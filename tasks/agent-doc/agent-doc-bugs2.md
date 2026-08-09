@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 431d629f-7432-4c2c-b56d-a7454c520458
+resume: f782d857-9380-412d-a881-13e43d75bc5b
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -85,12 +85,48 @@ Your read on severity holds: the old grep could only produce a false red, never 
 **Not spread elsewhere.** I checked the sibling release workflows for the same pattern: `src/agent-doc` uses "already exists" for a `gh release view` check (unrelated), and `src/tsift` pre-checks the index itself via `crate_version_exists` (also unrelated). No second instance of this bug.
 
 Still operator-gated and unchanged by this work: `#hvw0` — the `CARGO_REGISTRY_TOKEN` on that repo returns 403, so no tagged release has exercised the publish step since 32836ad. This turn proves the classifier statically; the live path stays unproven until the token is rotated and a tag runs.
+
+### Re: do [#dedupepresettle] — opus-5
+
+> **Queue prompt:**
+>
+> do [#dedupepresettle]
+
+Fixed, and the diagnosis in the filed item was right about the shape but wrong about the count — it is **one** root cause at two sites, not three bugs.
+
+**The root cause: a repair judged by the sample taken the instant after the write.**
+
+`await_late_editor_repair_projection` gave its settle window only to the `LateEditorAttachment` shape and returned immediately on `Diverged`. The trap is that a projection which is *merely still propagating* also samples as `Diverged` — canonical and disk both differ from the target because neither has caught up yet — so it is indistinguishable, on that first read, from a repair that genuinely lost a race. An in-flight repair therefore got **zero** settle time and `settle_atomic_repair_projection` reported `did not converge exactly before settling deferred lineage` for a write that converged milliseconds later. The failure hashes prove it: `canonical_hash=6dec…` and `disk_hash=dd1e…` both differed from `expected_hash=1850…`, which is `Diverged`, not the late-attachment shape that had the grace path.
+
+The window now covers every non-converged sample. The terminal classification is decided when the window closes rather than the instant after the write, so both typed refusals in `settle_atomic_repair_projection` are still reached with exactly the same semantics — only later. Renamed to `await_atomic_repair_projection` / `ATOMIC_REPAIR_PROJECTION_SETTLE_TIMEOUT_MS` since it is no longer late-editor-specific, and the wait policy moved into a pure loop over an injected sampler so it is testable without a live controller or filesystem race.
+
+**Second site, same cause.** `agent-doc dedupe` routes through `converge_or_disk_write`, whose contract explicitly allows returning `Ok` on the deferred-delivery path — the code comment says callers needing a disk projection "separately verify `delivery_converged` at that boundary," and dedupe never did. So it printed `removed 3313 bytes` off the cut it had just handed the write path, exited 0, and left both response copies in place. Dedupe is a repair command whose entire contract is "the duplicate is gone", so it now re-reads the authority after each write, reapplies against what it actually finds (bounded at 5 attempts), and reports removed bytes only from a proven fixpoint. An unconverged repair fails loudly and names the recovery without offering the disk-write escape hatch.
+
+**Mutation-checked, not just green.** Reverting the await policy to the old `Diverged`-returns-now behavior reddens `atomic_repair_projection_awaits_a_transiently_diverged_sample` (`left: "stale", right: "target"`); restoring it turns it green again. Four settle-policy tests plus two dedupe-convergence tests, including one proving an unconverged repair *fails* rather than reporting bytes removed.
+
+`make check` green — 8749 tests run, 8749 passed, 0 failed. Shipped as **0.35.184**: `make release-version`, `VERSIONS.md`, `make install` (binary now reports 0.35.184), commit `c5c1b6471`, pushed, tagged `v0.35.184`, `admin recycle` issued, submodule pointer `9fe8ead`. CI / Release / PyPI runs are in progress on the tag — recorded, not awaited.
+
+### Re: haiven-dev.md wedge and the manifest diagnosis — opus-5
+
+Ran your three steps. The wedge is cleared, and two premises in the diagnosis need correcting.
+
+**Steps.** `make install` is done (that build carries the fix above, so it was worth sequencing after it). `agent-doc admin reload-lib` fanned out the cdylib reload, exit 0 — but the Kotlin package still needs your IDE restart, which install itself reports (`Restart running IDEs to activate the package generation`); plugin 0.2.350 is installed in all four IDE configs. `agent-doc session doctor tasks/haiven-dev.md` now reports **`doctor: no issues detected`**. The divergence is gone.
+
+What actually cleared it was `c0d02fdec` (`#dedupnoopretain` — session-check published a no-op repair and retained it forever), one of the two commits the running binary was missing. The other missing commit, `e6e65dd6d`, is a test.
+
+**Correction 1 — the manifest is on disk, not live-buffer-only.** `grep -c dynamic_context_ref src/haiven-dev/tasks/haiven-dev.md` returns 2 (open and close tags). Your grep found nothing because the path is `src/haiven-dev/tasks/haiven-dev.md`; there is no `tasks/haiven-dev.md` at the superproject root. And it is not a leak — `agent-doc-compact-io` asserts `exchange.contains("<dynamic_context_ref")`, so writing the manifest reference into `exchange` is intended behavior.
+
+**Correction 2 — it is one block with six `<context_ref/>` children, not eight directives, and the classifier does not treat it as steering.** I probed `classify_prompt_bearing_changes` and `all_unstarted_prompt_bearing_changes_from_diff` with a diff that *adds* a manifest block: both return **0** changes. So there is nothing to fix here — the "8 concurrent operator steering directives" reading was produced by the stale, wedged binary, not by a live classification defect. I did not file a backlog item for a defect that does not reproduce.
+
+**What remains on haiven-dev.md is real steering, not a wedge.** `session-check` reports the cycle `committed` with one genuine unresolved prompt: `#pusherrorcodebranch` (push `feat/error-response-code` so the gate — "Preflight (Backend)", not "CI" — runs the `request_body_too_large` fix). Its own guidance says to continue with `agent-doc tasks/haiven-dev.md`. That document has its own owner pane (`%20`, currently `alive-busy`), so I have not driven it from this session — re-invoke it there. Doctor also flags `owned_pane_ready_busy_conflict` on that pane; it is the recoverable stale ready/busy probe, and the recovery hint is `session status` then `session clear` from another pane if it persists.
+
+One thing your message surfaced that *is* a live defect: `agent-doc respond --help` on 0.35.184 has no `--baseline-file`, yet SKILL.md's mandatory persist step documents it. Filed as `#respondbaselineflag` at the top of the backlog.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#dedupepresettle]
+- do [#respondbaselineflag]
 <!-- /agent:queue -->
 
 ## Notes
@@ -101,7 +137,7 @@ Still operator-gated and unchanged by this work: `#hvw0` — the `CARGO_REGISTRY
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#dedupepresettle] #agent-doc-bug Closeout write path reports success before CRDT/disk convergence under CAS contention, producing a duplicate response section. Observed 2026-08-08 on cycle-1786232060198: `respond --stream` logged `compare_and_swap_raced` twice, wrote the response cell twice, and failed session-check with `found consecutive duplicate response patchback`; `agent-doc dedupe` then printed `removed 3313 bytes` and exited 0 while the duplicate was STILL on disk, needing a second identical run to converge; session-check's own `self_heal_response_replay_duplication` failed terminally with `session_check_response_replay_dedup: successful repair write did not converge exactly before settling deferred lineage`. One bug, not three: repair/dedupe/respond writes return success on the pre-settle path instead of awaiting convergence. Fix: make dedupe and the self-heal repair await settle and re-verify the post-write content hash before returning success, and add a SimWorld case that races a replica CAS against the response patchback and asserts exactly one response section. Also: the last dedupe run dropped the `<!-- agent:boundary:... -->` marker from the working copy while HEAD kept it.
+- [ ] [#respondbaselineflag] #agent-doc-bug SKILL.md's MANDATORY persist step documents `agent-doc respond <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill`, but neither `respond` nor `write` accepts `--baseline-file` in 0.35.184 (`agent-doc respond --help` has no baseline/snapshot flag). An agent following the hot-path skill verbatim gets a clap parse error on the one step the skill calls mandatory, and the documented 'use preflight's baseline, do NOT save your own' contract has no way to be honoured. Decide one way: either add `--baseline-file` to respond/write and thread it into the diff baseline, or remove it from SKILL.md + every generated harness surface (.claude/.codex/.opencode/.cursor) and the runbooks. Reported by the operator 2026-08-08 while diagnosing the haiven-dev wedge.
 <!-- /agent:backlog -->
 
 ## Review

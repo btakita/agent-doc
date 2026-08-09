@@ -4341,6 +4341,53 @@ Second answer line three.
     }
 
     #[test]
+    fn duplicate_re_heading_keeps_both_bodies() {
+        // `#dupreheadingcollide`, step (a): confirm the reproduction rather than
+        // assume it. Two consecutive responses reused the heading
+        // `### Re: #resumeuuidstallsdrain — opus-5` on
+        // `tasks/agent-doc/agent-doc-bugs2.md` on 2026-08-09, and cell-merge
+        // logged `identity=exchange:0:<heading>:duplicate:1 policy_chose_ours=true`.
+        //
+        // The claim under test is the one the incident actually supports: the
+        // keying is LOSSLESS. Both bodies must survive a real merge, because
+        // that is what makes this a snapshot/closeout problem rather than a data
+        // problem — and it is why `#qdedup-directive-twin`'s intentional
+        // duplicate multiplicity must not be "fixed" here.
+        let heading = "### Re: #resumeuuidstallsdrain — opus-5";
+        let base = format!(
+            "<!-- agent:exchange -->\n{heading}\n\nfirst body\n<!-- /agent:exchange -->\n"
+        );
+        // Ours: the agent appended a SECOND response reusing the same heading.
+        let ours = format!(
+            "<!-- agent:exchange -->\n{heading}\n\nfirst body\n\n{heading}\n\nsecond body\n<!-- /agent:exchange -->\n"
+        );
+        // Theirs: the editor replica still holds only the first.
+        let theirs = base.clone();
+
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+
+        let exchange = merged
+            .split("<!-- agent:exchange -->")
+            .nth(1)
+            .and_then(|s| s.split("<!-- /agent:exchange -->").next())
+            .unwrap();
+        assert!(
+            exchange.contains("first body"),
+            "the committed response must survive:\n{exchange}"
+        );
+        assert!(
+            exchange.contains("second body"),
+            "the duplicate-heading response must NOT be dropped by the :duplicate: keying:\n{exchange}"
+        );
+        assert_eq!(
+            exchange.matches(heading).count(),
+            2,
+            "both headings must survive; the keying is lossless by design:\n{exchange}"
+        );
+    }
+
+    #[test]
     fn split_exchange_children_is_lossless() {
         let body = "\n### Re: a — opus\n\nbody a\n\n### Re: b — opus\n\nbody b\n";
         let children = split_exchange_children(body).unwrap();

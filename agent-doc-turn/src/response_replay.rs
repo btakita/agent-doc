@@ -861,6 +861,47 @@ fn strip_transient_response_head_marker(line: &str) -> String {
 }
 
 #[cfg(test)]
+mod duplicate_heading_materialization {
+    use super::*;
+
+    /// `#dupreheadingcollide`, the safety property that actually matters.
+    ///
+    /// Two consecutive responses can share a `### Re:` heading — I did it on
+    /// `tasks/agent-doc/agent-doc-bugs2.md` on 2026-08-09, which is what set up
+    /// `#commitwritecommitdeadlock`. The keying that results is lossless (see
+    /// `duplicate_re_heading_keeps_both_bodies` in `agent-doc-merge`), so the
+    /// deadlock was the only damage and 0.35.204 fixed it.
+    ///
+    /// The far worse failure would be this predicate matching on the HEADING:
+    /// the capture guard would then believe the second response is already
+    /// staged, allow the closeout, and the response would be dropped from the
+    /// commit with no error anywhere. Absence must be detected by BODY.
+    #[test]
+    fn a_shared_heading_with_a_different_body_is_not_materialized() {
+        let heading = "### Re: #resumeuuidstallsdrain — opus-5";
+        let committed = format!(
+            "<!-- agent:exchange -->\n{heading}\n\nthe first response body\n<!-- /agent:exchange -->\n"
+        );
+        let second_response = format!("{heading}\n\na completely different second body\n");
+
+        assert!(
+            !response_materialized_in_content(&second_response, &committed),
+            "matching on the heading alone would let the capture guard drop this response"
+        );
+
+        // And the converse still holds, or the guard would block forever on a
+        // response that IS present.
+        let both = format!(
+            "<!-- agent:exchange -->\n{heading}\n\nthe first response body\n\n{heading}\n\na completely different second body\n<!-- /agent:exchange -->\n"
+        );
+        assert!(
+            response_materialized_in_content(&second_response, &both),
+            "a genuinely present duplicate-heading response must read as materialized"
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

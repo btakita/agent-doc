@@ -2,6 +2,38 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.205
+
+- **Investigation (`#dupreheadingcollide`): two responses sharing a `### Re:`
+  heading is not a defect. Closed with proofs, not a change.**
+
+  Reusing `### Re: #resumeuuidstallsdrain — opus-5` across consecutive cycles on
+  `tasks/agent-doc/agent-doc-bugs2.md` made cell-merge key the second block as
+  `:duplicate:1`, and that set up `#commitwritecommitdeadlock`. The open
+  question was whether the keying itself was wrong — whether an exchange
+  response cell should key on its cycle/capture id instead of heading text.
+
+  Two properties were measured rather than assumed, and both hold:
+
+  - **The keying is lossless.** `duplicate_re_heading_keeps_both_bodies` drives
+    the real `merge_by_component` path with a duplicate heading and asserts both
+    bodies and both headings survive. Nothing was ever at risk of being dropped.
+  - **The capture guard matches on BODY, not heading.**
+    `a_shared_heading_with_a_different_body_is_not_materialized` asserts that a
+    second response sharing a heading reads as *not* materialized against a
+    document holding only the first — and that a genuinely present one still
+    reads as materialized. A heading-level match would have been far worse than
+    the deadlock: the guard would allow the closeout and the response would
+    vanish from the commit with no error anywhere.
+
+  So the answer to "re-key response cells on cycle id" is **no**. The text keying
+  is sound, and changing it would put `#qdedup-directive-twin`'s intentional
+  duplicate multiplicity at risk to fix nothing. The only damage the collision
+  caused was the mutual-remedy deadlock, already fixed in 0.35.204.
+
+  Both tests stay as permanent regressions: they pin properties a future keying
+  change could otherwise break silently.
+
 ## 0.35.204
 
 - **Fix (`#commitwritecommitdeadlock`): three commands named each other on a

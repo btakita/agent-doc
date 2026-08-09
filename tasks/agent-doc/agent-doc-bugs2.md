@@ -694,6 +694,7 @@ Exchange is 633 lines across 27 sections; the queue is active so I am not stalli
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#hookcontractlost]
 - ~~do [#commitwritecommitdeadlock]~~
 - ~~do [#resumeuuidstallsdrainbug]~~
 - ⏭️ do [#run3rdpaneswitchverify]

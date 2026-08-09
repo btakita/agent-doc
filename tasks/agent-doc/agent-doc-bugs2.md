@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 93e3b609-7891-42f1-a046-ef37f066b7ca
+resume: d0c71f84-f882-4812-9dd1-a2cf49b0ddcf
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -119,16 +119,52 @@ I did not expand into it this turn — it is the next queue head and the loop ta
 One thing I could not measure from here: the editor-driven sync path itself. `agent-doc sync` refuses without explicit `--col` (it requires the editor to publish its visible projection), so the end-to-end editor latency is only observable from a live IDE. The resolution count above is the underlying cost either way.
 
 On the 3 panes: window `0:0 agent-doc` holds `%25` (agent-loop root), `%926` (`src/haiven-dev`), `%13` (agent-loop root), and `0:1 stash` holds 5. `%926` is the same pane from the `#strandeddraftresubmit` trace. If a column there is one you cannot see in the editor, that is the unfixed half of `#panewindowdrift` — `session doctor` now reports the drift but nothing prevents it, and `agent-doc sync` (Sync Tmux Layout) is still the manual repair.
+
+### Re: are you tracking the unsubmitted prompt storm? — opus-5
+
+No, I was not — it is a different defect from the one I closed above, and my write-up for that one contained a claim that this disproves. Fixed and installed (`61d47dd27`, pushed; superproject pointer `fe692bf164`).
+
+**One 22-byte pane capture explains the whole storm.** Preserved verbatim, because a rendered-frame check written against a paraphrase would not have caught it:
+
+```
+ESC[38;5;246m ❯ NBSP ESC[39m      ← the entire capture, 22 bytes
+payload_already_pending=false  dispatch_ready=true  action=dispatch_fresh
+```
+
+A bare prompt glyph and nothing else — pane `%20` sampled mid-render while layout churn moved it between windows. `capture_pane` returned `Ok`, so the drain treated it as authoritative and concluded three wrong things at once: composer empty, prompt dispatch-ready, and by omission that no turn was running. It injected. 31s later it sampled the same unrenderable frame and did it again. Eleven times, `03:38:07`→`03:43:13`, into a pane 19 minutes into an active turn.
+
+**A successful capture is not an informative one.** `#idlerevisionreactive` applies to a pane exactly as it does to a controller probe: "I looked and the composer is empty" and "the frame I got cannot contain a composer" are different facts, and the drain had no way to say the second one. Its `DeferUnobservable` branch was reachable only when the capture *failed*.
+
+Three defects, in the order they matter:
+
+| # | fix | note |
+|---|---|---|
+| A | `pane_frame_answers_composer_state` — a frame whose only non-empty line IS the prompt candidate answers nothing | the proven cause |
+| B | observation carries `pane_busy`; the drain had **no busy input at all** | latent, not the proven cause here — the 22-byte frames hid the busy cue anyway |
+| C | `IDLE_QUEUE_UNPROVEN_INJECTION_BUDGET = 2` per (head, payload) | backstop: no payload can be written unbounded |
+
+A's rejection runs **before** `payload_already_pending` and `dispatch_ready` are consulted — order is load-bearing, since both are computed from that same meaningless capture. The predicate is deliberately not keyed on harness footer text, which varies per harness and permission mode and is what the pane-draft-unblocker work already had to repair twice.
+
+**Correcting my previous entry.** It said an unconsumed edge would "reach the pending-payload resubmit instead of re-injecting." That was wrong, and A is why: the next tick re-read the same unrendered frame and re-ran `DispatchFresh`. That commit fixed the route path and the post-send *proof*; it left the drain's pre-send *precondition* trusting an unreadable frame. Same failure family, opposite end of the same dispatch.
+
+6 new tests, all four guards mutation-proven — including one asserting that `pane_dispatch_ready_at_cursor` genuinely does return `true` on those 22 bytes, so the frame gate is the only thing that can reject them. `make check`: **8768 passed, 0 failed**.
+
+**Not yet proven live, and I am not claiming it is.** The binary is installed and every controller recycled, but zero drain decisions have run since the install, and the long-lived supervisor for that document (PID 3854486, started Aug 8) still holds the pre-fix image until its next idle-boundary reexec. Confirmation is a `frame_rendered=` field appearing in an `idle_queue_payload_observation` line — automatically checkable, so it is a backlog item rather than an operator-gated review item.
+
+One correction on my own diagnostics: I initially read a controller's `--handoff-state preparing` argv as a live wedge. That is launch argv, not live state — RPCs answered in 50ms. Disregard it.
+
+Thanks for the screenshot. The 31s cadence and the stacked-identical-payload shape are what made this findable at all.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#unrenderedframestormlive]
 - ⏭️ do [#panewindowdrift]
-- ~~do [#strandeddraftresubmit]~~
 - do [#preflightprojpass]
 - do [#loopcontractseal]
 - ⏭️ do [#respondbaselineflag]
+- do [#hookhashfalsepositive]
 <!-- /agent:queue -->
 
 ## Notes
@@ -139,6 +175,8 @@ On the 3 panes: window `0:0 agent-doc` holds `%25` (agent-loop root), `%926` (`s
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#unrenderedframestormlive] #agent-doc-bug LIVE CONFIRMATION for #unrenderedframestorm (fix landed 61d47dd27, installed, controllers recycled): the new code path is UNEXERCISED in production -- zero idle_queue_payload_observation lines have run since the 03:58:54Z install, and the long-lived supervisor for src/haiven-dev/tasks/haiven-dev.md (PID 3854486, started 2026-08-08 03:42) still holds the pre-fix image until its next idle-boundary reexec. Automatically checkable, so do NOT file this as an operator-verify review item: grep any project ops.log for an idle_queue_payload_observation line containing frame_rendered= (proves the new observation shape is live) and for idle_queue_dispatch_deferred reason=defer_unrendered_frame / defer_pane_busy / defer_injection_budget_spent (proves a guard actually fired). If a supervisor never adopts the new image at an idle boundary, that is a separate stale-supervisor-reexec defect and needs its own item with the observed PID and start time.
+- [ ] [#hookhashfalsepositive] agent-doc's coined-id-pre-tool-use hook rejects C preprocessor directives as untracked backlog ids. Writing a file containing a line starting with a hash — pragma once, include <string> — is blocked with "would write coined id(s) #include, #pragma ... not tracked in agent:backlog". The same class of false positive already applies to CSS ids, shell comments, and agent-doc's own anchor tags quoted from SKILL.md. It is not a hard block (a bash heredoc bypasses the PreToolUse hook entirely, which is itself the interesting part — the guard is trivially avoidable while being obstructive to correct writes) but it forced a workaround into emitted C++: src/sdk-spike/ts/src/wire/code.ts assembles the directives via String.fromCharCode(35) with a comment explaining why. The guard should recognise language syntax — preprocessor directives, CSS selectors, shell/YAML comments, markdown headings — or scope itself to prose contexts. Fix belongs in agent-loop src/agent-doc, not here; remove the workaround in code.ts once it lands.
 - [ ] [#panewindowdrift] #agent-doc-bug REMAINING HALF (diagnosis landed 6f1af3f6b): the pane-layout survey still admits a stashed pane as a visible column, so editor auto-focus is still mirrored onto a pane the operator cannot see — session doctor now REPORTS the drift but nothing prevents it. apply_pane_layout_focus_effect (agent-doc-controller-io/src/project_controller/rpc.rs:18121) resolves the focus document to a pane from file_panes and calls select_pane with no notion of window; its call sites (18356, 18501) already hold a tmux handle (|pane| tmux.select_pane(pane)) so the guard is cheap to inject. BLOCKER — the projection model has no explicit 'visible window' concept to compare against, and picking the wrong reference (active window / first pane's window / majority window) would break legitimate multi-window layouts. Decide that reference first, then refuse focus for a non-co-visible pane with an explicit receipt reason, and stop counting it toward observation=synced. Reuse the landed pure predicate agent_doc_controller::pane_layout::pane_window_binding_drifted (unknown on either side is never drift). Add SimWorld coverage for a stashed-pane column.
 - [ ] [#preflightprojpass] #agent-doc-bug Preflight never opens the current-document projection pass, so one preflight makes ~49 redundant full-document CRDT resolutions (98 controller_crdt_current_text / crdt_current_text ops-log lines for a 13.8KB doc) at ~186ms each -- the entire 15-18s preflight wall time, and the cost auto-sync inherits. Measured: the process sits in unix_stream_read_generic for essentially the whole run; session-check alone accounts for 11 logical reads. NOT git (46 subprocesses = 0.05s), NOT tmux (24 = 0.03s), NOT controller serialization (admin detect answers in 0.06s even mid-preflight), NOT machine load (reaping 866 leaked controllers took load 18.59 to 2.08 and preflight stayed 20.84s). Do NOT write a new cache: agent-doc-document-realtime-io/src/current_document_projection.rs already is the right one, keyed by the live Yrs state vector (or disk hash when detached) and read via try_resolve_current_document_with_source then resolve_projection; its doc comment names the trap ('memoizing only by path can hide operator edits made during the pass'). commit-io, closeout-runtime-io and compact-io all open the pass and passes nest; agent-doc-preflight-command-io/src/run.rs run_with_options does not. BLOCKER (PREFLIGHT HALF ONLY) -- wrapping preflight is unsafe today: only agent-doc-commit-io/src/lib.rs:891 calls invalidate_current_document_projection (session-check calls its alias at 10+ sites), while preflight's own mutating phases call it ZERO times because with no pass open none is needed -- exact-replay converge (run.rs:300), auto-repair base index (354), repair (479), run_pending_maintenance (537), commit (~709), run_queue_maintenance (858), baseline realign (936). Safe order for that half: make each preflight mutator SELF-invalidate (the discipline session-check already follows), THEN open the pass in run_with_options, THEN a regression test that a post-mutation read observes the new text. RE-MEASURED 2026-08-09 03:20-03:28Z, operator reported auto-sync going from acceptable latency to extremely laggy: 170 resolutions on agent-doc-bugs2.md (22.8KB) in 8 minutes, up to 14 in a SINGLE second, and EVERY one returned the identical len=22846 hash=83f91d63 -- the redundancy is NOT preflight-scoped. The hot consumer is the realtime relay / auto-sync path (realtime_doc_resolve authority=editor_buffer reason=crdt_relay_current source=crdt_relay), and the preflight blocker above does NOT gate it: no preflight mutator has to self-invalidate first. DO THE RELAY CONSUMER FIRST for the operator-visible latency win, then the preflight half behind its stated safe order. Ruled out as causes of that lag: pane-layout survey (pane_layout_survey_timing elapsed_ms=5-29 across the whole window, so pane count is not the cost) and controller RPC health (admin detect 0.05s, session status 0.60s).
 - [ ] [#loopcontractseal] #agent-doc-bug SETTLE THEN FIX: the haiven-dev session stopped mid-drain with queue_continuation_required=true and 17 heads, claiming '/loop re-entry can't seal a preflight contract'. That claim is UNVERIFIED — I could not confirm it from another session. .claude/settings.json wires UserPromptSubmit -> `agent-doc hook preflight-user-prompt-submit`, which seals the contract for every submitted prompt; the open question is whether a ScheduleWakeup-fired /loop re-entry counts as a UserPromptSubmit event in Claude Code. Experiment: start a /loop over an active queue, then grep .agent-doc/logs/ops.log for a preflight event with no operator-typed trigger. If the contract IS sealed, the stop was an unjustified stall and SKILL.md's Claude Code auto-loop section needs an explicit 'a /loop re-entry seals its own contract; do not stop for this' line. If it is NOT sealed, the Claude Code auto-loop as documented cannot work and Claude Code needs the same in-turn self-drive OpenCode already has (#ocdrainstall Part A: preflight -> respond -> write --commit in the SAME turn until queue_continuation_required==false). Either way the current instruction surface lets an agent hand 17 drainable heads back to the operator, which #drain-no-defer forbids.

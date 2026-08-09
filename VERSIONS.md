@@ -2,6 +2,41 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.210
+
+- **Fix (`#ctrlsockpathtoolong`): a project root long enough to overflow
+  `sun_path` made every client poll for a controller that could never exist,
+  instead of saying so.**
+
+  Found while verifying the 0.35.209 hook budget: a **brand-new empty document**
+  burned the full 90s preflight admission budget. Document size was never the
+  driver — the session root was 108 bytes, so
+  `<root>/.agent-doc/controller.sock` came to 135 against the 107-byte `AF_UNIX`
+  limit. The bind failed with a bare OS error indistinguishable from "the
+  controller has not started yet", so `wait_for_controller_path_with_timeout`
+  polled it until the budget ran out. Every symptom read as "agent-doc is slow".
+
+  The supervisor socket already handles this by relocating to a short runtime
+  path. The controller socket deliberately does **not**: the JetBrains and VS
+  Code plugins resolve `.agent-doc/controller.sock` themselves, so relocating it
+  would bind the controller somewhere no editor ever looks — trading a loud
+  failure for a permanently missing editor authority. An over-long root is
+  therefore a permanent condition, and the fix is to name it immediately.
+
+  `agent_doc_controller::paths::resolved_socket_path_rejection` is the one
+  predicate, enforced at the three places that used to hide it: the wait loop
+  bails before its first sleep, `connect_path` / `connect_path_async` replace the
+  bare OS error, and `serve_with_options` refuses to start before touching the
+  filesystem. It measures the path actually being bound, so a longer
+  generation-scoped handoff socket is caught too. The message carries the path,
+  its byte length, the limit, and the remedy.
+
+  Measured on the original repro: **90s to 1.3s**. Regression coverage pins the
+  budget property itself (a 30s wait must refuse in under a second, and must not
+  report a timeout), that a single connect names the limit, and — guarding the
+  false positive that would refuse every controller connect in the product —
+  that an ordinary root still fails as an ordinary connect failure.
+
 ## 0.35.209
 
 - **Fix (`#hookcontractlost`): a slow preflight still went silent — the harness

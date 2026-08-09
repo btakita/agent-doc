@@ -564,6 +564,12 @@ pub fn controller_model_pressure_cooldown_active_for_doc(doc: &Path) -> bool {
 }
 
 pub(crate) fn connect_path(path: &Path) -> Result<interprocess::local_socket::Stream> {
+    // Without this the OS reports a bare ENOENT/EINVAL, which is
+    // indistinguishable from "the controller has not started yet" — so callers
+    // retry a path that can never work (`#ctrlsockpathtoolong`).
+    if let Some(reason) = agent_doc_controller::paths::resolved_socket_path_rejection(path) {
+        anyhow::bail!(reason);
+    }
     let name = path.to_fs_name::<GenericFilePath>()?;
     interprocess::local_socket::ConnectOptions::new()
         .name(name)
@@ -572,6 +578,9 @@ pub(crate) fn connect_path(path: &Path) -> Result<interprocess::local_socket::St
 }
 
 async fn connect_path_async(path: &Path) -> Result<interprocess::local_socket::tokio::Stream> {
+    if let Some(reason) = agent_doc_controller::paths::resolved_socket_path_rejection(path) {
+        anyhow::bail!(reason);
+    }
     let name = path.to_fs_name::<GenericFilePath>()?;
     interprocess::local_socket::ConnectOptions::new()
         .name(name)
@@ -10050,6 +10059,12 @@ pub(crate) fn wait_for_controller_path_with_timeout(
     path: &Path,
     timeout: Duration,
 ) -> Result<interprocess::local_socket::Stream> {
+    // A path over `sun_path` can never bind, so polling it only converts a
+    // one-line diagnosis into a budget-length stall (`#ctrlsockpathtoolong`).
+    // Fail before the first sleep, not after the last one.
+    if let Some(reason) = agent_doc_controller::paths::resolved_socket_path_rejection(path) {
+        anyhow::bail!(reason);
+    }
     let start = Instant::now();
     loop {
         if let Ok(stream) = connect_path(path) {
@@ -10064,6 +10079,7 @@ pub(crate) fn wait_for_controller_path_with_timeout(
         std::thread::sleep(CONNECT_POLL);
     }
 }
+
 
 #[allow(dead_code)]
 pub fn serve(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
@@ -10299,6 +10315,14 @@ pub(crate) fn serve_with_options(
     // loop (renames the temp socket onto `public_sock`), after which it serves as the
     // authoritative public controller and is no longer a replacement.
     let mut handoff_temp_socket: Option<PathBuf> = (sock != public_sock).then(|| sock.clone());
+    // Refuse before touching the filesystem: a `sun_path` overflow makes the bind
+    // below fail with a bare OS error that reads as a transient startup problem,
+    // and every client then polls for a controller that can never appear
+    // (`#ctrlsockpathtoolong`). `sock` may be a longer generation-scoped handoff
+    // path than `public_sock`, so measure the one actually being bound.
+    if let Some(reason) = agent_doc_controller::paths::resolved_socket_path_rejection(&sock) {
+        anyhow::bail!(reason);
+    }
     if sock.exists() {
         let _ = std::fs::remove_file(&sock);
     }
@@ -21612,6 +21636,72 @@ mod tests {
 
     fn test_controller_runtime(bootstrap: &ControllerBootstrap) -> Arc<ControllerRuntime> {
         ControllerRuntime::new_arc(bootstrap.clone()).unwrap()
+    }
+
+    /// A project root long enough that `<root>/.agent-doc/controller.sock`
+    /// overflows `sun_path`.
+    fn over_sun_path_root() -> PathBuf {
+        PathBuf::from(format!(
+            "/{}",
+            "d".repeat(agent_doc_controller::paths::SUN_PATH_MAX)
+        ))
+    }
+
+    /// `#ctrlsockpathtoolong`: the wait loop used to poll a path that can never
+    /// bind until its whole budget elapsed — which is how a fresh EMPTY document
+    /// burned a full 90s preflight admission budget. The budget is the thing
+    /// under test: this must fail in a small fraction of the timeout it is given.
+    #[test]
+    fn waiting_on_an_over_sun_path_socket_fails_before_the_timeout() {
+        let sock = socket_path(&over_sun_path_root());
+        let timeout = Duration::from_secs(30);
+
+        let start = Instant::now();
+        let err = wait_for_controller_path_with_timeout(&sock, timeout)
+            .expect_err("a socket path over sun_path can never be connected");
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "expected an immediate refusal, waited {elapsed:?} of a {timeout:?} budget"
+        );
+        let message = format!("{err:#}");
+        assert!(message.contains("sun_path"), "{message}");
+        assert!(
+            !message.contains("timed out"),
+            "the refusal must name the real cause, not a timeout: {message}"
+        );
+    }
+
+    /// A single connect must name the cause too: a bare OS error here is what
+    /// made callers treat a permanent condition as "not started yet".
+    #[test]
+    fn connecting_to_an_over_sun_path_socket_names_the_limit() {
+        let err = connect_path(&socket_path(&over_sun_path_root()))
+            .expect_err("a socket path over sun_path can never be connected");
+
+        let message = format!("{err:#}");
+        assert!(message.contains("sun_path"), "{message}");
+        assert!(
+            message.contains("retrying cannot help"),
+            "the refusal must say the condition is permanent: {message}"
+        );
+    }
+
+    /// The guard must not fire on ordinary roots — a false positive here would
+    /// refuse every controller connect in the product.
+    #[test]
+    fn an_ordinary_project_root_still_connects_normally() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sock = socket_path(tmp.path());
+
+        let err = connect_path(&sock).expect_err("nothing is listening in a fresh temp dir");
+
+        let message = format!("{err:#}");
+        assert!(
+            !message.contains("sun_path"),
+            "an ordinary root must fail as an ordinary connect failure: {message}"
+        );
     }
 
     fn test_editor_surface(focused: &str) -> agent_doc_editor_surface::EditorSurface {

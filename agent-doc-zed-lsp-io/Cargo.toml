@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-zed-lsp-io"
-version = "0.35.209"
+version = "0.35.210"
 edition = "2024"
 description = "Supplemental Markdown language server for agent-doc Zed integration"
 license = "MIT"
@@ -8,11 +8,11 @@ repository = "https://github.com/btakita/agent-doc"
 publish = false
 
 [dependencies]
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.209" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.209" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.209" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.209" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.209" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.210" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.210" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.210" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.210" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.210" }
 anyhow = "1"
 base64 = "0.22"
 serde_json = "1"

@@ -2,6 +2,50 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.186
+
+- **Fix (`#stalereexecstarve`): a supervisor whose queue drain kept bailing early
+  could never self-recycle, and ran a deleted binary indefinitely.**
+
+  The idle-queue watch does two independent jobs per tick: drain the go-mode
+  queue, and decide whether a stale supervisor should hot-reload onto the
+  freshly-installed binary. The recycle decision is sequenced *after* the drain,
+  and the drain's legitimate early exits — `QueueHeadObservation::AuthorityUnavailable`,
+  an in-flight context clear, a settling clear cooldown — each `continue`d the
+  whole **tick**. Any supervisor parked in one of those drain states therefore
+  never reached the recycle decision, never published `binary_stale`, and never
+  wrote the `⚠ STALE SUPERVISOR` pane marker, so the failure produced no
+  diagnostic of its own.
+
+  Observed live 2026-08-09 while proving `#unrenderedframestormlive`: the
+  supervisor for `src/boost-client/tasks/monsterrodholders.md` (PID 4069526,
+  started 2026-08-05) had run four days on a **deleted** binary image
+  (`readlink /proc/4069526/exe` → `/home/brian/.cargo/bin/agent-doc (deleted)`)
+  while its controller projection stayed unavailable. Its ops log carried 227
+  `stale_supervisor_cp_recycle_requested ... request_status=requested` lines and
+  **zero** `supervisor_binary_stale_*` lines across 198,660 entries — the
+  requests were written and never consumed. Every other live supervisor had
+  re-exec'd normally, which is why the staleness looked policy-shaped rather
+  than control-flow-shaped.
+
+  The queue drain now runs inside a `'drain:` labeled block: an early exit leaves
+  the **drain**, not the tick, and the recycle evaluation always runs. The facts
+  the drain would have produced are hoisted with conservative "nothing observed"
+  defaults, which is exactly what the policy needs — `stale_recycle_safe_checkpoint`
+  (stale binary, no IPC handler in flight) already licenses a recycle without a
+  turn boundary or a pending head. A new
+  `supervisor_stale_recycle_drain_fallthrough` receipt makes the guard provable
+  from ops.log instead of only from source.
+
+  `rustc` rejects a bare `continue` inside the labeled block (E0695), so the
+  literal regression can no longer compile;
+  `agent-doc-start-runtime-io/tests/idle_watch_drain_scope_guard.rs` covers the
+  half the compiler accepts (a labeled `continue` aimed past the block) and pins
+  the drain-before-recycle ordering the fix depends on. SimWorld's
+  `stale_supervisor_recycles_even_when_the_drain_bails_early` carries the
+  behavioral half, and the same drain-scoped early return is repaired in the
+  SimWorld model, which had faithfully reproduced the defect.
+
 ## 0.35.185
 
 - **Fix (`#terminalproofphaseregress`): a closeout that had already committed

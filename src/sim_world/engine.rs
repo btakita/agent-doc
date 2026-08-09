@@ -1286,6 +1286,13 @@ impl SimWorld {
             SupervisorLifecycle::Busy | SupervisorLifecycle::WaitingInput
         );
         let has_active_head = self.recycle_clear.queue_active_head.is_some();
+        // `#stalereexecstarve`: a drain-scoped early exit suppresses the DRAIN, not
+        // the whole tick. Production used to `continue` here, which also skipped the
+        // stale-binary recycle decision below — so a supervisor whose drain kept
+        // bailing (unavailable queue authority, in-flight context clear, settling
+        // clear cooldown) mapped a deleted binary forever. Model the same
+        // fallthrough: set the flag, keep evaluating recycle, and only then stop.
+        let mut drain_suppressed = false;
 
         // (1) Clear-cooldown idle-tick accounting — mirrors idle_watch.rs:157-161.
         if self.recycle_clear.clear_cooldown_active
@@ -1320,10 +1327,12 @@ impl SimWorld {
             self.record_ops_proof(
                 "recycle_session_reclear action=clear_cooldown_resume result=ready",
             );
-            // Production `continue`s (idle_watch.rs:204) so the normal drain
-            // decision dispatches the head on the NEXT tick with the cooldown
-            // already cleared. Return early to model that re-evaluation boundary.
-            return Ok(());
+            // Production `break 'drain`s so the normal drain decision dispatches
+            // the head on the NEXT tick with the cooldown already cleared. Suppress
+            // the drain to model that re-evaluation boundary — but keep falling
+            // through to the recycle decision (`#stalereexecstarve`), which a bare
+            // early return would starve.
+            drain_suppressed = true;
         }
 
         let turn_boundary = prompt_visible && !turn_active;
@@ -1532,6 +1541,12 @@ impl SimWorld {
                     ));
                 }
             }
+        }
+
+        // `#stalereexecstarve`: the recycle decision above has now run. Everything
+        // below is the drain, which a drain-scoped early exit legitimately skips.
+        if drain_suppressed {
+            return Ok(());
         }
 
         let prompt_visible_now = matches!(self.route.durable.lifecycle, SupervisorLifecycle::Ready);

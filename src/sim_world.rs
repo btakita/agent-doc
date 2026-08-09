@@ -8575,6 +8575,79 @@ fn stale_supervisor_self_recycles_at_turn_boundary_by_default() {
 }
 
 #[test]
+fn stale_supervisor_recycles_even_when_the_drain_bails_early() {
+    // `#stalereexecstarve`: the regression this pins is CONTROL FLOW, not policy.
+    //
+    // The idle-queue watch does two unrelated jobs per tick: drain the go-mode
+    // queue, and decide whether a stale supervisor should hot-reload onto the
+    // freshly-installed binary. The drain has several legitimate early exits —
+    // unavailable queue authority, an in-flight context clear, a settling clear
+    // cooldown — and each one used to `continue`/`return` the WHOLE tick. The
+    // recycle decision lives after the drain, so any supervisor stuck in one of
+    // those drain states could never reach it.
+    //
+    // Observed live 2026-08-09 on `src/boost-client/tasks/monsterrodholders.md`:
+    // PID 4069526 ran four days on a DELETED binary image
+    // (`readlink /proc/4069526/exe` → `... (deleted)`) while its controller
+    // projection stayed unavailable. 227 CP recycle requests were written and
+    // none was ever consumed, and the ops log carried zero
+    // `supervisor_binary_stale_*` lines for the whole window — the decision was
+    // never reached, so it could not even report itself as deferred.
+    //
+    // Model the clear-cooldown-resume early exit (the drain-scoped bail that is
+    // deterministic in SimWorld) with a stale binary and assert the recycle still
+    // happens on that same tick.
+    let mut world = SimWorld::new(9_041);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    let gen_before = world.route.durable.generation;
+    let pane_before = world.route.durable.pane_id.clone();
+
+    // A go-mode head is waiting behind a clear cooldown that is about to settle:
+    // the drain will take its early exit on this tick.
+    world.recycle_clear.queue_active_head = Some("do [#stalereexecstarve]".to_string());
+    world.recycle_clear.clear_cooldown_active = true;
+    // One short of the resume threshold: this tick's own idle accounting brings it
+    // to the bar, so the drain takes its early exit inside the tick under test.
+    world.recycle_clear.clear_cooldown_idle_ticks =
+        agent_doc_queue::queue::CLEAR_COOLDOWN_RESUME_IDLE_TICKS.saturating_sub(1);
+
+    // ...and the binary went stale underneath it (a later `cargo install`).
+    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
+    assert!(
+        world.recycle_clear.binary_stale,
+        "precondition: the supervisor maps the old binary"
+    );
+
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+
+    // The drain DID take its early exit — that part is unchanged and correct.
+    assert!(
+        !world.recycle_clear.clear_cooldown_active,
+        "the clear cooldown resumed, which is the drain-scoped early exit"
+    );
+    // ...and the recycle decision still ran on the SAME tick.
+    assert_eq!(
+        world.coverage.supervisor_recycles, 1,
+        "a drain-scoped early exit must not starve the stale-binary recycle (#stalereexecstarve)"
+    );
+    assert!(
+        !world.recycle_clear.binary_stale,
+        "the execve hot-reload promoted the freshly-installed binary"
+    );
+    assert_eq!(
+        world.route.durable.generation,
+        gen_before + 1,
+        "recycle advances the generation"
+    );
+    assert_eq!(
+        world.route.durable.pane_id, pane_before,
+        "blue/green: the live pane survives the hot-reload"
+    );
+}
+
+#[test]
 fn wedged_opted_out_supervisor_recycles_on_write_wedge() {
     // `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`): reproduces the firsthand
     // session — a stale-binary route-owned supervisor whose editor-IPC write is

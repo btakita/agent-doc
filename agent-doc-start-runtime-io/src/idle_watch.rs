@@ -1201,6 +1201,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut unproven_injection_key: Option<String> = None;
             let mut unproven_injections: usize = 0;
             let mut clear_cooldown_logged = false;
+            // `#stalereexecstarve`: one-shot latch for the drain-fallthrough receipt.
+            let mut stale_drain_fallthrough_logged = false;
             let mut route_submit_in_flight_logged = false;
             let mut context_clear_route_wait_logged = false;
             let mut current_transition_pending_logged = false;
@@ -1885,14 +1887,47 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                     observation
                 };
+                // `#stalereexecstarve`: the queue-drain section below has several
+                // legitimate early exits — unavailable queue authority, an
+                // in-flight context clear, a settling clear cooldown. Each one
+                // used to `continue` the whole TICK, which also skipped the
+                // binary-staleness publication and the stale-supervisor recycle
+                // decision further down. A supervisor whose document authority
+                // stayed unavailable therefore mapped a deleted binary
+                // indefinitely: no recycle, no `⚠ STALE SUPERVISOR` marker, and
+                // no `supervisor_binary_stale_*` receipt to diagnose it from.
+                // Observed live on `src/boost-client/tasks/monsterrodholders.md`
+                // (PID 4069526, four days on a deleted image while its
+                // controller projection was unavailable and 227 CP recycle
+                // requests went unanswered).
+                //
+                // The drain now runs inside a labeled block: an early exit
+                // leaves the DRAIN, not the tick, and the recycle evaluation
+                // below always runs. The facts the drain would have produced are
+                // hoisted with conservative "nothing observed" defaults, which
+                // is exactly what the recycle policy needs — a stale supervisor
+                // at a safe checkpoint (`stale_recycle_safe_checkpoint`) does not
+                // need a turn boundary or a pending head to recycle.
+                let mut active_head: Option<String> = None;
+                let mut prompt_visible = false;
+                let mut turn_active = false;
+                let mut route_submit_in_flight = false;
+                let mut current_transition_pending = false;
+                let mut turn_boundary = false;
+                let mut head_pending = false;
+                let mut drain_completed = false;
+                'drain: {
                 // The head and its delivery-transition state come out of ONE
                 // authority read (`#recycletransitionwedge`).
-            let (active_head, active_transition) = match active_head_observation {
-                QueueHeadObservation::Observed { head, transition } => (head, transition),
+            let active_transition = match active_head_observation {
+                QueueHeadObservation::Observed { head, transition } => {
+                    active_head = head;
+                    transition
+                }
                 QueueHeadObservation::AuthorityUnavailable => {
                         queue_state_observed = false;
                         last_quiescent_maintenance = None;
-                    continue;
+                    break 'drain;
                 }
             };
             queue_continuation_triggers.observe_head(
@@ -1946,9 +1981,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         ready_busy_logged_key = Some(key);
                     }
                 }
-                let prompt_visible =
+                prompt_visible =
                     ready_busy_reconciled || idle_queue_prompt_visible(&shared, &harness);
-                let turn_active = turn_active_for_owned_pane_with_idle_evidence(
+                turn_active = turn_active_for_owned_pane_with_idle_evidence(
                     &path,
                     &shared,
                     prompt_visible,
@@ -2046,7 +2081,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                     }
                 }
-                let route_submit_in_flight =
+                route_submit_in_flight =
                     match agent_doc_controller_io::project_controller::route_submit_in_flight_for_file(
                         &path,
                     ) {
@@ -2099,7 +2134,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // second read (a per-tick extra controller round-trip is what
             // `#idlewatchctrlbackoff` exists to prevent) and never the supervisor's
             // own process-local relay registry, which can only ever miss.
-            let current_transition_pending =
+            current_transition_pending =
                 active_head.is_some() && active_transition == IdleQueueTransition::Pending;
             if current_transition_pending {
                 if !current_transition_pending_logged {
@@ -2278,7 +2313,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                         harness.binary, projection.target, projection.command
                                     ),
                                 );
-                                continue;
+                                break 'drain;
                             }
                             AutoTriggerOutcome::Cancelled => return,
                             outcome => {
@@ -2290,13 +2325,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                         outcome.as_str()
                                     ),
                                 );
-                                continue;
+                                break 'drain;
                             }
                         }
                     }
                     IdleQueueContextClearInFlightDecision::WaitForIdle
                     | IdleQueueContextClearInFlightDecision::WaitForPendingClear
-                    | IdleQueueContextClearInFlightDecision::AwaitSettle => continue,
+                    | IdleQueueContextClearInFlightDecision::AwaitSettle => break 'drain,
                     IdleQueueContextClearInFlightDecision::Settled => {
                         if let Err(err) =
                             agent_doc_controller_io::project_controller::clear_queue_context_clear_in_flight_for_file(&path)
@@ -2401,7 +2436,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             );
                             // Re-evaluate next tick with the cooldown cleared so
                             // the normal drain decision dispatches the head.
-                            continue;
+                            break 'drain;
                         }
                         Err(err) => {
                             eprintln!(
@@ -2436,8 +2471,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // image re-dispatches the pending head on the fresh binary); with no
                 // head waiting we debounce so a brief idle gap between unrelated turns
                 // never trips it.
-                let turn_boundary = prompt_visible && !turn_active;
-                let head_pending = active_head.is_some();
+                turn_boundary = prompt_visible && !turn_active;
+                head_pending = active_head.is_some();
                 // `#supkill-a` — graceful, idle-gated self-kill. An external driver
                 // (the CP / `admin kill-supervisor`) records a per-document request;
                 // the supervisor honors it at a turn boundary by tearing down its
@@ -2671,7 +2706,23 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                     }
                 }
+                    drain_completed = true;
+                }
                 let supervisor_stale = supervisor_stale_fast;
+                // `#stalereexecstarve`: receipt for the fallthrough itself. Emitted
+                // only when the drain bailed early AND the supervisor is stale —
+                // exactly the state that used to starve silently — so a live check
+                // can prove the guard is exercised without reading the source.
+                if !drain_completed && supervisor_stale && !stale_drain_fallthrough_logged {
+                    stale_drain_fallthrough_logged = true;
+                    let event = format!(
+                        "supervisor_stale_recycle_drain_fallthrough file={} pane={} reason=drain_early_exit_no_longer_skips_recycle (#stalereexecstarve)",
+                        path.display(),
+                        shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                    );
+                    log_event(&mut session_log, &event);
+                    agent_doc_ops_log_io::log_op(&path, &event);
+                }
                 // `#supkill-bg` — publish the live staleness probe so the IPC `Restart`
                 // handler can decide drain-reexec vs immediate relaunch without
                 // recomputing it.

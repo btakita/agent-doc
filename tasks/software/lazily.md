@@ -400,6 +400,29 @@ Queue: `#lzgomergeops`.
 `make check` green in lazily-go: 604 tests, race detector, **141 of 149 canonical fixtures opened (up from 135), 8 known-uncovered (down from 14)**, 144/144 scenarios replayed. Re-adding one merge fixture to lazily-go's own ledger reddens exactly the restored mark. CI is running on both repos (`31296523543`, `31296529788`) and is recorded pending rather than claimed.
 
 Queue: `#lzzigcanonrunner`.
+
+### Re: do [#lzzigcanonrunner] — 9 of 12 landed; the collections half remains — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzzigcanonrunner]
+
+
+lazily-zig now replays all **nine canonical lossless-tree fixtures** from the corpus bytes. Zig is back to ✅ on the three lossless-tree rows; 452 verified marks. Commits `7823540` (zig) and `db98b8d` (spec), 10 README syncs, superproject `e59661a`. I narrowed the item to the three collections CRDT fixtures rather than closing it.
+
+**"Implements it" and "conforms to it" were two different claims here.** `lossless_tree.zig` carries the whole `LosslessTreeCrdt` op vocabulary and its own tests, and *opened none of the corpus* — all nine sat under "No runner at all in this binding." That is the inline-mirror failure one step earlier: a mirror at least agrees with something, and retiring this binding's eight of them turned up three real wire defects. A missing runner has nothing to disagree with at all.
+
+**Two assertions are deliberately stronger than the fixture's letter.** `converged` compares rendered text **pairwise between replicas**, not each against the expected string — two replicas that both match the string while disagreeing about anything `render` elides would otherwise pass. And `live_nodes` is checked on **every** replica, not just `a`; after a converging exchange the counts must agree, so checking one would miss a replica that resurrected or dropped a node.
+
+**The harness caught my first attempt at `render_on`.** I swept the object key by key, and the rung-6 guard refused it: sub-fields checked one by one and the key *set* by nothing, so a replica the corpus adds later is compared by nothing and the runner stays green. It descends through a child tracker now.
+
+**Two mutants, and one of them survived — which I am reporting rather than rounding off.** Reading `at_byte` as a **char** offset instead of a byte offset — the exact multi-byte trap these fixtures exist for — reddens six of the nine. But making `diff` **ignore the partner frontier entirely** reddens *none* of them, including `non_contiguous_anti_entropy`, whose whole subject is a replica with a gap. So the runner currently pins that the replicas converge, and does not pin that anti-entropy ships only what the partner lacks. Filed as `#lzzigdiffmutant`; a mutant that lives is a statement about what the suite pins, not a detail to leave implied.
+
+**What remains, and why it is not done.** The three collections CRDT fixtures — `textcrdt_convergence`, `textcrdt_delta_sync`, `seqcrdt_convergence` — are a distinct runner over two other models (`TextCrdt`, `SeqCrdt`) with their own vocabulary: nine ops, fifteen expect keys, plus `clone` / `snapshot` / `delta` / `exchange` / `stable` / `gc`, versus the five ops and four expect keys the tree fixtures use. They score the three CRDT rows, which stay at `~`. I narrowed `#lzzigcanonrunner` to exactly that group rather than closing it on half the work.
+
+`make check` green in lazily-zig: **129 of 149 canonical fixtures opened (up from 120), 20 known-uncovered (down from 29), 128/128 scenarios replayed (up from 114)**. CI is running (`31296905681`) and recorded pending. One note on the local suite: bare `zig build test` prints the scenario-identity guard's own self-test to stderr and the build runner reports that as a failed command — the Makefile's `test` target is what tolerates it. I checked that against HEAD before touching anything, since a red-looking suite I did not cause is exactly the thing to verify rather than assume.
+
+Queue: `#lzregistersfixture`.
 <!-- agent:boundary:139c989e:lazily -->
 <!-- /agent:exchange -->
 
@@ -409,21 +432,23 @@ Queue: `#lzzigcanonrunner`.
 - ~~do [#lzegressrow]~~
 - ~~do [#lzcppmatreplay]~~
 - ~~do [#lzgomergeops]~~
-- do [#lzzigcanonrunner]
+- ~~do [#lzzigcanonrunner]~~
 - do [#lzregistersfixture]
 - do [#lzgdvocab]
 - do [#lzboundaryingressrow]
 - do [#lzdefaultmodeuniform]
+- do [#lzzigdiffmutant]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzzigcanonrunner] lazily-zig implements text_crdt.zig, seq_crdt.zig, and lossless_tree.zig with its own tests but has no canonical runner for collections CRDT or lossless-tree, so 12 fixtures sit under 'No runner at all in this binding' and Zig dropped to ~ on three CRDT rows and three lossless-tree rows. Add canonical replay for collections/{textcrdt_convergence,textcrdt_delta_sync,seqcrdt_convergence}.json and the nine lossless-tree/*.json, following the pattern that already retired this binding's eight inline mirrors in src/lazily/{collections,distributed,signaling}_conformance.zig — that retirement found three wire defects the mirrors could not see.
+- [ ] 🚧 [#lzzigcanonrunner] lazily-zig has no canonical runner for the three collections CRDT fixtures, so Zig stays at ~ on the three CRDT rows (free-text-character-crdt, textcrdt-delta-sync, move-aware-sequence-crdt). text_crdt.zig and seq_crdt.zig exist with their own tests; what is missing is corpus replay. Add it for collections/{textcrdt_convergence,textcrdt_delta_sync,seqcrdt_convergence}.json — a distinct runner over two models (TextCrdt, SeqCrdt) with 9 ops (insert, insert_str, delete, gc, insert_back, insert_front, move_after, set_value, remove), 15 expect keys (text, len, texts_equal, a_starts_with/a_ends_with, tombstone_count, version_vector_on, text_on, order, get, orders_equal, contains_all, order_on, get_on, not_contains_on) and the clone/snapshot/delta/exchange/stable step forms. Follow src/lazily/lossless_tree_conformance.zig, which landed the other nine fixtures of this item. DONE already: all nine lossless-tree fixtures replay and Zig is shipped on those three rows.
 - [ ] [#lzregistersfixture] The Registers row (LWW / MV + PnCounter + CellCrdt) is marked shipped in nine bindings and has NO canonical fixture anywhere in the corpus, so check-coverage-claims.mjs cannot verify a single one of those marks. seqcrdt_convergence.json exercises LWW registers only incidentally, as the substrate for move-aware sequence order, and backs the SeqCrdt row instead. Author a canonical crdt fixture pinning LWW resolution (including the equal-timestamp tiebreak), MV concurrent-value retention, PnCounter increment/decrement convergence, and the CellCrdt reactive projection; then cite it on the row.
 - [ ] [#lzgdvocab] Finish the lazily-gd conformance runner: 7 of the 21 canonical reactive-graph fixtures remain, in two op families. (a) merge_cell (5 fixtures: exact_fold_paths_stay_exact, merge_cell_acquires_no_dependency_edge, merge_feed_through_a_formula_coalesces, merge_folds_synchronously_in_batch, merge_per_settled_cone_not_per_write) — this is the one group needing KERNEL work, a folding Source with a merge policy (source_with/merge), plus the merges_of observable. (b) fanout/churn/dispose_fanout/dispose_stale_handle bulk ops plus real id recycling (2 fixtures: churn_returns_to_baseline, recycled_id_inherits_nothing) — recycling needs explicit work beyond Godot instance ids, which are monotonic and never alias. Each is named in KNOWN_UNCOVERED with its reason; removing an entry there is the definition of done for that group. Landed already: signal/dispose_signal (3), fail_next (1), shape=scenarios (1) — 14/149 replayed, 7 named excuses.
 - [ ] [#lzboundaryingressrow] conformance/ingress/boundary_ingress_adapter.json declares "model": "BoundaryIngressAdapter" — a distinct model from IngressCell, with its own bootstrap/subscribe/cursor phases — and NINE bindings replay it (lazily-rs tests/boundary_ingress_conformance.rs, py, kt, js, dart, zig, go, cpp, cs) against NO coverage.json row at all. Same gap class as #lzegressrow: a canonical fixture nine bindings replay scores nothing, so nine real implementations get no credit and any future regression in the adapter moves no cell. It must not be cited on the reactive-ingress rows — that would claim IngressCell conformance from an adapter fixture, the misattribution refused for RelayCell/egress in #lzcoveragerowfixtures. Add a BoundaryIngressAdapter row (family ingress, or its own), cite the fixture, and score the nine bindings from their own ledgers.
 - [ ] [#lzdefaultmodeuniform] The materialization corpus's default_mode key gets FIVE different treatments across nine bindings, so the default_mode_eager clause is not uniformly proved. Rust (tests/materialization_conformance.rs) and C# (MaterializationConformanceTests.cs) assert the BEHAVIOUR the named mode implies — the mode selects the build, and a map built that way must be fully materialized at build time — and lazily-cpp now does the same via tests/test_materialization_replay.hpp. Python (_excuse_default_mode in tests/test_reactive_family.py), Kotlin and JS EXCUSE the key as 'no mode flag to read back', a reason C++ and C# disprove since neither has a mode flag either. Dart (materialization_conformance_test.dart) and Zig (reactive_map.zig) compare it against the string literal 'eager', which asserts only that the fixture equals itself (#lzconsumednotasserted). Go deserializes it into a DefaultMode struct field. Converge all nine on the behavioural assertion and delete the three excuses; a corpus that flips default_mode must redden every binding, which today it does not.
+- [ ] [#lzzigdiffmutant] lazily-zig's lossless-tree replay does not pin the anti-entropy FILTER, only convergence: mutating LosslessTreeCrdt.diff to ignore the partner frontier (ship every op in the log) reddens NONE of the nine fixtures, including non_contiguous_anti_entropy.json whose subject is a replica with a gap. deliver.only indexes into the diff, so a diff whose contents change should select different ops and change what the gapped replica renders (hole_before_repair expects b='013') — it does not, and the reason is not yet established. Either the runner's deliver path is not exercising the frontier as intended, or applyUpdate's idempotence absorbs the difference; find out which, then make the fixture discriminating (or record honestly that convergence is all it can pin). Contrast the at_byte char-offset mutant, which reddens six of the nine.
 <!-- /agent:backlog -->
 
 ## Review

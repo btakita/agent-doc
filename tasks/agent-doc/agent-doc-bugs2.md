@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 1404a83c-1699-4652-90f6-8f94075cf8c0
+resume: 3c4e9bbc-6401-4daf-ba00-badc1295fa37
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -562,16 +562,45 @@ The regression asserts both directions — managed keys are bookkeeping, `claude
 Exchange is 494 lines across 20 sections; the queue is active so I am not stalling to compact.
 
 No new plan file and no new actionable follow-up items: both child items are done, and the narrowed `#preflightprojpass` carries the one remaining lead.
+
+### Re: #resumeuuidstallsdrain — opus-5
+
+> **Queue prompt:**
+>
+> do [#resumeuuidstallsdrainbug]
+
+
+Already fixed and shipped in 0.35.201 last cycle, so this head was just a record to reap. But *how* it got its name was a live bug, now fixed in **0.35.202**.
+
+The item landed as `#resumeuuidstallsdrainbug`, with a stray `resumeuuidstallsdrain=` embedded in its body. That was not a naming quirk — it was `--backlog-add` silently accepting the wrong syntax:
+
+- `--backlog-edit` takes `<id>=<new text>`
+- `--backlog-add` takes `id=<custom> <text>` — the literal keyword `id`
+
+Adjacent flags, same `=` separator, opposite meanings. Getting it wrong produced **no error**: the whole string became the body, and the id was auto-derived from the words that happened to follow. Three items in this document were written that way today before I noticed. The damage isn't cosmetic — the id the author meant never exists, so a later `--done`, `do [#id]`, or cross-reference resolves to nothing. That is exactly what the coined-id guard exists to prevent, arriving through the one path that bypasses it.
+
+It fails closed now, naming both correct forms.
+
+**The guard's first draft was too broad, and the existing suite caught it.** `#lazilyspecpin=Pin the vocabulary` is an established compound *topic label* — the `=` deliberately disqualifies id promotion and the text is preserved verbatim — and `op_add_leading_bare_tag_with_trailing_equals_keeps_auto_hash` failed immediately. The distinguishing feature is the leading `#`: my failure shape had none. The guard now requires a valid id shape *and* no leading `#`, and a second regression pins the non-firing side (`fix the x = y + 1 off-by-one`, `kernel arg root=/dev/sda1 breaks the initramfs`, and that bare-tag form) — a guard that starts rejecting ordinary prose would be worse than the bug it replaces. Mutation-checked.
+
+Worth noting where this came from: I hit this three times in a row and read it as a papercut in my own usage. It was a product defect the whole time, and the only reason it surfaced is that a silent-corruption bug eventually produces a record too strange to ignore.
+
+**Verification:** `make check` green — 8803 passed, 0 failed, exit 0 (checked explicitly; RTK masks the exit code). Installed 0.35.202, pushed, tagged, recycled, submodule pointer pushed. CI: 0.35.199 and 0.35.200 completed green; 31308629542 and 31309397366 in progress — observed, not awaited.
+
+Exchange is 530 lines across 21 sections; the queue is active so I am not stalling to compact.
+
+No new plan file and no new actionable follow-up items: the fix, both regressions, and the version entry landed in this cycle.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ⏭️ do [#run3rdpaneswitchverify]
+- ~~do [#resumeuuidstallsdrainbug]~~
+- do [#run3rdpaneswitchverify]
 - ~~do [#operatorverifylive]~~
 - ~~do [#strandedremedydeadlock]~~
 - ~~do [#run3rdpaneswitch]~~
-- 🚧 do [#preflightprojpass]
+- ⏭️ do [#preflightprojpass]
 - ~~do [#projpassmeasurebugrun]~~
 - ~~do [#projpasspreflightbugdeci]~~
 - do [#respondbaselineflag]
@@ -589,7 +618,7 @@ No new plan file and no new actionable follow-up items: both child items are don
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#hookhashfalsepositive] agent-doc's coined-id-pre-tool-use hook rejects C preprocessor directives as untracked backlog ids. Writing a file containing a line starting with a hash — pragma once, include <string> — is blocked with "would write coined id(s) #include, #pragma ... not tracked in agent:backlog". The same class of false positive already applies to CSS ids, shell comments, and agent-doc's own anchor tags quoted from SKILL.md. It is not a hard block (a bash heredoc bypasses the PreToolUse hook entirely, which is itself the interesting part — the guard is trivially avoidable while being obstructive to correct writes) but it forced a workaround into emitted C++: src/sdk-spike/ts/src/wire/code.ts assembles the directives via String.fromCharCode(35) with a comment explaining why. The guard should recognise language syntax — preprocessor directives, CSS selectors, shell/YAML comments, markdown headings — or scope itself to prose contexts. Fix belongs in agent-loop src/agent-doc, not here; remove the workaround in code.ts once it lands.
-- [ ] 🚧 [#preflightprojpass] #agent-doc-bug Redundant full-document CRDT resolutions (~186ms each). MEASURED 2026-08-09 on 0.35.199+ with real caller attribution (the two prior narrowings were reading a hardcoded constant, fixed in 0.35.199). Result: 112 resolutions in ~15 minutes across ~20 DISTINCT callers, answered_by=crdt_relay 100% (the relay is the transport, not a consumer). Top callers: session-check 17, observe_live_queue_heads 10, then pre_write_guards / verify_pane_ownership / canonicalize_response_for_capture / resume_id_owner at 8 each, long tail below. NO preflight phase appears at all, which closed the preflight half (#projpasspreflightbugdeci) -- its premise was never supported. There is no single hot consumer left to fix; the cost is spread. REMAINING, and much narrower than the original item: session-check is the fattest single consumer at ~8 full-document resolutions per closeout on one document (17 across ~2 cycles). Audit agent-doc-session-check-io's guard sequence -- it runs ~30 named guards per closeout and several call resolve_current_document_content independently -- and thread ONE resolved document through the guard sequence instead of re-resolving per guard. That is a within-command change with no cache and no new projection pass. Do NOT open a projection pass or write a new cache; the measurement says the win is in one command's internal fan-out, not in a shared cache.
+- [ ] [#preflightprojpass] #agent-doc-bug Redundant full-document CRDT resolutions (~186ms each). MEASURED 2026-08-09 on 0.35.199+ with real caller attribution (both prior narrowings were reading a hardcoded constant, fixed in 0.35.199). Result: 112 resolutions in ~15 minutes across ~20 DISTINCT callers, answered_by=crdt_relay 100% (the relay is the transport, not a consumer). Top callers: session-check 17, observe_live_queue_heads 10, then pre_write_guards / verify_pane_ownership / canonicalize_response_for_capture / resume_id_owner at 8 each, long tail below. NO preflight phase appears at all, which closed the preflight half -- its premise was never supported. There is no single hot consumer left; the cost is spread. REMAINING, much narrower than the original item: session-check is the fattest single consumer at ~8 full-document resolutions per closeout on one document. Audit agent-doc-session-check-io's guard sequence (it runs ~30 named guards per closeout and several call resolve_current_document_content independently) and thread ONE resolved document through the sequence instead of re-resolving per guard. Within-command change. Do NOT open a projection pass or write a new cache; the measurement says the win is one command's internal fan-out, not a shared cache.
 - [ ] [#respondbaselineflag] #agent-doc-bug SKILL.md's MANDATORY persist step documents `agent-doc respond <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill`, but neither `respond` nor `write` accepts `--baseline-file` in 0.35.184 (`agent-doc respond --help` has no baseline/snapshot flag). An agent following the hot-path skill verbatim gets a clap parse error on the one step the skill calls mandatory, and the documented 'use preflight's baseline, do NOT save your own' contract has no way to be honoured. Decide one way: either add `--baseline-file` to respond/write and thread it into the diff baseline, or remove it from SKILL.md + every generated harness surface (.claude/.codex/.opencode/.cursor) and the runbooks. Reported by the operator 2026-08-08 while diagnosing the haiven-dev wedge.
 <!-- /agent:backlog -->
 

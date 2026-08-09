@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 34ac6c09-1abb-477b-b1ee-7c3300e10400
+resume: 12520dca-8624-437c-bfe9-881cdf0fc5f3
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -498,15 +498,44 @@ So the outgoing pane stayed visible, the loop below joined the incoming document
 Exchange is now 439 lines across 18 sections; the queue is active so I am not stalling to compact.
 
 There are no actionable follow-up items and no plan file is needed: the fix, both regressions, and the spec/eval docs landed in this cycle. The one thing an agent cannot do is watch a real IDE, so I filed `#run3rdpaneswitchverify` as a non-blocking `[operator-verify]` eyeball — the deterministic test stages tmux directly rather than driving the JetBrains layout path.
+
+### Re: #preflightprojpass — opus-5
+
+The item said "RE-MEASURE FIRST". I did, and the measurement could not be taken — **the instrument was broken**, which is why this item has been re-narrowed twice onto the same wrong answer. Fixed in **0.35.199**; the item stays open, re-scoped onto real data for the first time.
+
+**`source=crdt_relay` was never a caller.** Four `realtime_doc_resolve` emit sites in `agent-doc-document-realtime-io` hardcoded that string, and two more omitted `source` entirely — even though the caller's `source` argument was in scope at every one of them. It is a label for what *answered* the resolve. Both previous narrowings read the log, saw it on top, and concluded the relay was the largest consumer. A constant cannot lose that comparison, and it says nothing about which caller to fix.
+
+**What the numbers actually were** (post-0.35.195, pre-fix — so all of it unattributable):
+
+| | count |
+|---|---|
+| total `realtime_doc_resolve` | 494 |
+| carrying the hardcoded `crdt_relay` | 489 |
+| `session`, `idle_watch_active_queue_head`, `serialized_atomic_write` | **0** |
+
+Those three are the sources the item had queued up to check next. They were not rare — they were **unreportable**. Separately confirmed healthy: `resume_id_owner` is 0 post-0.35.191, and the 0.35.195 canonical-key fix is holding.
+
+**The fix** emits the caller in `source=` at all six sites and moves relay/detached/disk-only to a separate `answered_by=`. Both facts present, neither inferred.
+
+**Two tests, because one runtime path is not enough.** A runtime test resolves through whichever branch its fixture takes: my first draft passed *unchanged* when I mutated `resolve_disk_only_current_doc` back to the constant, because that fixture goes through the detached branch. So `no_resolve_emit_site_hardcodes_the_caller_field` checks all six sites at once, mutation-checked against both pre-fix shapes (pinned constant, omitted field). The guard's own first draft scanned its own test module and reported two findings against its own assertions — it is now bounded to shipped code.
+
+**Why the preflight half is not done, concretely.** Its premise is unsupported by measurement. Preflight's seven mutating phases do call `invalidate_current_document_projection` zero times — but no projection pass is open during preflight, so there is no stale read today and no measured cost. Adding seven inert calls would be a precondition for an optimization the data says isn't needed, not a fix. The item now records that in order: re-measure on 0.35.199+ with real attribution, *then* decide. I am not gating it — it is actionable, it just has a different first step than it did this morning.
+
+**Verification:** `make check` green — 8800 passed, 0 failed, exit 0 (checked explicitly; RTK masks the exit code). Installed 0.35.199, pushed, tagged `v0.35.199`, controller recycled, submodule pointer pushed. CI: 0.35.197 completed green; 31306850204 and 31307570034 in progress — observed, not awaited.
+
+Exchange is 466 lines across 19 sections; the queue is active so I am not stalling to compact.
+
+No new plan file and no new actionable follow-up items: the remaining work is recorded in the narrowed `#preflightprojpass` item itself, which stays at the top of the queue.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#run3rdpaneswitchverify]
 - ~~do [#operatorverifylive]~~
 - ~~do [#strandedremedydeadlock]~~
 - ~~do [#run3rdpaneswitch]~~
-- do [#preflightprojpass]
+- 🚧 do [#preflightprojpass]
 - do [#respondbaselineflag]
 - do [#hookhashfalsepositive]
 <!-- /agent:queue -->
@@ -522,7 +551,7 @@ There are no actionable follow-up items and no plan file is needed: the fix, bot
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#hookhashfalsepositive] agent-doc's coined-id-pre-tool-use hook rejects C preprocessor directives as untracked backlog ids. Writing a file containing a line starting with a hash — pragma once, include <string> — is blocked with "would write coined id(s) #include, #pragma ... not tracked in agent:backlog". The same class of false positive already applies to CSS ids, shell comments, and agent-doc's own anchor tags quoted from SKILL.md. It is not a hard block (a bash heredoc bypasses the PreToolUse hook entirely, which is itself the interesting part — the guard is trivially avoidable while being obstructive to correct writes) but it forced a workaround into emitted C++: src/sdk-spike/ts/src/wire/code.ts assembles the directives via String.fromCharCode(35) with a comment explaining why. The guard should recognise language syntax — preprocessor directives, CSS selectors, shell/YAML comments, markdown headings — or scope itself to prose contexts. Fix belongs in agent-loop src/agent-doc, not here; remove the workaround in code.ts once it lands.
-- [ ] [#preflightprojpass] #agent-doc-bug Redundant full-document CRDT resolutions (~186ms each). RE-NARROWED 2026-08-09 after 0.35.195. Correction to the earlier narrowing: the relay half WAS the top consumer -- the previous measurement counted crdt_current_text lines only; counting realtime_doc_resolve shows source=crdt_relay at 144 resolutions in a 20-minute window, the largest single source. 0.35.195 fixed a major cause: pass_projection and invalidate_current_document_projection keyed on the path AS GIVEN, so one document split into two cache entries across absolute vs repo-relative spellings (measured 43 + 40 for the same file in one window) -- guaranteed misses, plus a correctness edge where invalidation under one spelling leaves the other serving pre-mutation text. Both sites now key on the canonical path. 0.35.191 separately fixed resume_id_owner materializing every document in state.db. REMAINING: (a) RE-MEASURE FIRST -- rerun the realtime_doc_resolve source distribution and the per-file spelling breakdown post-0.35.195 to see how much relay redundancy survives canonical keying before assuming more work is needed; the next largest sources to check are session, idle_watch_active_queue_head and serialized_atomic_write. (b) PREFLIGHT HALF, still behind its recorded blocker: only agent-doc-commit-io/src/lib.rs:891 calls invalidate_current_document_projection while preflight's seven mutating phases call it ZERO times (exact-replay converge run.rs:300, auto-repair base index 354, repair 479, run_pending_maintenance 537, commit ~709, run_queue_maintenance 858, baseline realign 936). Safe order unchanged: make each preflight mutator SELF-invalidate, THEN open the pass in run_with_options, THEN a regression that a post-mutation read observes the new text. Do NOT write a new cache.
+- [ ] 🚧 [#preflightprojpass] #agent-doc-bug Redundant full-document CRDT resolutions (~186ms each). RE-SCOPED 2026-08-09 after the 0.35.199 measurement. The instrument was broken, which is why this item was re-narrowed twice onto the same wrong answer: realtime_doc_resolve hardcoded source=crdt_relay at four emit sites and omitted source at two more, so 'crdt_relay is the largest source' was reading a constant, not a caller. 0.35.199 emits the real caller in source= and moves the relay/detached/disk-only fact to answered_by=. MEASUREMENT (post-0.35.195, before the instrument fix): 494 resolutions, 489 answered by the relay, and session / idle_watch_active_queue_head / serialized_atomic_write appeared ZERO times -- they were never absent, they were unreportable. resume_id_owner is 0 post-0.35.191 and the 0.35.195 canonical-key fix is holding. REMAINING, in order: (1) re-run the source distribution over a fresh window on 0.35.199+ ops.log, now grouping by the real source= caller, and identify the top callers -- this is the first real attribution data this item will ever have had; (2) only then decide the preflight half. Its premise is currently UNSUPPORTED by measurement: preflight's seven mutating phases (run.rs exact-replay converge 300, auto-repair base index 354, repair 479, run_pending_maintenance 537, commit ~709, run_queue_maintenance 858, baseline realign 936) call invalidate_current_document_projection zero times, but no projection pass is open during preflight, so there is no stale read today and no measured cost -- the self-invalidation work is a precondition for opening the pass, not a fix. Do NOT open the pass or write a new cache until (1) says preflight is worth it.
 - [ ] [#respondbaselineflag] #agent-doc-bug SKILL.md's MANDATORY persist step documents `agent-doc respond <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill`, but neither `respond` nor `write` accepts `--baseline-file` in 0.35.184 (`agent-doc respond --help` has no baseline/snapshot flag). An agent following the hot-path skill verbatim gets a clap parse error on the one step the skill calls mandatory, and the documented 'use preflight's baseline, do NOT save your own' contract has no way to be honoured. Decide one way: either add `--baseline-file` to respond/write and thread it into the diff baseline, or remove it from SKILL.md + every generated harness surface (.claude/.codex/.opencode/.cursor) and the runbooks. Reported by the operator 2026-08-08 while diagnosing the haiven-dev wedge.
 <!-- /agent:backlog -->
 

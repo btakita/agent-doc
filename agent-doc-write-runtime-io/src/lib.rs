@@ -1975,6 +1975,33 @@ fn run_command_inner_within_pass(
                 file.display()
             )
         })?;
+        // `#mutprovenancepreresponse`: the envelope is valid, so record what this
+        // cycle INTENDS before the response cell is published. The post-hoc
+        // record in the mutation phase runs after the response write; a write
+        // that fails once the response has landed leaves no provenance at all,
+        // and the divergence is then misclassified as a fresh operator edit and
+        // swept. Intent recorded here survives a failure at any position.
+        let requested_added_ids: Vec<String> = options
+            .pending_add
+            .iter()
+            .chain(options.pending_add_gated.iter())
+            .chain(options.pending_add_back.iter())
+            .filter_map(|text| {
+                agent_doc_element_backlog::backlog::explicit_custom_id(text)
+            })
+            .collect();
+        if let Err(err) = agent_doc_cycle_state_io::record_requested_tracked_work(
+            file,
+            &options.pending_done,
+            &requested_added_ids,
+        ) {
+            // Never fatal: provenance is a recovery aid, and failing the turn
+            // here would turn a bookkeeping problem into a lost closeout.
+            eprintln!(
+                "[write] warning: failed to record tracked-work intent for {}: {err:#}",
+                file.display()
+            );
+        }
     }
 
     let write_flags = WriteFlags {

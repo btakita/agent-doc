@@ -1021,6 +1021,11 @@ fn run_with_options_inner(
                 agent_doc_turn::write_ownership::RecordedTrackedWork {
                     done_ids: &state.pending_done_ids,
                     added_ids: &state.pending_added_ids,
+                    // `#mutprovenancepreresponse`: intent recorded BEFORE the
+                    // response write, so a write that fails once the response
+                    // has landed still proves the divergence is ours.
+                    requested_done_ids: &state.requested_done_ids,
+                    requested_added_ids: &state.requested_added_ids,
                 },
                 &disk_content,
             )

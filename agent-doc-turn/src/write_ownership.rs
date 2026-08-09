@@ -258,6 +258,15 @@ pub struct RecordedTrackedWork<'a> {
     pub done_ids: &'a [String],
     /// Ids this cycle recorded a `--backlog-add` / `--review-add` for.
     pub added_ids: &'a [String],
+    /// `#mutprovenancepreresponse`: `--done` ids this cycle REQUESTED, recorded
+    /// before the response cell was published.
+    ///
+    /// The two fields above are written by the mutation phase, which runs AFTER
+    /// the response write — so a write that fails once the response has landed
+    /// records nothing, and the divergence reads as a fresh operator edit.
+    pub requested_done_ids: &'a [String],
+    /// Explicit add ids this cycle requested (`#mutprovenancepreresponse`).
+    pub requested_added_ids: &'a [String],
 }
 
 /// Whether a recorded tracked-work mutation is still missing from `disk`.
@@ -289,14 +298,23 @@ pub struct RecordedTrackedWork<'a> {
 /// swallowing the operator's next prompt.
 pub fn recorded_tracked_work_is_unlanded(recorded: RecordedTrackedWork<'_>, disk: &str) -> bool {
     let normalize = |id: &str| id.trim().trim_start_matches('#').to_string();
-    recorded
-        .done_ids
-        .iter()
-        .any(|id| disk.contains(&format!("- [ ] [#{}]", normalize(id))))
-        || recorded
-            .added_ids
-            .iter()
+    let done_unlanded = |ids: &[String]| {
+        ids.iter()
+            .any(|id| disk.contains(&format!("- [ ] [#{}]", normalize(id))))
+    };
+    let add_unlanded = |ids: &[String]| {
+        ids.iter()
             .any(|id| !disk.contains(&format!("[#{}]", normalize(id))))
+    };
+    done_unlanded(recorded.done_ids)
+        || add_unlanded(recorded.added_ids)
+        // Intent counts the same as the post-hoc record: both mean "this
+        // closeout asked for a mutation that is not visible yet".
+        || done_unlanded(recorded.requested_done_ids)
+        || add_unlanded(recorded.requested_added_ids)
+        // Intent counts the same as the post-hoc record: both mean "this
+        // closeout asked for a mutation that is not visible yet".
+
 }
 
 #[cfg(test)]
@@ -354,6 +372,8 @@ mod tests {
             RecordedTrackedWork {
                 done_ids: &done,
                 added_ids: &added,
+                requested_done_ids: &[],
+                requested_added_ids: &[],
             },
             disk,
         ));
@@ -364,9 +384,84 @@ mod tests {
             RecordedTrackedWork {
                 done_ids: &hashed,
                 added_ids: &[],
+                requested_done_ids: &[],
+                requested_added_ids: &[],
             },
             disk,
         ));
+    }
+
+    /// `#mutprovenancepreresponse`: intent alone proves ownership when the
+    /// post-hoc record never got written.
+    ///
+    /// `done_ids` / `added_ids` are recorded by the mutation phase, which runs
+    /// AFTER the response write. Observed 2026-08-09 closing
+    /// `#hooktriggerunresolved`: `respond` hit the pre-write delivery barrier,
+    /// the response reached HEAD, the `--done` never applied and was never
+    /// recorded — so this predicate correctly saw nothing, and the divergence
+    /// was classified as a fresh operator edit with the queue head unstruck.
+    #[test]
+    fn requested_intent_alone_proves_the_divergence_is_ours() {
+        let requested = vec!["hooktriggerunresolved".to_string()];
+        // Exactly the observed shape: the post-hoc record is EMPTY because the
+        // mutation phase never ran, and the item is still open on disk.
+        let disk = "- [ ] [#hooktriggerunresolved] FIXED in 0.35.219\n";
+        assert!(recorded_tracked_work_is_unlanded(
+            RecordedTrackedWork {
+                done_ids: &[],
+                added_ids: &[],
+                requested_done_ids: &requested,
+                requested_added_ids: &[],
+            },
+            disk,
+        ));
+
+        // A requested ADD that never arrived is ours too.
+        let requested_add = vec!["neverlanded".to_string()];
+        assert!(recorded_tracked_work_is_unlanded(
+            RecordedTrackedWork {
+                done_ids: &[],
+                added_ids: &[],
+                requested_done_ids: &[],
+                requested_added_ids: &requested_add,
+            },
+            disk,
+        ));
+
+        // And once the intent HAS landed, it stops claiming the divergence —
+        // otherwise every later operator edit would read as ours forever.
+        assert!(!recorded_tracked_work_is_unlanded(
+            RecordedTrackedWork {
+                done_ids: &[],
+                added_ids: &[],
+                requested_done_ids: &requested,
+                requested_added_ids: &[],
+            },
+            "- [x] [#hooktriggerunresolved] FIXED in 0.35.219\n",
+        ));
+    }
+
+    /// The intent must be recorded BEFORE the response is published, or it does
+    /// not solve the problem it exists for.
+    ///
+    /// The whole defect is that provenance written after the response write is
+    /// absent exactly when the write fails post-landing. A unit test cannot
+    /// reach that state, and ordering is invisible to a behavioural test that
+    /// succeeds — so guard the position structurally.
+    #[test]
+    fn the_intent_is_recorded_before_the_response_write() {
+        let source = include_str!("../../agent-doc-write-runtime-io/src/lib.rs");
+        let record = source
+            .find("record_requested_tracked_work(")
+            .expect("the write path must record tracked-work intent");
+        let write = source
+            .find("let write_result = if options.is_ipc {")
+            .expect("the response write site moved or was renamed");
+        assert!(
+            record < write,
+            "tracked-work intent must be recorded BEFORE the response cell is \
+             published; recorded at byte {record}, response write at {write}"
+        );
     }
 
     /// The other half, and the one that keeps `commit` from swallowing the
@@ -382,6 +477,8 @@ mod tests {
             RecordedTrackedWork {
                 done_ids: &done,
                 added_ids: &added,
+                requested_done_ids: &[],
+                requested_added_ids: &[],
             },
             disk,
         ));
@@ -393,6 +490,8 @@ mod tests {
             RecordedTrackedWork {
                 done_ids: &done,
                 added_ids: &added,
+                requested_done_ids: &[],
+                requested_added_ids: &[],
             },
             gated,
         ));

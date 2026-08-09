@@ -2,6 +2,47 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.222
+
+- **Fix (`#mutprovenancepreresponse`): closeout provenance was recorded after the
+  response, so a write that failed post-landing left nothing to prove the
+  mutations were ours.**
+
+  0.35.216 taught `session-check` and `commit` to tell "this closeout's own
+  unlanded mutations" from "a fresh operator edit" by reading `CycleState`'s
+  `pending_done_ids` / `pending_added_ids`. That works whenever the mutation
+  phase ran. It does not when the *response write itself* fails after the
+  response has landed: `apply_pending_and_status_mutations` never executes,
+  nothing is recorded, `recorded_tracked_work_is_unlanded` correctly reports "no
+  unlanded mutations of mine", and the divergence is classified
+  `UnansweredEditPending` again.
+
+  Observed 2026-08-09 closing `#hooktriggerunresolved`: `respond` hit the
+  pre-write delivery barrier, the response reached HEAD, the `--done` never
+  applied and was never recorded, and `session-check` gave the unanswered-edit
+  verdict with the queue head unstruck. Recovery worked only because the operator
+  still knew the intent — nothing in the document or state proved it.
+
+  The requested mutations are now recorded where `#prmergeguardpr` already
+  validates the envelope: after validation, before the response cell is
+  published. Provenance therefore exists no matter where the write fails.
+  `RecordedTrackedWork` carries the intent alongside the post-hoc record and
+  treats them the same — both mean "this closeout asked for a mutation that is
+  not visible yet" — and intent that HAS landed stops claiming the divergence, so
+  later operator edits are not captured forever.
+
+  Kept deliberately separate from `pending_done_ids` rather than recorded early
+  into it: closeout-signal logic reads that field as "this cycle recorded a
+  completion outcome", and a failed cycle claiming its queue head was answered
+  would strike a head that never got done.
+
+  Only explicitly-named add ids (`id=<id>` / `[#id]`) are knowable before the add
+  runs; generated ids stay covered by the post-hoc record. Recording failure is
+  logged, never fatal — provenance is a recovery aid, and failing the turn there
+  would turn a bookkeeping problem into a lost closeout. Ordering is guarded
+  structurally (`the_intent_is_recorded_before_the_response_write`), because a
+  behavioural test that succeeds cannot see it. Mutation-checked.
+
 ## 0.35.221
 
 - **Fix (`#resumeownerfmread`): `agent-doc start`'s resume-claim check paid two

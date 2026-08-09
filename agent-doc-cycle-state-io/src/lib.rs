@@ -200,6 +200,30 @@ pub struct CycleState {
     /// brand-new same-cycle add from a pre-existing item.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_added_ids: Vec<String>,
+    /// `#mutprovenancepreresponse`: tracked-work ids this cycle REQUESTED,
+    /// recorded before the response cell is published.
+    ///
+    /// `pending_done_ids` / `pending_added_ids` are written by the mutation
+    /// phase, which runs AFTER the response write. When that write fails once
+    /// the response has already landed, the mutation phase never runs, nothing
+    /// is recorded, and the closeout-provenance predicate correctly reports "no
+    /// unlanded mutations of mine" — so the divergence is misclassified as a
+    /// fresh operator edit and swept. Intent recorded up front survives a
+    /// failure at any position.
+    ///
+    /// Deliberately separate from `pending_done_ids` rather than recorded early
+    /// into it: closeout-signal logic reads that field as "this cycle recorded a
+    /// completion outcome", and a failed cycle claiming its queue head was
+    /// answered would strike a head that never got done.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requested_done_ids: Vec<String>,
+    /// Explicit ids this cycle requested to ADD (`#mutprovenancepreresponse`).
+    ///
+    /// Only ids the caller named (`id=<id>` / `[#id]`) are knowable before the
+    /// add runs; generated ids are not, and stay covered by the post-hoc
+    /// `pending_added_ids` record.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requested_added_ids: Vec<String>,
     /// `#backlogqueuepopulation`: tracked-work ids that became actionable this
     /// cycle and therefore may need insert-only mirroring into an explicit
     /// go-mode `agent:queue`. Adds and ungates record here; gates, done
@@ -1177,6 +1201,8 @@ pub fn start_preflight_with_task(
         pending_gated_ids: Vec::new(),
         pending_added_this_cycle: false,
         pending_added_ids: Vec::new(),
+        requested_done_ids: Vec::new(),
+        requested_added_ids: Vec::new(),
         pending_actionable_ids: Vec::new(),
         pending_anchored_ids: Vec::new(),
         tracked_work_maintenance_required_at_preflight: file_content
@@ -1702,6 +1728,39 @@ pub fn record_pending_gated_ids(file: &Path, ids: &[String]) -> Result<Option<Cy
 /// `#opsproof-samecycle-add`: record the ids of tracked-work items added this
 /// cycle (via `--pending-add` / `--pending-add-gated` / `--review-add`) so the
 /// opportunistic ops-proof auto-completion can exclude brand-new same-cycle adds.
+/// Record the tracked-work mutations this cycle REQUESTED, before the response
+/// cell is published (`#mutprovenancepreresponse`).
+pub fn record_requested_tracked_work(
+    file: &Path,
+    done_ids: &[String],
+    added_ids: &[String],
+) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    let mut changed = false;
+    for (ids, slot) in [
+        (done_ids, &mut state.requested_done_ids),
+        (added_ids, &mut state.requested_added_ids),
+    ] {
+        for id in ids
+            .iter()
+            .map(|id| normalize_pending_id(id))
+            .filter(|id| !id.is_empty())
+        {
+            if !slot.iter().any(|existing| existing == &id) {
+                slot.push(id);
+                changed = true;
+            }
+        }
+    }
+    if !changed {
+        return Ok(Some(state));
+    }
+    save(file, &state)?;
+    Ok(Some(state))
+}
+
 pub fn record_pending_added_ids(file: &Path, ids: &[String]) -> Result<Option<CycleState>> {
     let Some(mut state) = load(file)? else {
         return Ok(None);
@@ -3107,6 +3166,8 @@ fn synthetic_state_with_id(
         pending_gated_ids: Vec::new(),
         pending_added_this_cycle: false,
         pending_added_ids: Vec::new(),
+        requested_done_ids: Vec::new(),
+        requested_added_ids: Vec::new(),
         pending_actionable_ids: Vec::new(),
         pending_anchored_ids: Vec::new(),
         // A synthetic cycle did not observe a preflight document. Preserve

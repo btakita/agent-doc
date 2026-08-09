@@ -2546,6 +2546,8 @@ mod th {
             pending_gated_ids: Vec::new(),
             pending_added_this_cycle: false,
             pending_added_ids: Vec::new(),
+            requested_done_ids: Vec::new(),
+            requested_added_ids: Vec::new(),
             pending_actionable_ids: Vec::new(),
             pending_anchored_ids: Vec::new(),
             tracked_work_maintenance_required_at_preflight: Some(false),

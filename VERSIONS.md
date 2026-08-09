@@ -2,6 +2,48 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.208
+
+- **Fix (`#backlogclosemarkeroffbyone`): `backlog remove` / `icebox remove`
+  could not remove anything — every invocation failed the structural-target
+  guard, and matching by the id `backlog list` renders never matched.**
+
+  `op_remove_matching_tracked_line` rebuilt the component body with
+  `body.lines().join("\n")`, which drops the body's trailing newline. That body
+  is spliced back *between* the component markers, so the closing marker was
+  welded onto the surviving last item line and `persist_pending_write` refused
+  the write:
+
+  ```
+  pending_write: refusing structurally invalid canonical target
+  (non_standalone_component_marker:backlog:close:lineN)
+  ```
+
+  The reported line looked off by one because it named the welded *item* line,
+  one above where the operator saw the marker — and it tracked the document
+  because it is a real line number, not an offset. The guard was correct; the
+  rendered target was genuinely invalid. It fired even when nothing matched,
+  because the join ran unconditionally, so `remove` was wedged for every target.
+
+  Removal now runs over parsed `PendingLayout` items rather than raw lines, so a
+  multi-line item's continuation lines leave with it, and
+  `preserve_trailing_newline_shape` pins the invariant the join broke: the body
+  ends with a newline afterwards exactly when it did before.
+
+  Second half: `remove` matched only `trim_tracked_parent_prefix(line) ==
+  target`, so the identity `backlog list` prints (`[#someid]`) matched nothing —
+  `remove someid` and `remove '#someid'` both answered `no matching item found`,
+  and even a copied list line failed because `list` renders the `- ` bullet the
+  comparison had stripped. `remove` now resolves the hash id first (bare or
+  `#`-prefixed, via `normalize_pending_id`), then the full item line in either
+  bullet form, then the bare item text. A no-match now skips the write instead
+  of persisting an unchanged document, and says what it tried to match.
+
+  Regression coverage: first-item and last-item removal round-trips on a
+  document whose closing marker is the final component line, every rendered
+  identity matches, continuation lines leave with their item, and a no-match
+  leaves the body byte-identical.
+
 ## 0.35.207
 
 - **Fix (`#hookcontractlost`): the `UserPromptSubmit` hook could run preflight

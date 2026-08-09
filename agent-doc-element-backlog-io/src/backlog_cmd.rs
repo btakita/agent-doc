@@ -1307,7 +1307,12 @@ fn remove_from_list(
         backlog::op_remove_matching_tracked_line(existing, target, contains);
 
     if !removed {
-        eprintln!("[{}] no matching item found", list.label());
+        eprintln!(
+            "[{}] no matching item found for {:?} (match by hash id, full item line, or exact text)",
+            list.label(),
+            target
+        );
+        return Ok(());
     }
 
     let new_doc = comp.replace_content(&full_content, &new_content);
@@ -1648,6 +1653,56 @@ mod tests {
         let (tmp, doc) = setup_test_dir();
         fs::write(&doc, content).unwrap();
         (tmp, doc)
+    }
+
+    /// `#backlogclosemarkeroffbyone`: the removal result is spliced back between
+    /// the component markers, so dropping its trailing newline welded
+    /// `<!-- /agent:pending -->` onto the surviving last item line and the
+    /// structural-target guard rejected every removal. Cover the first and the
+    /// last item on a document whose closing marker is the final component line.
+    #[test]
+    fn remove_keeps_the_closing_marker_on_its_own_line() {
+        for target in ["one", "three"] {
+            let (_tmp, doc) = doc_with_pending(
+                "- [ ] [#one] First\n- [ ] [#two] Second\n- [ ] [#three] Third",
+            );
+
+            force_pending(|| remove(&doc, target, false));
+
+            let content = fs::read_to_string(&doc).unwrap();
+            assert_eq!(
+                agent_doc_element::element::structural_corruption_reason(&content),
+                None,
+                "removing [#{target}] produced a structurally invalid document:\n{content}"
+            );
+            assert!(
+                !content.contains(&format!("[#{target}]")),
+                "[#{target}] survived removal:\n{content}"
+            );
+            assert!(
+                content.contains("- [ ] [#two] Second\n"),
+                "the surviving item lost its own line:\n{content}"
+            );
+        }
+    }
+
+    /// `backlog list` renders `[#id]`, so `remove <id>` must match that identity
+    /// rather than only a raw content line (`#backlogclosemarkeroffbyone`).
+    #[test]
+    fn remove_matches_the_identity_backlog_list_renders() {
+        for target in ["two", "#two", "- [ ] [#two] Second", "Second"] {
+            let (_tmp, doc) =
+                doc_with_pending("- [ ] [#one] First\n- [ ] [#two] Second");
+
+            force_pending(|| remove(&doc, target, false));
+
+            let content = fs::read_to_string(&doc).unwrap();
+            assert!(
+                !content.contains("[#two]"),
+                "remove({target:?}) did not match the rendered item:\n{content}"
+            );
+            assert!(content.contains("[#one]"), "{content}");
+        }
     }
 
     #[test]

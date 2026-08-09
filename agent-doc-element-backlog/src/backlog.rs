@@ -1316,23 +1316,77 @@ pub fn trim_tracked_parent_prefix(line: &str) -> &str {
     tail.trim_start()
 }
 
+/// Restore `next`'s trailing-newline shape to match `original`.
+///
+/// A tracked-work body sits between its component's opening and closing
+/// markers, so dropping its trailing newline welds the closing marker onto the
+/// last item line — which the structural-target guard then rejects as
+/// `non_standalone_component_marker:<component>:close:<line>` (`#backlogclosemarkeroffbyone`).
+fn preserve_trailing_newline_shape(original: &str, mut next: String) -> String {
+    match (original.ends_with('\n'), next.ends_with('\n')) {
+        (true, false) if !next.is_empty() => next.push('\n'),
+        (false, true) => {
+            next.pop();
+        }
+        _ => {}
+    }
+    next
+}
+
+/// Remove tracked-work item(s) matching `target`.
+///
+/// `target` may be the hash id `backlog list` renders (`abc123` or `#abc123`),
+/// a full item line in either `- [ ] [#abc123] text` or `[ ] [#abc123] text`
+/// form, or the bare item text. Matching runs over parsed items so a
+/// multi-line item's continuation lines are removed with it, and the body's
+/// newline shape is preserved exactly; only when no item matches does this fall
+/// back to raw line matching for non-item body text.
 pub fn op_remove_matching_tracked_line(body: &str, target: &str, contains: bool) -> (String, bool) {
-    let lines: Vec<&str> = body.lines().collect();
-    let new_lines: Vec<String> = if contains {
-        lines
-            .iter()
-            .filter(|line| !line.contains(target))
-            .map(|line| line.to_string())
-            .collect()
-    } else {
-        lines
-            .iter()
-            .filter(|line| trim_tracked_parent_prefix(line) != target)
-            .map(|line| line.to_string())
-            .collect()
+    let layout = PendingLayout::parse(body);
+    let id = normalize_pending_id(target);
+    let target_line = trim_tracked_parent_prefix(target);
+    let matches_item = |item: &PendingItem| -> bool {
+        if !id.is_empty() && item.id == id {
+            return true;
+        }
+        let rendered = item.render();
+        if contains {
+            return rendered.contains(target) || item.continuation.contains(target);
+        }
+        let first_line = rendered.lines().next().unwrap_or_default();
+        trim_tracked_parent_prefix(first_line) == target_line || item.text.trim() == target
     };
-    let removed = new_lines.len() != lines.len();
-    (new_lines.join("\n"), removed)
+
+    if layout.items().iter().any(&matches_item) {
+        let next = layout.replace_items(|item| {
+            if matches_item(item) {
+                None
+            } else {
+                Some(item.clone())
+            }
+        });
+        return (
+            preserve_trailing_newline_shape(body, next.render()),
+            true,
+        );
+    }
+
+    let mut out = String::with_capacity(body.len());
+    let mut removed = false;
+    for raw in body.split_inclusive('\n') {
+        let line = raw.strip_suffix('\n').unwrap_or(raw);
+        let matched = if contains {
+            line.contains(target)
+        } else {
+            trim_tracked_parent_prefix(line) == target
+        };
+        if matched {
+            removed = true;
+        } else {
+            out.push_str(raw);
+        }
+    }
+    (preserve_trailing_newline_shape(body, out), removed)
 }
 
 /// Non-empty tracked-work body lines as rendered by the CLI list command.
@@ -7082,6 +7136,50 @@ mod tests {
 
         assert!(removed);
         assert_eq!(updated, "- [ ] [#one] First");
+    }
+
+    /// `#backlogclosemarkeroffbyone`: the removal result is spliced back between
+    /// the component's markers, so a dropped trailing newline welds the closing
+    /// marker onto the last item line and the structural-target guard rejects
+    /// the write. Cover the first item, the last item, and a no-match target.
+    #[test]
+    fn remove_matching_tracked_line_preserves_body_newline_shape() {
+        let body = "\n- [ ] [#one] First\n- [ ] [#two] Second\n- [ ] [#three] Third\n";
+
+        for target in ["one", "three"] {
+            let (updated, removed) = op_remove_matching_tracked_line(body, target, false);
+            assert!(removed, "expected {target} to match");
+            assert!(
+                updated.ends_with('\n'),
+                "removing {target} dropped the trailing newline: {updated:?}"
+            );
+        }
+
+        let (unchanged, removed) = op_remove_matching_tracked_line(body, "nosuchid", false);
+        assert!(!removed);
+        assert_eq!(unchanged, body);
+    }
+
+    #[test]
+    fn remove_matching_tracked_line_matches_the_rendered_identity() {
+        let body = "- [ ] [#one] First\n- [ ] [#two] Second\n";
+
+        // The identity `backlog list` renders, bare and hash-prefixed.
+        for target in ["two", "#two", "- [ ] [#two] Second", "[ ] [#two] Second", "Second"] {
+            let (updated, removed) = op_remove_matching_tracked_line(body, target, false);
+            assert!(removed, "expected {target:?} to match");
+            assert_eq!(updated, "- [ ] [#one] First\n", "target {target:?}");
+        }
+    }
+
+    #[test]
+    fn remove_matching_tracked_line_takes_continuation_lines_with_the_item() {
+        let body = "- [ ] [#one] First\n  - child of first\n- [ ] [#two] Second\n";
+
+        let (updated, removed) = op_remove_matching_tracked_line(body, "one", false);
+
+        assert!(removed);
+        assert_eq!(updated, "- [ ] [#two] Second\n");
     }
 
     #[test]

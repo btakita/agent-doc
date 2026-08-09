@@ -2,6 +2,41 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.195
+
+- **Fix (`#preflightprojpass`, relay half): the current-document projection cache
+  split one document into two entries whenever callers spelled its path
+  differently.**
+
+  `pass_projection` and `invalidate_current_document_projection` keyed on the
+  path AS GIVEN. Measured on `tasks/agent-doc/agent-doc-bugs2.md` in a single
+  20-minute window: 43 resolutions under the absolute path and 40 under the
+  repo-relative path — every one a guaranteed miss against the other spelling's
+  entry, each costing a full CRDT materialization.
+
+  The wasted work is the smaller problem. Two entries hold two independent
+  revisions, and invalidation clears only the spelling it is handed — so an
+  agent-authored mutation invalidated under one spelling leaves the other serving
+  PRE-MUTATION text. That is precisely the trap the module's own doc comment
+  warns about ("memoizing only by path can hide operator edits made during the
+  pass"), reached by a route the comment did not anticipate.
+
+  Both sites now key on the canonical path, falling back to the given path when
+  canonicalization fails (a document that does not exist yet), which preserves
+  the previous behavior for that case.
+
+  `two_spellings_of_one_document_share_one_projection_entry` asserts the cache
+  hit AND the cross-spelling invalidation. It uses a `..` hop rather than a `.`
+  hop because `Path` equality normalizes `.` away component-wise, so a `.` alias
+  would not have been distinct in the first place — the test would have passed
+  without testing anything. Verified by mutation: reverting the key to
+  `to_path_buf()` reddens it.
+
+  **Scope: `#preflightprojpass` remains open.** This removes a major source of
+  redundant relay resolutions but is not proven to be the only one, and the
+  preflight half is still behind its recorded blocker (the seven mutating phases
+  must self-invalidate before the pass may wrap `run_with_options`).
+
 ## 0.35.194
 
 - **Fix (`#ownershipverdictdiverges`): the retained-write VERDICT contradicted

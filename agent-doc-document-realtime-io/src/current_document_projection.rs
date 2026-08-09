@@ -172,6 +172,28 @@ pub fn with_current_document_projection_pass<T>(f: impl FnOnce() -> T) -> T {
     f()
 }
 
+/// The cache key for a document: its canonical path.
+///
+/// `#preflightprojpass`: keying on the path AS GIVEN silently splits one
+/// document into two cache entries whenever callers disagree about spelling.
+/// Measured on 2026-08-09, in one 20-minute window, the same session document
+/// resolved 43 times as `/home/brian/.../tasks/agent-doc/agent-doc-bugs2.md` and
+/// 40 times as `tasks/agent-doc/agent-doc-bugs2.md` — every one of those a
+/// guaranteed miss against the other spelling's entry.
+///
+/// The wasted work is the smaller problem. Two entries hold two independent
+/// revisions, and `invalidate_current_document_projection` clears only the
+/// spelling it is handed — so an agent-authored mutation invalidated under one
+/// spelling leaves the other serving pre-mutation text. That is the exact trap
+/// this module's own doc comment warns about ("memoizing only by path can hide
+/// operator edits made during the pass").
+///
+/// Falls back to the given path when canonicalization fails (a document that
+/// does not exist yet), which preserves the previous behavior for that case.
+fn projection_key(file: &Path) -> PathBuf {
+    std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf())
+}
+
 /// Explicitly invalidate after an agent-authored mutation.
 ///
 /// Operator edits do not need this call: their Yrs state vector (or detached
@@ -182,7 +204,7 @@ pub fn invalidate_current_document_projection(file: &Path) {
         let Some(graph) = slot.as_ref() else {
             return;
         };
-        let key = file.to_path_buf();
+        let key = projection_key(file);
         let ctx = graph.scope.ctx();
         let next = graph
             .manual_epoch
@@ -213,7 +235,7 @@ fn pass_projection(
     PASS.with(|slot| {
         let slot = slot.borrow();
         let graph = slot.as_ref()?;
-        let key = file.to_path_buf();
+        let key = projection_key(file);
         let ctx = graph.scope.ctx();
         if graph.revision.observe(ctx, &key).as_ref() != Some(&revision) {
             graph.revision.set(ctx, key.clone(), revision);
@@ -327,6 +349,80 @@ mod tests {
                 started.elapsed() < Duration::from_millis(150),
                 "five readers should reuse the one simulated authority delay"
             );
+        });
+    }
+
+    /// `#preflightprojpass`: two spellings of one document must share one cache
+    /// entry — and one invalidation must clear both.
+    ///
+    /// Measured on 2026-08-09: in a single 20-minute window the same session
+    /// document resolved 43 times under its absolute path and 40 times under its
+    /// repo-relative path. Splitting one document into two entries wastes a full
+    /// CRDT materialization per miss, and — worse — lets an invalidation under
+    /// one spelling leave the other serving pre-mutation text.
+    #[test]
+    fn two_spellings_of_one_document_share_one_projection_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let absolute = dir.path().join("plan.md");
+        std::fs::write(&absolute, "seed").unwrap();
+        // A second spelling of the SAME file. It must survive `Path`'s
+        // component-wise equality, which silently normalizes a `.` hop away — so
+        // a `..` hop is used instead. Canonicalization, not string equality, is
+        // what has to make these agree.
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        let alias = dir.path().join("sub").join("..").join("plan.md");
+        assert_ne!(absolute.as_path(), alias.as_path(), "distinct as written");
+
+        let content = Arc::new(Mutex::new(
+            "<!-- agent:queue -->\n- [ ] #keep\n<!-- /agent:queue -->\n".to_string(),
+        ));
+        let calls = Arc::new(AtomicU64::new(0));
+
+        with_current_document_projection_pass(|| {
+            let first = test_projection(
+                &absolute,
+                1,
+                Arc::clone(&content),
+                Arc::clone(&calls),
+                Duration::ZERO,
+            );
+            assert!(first.document().content().contains("#keep"));
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+            // The other spelling must HIT, not resolve again.
+            let second = test_projection(
+                &alias,
+                1,
+                Arc::clone(&content),
+                Arc::clone(&calls),
+                Duration::ZERO,
+            );
+            assert!(second.document().content().contains("#keep"));
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                1,
+                "the alias spelling must reuse the entry, not mint a second one"
+            );
+
+            // An agent-authored mutation invalidated under ONE spelling must be
+            // visible through the OTHER. This is the correctness half: a stale
+            // second entry serves pre-mutation text.
+            *content.lock().unwrap() =
+                "<!-- agent:queue -->\n- [ ] #added\n<!-- /agent:queue -->\n".to_string();
+            invalidate_current_document_projection(&absolute);
+
+            let after = test_projection(
+                &alias,
+                1,
+                Arc::clone(&content),
+                Arc::clone(&calls),
+                Duration::ZERO,
+            );
+            assert!(
+                after.document().content().contains("#added"),
+                "invalidation under one spelling must reach the other"
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
         });
     }
 

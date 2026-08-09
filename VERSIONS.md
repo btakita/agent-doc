@@ -2,6 +2,37 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.201
+
+- **Fix (`#resumeuuidstallsdrain`): the binary's own `resume:` UUID rotation
+  read as a user prompt and silently halted go-mode queue drains.**
+
+  Observed 2026-08-09 on `tasks/agent-doc/agent-doc-bugs2.md` mid-drain:
+  `queue_active: true`, `queue_drainable_head_count: 5`, and yet
+  `queue_continuation_required: false`. The sole entry in
+  `user_intent_prompt_changes` was `resume: 06ff3b9e-…` — a UUID the binary
+  itself rotates every cycle.
+
+  `line_is_managed_state_only` (`agent-doc-diff`) hand-listed the managed
+  frontmatter keys it knew: `queue_active:`, `agent_doc_pipeline:`, and the
+  pipeline block's children. It did not list `resume:`. So a routine managed
+  write became "fresh user intent", `prompt_changes_preempt_queue` returned
+  true, and the drain stopped with work still queued — the failure mode looks
+  exactly like an operator interrupting, which is why it is easy to miss.
+
+  `agent-doc-frontmatter` already owns the authoritative set:
+  `is_agent_managed_frontmatter_key` (`agent_doc_session` / `session` /
+  `resume` / `agent_doc_pipeline`), used by the frontmatter three-way merge to
+  decide which keys the agent may write. The classifier now derives from it
+  instead of keeping a second list that can drift — the same duplicated-predicate
+  failure as `#percellconverge` and `#strandedremedydeadlock`.
+
+  `managed_state_covers_every_binary_owned_frontmatter_key` asserts both
+  directions: every canonical managed key classifies as bookkeeping, and
+  operator-owned keys (`claude_model`, `agent`, `goal`) still read as intent so
+  a real operator edit keeps preempting the drain. Mutation-checked against the
+  pre-fix list.
+
 ## 0.35.200
 
 - **Fix (`#strandedremedydeadlock` follow-up): the new verdict claimed an author

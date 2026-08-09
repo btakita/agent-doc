@@ -1354,15 +1354,33 @@ fn line_is_managed_state_only(line: &str) -> bool {
     if trimmed.starts_with("queue_active:") {
         return true;
     }
-    // #22a8: managed `agent_doc_pipeline:` mirror block (key + indented children
-    // such as `run_id:` / `step:` / `turn_id:` / `queue_task_id:`). The diff
-    // already strips this block, but classify it as managed state too so any
-    // residual line never reads as a user prompt.
-    if trimmed.starts_with("agent_doc_pipeline:")
-        || trimmed.starts_with("run_id:")
+    // #22a8: managed `agent_doc_pipeline:` mirror block children (`run_id:` /
+    // `step:` / `turn_id:` / `queue_task_id:`). The diff already strips this
+    // block, but classify it as managed state too so any residual line never
+    // reads as a user prompt.
+    if trimmed.starts_with("run_id:")
         || trimmed.starts_with("step:")
         || trimmed.starts_with("turn_id:")
         || trimmed.starts_with("queue_task_id:")
+    {
+        return true;
+    }
+    // `#resumeuuidstallsdrain`: any frontmatter key the BINARY owns. This used
+    // to be a hand-listed subset that named `agent_doc_pipeline:` but not
+    // `resume:` — and the binary rotates the resume UUID every cycle. So a
+    // routine `resume: <new-uuid>` read as fresh user intent, which made
+    // `prompt_changes_preempt_queue` return true and dropped
+    // `queue_continuation_required` to false. Observed 2026-08-09 on
+    // `tasks/agent-doc/agent-doc-bugs2.md`: the drain halted with FIVE
+    // drainable heads and `queue_active: true`, and the only "user prompt" was
+    // the binary's own bookkeeping.
+    //
+    // `agent_doc_frontmatter` already owns the authoritative set
+    // (`is_agent_managed_frontmatter_key`, used by the frontmatter three-way
+    // merge). Derive from it instead of keeping a second list that can drift —
+    // the same failure as every other duplicated predicate in this codebase.
+    if let Some((key, _)) = trimmed.split_once(':')
+        && agent_doc_frontmatter::frontmatter::is_agent_managed_frontmatter_key(key.trim())
     {
         return true;
     }
@@ -5062,6 +5080,41 @@ Done.\n\
         PromptBearingChange {
             kind,
             text: text.to_string(),
+        }
+    }
+
+    /// `#resumeuuidstallsdrain`: the binary rotates `resume:` every cycle, so a
+    /// classifier that does not know the key turns its own bookkeeping into a
+    /// "user prompt" and halts the go-mode drain. Observed 2026-08-09 on
+    /// `tasks/agent-doc/agent-doc-bugs2.md`: `queue_active: true`,
+    /// `queue_drainable_head_count: 5`, and `queue_continuation_required:
+    /// false` — the sole user_intent_prompt_change being
+    /// `resume: 06ff3b9e-5d68-4b7f-a0df-b8b8dd702885`.
+    #[test]
+    fn managed_state_covers_every_binary_owned_frontmatter_key() {
+        for key in ["resume", "agent_doc_session", "session", "agent_doc_pipeline"] {
+            assert!(
+                agent_doc_frontmatter::frontmatter::is_agent_managed_frontmatter_key(key),
+                "{key} must be in the canonical agent-managed set this classifier derives from"
+            );
+            assert!(
+                change_is_managed_state_only(&pbc(
+                    PromptBearingChangeKind::ContentEdit,
+                    &format!("{key}: 06ff3b9e-5d68-4b7f-a0df-b8b8dd702885")
+                )),
+                "a routine `{key}:` rotation is the binary's own bookkeeping, not a user prompt"
+            );
+        }
+        // The operator still owns everything else in frontmatter: an edit to a
+        // non-managed key must keep preempting the drain.
+        for operator_key in ["claude_model", "agent", "goal"] {
+            assert!(
+                !change_is_managed_state_only(&pbc(
+                    PromptBearingChangeKind::ContentEdit,
+                    &format!("{operator_key}: something the operator typed")
+                )),
+                "`{operator_key}:` is operator-authoritative and must still read as intent"
+            );
         }
     }
 

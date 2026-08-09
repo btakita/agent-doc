@@ -1630,7 +1630,7 @@ pub fn split_frontmatter_parts(content: &str) -> (Option<&str>, &str) {
 /// Note: `queue` / `queue_active` are intentionally NOT here — the operator owns
 /// `queue: start|stop`, and an agent-only drain flip still applies because it is
 /// an agent-only change (operator did not touch it).
-fn is_agent_managed_frontmatter_key(key: &str) -> bool {
+pub fn is_agent_managed_frontmatter_key(key: &str) -> bool {
     matches!(
         key,
         "agent_doc_session" | "session" | "resume" | "agent_doc_pipeline"

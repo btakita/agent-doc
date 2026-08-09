@@ -1589,8 +1589,43 @@ fn extract_inline_tag_id(text: &str) -> Option<(String, String)> {
 /// This closes the "agent-doc ignores the explicit id" gap: an agent that adds
 /// `#mergestatemachine3 JB+VSCode report…` now gets `[#mergestatemachine3] …`
 /// instead of a generated hash with the tag left dangling in the text.
+/// Split leading bracketed **state** tags (`[operator-verify]`, `[clean-session]`,
+/// `[focused-cycle]`, `[recommended]`, ...) off the front of an item's text.
+///
+/// `#operatorverifyliveid`: those tags are queue/closeout metadata, not identity.
+/// A bracketed custom id (`[#id]`) is NOT a state tag and is left in place — it
+/// has its own parser that runs earlier.
+///
+/// Returns `(tags, remainder)`; `tags` is the joined tag prefix, trimmed.
+fn split_leading_state_tags(text: &str) -> (&str, &str) {
+    let mut rest = text.trim_start();
+    let start = rest;
+    let mut consumed = 0;
+    while let Some(after_open) = rest.strip_prefix('[') {
+        // `[#id]` is a custom id, not a state tag.
+        if after_open.starts_with('#') {
+            break;
+        }
+        let Some(close) = after_open.find(']') else {
+            break;
+        };
+        let tag = &after_open[..close];
+        if tag.is_empty() || !tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            break;
+        }
+        let next = after_open[close + 1..].trim_start();
+        consumed = start.len() - next.len();
+        rest = next;
+    }
+    (start[..consumed].trim_end(), rest)
+}
+
 fn leading_bare_tag_id(text: &str) -> Option<(String, String)> {
-    let trimmed = text.trim_start();
+    // Look past any leading state tag for the caller's explicit id, then put the
+    // tag back on the item text. Without this, `[operator-verify] #someid text`
+    // discards `#someid` and mints a slug from the tag's own words — so every
+    // `[operator-verify]` item derives the SAME id and collides.
+    let (state_tags, trimmed) = split_leading_state_tags(text);
     let after_hash = trimmed.strip_prefix('#')?;
     let end = after_hash
         .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
@@ -1613,7 +1648,12 @@ fn leading_bare_tag_id(text: &str) -> Option<(String, String)> {
     if rest.is_empty() {
         return None;
     }
-    Some((token.to_lowercase(), rest.to_string()))
+    let rest = if state_tags.is_empty() {
+        rest.to_string()
+    } else {
+        format!("{state_tags} {rest}")
+    };
+    Some((token.to_lowercase(), rest))
 }
 
 fn custom_id_error(raw_id: &str) -> anyhow::Error {
@@ -2798,6 +2838,10 @@ const REPRESENTATIVE_ID_STOPWORDS: &[&str] = &[
 /// id keys off the operator's own directive rather than pasted logs or a quoted
 /// prior response.
 fn representative_id_source(text: &str) -> String {
+    // `#operatorverifyliveid`: a leading state tag is metadata shared by many
+    // items, so letting it contribute words makes every `[operator-verify]` item
+    // derive the same id. Identity comes from what the item is ABOUT.
+    let (_, text) = split_leading_state_tags(text);
     let mut source = String::new();
     for line in text.lines() {
         let trimmed = line.trim_start();
@@ -5809,6 +5853,75 @@ mod tests {
 
     /// No distinctive keywords means a surrogate hash is the honest answer.
     #[test]
+    /// `#operatorverifyliveid`: the SKILL tells agents to tag operator-gated
+    /// follow-ups `[operator-verify]`. That tag used to push an explicit `#id`
+    /// out of leading position, so the id was discarded and a slug was minted
+    /// from the tag's OWN words — meaning every `[operator-verify]` item derived
+    /// `operatorverifylive` and collided. Observed live on
+    /// tasks/agent-doc/agent-doc-bugs2.md, where the collision blocked queue
+    /// dispatch with `preset_item_id_collision`.
+    #[test]
+    fn a_leading_state_tag_does_not_swallow_the_explicit_id() {
+        assert_eq!(
+            leading_bare_tag_id("[operator-verify] #panewindowdriftverify Live-pane proof"),
+            Some((
+                "panewindowdriftverify".to_string(),
+                "[operator-verify] Live-pane proof".to_string()
+            )),
+            "the explicit id wins and the tag stays on the item text"
+        );
+        assert_eq!(
+            leading_bare_tag_id("[operator-verify] [clean-session] #someid text"),
+            Some((
+                "someid".to_string(),
+                "[operator-verify] [clean-session] text".to_string()
+            )),
+            "several stacked tags"
+        );
+        assert_eq!(
+            leading_bare_tag_id("#someid text"),
+            Some(("someid".to_string(), "text".to_string())),
+            "no tag: unchanged"
+        );
+    }
+
+    /// Two `[operator-verify]` items about different things must not derive the
+    /// same id. Identity comes from what the item is ABOUT, not its state tag.
+    #[test]
+    fn a_leading_state_tag_does_not_contribute_id_words() {
+        assert_eq!(
+            derive_representative_id("[operator-verify] Live-pane proof for stashed columns")
+                .as_deref(),
+            Some("livepaneproof")
+        );
+        assert_ne!(
+            derive_representative_id("[operator-verify] Live-pane proof for stashed columns"),
+            derive_representative_id("[operator-verify] Live replica panic proof"),
+            "distinct subjects must derive distinct ids"
+        );
+    }
+
+    /// The state-tag split must not eat a bracketed custom id or ordinary
+    /// bracketed prose, and must leave non-tag text alone.
+    #[test]
+    fn state_tag_split_is_narrow() {
+        assert_eq!(split_leading_state_tags("[#customid] text"), ("", "[#customid] text"));
+        assert_eq!(split_leading_state_tags("plain text"), ("", "plain text"));
+        assert_eq!(
+            split_leading_state_tags("[not closed text"),
+            ("", "[not closed text")
+        );
+        assert_eq!(
+            split_leading_state_tags("[has space] text"),
+            ("", "[has space] text"),
+            "a tag is a single alphanumeric/hyphen token"
+        );
+        assert_eq!(
+            split_leading_state_tags("[operator-verify] rest"),
+            ("[operator-verify]", "rest")
+        );
+    }
+
     fn derive_representative_id_declines_when_text_has_no_keywords() {
         assert_eq!(derive_representative_id(""), None);
         assert_eq!(derive_representative_id("the and but for not"), None);

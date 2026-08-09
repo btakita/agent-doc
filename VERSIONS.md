@@ -2,6 +2,43 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.189
+
+- **Fix (`#operatorverifyliveid`): a leading `[operator-verify]` tag swallowed the
+  item's explicit `#id`, so every operator-gated follow-up derived the same id
+  and collided.**
+
+  `leading_bare_tag_id` promotes a `#tag` to the item id only in **leading**
+  position. The SKILL tells agents to tag operator-gated follow-ups
+  `[operator-verify]`, which pushes the explicit id out of that position — so the
+  id the agent supplied was discarded and `derive_representative_id` minted a
+  slug from the tag's own words instead. `[operator-verify] ...` yields
+  `operator` + `verify` + the next word for *every* such item, so any two of them
+  collide by construction.
+
+  Observed live on `tasks/agent-doc/agent-doc-bugs2.md`: a new
+  `[operator-verify]` backlog item and an existing `[operator-verify]` review
+  item both landed as `#operatorverifylive`, and the resulting
+  `preset_item_id_collision` warning blocked queue dispatch.
+
+  Leading bracketed **state** tags are now split off before both steps: the
+  explicit `#id` after the tag is promoted (with the tag preserved on the item
+  text), and when there is no explicit id the tag contributes no words to the
+  derived slug. The split is deliberately narrow — a bracketed custom id
+  (`[#id]`) keeps its own earlier parser, and bracketed prose, unterminated
+  brackets, and multi-word brackets are left alone.
+
+  Known remaining gap, filed as actionable backlog: `assign_unique_id`'s `taken`
+  set is built only from the backlog list, while the collision guard evaluates
+  across backlog + review + presets, so a cross-component collision still is not
+  auto-suffixed. This fix removes the collision *class* that the SKILL's own
+  conventions create; widening `taken` needs the id namespaces threaded into
+  `op_add_at_with_outcome`.
+
+  Coverage: `a_leading_state_tag_does_not_swallow_the_explicit_id`,
+  `a_leading_state_tag_does_not_contribute_id_words`, and
+  `state_tag_split_is_narrow` in `agent-doc-element-backlog`.
+
 ## 0.35.188
 
 - **Fix (`#loopcontractseal`): the Claude Code queue auto-loop could not seal a

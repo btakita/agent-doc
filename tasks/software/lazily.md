@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: f4aefe6a-bb23-456b-a937-e4d5c732e3d2
+resume: e472c94f-4338-40bd-b060-e5fbf3df2df1
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -324,23 +324,56 @@ All three are "implemented, but not this wire" — which is what `~` is for, per
 **What I did not cite.** Registers (LWW/MV + `PnCounter` + `CellCrdt`) has no canonical fixture anywhere in the corpus, so it stays unverifiable — filed rather than papered over. Row 0 cites only the fixtures matching its prose (two cell kinds, Effect sink, eager `Computed`, batch); the disposal and scoping fixtures are real but no coverage row claims them, and citing them on row 0 would have over-claimed to inflate the verified count.
 
 `make check` green in lazily-spec: 279 schema tests, Lean build, all nine guards.
+
+### Re: do [#lzegressrow] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzegressrow]
+
+
+`coverage.json` now scores **EgressCore** as three rows of its own. The claim guard verifies **445 shipped marks across 55 fixture-bearing rows**, up from 415/49. Spec commit `f6d575f` (CI green, run 31294188085), 11 sibling README syncs, superproject at `2fb5a6f67e`.
+
+**Three rows, not one, because egress mirrors ingress.** The item left the shape open — one row or three, "if the three context flavors are scored separately like queue/topic/work-queue". Egress is the send-side mirror of ingress, ingress is already scored as core + thread-safe + async, and `EgressCell` / `ThreadSafeEgressCell` / `AsyncEgressCell` are three real shells over one `EgressCore`. Collapsing them to one row would have made egress the only family in the corpus whose shell axis is invisible.
+
+**Rust ships all three; nothing else has an egress runner.** That is read from evidence on both sides: `tests/egress_family_conformance.rs` drives `SyncModel`, `SharedModel` and `AsyncModel` through the same `replay_corpus` over all four fixtures, with a per-shell test asserting the full step count; and seven bindings (py, kt, js, dart, zig, go, cs) name all four in `KNOWN_UNCOVERED` with "Reactive egress is currently Rust-only". C++ and GDScript are absent by scope rather than by ledger — `egress` is not in lazily-cpp's `REQUIRED_AREAS`, and lazily-gd's `IMPLEMENTED_FAMILY_PREFIXES` claims only `reactive-graph/`.
+
+**The honest consequence is that eight columns lost a ✅.** The Egress family roll-up goes from shipped to partial for Python, Kotlin, JS, Dart, Zig, Go, C++ and C#. They still ship RelayCell; they were reading as shipped on a family whose core primitive they do not implement, because the only row in it was RelayCell. That is the whole point of the item, and it is why the four egress fixtures existed with nothing to score.
+
+**Three perturbations, three directions.** Flipping Python to ✅ on the new row fails with all four fixtures named from lazily-py's own ledger. Citing a fixture outside the corpus fails as an uncited-corpus error. And adding one egress fixture to **lazily-rs's** `KNOWN_UNCOVERED` reddens all three new rows — which is the direction that matters, since it proves the Rust marks are backed by that binding's ledger rather than passing vacuously. The mark count moving exactly +3 (one Rust ✅ per new row) is the same confirmation arithmetically.
+
+**One thing the guard structurally cannot see, stated rather than implied.** It resolves fixtures per binding, not per shell, so all three rows cite the same four files and a binding replaying only its sync shell would pass all three. That is not a defect I introduced — queue, topic and work-queue have carried it since they were scored — but the shell axis is verified by the binding's own per-shell tests, not by this guard.
+
+**I also cited the ingress fixtures while I was in the same audit surface.** The three ingress rows carried *no* fixtures at all despite nine bindings marked ✅ and no binding excusing a single `ingress/*` file — an omission from `#lzcoveragerowfixtures`, not a considered exclusion. Citing the seven `IngressCell` fixtures verifies 27 more marks and reddens nothing.
+
+**And it turned up the same gap one family over.** `conformance/ingress/boundary_ingress_adapter.json` declares `"model": "BoundaryIngressAdapter"` — not `IngressCell` — and **nine bindings replay it against no row at all**. I did not fold it into the ingress rows to inflate the count; citing it there would claim IngressCell conformance from an adapter fixture, exactly the misattribution I refused for RelayCell and `egress/*` last cycle. Filed as `#lzboundaryingressrow` at the bottom of the backlog.
+
+`make check` green in lazily-spec: 279 schema tests, Lean build, all nine guards. `AGENTS.md` carries another session's uncommitted edits in lazily-spec and stayed uncommitted — every commit was `git commit --only -- <paths>`.
+
+Queue: `#lzcppmatreplay`.
 <!-- agent:boundary:139c989e:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- ~~do [#lzegressrow]~~
+- do [#lzcppmatreplay]
+- do [#lzgomergeops]
+- do [#lzzigcanonrunner]
+- do [#lzregistersfixture]
+- do [#lzgdvocab]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzegressrow] coverage.json has NO row for transport-agnostic reactive egress (EgressCore, docs/transport-egress.md) — sequence assignment, bounded inflight window, cumulative ack watermark, retry/backoff/exhaustion, producer-generation fence. Four canonical fixtures (egress/egress_ordered_ack, egress_inflight_window, egress_retry_budget, egress_generation_fence) therefore score nothing, and seven bindings (py, kt, js, dart, zig, go, cs) carry them in KNOWN_UNCOVERED against no claim at all. The egress family currently holds only the RelayCell row, whose conformance docs/relaycell.md section 8 pins to mergecell_algebra.json instead. Add the EgressCore row (or rows, if the three context flavors are scored separately like queue/topic/work-queue), cite the four fixtures, and score each binding honestly — expect Rust shipped and most others absent.
 - [ ] [#lzcppmatreplay] lazily-cpp replays only 1 of 3 canonical materialization fixtures from the corpus bytes; observational_transparency.json and deferral_not_deallocation.json are transcribed BY HAND into tests/test_reactive_family.cpp and its async/thread-safe siblings, which is why C++ dropped to ~ on all three materialization rows. A mirror transcribed from the implementation cannot catch a divergence between the implementation and the corpus — the same failure retiring lazily-zig's eight inline mirrors turned up three real wire defects. Replay both from conformance/materialization/, delete the two KNOWN_UNCOVERED entries, and restore the marks.
 - [ ] [#lzgomergeops] lazily-go's reactive-graph runner has no merge/fold node kind, so all five merge fixtures (merge_cell_acquires_no_dependency_edge, merge_folds_synchronously_in_batch, merge_per_settled_cone_not_per_write, merge_feed_through_a_formula_coalesces, exact_fold_paths_stay_exact) plus feedback_drain_bound_reports_exhaustion sit in reactiveGraphUnsupported — which is why Go dropped to ~ on merge-algebra. The library half exists (merge.go, relay.go implement MergePolicy); this is a runner op gap. Teach the runner the merge_cell op family and the drain_exhausted/writes_own_cone assertion keys, then delete the entries. Note memory: welding eagerness into invalidation is the known lazily-go clause-3 defect, and signal_materializes_once_per_batch is the only fixture that catches it.
 - [ ] [#lzzigcanonrunner] lazily-zig implements text_crdt.zig, seq_crdt.zig, and lossless_tree.zig with its own tests but has no canonical runner for collections CRDT or lossless-tree, so 12 fixtures sit under 'No runner at all in this binding' and Zig dropped to ~ on three CRDT rows and three lossless-tree rows. Add canonical replay for collections/{textcrdt_convergence,textcrdt_delta_sync,seqcrdt_convergence}.json and the nine lossless-tree/*.json, following the pattern that already retired this binding's eight inline mirrors in src/lazily/{collections,distributed,signaling}_conformance.zig — that retirement found three wire defects the mirrors could not see.
 - [ ] [#lzregistersfixture] The Registers row (LWW / MV + PnCounter + CellCrdt) is marked shipped in nine bindings and has NO canonical fixture anywhere in the corpus, so check-coverage-claims.mjs cannot verify a single one of those marks. seqcrdt_convergence.json exercises LWW registers only incidentally, as the substrate for move-aware sequence order, and backs the SeqCrdt row instead. Author a canonical crdt fixture pinning LWW resolution (including the equal-timestamp tiebreak), MV concurrent-value retention, PnCounter increment/decrement convergence, and the CellCrdt reactive projection; then cite it on the row.
 - [ ] [#lzgdvocab] Finish the lazily-gd conformance runner: 7 of the 21 canonical reactive-graph fixtures remain, in two op families. (a) merge_cell (5 fixtures: exact_fold_paths_stay_exact, merge_cell_acquires_no_dependency_edge, merge_feed_through_a_formula_coalesces, merge_folds_synchronously_in_batch, merge_per_settled_cone_not_per_write) — this is the one group needing KERNEL work, a folding Source with a merge policy (source_with/merge), plus the merges_of observable. (b) fanout/churn/dispose_fanout/dispose_stale_handle bulk ops plus real id recycling (2 fixtures: churn_returns_to_baseline, recycled_id_inherits_nothing) — recycling needs explicit work beyond Godot instance ids, which are monotonic and never alias. Each is named in KNOWN_UNCOVERED with its reason; removing an entry there is the definition of done for that group. Landed already: signal/dispose_signal (3), fail_next (1), shape=scenarios (1) — 14/149 replayed, 7 named excuses.
+- [ ] [#lzboundaryingressrow] conformance/ingress/boundary_ingress_adapter.json declares "model": "BoundaryIngressAdapter" — a distinct model from IngressCell, with its own bootstrap/subscribe/cursor phases — and NINE bindings replay it (lazily-rs tests/boundary_ingress_conformance.rs, py, kt, js, dart, zig, go, cpp, cs) against NO coverage.json row at all. Same gap class as #lzegressrow: a canonical fixture nine bindings replay scores nothing, so nine real implementations get no credit and any future regression in the adapter moves no cell. It must not be cited on the reactive-ingress rows — that would claim IngressCell conformance from an adapter fixture, the misattribution refused for RelayCell/egress in #lzcoveragerowfixtures. Add a BoundaryIngressAdapter row (family ingress, or its own), cite the fixture, and score the nine bindings from their own ledgers.
 <!-- /agent:backlog -->
 
 ## Review

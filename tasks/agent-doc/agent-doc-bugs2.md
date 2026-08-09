@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 414e5502-a3a8-4dd0-9558-21c14312c165
+resume: 8bd8d65b-bb05-4208-9ebb-9884aabaf5b5
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -996,12 +996,33 @@ The `state.db` `documents.session_id` shortcut stays rejected, and the item text
 **One thing this cycle exposed, filed as `#mutprovenancepreresponse`.** Recovering the previous closeout showed a gap in `#retainedmutdrop`'s fix. The provenance it reads — `pending_done_ids` / `pending_added_ids` — is only recorded when the mutation phase runs, which is *after* the response write. When the write fails after the response has landed, nothing is recorded, the predicate correctly reports "no unlanded mutations of mine", and the divergence is classified as an unanswered edit again. Recovery worked only because I still knew the intent; nothing in the document or state proved it. The fix is to persist the requested intent at the point `#prmergeguardpr` already validates the envelope — before publication — so provenance exists no matter where the write fails.
 
 **Verification.** `make check` green (8853 passed, 249 skipped); installed 0.35.221, committed, tagged, pushed, superproject pointer pushed. CI: `0.35.216`–`0.35.219` all green; `0.35.220` and `0.35.221` in progress at closeout.
+
+### Re: provenance recorded too late to survive the failure it exists for — opus-5
+
+> **Queue prompt:**
+>
+> do [#mutprovenancepreresponse]
+
+
+`#mutprovenancepreresponse` is fixed and shipped as **0.35.222**, which closes the last known gap in the chain that started with `#prmergeguardpr`. A CI red on `0.35.220` is also repaired in `0.35.223`.
+
+**The gap.** 0.35.216 taught `session-check` and `commit` to distinguish "this closeout's own unlanded mutations" from "a fresh operator edit" by reading `pending_done_ids` / `pending_added_ids`. That works whenever the mutation phase ran — and the mutation phase runs *after* the response write. When the write itself fails once the response has landed, nothing is recorded, the predicate correctly reports "no unlanded mutations of mine", and the divergence is misclassified again. I hit exactly that closing `#hooktriggerunresolved`: the response reached HEAD, the `--done` never applied and was never recorded, and recovery worked only because I still knew the intent — nothing in the document or state proved it.
+
+The requested mutations are now recorded where `#prmergeguardpr` already validates the envelope: after validation, before publication. Provenance therefore exists wherever the write fails.
+
+Three judgement calls worth stating. It is a **separate** field rather than early-writing `pending_done_ids`, because closeout-signal logic reads that one as "this cycle recorded a completion outcome" — a failed cycle claiming its head was answered would strike a head that never got done. Recording failure is logged, never fatal, since provenance is a recovery aid and failing there would turn a bookkeeping problem into a lost closeout. And only explicitly-named add ids are knowable before the add runs; generated ids stay covered by the post-hoc record, so this narrows the gap rather than closing it completely.
+
+The ordering is guarded structurally, because a behavioural test that *succeeds* cannot observe where the record was written — the whole defect is what happens when the write fails afterwards.
+
+**The CI red.** `0.35.220` failed on a fail-fast test asserting a flat 1-second wall clock, while the same test runs in 0.02s locally and the change under test does not touch that path. That assertion is a proxy for "did not enter the bounded editor-delivery wait", and what it distinguishes against is a 5-second stall threshold — 5x headroom, which a loaded runner eats. The bound is now derived from that threshold rather than hardcoded, so a genuine stall still fails it. Not waived as flaky: the fragility is real, it lives in the proxy, and the proxy is what changed. Same class as `0.35.215`.
+
+**Verification.** `make check` green (8855 passed, 249 skipped); the intent path and the ordering guard are both mutation-checked. 0.35.222 and 0.35.223 installed, committed, tagged, pushed, superproject pointer pushed. CI: `0.35.216`–`0.35.219` green, `0.35.220` is the red run 0.35.223 repairs, `0.35.221`–`0.35.223` in progress at closeout.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#mutprovenancepreresponse]
+- ~~do [#mutprovenancepreresponse]~~
 - ~~do [#hooktriggerunresolved]~~
 - ~~do [#resumeownerfmread]~~
 - ~~do [#queueblockquoteintent]~~
@@ -1026,7 +1047,6 @@ The `state.db` `documents.session_id` shortcut stays rejected, and the item text
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#mutprovenancepreresponse] The provenance record that #retainedmutdrop relies on is written AFTER the response, so a write that fails post-landing leaves nothing to prove the mutations were ours (#agent-doc-bug). 0.35.216 taught session-check and commit to distinguish 'this closeout's own unlanded mutations' from 'a fresh operator edit' by reading CycleState pending_done_ids / pending_added_ids. That works whenever the mutation phase RAN. It does not when the response write itself fails after the response has landed: apply_pending_and_status_mutations never executes, so nothing is recorded, recorded_tracked_work_is_unlanded correctly returns false, and the divergence is classified UnansweredEditPending again. Observed 2026-08-09 closing #hooktriggerunresolved: respond hit the pre-write delivery barrier, the response reached HEAD, the --done never applied and was never recorded, and session-check reported the unanswered-edit verdict with the queue head unstruck. Recovery worked (agent-doc write --commit --backlog-only --done <id>) but only because I still knew the intent; nothing in the document or state proved it. Fix: record the REQUESTED mutation intent before the response cell is published, not after it lands. The captured_closeout_mutation_plan already exists in the write flags and is serialized into mutation_plan_json — persist that as cycle-state provenance at the same point #prmergeguardpr validates the envelope, so provenance exists for any failure position. Then teach recorded_tracked_work_is_unlanded to read the intent, not just the post-hoc record.
 - [ ] [#planhead] `agent-doc plan` reports a queue head the in-session loop is not allowed to drain (#agent-doc-bug). Observed twice this session: preflight's `selected_queue_prompts` correctly named the drainable head (`do [#prmergeguardpr]`, then `do [#preflightprojpass]`) while plan's `prompt_targets` / `repo_actions` / `required_commands` all named `do [#operatorverifylive]` — an [operator-verify] head that needs a human watching a real IDE + tmux session and that preflight had already deferred. SKILL.md step 0d says to treat plan's output as the execution contract, so an agent following it verbatim works the wrong item and would then --done an operator-gated one. Fix: drop plan's own head selection and defer to preflight.selected_queue_prompts. Two independent derivations of 'which head is next' is the defect class, not the specific filter.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.

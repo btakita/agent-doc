@@ -17533,15 +17533,25 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
             )
         })
         .collect::<Vec<_>>();
+    // `#panewindowdrift`: an effect/reuse assignment is a record of where a pane
+    // was placed, and it keeps naming that pane after the operator stashes it.
+    // `panes` is the target window's own ordered pane list, so an assignment
+    // outside it is not a visible column — it must not satisfy a layout slot or
+    // stand in as the focus target, or a stashed pane counts toward `synced`.
+    let visible_effect_file_panes = effect_file_panes
+        .iter()
+        .filter(|(_, assigned_pane)| panes.iter().any(|pane| pane == assigned_pane))
+        .cloned()
+        .collect::<Vec<_>>();
     let expected_panes = layout_sync_state_expected_panes(
         &bootstrap.project_root,
         &expected_documents,
-        effect_file_panes,
+        &visible_effect_file_panes,
     );
     let expected_focus_pane = layout_sync_state_expected_focus_pane(
         &bootstrap.project_root,
         focus.as_deref(),
-        effect_file_panes,
+        &visible_effect_file_panes,
     );
     let active_pane = agent_doc_tmux_io::target_pane_id(&tmux, &window_id_value);
     let operator_owned_documents = layout_sync_state_operator_owned_documents(
@@ -18109,6 +18119,54 @@ struct PaneLayoutFocusEffectReceipt {
     reason: String,
 }
 
+/// Resolve the window this pane-layout generation is arranging its columns in.
+///
+/// `#panewindowdrift`: the focus guard needs an explicit *visible window*
+/// reference, and this is the one the model already owns — the same resolution
+/// [`tmux_layout_sync_state_for_invocation_with_effect_assignment`] performs
+/// before it lists the layout's panes. It is per-invocation, so a legitimate
+/// multi-window layout keeps its own reference; nothing is inferred from where
+/// the active pane, the first column, or the majority of panes happen to be.
+///
+/// Only a window **id** is returned, because the live side of the comparison is
+/// `#{window_id}`. An `invocation.window` that is a name (`agent-doc`) resolves
+/// through the by-name lookup rather than being compared against an id. An
+/// unresolvable window yields `None`, which
+/// [`pane_window_binding_drifted`](agent_doc_controller::pane_layout::pane_window_binding_drifted)
+/// never treats as drift.
+/// Read the window a pane currently lives in. Best-effort: a tmux that cannot
+/// answer yields `None`, which `pane_window_binding_drifted` never treats as
+/// drift. Mirrors `session_actor_cmd::observe_live_pane_window`.
+fn observe_pane_window_id(tmux: &tmux_router::Tmux, pane_id: &str) -> Option<String> {
+    tmux.pane_window(pane_id)
+        .ok()
+        .map(|window| window.trim().to_string())
+        .filter(|window| !window.is_empty())
+}
+
+fn pane_layout_target_window_id(
+    project_root: &Path,
+    tmux: &tmux_router::Tmux,
+    invocation_window: Option<&str>,
+) -> Option<String> {
+    if let Some(window_id) = invocation_window
+        .map(str::trim)
+        .filter(|window| window.starts_with('@'))
+    {
+        return Some(window_id.to_string());
+    }
+    let configured_session = configured_tmux_session_for_project(project_root)?;
+    resolve_agent_doc_window_id_for_session(tmux, &configured_session)
+}
+
+/// The co-visibility inputs of the pane-layout focus effect (`#panewindowdrift`):
+/// the window this layout generation is arranging its columns in, plus the live
+/// `#{window_id}` observation for a candidate pane.
+struct PaneLayoutFocusCoVisibility<'a, F: FnOnce(&str) -> Option<String>> {
+    layout_window: Option<&'a str>,
+    observe_pane_window: F,
+}
+
 /// Apply the focus half of a pane-layout projection after its structural
 /// reconcile has made the requested pane visible.
 ///
@@ -18118,14 +18176,28 @@ struct PaneLayoutFocusEffectReceipt {
 /// follows it. This is the pane-layout counterpart of
 /// [`ControllerAsyncEditorCommandGraph::apply_focus_effect`], keyed by reactive
 /// generation rather than by an imperative command id.
+///
+/// `#panewindowdrift`: the file→pane assignment is a *record* of where the pane
+/// was bound, and records agree with each other even after the pane is moved
+/// into the stash window. Before selecting, compare the layout's target window
+/// against where the pane actually lives now and refuse a pane the operator
+/// cannot see — mirroring editor focus onto a stashed pane is the reported bug.
+/// A refusal keeps `applied: false`, so the caller neither converges nor counts
+/// it toward `observation=synced`; the structural reconcile runs and the retry
+/// focuses the pane once it is back in the layout window.
 fn apply_pane_layout_focus_effect(
     worker_state: &Mutex<agent_doc_controller::pane_layout::LatestProjectionWorkerState>,
     generation: u64,
     focus: Option<&str>,
     focus_suppressed: bool,
     file_panes: &[(String, String)],
+    co_visibility: PaneLayoutFocusCoVisibility<'_, impl FnOnce(&str) -> Option<String>>,
     select_pane: impl FnOnce(&str) -> Result<()>,
 ) -> PaneLayoutFocusEffectReceipt {
+    let PaneLayoutFocusCoVisibility {
+        layout_window,
+        observe_pane_window,
+    } = co_visibility;
     let Some(focus) = focus else {
         return PaneLayoutFocusEffectReceipt {
             required: false,
@@ -18147,6 +18219,25 @@ fn apply_pane_layout_focus_effect(
             reason: format!("focus_pane_not_found:{focus}"),
         };
     };
+
+    // Observed outside the worker mutex: this is a tmux read, and an unknown
+    // answer must never be treated as drift.
+    if let Some(layout_window) = layout_window.map(str::trim).filter(|w| !w.is_empty()) {
+        let live_window = observe_pane_window(pane);
+        if agent_doc_controller::pane_layout::pane_window_binding_drifted(
+            layout_window,
+            live_window.as_deref(),
+        ) {
+            let live_window = live_window.unwrap_or_default();
+            return PaneLayoutFocusEffectReceipt {
+                required: true,
+                applied: false,
+                reason: format!(
+                    "focus_pane_not_co_visible:{focus}:{pane}:live_window={live_window}:layout_window={layout_window}"
+                ),
+            };
+        }
+    }
 
     let state = worker_state.lock();
     if state.is_superseded(generation) {
@@ -18353,12 +18444,21 @@ fn pane_layout_effect_worker(
 
         if let Some(reusable) = reusable_structure {
             let tmux = tmux_router::Tmux::default_server();
+            let layout_window = pane_layout_target_window_id(
+                &bootstrap.project_root,
+                &tmux,
+                desired.invocation.window.as_deref(),
+            );
             let focus_receipt = apply_pane_layout_focus_effect(
                 &state,
                 work_revision,
                 projected_focus.as_deref(),
                 focus_suppressed,
                 &reusable.file_panes,
+                PaneLayoutFocusCoVisibility {
+                    layout_window: layout_window.as_deref(),
+                    observe_pane_window: |pane| observe_pane_window_id(&tmux, pane),
+                },
                 |pane| tmux.select_pane(pane),
             );
             if focus_receipt.reason == "focus_superseded_by_newer_layout_state" {
@@ -18498,12 +18598,21 @@ fn pane_layout_effect_worker(
         }
         let focus_receipt = if effect_result.is_ok() {
             let tmux = tmux_router::Tmux::default_server();
+            let layout_window = pane_layout_target_window_id(
+                &bootstrap.project_root,
+                &tmux,
+                desired.invocation.window.as_deref(),
+            );
             apply_pane_layout_focus_effect(
                 &state,
                 work_revision,
                 projected_focus.as_deref(),
                 focus_suppressed,
                 &effect_file_panes,
+                PaneLayoutFocusCoVisibility {
+                    layout_window: layout_window.as_deref(),
+                    observe_pane_window: |pane| observe_pane_window_id(&tmux, pane),
+                },
                 |pane| tmux.select_pane(pane),
             )
         } else {
@@ -19714,6 +19823,10 @@ mod pane_layout_projection_dispatch_tests {
             Some("/tasks/new-left.md"),
             false,
             &file_panes,
+            PaneLayoutFocusCoVisibility {
+                layout_window: Some("@894"),
+                observe_pane_window: |_| Some("@894".to_string()),
+            },
             |pane| {
                 selected = Some(pane.to_string());
                 Ok(())
@@ -19723,6 +19836,171 @@ mod pane_layout_projection_dispatch_tests {
         assert_eq!(selected.as_deref(), Some("%76"));
         assert!(receipt.required);
         assert!(receipt.applied);
+    }
+
+    /// `#panewindowdrift`: the operator-reported shape. The layout's file→pane
+    /// record still names `%76`, but that pane was moved into the `stash` window
+    /// after it was bound, so every record-vs-record check still agrees. Focus
+    /// must be refused instead of mirrored onto a pane the operator cannot see,
+    /// and the refusal must not count toward convergence.
+    #[test]
+    fn focus_is_refused_for_a_pane_stashed_out_of_the_layout_window() {
+        let state =
+            Mutex::new(agent_doc_controller::pane_layout::LatestProjectionWorkerState::default());
+        assert!(state.lock().schedule(7));
+        let file_panes = vec![
+            ("/tasks/new-left.md".to_string(), "%76".to_string()),
+            ("/tasks/right.md".to_string(), "%75".to_string()),
+        ];
+        let mut selected = None;
+
+        let receipt = apply_pane_layout_focus_effect(
+            &state,
+            7,
+            Some("/tasks/new-left.md"),
+            false,
+            &file_panes,
+            PaneLayoutFocusCoVisibility {
+                layout_window: Some("@894"),
+                observe_pane_window: |pane| {
+                    assert_eq!(pane, "%76");
+                    Some("@904".to_string())
+                },
+            },
+            |pane| {
+                selected = Some(pane.to_string());
+                Ok(())
+            },
+        );
+
+        assert!(
+            selected.is_none(),
+            "a stashed pane must never reach tmux select-pane"
+        );
+        assert!(receipt.required);
+        assert!(!receipt.applied, "a refused focus must not count as applied");
+        assert_eq!(
+            receipt.reason,
+            "focus_pane_not_co_visible:/tasks/new-left.md:%76:live_window=@904:layout_window=@894"
+        );
+    }
+
+    /// Strict tightening, mirroring the pure predicate: a window we cannot
+    /// resolve on either side is never drift, so a transient tmux read or an
+    /// unconfigured session cannot turn into a refused focus.
+    #[test]
+    fn unresolved_windows_never_refuse_focus() {
+        let file_panes = vec![("/tasks/left.md".to_string(), "%76".to_string())];
+
+        for (layout_window, live_window) in [
+            (None, Some("@904".to_string())),
+            (Some("@894"), None),
+            (Some("  "), Some("@904".to_string())),
+            (Some("@894"), Some(String::new())),
+        ] {
+            let state = Mutex::new(
+                agent_doc_controller::pane_layout::LatestProjectionWorkerState::default(),
+            );
+            assert!(state.lock().schedule(7));
+            let mut selected = None;
+
+            let receipt = apply_pane_layout_focus_effect(
+                &state,
+                7,
+                Some("/tasks/left.md"),
+                false,
+                &file_panes,
+                PaneLayoutFocusCoVisibility {
+                    layout_window,
+                    observe_pane_window: |_| live_window.clone(),
+                },
+                |pane| {
+                    selected = Some(pane.to_string());
+                    Ok(())
+                },
+            );
+
+            assert_eq!(selected.as_deref(), Some("%76"));
+            assert!(receipt.applied, "unknown window must not refuse focus");
+        }
+    }
+
+    /// The layout target window is the projection's own declared window, never
+    /// an inferred active/first/majority window. An explicit window id is used
+    /// verbatim; a window *name* falls through to the by-name lookup so the
+    /// comparison stays id-to-id.
+    #[test]
+    fn layout_target_window_prefers_an_explicit_window_id() {
+        let project_root = std::env::temp_dir().join("agent-doc-pane-layout-window-id-test");
+        let tmux = tmux_router::Tmux::default_server();
+        assert_eq!(
+            pane_layout_target_window_id(&project_root, &tmux, Some("@894")),
+            Some("@894".to_string())
+        );
+        assert_eq!(
+            pane_layout_target_window_id(&project_root, &tmux, Some(" @894 ")),
+            Some("@894".to_string())
+        );
+        // A name is not an id: it must not become the comparison reference.
+        assert_ne!(
+            pane_layout_target_window_id(&project_root, &tmux, Some("agent-doc")),
+            Some("agent-doc".to_string())
+        );
+    }
+
+    /// A pane assignment that names a pane outside the layout window is not a
+    /// visible column, so it must not satisfy a layout slot or the focus target.
+    #[test]
+    fn stashed_assignment_does_not_satisfy_a_layout_slot_or_focus() {
+        let project_root = Path::new("/project");
+        let window_panes = ["%75".to_string()];
+        let effect_file_panes = vec![
+            ("/project/left.md".to_string(), "%76".to_string()),
+            ("/project/right.md".to_string(), "%75".to_string()),
+        ];
+        let visible_effect_file_panes = effect_file_panes
+            .iter()
+            .filter(|(_, assigned_pane)| window_panes.iter().any(|pane| pane == assigned_pane))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            layout_sync_state_expected_focus_pane(
+                project_root,
+                Some("/project/left.md"),
+                &visible_effect_file_panes,
+            ),
+            None,
+            "a stashed pane must not stand in as the focus target"
+        );
+        assert_eq!(
+            layout_sync_state_expected_panes(
+                project_root,
+                &[
+                    "/project/left.md".to_string(),
+                    "/project/right.md".to_string()
+                ],
+                &visible_effect_file_panes,
+            ),
+            vec!["%75".to_string()],
+        );
+        let (synced, reason) = layout_sync_state_result(
+            &[
+                "/project/left.md".to_string(),
+                "/project/right.md".to_string(),
+            ],
+            &[
+                "/project/left.md".to_string(),
+                "/project/right.md".to_string(),
+            ],
+            &["%75".to_string()],
+            &window_panes,
+            true,
+            None,
+            Some("%75"),
+        );
+        assert!(!synced);
+        assert_eq!(reason, "focus_pane_not_found");
     }
 
     #[test]
@@ -19740,6 +20018,10 @@ mod pane_layout_projection_dispatch_tests {
             Some("/tasks/old-left.md"),
             false,
             &file_panes,
+            PaneLayoutFocusCoVisibility {
+                layout_window: Some("@894"),
+                observe_pane_window: |_| Some("@894".to_string()),
+            },
             |_| {
                 selected = true;
                 Ok(())

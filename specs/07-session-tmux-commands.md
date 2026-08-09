@@ -205,6 +205,28 @@ and retries the exact current generation. Convergence, supersession, or
 controller teardown ends that ownership.
 Tmux observation and retry must not run on the Project Controller IPC accept
 thread or in a detached periodic timer.
+- Layout focus is refused for a pane that is not co-visible
+  (`#panewindowdrift`). A file→pane assignment, the actor row, and the registry
+  entry each carry the window captured when the pane was bound, and none of them
+  re-derives it — so after the pane is moved into a `stash` window every
+  record-vs-record check still agrees and the projection mirrors editor focus
+  onto a pane the operator cannot see. The reference window is the projection's
+  own target window (`invocation.window` when it is already a window id,
+  otherwise the `agent-doc`-named window in the project's configured session —
+  the same resolution the drift survey performs), never an inferred active,
+  first-column, or majority window, so a legitimate multi-window layout keeps its
+  own reference. Before `select-pane` the effect compares that window against the
+  pane's live `#{window_id}` via
+  `agent_doc_controller::pane_layout::pane_window_binding_drifted` and, on drift,
+  publishes `focus_pane_not_co_visible:<file>:<pane>:live_window=<w>:layout_window=<w>`
+  with `focus_applied: false`; the structural reconcile then runs and the retry
+  focuses the pane once it is back in the layout window. Strict tightening: an
+  unresolved window on either side is never drift, so a transient tmux read
+  cannot refuse a legitimate focus. The drift survey applies the same rule to its
+  observation — an assignment naming a pane outside the target window's own
+  ordered pane list is not a visible column and must not satisfy a layout slot or
+  stand in as `expected_focus_pane`, so a stashed pane never counts toward
+  `observation=synced`.
 - Default focus defers stash promotion (`#jb-nav-3pane-promote-swap`): `agent-doc
 focus <FILE>` selects the resolved pane when it is already visible, but skips
   additive `join-pane` promotion when the pane is parked in a `stash` window.

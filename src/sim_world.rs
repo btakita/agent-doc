@@ -79,6 +79,182 @@ mod pane_layout_projection_model {
     }
 }
 
+/// `#panewindowdrift` reference model: a layout column whose pane was moved into
+/// the stash window after it was bound.
+///
+/// The file→pane assignment and the actor/registry records all keep the window
+/// captured at bind time, so every record-vs-record comparison still agrees and
+/// the drift is invisible. Only the live window can see it, which is why the
+/// focus effect compares the layout's target window against where the pane
+/// actually is. The model drives the production predicate
+/// `agent_doc_controller::pane_layout::pane_window_binding_drifted` and carries
+/// its own record-only mutation so the coverage is provably sensitive.
+mod pane_layout_stashed_column_model {
+    use agent_doc_controller::pane_layout::pane_window_binding_drifted;
+    use std::collections::BTreeMap;
+
+    const LAYOUT_WINDOW: &str = "@894";
+    const STASH_WINDOW: &str = "@904";
+
+    #[derive(Clone, Copy)]
+    enum Action {
+        /// The operator (or a reconcile) moves a column's pane into the stash
+        /// window. Neither the layout assignment nor the bind-time record moves
+        /// with it — that is the whole defect.
+        StashColumn(&'static str),
+        /// A structural reconcile brings the pane back into the layout window.
+        SurfaceColumn(&'static str),
+        /// One pane-layout focus effect for the named document.
+        FocusEffect(&'static str),
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum FocusOutcome {
+        Applied(String),
+        RefusedNotCoVisible(String),
+        PaneNotFound,
+    }
+
+    struct World {
+        /// The layout's file→pane assignment: a record, never re-derived.
+        file_panes: Vec<(&'static str, &'static str)>,
+        /// The window each pane was bound in. Records do not follow a move.
+        recorded_window: BTreeMap<&'static str, &'static str>,
+        /// Where each pane actually is right now.
+        live_window: BTreeMap<&'static str, &'static str>,
+        /// The tmux active pane — what the operator's focus mirrors onto.
+        selected: Option<&'static str>,
+        outcomes: Vec<FocusOutcome>,
+        /// When true, the focus guard compares record against record (the
+        /// pre-fix behavior) instead of record against live.
+        record_only_guard: bool,
+    }
+
+    impl World {
+        /// Two columns in the `agent-doc` window; `left` is the focus target.
+        fn two_column_layout() -> Self {
+            Self {
+                file_panes: vec![("/tasks/left.md", "%76"), ("/tasks/right.md", "%75")],
+                recorded_window: BTreeMap::from([("%76", LAYOUT_WINDOW), ("%75", LAYOUT_WINDOW)]),
+                live_window: BTreeMap::from([("%76", LAYOUT_WINDOW), ("%75", LAYOUT_WINDOW)]),
+                selected: Some("%75"),
+                outcomes: Vec::new(),
+                record_only_guard: false,
+            }
+        }
+
+        fn pane_for(&self, document: &str) -> Option<&'static str> {
+            self.file_panes
+                .iter()
+                .find(|(file, _)| *file == document)
+                .map(|(_, pane)| *pane)
+        }
+
+        fn step(&mut self, action: Action) {
+            match action {
+                Action::StashColumn(document) => {
+                    if let Some(pane) = self.pane_for(document) {
+                        self.live_window.insert(pane, STASH_WINDOW);
+                    }
+                }
+                Action::SurfaceColumn(document) => {
+                    if let Some(pane) = self.pane_for(document) {
+                        self.live_window.insert(pane, LAYOUT_WINDOW);
+                    }
+                }
+                Action::FocusEffect(document) => {
+                    let Some(pane) = self.pane_for(document) else {
+                        self.outcomes.push(FocusOutcome::PaneNotFound);
+                        return;
+                    };
+                    // The guard's observation side: the live window, or the
+                    // bind-time record under the record-only mutation.
+                    let observed = if self.record_only_guard {
+                        self.recorded_window.get(pane).copied()
+                    } else {
+                        self.live_window.get(pane).copied()
+                    };
+                    if pane_window_binding_drifted(LAYOUT_WINDOW, observed) {
+                        self.outcomes
+                            .push(FocusOutcome::RefusedNotCoVisible(pane.to_string()));
+                        return;
+                    }
+                    self.selected = Some(pane);
+                    self.outcomes.push(FocusOutcome::Applied(pane.to_string()));
+                }
+            }
+        }
+
+        /// The operator-visible property: focus never lands on a pane that is
+        /// not in the layout window.
+        fn selected_pane_is_co_visible(&self) -> bool {
+            self.selected
+                .and_then(|pane| self.live_window.get(pane).copied())
+                .is_none_or(|window| window == LAYOUT_WINDOW)
+        }
+    }
+
+    #[test]
+    fn a_stashed_column_never_receives_mirrored_focus() {
+        let mut world = World::two_column_layout();
+        world.step(Action::StashColumn("/tasks/left.md"));
+        world.step(Action::FocusEffect("/tasks/left.md"));
+
+        assert_eq!(
+            world.outcomes,
+            vec![FocusOutcome::RefusedNotCoVisible("%76".to_string())]
+        );
+        assert_eq!(
+            world.selected,
+            Some("%75"),
+            "the visible active pane is left alone"
+        );
+        assert!(world.selected_pane_is_co_visible());
+    }
+
+    #[test]
+    fn a_surfaced_column_focuses_on_the_next_attempt() {
+        let mut world = World::two_column_layout();
+        world.step(Action::StashColumn("/tasks/left.md"));
+        world.step(Action::FocusEffect("/tasks/left.md"));
+        // The structural reconcile the refusal does not short-circuit.
+        world.step(Action::SurfaceColumn("/tasks/left.md"));
+        world.step(Action::FocusEffect("/tasks/left.md"));
+
+        assert_eq!(
+            world.outcomes,
+            vec![
+                FocusOutcome::RefusedNotCoVisible("%76".to_string()),
+                FocusOutcome::Applied("%76".to_string()),
+            ]
+        );
+        assert_eq!(world.selected, Some("%76"));
+        assert!(world.selected_pane_is_co_visible());
+    }
+
+    /// Sensitivity proof: with the pre-fix record-vs-record guard the stashed
+    /// pane still reads as co-visible, focus is mirrored onto it, and the
+    /// invariant goes red. Without this the passing test above would not prove
+    /// the live comparison is what does the work.
+    #[test]
+    fn record_only_guard_mirrors_focus_onto_the_stashed_pane() {
+        let mut world = World::two_column_layout();
+        world.record_only_guard = true;
+        world.step(Action::StashColumn("/tasks/left.md"));
+        world.step(Action::FocusEffect("/tasks/left.md"));
+
+        assert_eq!(
+            world.outcomes,
+            vec![FocusOutcome::Applied("%76".to_string())],
+            "records agree, so a record-only guard cannot see the move"
+        );
+        assert!(
+            !world.selected_pane_is_co_visible(),
+            "the pre-fix guard is what put focus on a pane the operator cannot see"
+        );
+    }
+}
+
 /// Adversarial model for `#percellconverge` phase 3. The retained agent
 /// transition owns only `exchange`; the editor changes `queue` on every tick.
 /// The survival assertion is paired with an ownership-overclaim mutation proof

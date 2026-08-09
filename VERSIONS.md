@@ -2,6 +2,52 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.187
+
+- **Fix (`#panewindowdrift`): editor auto-focus was mirrored onto a pane the
+  operator could not see.**
+
+  The pane-layout projection's file→pane assignment, the actor row, and the
+  registry entry each carry the window captured when the pane was *bound*, and
+  nothing re-derives it. Move that pane into a `stash` window and every
+  record-vs-record comparison still agrees — so the layout survey admitted a
+  stashed pane as a visible column and `apply_pane_layout_focus_effect` ran
+  `select-pane` on it. `session doctor` reported the drift (0.35.186) but nothing
+  prevented it.
+
+  The reference window is now explicit: the projection's **own** target window —
+  `invocation.window` when it is already a window id, otherwise the
+  `agent-doc`-named window in the project's configured tmux session, which is the
+  same resolution the drift survey already performs. It is never an inferred
+  active, first-column, or majority window, so a legitimate multi-window layout
+  keeps its own reference. Before `select-pane` the effect compares that window
+  against the pane's live `#{window_id}` through the pure predicate
+  `pane_window_binding_drifted` and, on drift, publishes
+  `focus_pane_not_co_visible:<file>:<pane>:live_window=<w>:layout_window=<w>` with
+  `focus_applied: false`. Since convergence is
+  `report.synced && (!focus_required || focus_applied)`, a refusal cannot report
+  converged: the structural reconcile runs and the retry focuses the pane once it
+  is back in the layout window.
+
+  The drift survey applies the same rule to its observation. An effect/reuse
+  assignment naming a pane outside the target window's own ordered pane list is
+  not a visible column, so it no longer satisfies a layout slot or stands in as
+  `expected_focus_pane` — a stashed pane stops counting toward
+  `observation=synced`.
+
+  Strict tightening throughout, mirroring the predicate: an unresolved window on
+  either side is never drift, so a transient tmux read or an unconfigured session
+  cannot refuse a legitimate focus.
+
+  Coverage: `focus_is_refused_for_a_pane_stashed_out_of_the_layout_window`,
+  `unresolved_windows_never_refuse_focus`,
+  `layout_target_window_prefers_an_explicit_window_id`, and
+  `stashed_assignment_does_not_satisfy_a_layout_slot_or_focus` in
+  `agent-doc-controller-io`, plus the SimWorld
+  `pane_layout_stashed_column_model` — which carries a record-only mutation that
+  reproduces the pre-fix mirrored focus, so the passing tests prove the live
+  comparison is what does the work.
+
 ## 0.35.186
 
 - **Fix (`#stalereexecstarve`): a supervisor whose queue drain kept bailing early

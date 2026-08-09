@@ -153,15 +153,30 @@ fn run_preflight_for_prompt(prompt: &str, cwd: &Path) -> HookAdmission {
 /// truncated contract but never the seal, and the agent's three-state read still
 /// lands on "admission failed".
 fn run_preflight_within_budget(file: &Path, budget: std::time::Duration) -> anyhow::Result<()> {
+    let preflight_file = file.to_path_buf();
+    run_within_budget(file, budget, move || {
+        agent_doc_preflight_command_io::run_with_options(
+            &preflight_file,
+            agent_doc_preflight_command_io::PreflightOptions { probe: false },
+        )
+    })
+}
+
+/// [`run_preflight_within_budget`] with the work injected.
+///
+/// Split out so the budget-expiry path can be tested against a worker that
+/// provably does not finish. Driving it with a tiny budget and real preflight
+/// instead is a race — a fast-failing preflight wins and the test asserts the
+/// wrong branch (CI caught exactly that).
+fn run_within_budget<F>(file: &Path, budget: std::time::Duration, work: F) -> anyhow::Result<()>
+where
+    F: FnOnce() -> anyhow::Result<()> + Send + 'static,
+{
     let (tx, rx) = std::sync::mpsc::channel();
-    let worker_file = file.to_path_buf();
     let worker = std::thread::Builder::new()
         .name("agent-doc-preflight-hook".to_string())
         .spawn(move || {
-            let outcome = agent_doc_preflight_command_io::run_with_options(
-                &worker_file,
-                agent_doc_preflight_command_io::PreflightOptions { probe: false },
-            );
+            let outcome = work();
             // The receiver is gone on a budget overrun; the send failing there is
             // the expected shape, not a swallowed error.
             let _send_after_overrun = tx.send(outcome.map_err(|err| format!("{err:#}")));
@@ -285,13 +300,23 @@ mod tests {
     /// one — the exact state the admission-failure marker exists to remove.
     #[test]
     fn budget_overrun_reports_a_reason_instead_of_hanging() {
-        // A document that does not exist still reaches preflight, so drive the
-        // timeout directly with a budget no real run can beat.
-        let err = run_preflight_within_budget(
+        // The worker must provably not finish, or a fast-failing one wins the
+        // race and this asserts the completion branch instead of the overrun.
+        let release = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let worker_release = std::sync::Arc::clone(&release);
+
+        let err = run_within_budget(
             Path::new("/nonexistent/agent-doc-budget-probe.md"),
-            std::time::Duration::from_nanos(1),
+            std::time::Duration::from_millis(50),
+            move || {
+                while !worker_release.load(std::sync::atomic::Ordering::SeqCst) {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Ok(())
+            },
         )
-        .expect_err("a 1ns budget cannot admit");
+        .expect_err("a worker that outlives the budget cannot admit");
+        release.store(true, std::sync::atomic::Ordering::SeqCst);
 
         let message = format!("{err:#}");
         assert!(
@@ -301,6 +326,37 @@ mod tests {
         assert!(
             message.contains(HOOK_ADMISSION_BUDGET_ENV),
             "overrun must name the override: {message}"
+        );
+    }
+
+    /// The complementary branch: a worker that finishes inside its budget must
+    /// admit, so the guard cannot refuse an ordinary fast preflight.
+    #[test]
+    fn work_that_finishes_inside_the_budget_admits() {
+        run_within_budget(
+            Path::new("/nonexistent/agent-doc-budget-probe.md"),
+            std::time::Duration::from_secs(30),
+            || Ok(()),
+        )
+        .expect("work completing inside its budget must admit");
+    }
+
+    /// A failing preflight must surface its own reason, not be relabelled as a
+    /// budget overrun.
+    #[test]
+    fn work_that_fails_inside_the_budget_keeps_its_own_reason() {
+        let err = run_within_budget(
+            Path::new("/nonexistent/agent-doc-budget-probe.md"),
+            std::time::Duration::from_secs(30),
+            || Err(anyhow::anyhow!("preflight refused for its own reason")),
+        )
+        .expect_err("a failing worker must fail the admission");
+
+        let message = format!("{err:#}");
+        assert!(message.contains("preflight refused for its own reason"), "{message}");
+        assert!(
+            !message.contains("admission budget"),
+            "a real refusal must not be relabelled as an overrun: {message}"
         );
     }
 

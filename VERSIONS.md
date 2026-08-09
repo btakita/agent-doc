@@ -2,6 +2,23 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.211
+
+- **Fix: 0.35.209's budget-overrun test was racy and turned CI red.**
+
+  `budget_overrun_reports_a_reason_instead_of_hanging` drove the timeout with a
+  1ns budget against real preflight on a nonexistent path. That is a race, not a
+  test: preflight can fail *faster* than the budget expires, in which case
+  `recv_timeout` returns the completed result and the assertion lands on the
+  wrong branch. It passed locally and failed on CI, which is the signature.
+
+  `run_within_budget` now takes the work as a parameter, so the overrun test
+  supplies a worker that provably does not finish until released. Two
+  complementary branches are pinned alongside it: work finishing inside its
+  budget still admits (the guard must not refuse an ordinary fast preflight),
+  and a failing preflight keeps its own reason instead of being relabelled as an
+  overrun. Verified deterministic over 8 consecutive runs.
+
 ## 0.35.210
 
 - **Fix (`#ctrlsockpathtoolong`): a project root long enough to overflow

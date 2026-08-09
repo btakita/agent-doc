@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-editor-surface-io"
-version = "0.35.210"
+version = "0.35.211"
 edition = "2024"
 description = "Project-scoped editor-surface graphs and their tmux consequence for agent-doc"
 license = "MIT"
@@ -11,9 +11,9 @@ publish = false
 name = "agent_doc_editor_surface_io"
 
 [dependencies]
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.210" }
-agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.210" }
-agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.210" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.211" }
+agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.211" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.211" }
 anyhow = "1"
 lazily = { version = "0.56.0", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }

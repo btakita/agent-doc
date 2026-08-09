@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 6f64f6e1-43be-441d-a799-94da70cebcd0
+resume: a4612e7a-e1a6-40d7-ae91-90bfe7c7724c
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -961,6 +961,11 @@ The right design is to move the *question* to where the hubs already live: one c
 
 ### Re: closing the silent-trigger item — opus-5
 
+> **Queue prompt:**
+>
+> do [#hooktriggerunresolved]
+
+
 `#hooktriggerunresolved` was implemented, verified and shipped as **0.35.219** in the previous cycle; this drains its queue head. Nothing new to build.
 
 Recap for the record: `run_preflight_for_prompt` collapsed two very different outcomes into one silent exit. A prompt that is not a trigger is a correct no-op. A prompt that **is** an `agent-doc <FILE>` trigger whose path fails to resolve is an admission failure — and it returned the same `NotATrigger`, emitting neither marker. The rule was already written one branch below ("A trigger that reached preflight must never produce silence"); the protection just started a line too late. An unresolvable trigger now names the target, the cwd it resolved against, and the remedy, while unrelated prompts stay silent under their own assertions.
@@ -975,8 +980,8 @@ Exchange is 926 lines across 41 sections and accretion is at `block`, but the qu
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 🚧 do [#hooktriggerunresolved]
-- ⏭️ do [#resumeownerfmread]
+- ~~do [#hooktriggerunresolved]~~
+- do [#resumeownerfmread]
 - ~~do [#queueblockquoteintent]~~
 - ~~do [#pullnoackdeadlock]~~
 - ~~do [#retainedmutdrop]~~
@@ -999,7 +1004,6 @@ Exchange is 926 lines across 41 sections and accretion is at `block`, but the qu
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#hooktriggerunresolved] FIXED in 0.35.219. run_preflight_for_prompt had two silent exits meaning very different things: invoked_document returning None is a genuine non-trigger and a correct no-op, but resolve_document returning None means the prompt WAS an agent-doc <FILE> trigger and only the path failed — and that also returned NotATrigger, emitting neither the contract marker nor the admission-failure marker. That is exactly #hookcontractlost: the agent cannot distinguish an absent hook from a refusing one, is told to treat it as an unfixable harness defect, and stops. The branch immediately below already states the rule ('A trigger that reached preflight must never produce silence') but the protection began one line too late. Observed 2026-08-09 on this document: a /loop agent-doc turn produced no marker of either kind and no preflight activity at all. A repo-relative target resolves against the hook's cwd, so any cwd that is not the project root silently un-triggers the hook. An unresolvable trigger now emits the admission-failure marker naming the target, the cwd, and the remedy; an unrelated prompt is still a silent no-op and has its own assertions. Mutation-checked.
 - [ ] [#resumeownerfmread] agent-doc start pays TWO controller round trips per attached sibling document to answer one ownership question, and it is the single largest resolve source. Measured 2026-08-09 over the window AFTER 0.35.199 landed, so this profile is trustworthy: resume_id_owner 213 and start_resume_id_capture 126 top every other caller (next is observe_live_queue_heads at 107). #projpassstart already proved a projection pass cannot help — resume_id_owner runs once per start and reads each candidate exactly once. CORRECTION to this item's original plan (2026-08-09): it proposed a frontmatter-scoped relay read so an attached document could answer a bounded leading-block query without materializing its whole text. That will NOT help, and the reason matters. The cost is not string materialization: canonical_text goes through Yrs get_string, which walks the whole tree regardless of how few bytes the caller wants, and the profiling note on the hook budget says preflight is 'almost entirely blocked on controller round trips'. A prefix API would still pay the per-candidate round trip, which is the actual cost. The right design is to move the QUESTION to where the hubs already live: one controller-side query answering 'which registered document claims resume id X' across all hubs, replacing N per-candidate round trips with one. That matches #lazily-hot-path — ask the actor rather than have the caller poll it N times. Note resume_id_owner currently pays TWO round trips per attached candidate (current_revision_for_file, then the text resolve). Do NOT substitute state.db documents.session_id for the frontmatter read: it is a durable sink (#lzdurablesink) and a stale row would either invent an owner, silently losing a conversation resume via the #resumeclaim start-fresh path, or miss a real one.
 - [ ] [#planhead] `agent-doc plan` reports a queue head the in-session loop is not allowed to drain (#agent-doc-bug). Observed twice this session: preflight's `selected_queue_prompts` correctly named the drainable head (`do [#prmergeguardpr]`, then `do [#preflightprojpass]`) while plan's `prompt_targets` / `repo_actions` / `required_commands` all named `do [#operatorverifylive]` — an [operator-verify] head that needs a human watching a real IDE + tmux session and that preflight had already deferred. SKILL.md step 0d says to treat plan's output as the execution contract, so an agent following it verbatim works the wrong item and would then --done an operator-gated one. Fix: drop plan's own head selection and defer to preflight.selected_queue_prompts. Two independent derivations of 'which head is next' is the defect class, not the specific filter.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.

@@ -121,11 +121,39 @@ What actually cleared it was `c0d02fdec` (`#dedupnoopretain` — session-check p
 **What remains on haiven-dev.md is real steering, not a wedge.** `session-check` reports the cycle `committed` with one genuine unresolved prompt: `#pusherrorcodebranch` (push `feat/error-response-code` so the gate — "Preflight (Backend)", not "CI" — runs the `request_body_too_large` fix). Its own guidance says to continue with `agent-doc tasks/haiven-dev.md`. That document has its own owner pane (`%20`, currently `alive-busy`), so I have not driven it from this session — re-invoke it there. Doctor also flags `owned_pane_ready_busy_conflict` on that pane; it is the recoverable stale ready/busy probe, and the recovery hint is `session status` then `session clear` from another pane if it persists.
 
 One thing your message surfaced that *is* a live defect: `agent-doc respond --help` on 0.35.184 has no `--baseline-file`, yet SKILL.md's mandatory persist step documents it. Filed as `#respondbaselineflag` at the top of the backlog.
+
+### Re: fix the stall in this turn — opus-5
+
+Fixed and shipped as **0.35.185**. It was not a flake; it was a real defect with the same signature as `#dedupepresettle`, one layer up.
+
+**Cycle phase is monotone, but the terminal proof re-read it and got an older answer.** `reconstruct_cycle_state` decodes the last `turn_intent_checkpoint` and rebases the closeout projection over it *only when the projection matches the cycle*. When the projection is absent or names another cycle, the phase falls back to whatever was baked into that older checkpoint. So `ensure_cycle_committed` passed, the document commit landed (`89f255b0e2`), and `record_terminal_closeout_proof` then read `response_captured` and failed the closeout — handing you a cycle whose commit had already succeeded to hand-repair with `write --commit`. `session-check` afterwards reporting `write_applied` on the same cycle confirms the read was wrong, not the commit. The `admin recycle` I had issued a minute earlier is the plausible trigger for the projection gap.
+
+`ensure_cycle_committed` now returns the cycle id it proved, and `CompleteRequiredCloseoutOptions::proven_committed_cycle` carries it into the proof. A sub-`Committed` read naming that same cycle is a lagging replica, not a regression: log `terminal_proof_phase_regressed_after_commit_proof`, repair via `mark_committed`, continue. Callers with no prior proof — preflight, any first-time caller — keep the strict fail-closed guard, and the new test pins both sides so the fix cannot quietly become a blanket bypass.
+
+Mutation-checked: forcing the guard to always bail reddens `terminal_proof_repairs_a_phase_read_that_regressed_below_its_own_commit_proof`. `make check` green — 8750 run, 8750 passed. Commit `3b7e54d27`, pushed, tagged `v0.35.185`, installed (binary reports 0.35.185), submodule pointer `541cba7`. Release/PyPI/Book runs pending on the tag.
+
+One incident worth noting: the first `make install` died with `failed to build archive ... No such file or directory` across four crates — another process cleaned `target/local-install` mid-build. A concurrent build in the shared tree, not a code fault; the retry was clean.
+
+### Re: haiven-dev stopping mid-drain — opus-5
+
+That session stopped with `queue_continuation_required=true` and 17 heads on the claim that "/loop re-entry can't seal a preflight contract." **I could not verify that claim, and I am not going to change shipped instructions on an unverified premise.**
+
+What I can state: `.claude/settings.json` wires `UserPromptSubmit` → `agent-doc hook preflight-user-prompt-submit`, which seals the contract for every submitted prompt. The open question is narrower than the claim — whether a `ScheduleWakeup`-fired `/loop` re-entry registers as a `UserPromptSubmit` event in Claude Code. The `loop` skill is harness-builtin, not on disk, so I cannot read its dispatch path from here, and settling it from a different session would mean running a live loop and watching `ops.log`.
+
+Either answer is actionable, which is why I filed `#loopcontractseal` rather than guessing:
+
+- If the contract **is** sealed, the stop was an unjustified stall and SKILL.md's Claude Code auto-loop section needs an explicit line saying so.
+- If it is **not** sealed, the documented Claude Code auto-loop cannot work at all, and Claude Code needs the same in-turn self-drive OpenCode already has (`#ocdrainstall` Part A: preflight → respond → `write --commit` in the SAME turn until `queue_continuation_required == false`).
+
+Either way the current instruction surface permitted handing 17 drainable heads back to you, which `#drain-no-defer` forbids. The item carries the experiment that decides it.
+
+The rest of that report reads clean: `test_published_descriptions_read_as_api_prose` sweeping both sources (~150 fields) and `test_only_the_docstring_summary_is_published` pinning the withheld half is the right shape — the guard catching the original one-line summary on its own is what makes it a real convention gate rather than a snapshot. `task check` 824 passed + 2 xfailed, `task test-e2e` 87 passed, fpe at `2d906b5`, pointer `79e5e68`, with the caveat you noted that the last two green fpe CI runs predate that commit.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#loopcontractseal]
 - do [#respondbaselineflag]
 <!-- /agent:queue -->
 
@@ -137,6 +165,7 @@ One thing your message surfaced that *is* a live defect: `agent-doc respond --he
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#loopcontractseal] #agent-doc-bug SETTLE THEN FIX: the haiven-dev session stopped mid-drain with queue_continuation_required=true and 17 heads, claiming '/loop re-entry can't seal a preflight contract'. That claim is UNVERIFIED — I could not confirm it from another session. .claude/settings.json wires UserPromptSubmit -> `agent-doc hook preflight-user-prompt-submit`, which seals the contract for every submitted prompt; the open question is whether a ScheduleWakeup-fired /loop re-entry counts as a UserPromptSubmit event in Claude Code. Experiment: start a /loop over an active queue, then grep .agent-doc/logs/ops.log for a preflight event with no operator-typed trigger. If the contract IS sealed, the stop was an unjustified stall and SKILL.md's Claude Code auto-loop section needs an explicit 'a /loop re-entry seals its own contract; do not stop for this' line. If it is NOT sealed, the Claude Code auto-loop as documented cannot work and Claude Code needs the same in-turn self-drive OpenCode already has (#ocdrainstall Part A: preflight -> respond -> write --commit in the SAME turn until queue_continuation_required==false). Either way the current instruction surface lets an agent hand 17 drainable heads back to the operator, which #drain-no-defer forbids.
 - [ ] [#respondbaselineflag] #agent-doc-bug SKILL.md's MANDATORY persist step documents `agent-doc respond <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill`, but neither `respond` nor `write` accepts `--baseline-file` in 0.35.184 (`agent-doc respond --help` has no baseline/snapshot flag). An agent following the hot-path skill verbatim gets a clap parse error on the one step the skill calls mandatory, and the documented 'use preflight's baseline, do NOT save your own' contract has no way to be honoured. Decide one way: either add `--baseline-file` to respond/write and thread it into the diff baseline, or remove it from SKILL.md + every generated harness surface (.claude/.codex/.opencode/.cursor) and the runbooks. Reported by the operator 2026-08-08 while diagnosing the haiven-dev wedge.
 <!-- /agent:backlog -->
 

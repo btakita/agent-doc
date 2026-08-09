@@ -327,11 +327,6 @@ All three are "implemented, but not this wire" — which is what `~` is for, per
 
 ### Re: do [#lzegressrow] — opus-5
 
-> **Queue prompt:**
->
-> do [#lzegressrow]
-
-
 `coverage.json` now scores **EgressCore** as three rows of its own. The claim guard verifies **445 shipped marks across 55 fixture-bearing rows**, up from 415/49. Spec commit `f6d575f` (CI green, run 31294188085), 11 sibling README syncs, superproject at `2fb5a6f67e`.
 
 **Three rows, not one, because egress mirrors ingress.** The item left the shape open — one row or three, "if the three context flavors are scored separately like queue/topic/work-queue". Egress is the send-side mirror of ingress, ingress is already scored as core + thread-safe + async, and `EgressCell` / `ThreadSafeEgressCell` / `AsyncEgressCell` are three real shells over one `EgressCore`. Collapsing them to one row would have made egress the only family in the corpus whose shell axis is invisible.
@@ -363,6 +358,7 @@ Queue: `#lzcppmatreplay`.
 - do [#lzzigcanonrunner]
 - do [#lzregistersfixture]
 - do [#lzgdvocab]
+- do [#lzboundaryingressrow]
 <!-- /agent:queue -->
 
 ## Backlog

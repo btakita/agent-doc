@@ -2,6 +2,40 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.184
+
+- **Fix (`#dedupepresettle`): a repair write reported success before its
+  projection converged, so a duplicated response survived a "successful" repair.**
+
+  Two sites shared one root cause: a repair was judged by the sample taken the
+  instant after the write, before the delivery projection had published it.
+
+  `await_late_editor_repair_projection` gave its settle window only to the
+  `LateEditorAttachment` shape and returned immediately on `Diverged`. But a
+  projection that is merely still propagating *also* samples as `Diverged` —
+  canonical and disk both differ from the target because neither has caught up —
+  so an in-flight repair was classified terminal on its first read.
+  `settle_atomic_repair_projection` then reported `did not converge exactly
+  before settling deferred lineage` for a write that converged milliseconds
+  later. Observed 2026-08-08 on `tasks/agent-doc/agent-doc-bugs2.md`, where
+  `session-check`'s own `self_heal_response_replay_duplication` failed
+  terminally and a byte-identical rerun converged. The window now covers every
+  non-converged sample (`atomic_repair_projection_should_await`), so the
+  terminal classification is decided when the window closes rather than the
+  instant after the write. Both typed refusals are reached with exactly the same
+  semantics — only later. Renamed to `await_atomic_repair_projection` /
+  `ATOMIC_REPAIR_PROJECTION_SETTLE_TIMEOUT_MS`, and the wait policy is now a
+  pure loop over an injected sampler so it is testable without a live race.
+
+  `agent-doc dedupe` inherited the ordinary write path's deferred-delivery
+  success: it printed `removed 3313 bytes` and exited 0 with both response
+  copies still on disk, and only a second identical run converged. Dedupe is a
+  repair command whose whole contract is "the duplicate is gone", so it now
+  re-reads the authority after each write, reapplies the cut against what it
+  actually finds (bounded at 5 attempts), and reports removed bytes only from a
+  proven fixpoint. An unconverged repair fails loudly and names the recovery
+  without offering the disk-write escape hatch.
+
 ## 0.35.183
 
 - **Fix (`#dedupnoopretain`): `session-check`'s response-replay dedup published a

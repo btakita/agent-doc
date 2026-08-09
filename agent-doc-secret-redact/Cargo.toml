@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-secret-redact"
-version = "0.35.183"
+version = "0.35.184"
 edition = "2024"
 description = "Secret redaction hygiene layer for agent-doc state and stream output"
 license = "MIT"

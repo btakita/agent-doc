@@ -161,9 +161,9 @@ const CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS: u64 = 8_000;
 const _: () =
     assert!(CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS > CRDT_PROJECTION_FALLBACK_BACKOFF_MAX_MS);
 #[cfg(test)]
-const ATOMIC_REPAIR_LATE_EDITOR_SETTLE_TIMEOUT_MS: u64 = 100;
+const ATOMIC_REPAIR_PROJECTION_SETTLE_TIMEOUT_MS: u64 = 100;
 #[cfg(not(test))]
-const ATOMIC_REPAIR_LATE_EDITOR_SETTLE_TIMEOUT_MS: u64 = 10_000;
+const ATOMIC_REPAIR_PROJECTION_SETTLE_TIMEOUT_MS: u64 = 10_000;
 #[derive(Debug)]
 pub struct AwaitEditorReplicaNoDiskWrite(String);
 
@@ -2111,7 +2111,7 @@ pub fn atomic_repair_write_if_current_through_authority(
     atomic_write_if_current_through_authority(path, content, expected_current, source)?;
     let canonical = try_resolve_current_document_content(path, source)?;
     let disk = resolve_disk_current_document_content(path, source)?;
-    let (canonical, disk) = await_late_editor_repair_projection(
+    let (canonical, disk) = await_atomic_repair_projection(
         path,
         content,
         expected_current,
@@ -2144,45 +2144,116 @@ fn classify_atomic_repair_projection(
     }
 }
 
-fn await_late_editor_repair_projection(
-    path: &Path,
+/// `#dedupepresettle`: the settle window belongs to every non-converged sample,
+/// not only the late-editor-attachment shape.
+///
+/// A repair whose projection is still propagating samples as `Diverged` —
+/// canonical and disk both differ from the target because neither has caught up
+/// yet — is indistinguishable, on the first read after the write, from a repair
+/// that genuinely lost a race. Returning immediately on `Diverged` gave that
+/// sample zero settle time, so `settle_atomic_repair_projection` reported
+/// `did not converge exactly before settling deferred lineage` for a write that
+/// converged milliseconds later. Observed 2026-08-08 on
+/// `tasks/agent-doc/agent-doc-bugs2.md`: `session-check`'s own
+/// `self_heal_response_replay_duplication` failed terminally, and a plain rerun
+/// of the identical repair converged.
+///
+/// Poll while the projection is unconverged in either shape. The terminal
+/// classification is then decided by the sample taken when the window closes,
+/// not the one taken the instant after the write, and both typed refusals in
+/// `settle_atomic_repair_projection` are reached with exactly the same
+/// semantics — only later.
+fn atomic_repair_projection_should_await(state: AtomicRepairProjectionState) -> bool {
+    match state {
+        AtomicRepairProjectionState::Converged => false,
+        AtomicRepairProjectionState::LateEditorAttachment
+        | AtomicRepairProjectionState::Diverged => true,
+    }
+}
+
+/// Pure settle loop over an injected projection sampler.
+///
+/// The sampler is the only I/O, so the wait policy is testable without a live
+/// controller, editor, or filesystem race.
+fn await_atomic_repair_projection_samples<S>(
     content: &str,
     expected_current: &str,
-    source: &str,
+    timeout: std::time::Duration,
     mut canonical: String,
     mut disk: String,
-) -> Result<(String, String)> {
-    if classify_atomic_repair_projection(content, expected_current, &canonical, &disk)
-        != AtomicRepairProjectionState::LateEditorAttachment
-    {
+    mut sample: S,
+) -> Result<(String, String)>
+where
+    S: FnMut() -> Result<(String, String)>,
+{
+    if !atomic_repair_projection_should_await(classify_atomic_repair_projection(
+        content,
+        expected_current,
+        &canonical,
+        &disk,
+    )) {
         return Ok((canonical, disk));
     }
 
     let started = std::time::Instant::now();
-    let timeout = std::time::Duration::from_millis(ATOMIC_REPAIR_LATE_EDITOR_SETTLE_TIMEOUT_MS);
     let mut backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
     while started.elapsed() < timeout {
         std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
-        canonical = try_resolve_current_document_content(path, source)?;
-        disk = resolve_disk_current_document_content(path, source)?;
-        match classify_atomic_repair_projection(content, expected_current, &canonical, &disk) {
-            AtomicRepairProjectionState::Converged => {
-                agent_doc_ops_log_io::log_op(
-                    path,
-                    &format!(
-                        "repair_projection_late_editor_settled file={} source={} target_hash={} wait_ms={} recovery=observed_convergence",
-                        path.display(),
-                        source,
-                        agent_doc_hash::content_hash(content),
-                        started.elapsed().as_millis(),
-                    ),
-                );
-                return Ok((canonical, disk));
-            }
-            AtomicRepairProjectionState::LateEditorAttachment => {}
-            AtomicRepairProjectionState::Diverged => return Ok((canonical, disk)),
+        let (next_canonical, next_disk) = sample()?;
+        canonical = next_canonical;
+        disk = next_disk;
+        if !atomic_repair_projection_should_await(classify_atomic_repair_projection(
+            content,
+            expected_current,
+            &canonical,
+            &disk,
+        )) {
+            return Ok((canonical, disk));
         }
         backoff_ms = CRDT_WRITE_BACKOFF_POLICY.next_ms(backoff_ms, false);
+    }
+    Ok((canonical, disk))
+}
+
+fn await_atomic_repair_projection(
+    path: &Path,
+    content: &str,
+    expected_current: &str,
+    source: &str,
+    canonical: String,
+    disk: String,
+) -> Result<(String, String)> {
+    let entry_state =
+        classify_atomic_repair_projection(content, expected_current, &canonical, &disk);
+    let started = std::time::Instant::now();
+    let (canonical, disk) = await_atomic_repair_projection_samples(
+        content,
+        expected_current,
+        std::time::Duration::from_millis(ATOMIC_REPAIR_PROJECTION_SETTLE_TIMEOUT_MS),
+        canonical,
+        disk,
+        || {
+            Ok((
+                try_resolve_current_document_content(path, source)?,
+                resolve_disk_current_document_content(path, source)?,
+            ))
+        },
+    )?;
+    if entry_state != AtomicRepairProjectionState::Converged
+        && classify_atomic_repair_projection(content, expected_current, &canonical, &disk)
+            == AtomicRepairProjectionState::Converged
+    {
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "repair_projection_settled file={} source={} target_hash={} wait_ms={} entry_state={:?} recovery=observed_convergence",
+                path.display(),
+                source,
+                agent_doc_hash::content_hash(content),
+                started.elapsed().as_millis(),
+                entry_state,
+            ),
+        );
     }
     Ok((canonical, disk))
 }
@@ -7293,6 +7364,93 @@ mod tests {
             classify_atomic_repair_projection("target", "before", "before", "before"),
             AtomicRepairProjectionState::Diverged,
             "the grace path requires proof that the repair already reached disk",
+        );
+    }
+
+    /// `#dedupepresettle`: an in-flight projection samples as `Diverged`, and
+    /// returning on that first sample turned a repair that converged
+    /// milliseconds later into a terminal
+    /// `did not converge exactly before settling deferred lineage` failure.
+    #[test]
+    fn atomic_repair_projection_awaits_a_transiently_diverged_sample() {
+        let samples = std::cell::RefCell::new(vec![
+            ("stale".to_string(), "stale".to_string()),
+            ("target".to_string(), "target".to_string()),
+        ]);
+        let (canonical, disk) = await_atomic_repair_projection_samples(
+            "target",
+            "before",
+            std::time::Duration::from_millis(ATOMIC_REPAIR_PROJECTION_SETTLE_TIMEOUT_MS),
+            // The first read after the write: neither plane has caught up, so
+            // this classifies as `Diverged`, not `LateEditorAttachment`.
+            "stale".to_string(),
+            "stale".to_string(),
+            || Ok(samples.borrow_mut().remove(0)),
+        )
+        .unwrap();
+
+        assert_eq!(canonical, "target");
+        assert_eq!(disk, "target");
+    }
+
+    #[test]
+    fn atomic_repair_projection_still_awaits_late_editor_attachment() {
+        let samples = std::cell::RefCell::new(vec![("target".to_string(), "target".to_string())]);
+        let (canonical, disk) = await_atomic_repair_projection_samples(
+            "target",
+            "before",
+            std::time::Duration::from_millis(ATOMIC_REPAIR_PROJECTION_SETTLE_TIMEOUT_MS),
+            "before".to_string(),
+            "target".to_string(),
+            || Ok(samples.borrow_mut().remove(0)),
+        )
+        .unwrap();
+
+        assert_eq!(canonical, "target");
+        assert_eq!(disk, "target");
+    }
+
+    /// The settle window must not become a spin: a converged entry sample
+    /// returns without sampling at all.
+    #[test]
+    fn atomic_repair_projection_returns_converged_without_sampling() {
+        let sampled = std::cell::Cell::new(0u32);
+        let (canonical, disk) = await_atomic_repair_projection_samples(
+            "target",
+            "before",
+            std::time::Duration::from_millis(ATOMIC_REPAIR_PROJECTION_SETTLE_TIMEOUT_MS),
+            "target".to_string(),
+            "target".to_string(),
+            || {
+                sampled.set(sampled.get() + 1);
+                Ok(("target".to_string(), "target".to_string()))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(canonical, "target");
+        assert_eq!(disk, "target");
+        assert_eq!(sampled.get(), 0);
+    }
+
+    /// A projection that never converges must still reach the existing typed
+    /// terminal classification — the window bounds the wait, it does not
+    /// swallow the divergence.
+    #[test]
+    fn atomic_repair_projection_returns_the_last_sample_after_the_window() {
+        let (canonical, disk) = await_atomic_repair_projection_samples(
+            "target",
+            "before",
+            std::time::Duration::from_millis(ATOMIC_REPAIR_PROJECTION_SETTLE_TIMEOUT_MS),
+            "stale".to_string(),
+            "stale".to_string(),
+            || Ok(("operator edit".to_string(), "stale".to_string())),
+        )
+        .unwrap();
+
+        assert_eq!(
+            classify_atomic_repair_projection("target", "before", &canonical, &disk),
+            AtomicRepairProjectionState::Diverged,
         );
     }
 

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: a1e06037-6323-4759-b308-1abe00763a2d
+resume: 2c6171b1-ef84-46fb-bafc-fd78406d58f9
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -423,6 +423,20 @@ lazily-zig now replays all **nine canonical lossless-tree fixtures** from the co
 `make check` green in lazily-zig: **129 of 149 canonical fixtures opened (up from 120), 20 known-uncovered (down from 29), 128/128 scenarios replayed (up from 114)**. CI is running (`31296905681`) and recorded pending. One note on the local suite: bare `zig build test` prints the scenario-identity guard's own self-test to stderr and the build runner reports that as a failed command — the Makefile's `test` target is what tolerates it. I checked that against HEAD before touching anything, since a red-looking suite I did not cause is exactly the thing to verify rather than assume.
 
 Queue: `#lzregistersfixture`.
+
+### Re: status — five heads remain, drain paused by the binary — opus-5
+
+No new instruction arrived this turn: the only change is the `resume:` frontmatter UUID, which is managed state, not a prompt. So this is a status turn rather than a work turn.
+
+**The binary is holding the drain, and I am not overriding it.** `queue_continuation_required` is `false` even though `queue_drainable_head_count` is 5, and the queue head `#lzregistersfixture` carries a `⏭️` deferral marker with `#lzgdvocab` marked `🚧`. The in-session loop rule is explicit that this signal is computed in the binary and must not be re-derived from the queue prose, so I am reporting rather than looping.
+
+**Remaining heads:** `#lzregistersfixture` (author the missing canonical Registers fixture — the row is marked shipped in nine bindings and verified in none), `#lzgdvocab` (lazily-gd's last two op families: `merge_cell` needs kernel work, `fanout`/`churn` needs real id recycling), `#lzboundaryingressrow`, `#lzdefaultmodeuniform`, `#lzzigdiffmutant`.
+
+**Where the four drained items left things.** All repo work is committed and pushed with CI green or pending on each repo: `#lzegressrow` (three EgressCore rows; Egress roll-up honestly dropped to partial in eight columns), `#lzcppmatreplay` (byte replay in all three C++ shells), `#lzgomergeops` (bounded effect drain on both Go planes — both were unbounded and hung on a scheduler-closed loop — plus an async merge-cell surface), and `#lzzigcanonrunner` (nine lossless-tree fixtures; narrowed to the three collections CRDT fixtures rather than closed on half the work).
+
+Two open threads I would not want lost in the summary: **a surviving mutant** — making `LosslessTreeCrdt.diff` ignore the partner frontier reddens none of the nine Zig fixtures, so the runner pins convergence but not the anti-entropy filter (`#lzzigdiffmutant`) — and **`default_mode` getting five different treatments across nine bindings**, two of which are the exact vacuity my own first draft had (`#lzdefaultmodeuniform`).
+
+One note without a request attached: the exchange is at 403 lines across 19 response sections, well past the accretion threshold. Compaction needs an explicit `agent_doc_auto_compact` opt-in, so I am recording the size rather than acting on it.
 <!-- agent:boundary:c6ef3fb1 -->
 <!-- /agent:exchange -->
 

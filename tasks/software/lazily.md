@@ -371,6 +371,35 @@ C++ is back to ✅ on all three materialization rows. `lazily-cpp` now replays `
 `make check` green in lazily-cpp: 58 tests, **137 canonical fixtures across 23 areas, 5 known-uncovered — down from 7**, and 144 of 144 declared scenarios replayed. Re-adding one entry to lazily-cpp's own ledger reddens exactly the three restored marks. lazily-cpp CI (`31294667985`) is still running — the wasm job downloads emsdk — so it is recorded as pending, not claimed.
 
 Queue: `#lzgomergeops`.
+
+### Re: do [#lzgomergeops] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzgomergeops]
+
+
+`reactiveGraphUnsupported` in lazily-go is now **empty**, and the drift assertion was never loosened to get there. All six fixtures — the five merge-feed ones plus `feedback_drain_bound_reports_exhaustion` — replay on **both** the sync and async planes. Go is back to ✅ on merge-algebra; 449 verified marks. Commits `e9ab14d` (go) and `094c6a4` (spec), 10 README syncs, superproject `89b769c`.
+
+**The item called this a runner op gap. Two of the six were library gaps, and that is the more interesting half.**
+
+`Context.flushEffects` was an **unbounded loop**, and `AsyncContext`'s rerun chain was unbounded too. An effect writing into its own dependency cone hung the process — not hypothetically: removing the bound again makes the suite hang until the test timeout, which is the fourth mutant below. That loop closes through the **scheduler**, not the graph, so acyclicity checks never fire; and because a nested `flushEffects` returns at the re-entrancy guard, the drain runs *flat at depth 1*, so a recursion-depth bound could never fire either. Both planes now bound iterations and record a `DrainExhaustion` — iterations, budget, busiest effects — leaving the worklist as-is, because exhaustion is not convergence and discarding the pending work would make a cut-short drain indistinguishable from a finished one.
+
+`AsyncSource` also had no merge surface at all: no policy, no `Merge`. It gained both, mirroring the sync `Source`. The fold runs inside **one loop command**, so it is atomic against every other graph mutation — which is precisely why it belongs in the library and not as a `Peek`-then-`Set` at the call site. A runner-side fold would have passed these fixtures while leaving the binding without the primitive.
+
+**The runner half:** the `merge_cell` / `merge` / batch-`merges` ops, the `merges_into` and `writes_own_cone` effect flavours, and the `merges_of` / `drain_exhausted` keys. The merge counter ticks from **inside** the effect body, so it moves only when the runtime actually folds. Ticking at the call site would report the runner's intent rather than the library's behaviour — and that is the single thing these fixtures discriminate on.
+
+**Three details the corpus forced, each a real distinction I had wrong first:**
+
+- `computes_of` on an **effect** is its run count, not a compute counter. `merge_folds`'s `watch` is an effect observing the accumulator, so the compute counter reads 0 forever.
+- A feed effect's step asserts `value` on the cell it **feeds**, not on the effect — the effect has no value. The corpus names the target in `merges_into`.
+- The divergent body must hold **0 as a fixed point**. The dependency edge registers the instant the tracked read runs, so a plain `v+1` reschedules itself mid-creation and exhausts the drain before the external kick ever lands — and the fixture pins `drain_exhausted: false` at creation. Writing 0 back lets the store's equality guard suppress the invalidation; `set_cell(counter, 1)` then moves off the fixed point and it diverges.
+
+**Four mutants, and one of them is the whole argument for the feature.** Making `Merge` ignore its policy reddens the value assertions. Ticking the merge counter at construction instead of per fold reddens the counts. Making the feed effect track the accumulator — modelling the feed as a real edge *into* the merge cell — reddens `dependents_of.acc` and `dependencies_of.feed`, which is exactly what `merge_cell_acquires_no_dependency_edge.json` says is the only assertion that can catch a fourth node kind that is both writable and dependent. And removing the drain bound hangs the suite. A test that only *passes* faster with the feature would not have been evidence; a test that **hangs** without it is.
+
+`make check` green in lazily-go: 604 tests, race detector, **141 of 149 canonical fixtures opened (up from 135), 8 known-uncovered (down from 14)**, 144/144 scenarios replayed. Re-adding one merge fixture to lazily-go's own ledger reddens exactly the restored mark. CI is running on both repos (`31296523543`, `31296529788`) and is recorded pending rather than claimed.
+
+Queue: `#lzzigcanonrunner`.
 <!-- agent:boundary:139c989e:lazily -->
 <!-- /agent:exchange -->
 
@@ -379,7 +408,7 @@ Queue: `#lzgomergeops`.
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzegressrow]~~
 - ~~do [#lzcppmatreplay]~~
-- do [#lzgomergeops]
+- ~~do [#lzgomergeops]~~
 - do [#lzzigcanonrunner]
 - do [#lzregistersfixture]
 - do [#lzgdvocab]
@@ -390,7 +419,6 @@ Queue: `#lzgomergeops`.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzgomergeops] lazily-go's reactive-graph runner has no merge/fold node kind, so all five merge fixtures (merge_cell_acquires_no_dependency_edge, merge_folds_synchronously_in_batch, merge_per_settled_cone_not_per_write, merge_feed_through_a_formula_coalesces, exact_fold_paths_stay_exact) plus feedback_drain_bound_reports_exhaustion sit in reactiveGraphUnsupported — which is why Go dropped to ~ on merge-algebra. The library half exists (merge.go, relay.go implement MergePolicy); this is a runner op gap. Teach the runner the merge_cell op family and the drain_exhausted/writes_own_cone assertion keys, then delete the entries. Note memory: welding eagerness into invalidation is the known lazily-go clause-3 defect, and signal_materializes_once_per_batch is the only fixture that catches it.
 - [ ] [#lzzigcanonrunner] lazily-zig implements text_crdt.zig, seq_crdt.zig, and lossless_tree.zig with its own tests but has no canonical runner for collections CRDT or lossless-tree, so 12 fixtures sit under 'No runner at all in this binding' and Zig dropped to ~ on three CRDT rows and three lossless-tree rows. Add canonical replay for collections/{textcrdt_convergence,textcrdt_delta_sync,seqcrdt_convergence}.json and the nine lossless-tree/*.json, following the pattern that already retired this binding's eight inline mirrors in src/lazily/{collections,distributed,signaling}_conformance.zig — that retirement found three wire defects the mirrors could not see.
 - [ ] [#lzregistersfixture] The Registers row (LWW / MV + PnCounter + CellCrdt) is marked shipped in nine bindings and has NO canonical fixture anywhere in the corpus, so check-coverage-claims.mjs cannot verify a single one of those marks. seqcrdt_convergence.json exercises LWW registers only incidentally, as the substrate for move-aware sequence order, and backs the SeqCrdt row instead. Author a canonical crdt fixture pinning LWW resolution (including the equal-timestamp tiebreak), MV concurrent-value retention, PnCounter increment/decrement convergence, and the CellCrdt reactive projection; then cite it on the row.
 - [ ] [#lzgdvocab] Finish the lazily-gd conformance runner: 7 of the 21 canonical reactive-graph fixtures remain, in two op families. (a) merge_cell (5 fixtures: exact_fold_paths_stay_exact, merge_cell_acquires_no_dependency_edge, merge_feed_through_a_formula_coalesces, merge_folds_synchronously_in_batch, merge_per_settled_cone_not_per_write) — this is the one group needing KERNEL work, a folding Source with a merge policy (source_with/merge), plus the merges_of observable. (b) fanout/churn/dispose_fanout/dispose_stale_handle bulk ops plus real id recycling (2 fixtures: churn_returns_to_baseline, recycled_id_inherits_nothing) — recycling needs explicit work beyond Godot instance ids, which are monotonic and never alias. Each is named in KNOWN_UNCOVERED with its reason; removing an entry there is the definition of done for that group. Landed already: signal/dispose_signal (3), fail_next (1), shape=scenarios (1) — 14/149 replayed, 7 named excuses.

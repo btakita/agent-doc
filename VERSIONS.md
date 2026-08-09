@@ -2,6 +2,38 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.199
+
+- **Fix (`#preflightprojpass`): `realtime_doc_resolve` could not name the caller
+  that asked for the resolve, so the redundancy it exists to measure was
+  unmeasurable.**
+
+  Six emit sites in `agent-doc-document-realtime-io`. Four hardcoded
+  `source=crdt_relay` — which is what *answered* the resolve, not who asked —
+  and two omitted `source` entirely, even though the caller's `source` argument
+  was in scope at every one of them.
+
+  This is why `#preflightprojpass` was re-narrowed twice onto the same wrong
+  answer. Both narrowings read the log, saw `crdt_relay` on top, and concluded
+  the relay was the largest consumer. It is a constant: it was always going to
+  win, and it says nothing about which caller to fix. Measured 2026-08-09 after
+  0.35.195, **489 of 494** resolutions carried that constant, and the three
+  sources the item had queued up to check next (`session`,
+  `idle_watch_active_queue_head`, `serialized_atomic_write`) did not appear at
+  all — not because they are rare, but because no site could report them.
+
+  The caller's `source` is now emitted at every site, with the relay/detached/
+  disk-only fact moved to a separate `answered_by=` field so neither shadows the
+  other. Both facts are present; neither is inferred.
+
+  Coverage is two tests because one is not enough here: a runtime test resolves
+  through whichever branch its fixture takes — the first draft passed unchanged
+  when `resolve_disk_only_current_doc` was mutated back to the constant, because
+  that fixture goes through the detached branch — so
+  `no_resolve_emit_site_hardcodes_the_caller_field` checks all six sites at once
+  and is mutation-checked against both pre-fix shapes (pinned constant, and
+  omitted field).
+
 ## 0.35.198
 
 - **Fix (`#run3rdpaneswitch`): switching documents while a turn was running grew

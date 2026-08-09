@@ -5081,6 +5081,7 @@ fn resolve_closed_editor_disk_fallback_current_doc(
         file,
         &disk,
         "idle_editor_authority_fallback",
+        source,
     ))
 }
 
@@ -6335,12 +6336,13 @@ fn try_resolve_current_doc_with_disk_inner(
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
-                            "{} authority={} reason={} diverged={} file={} source=crdt_relay live_editors={} delivery_converged={} editor_open=true recovery=keep_editor_authority_no_live_replica",
+                            "{} authority={} reason={} diverged={} file={} source={} answered_by=crdt_relay live_editors={} delivery_converged={} editor_open=true recovery=keep_editor_authority_no_live_replica",
                             OpsLogEvent::RealtimeDocResolve,
                             reconciliation.authority.as_str(),
                             reconciliation.reason,
                             reconciliation.diverged,
                             file.display(),
+                            source,
                             live_editors,
                             delivery_converged,
                         ),
@@ -6372,7 +6374,7 @@ fn try_resolve_current_doc_with_disk_inner(
                         delivery_converged,
                     ),
                 );
-                return Ok(resolve_disk_only_current_doc(file, &disk, "editor_absent"));
+                return Ok(resolve_disk_only_current_doc(file, &disk, "editor_absent", source));
             }
             record_editor_relay_authority(file, source, &text);
             let reconciliation = Reconciliation {
@@ -6384,12 +6386,13 @@ fn try_resolve_current_doc_with_disk_inner(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "{} authority={} reason={} diverged={} file={} source=crdt_relay live_editors={} delivery_converged={}",
+                    "{} authority={} reason={} diverged={} file={} source={} answered_by=crdt_relay live_editors={} delivery_converged={}",
                     OpsLogEvent::RealtimeDocResolve,
                     reconciliation.authority.as_str(),
                     reconciliation.reason,
                     reconciliation.diverged,
                     file.display(),
+                    source,
                     live_editors,
                     delivery_converged,
                 ),
@@ -6407,7 +6410,7 @@ fn try_resolve_current_doc_with_disk_inner(
                 })?,
             };
             record_disk_replica_authority(file, source, &disk);
-            Ok(resolve_detached_current_doc(file, &disk))
+            Ok(resolve_detached_current_doc(file, &disk, source))
         }
         // Read-path precedence is **editor buffer, then disk** — and only those
         // two tiers (no git tier).
@@ -6539,13 +6542,14 @@ fn resolve_editor_unavailable_disk_read_fallback(
                     file,
                     &format!(
                         "{} authority={} reason={} diverged={} file={} \
-                         source=crdt_relay live_editors={} delivery_converged={} \
+                         source={} answered_by=crdt_relay live_editors={} delivery_converged={} \
                          recovery=editor_model_rebuilt",
                         OpsLogEvent::RealtimeDocResolve,
                         reconciliation.authority.as_str(),
                         reconciliation.reason,
                         reconciliation.diverged,
                         file.display(),
+                        source,
                         live_editors,
                         delivery_converged,
                     ),
@@ -6646,13 +6650,14 @@ fn resolve_editor_unavailable_disk_read_fallback(
                         file,
                         &format!(
                             "{} authority={} reason={} diverged={} file={} \
-                             source=crdt_relay live_editors={} delivery_converged={} \
+                             source={} answered_by=crdt_relay live_editors={} delivery_converged={} \
                              recovery=missing_replica_terminal_rebuild",
                             OpsLogEvent::RealtimeDocResolve,
                             reconciliation.authority.as_str(),
                             reconciliation.reason,
                             reconciliation.diverged,
                             file.display(),
+                            source,
                             live_editors,
                             delivery_converged,
                         ),
@@ -6747,23 +6752,28 @@ fn resolve_editor_unavailable_disk_read_fallback(
         ),
     );
     record_disk_replica_authority(file, source, &disk);
-    Ok(resolve_detached_current_doc(file, &disk))
+    Ok(resolve_detached_current_doc(file, &disk, source))
 }
 
 /// Resolve the detached-editor fallback path.
 ///
-fn resolve_detached_current_doc(file: &std::path::Path, disk: &str) -> Reconciliation {
+fn resolve_detached_current_doc(
+    file: &std::path::Path,
+    disk: &str,
+    source: &str,
+) -> Reconciliation {
     let buffer = durable_buffer_state(file, disk);
     let reconciliation = reconcile_current_doc(disk, buffer.as_ref());
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "{} authority={} reason={} diverged={} file={}",
+            "{} authority={} reason={} diverged={} file={} source={} answered_by=detached",
             OpsLogEvent::RealtimeDocResolve,
             reconciliation.authority.as_str(),
             reconciliation.reason,
             reconciliation.diverged,
             file.display(),
+            source,
         ),
     );
     reconciliation
@@ -6773,17 +6783,19 @@ fn resolve_disk_only_current_doc(
     file: &std::path::Path,
     disk: &str,
     reason: &'static str,
+    source: &str,
 ) -> Reconciliation {
     let reconciliation = reconcile_current_doc(disk, None);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "{} authority={} reason={} diverged={} file={}",
+            "{} authority={} reason={} diverged={} file={} source={} answered_by=disk_only",
             OpsLogEvent::RealtimeDocResolve,
             reconciliation.authority.as_str(),
             reason,
             reconciliation.diverged,
             file.display(),
+            source,
         ),
     );
     Reconciliation {
@@ -12357,6 +12369,127 @@ mod tests {
             log.contains("crdt_relay_hub_evicted")
                 && log.contains("realtime_doc_resolve authority=disk reason=editor_absent"),
             "closed-editor disk demotion should be auditable:\n{log}"
+        );
+    }
+
+    /// `#preflightprojpass`: every `realtime_doc_resolve` must name the CALLER.
+    ///
+    /// The whole point of that item is "re-measure first" — find which callers
+    /// still resolve the full document redundantly. The instrument could not
+    /// answer it: four emit sites hardcoded `source=crdt_relay` (which is what
+    /// *answered* the resolve, not who asked) and two omitted `source`
+    /// entirely, so 100% of resolutions were unattributable. The item was
+    /// re-narrowed twice off that reading and named `crdt_relay` "the largest
+    /// single source" both times — it is a constant, and it was always going to
+    /// win. Measured 2026-08-09 after 0.35.195: 489 of 494 resolutions carried
+    /// that constant, and the sources the item queued up to check next did not
+    /// appear at all.
+    #[test]
+    fn every_resolve_names_the_caller_not_just_what_answered_it() {
+        let (dir, file, _canonical) = temp_doc("<!-- agent:exchange -->\nbody\n<!-- /agent:exchange -->\n");
+        let owner = "test-resolve-attribution";
+        seed_reliable_sync_open(&file, owner);
+        test_support_register_replica_for_file(&file, owner)
+            .unwrap()
+            .expect("editor-attached replica registers");
+        assert!(test_support_deregister_replica_for_file(&file, owner).unwrap());
+        seed_reliable_sync_close(&file, owner);
+
+        let caller = "unmistakable_caller_under_test";
+        try_resolve_current_document_content(&file, caller)
+            .expect("a deregistered editor still resolves");
+
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let resolves: Vec<&str> = log
+            .lines()
+            .filter(|line| line.contains("realtime_doc_resolve authority="))
+            .collect();
+        assert!(
+            !resolves.is_empty(),
+            "the resolve must be logged at all:\n{log}"
+        );
+        for line in &resolves {
+            assert!(
+                line.contains(&format!("source={caller}")),
+                "a resolve that cannot name its caller cannot be measured: {line}"
+            );
+            assert!(
+                !line.contains("source=crdt_relay"),
+                "`crdt_relay` is what answered the resolve, not who asked — it must not \
+                 occupy the caller field: {line}"
+            );
+        }
+    }
+
+    /// The complement of the runtime test above, and the one that actually
+    /// covers the defect: SIX emit sites, one runtime path per test.
+    ///
+    /// `#preflightprojpass`: four of them hardcoded `source=crdt_relay` and two
+    /// omitted `source` altogether. A runtime test reaches whichever branch its
+    /// fixture happens to take — the first draft of the test above passed
+    /// unchanged when `resolve_disk_only_current_doc` was mutated back to the
+    /// constant, because that fixture resolves through the detached branch. A
+    /// measurement is only as good as its worst-attributed site, so the
+    /// property has to be checked across all of them at once.
+    #[test]
+    fn no_resolve_emit_site_hardcodes_the_caller_field() {
+        let source = include_str!("lib.rs");
+        // Guard the shipped emit sites only. This module asserts on the very
+        // strings it forbids, so scanning itself is how the first draft
+        // reported two findings against its own assertions.
+        let source = source
+            .split_once("\n#[cfg(test)]\nmod tests {")
+            .map(|(before, _)| before)
+            .unwrap_or(source);
+        let lines: Vec<&str> = source.lines().collect();
+        let mut checked = 0usize;
+        let mut findings = Vec::new();
+
+        for (index, line) in lines.iter().enumerate() {
+            if !line.contains("OpsLogEvent::RealtimeDocResolve,") {
+                continue;
+            }
+            // Walk back to the `format!(` that owns this argument list; the
+            // lines between are the format string literal. Bounded, so a site
+            // that does not match this shape is skipped rather than swallowing
+            // the file into one bogus finding.
+            let Some(start) = (index.saturating_sub(8)..index)
+                .rev()
+                .find(|candidate| lines[*candidate].contains("format!("))
+            else {
+                continue;
+            };
+            let literal: String = lines[start + 1..index].concat();
+            if literal.trim().is_empty() {
+                continue;
+            }
+            checked += 1;
+            if !literal.contains("source={}") {
+                findings.push(format!(
+                    "line {}: emits a resolve with no `source={{}}` caller field: {literal}",
+                    index + 1
+                ));
+            }
+            if literal.contains("source=crdt_relay") {
+                findings.push(format!(
+                    "line {}: pins the caller field to a constant: {literal}",
+                    index + 1
+                ));
+            }
+        }
+
+        assert!(
+            checked >= 4,
+            "guard found only {checked} resolve emit sites — it stopped matching the code it guards"
+        );
+        assert!(
+            findings.is_empty(),
+            "`#preflightprojpass`: every `realtime_doc_resolve` must name its CALLER in \
+             `source=`. `crdt_relay` / `detached` / `disk_only` describe what ANSWERED the \
+             resolve and belong in `answered_by=`. A site that pins `source=` to a constant \
+             makes every resolution it emits unattributable, which is how this item was \
+             re-narrowed twice onto a value that could not lose.\n\n{}",
+            findings.join("\n")
         );
     }
 

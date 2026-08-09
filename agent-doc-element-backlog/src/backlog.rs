@@ -1851,21 +1851,28 @@ fn reject_edit_shaped_id_prefix(trimmed: &str) -> Result<()> {
 /// Used by mutation-time collision enforcement (#preset-item-id-collision-enforce)
 /// so an explicit id that collides with a prompt preset or active item id is
 /// rejected before the add is written.
+/// The id a caller **asked for**, if any.
+///
+/// `#baretagidcollide`: only `id=<id>` and `[#id]` are explicit requests. A
+/// leading bare `#tag` is an *inference* the add path makes so that, for
+/// example, `[operator-verify] #someid text` keeps `#someid` instead of
+/// deriving a slug from the tag's own words. Treating that inference as an
+/// explicit request made a document-wide classification tag single-use: the
+/// first `--backlog-add "#agent-doc-bug ..."` claimed the id and every later
+/// one failed closed, even though the caller never asked for an id at all.
+/// Observed twice on `tasks/agent-doc/agent-doc-bugs2.md`.
+///
+/// The spec's rule is that auto-id adds are never blocked, so the inference now
+/// degrades to an auto id on collision (see [`inferred_bare_tag_id_if_free`])
+/// rather than failing the turn. An explicit `id=` / `[#id]` collision still
+/// fails closed — that one really is an ambiguous request.
 pub fn explicit_custom_id(item: &str) -> Option<String> {
     match parse_custom_id_prefix(item) {
-        Ok((id, _)) => {
-            if id.is_some() {
-                id
-            } else {
-                // No `id=` / `[#id]` prefix; a leading bare `#tag` is also an
-                // explicit id request (promoted at add time), so collision
-                // enforcement must see it too.
-                leading_bare_tag_id(item).map(|(id, _)| id)
-            }
-        }
+        Ok((id, _)) => id,
         Err(_) => None,
     }
 }
+
 
 #[test]
 fn add_rejects_edit_shaped_id_prefix_instead_of_swallowing_it() {
@@ -3645,10 +3652,18 @@ pub fn op_add_at_with_outcome_reserved(
 
     let mut inline_custom_id = None;
     if custom_id.is_none() {
-        if let Some((tag_id, cleaned)) = leading_bare_tag_id(&text) {
+        // `#baretagidcollide`: the bare-tag id is inferred, not requested, so an
+        // id that is already taken means "this was a classification tag, not an
+        // id" — keep it as body text and take a generated id. Failing the add
+        // here made a document-wide tag like `#agent-doc-bug` single-use.
+        if let Some((tag_id, cleaned)) =
+            leading_bare_tag_id(&text).filter(|(id, _)| !reserved.contains(&normalize_pending_id(id)))
+        {
             inline_custom_id = Some(tag_id);
             text = cleaned;
-        } else if let Some((tag_id, cleaned)) = extract_inline_tag_id(&text) {
+        } else if let Some((tag_id, cleaned)) = extract_inline_tag_id(&text)
+            .filter(|(id, _)| !reserved.contains(&normalize_pending_id(id)))
+        {
             inline_custom_id = Some(tag_id);
             text = cleaned;
         }
@@ -6132,6 +6147,97 @@ mod tests {
     /// id active in `agent:review` (or a prompt preset) used to be emitted
     /// as-is, because `taken` only covered the list being added to. The
     /// resulting two-active-meanings ambiguity blocked queue dispatch.
+    /// `#baretagidcollide`: a leading bare `#tag` is an INFERENCE, not a
+    /// request, so an already-taken tag means "this is a classification tag,
+    /// not an id" — the add takes a generated id and keeps the tag in the text.
+    ///
+    /// Treating the inference as an explicit request made a document-wide tag
+    /// single-use: the first `--backlog-add "#agent-doc-bug ..."` claimed the
+    /// id and every later one failed the whole turn closed. Observed twice on
+    /// `tasks/agent-doc/agent-doc-bugs2.md`, the second time while closing out
+    /// an unrelated item.
+    #[test]
+    fn a_taken_bare_tag_becomes_body_text_instead_of_failing_the_add() {
+        let doc = concat!(
+            "---\nprompt_presets:\n  '#agent-doc-bug': x\n---\n\n",
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n"
+        );
+        let reserved = document_reserved_identity_ids(doc);
+        assert!(reserved.contains("agent-doc-bug"), "precondition");
+
+        let text = "#agent-doc-bug plan reports an undrainable queue head";
+        // The enforcement layer must not see this as an explicit request.
+        assert_eq!(
+            explicit_custom_id(text),
+            None,
+            "an inferred bare tag is not an explicit id request"
+        );
+        assert!(
+            explicit_new_item_id_collision(doc, text).is_none(),
+            "so it must not fail closed on collision"
+        );
+
+        let outcome = op_add_with_outcome_reserved("", text, DOC_ID, false, &reserved).unwrap();
+        assert_ne!(outcome.id, "agent-doc-bug", "the taken id is not claimed");
+        assert!(
+            outcome.body.contains("#agent-doc-bug"),
+            "the tag stays in the item text: {}",
+            outcome.body
+        );
+
+        // The same holds when the tag is taken by an active BACKLOG item rather
+        // than a preset — that is the shape a second `#agent-doc-bug` add hits.
+        let doc_with_item = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#agent-doc-bug] the first tagged item\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let reserved = document_reserved_identity_ids(doc_with_item);
+        let body = "- [ ] [#agent-doc-bug] the first tagged item\n";
+        let outcome =
+            op_add_with_outcome_reserved(body, text, DOC_ID, false, &reserved).unwrap();
+        assert_ne!(outcome.id, "agent-doc-bug");
+    }
+
+    /// The inference still applies when the tag is free — this is the behavior
+    /// `leading_bare_tag_id` exists for, and the collision guard must not
+    /// disable it.
+    #[test]
+    fn a_free_bare_tag_is_still_promoted_to_the_item_id() {
+        let doc = "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n";
+        let reserved = document_reserved_identity_ids(doc);
+        let outcome = op_add_with_outcome_reserved(
+            "",
+            "[operator-verify] #panewindowdriftverify Live-pane proof",
+            DOC_ID,
+            false,
+            &reserved,
+        )
+        .unwrap();
+        assert_eq!(outcome.id, "panewindowdriftverify");
+    }
+
+    /// An EXPLICIT request keeps failing closed — `id=` / `[#id]` really is an
+    /// unambiguous ask, so a collision there is a genuine conflict.
+    #[test]
+    fn an_explicit_id_collision_still_fails_closed() {
+        let doc = concat!(
+            "---\nprompt_presets:\n  '#agent-doc-bug': x\n---\n\n",
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n"
+        );
+        for form in ["id=agent-doc-bug some text", "[#agent-doc-bug] some text"] {
+            assert_eq!(
+                explicit_custom_id(form).as_deref(),
+                Some("agent-doc-bug"),
+                "{form} is an explicit request"
+            );
+            assert!(
+                explicit_new_item_id_collision(doc, form).is_some(),
+                "{form} must still be refused"
+            );
+        }
+    }
+
     #[test]
     fn a_derived_id_dodges_ids_reserved_by_other_sources() {
         let doc = concat!(

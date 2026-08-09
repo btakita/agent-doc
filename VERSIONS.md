@@ -2,6 +2,34 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.214
+
+- **Fix (`#baretagidcollide`): a document-wide classification tag was single-use,
+  and the second use failed the whole turn closed.**
+
+  `explicit_custom_id` treated a leading bare `#tag` as an explicit id request,
+  the same as `id=<id>` and `[#id]`. It is not one — it is an *inference* the add
+  path makes so `[operator-verify] #someid text` keeps `#someid` instead of
+  deriving a slug from the tag's own words. Because the inference was enforced
+  like a request, the first `--backlog-add "#agent-doc-bug ..."` claimed the id
+  and every later one was refused by `#preset-item-id-collision-enforce`, even
+  though the caller never asked for an id at all. The spec's own rule is that
+  auto-id adds are never blocked.
+
+  An inferred id that is already active now means "this token was a
+  classification tag": the add keeps the tag in the item text and takes a
+  generated id. `extract_inline_tag_id` degrades the same way. An explicit
+  `id=` / `[#id]` collision still fails closed — that really is an ambiguous
+  request.
+
+  Found by 0.35.212's own guard, on the turn that shipped it: the rejection
+  arrived *before* the response was written and nothing was applied, which is
+  exactly the behavior `#prmergeguardpr` added. Under the previous release the
+  same input would have stranded a durable response beside unapplied mutations.
+
+  Mutation-checked: reverting the collision filter reddens
+  `a_taken_bare_tag_becomes_body_text_instead_of_failing_the_add`.
+
 ## 0.35.213
 
 - **Fix (`#preflightprojpass`): the missing projection pass was at the write

@@ -435,7 +435,8 @@ pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     backlog::ensure_new_item_explicit_id_available(&full_content, item)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
-    let outcome = backlog::op_add_with_outcome(existing, item, &doc_id, gated)?;
+    let reserved = backlog::document_reserved_identity_ids(&full_content);
+    let outcome = backlog::op_add_with_outcome_reserved(existing, item, &doc_id, gated, &reserved)?;
     let canonical = backlog::canonicalize_tracked_work_body(&outcome.body, &doc_id);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;
@@ -906,7 +907,8 @@ pub fn review_add(file: &Path, item: &str) -> Result<Option<String>> {
     let (full_content, comp) = ensure_review_component_in_document(&full_content)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
-    let outcome = backlog::op_add_with_outcome(existing, item, &doc_id, true)?;
+    let reserved = backlog::document_reserved_identity_ids(&full_content);
+    let outcome = backlog::op_add_with_outcome_reserved(existing, item, &doc_id, true, &reserved)?;
     let canonical = backlog::canonicalize_tracked_work_body(&outcome.body, &doc_id);
     let new_doc = comp.replace_content(&full_content, &canonical);
     persist_pending_write(file, &full_content, &new_doc)?;

@@ -2,6 +2,43 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.190
+
+- **Fix (`#idcollisionnamespace`): a derived item id could duplicate an id that
+  was already active in another source, and nothing suffixed it.**
+
+  `assign_unique_id` already appends a short hash when a derived id is taken —
+  but its `taken` set was built only from the list being added to, while the
+  `preset_item_id_collision` guard evaluates identity across `agent:backlog`,
+  `agent:review`, sibling tracked-work lists, and prompt presets. A slug derived
+  from an item's own words could therefore land on an id held by review or a
+  preset, and the resulting two-active-meanings ambiguity blocked queue dispatch
+  on something nothing had a chance to prevent. `explicit_new_item_id_collision`
+  even documented the assumption — "auto-id adds never collide" — which was
+  false.
+
+  The cross-source identity map that the guard uses (`document_active_identities`)
+  is now exposed as `document_reserved_identity_ids` and threaded into the add
+  path via `op_add_at_with_outcome_reserved` / `op_add_with_outcome_reserved`;
+  `backlog_cmd::add` and `review_add` pass the document's active ids. A derived
+  id that duplicates one is suffixed exactly as an in-list duplicate already was,
+  so readability is kept (`livepaneproof` -> `livepaneproof<hash>`).
+
+  Deliberately narrow: EXPLICIT ids keep their own dedicated cross-source guard
+  (`ensure_new_item_explicit_id_available`) so their fail-closed message stays
+  specific, and the existing signatures delegate with an empty reserved set, so
+  no caller changes behavior implicitly.
+
+  Coverage: `a_derived_id_dodges_ids_reserved_by_other_sources`, plus
+  `an_empty_reserved_set_reproduces_the_collision` — a sensitivity test that
+  reproduces the old id exactly, so the fix is proven to be what does the work.
+
+- **Verified (`#loopcontractseal`): the Claude Code queue auto-loop re-entry now
+  seals a cycle contract end to end.** A `ScheduleWakeup`-fired
+  `/loop agent-doc <FILE>` arrived with the `[agent-doc] cycle contract` marker
+  and a bound `queue_task_id`, on the 0.35.188 wrapper fix — live proof, where
+  0.35.188 shipped with unit-test proof only.
+
 ## 0.35.189
 
 - **Fix (`#operatorverifyliveid`): a leading `[operator-verify]` tag swallowed the

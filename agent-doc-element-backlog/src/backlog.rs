@@ -1167,6 +1167,22 @@ pub fn identity_collision_for_new_id(content: &str, candidate_id: &str) -> Optio
         .cloned()
 }
 
+/// Every id that already has an active meaning anywhere in the document —
+/// tracked-work components plus prompt presets.
+///
+/// `#idcollisionnamespace`: a DERIVED id must avoid these too. `assign_unique_id`
+/// only ever saw the one list being added to, so a slug derived from an item's
+/// own words could duplicate a review or preset id and was never suffixed. The
+/// `preset_item_id_collision` guard then blocked queue dispatch on an ambiguity
+/// nothing had a chance to prevent.
+pub fn document_reserved_identity_ids(content: &str) -> HashSet<String> {
+    document_active_identities(content)
+        .into_iter()
+        .filter(|(_, sources)| !sources.is_empty())
+        .map(|(id, _)| id)
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExplicitIdCollision {
     pub candidate_id: String,
@@ -1174,7 +1190,12 @@ pub struct ExplicitIdCollision {
 }
 
 /// Return existing active sources that a new explicit item id would collide
-/// with. Auto-id adds (no `id=<custom>` / `[#custom]` prefix) never collide.
+/// with.
+///
+/// Scope note (`#idcollisionnamespace`): this covers only EXPLICIT ids, which
+/// fail closed with a specific message. Derived ids used to be assumed
+/// collision-free, which was false — they are now suffixed against
+/// [`document_reserved_identity_ids`] on the add path instead.
 pub fn explicit_new_item_id_collision(
     full_content: &str,
     item: &str,
@@ -3377,6 +3398,18 @@ pub fn op_add_with_outcome(
     op_add_at_with_outcome(body, text, doc_id, gated, AddPosition::First)
 }
 
+/// [`op_add_with_outcome`] with ids reserved by other identity sources
+/// (`#idcollisionnamespace`).
+pub fn op_add_with_outcome_reserved(
+    body: &str,
+    text: &str,
+    doc_id: &str,
+    gated: bool,
+    reserved: &HashSet<String>,
+) -> Result<PendingAddOutcome> {
+    op_add_at_with_outcome_reserved(body, text, doc_id, gated, AddPosition::First, reserved)
+}
+
 /// Prepend multiple new tracked-work items while preserving caller order.
 ///
 /// Each single add prepends to the front, so the batch is applied in reverse and
@@ -3424,6 +3457,25 @@ pub fn op_add_at_with_outcome(
     doc_id: &str,
     gated: bool,
     position: AddPosition<'_>,
+) -> Result<PendingAddOutcome> {
+    op_add_at_with_outcome_reserved(body, text, doc_id, gated, position, &HashSet::new())
+}
+
+/// [`op_add_at_with_outcome`] with ids reserved by OTHER identity sources
+/// (`agent:review`, prompt presets, sibling tracked-work lists).
+///
+/// `#idcollisionnamespace`: a derived id is suffixed when it duplicates one of
+/// these, exactly as it already was for a duplicate within the target list.
+/// Explicit ids keep their own dedicated cross-source guard
+/// ([`ensure_new_item_explicit_id_available`]) so their error message stays
+/// specific.
+pub fn op_add_at_with_outcome_reserved(
+    body: &str,
+    text: &str,
+    doc_id: &str,
+    gated: bool,
+    position: AddPosition<'_>,
+    reserved: &HashSet<String>,
 ) -> Result<PendingAddOutcome> {
     let (custom_id, text) = parse_custom_id_prefix(text)?;
     let mut text = text.trim().to_string();
@@ -3524,7 +3576,10 @@ pub fn op_add_at_with_outcome(
         }
         inline_id
     } else {
-        assign_unique_id(&text, doc_id, &taken)
+        // Derived ids must dodge every active identity, not just this list's.
+        let mut derived_taken = taken.clone();
+        derived_taken.extend(reserved.iter().cloned());
+        assign_unique_id(&text, doc_id, &derived_taken)
     };
     taken.insert(id.clone());
 
@@ -5920,6 +5975,54 @@ mod tests {
             split_leading_state_tags("[operator-verify] rest"),
             ("[operator-verify]", "rest")
         );
+    }
+
+    /// `#idcollisionnamespace`: the live shape. A derived id that duplicates an
+    /// id active in `agent:review` (or a prompt preset) used to be emitted
+    /// as-is, because `taken` only covered the list being added to. The
+    /// resulting two-active-meanings ambiguity blocked queue dispatch.
+    #[test]
+    fn a_derived_id_dodges_ids_reserved_by_other_sources() {
+        let doc = concat!(
+            "---\nprompt_presets:\n  '#next-steps': x\n---\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#livepaneproof] Live-pane proof for the replica panic\n",
+            "<!-- /agent:review -->\n",
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n"
+        );
+        let reserved = document_reserved_identity_ids(doc);
+        assert!(reserved.contains("livepaneproof"));
+        assert!(reserved.contains("next-steps"), "presets are identities too");
+
+        let text = "Live-pane proof for stashed columns";
+        assert_eq!(
+            derive_representative_id(text).as_deref(),
+            Some("livepaneproof"),
+            "precondition: this text derives the id already held by review"
+        );
+
+        let outcome =
+            op_add_with_outcome_reserved("", text, DOC_ID, false, &reserved).unwrap();
+        assert_ne!(
+            outcome.id, "livepaneproof",
+            "a derived id must not duplicate an id active in another source"
+        );
+        assert!(outcome.id.starts_with("livepaneproof"), "readability is kept");
+    }
+
+    /// Without the reserved set the old behavior is reproduced exactly — the
+    /// guard above is doing the work, not incidental slug drift.
+    #[test]
+    fn an_empty_reserved_set_reproduces_the_collision() {
+        let outcome = op_add_with_outcome_reserved(
+            "",
+            "Live-pane proof for stashed columns",
+            DOC_ID,
+            false,
+            &HashSet::new(),
+        )
+        .unwrap();
+        assert_eq!(outcome.id, "livepaneproof");
     }
 
     fn derive_representative_id_declines_when_text_has_no_keywords() {

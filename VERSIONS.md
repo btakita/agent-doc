@@ -2,6 +2,29 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.200
+
+- **Fix (`#strandedremedydeadlock` follow-up): the new verdict claimed an author
+  it could not prove.**
+
+  0.35.197 added `OperatorEditPending` so a refusal would stop naming a command
+  that refuses. The classification was right; the *name* was not. The sites that
+  set it compare typed components — none of them can establish who authored the
+  difference, and the common non-operator case is an earlier `agent-doc write`
+  whose own commit refused, which leaves exactly the same shape.
+
+  Caught the same day it shipped, in production: a `--backlog-add-after` left
+  that drift, and the diagnostic told the session it was looking at an
+  "UNANSWERED OPERATOR EDIT" by the operator. The prescribed action was still
+  correct — run the document again, which reads the edit and commits it — but a
+  diagnostic that invents authorship is how the next investigation gets
+  misdirected, which is the exact failure this whole item was about.
+
+  Renamed to `UnansweredEditPending` / `unanswered_edit`, and the wording now
+  says what it knows: the divergence is an edit this turn's write did not
+  produce, either operator steering or an earlier refused write, and the check
+  does not guess which. The `#percellconverge` guard tracks the new phrase.
+
 ## 0.35.199
 
 - **Fix (`#preflightprojpass`): `realtime_doc_resolve` could not name the caller

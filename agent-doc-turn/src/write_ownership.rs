@@ -55,17 +55,23 @@ pub struct RetainedWriteOwnership {
     /// terminal commit is outstanding — `session-check` calls that cycle
     /// INTERRUPTED, and only `agent-doc commit` advances it.
     pub write_applied: bool,
-    /// The divergence is an operator edit to typed components this turn never
-    /// wrote — a queue strike, a backlog add — that the disk projection does
-    /// not have yet (`#strandedremedydeadlock`).
+    /// The divergence is an unanswered edit to typed components this turn's
+    /// write never produced — a queue strike, a backlog add — that the disk
+    /// projection does not have yet (`#strandedremedydeadlock`).
     ///
-    /// This is what distinguishes "the agent's write is stranded" from "the
-    /// operator typed the next prompt into the live buffer". Both look
-    /// identical to an ownership check — no cycle, no capture — but only the
-    /// first is recoverable by committing. A fresh operator edit **must not**
-    /// be committed: it is the next turn's input, and every command that
-    /// commits the session document deliberately refuses it.
-    pub unanswered_operator_edit: bool,
+    /// This is what distinguishes "the agent's write is stranded" from "an
+    /// edit is sitting in the live buffer waiting for the next cycle". Both
+    /// look identical to an ownership check — no cycle, no capture — but only
+    /// the first is recoverable by committing.
+    ///
+    /// Deliberately **not** called an *operator* edit. The sites that set this
+    /// compare components; none of them can prove who authored the difference,
+    /// and the common non-operator case is an earlier `agent-doc write` whose
+    /// own commit refused. Claiming authorship the predicate cannot establish
+    /// is how a diagnostic starts lying — observed the same day this flag
+    /// shipped, when a `--backlog-add-after` left exactly this drift and the
+    /// message called it an operator edit.
+    pub unanswered_edit: bool,
 }
 
 impl RetainedWriteOwnership {
@@ -76,7 +82,7 @@ impl RetainedWriteOwnership {
         cycle_open: false,
         retained_capture: false,
         write_applied: false,
-        unanswered_operator_edit: false,
+        unanswered_edit: false,
     };
 
     pub const fn new(cycle_open: bool, retained_capture: bool) -> Self {
@@ -84,7 +90,7 @@ impl RetainedWriteOwnership {
             cycle_open,
             retained_capture,
             write_applied: false,
-            unanswered_operator_edit: false,
+            unanswered_edit: false,
         }
     }
 
@@ -98,16 +104,16 @@ impl RetainedWriteOwnership {
             cycle_open,
             retained_capture,
             write_applied,
-            unanswered_operator_edit: false,
+            unanswered_edit: false,
         }
     }
 
-    /// Record that the diverging components are an operator edit this turn
-    /// never wrote. Only a site that has actually compared the components may
+    /// Record that the diverging components are an edit this turn's write did
+    /// not produce. Only a site that has actually compared the components may
     /// set it; the default is `false`, so a site that has not looked keeps the
     /// conservative retained-write reading.
-    pub const fn with_unanswered_operator_edit(mut self, unanswered_operator_edit: bool) -> Self {
-        self.unanswered_operator_edit = unanswered_operator_edit;
+    pub const fn with_unanswered_edit(mut self, unanswered_edit: bool) -> Self {
+        self.unanswered_edit = unanswered_edit;
         self
     }
 
@@ -119,11 +125,11 @@ impl RetainedWriteOwnership {
             RetainedWriteVerdict::AwaitingTerminalCommit
         } else if self.cycle_open || self.retained_capture {
             RetainedWriteVerdict::Deferred
-        } else if self.unanswered_operator_edit {
+        } else if self.unanswered_edit {
             // Refines the unowned case only. With a durable holder the write
-            // is genuinely deferred and the operator's edit rides along with
-            // it; it is the *unowned* shape the two readings collide on.
-            RetainedWriteVerdict::OperatorEditPending
+            // is genuinely deferred and the pending edit rides along with it;
+            // it is the *unowned* shape the two readings collide on.
+            RetainedWriteVerdict::UnansweredEditPending
         } else {
             RetainedWriteVerdict::Stranded
         }
@@ -151,14 +157,14 @@ pub enum RetainedWriteVerdict {
     /// equally wrong. `agent-doc commit` is the one command that advances it.
     AwaitingTerminalCommit,
     /// Nothing owns a write because there is no write — the divergence is an
-    /// operator edit to typed components this turn never wrote
+    /// unanswered edit to typed components this turn's write never produced
     /// (`#strandedremedydeadlock`).
     ///
     /// Indistinguishable from [`Self::Stranded`] by ownership alone, and the
-    /// opposite instruction: committing a fresh operator edit would swallow the
-    /// next turn's prompt, so every commit path refuses it on purpose.
+    /// opposite instruction: committing a fresh unanswered edit would swallow
+    /// the next turn's prompt, so every commit path refuses it on purpose.
     /// Answering it — running the document again — is what resolves it.
-    OperatorEditPending,
+    UnansweredEditPending,
 }
 
 impl RetainedWriteVerdict {
@@ -167,7 +173,7 @@ impl RetainedWriteVerdict {
             Self::Deferred => "deferred",
             Self::Stranded => "stranded",
             Self::AwaitingTerminalCommit => "awaiting_terminal_commit",
-            Self::OperatorEditPending => "operator_edit_pending",
+            Self::UnansweredEditPending => "unanswered_edit_pending",
         }
     }
 
@@ -193,7 +199,7 @@ impl RetainedWriteVerdict {
     /// recovery" guidance still governs there.
     pub const fn commit_is_the_named_recovery(self) -> bool {
         match self {
-            Self::Deferred | Self::OperatorEditPending => false,
+            Self::Deferred | Self::UnansweredEditPending => false,
             Self::Stranded | Self::AwaitingTerminalCommit => true,
         }
     }
@@ -228,15 +234,17 @@ pub fn retained_write_remedy(ownership: RetainedWriteOwnership, file: &str) -> S
              `agent-doc commit {file}`. Do NOT re-send the response (the body is already \
              durable and would duplicate), force disk, `admin recycle`, or `admin reload-lib`"
         ),
-        RetainedWriteVerdict::OperatorEditPending => format!(
+        RetainedWriteVerdict::UnansweredEditPending => format!(
             "NO write is retained — the response is already committed and the divergence is an \
-             UNANSWERED OPERATOR EDIT to typed components this turn never wrote (a queue or \
-             backlog line the live buffer has and the disk projection does not). This is normal \
-             realtime steering, not a failed closeout. Answer it: run `agent-doc {file}` to open \
-             the next cycle, which reads that edit as its prompt. Do NOT run `agent-doc commit \
-             {file}` — every commit path refuses a fresh operator edit on purpose, because \
-             committing it would swallow the next turn's prompt — and do NOT force disk, which \
-             clobbers the operator's live edits"
+             UNANSWERED DOCUMENT EDIT to typed components this turn's write never produced (a \
+             queue or backlog line the live buffer has and the disk projection does not). It is \
+             either operator steering or an earlier `agent-doc write` whose own commit refused; \
+             this check compares components and cannot tell which, so it does not guess. Either \
+             way it is not a failed closeout. Answer it: run `agent-doc {file}` to open the next \
+             cycle, which reads that edit as its prompt and commits it. Do NOT run `agent-doc \
+             commit {file}` — every commit path refuses a fresh unanswered edit on purpose, \
+             because committing it would swallow the next turn's prompt — and do NOT force disk, \
+             which clobbers the live edits"
         ),
     }
 }
@@ -357,7 +365,7 @@ mod tests {
             RetainedWriteVerdict::Deferred,
             RetainedWriteVerdict::Stranded,
             RetainedWriteVerdict::AwaitingTerminalCommit,
-            RetainedWriteVerdict::OperatorEditPending,
+            RetainedWriteVerdict::UnansweredEditPending,
         ] {
             let ownership = match verdict {
                 RetainedWriteVerdict::Deferred => RetainedWriteOwnership::new(true, false),
@@ -365,8 +373,8 @@ mod tests {
                 RetainedWriteVerdict::AwaitingTerminalCommit => {
                     RetainedWriteOwnership::new_with_phase(true, true, true)
                 }
-                RetainedWriteVerdict::OperatorEditPending => {
-                    RetainedWriteOwnership::UNOWNED.with_unanswered_operator_edit(true)
+                RetainedWriteVerdict::UnansweredEditPending => {
+                    RetainedWriteOwnership::UNOWNED.with_unanswered_edit(true)
                 }
             };
             assert_eq!(ownership.verdict(), verdict, "fixture builds {verdict:?}");

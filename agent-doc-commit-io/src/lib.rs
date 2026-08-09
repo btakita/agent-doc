@@ -1810,9 +1810,9 @@ where
     // the state that named it, and an agent obeying faithfully had no move.
     //
     // Two commands, one state, two predicates. The verdict owns it now: this
-    // site proves the diverging components are an operator edit the turn never
-    // wrote and hands that fact to the shared predicate, which resolves to
-    // `OperatorEditPending` and stops naming `commit` as the recovery. The
+    // site proves the diverging components are an edit the turn's write never
+    // produced and hands that fact to the shared predicate, which resolves to
+    // `UnansweredEditPending` and stops naming `commit` as the recovery. The
     // refusal then quotes that same remedy, so both commands say the one
     // actionable thing — answer the edit by running the document again.
     if snapshot_matches_head
@@ -1826,8 +1826,11 @@ where
         )
         // Proven, not assumed: we are inside the branch that just compared the
         // components, and the exchange — where a response would live — is
-        // converged. Whatever diverges is not this turn's write.
-        .with_unanswered_operator_edit(true);
+        // converged. Whatever diverges is not this turn's write. It is NOT
+        // necessarily the operator's either — an earlier `agent-doc write`
+        // whose commit refused leaves the same shape — so the verdict names the
+        // edit, not an author it cannot prove.
+        .with_unanswered_edit(true);
         let verdict = ownership.verdict();
         // The one verdict whose remedy names THIS command. `write_applied` means
         // the binary's own response write already landed and only the terminal

@@ -36,10 +36,10 @@ const VERDICT_PHRASES: [&str; 4] = [
     // lost nor self-completing, and its phrase needs the same protection or a
     // site will eventually re-author it into a fourth dialect.
     "ALREADY LANDED",
-    // `#strandedremedydeadlock`: the fourth. An unanswered operator edit looks
+    // `#strandedremedydeadlock`: the fourth. An unanswered document edit looks
     // exactly like a stranded write to an ownership check and takes the
     // opposite instruction, so its wording needs the same single owner.
-    "UNANSWERED OPERATOR EDIT",
+    "UNANSWERED DOCUMENT EDIT",
 ];
 
 /// The file allowed to author them.

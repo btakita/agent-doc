@@ -2391,7 +2391,7 @@ Duplicate replay should stay live.
     /// the whole response committed in HEAD and the tree clean.
     ///
     /// So the refusal must never send the agent to a command that refuses: it
-    /// resolves to `OperatorEditPending` and quotes that remedy, which names
+    /// resolves to `UnansweredEditPending` and quotes that remedy, which names
     /// `agent-doc <FILE>` — answering the edit is what clears it.
     #[test]
     fn commit_refuses_an_operator_edit_without_naming_itself_as_the_recovery() {
@@ -2409,7 +2409,7 @@ Duplicate replay should stay live.
         let err = commit(&doc).expect_err("a fresh operator edit must still fail closed");
         let err = format!("{err:#}");
         assert!(
-            err.contains("UNANSWERED OPERATOR EDIT"),
+            err.contains("UNANSWERED DOCUMENT EDIT"),
             "the refusal must classify the drift, not just decline: {err}"
         );
         assert!(
@@ -2428,7 +2428,7 @@ Duplicate replay should stay live.
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("commit_blocked_unproved_head_current_component_drift")
-                && log.contains("verdict=operator_edit_pending"),
+                && log.contains("verdict=unanswered_edit_pending"),
             "the refusal must record the verdict that decided it:\n{log}"
         );
 

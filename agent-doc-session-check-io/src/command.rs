@@ -990,7 +990,7 @@ fn run_with_options_inner(
         // where a response lives, so an exchange-clean divergence in
         // queue/backlog/status is by construction not this turn's write. Prove
         // it and let the shared predicate resolve the verdict.
-        let ownership = ownership.with_unanswered_operator_edit(
+        let ownership = ownership.with_unanswered_edit(
             agent_doc_git::has_blocking_non_exchange_component_drift(
                 &disk_content,
                 &authority_content,
@@ -1005,7 +1005,7 @@ fn run_with_options_inner(
             }
             agent_doc_turn::write_ownership::RetainedWriteVerdict::Stranded
             | agent_doc_turn::write_ownership::RetainedWriteVerdict::AwaitingTerminalCommit
-            | agent_doc_turn::write_ownership::RetainedWriteVerdict::OperatorEditPending => {
+            | agent_doc_turn::write_ownership::RetainedWriteVerdict::UnansweredEditPending => {
                 agent_doc_turn::write_ownership::retained_write_remedy(
                     ownership,
                     &file.display().to_string(),

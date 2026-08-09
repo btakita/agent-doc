@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 87960267-ff0f-44d2-9d11-f9d8f65433a2
+resume: ac88e56e-1d2c-4e03-8c13-f2ed2a8850d1
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -1087,12 +1087,43 @@ Two things worth flagging:
 - The superproject commit picked up one file that is not mine: `runbooks/code-navigation.md`, a one-line `tsift:code-navigation-runbook v=0.1.78 → v=0.1.80` marker bump written by tsift. `git commit --only -- runbooks` takes the whole directory, so unstaging it did not keep it out. Content is correct; I left it rather than rewriting the commit.
 
 `src/session-share` carries its own stale copies of these runbooks. Different repo, left alone.
+### Re: `do [#clearsubmitunobserved]` — opus-5
+
+Fixed in 0.35.225 — and the hypothesis I filed last cycle was half wrong, which turned out to be the useful part.
+
+**Wrong half.** I guessed the delivery baseline might be captured after the clear wiped the pane. It is not: `send_clear_to_pane` captures `pre_delivery_capture_hash` on the line before the send. That code is correct.
+
+**Right half, sharpened.** `poll_context_clear_submit_acceptance` can only observe a **transition** — it accepts when it catches the command in the composer at some poll, or sees the capture hash differ from the pre-delivery hash. But `/clear` is **idempotent**: its contract is a state ("this pane holds no conversation"), not a transition. A cold-started pane has nothing to clear, so a successful clear changes nothing on screen, and a fast submit slips between polls. Both signals are absent for a clear that did exactly what was asked.
+
+That explains the shape of your report precisely: the failure came immediately after `escalating to a cold-start`, not at random. The pane was seconds old. There was nothing to clear, so nothing changed, so the code called it unknown.
+
+**The fix.** Before reporting the unknown, the timeout path now asks the state question directly — capture the pane *including scrollback* (`capture_pane_history`, new in `agent-doc-tmux-commands`/`agent-doc-tmux-io`) and accept as `AcceptedClearedState` only when `context_clear_history_proves_cleared_state` holds: the command is not in the active composer, a dispatch-ready prompt is present, and at most 200 non-blank lines are retained.
+
+The threshold works because the two populations are orders of magnitude apart — a cleared pane carries a banner and a prompt, tens of lines; a pane holding a conversation carries hundreds to thousands.
+
+**Why this cannot weaken the guard.** A clear that was genuinely lost leaves its conversation in scrollback, far over the threshold, so it stays blocked. So do a composer still holding the command, a capture failure, and a pane with no settled prompt — every ambiguous shape fails closed, and each has a test. The only outcome that changes is the one where the desired end state demonstrably already holds.
+
+One trap worth naming: `ContextClearSubmitStatus` now has two accepting variants, so callers gate on `is_accepted()`. A caller still writing `== Accepted` would silently keep failing closed — which is the same class of bug as the one being fixed.
+
+`ops.log` gets `session_clear_submit_cleared_state_probe ... result=cleared_state_proven|conversation_retained retained_lines=N`, so the decision is auditable rather than inferred.
+
+### Re: side note — `#planhead` confirmed in the wild — opus-5
+
+This turn's `agent-doc plan` named `do [#clearsubmitunobserved]`, matching preflight's `selected_queue_prompts` exactly. Last cycle they disagreed. The fix holds.
+
+### Re: verification — opus-5
+
+`make check` green: **8861 passed, 249 skipped** (4 new). 0.35.225 installed, committed, tagged `v0.35.225`, pushed; superproject pointer pushed; harness surfaces refreshed (again by hand — `#skillinstallstalemirror` is still open); `admin recycle` requested. CI: `0.35.224` and `0.35.225` both in progress at closeout — recorded, not waited on.
+
+Gated one `[operator-verify]` follow-up, `#clearsubmitunobservedverify`: the unit tests pin the predicate against synthetic captures, but only a live pane exercises the tmux scrollback capture and the real harness prompt shapes. Re-run the exact sequence you hit — supervisor dead, Run Agent Doc, cold start, clear — and it should now succeed with `result=cleared_state_proven` in `ops.log`.
+
+Exchange is at 1055 lines / 50 sections; queue is active, so I am not stopping to compact.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#clearsubmitunobserved]
+- 🚧 do [#clearsubmitunobserved]
 - do [#skillinstallstalemirror]
 - ~~do [#planhead]~~
 - do [#operatorverifylive]
@@ -1110,8 +1141,9 @@ Two things worth flagging:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [/] [#clearsubmitunobservedverify] [operator-verify] Live re-proof for #clearsubmitunobserved (0.35.225): reproduce the reported haiven-dev.md sequence — let the supervisor go dead (or `session restart-supervisor`), then Run Agent Doc so the flow cold-starts a replacement and immediately runs Clear Session Context on the fresh pane. Expect it to SUCCEED instead of failing with `result=submission_unobserved ... unblocker=clear_submission_unobserved`, and expect `session_clear_submit_cleared_state_probe ... result=cleared_state_proven retained_lines=<small>` in ops.log. Then the half that must not regress: on a pane holding a real conversation, break submission (e.g. leave the composer wedged) and confirm the clear still fails closed with `result=conversation_retained`. Unit tests pin the predicate against synthetic captures; only a live pane exercises the tmux scrollback capture and the real harness prompt shapes.
 - [ ] [#caswriteracechurn] #agent-doc-bug The `compare_and_swap_raced` settle-wait is recurring across concurrent sessions, not a one-off. Operator-reported on sdk.md 2026-08-09 ("Same CAS-race path as last cycle — the write landed; finishing with commit"), and the SAME cycle on agent-doc-bugs2.md hit it twice in one closeout: `[write] Waiting for typing/CRDT versions to settle ... (reason=compare_and_swap_raced, elapsed=9945ms)` then again at 4694ms, inside a 32.7s closeout (commit_authority 14.9s, session_check 16.7s). Outcome is correct every time — the write lands and the cycle commits — so this is latency/churn, not loss. Worth measuring before fixing: instrument how often a closeout takes the CAS-race branch and what the contending writer is (concurrent supervisor idle-watch? replica propagation? another session on the same state.db?). If the contention is self-inflicted (agent-doc writing the same cell twice per closeout), the fix is to collapse the writes; if it is genuine cross-session contention on a shared project root, the settle wait is doing its job and the item is a metric, not a bug. Do not "fix" it by shortening the wait -- the wait is what makes the write land.
-- [ ] [#clearsubmitunobserved] #agent-doc-bug Operator-reported 2026-08-09 on haiven-dev.md: Run Agent Doc escalated to a cold start (`supervisor for tasks/haiven-dev.md is dead or unreachable`), the replacement was proven live on pid 3854486, and then the `/clear` failed closed with `result=submission_unobserved command_visible=false ... unblocker=clear_submission_unobserved`. Root-cause hypothesis to verify first: `agent-doc-turn-executor-tmux/src/context_clear.rs::context_clear_submit_poll_status` only returns `Accepted` when it either saw the command text in the composer at some poll or saw `content_changed_since_delivery`. A Claude Code `/clear` that succeeds WIPES the pane, so a fast clear that completes before the first poll leaves no visible command AND (if the delivery baseline was captured after the wipe) no observed change -- success is then indistinguishable from never-submitted, which is exactly the `Unobserved` report. Fix direction: add a positive post-state predicate (a cleared Claude Code pane has a recognisable fresh-session shape) as acceptance evidence independent of change detection, and verify the delivery baseline is captured strictly before the send. Add SimWorld coverage for fast-clear-before-first-poll.
+- [x] 🚧 [#clearsubmitunobserved] #agent-doc-bug Operator-reported 2026-08-09 on haiven-dev.md: Run Agent Doc escalated to a cold start (`supervisor for tasks/haiven-dev.md is dead or unreachable`), the replacement was proven live on pid 3854486, and then the `/clear` failed closed with `result=submission_unobserved command_visible=false ... unblocker=clear_submission_unobserved`. Root-cause hypothesis to verify first: `agent-doc-turn-executor-tmux/src/context_clear.rs::context_clear_submit_poll_status` only returns `Accepted` when it either saw the command text in the composer at some poll or saw `content_changed_since_delivery`. A Claude Code `/clear` that succeeds WIPES the pane, so a fast clear that completes before the first poll leaves no visible command AND (if the delivery baseline was captured after the wipe) no observed change -- success is then indistinguishable from never-submitted, which is exactly the `Unobserved` report. Fix direction: add a positive post-state predicate (a cleared Claude Code pane has a recognisable fresh-session shape) as acceptance evidence independent of change detection, and verify the delivery baseline is captured strictly before the send. Add SimWorld coverage for fast-clear-before-first-poll.
 - [ ] [#skillinstallstalemirror] #agent-doc-bug `agent-doc skill install` silently skips a content refresh, and two mirror directories are unmanaged. (a) `make release-version` stamps the new version into the INSTALLED skill copies, so the subsequent `skill install --all` sees a matching version and reports `already up to date` without rewriting runbook content -- 0.35.224 shipped with `.claude/.codex/.opencode/.cursor` runbooks still carrying the retired `--baseline-file` command until they were force-refreshed by hand (reset the version marker, reinstall). The version marker is the wrong freshness key; use a content hash, or have release-version stop touching installed copies. (b) The superproject `runbooks/` and `.codex/runbooks/` mirrors are not written by `skill install` at all and had drifted SEVERAL versions behind (they still described `agent-doc finalize` as the normal path and titled files `Pending ops` / `Streaming Checkpoints`); they were hand-synced from the bundle this cycle. Decide whether `.codex/runbooks/` is a retired surface `skill install` should migrate/remove, and make `runbooks/` a managed target. `audit-docs` reported `No blocking issues found` against all of this, so its staleness check does not compare runbook content to the bundle.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.

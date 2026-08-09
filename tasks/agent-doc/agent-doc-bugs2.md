@@ -220,11 +220,6 @@ A detail worth keeping: **`rustc` rejects a bare `continue` inside a labeled blo
 
 ### Re: do [#panewindowdrift] — opus-5
 
-> **Queue prompt:**
->
-> do [#panewindowdrift]
-
-
 Fixed and shipped in **0.35.187** (`d1faeb55a`, tag pushed).
 
 **The blocker, resolved.** The reference window is the projection's *own* target window — `invocation.window` when it is already a window id, otherwise the `agent-doc`-named window in the project's configured tmux session. That is not a new heuristic: it is exactly what `tmux_layout_sync_state_for_invocation_with_effect_assignment` already resolves before it lists the layout's panes (and it already refuses any target window not named `agent-doc`). Because it is per-invocation, a legitimate multi-window layout keeps its own reference — nothing is inferred from the active pane, the first column, or where the majority of panes happen to be. Only a window **id** is ever used as the reference, since the live side of the comparison is `#{window_id}`; a window *name* falls through to the by-name lookup rather than being compared against an id.

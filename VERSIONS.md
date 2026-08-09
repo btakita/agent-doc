@@ -2,6 +2,25 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.223
+
+- **Fix (`#failfastproxyload`): two fail-fast tests asserted a flat 1s wall clock
+  and went red on a loaded CI runner.**
+
+  `serialized_atomic_write_defers_zero_replica_editor_owner_without_touching_disk`
+  turned the 0.35.220 CI run red while taking 0.02s locally, and the change under
+  test does not touch that path.
+
+  The assertion is a *proxy* for "did not enter the bounded editor-delivery
+  wait", and the thing it distinguishes against is
+  `VISIBLE_WRITE_CURRENT_TRANSITION_TIMEOUT_MS` — 5 seconds. One second left only
+  5x headroom, which CI scheduling noise consumes. The bound is now derived from
+  that stall threshold (half of it) rather than hardcoded, so the test still
+  fails on a genuine stall — which costs 5s or more — without failing on load.
+
+  Not waived as flaky: the fragility is real and lives in the proxy, so the proxy
+  is what changed. Same class as 0.35.215's `clear_op_capture` budget.
+
 ## 0.35.222
 
 - **Fix (`#mutprovenancepreresponse`): closeout provenance was recorded after the

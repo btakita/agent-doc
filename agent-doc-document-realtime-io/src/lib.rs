@@ -5244,6 +5244,23 @@ fn record_editor_relay_authority(file: &std::path::Path, source: &str, text: &st
 
 const VISIBLE_WRITE_CURRENT_TRANSITION_TIMEOUT_MS: u64 = 5_000;
 
+/// Upper bound for "this path failed fast rather than stalling the turn".
+///
+/// `#failfastproxyload`: the fail-fast tests asserted a flat 1s. That is a
+/// *proxy* for "did not enter the bounded editor-delivery wait", and the thing
+/// it distinguishes against is
+/// [`VISIBLE_WRITE_CURRENT_TRANSITION_TIMEOUT_MS`] — 5s. One second leaves only
+/// 5x headroom, which a loaded CI runner eats: 0.35.220 went red on
+/// `serialized_atomic_write_defers_zero_replica_editor_owner_without_touching_disk`
+/// while the same test took 0.02s locally, and the change under test does not
+/// touch that path.
+///
+/// Derived from the stall threshold instead of hardcoded, so the assertion stays
+/// meaningful (a genuine stall is >= 5s) without failing on scheduler noise.
+#[cfg(test)]
+const FAIL_FAST_BUDGET: std::time::Duration =
+    std::time::Duration::from_millis(VISIBLE_WRITE_CURRENT_TRANSITION_TIMEOUT_MS / 2);
+
 /// Max re-merge attempts when reconciling the visible-write guard with a
 /// foreign disk write that landed after the merge was computed
 /// (#ipc-drift-visbuf-reconcile). After this many drifting re-reads, fall back
@@ -9080,7 +9097,7 @@ mod tests {
         let started = std::time::Instant::now();
         let err = atomic_write_through_authority(&file, target).unwrap_err();
         assert!(
-            started.elapsed() < std::time::Duration::from_secs(1),
+            started.elapsed() < FAIL_FAST_BUDGET,
             "zero-replica authority must fail fast instead of stalling the turn"
         );
         let message = format!("{err:#}");

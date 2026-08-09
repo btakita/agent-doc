@@ -2,6 +2,44 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.225
+
+- **Fix (`#clearsubmitunobserved`): a `/clear` that succeeded was reported as an
+  unknown, blocking Run Agent Doc.**
+
+  Operator-reported on `haiven-dev.md`: the supervisor was dead, the flow
+  escalated to a cold start, the replacement was proven live — and then
+  `session_clear` failed closed with `result=submission_unobserved
+  command_visible=false`, "whether the clear ran is unknown".
+
+  `poll_context_clear_submit_acceptance` can only observe a **transition**: it
+  accepts when it sees the command in the composer at some poll, or sees the
+  pane content change against the pre-delivery hash. But `/clear` is
+  **idempotent** — its contract is a state ("this pane holds no conversation"),
+  not a transition. A cold-started pane has nothing to clear, so a successful
+  clear changes nothing, and a fast submit can slip between polls. Both signals
+  are then absent for a clear that did exactly what was asked. That is why the
+  failure showed up immediately after a cold start rather than at random.
+
+  (The pre-delivery baseline is captured strictly before the send — that half of
+  the original report's hypothesis was wrong, and the code is correct there.)
+
+  Before reporting the unknown, the timeout path now asks the state question
+  directly: capture the pane **including scrollback**
+  (`agent_doc_tmux_io::capture_pane_history`) and accept as
+  `AcceptedClearedState` only when the pane holds no conversation
+  (`context_clear_history_proves_cleared_state`: command not in the active
+  composer, a dispatch-ready prompt present, at most
+  `CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES` retained lines).
+
+  This cannot weaken the guard. A clear that was genuinely lost leaves its
+  conversation in scrollback — orders of magnitude over the threshold — so it
+  stays blocked, as do a composer still holding the command, a capture failure,
+  and a pane with no settled prompt. The only outcome that changes is the one
+  where the desired end state demonstrably already holds. Callers gate on
+  `ContextClearSubmitStatus::is_accepted()`; a caller still writing
+  `== Accepted` would silently keep failing closed.
+
 ## 0.35.224
 
 - **Fix (`#respondbaselineflag`): the MANDATORY persist step documented a flag

@@ -16,6 +16,7 @@ use std::process::{Command, Output};
 
 use agent_doc_tmux_commands::{
     TmuxCommand, TmuxSubmitProfile, capture_pane as capture_pane_command,
+    capture_pane_history as capture_pane_history_command,
     capture_pane_with_ansi as capture_pane_with_ansi_command, display_message,
     display_notification, inherit_window_size as inherit_window_size_command,
     kill_pane as kill_pane_command, kill_window as kill_window_command,
@@ -467,6 +468,18 @@ pub fn capture_pane_with_ansi(
     target: &str,
 ) -> Result<String, TmuxIoError> {
     runner.run(&capture_pane_with_ansi_command(target))
+}
+
+/// Capture the pane INCLUDING its scrollback history.
+///
+/// `#clearsubmitunobserved`: retained scrollback is the positive evidence that a
+/// context clear did NOT run. The visible-screen capture cannot supply it,
+/// because a successful clear on an already-empty pane changes nothing.
+pub fn capture_pane_history(
+    runner: &(impl TmuxCommandRunner + ?Sized),
+    target: &str,
+) -> Result<String, TmuxIoError> {
+    runner.run(&capture_pane_history_command(target))
 }
 
 pub fn run_command(

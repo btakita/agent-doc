@@ -22,7 +22,9 @@ use agent_doc_turn_executor_tmux::context_clear::{
     busy_clear_deferred_message, busy_clear_refusal_message,
     context_clear_command_visible_in_active_input, context_clear_submit_blocked_line,
     context_clear_submit_blocked_message, context_clear_submit_can_enter_resubmit,
-    context_clear_submit_observation_line, context_clear_submit_poll_status,
+    CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+    context_clear_history_proves_cleared_state, context_clear_submit_observation_line,
+    context_clear_submit_poll_status,
     context_clear_submit_resubmit_proof_line, interrupt_clear_timeout_message,
     operator_interrupt_key_plan, operator_interrupt_step_delay, protected_clear_refusal_message,
     terminal_editor_command,
@@ -2216,6 +2218,59 @@ fn clear_direct_submit_max_enter_resubmits() -> usize {
     clear_direct_submit_max_enter_resubmits_from_env_value(value.as_deref())
 }
 
+/// (`#clearsubmitunobserved`) Resolve an unobserved clear against the pane's
+/// scrollback instead of reporting an unknown.
+///
+/// Returns [`ContextClearSubmitStatus::AcceptedClearedState`] only when the
+/// capture succeeds AND proves the pane holds no conversation. Every other
+/// path — capture error, retained scrollback, no settled prompt — keeps the
+/// original `Unobserved` verdict, so this can only ever turn a false block into
+/// a pass, never a real failure into a pass.
+fn upgrade_unobserved_clear_from_pane_history(
+    tmux: &Tmux,
+    pane: &str,
+    file: &Path,
+    harness: &str,
+    command: &str,
+    phase: &str,
+) -> ContextClearSubmitStatus {
+    let harness_config = agent_doc_harness::HarnessConfig::from_agent_name(harness);
+    let history = match agent_doc_tmux_io::capture_pane_history(tmux, pane) {
+        Ok(history) => history,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "session_clear_submit_cleared_state_probe file={} pane={pane} harness={harness} phase={phase} result=capture_failed error={err}",
+                    file.display()
+                ),
+            );
+            return ContextClearSubmitStatus::Unobserved;
+        }
+    };
+    let proven = context_clear_history_proves_cleared_state(
+        &history,
+        command,
+        CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+        |line| harness_config.is_dispatch_ready_prompt_line(line),
+    );
+    let retained_lines = history.lines().filter(|line| !line.trim().is_empty()).count();
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "session_clear_submit_cleared_state_probe file={} pane={pane} harness={harness} phase={phase} result={} retained_lines={retained_lines} max_lines={}",
+            file.display(),
+            if proven { "cleared_state_proven" } else { "conversation_retained" },
+            CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES
+        ),
+    );
+    if proven {
+        ContextClearSubmitStatus::AcceptedClearedState
+    } else {
+        ContextClearSubmitStatus::Unobserved
+    }
+}
+
 fn poll_context_clear_submit_acceptance(
     tmux: &Tmux,
     pane: &str,
@@ -2292,6 +2347,17 @@ fn poll_context_clear_submit_acceptance(
     } else {
         (ContextClearSubmitStatus::Unobserved, false)
     };
+    // `#clearsubmitunobserved`: the loop above can only observe a transition, and
+    // a clear that succeeds on a pane with nothing to clear produces none — the
+    // normal case right after a cold start, which is where this was reported.
+    // Before reporting the unknown, ask the state question the operator would:
+    // does the pane still hold a conversation? Retained scrollback keeps it
+    // blocked; an empty pane means the desired end state holds either way.
+    let status = if status == ContextClearSubmitStatus::Unobserved {
+        upgrade_unobserved_clear_from_pane_history(tmux, pane, file, harness, command, phase)
+    } else {
+        status
+    };
     let observation = ContextClearSubmitObservation {
         status,
         elapsed,
@@ -2340,7 +2406,7 @@ fn require_context_clear_submit_accepted(
     phase: &str,
     observation: ContextClearSubmitObservation,
 ) -> Result<()> {
-    if observation.status == ContextClearSubmitStatus::Accepted {
+    if observation.status.is_accepted() {
         return Ok(());
     }
     let line = context_clear_submit_blocked_line(

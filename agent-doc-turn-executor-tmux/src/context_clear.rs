@@ -22,6 +22,10 @@ use std::time::Duration;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ContextClearSubmitStatus {
     Accepted,
+    /// (`#clearsubmitunobserved`) No transition was observed, but the pane's
+    /// scrollback proves it holds no conversation — the cleared state that
+    /// `/clear` exists to produce. See [`Self::is_accepted`].
+    AcceptedClearedState,
     StillVisible,
     Unobserved,
     CaptureFailed,
@@ -31,10 +35,17 @@ impl ContextClearSubmitStatus {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Accepted => "accepted",
+            Self::AcceptedClearedState => "accepted_cleared_state",
             Self::StillVisible => "command_still_visible",
             Self::Unobserved => "submission_unobserved",
             Self::CaptureFailed => "capture_failed",
         }
+    }
+
+    /// Whether this outcome satisfies the clear. Callers must use this rather
+    /// than `== Accepted`, or the state-proven variant silently fails closed.
+    pub const fn is_accepted(self) -> bool {
+        matches!(self, Self::Accepted | Self::AcceptedClearedState)
     }
 
     pub const fn issue(self) -> Option<&'static str> {
@@ -42,7 +53,7 @@ impl ContextClearSubmitStatus {
             Self::StillVisible => Some("prompt_not_submitted"),
             Self::Unobserved => Some("submit_unobserved"),
             Self::CaptureFailed => Some("submit_unverified_capture_failed"),
-            Self::Accepted => None,
+            Self::Accepted | Self::AcceptedClearedState => None,
         }
     }
 
@@ -54,7 +65,7 @@ impl ContextClearSubmitStatus {
             Self::StillVisible => "clear_command_not_consumed",
             Self::Unobserved => "clear_submission_unobserved",
             Self::CaptureFailed => "clear_submit_capture_failed",
-            Self::Accepted => "none",
+            Self::Accepted | Self::AcceptedClearedState => "none",
         }
     }
 
@@ -62,9 +73,60 @@ impl ContextClearSubmitStatus {
         match self {
             Self::StillVisible => "restore_idle_prompt_and_retry",
             Self::Unobserved | Self::CaptureFailed => "verify_pane_state_then_retry",
-            Self::Accepted => "none",
+            Self::Accepted | Self::AcceptedClearedState => "none",
         }
     }
+}
+
+/// Scrollback lines a pane may retain and still count as cleared.
+///
+/// A cleared Claude Code / Codex / OpenCode pane shows a banner, a few hint
+/// lines, and the prompt — tens of lines. A pane holding a real conversation
+/// carries hundreds to thousands. The threshold sits far above the first and far
+/// below the second on purpose: it must never call a pane with retained context
+/// "cleared", and a generous margin costs nothing because the two populations are
+/// orders of magnitude apart.
+pub const CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES: usize = 200;
+
+/// (`#clearsubmitunobserved`) Does the pane's scrollback prove it is in the
+/// cleared state?
+///
+/// `/clear` is **idempotent**: its contract is a state ("this pane holds no
+/// conversation"), not a transition. The poll loop can only observe transitions,
+/// so when a clear succeeds on a pane that had nothing to clear — the normal case
+/// immediately after a cold start — it sees no command in the composer and no
+/// content change, and reports `Unobserved` for a clear that did exactly what was
+/// asked. Asking the state question directly resolves it.
+///
+/// This never weakens the guard. A pane whose clear was genuinely lost still
+/// holds its conversation, so its scrollback is far over the threshold and it
+/// stays blocked. The only outcome this changes is the one where the desired end
+/// state demonstrably already holds.
+///
+/// Fails closed on the ambiguous inputs: a composer still showing the command is
+/// an unconsumed draft regardless of scrollback, and a capture with no
+/// dispatch-ready prompt line is not a settled pane.
+pub fn context_clear_history_proves_cleared_state(
+    history: &str,
+    command: &str,
+    max_history_lines: usize,
+    is_dispatch_ready_prompt_line: impl Fn(&str) -> bool + Copy,
+) -> bool {
+    if context_clear_command_visible_in_active_input(history, command, is_dispatch_ready_prompt_line)
+    {
+        return false;
+    }
+    let retained: Vec<String> = history
+        .lines()
+        .map(crate::prompt::strip_ansi)
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    if retained.len() > max_history_lines {
+        return false;
+    }
+    retained
+        .iter()
+        .any(|line| is_dispatch_ready_prompt_line(line.trim()))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -200,6 +262,7 @@ pub fn context_clear_submit_resubmit_proof_line(
 ) -> String {
     let result = match observation.status {
         ContextClearSubmitStatus::Accepted => "accepted",
+        ContextClearSubmitStatus::AcceptedClearedState => "accepted_cleared_state",
         ContextClearSubmitStatus::StillVisible => "still_visible",
         ContextClearSubmitStatus::Unobserved => "unobserved",
         ContextClearSubmitStatus::CaptureFailed => "capture_failed",
@@ -638,6 +701,80 @@ mod tests {
                 max_attempts: 2,
             }
         ));
+    }
+
+    /// `#clearsubmitunobserved`: the reported failure. A cold-started pane has
+    /// nothing to clear, so a successful `/clear` changes nothing and the poll
+    /// loop reports `Unobserved` for a clear that did exactly what was asked.
+    #[test]
+    fn cleared_pane_history_proves_the_cleared_state_without_an_observed_transition() {
+        let is_ready = |line: &str| line.starts_with('>');
+        let fresh_pane = "\
+Welcome to Claude Code
+
+  /help for help
+
+> \
+";
+        assert!(
+            context_clear_history_proves_cleared_state(fresh_pane, "/clear", 200, is_ready),
+            "a pane holding no conversation is already in the cleared state"
+        );
+    }
+
+    /// The half that must never regress: a clear that was genuinely lost leaves
+    /// the conversation in scrollback, so the pane stays blocked.
+    #[test]
+    fn retained_conversation_history_keeps_an_unobserved_clear_blocked() {
+        let is_ready = |line: &str| line.starts_with('>');
+        let mut busy_pane = String::from("Welcome to Claude Code\n");
+        for turn in 0..300 {
+            busy_pane.push_str(&format!("> question {turn}\nassistant answer {turn}\n"));
+        }
+        busy_pane.push_str("> ");
+        assert!(
+            !context_clear_history_proves_cleared_state(&busy_pane, "/clear", 200, is_ready),
+            "retained conversation must never read as cleared"
+        );
+    }
+
+    /// Both ambiguous shapes stay closed: an unconsumed command in the composer
+    /// is a draft regardless of scrollback, and a capture with no settled prompt
+    /// is not a settled pane.
+    #[test]
+    fn ambiguous_pane_shapes_never_prove_the_cleared_state() {
+        let is_ready = |line: &str| line.trim() == ">";
+        let unconsumed = "Welcome to Claude Code\n> /clear";
+        assert!(
+            !context_clear_history_proves_cleared_state(unconsumed, "/clear", 200, is_ready),
+            "a composer still holding the command is an unconsumed draft"
+        );
+        let no_prompt = "Welcome to Claude Code\nstarting up...";
+        assert!(
+            !context_clear_history_proves_cleared_state(no_prompt, "/clear", 200, is_ready),
+            "a pane with no dispatch-ready prompt is not settled"
+        );
+    }
+
+    /// The state-proven variant must satisfy the gate. Callers compare through
+    /// `is_accepted()`; a caller that wrote `== Accepted` would silently keep
+    /// failing closed.
+    #[test]
+    fn cleared_state_acceptance_reports_as_accepted_with_no_issue() {
+        assert!(ContextClearSubmitStatus::AcceptedClearedState.is_accepted());
+        assert!(ContextClearSubmitStatus::Accepted.is_accepted());
+        assert!(!ContextClearSubmitStatus::Unobserved.is_accepted());
+        assert!(!ContextClearSubmitStatus::StillVisible.is_accepted());
+        assert!(!ContextClearSubmitStatus::CaptureFailed.is_accepted());
+        assert_eq!(
+            ContextClearSubmitStatus::AcceptedClearedState.as_str(),
+            "accepted_cleared_state"
+        );
+        assert_eq!(ContextClearSubmitStatus::AcceptedClearedState.issue(), None);
+        assert_eq!(
+            ContextClearSubmitStatus::AcceptedClearedState.unblocker(),
+            "none"
+        );
     }
 
     #[test]

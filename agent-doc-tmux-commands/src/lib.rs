@@ -133,6 +133,17 @@ pub fn capture_pane_with_ansi(target: &str) -> TmuxCommand {
     TmuxCommand::new(["capture-pane", "-t", target, "-p", "-e"])
 }
 
+/// Capture the pane INCLUDING its full scrollback history (`-S -`).
+///
+/// The visible-screen capture answers "what does the pane look like now"; this
+/// answers "does the pane still hold a conversation". `#clearsubmitunobserved`
+/// needs the second question: a `/clear` that succeeds on a pane with nothing to
+/// clear leaves the visible screen byte-identical, so change detection cannot
+/// prove it ran, while retained scrollback proves it did not.
+pub fn capture_pane_history(target: &str) -> TmuxCommand {
+    TmuxCommand::new(["capture-pane", "-p", "-S", "-", "-t", target])
+}
+
 pub fn send_keys_literal(target: &str, text: &str) -> TmuxCommand {
     TmuxCommand::new(["send-keys", "-t", target, "-l", text])
 }

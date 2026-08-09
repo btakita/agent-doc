@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: e472c94f-4338-40bd-b060-e5fbf3df2df1
+resume: a1e06037-6323-4759-b308-1abe00763a2d
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -346,6 +346,31 @@ All three are "implemented, but not this wire" — which is what `~` is for, per
 `make check` green in lazily-spec: 279 schema tests, Lean build, all nine guards. `AGENTS.md` carries another session's uncommitted edits in lazily-spec and stayed uncommitted — every commit was `git commit --only -- <paths>`.
 
 Queue: `#lzcppmatreplay`.
+
+### Re: do [#lzcppmatreplay] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzcppmatreplay]
+
+
+C++ is back to ✅ on all three materialization rows. `lazily-cpp` now replays `observational_transparency.json` and `deferral_not_deallocation.json` from the canonical bytes in **all three shells**, the two `KNOWN_UNCOVERED` entries are gone, and the claim guard verifies 448 shipped marks across 55 rows. Commits `d889f8e` (cpp) and `2e01b4e` (spec, CI green 31294673470), 10 sibling README syncs, superproject at `f9e29f2c09`.
+
+**Three shells, not one, because that is what the rows claim.** The item asked for byte replay; the fixture-level guard would have accepted a single-threaded runner and restored all three marks, since it resolves fixtures per binding and cannot see the shell axis — the limitation I flagged one cycle ago. So the replay lives once in `tests/test_materialization_replay.hpp`, parameterised over the map shell, and `Context` / `ThreadSafeContext` / `AsyncContext` each replay the same bytes. They cannot share a binary: the two threaded shells force the `-pthread` wasm tier, so the core-tier runner stays single-threaded and the shells get their own target — the split `test_collections_fixture` / `_family` already uses for exactly this reason.
+
+**The six mirrors are retired.** `entry_kind`'s mirrors stay, since that fixture was already byte-replayed and they are ordinary unit tests over synthetic input. Every expectation now reaches an `AssertionKeys` tracker, so a key the corpus grows fails by name — the mirrors could not fail that way at all, carrying no reference to the block. Proven: adding an `eager_present_count` key to the fixture reddens with "present in the fixture but was never consumed by this runner."
+
+**My first `default_mode` assertion was vacuous, and the perturbation is what caught it.** I branched on the fixture's own value and then asserted the present-set that branch implies — which tests the `if`, not the library. Flipping the corpus to `"lazy"` left the suite green while five other perturbations reddened. It now follows the Rust reference: the named mode **selects the build**, and the asserted fact is that a map built that way is fully materialized at build time. Flipping the key reddens both binaries. Writing the probe before I thought I needed it is the only reason this is not shipped.
+
+**Six fixture perturbations and two library mutants.** Dropped `eager_present` key, altered `present_after_each_read`, a longer `reads` sequence, a wrong `observe` value, an unread new key, a flipped `default_mode` — all red. Then `materialize_all` skipping a key in both the sync and thread-safe maps — both red. The fixture probes ran against a scratch corpus under `LAZILY_SPEC_CONFORMANCE_DIR`, not the shared one, since eight other bindings read those bytes.
+
+**One thing the wasm work from two cycles ago paid for immediately.** The new runner reached for `<lazily/lazily.hpp>` out of habit and the wasm build rejected it — the umbrella drags in `transport.hpp` and `reliable_sync.hpp`, whose guards refuse wasm32. That is the same habit that made six runners native-only in `#lzcppwasm`, and it failed at compile time instead of quietly becoming a native-only target. `make wasm` green on both tiers: **89 core + 46 threaded** distinct fixtures, up from 87 + 44.
+
+**A cross-binding gap this turned up, filed rather than folded in.** `default_mode` gets **five different treatments** across nine bindings. Rust and C# assert the behaviour the mode implies. Python, Kotlin and JS **excuse** the key as "no mode flag to read back" — a reason C++ and C# disprove, since neither has a mode flag either. Dart and Zig compare it against the string literal `"eager"`, which is the exact vacuity my own first draft had. Go deserializes it into a struct field. Filed as `#lzdefaultmodeuniform`.
+
+`make check` green in lazily-cpp: 58 tests, **137 canonical fixtures across 23 areas, 5 known-uncovered — down from 7**, and 144 of 144 declared scenarios replayed. Re-adding one entry to lazily-cpp's own ledger reddens exactly the three restored marks. lazily-cpp CI (`31294667985`) is still running — the wasm job downloads emsdk — so it is recorded as pending, not claimed.
+
+Queue: `#lzgomergeops`.
 <!-- agent:boundary:139c989e:lazily -->
 <!-- /agent:exchange -->
 
@@ -353,23 +378,24 @@ Queue: `#lzcppmatreplay`.
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzegressrow]~~
-- do [#lzcppmatreplay]
+- ~~do [#lzcppmatreplay]~~
 - do [#lzgomergeops]
 - do [#lzzigcanonrunner]
 - do [#lzregistersfixture]
 - do [#lzgdvocab]
 - do [#lzboundaryingressrow]
+- do [#lzdefaultmodeuniform]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcppmatreplay] lazily-cpp replays only 1 of 3 canonical materialization fixtures from the corpus bytes; observational_transparency.json and deferral_not_deallocation.json are transcribed BY HAND into tests/test_reactive_family.cpp and its async/thread-safe siblings, which is why C++ dropped to ~ on all three materialization rows. A mirror transcribed from the implementation cannot catch a divergence between the implementation and the corpus — the same failure retiring lazily-zig's eight inline mirrors turned up three real wire defects. Replay both from conformance/materialization/, delete the two KNOWN_UNCOVERED entries, and restore the marks.
 - [ ] [#lzgomergeops] lazily-go's reactive-graph runner has no merge/fold node kind, so all five merge fixtures (merge_cell_acquires_no_dependency_edge, merge_folds_synchronously_in_batch, merge_per_settled_cone_not_per_write, merge_feed_through_a_formula_coalesces, exact_fold_paths_stay_exact) plus feedback_drain_bound_reports_exhaustion sit in reactiveGraphUnsupported — which is why Go dropped to ~ on merge-algebra. The library half exists (merge.go, relay.go implement MergePolicy); this is a runner op gap. Teach the runner the merge_cell op family and the drain_exhausted/writes_own_cone assertion keys, then delete the entries. Note memory: welding eagerness into invalidation is the known lazily-go clause-3 defect, and signal_materializes_once_per_batch is the only fixture that catches it.
 - [ ] [#lzzigcanonrunner] lazily-zig implements text_crdt.zig, seq_crdt.zig, and lossless_tree.zig with its own tests but has no canonical runner for collections CRDT or lossless-tree, so 12 fixtures sit under 'No runner at all in this binding' and Zig dropped to ~ on three CRDT rows and three lossless-tree rows. Add canonical replay for collections/{textcrdt_convergence,textcrdt_delta_sync,seqcrdt_convergence}.json and the nine lossless-tree/*.json, following the pattern that already retired this binding's eight inline mirrors in src/lazily/{collections,distributed,signaling}_conformance.zig — that retirement found three wire defects the mirrors could not see.
 - [ ] [#lzregistersfixture] The Registers row (LWW / MV + PnCounter + CellCrdt) is marked shipped in nine bindings and has NO canonical fixture anywhere in the corpus, so check-coverage-claims.mjs cannot verify a single one of those marks. seqcrdt_convergence.json exercises LWW registers only incidentally, as the substrate for move-aware sequence order, and backs the SeqCrdt row instead. Author a canonical crdt fixture pinning LWW resolution (including the equal-timestamp tiebreak), MV concurrent-value retention, PnCounter increment/decrement convergence, and the CellCrdt reactive projection; then cite it on the row.
 - [ ] [#lzgdvocab] Finish the lazily-gd conformance runner: 7 of the 21 canonical reactive-graph fixtures remain, in two op families. (a) merge_cell (5 fixtures: exact_fold_paths_stay_exact, merge_cell_acquires_no_dependency_edge, merge_feed_through_a_formula_coalesces, merge_folds_synchronously_in_batch, merge_per_settled_cone_not_per_write) — this is the one group needing KERNEL work, a folding Source with a merge policy (source_with/merge), plus the merges_of observable. (b) fanout/churn/dispose_fanout/dispose_stale_handle bulk ops plus real id recycling (2 fixtures: churn_returns_to_baseline, recycled_id_inherits_nothing) — recycling needs explicit work beyond Godot instance ids, which are monotonic and never alias. Each is named in KNOWN_UNCOVERED with its reason; removing an entry there is the definition of done for that group. Landed already: signal/dispose_signal (3), fail_next (1), shape=scenarios (1) — 14/149 replayed, 7 named excuses.
 - [ ] [#lzboundaryingressrow] conformance/ingress/boundary_ingress_adapter.json declares "model": "BoundaryIngressAdapter" — a distinct model from IngressCell, with its own bootstrap/subscribe/cursor phases — and NINE bindings replay it (lazily-rs tests/boundary_ingress_conformance.rs, py, kt, js, dart, zig, go, cpp, cs) against NO coverage.json row at all. Same gap class as #lzegressrow: a canonical fixture nine bindings replay scores nothing, so nine real implementations get no credit and any future regression in the adapter moves no cell. It must not be cited on the reactive-ingress rows — that would claim IngressCell conformance from an adapter fixture, the misattribution refused for RelayCell/egress in #lzcoveragerowfixtures. Add a BoundaryIngressAdapter row (family ingress, or its own), cite the fixture, and score the nine bindings from their own ledgers.
+- [ ] [#lzdefaultmodeuniform] The materialization corpus's default_mode key gets FIVE different treatments across nine bindings, so the default_mode_eager clause is not uniformly proved. Rust (tests/materialization_conformance.rs) and C# (MaterializationConformanceTests.cs) assert the BEHAVIOUR the named mode implies — the mode selects the build, and a map built that way must be fully materialized at build time — and lazily-cpp now does the same via tests/test_materialization_replay.hpp. Python (_excuse_default_mode in tests/test_reactive_family.py), Kotlin and JS EXCUSE the key as 'no mode flag to read back', a reason C++ and C# disprove since neither has a mode flag either. Dart (materialization_conformance_test.dart) and Zig (reactive_map.zig) compare it against the string literal 'eager', which asserts only that the fixture equals itself (#lzconsumednotasserted). Go deserializes it into a DefaultMode struct field. Converge all nine on the behavioural assertion and delete the three excuses; a corpus that flips default_mode must redden every binding, which today it does not.
 <!-- /agent:backlog -->
 
 ## Review

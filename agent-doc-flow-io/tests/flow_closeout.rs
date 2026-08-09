@@ -389,6 +389,83 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), visible);
     }
 
+    /// `#terminalproofphaseregress`: cycle phase is monotone, so a terminal
+    /// proof re-read that lands BELOW what the same closeout already proved is
+    /// a lagging replica — `reconstruct_cycle_state` falls back to the phase
+    /// baked into the last `turn_intent_checkpoint` whenever the closeout
+    /// projection is absent or names another cycle. Observed 2026-08-08 on
+    /// `tasks/agent-doc/agent-doc-bugs2.md` shortly after an `admin recycle`:
+    /// the document commit landed, then the proof read `response_captured` and
+    /// failed the closeout, leaving a committed cycle for the operator to
+    /// hand-repair.
+    #[test]
+    fn terminal_proof_repairs_a_phase_read_that_regressed_below_its_own_commit_proof() {
+        let committed = concat!(
+            "---\nagent_doc_format: template\nsession: test\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: phase regression — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, doc) = setup_git_project_with_doc(committed);
+        let state =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed))
+                .unwrap();
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: phase regression — gpt-5\n\nDone.\n",
+            "<!-- /patch:exchange -->",
+        );
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+
+        // The document is committed in git, but the cycle phase reads back
+        // below `Committed` — exactly the sample the failing closeout saw.
+        let read_back = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+            .unwrap()
+            .expect("cycle state");
+        assert_ne!(read_back.phase, agent_doc_turn::CyclePhase::Committed);
+
+        // Without a prior proof (preflight, any first-time caller) the strict
+        // fail-closed guard is unchanged.
+        let err = agent_doc_flow_io::closeout::record_terminal_closeout_proof(
+            &doc,
+            true,
+            &agent_doc_closeout_runtime_io::closeout_effects(),
+            agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions::default(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("terminal proof cannot record closeout"),
+            "an unproven cycle must still fail closed: {err}"
+        );
+
+        // With this closeout's own commit proof, the lagging read is repaired
+        // instead of failing a closeout whose commit already succeeded.
+        agent_doc_flow_io::closeout::record_terminal_closeout_proof(
+            &doc,
+            true,
+            &agent_doc_closeout_runtime_io::closeout_effects(),
+            agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions {
+                force_disk: false,
+                proven_committed_cycle: Some(state.cycle_id.clone()),
+            },
+        )
+        .expect("a phase read below this closeout's own commit proof must not fail the closeout");
+
+        let repaired = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+            .unwrap()
+            .expect("cycle state");
+        assert_eq!(repaired.cycle_id, state.cycle_id);
+        assert_eq!(repaired.phase, agent_doc_turn::CyclePhase::Committed);
+        assert!(
+            agent_doc_cycle_state_io::load_latest_terminal_closeout_proof(&doc)
+                .unwrap()
+                .is_some(),
+            "the repaired closeout must record its terminal proof"
+        );
+    }
+
     #[test]
     fn complete_required_closeout_records_terminal_proof_after_abandoned_preflight_cycle() {
         // An interrupted/stale preflight may be force-closed as `abandoned` by the

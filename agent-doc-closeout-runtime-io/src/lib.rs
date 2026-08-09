@@ -1057,7 +1057,10 @@ pub fn complete_required_closeout(file: &Path, force_disk: bool) -> Result<bool>
         agent_doc_flow_io::closeout::complete_required_closeout_with_options(
             file,
             &closeout_effects(),
-            agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions { force_disk },
+            agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions {
+                force_disk,
+                proven_committed_cycle: None,
+            },
         )
     })
 }

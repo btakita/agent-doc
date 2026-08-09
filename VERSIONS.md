@@ -2,6 +2,31 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.185
+
+- **Fix (`#terminalproofphaseregress`): a closeout that had already committed
+  failed at the terminal proof because the phase read back regressed.**
+
+  Cycle phase is monotone (`resolve_closeout_phase`), but the terminal proof
+  re-reads cycle state and that read can land *below* what the same closeout
+  already proved. `reconstruct_cycle_state` decodes the last
+  `turn_intent_checkpoint` and rebases the closeout projection over it only when
+  the projection matches the cycle, so an absent or non-matching projection
+  leaves the phase baked into that older checkpoint. Observed 2026-08-08 on
+  `tasks/agent-doc/agent-doc-bugs2.md` minutes after an `admin recycle`:
+  `ensure_cycle_committed` passed, the document commit landed (`89f255b0e2`),
+  and `record_terminal_closeout_proof` then read `response_captured` and failed
+  the closeout — leaving an operator to hand-repair with `write --commit` a
+  cycle whose commit had already succeeded.
+
+  `ensure_cycle_committed` now returns the cycle id it proved, and
+  `CompleteRequiredCloseoutOptions::proven_committed_cycle` carries it into the
+  terminal proof. A sub-`Committed` read naming that same cycle is a lagging
+  replica: the proof logs
+  `terminal_proof_phase_regressed_after_commit_proof`, repairs the phase through
+  `mark_committed`, and continues. Callers with no prior proof (preflight, any
+  first-time caller) keep the strict fail-closed guard unchanged.
+
 ## 0.35.184
 
 - **Fix (`#dedupepresettle`): a repair write reported success before its

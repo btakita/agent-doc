@@ -86,9 +86,29 @@ pub trait CloseoutEffects {
     ) -> Result<agent_doc_cycle_state_io::CycleState>;
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CompleteRequiredCloseoutOptions {
     pub force_disk: bool,
+    /// `#terminalproofphaseregress`: the cycle id this closeout already proved
+    /// `Committed` via [`ensure_cycle_committed`].
+    ///
+    /// The terminal proof re-reads cycle state, and that read can come back
+    /// *behind* what closeout already proved: `reconstruct_cycle_state` decodes
+    /// the last `turn_intent_checkpoint` and rebases the closeout projection
+    /// over it only when the projection matches the cycle, so an absent or
+    /// non-matching projection leaves the phase baked into that older
+    /// checkpoint. Observed 2026-08-08 on `tasks/agent-doc/agent-doc-bugs2.md`
+    /// minutes after an `admin recycle`: `ensure_cycle_committed` passed, the
+    /// document commit landed, and the terminal proof then read
+    /// `response_captured` and failed the closeout — leaving the operator to
+    /// hand-repair a cycle whose commit had already succeeded.
+    ///
+    /// A phase is monotone (`resolve_closeout_phase`), so a lower re-read is a
+    /// lagging replica, never a real regression. When it names the same cycle
+    /// this closeout proved, the proof repairs the phase and continues instead
+    /// of failing. `None` (preflight and any caller with no prior proof) keeps
+    /// the strict fail-closed guard.
+    pub proven_committed_cycle: Option<String>,
 }
 
 pub fn log_closeout_guard_event(
@@ -188,7 +208,7 @@ pub fn complete_required_closeout_with_options(
     rc.invalidate_head_content();
     rc.invalidate_snapshot_content();
     timer.mark("record_committed_baseline");
-    ensure_cycle_committed(file)?;
+    let mut proven_committed_cycle = Some(ensure_cycle_committed(file)?);
     timer.mark("cycle_state");
 
     // `#exit75-done-reap-not-atomic`: reap any `[x]` tracked items the response
@@ -235,7 +255,7 @@ pub fn complete_required_closeout_with_options(
         rc.invalidate_head_content();
         rc.invalidate_snapshot_content();
         timer.mark("git_commit_retry_parent_pointer");
-        ensure_cycle_committed(file)?;
+        proven_committed_cycle = Some(ensure_cycle_committed(file)?);
         timer.mark("cycle_state_retry_parent_pointer");
     }
     if let Some(drift) = agent_doc_git_io::submodule::submodule_pointer_drift(file)? {
@@ -281,7 +301,15 @@ pub fn complete_required_closeout_with_options(
             cycle_mark: "cycle_state_retry_terminal_snapshot",
         },
     )?;
-    record_terminal_closeout_proof(file, did_commit, effects, options)?;
+    record_terminal_closeout_proof(
+        file,
+        did_commit,
+        effects,
+        CompleteRequiredCloseoutOptions {
+            proven_committed_cycle,
+            ..options
+        },
+    )?;
     timer.mark("terminal_proof");
     timer.finish();
     Ok(did_commit)
@@ -503,7 +531,9 @@ fn capture_state_label(state: agent_doc_workflow::capture::CaptureState) -> &'st
     }
 }
 
-fn ensure_cycle_committed(file: &Path) -> Result<()> {
+/// Returns the cycle id proven closed, so the terminal proof can tell a lagging
+/// re-read apart from a genuinely open cycle (`#terminalproofphaseregress`).
+fn ensure_cycle_committed(file: &Path) -> Result<String> {
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         log_closeout_guard_event(
             file,
@@ -527,7 +557,7 @@ fn ensure_cycle_committed(file: &Path) -> Result<()> {
             state.last_event
         );
     }
-    Ok(())
+    Ok(state.cycle_id)
 }
 
 struct RetrySnapshotHeadDriftOptions<'a> {
@@ -589,12 +619,41 @@ pub fn record_terminal_closeout_proof(
             file.display()
         );
     };
+    let mut state = state;
     if state.phase != agent_doc_turn::CyclePhase::Committed {
-        anyhow::bail!(
-            "terminal proof cannot record closeout for {}: cycle `{}` is `{}`",
+        // `#terminalproofphaseregress`: a phase is monotone, so a re-read below
+        // what this same closeout already proved is a lagging replica — not a
+        // regression to fail on. Repair it and continue; without the proof
+        // (preflight, any first-time caller) the strict guard still applies.
+        if options.proven_committed_cycle.as_deref() != Some(state.cycle_id.as_str()) {
+            anyhow::bail!(
+                "terminal proof cannot record closeout for {}: cycle `{}` is `{}`",
+                file.display(),
+                state.cycle_id,
+                state.phase.as_str()
+            );
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "terminal_proof_phase_regressed_after_commit_proof file={} cycle={} read_phase={} recovery=repair_committed_phase",
+                file.display(),
+                state.cycle_id,
+                state.phase.as_str(),
+            ),
+        );
+        state = agent_doc_cycle_state_io::mark_committed(
+            &canonical,
+            "terminal_proof_phase_repair",
+            None,
+            None,
+        )?;
+        anyhow::ensure!(
+            state.phase == agent_doc_turn::CyclePhase::Committed,
+            "terminal proof could not repair the regressed phase for {}: cycle `{}` is `{}`",
             file.display(),
             state.cycle_id,
-            state.phase.as_str()
+            state.phase.as_str(),
         );
     }
     let current_doc = effects.resolve_current_document_for_authority(

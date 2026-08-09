@@ -2,6 +2,45 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.209
+
+- **Fix (`#hookcontractlost`): a slow preflight still went silent — the harness
+  killed the `UserPromptSubmit` hook at 30s and discarded its output.**
+
+  Operator-reported 2026-08-09 on `tasks/software/lazily.md`:
+
+  ```
+  UserPromptSubmit hook timed out after 30s — output discarded.
+  ```
+
+  0.35.207 made preflight *name* its refusals on stdout, but a killed hook emits
+  nothing at all, so this reproduced the original silence exactly: no contract,
+  no reason, and no way for the agent to tell a slow hook from an unwired one.
+
+  Measured on that document: preflight takes **23-34s** at **~10% CPU** — almost
+  entirely blocked on controller round trips, not compute (`#preflightprojpass`
+  tracks the redundancy itself). Claude Code's default hook timeout is 30s, so
+  admission sat directly on the cliff and failed intermittently.
+
+  Two bounds now, an outer and an inner. The installed Claude hook entry carries
+  an explicit `timeout` (`PREFLIGHT_HOOK_TIMEOUT_SECS`, 120s), written on a fresh
+  install *and repaired onto an already-installed entry* — the checkouts that
+  need it most are the ones already wired without it. Inside that, the hook runs
+  preflight against its own `HOOK_ADMISSION_BUDGET_SECS` (90s, overridable with
+  `AGENT_DOC_PREFLIGHT_HOOK_BUDGET_SECS`) and converts an overrun into the normal
+  `ADMISSION_FAILURE_MARKER` refusal naming the budget and where to look. A test
+  pins `timeout > budget`: if they crossed, the harness would kill the hook
+  before it could name its overrun and the silence would return.
+
+  Ordering stays safe by construction — `CONTRACT_MARKER` is printed only after
+  preflight returns, so a worker finishing mid-report can emit a truncated
+  contract but never the seal, and the agent's three-state read still lands on
+  "admission failed".
+
+  Worth recording from the fix: a preflight against a **brand-new empty
+  document** also blew the 90s budget, which rules out document size as the
+  driver and points at project-controller bootstrap.
+
 ## 0.35.208
 
 - **Fix (`#backlogclosemarkeroffbyone`): `backlog remove` / `icebox remove`

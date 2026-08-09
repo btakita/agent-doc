@@ -1048,12 +1048,14 @@ fn merge_codex_hooks_json(path: &Path) -> Result<()> {
         "UserPromptSubmit",
         CODEX_USER_PROMPT_COMMAND,
         Some("Preparing agent-doc cycle"),
+        None,
     );
     ensure_codex_hook_command(
         hooks_map,
         "Stop",
         CODEX_STOP_COMMAND,
         Some("Checking agent-doc completion boundary"),
+        None,
     );
 
     let rendered = serde_json::to_string_pretty(&root)?;
@@ -1073,6 +1075,26 @@ const COINED_ID_PRETOOLUSE_COMMAND: &str = "agent-doc hook coined-id-pre-tool-us
 /// only a bare `agent-doc <FILE>` first line and no-ops on everything else, so
 /// it cannot perturb an ordinary prompt.
 const PREFLIGHT_USER_PROMPT_COMMAND: &str = "agent-doc hook preflight-user-prompt-submit";
+
+/// `timeout` written onto the installed Claude `UserPromptSubmit` preflight hook.
+///
+/// Claude Code defaults an untimed hook to 30s and **discards its output** on
+/// expiry. Preflight measured 23-34s on an 87KB session document (2026-08-09),
+/// so the default sat right on the cliff: a slow admission produced no contract
+/// and no reason, which is indistinguishable from an unwired hook
+/// (`#hookcontractlost`). This is deliberately well above the observed worst case
+/// and above [`crate::preflight_hook::HOOK_ADMISSION_BUDGET_SECS`], so the binary
+/// always gets to name its own overrun before the harness kills it silently.
+pub(crate) const PREFLIGHT_HOOK_TIMEOUT_SECS: u64 = 120;
+
+/// The harness timeout is the outer bound and the binary's own budget the inner
+/// one. If they ever crossed, the harness would kill the hook before it could
+/// name its overrun and the silence both exist to prevent would return — so this
+/// is a compile-time invariant rather than a test.
+const _: () = assert!(
+    PREFLIGHT_HOOK_TIMEOUT_SECS > crate::preflight_hook::HOOK_ADMISSION_BUDGET_SECS,
+    "the installed hook timeout must exceed the binary's admission budget"
+);
 
 const TURN_STATUS_ACTIVE_COMMAND: &str = "agent-doc turn-status active";
 const TURN_STATUS_IDLE_COMMAND: &str = "agent-doc turn-status idle";
@@ -1220,8 +1242,9 @@ fn merge_codex_turn_status_hooks(path: &Path) -> Result<()> {
         "UserPromptSubmit",
         TURN_STATUS_ACTIVE_COMMAND,
         None,
+        None,
     );
-    ensure_codex_hook_command(hooks_map, "Stop", TURN_STATUS_IDLE_COMMAND, None);
+    ensure_codex_hook_command(hooks_map, "Stop", TURN_STATUS_IDLE_COMMAND, None, None);
     let rendered = serde_json::to_string_pretty(&root)?;
     std::fs::write(path, rendered).with_context(|| format!("write {}", path.display()))?;
     Ok(())
@@ -1259,12 +1282,19 @@ fn merge_claude_turn_status_hooks(path: &Path) -> Result<()> {
         "UserPromptSubmit",
         TURN_STATUS_ACTIVE_COMMAND,
         None,
+        None,
     );
-    ensure_codex_hook_command(hooks_map, "Stop", TURN_STATUS_IDLE_COMMAND, None);
-    ensure_codex_hook_command(hooks_map, "SessionStart", TURN_STATUS_IDLE_COMMAND, None);
+    ensure_codex_hook_command(hooks_map, "Stop", TURN_STATUS_IDLE_COMMAND, None, None);
+    ensure_codex_hook_command(hooks_map, "SessionStart", TURN_STATUS_IDLE_COMMAND, None, None);
     // No matcher: the handler filters by tool name itself and allows everything
     // it does not recognize, so the guard cannot wedge a turn on an unknown tool.
-    ensure_codex_hook_command(hooks_map, "PreToolUse", COINED_ID_PRETOOLUSE_COMMAND, None);
+    ensure_codex_hook_command(
+        hooks_map,
+        "PreToolUse",
+        COINED_ID_PRETOOLUSE_COMMAND,
+        None,
+        None,
+    );
     // `#preflightinbinary`: run preflight in-binary on the trigger prompt so the
     // cycle contract arrives with the prompt rather than a round trip later.
     ensure_codex_hook_command(
@@ -1272,6 +1302,7 @@ fn merge_claude_turn_status_hooks(path: &Path) -> Result<()> {
         "UserPromptSubmit",
         PREFLIGHT_USER_PROMPT_COMMAND,
         None,
+        Some(PREFLIGHT_HOOK_TIMEOUT_SECS),
     );
 
     let rendered = serde_json::to_string_pretty(&root)?;
@@ -1284,13 +1315,14 @@ fn ensure_codex_hook_command(
     event: &str,
     command: &str,
     status_message: Option<&str>,
+    timeout_secs: Option<u64>,
 ) {
     let entries = hooks_map
         .entry(event.to_string())
         .or_insert_with(|| serde_json::json!([]));
     let Some(entry_array) = entries.as_array_mut() else {
         *entries = serde_json::json!([]);
-        return ensure_codex_hook_command(hooks_map, event, command, status_message);
+        return ensure_codex_hook_command(hooks_map, event, command, status_message, timeout_secs);
     };
 
     let already_present = entry_array.iter_mut().any(|entry| {
@@ -1301,10 +1333,16 @@ fn ensure_codex_hook_command(
                 hooks.iter_mut().any(|hook| {
                     let matches = hook.get("type").and_then(|v| v.as_str()) == Some("command")
                         && hook.get("command").and_then(|v| v.as_str()) == Some(command);
-                    if matches
-                        && let (Some(status), Some(hook)) = (status_message, hook.as_object_mut())
-                    {
-                        hook.insert("statusMessage".to_string(), serde_json::json!(status));
+                    if matches && let Some(hook) = hook.as_object_mut() {
+                        if let Some(status) = status_message {
+                            hook.insert("statusMessage".to_string(), serde_json::json!(status));
+                        }
+                        // Repair an already-installed entry too, not just a fresh
+                        // write: the checkouts that need the timeout most are the
+                        // ones whose hook is already wired without it.
+                        if let Some(timeout) = timeout_secs {
+                            hook.insert("timeout".to_string(), serde_json::json!(timeout));
+                        }
                     }
                     matches
                 })
@@ -1320,6 +1358,9 @@ fn ensure_codex_hook_command(
     hook.insert("command".to_string(), serde_json::json!(command));
     if let Some(status) = status_message {
         hook.insert("statusMessage".to_string(), serde_json::json!(status));
+    }
+    if let Some(timeout) = timeout_secs {
+        hook.insert("timeout".to_string(), serde_json::json!(timeout));
     }
     entry_array.push(serde_json::json!({ "hooks": [hook] }));
 }
@@ -1461,6 +1502,77 @@ pub fn check() -> Result<()> {
 mod tests {
     use super::*;
     use agent_kit::detect::Environment;
+
+    fn preflight_hook_entry(settings: &serde_json::Value) -> &serde_json::Value {
+        settings["hooks"]["UserPromptSubmit"]
+            .as_array()
+            .expect("UserPromptSubmit entries")
+            .iter()
+            .flat_map(|entry| entry["hooks"].as_array().expect("hooks array"))
+            .find(|hook| hook["command"] == serde_json::json!(PREFLIGHT_USER_PROMPT_COMMAND))
+            .expect("preflight hook entry")
+    }
+
+    /// `#hookcontractlost`: an untimed Claude hook defaults to 30s and discards
+    /// its output on expiry, which is exactly the silent no-contract state the
+    /// admission-failure marker exists to remove. Preflight measured 23-34s on a
+    /// large document, so the entry must carry its own timeout.
+    #[test]
+    fn installed_preflight_hook_carries_an_explicit_timeout() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let settings = tmp.path().join("settings.json");
+
+        merge_claude_turn_status_hooks(&settings).unwrap();
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        assert_eq!(
+            preflight_hook_entry(&parsed)["timeout"],
+            serde_json::json!(PREFLIGHT_HOOK_TIMEOUT_SECS)
+        );
+    }
+
+    /// The checkouts that need the timeout most are the ones already wired
+    /// without it, so the merge must repair an existing entry rather than only
+    /// writing a fresh one.
+    #[test]
+    fn preflight_hook_timeout_is_repaired_on_an_already_installed_entry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let settings = tmp.path().join("settings.json");
+        std::fs::write(
+            &settings,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "hooks": {
+                    "UserPromptSubmit": [
+                        { "hooks": [ { "type": "command", "command": PREFLIGHT_USER_PROMPT_COMMAND } ] }
+                    ]
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        merge_claude_turn_status_hooks(&settings).unwrap();
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        assert_eq!(
+            preflight_hook_entry(&parsed)["timeout"],
+            serde_json::json!(PREFLIGHT_HOOK_TIMEOUT_SECS)
+        );
+        assert_eq!(
+            parsed["hooks"]["UserPromptSubmit"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|entry| entry["hooks"].as_array().unwrap())
+                .filter(|hook| hook["command"] == serde_json::json!(PREFLIGHT_USER_PROMPT_COMMAND))
+                .count(),
+            1,
+            "repairing the timeout must not duplicate the entry"
+        );
+    }
+
 
     struct EnvVarGuard {
         key: &'static str,

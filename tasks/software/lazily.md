@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: 2c6171b1-ef84-46fb-bafc-fd78406d58f9
+resume: 8a0685ca-5c83-4e3d-b670-aa5ab0e361ae
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -455,6 +455,34 @@ Driven in both directions: marking GDScript ✅ fails on its scoping ledger, and
 One note on the queue: preflight advanced past `#lzregistersfixture`, which carries a `⏭️` deferral marker, and selected this item instead. That item authors a *new* canonical fixture, which is a different kind of change — it would redden nine currently-shipped Registers marks the moment it is cited, since no binding replays a fixture that does not exist yet.
 
 Queue: `#lzgdvocab`.
+
+### Re: do [#lzregistersfixture] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzregistersfixture]
+
+
+The Registers row has a canonical fixture. It was marked shipped in **nine bindings and verified in none** — `check-coverage-claims.mjs` had nothing to read for a single one of those marks. `collections/registers_convergence.json` (nine scenarios) now backs it, lazily-rs replays it, and the other eight are honestly `~` until each lands a runner. Spec `7423592` (CI green), lazily-rs `1ded66b`, eight binding ledger commits, superproject `6405a5a`.
+
+**Scored honestly rather than conveniently.** Citing a fixture while leaving nine ✅ in place would have been the same unverifiable claim wearing a citation. `~` is exactly the mark for "implemented, but not this wire", and each of the eight names the fixture in its own `KNOWN_UNCOVERED` with that reason. All eight guards re-run green against the now-150-fixture corpus.
+
+**What the fixture pins, and why each clause needed a scenario.** LWW resolves on `(wall_time, logical, peer)` — the tiebreak scenario gives both replicas identical `(wall, logical)`, so a binding comparing only those two has *no order at all* and the replicas never converge. MV keeps non-dominated values **and** collapses on a causally-later write; one half without the other is either LWW twice over or a set that never converges. PnCounter merges by per-peer **maximum**, and the forked replica holds a stale tally for the same peer, so an adding merge double-counts to 9 instead of 4. `changed` is carried with **both** outcomes, because with only the false case a binding hard-coding false passes.
+
+**The reference runner caught a causality bug in my own fixture on its first run.** The MV concurrent scenario forked *after* the first write, which makes the second write causally later — the set correctly collapsed to one value and my expectation of two was wrong. The fork moves first now and the note says the ordering is load-bearing.
+
+**Three separate gates caught wiring this runner reported green without, and that is the part worth recording.**
+
+- The **scenario ledger**, twice. First I read `fixture["scenarios"]` directly: nine scenarios replayed, none booked, and the guard's wording is exact — *"the fixture is counted as covered because a SIBLING scenario ran."* Then I booked through `common::scenarios` with a corpus-relative path, which `record_scenario` resolves to `None` and drops **silently**, because bookkeeping never fails a suite. My test printed `ok` through both.
+- **`ci-reach`**, which refused a target `make check` runs and no CI step does — the runner would have been verified on this machine and nowhere else.
+
+Each rung sees something the one below it structurally cannot: the manifest proves the bytes were read, the ledger proves the scenarios ran, `ci-reach` proves anyone but me runs them.
+
+**One process failure of my own.** I read two doctest failures as a regression before establishing they came from my running two `make check` invocations concurrently against one target directory — cargo rebuilt the lib without `thread-safe` under the other run's doctests. And I first recorded the PnCounter mutant as *surviving*; it hadn't, my substitution had patched the first `(*e).max(c)` in the file, which is in `VersionVector`, not `merge_max`. Both are the same lesson: a surprising red or green is suspect until you prove what actually ran.
+
+`make check` green in lazily-rs end to end — 144/150 fixtures opened, **159/159 scenarios replayed, 0 excused**, 50 CI-reached targets. lazily-rs CI queued (`31299688256`), recorded pending.
+
+Queue: `#lzgdvocab`.
 <!-- agent:boundary:c6ef3fb1 -->
 <!-- /agent:exchange -->
 
@@ -465,8 +493,8 @@ Queue: `#lzgdvocab`.
 - ~~do [#lzcppmatreplay]~~
 - ~~do [#lzgomergeops]~~
 - ~~do [#lzzigcanonrunner]~~
-- ⏭️ do [#lzregistersfixture]
-- ⏭️ do [#lzgdvocab]
+- ~~do [#lzregistersfixture]~~
+- do [#lzgdvocab]
 - ~~do [#lzboundaryingressrow]~~
 - do [#lzdefaultmodeuniform]
 - do [#lzzigdiffmutant]
@@ -476,7 +504,6 @@ Queue: `#lzgdvocab`.
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzzigcanonrunner] lazily-zig has no canonical runner for the three collections CRDT fixtures, so Zig stays at ~ on the three CRDT rows (free-text-character-crdt, textcrdt-delta-sync, move-aware-sequence-crdt). text_crdt.zig and seq_crdt.zig exist with their own tests; what is missing is corpus replay. Add it for collections/{textcrdt_convergence,textcrdt_delta_sync,seqcrdt_convergence}.json — a distinct runner over two models (TextCrdt, SeqCrdt) with 9 ops (insert, insert_str, delete, gc, insert_back, insert_front, move_after, set_value, remove), 15 expect keys (text, len, texts_equal, a_starts_with/a_ends_with, tombstone_count, version_vector_on, text_on, order, get, orders_equal, contains_all, order_on, get_on, not_contains_on) and the clone/snapshot/delta/exchange/stable step forms. Follow src/lazily/lossless_tree_conformance.zig, which landed the other nine fixtures of this item. DONE already: all nine lossless-tree fixtures replay and Zig is shipped on those three rows.
-- [ ] [#lzregistersfixture] The Registers row (LWW / MV + PnCounter + CellCrdt) is marked shipped in nine bindings and has NO canonical fixture anywhere in the corpus, so check-coverage-claims.mjs cannot verify a single one of those marks. seqcrdt_convergence.json exercises LWW registers only incidentally, as the substrate for move-aware sequence order, and backs the SeqCrdt row instead. Author a canonical crdt fixture pinning LWW resolution (including the equal-timestamp tiebreak), MV concurrent-value retention, PnCounter increment/decrement convergence, and the CellCrdt reactive projection; then cite it on the row.
 - [ ] [#lzgdvocab] Finish the lazily-gd conformance runner: 7 of the 21 canonical reactive-graph fixtures remain, in two op families. (a) merge_cell (5 fixtures: exact_fold_paths_stay_exact, merge_cell_acquires_no_dependency_edge, merge_feed_through_a_formula_coalesces, merge_folds_synchronously_in_batch, merge_per_settled_cone_not_per_write) — this is the one group needing KERNEL work, a folding Source with a merge policy (source_with/merge), plus the merges_of observable. (b) fanout/churn/dispose_fanout/dispose_stale_handle bulk ops plus real id recycling (2 fixtures: churn_returns_to_baseline, recycled_id_inherits_nothing) — recycling needs explicit work beyond Godot instance ids, which are monotonic and never alias. Each is named in KNOWN_UNCOVERED with its reason; removing an entry there is the definition of done for that group. Landed already: signal/dispose_signal (3), fail_next (1), shape=scenarios (1) — 14/149 replayed, 7 named excuses.
 - [ ] [#lzdefaultmodeuniform] The materialization corpus's default_mode key gets FIVE different treatments across nine bindings, so the default_mode_eager clause is not uniformly proved. Rust (tests/materialization_conformance.rs) and C# (MaterializationConformanceTests.cs) assert the BEHAVIOUR the named mode implies — the mode selects the build, and a map built that way must be fully materialized at build time — and lazily-cpp now does the same via tests/test_materialization_replay.hpp. Python (_excuse_default_mode in tests/test_reactive_family.py), Kotlin and JS EXCUSE the key as 'no mode flag to read back', a reason C++ and C# disprove since neither has a mode flag either. Dart (materialization_conformance_test.dart) and Zig (reactive_map.zig) compare it against the string literal 'eager', which asserts only that the fixture equals itself (#lzconsumednotasserted). Go deserializes it into a DefaultMode struct field. Converge all nine on the behavioural assertion and delete the three excuses; a corpus that flips default_mode must redden every binding, which today it does not.
 - [ ] [#lzzigdiffmutant] lazily-zig's lossless-tree replay does not pin the anti-entropy FILTER, only convergence: mutating LosslessTreeCrdt.diff to ignore the partner frontier (ship every op in the log) reddens NONE of the nine fixtures, including non_contiguous_anti_entropy.json whose subject is a replica with a gap. deliver.only indexes into the diff, so a diff whose contents change should select different ops and change what the gapped replica renders (hole_before_repair expects b='013') — it does not, and the reason is not yet established. Either the runner's deliver path is not exercising the frontier as intended, or applyUpdate's idempotence absorbs the difference; find out which, then make the fixture discriminating (or record honestly that convergence is all it can pin). Contrast the at_byte char-offset mutant, which reddens six of the nine.

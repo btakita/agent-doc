@@ -1750,13 +1750,16 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         agent_doc_controller_io::project_controller::supervisor_recycle_yield_pending_for_file(
             file,
         );
-    let effective_queue_continuation_required =
-        queue_state.queue_continuation_required && !exchange_prompt_preempts_queue;
-    let effective_continuation = agent_doc_queue::queue_continuation::effective_continuation_output(
-        effective_queue_continuation_required,
-        recycle_yield_pending,
-        queue_state.queue_pause_reason.as_deref(),
-    );
+    // `#queueblockquoteintent`: do NOT pre-fold the preemption into
+    // `raw_required` — a stop with heads remaining must name its reason instead
+    // of looking identical to a drained queue.
+    let effective_continuation =
+        agent_doc_queue::queue_continuation::effective_continuation_output_with_preemption(
+            queue_state.queue_continuation_required,
+            exchange_prompt_preempts_queue,
+            recycle_yield_pending,
+            queue_state.queue_pause_reason.as_deref(),
+        );
     let queue_continuation_required = effective_continuation.required;
     let queue_continuation_guidance = effective_continuation.guidance;
     preflight_read_facts.queue.continuation_required = queue_continuation_required;

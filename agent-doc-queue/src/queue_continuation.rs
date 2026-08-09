@@ -91,16 +91,48 @@ pub fn effective_continuation_output(
     recycle_yield_pending: bool,
     pause_reason: Option<&str>,
 ) -> EffectiveContinuationOutput {
+    effective_continuation_output_with_preemption(
+        raw_required,
+        false,
+        recycle_yield_pending,
+        pause_reason,
+    )
+}
+
+/// `#queueblockquoteintent`: a suppressed continuation must name its reason.
+///
+/// When an exchange prompt preempts the drain, the caller used to AND that into
+/// `raw_required` before calling, so this returned `required: false` with
+/// `guidance: None` — indistinguishable from a genuinely drained queue. Observed
+/// 2026-08-09 on `tasks/agent-doc/agent-doc-bugs2.md`: `queue_active: true` with
+/// four drainable heads, continuation suppressed, and BOTH `ui_outcome` and
+/// `queue_continuation_guidance` null. The cause could only be found by reading
+/// `user_intent_prompt_changes` by hand.
+///
+/// A stop with heads remaining is exactly the state that needs a reason, so pass
+/// the preemption in rather than pre-folding it away.
+pub fn effective_continuation_output_with_preemption(
+    raw_required: bool,
+    preempted_by_exchange_prompt: bool,
+    recycle_yield_pending: bool,
+    pause_reason: Option<&str>,
+) -> EffectiveContinuationOutput {
     if recycle_yield_pending {
         return EffectiveContinuationOutput {
             required: false,
             guidance: Some(RECYCLE_YIELD_GUIDANCE.to_string()),
         };
     }
-    if raw_required {
+    if raw_required && !preempted_by_exchange_prompt {
         return EffectiveContinuationOutput {
             required: true,
             guidance: Some(continuation_guidance(pause_reason)),
+        };
+    }
+    if raw_required && preempted_by_exchange_prompt {
+        return EffectiveContinuationOutput {
+            required: false,
+            guidance: Some(EXCHANGE_PROMPT_PREEMPTION_GUIDANCE.to_string()),
         };
     }
     EffectiveContinuationOutput {
@@ -108,6 +140,11 @@ pub fn effective_continuation_output(
         guidance: None,
     }
 }
+
+/// Named reason for a drain suppressed by a fresh exchange prompt
+/// (`#queueblockquoteintent`).
+pub const EXCHANGE_PROMPT_PREEMPTION_GUIDANCE: &str = "queue continuation suppressed — drainable heads remain, but this cycle's diff carries a fresh exchange prompt that preempts the drain (`user_intent_prompt_changes` is non-empty). Answer that prompt this turn; the queue resumes on the next cycle. This is NOT a drained queue: if you cannot find an operator prompt in the exchange tail, inspect `user_intent_prompt_changes` — binary-authored bookkeeping misclassified as user intent is a defect, not a stop reason.";
+
 
 /// A required queue continuation: the document closed cleanly, explicit `go`
 /// mode is active, and a ready queue head remains, so an in-session loop must
@@ -1095,6 +1132,38 @@ pub fn head_carries_operator_verdict(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// `#queueblockquoteintent`: a stop with heads remaining must name why.
+    ///
+    /// The caller used to AND the preemption into `raw_required`, so this
+    /// returned `required: false, guidance: None` — indistinguishable from a
+    /// genuinely drained queue. Observed with four drainable heads and BOTH
+    /// `ui_outcome` and `queue_continuation_guidance` null.
+    #[test]
+    fn a_preempted_drain_names_its_reason_instead_of_going_silent() {
+        let out = effective_continuation_output_with_preemption(true, true, false, None);
+        assert!(!out.required, "a fresh exchange prompt still preempts");
+        let guidance = out.guidance.expect("a suppressed drain must name its reason");
+        assert!(
+            guidance.contains("preempts") && guidance.contains("user_intent_prompt_changes"),
+            "the reason must be actionable and point at the field that proves it: {guidance}"
+        );
+
+        // Not preempted: unchanged behaviour.
+        let out = effective_continuation_output_with_preemption(true, false, false, None);
+        assert!(out.required);
+        assert!(out.guidance.is_some());
+
+        // Genuinely nothing to drain stays silent — there is no reason to give.
+        let out = effective_continuation_output_with_preemption(false, false, false, None);
+        assert!(!out.required);
+        assert!(out.guidance.is_none());
+
+        // Recycle-yield still wins over preemption.
+        let out = effective_continuation_output_with_preemption(true, true, true, None);
+        assert!(!out.required);
+        assert_eq!(out.guidance.as_deref(), Some(RECYCLE_YIELD_GUIDANCE));
+    }
+
     use super::*;
 
     fn doc_with_backlog(queue_prompts: &[&str], backlog_items: &[&str]) -> String {

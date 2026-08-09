@@ -1330,7 +1330,55 @@ fn text_is_managed_state_only(text: &str) -> bool {
     if lines.is_empty() {
         return false;
     }
+    if is_queue_prompt_echo_block(&lines) {
+        return true;
+    }
     lines.iter().all(|line| line_is_managed_state_only(line))
+}
+
+/// `#queueblockquoteintent`: the binary's own consumed-queue-prompt echo is
+/// bookkeeping, not operator steering.
+///
+/// The `> **Queue prompt:**` blockquote is written by the closeout that drains a
+/// head, so `#ftstrike` can prove which head the response answered — the same
+/// scaffold `tail_repair` already refuses to accept as tracked component content
+/// ("binary conversation scaffold"). It lives in `exchange` rather than in a
+/// managed component, so the per-line managed-state filter never saw it and it
+/// read as a fresh user prompt.
+///
+/// Observed 2026-08-09 on `tasks/agent-doc/agent-doc-bugs2.md`: preflight
+/// reported `queue_active: true` with four drainable heads but
+/// `queue_continuation_required: false`, because the only entry in
+/// `user_intent_prompt_changes` was the previous closeout's own echo of
+/// `do [#retainedmutdrop]`. Same shape as `#resumeuuidstallsdrain` above: the
+/// binary's bookkeeping stalling the binary's own drain.
+///
+/// Deliberately strict — EVERY line must be part of the quote block. An operator
+/// who quotes a prompt and then writes their own prose underneath is steering,
+/// and that must still preempt.
+fn is_queue_prompt_echo_block(lines: &[&str]) -> bool {
+    let mut saw_label = false;
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Some(quoted) = trimmed.strip_prefix('>') else {
+            return false;
+        };
+        let quoted = quoted.trim();
+        if quoted.is_empty() {
+            continue;
+        }
+        if !saw_label {
+            if quoted == "**Queue prompt:**" || quoted == "**Queue prompts:**" {
+                saw_label = true;
+                continue;
+            }
+            return false;
+        }
+    }
+    saw_label
 }
 
 fn line_is_managed_state_only(line: &str) -> bool {
@@ -3111,6 +3159,47 @@ fn interesting_changed_literal(literal: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    /// `#queueblockquoteintent`: the binary's own consumed-queue echo must not
+    /// read as operator steering.
+    ///
+    /// Observed 2026-08-09 on `tasks/agent-doc/agent-doc-bugs2.md`: preflight
+    /// reported `queue_active: true` with four drainable heads but
+    /// `queue_continuation_required: false`, because the only entry in
+    /// `user_intent_prompt_changes` was the previous closeout's own echo.
+    #[test]
+    fn the_binary_queue_prompt_echo_is_managed_bookkeeping() {
+        for echo in [
+            "> **Queue prompt:**\n>\n> do [#retainedmutdrop]",
+            "> **Queue prompts:**\n>\n> do [#a]\n>\n> do [#b]",
+            // Trailing blank lines are part of the block as diffed.
+            "> **Queue prompt:**\n>\n> deploy\n\n",
+        ] {
+            assert!(
+                text_is_managed_state_only(echo),
+                "binary scaffold must not read as user intent: {echo:?}"
+            );
+        }
+    }
+
+    /// Deliberately strict: an operator who quotes a prompt and then writes
+    /// their own prose IS steering, and must still preempt the drain.
+    #[test]
+    fn operator_prose_around_a_quoted_prompt_still_preempts() {
+        for steering in [
+            "> **Queue prompt:**\n>\n> do [#x]\n\nActually, stop and do this instead.",
+            "> **Queue prompt:**\n>\n> do [#x]\nplease also fix the other thing",
+            // A blockquote that is not the labeled echo at all.
+            "> some quoted operator note",
+            // The label alone, with nothing quoted, is not the scaffold shape.
+            "**Queue prompt:** do [#x]",
+        ] {
+            assert!(
+                !text_is_managed_state_only(steering),
+                "operator steering must still preempt: {steering:?}"
+            );
+        }
+    }
     use super::*;
 
     #[test]

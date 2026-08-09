@@ -2,6 +2,44 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.218
+
+- **Fix (`#queueblockquoteintent`): the binary's own queue-prompt echo stalled
+  the binary's own drain, silently.**
+
+  The `> **Queue prompt:**` blockquote is written by the closeout that drains a
+  head, so `#ftstrike` can prove which head the response answered — the same
+  scaffold `tail_repair` already refuses to accept as tracked component content
+  ("binary conversation scaffold"). But it lives in `exchange` rather than in a
+  managed component, so the per-line managed-state filter never saw it and it
+  classified as a fresh user prompt.
+
+  Observed on `tasks/agent-doc/agent-doc-bugs2.md`: preflight reported
+  `queue_active: true` with four drainable heads and
+  `queue_continuation_required: false`, because the single entry in
+  `user_intent_prompt_changes` was the previous closeout's own echo of
+  `do [#retainedmutdrop]`. Exactly the `#resumeuuidstallsdrain` shape: the
+  binary's bookkeeping preempting the binary's drain.
+
+  `text_is_managed_state_only` now recognizes the labeled echo block. It is
+  deliberately strict — every line must belong to the quote block, so an
+  operator who quotes a prompt and then writes prose underneath is still
+  steering and still preempts.
+
+- **Fix: a suppressed continuation was indistinguishable from a drained queue.**
+
+  The preemption was ANDed into `raw_required` before
+  `effective_continuation_output` saw it, so the result was
+  `required: false, guidance: None` — the same output as a genuinely empty
+  queue. In the case above, `ui_outcome` and `queue_continuation_guidance` were
+  BOTH null with four heads remaining, and the cause could only be found by
+  reading `user_intent_prompt_changes` by hand.
+
+  The preemption is now passed in rather than pre-folded, and a drain stopped
+  with heads remaining names its reason and points at the field that proves it.
+  Recycle-yield still takes precedence, and a genuinely drained queue stays
+  silent — there is no reason to give.
+
 ## 0.35.217
 
 - **Fix (`#pullnoackdeadlock`): one editor replica that pulls and never ACKs

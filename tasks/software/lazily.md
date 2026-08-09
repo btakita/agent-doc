@@ -604,6 +604,11 @@ Queue: `#lzktcorpusnotgradleinput`.
 
 ### Re: do [#lzcoverageunderclaim] — the premise I filed was wrong, and the honest version is smaller and still finds three — opus-5
 
+> **Queue prompt:**
+>
+> do [#lzcoverageunderclaim]
+
+
 `check-coverage-claims.mjs` now reports every partial mark that is indistinguishable from shipped on ledger evidence. lazily-spec `d1c1a82`, pointer bumped. It finds three today.
 
 **I filed this item last cycle with a rule that the file I was proposing to change already rejects.** My text said a `~` whose cited fixtures are all absent from `KNOWN_UNCOVERED` is "provably stale" and should be reported as a failure. The guard's own header says the opposite, deliberately: `~` requires nothing because it is "the honest place to record 'implemented, but not this wire'", and lazily-cpp's msgpack codec is the worked example. A row's `fixtures` list is not a complete specification of its feature, so replaying every cited fixture does not imply shipped. Failing on that would punish exactly the honesty the partial mark exists to permit, and the first person to hit a legitimate case would delete the check. I wrote the premise from the symptom without reading the rule.
@@ -627,12 +632,9 @@ Queue: `#lzktcorpusnotgradleinput`.
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lzcoverageunderclaim]
-- ~~do [#lzcsregisterscoveragerow]~~
-- 📌 do [#lzzigspecdiroption]
-- ~~📌 do [#lzcsregistersreplay]~~
-- ~~do [#lzzigcanonrunner]~~
-- ~~do [#lzoverrideallrunners]~~
+- do [#lzpartialmarkadjudicate]
+- ~~do [#lzcoverageunderclaim]~~
+- ⏭️ 📌 do [#lzzigspecdiroption]
 - 📌 do [#lzktcorpusnotgradleinput]
 - 📌 do [#lzledgeragreementaudit]
 - 📌 do [#lzzigdiffmutant]
@@ -643,7 +645,7 @@ Queue: `#lzktcorpusnotgradleinput`.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzcoverageunderclaim] check-coverage-claims.mjs is ONE-DIRECTIONAL: it verifies every shipped mark is backed by a ledger read, and reports the rest as '28 partial mark(s) left unverified by design'. So it catches a binding claiming a row it has not earned, and is SILENT about a binding sitting at '~' it has outgrown. That is why #lzcsregisterscoveragerow had to exist: lazily-cs earned the registers row the moment 7cc4584 landed with an empty ledger, and coverage.json would have kept reading '~' forever because nothing in make check compares a PARTIAL mark against the ledger that now contradicts it. One instance was caught by a hand-written backlog note; there are 28 unverified partial marks today and no mechanism says which are stale. Add the reverse check: for every '~' mark, if ALL of that row's cited fixtures are absent from that binding's KNOWN_UNCOVERED (and inside its REQUIRED_AREAS), the mark is provably stale — report it. Expect true positives beyond cs; run it before believing the matrix. Keep it advisory-but-failing in CI the same way the shipped-mark check is, and remember a flip can cascade into a family roll-up cell, so re-run sync-coverage.mjs and re-check the family summary for every row it moves.
+- [ ] [#lzpartialmarkadjudicate] check-coverage-claims.mjs (as of lazily-spec d1c1a82) reports three partial marks that are INDISTINGUISHABLE FROM SHIPPED on ledger evidence: GDScript on row reactive-graph (reactive-graph/{transitive_invalidation_reaches_depth,signal_materializes_without_a_read,signal_materializes_once_per_batch,dispose_signal_reverts_to_lazy}.json), Zig on reactivemap-core-single-threaded (collections/{cellmap_independence,cellmap_atomic_move}.json), and C# on reliable-sync (reliable-sync/{coalesce_bounds_outbox,liveness_lease_eviction}.json). None of the eight fixtures is in any KNOWN_UNCOVERED and no binding has a scenario- or block-level excuse. Adjudicate each ONE AT A TIME with binding-specific evidence the spec repo does not have: confirm from the binding's runtime manifest that it really replays each fixture, then decide whether the feature is complete or the shortfall is real but unpinned. Outcome per row is either (a) promote the mark and re-run sync-coverage.mjs — remember a row flip can carry its FAMILY roll-up cell with it and rewrites README.md in 11 sibling repos, so it is a 12-repo commit — or (b) cite a fixture that actually pins the gap, or add a scenario-level excuse, so the tilde becomes backed instead of merely unverified. Do NOT bulk-promote: tilde legitimately means 'implemented, but not this wire' and the guard deliberately cannot tell the two apart.
 - [ ] [#lzzigspecdiroption] lazily-zig has NO corpus-dir override: SPEC_DIR in src/lazily/reactive_map.zig is a comptime const used as SPEC_DIR ++ '/x.json', so the #lzdefaultmodeuniform probe had to temporarily edit the constant and restore it. Every future corpus probe in this binding pays that cost, and a probe that edits the shared ../lazily-spec checkout instead reddens all nine bindings concurrently. Add a '-Dspec-dir' build option (or a runtime env read) threaded to every fixture path, and keep the default unchanged. Compounding trap to preserve: specFixturesPresent() makes the tests 'return error.SkipZigTest' when the path is unreadable, so a probe that changes the PATH silently converts red into skip — the option must change which bytes are read, never whether they exist.
 - [ ] [#lzktcorpusnotgradleinput] lazily-kt's conformance corpus is NOT a declared input of the gradle 'test' task, so editing a fixture leaves 'test' UP-TO-DATE and the run reports green having replayed nothing — a false green that defeats any corpus-perturbation probe. Compounding it, tasks.test wires no environment(...), so the test JVM inherits the DAEMON's environment and a daemon started before LAZILY_SPEC_DIR was set serves the stale path. Today the only defence is remembering '--no-daemon --rerun-tasks'. Declare the corpus directory as a task input so a fixture change invalidates the task, and pass the corpus-dir variable through environment(...) explicitly. Definition of done: flip one assertion key in a scratch corpus and prove a plain 'make check' (no flags, warm daemon) reddens.
 - [ ] [#lzledgeragreementaudit] A KNOWN_UNCOVERED entry in a binding's shell coverage guard does NOT stop a test host that DISCOVERS fixtures by enumerating the corpus directory from trying to replay them — the two ledgers describing the same absence can disagree silently. lazily-cs was red on HEAD for exactly this (CI 31298919123): collections/registers_convergence.json was declared uncovered in the script while CollectionsConformanceTests crashed on it with a bare KeyNotFoundException naming neither the fixture nor the reason. Fixed there in b8cdb7e by adding the Unsupported entry and making the shape dispatch fail closed. Audit the other eight bindings for the same split: for each, list the fixtures in KNOWN_UNCOVERED, check whether the runner enumerates or names fixtures, and confirm an enumerating runner has a matching in-host ledger entry plus a fail-closed default on an unrecognised fixture shape. All eight are currently green, so this is about the NEXT fixture added to the shared corpus.

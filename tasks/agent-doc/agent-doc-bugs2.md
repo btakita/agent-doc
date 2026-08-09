@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: e7533783-c37d-46b8-ad7a-fb0503f920ef
+resume: de8d610d-f705-4362-9afc-1c13527585fd
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -440,20 +440,41 @@ Filed as `#run3rdpaneswitch` at the top of the queue; taking it next, as you ask
 Recording what you described precisely, because the detail that a **prompt is submitted and a turn is running** in that third pane matters: it means the extra pane is not inert layout drift, it is a live agent session. That distinguishes it from the known `#jb-nav-3pane-promote-swap` symptom, where focus-path promotion joins an incoming pane while the reconcile fails to stash the displaced one. Here the displaced pane is *busy*, and the spec's own passive-sync rule says a busy outgoing pane cannot be stashed — so the window grows instead. That is my starting hypothesis, and I will confirm it against the live layout rather than assume it.
 
 Everything above is shipped: `make check` green, 0.35.196 installed, pushed, tagged, recycled, submodule pointer pushed.
+
+### Re: #strandedremedydeadlock — opus-5
+
+Fixed and shipped in **0.35.197**.
+
+**Refusing was right; the instruction was wrong.** A fresh operator queue or backlog edit sitting in the live buffer is the *next turn's prompt*. Every commit path refuses it on purpose — committing it would swallow the prompt. I confirmed this the hard way: my first attempt made `commit` reconcile the drift, and two preflight regressions immediately went red (`preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit`, `test_preflight_warns_but_does_not_target_inactive_queue_edit`) because preflight's auto-commit then absorbed the pending queue edit and the turn saw `no_changes: true`. That guard is load-bearing.
+
+**So the real defect is the classification, not the refusal.** `RetainedWriteOwnership` cannot tell "the agent's write is stranded" from "the operator typed the next prompt into the live buffer" — both have no open cycle and no retained capture, both read `Stranded`, and they take *opposite* instructions. `session-check` handed out the `Stranded` remedy, which names `agent-doc commit <FILE>`, and `commit` refused with a message that named no next move at all.
+
+**One owner, as with `#percellconverge` and `#ownershipverdictdiverges`.** The verdict gains the missing fact:
+
+- `RetainedWriteOwnership::unanswered_operator_edit` + `RetainedWriteVerdict::OperatorEditPending`, refining the *unowned* case only (a durable holder still means `Deferred`).
+- Its remedy names `agent-doc <FILE>` — answering the edit is what clears it — and explicitly says **do NOT** run `agent-doc commit <FILE>`, with the reason.
+- Both sites *prove* the fact rather than assume it, from the same `has_blocking_non_exchange_component_drift` comparison: `exchange` is where a response lives, so an exchange-clean divergence in queue/backlog/status is by construction not this turn's write.
+- `commit`'s refusal now quotes that shared remedy instead of ending at "without an exact binary-owned retained-target proof".
+- `AwaitingTerminalCommit` — the verdict that legitimately names `commit` — no longer deadlocks either: at `write_applied` the drift is the binary's own landed write, so `commit` absorbs it and finishes rather than refusing.
+
+**Guards, so this cannot come back:**
+
+- `agent-doc-commit-io` joins the `#percellconverge` refusal-site guard as its **fourth** site — it is the command the other three send agents *to*, so a remedy it disagrees with is the same defect as a fourth wording dialect.
+- `commit_accepts_exactly_the_verdicts_whose_remedy_names_it` asserts the biconditional across *every* verdict: what the remedy prescribes and what `commit_is_the_named_recovery` returns are now the same fact.
+- Two commit regressions: an operator edit fails closed while naming `agent-doc <FILE>` (and never itself), and `write_applied` drift commits.
+
+**Verification:** `make check` green — 8797 passed, 0 failed, exit 0 (checked explicitly; RTK masks the exit code). Installed 0.35.197, pushed, tagged `v0.35.197`, controller recycled, superproject submodule pointer pushed. CI run 31306112739 was queued at push time — observed, not awaited.
+
+There are no actionable follow-up items and no plan file is needed: the fix, its regressions, and its architecture guard all landed in this cycle.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#run3rdpaneswitch]
-- ~~do [#backlogeditcorruptsreview]~~
-- ~~do [#ownershipverdictdiverges]~~
-- ~~do [#retainedwriteremedy]~~
-- ~~do [#queuestallloopfalsepositive]~~
-- ~~do [#idcollisionnamespace]~~
 - ~~do [#operatorverifylive]~~
-- ⏭️ do [#preflightprojpass]
-- ~~do [#loopcontractseal]~~
+- 🚧 do [#strandedremedydeadlock]
+- do [#run3rdpaneswitch]
+- do [#preflightprojpass]
 - do [#respondbaselineflag]
 - do [#hookhashfalsepositive]
 <!-- /agent:queue -->
@@ -466,6 +487,7 @@ Everything above is shipped: `make check` green, 0.35.196 installed, pushed, tag
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] 🚧 [#strandedremedydeadlock] #agent-doc-bug session-check and commit contradict each other on an authority/disk queue divergence. Observed 2026-08-09 on tasks/agent-doc/agent-doc-bugs2.md after cycle-1786265239202 closed. session-check returns INTERRUPTED with component_divergence=queue:<a>-><b>, the Stranded verdict, and the remedy 'Recover from the pane that OWNS this session: agent-doc commit <FILE>'. Running exactly that command fails: 'refusing to close as already committed: the staged snapshot matches HEAD, but the editor-authoritative document has uncommitted queue, backlog, status, or other typed-component drift without an exact binary-owned retained-target proof'. So the named recovery is refused by the state that names it, and an agent following the instruction faithfully has no next move. Everything was in fact safe -- response, backlog and review all committed in HEAD, git tree clean -- so the divergence was live editor-buffer queue state only. Two candidate fixes: (1) the Stranded remedy must not name a command that cannot run in this state; when snapshot==HEAD and the only drift is editor-authoritative typed-component state, say so and name the reconciliation path instead; (2) commit should treat an in-memory-only typed-component divergence with a clean tree and a closed cycle as reconcilable rather than a terminal refusal. Pick one owner so the two commands cannot disagree -- this is the same one-predicate lesson as #percellconverge and #ownershipverdictdiverges.
 - [ ] [#run3rdpaneswitch] #agent-doc-bug OPERATOR-REPORTED 2026-08-09: Run Agent Doc, then switch to another document. The tmux pane auto-syncs, then a THIRD pane appears holding the PREVIOUS tmux pane, with its prompt submitted and its turn running. The extra pane is a live agent session, not inert layout drift, which distinguishes it from #jb-nav-3pane-promote-swap. Hypothesis to confirm against a live layout, not assume: the outgoing pane is BUSY with a running turn, passive sync refuses to stash a busy pane, and the incoming document still attaches, so the agent-doc window grows to 3 panes for a 2-column editor. Check the focus-path promote vs debounced reconcile ordering in focus.rs and sync.rs, the busy-pane stash refusal, and whether Run Agent Doc dispatches into the outgoing pane before the switch is reconciled. Reproduce, then add SimWorld coverage for switch-while-busy.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#hookhashfalsepositive] agent-doc's coined-id-pre-tool-use hook rejects C preprocessor directives as untracked backlog ids. Writing a file containing a line starting with a hash — pragma once, include <string> — is blocked with "would write coined id(s) #include, #pragma ... not tracked in agent:backlog". The same class of false positive already applies to CSS ids, shell comments, and agent-doc's own anchor tags quoted from SKILL.md. It is not a hard block (a bash heredoc bypasses the PreToolUse hook entirely, which is itself the interesting part — the guard is trivially avoidable while being obstructive to correct writes) but it forced a workaround into emitted C++: src/sdk-spike/ts/src/wire/code.ts assembles the directives via String.fromCharCode(35) with a comment explaining why. The guard should recognise language syntax — preprocessor directives, CSS selectors, shell/YAML comments, markdown headings — or scope itself to prose contexts. Fix belongs in agent-loop src/agent-doc, not here; remove the workaround in code.ts once it lands.

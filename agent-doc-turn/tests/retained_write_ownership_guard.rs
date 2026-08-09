@@ -60,6 +60,30 @@ const REFUSAL_SITES: [(&str, &str); 3] = [
 /// green. A guard satisfied by prose about the rule is not a guard.
 const SHARED_PREDICATE_CALLS: [&str; 2] = ["retained_write_ownership(", "retained_write_remedy("];
 
+/// Constructors that BUILD a retained-write refusal the agent will read.
+///
+/// `#retainedwriteremedy`: the file-scoped check below is satisfied by a single
+/// call anywhere in the file, so a NEW branch beside an existing one inherits a
+/// pass it did not earn. That is exactly what happened —
+/// `defer_visible_delivery_projection` emitted a retention message with no
+/// remedy while its two sibling branches, in the same function, both appended
+/// one. Its message ended "no secondary snapshot/commit or forced disk write was
+/// attempted", which reads as *nothing happened*; the write had in fact applied
+/// and needed only `agent-doc commit <FILE>`. Observed twice on 2026-08-09 on
+/// `tasks/agent-doc/agent-doc-bugs2.md`, both recovered by that one command.
+const RETENTION_ERROR_CONSTRUCTORS: [&str; 1] = ["await_editor_replica_no_disk_write("];
+
+/// Call forms that reach the remedy, including a crate-local wrapper around it.
+///
+/// `retained_write_remedy_for(` does NOT contain `retained_write_remedy(` as a
+/// substring, so the wrapper has to be named explicitly — matching only the bare
+/// predicate would fail every site that routes through it.
+const REMEDY_CALLS: [&str; 3] = [
+    "retained_write_remedy(",
+    "retained_write_remedy_for(",
+    "retained_write_ownership(",
+];
+
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -212,4 +236,83 @@ fn every_retained_write_refusal_site_reaches_the_shared_predicate() {
          Sites not reaching the predicate:\n{}",
         missing.join("\n")
     );
+}
+
+/// Every constructed retained-write refusal names its recovery.
+///
+/// The complement of the file-scoped check: reaching the predicate *somewhere*
+/// in the file is not the property that matters to an agent reading one error
+/// string. Each individual refusal it can receive must carry the remedy, or that
+/// refusal reads as a lost response and invites the re-send `#percellconverge`
+/// forbids.
+#[test]
+fn every_constructed_retained_write_refusal_names_its_remedy() {
+    let root = workspace_root();
+    let mut findings = Vec::new();
+
+    for (relative, site) in REFUSAL_SITES {
+        let path = root.join(relative);
+        let Ok(source) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let test_lines = cfg_test_lines(&source);
+        for constructor in RETENTION_ERROR_CONSTRUCTORS {
+            let mut from = 0;
+            while let Some(found) = source[from..].find(constructor) {
+                let start = from + found;
+                from = start + constructor.len();
+                let line = source[..start].matches('\n').count() + 1;
+                if test_lines.contains(&line) {
+                    continue;
+                }
+                // Skip the definition itself and any comment mentioning it.
+                let line_start = source[..start].rfind('\n').map_or(0, |i| i + 1);
+                let prefix = source[line_start..start].trim_start();
+                if prefix.starts_with("//") || prefix.starts_with("fn ") || prefix.contains("fn ") {
+                    continue;
+                }
+                let Some(argument) = balanced_argument(&source, from - 1) else {
+                    continue;
+                };
+                let names_remedy = REMEDY_CALLS.iter().any(|call| argument.contains(call));
+                if !names_remedy {
+                    findings.push(format!(
+                        "{relative}:{line}: `{constructor}` builds a refusal with no remedy ({site})"
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(
+        findings.is_empty(),
+        "`#retainedwriteremedy`: every constructed retained-write refusal must append the remedy \
+         from `agent_doc_turn::write_ownership::retained_write_remedy`. A refusal that omits it \
+         reads as \"nothing happened\" even when the write already applied and only the terminal \
+         commit is outstanding — and an agent that believes the response was lost re-sends it, \
+         which is the failure `#percellconverge` exists to prevent.\n\n{}",
+        findings.join("\n")
+    );
+}
+
+/// The text between the paren at `open` and its match, exclusive.
+fn balanced_argument(source: &str, open: usize) -> Option<&str> {
+    let bytes = source.as_bytes();
+    if bytes.get(open)? != &b'(' {
+        return None;
+    }
+    let mut depth = 0i32;
+    for (offset, byte) in bytes[open..].iter().enumerate() {
+        match byte {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return source.get(open + 1..open + offset);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }

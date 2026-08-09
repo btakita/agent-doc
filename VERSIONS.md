@@ -2,6 +2,40 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.192
+
+- **Fix (`#retainedwriteremedy`): a retained-write refusal told the agent nothing
+  had been written, when the write had already applied.**
+
+  `defer_visible_delivery_projection` ended its message with "no secondary
+  snapshot/commit or forced disk write was attempted" and stopped there. Its two
+  sibling branches, in the same function, both append the remedy from
+  `agent_doc_turn::write_ownership::retained_write_remedy` — this one did not.
+  The message reads as *nothing happened*, but the cycle was in `write_applied`:
+  the response body HAD landed and needed only the terminal commit, which
+  `agent-doc commit <FILE>` completes. An agent that reads it as a lost response
+  re-answers or resubmits, which is exactly what `#percellconverge` forbids.
+
+  Observed twice on 2026-08-09 on `tasks/agent-doc/agent-doc-bugs2.md` — once
+  from `respond`, once from a follow-up `write --commit` — both recovered by a
+  single `agent-doc commit`.
+
+  The existing guard could not catch it: it asserts each refusal-site FILE
+  contains a call to the shared predicate, so one compliant call anywhere let a
+  new branch beside it inherit a pass it never earned. The new
+  `every_constructed_retained_write_refusal_names_its_remedy` is site-scoped — it
+  walks each `await_editor_replica_no_disk_write(` construction, extracts its
+  balanced argument expression, and requires the remedy inside that expression.
+
+  It immediately found **eight more** refusals with the same defect. Rather than
+  append the remedy at nine call sites — a rule that holds only while every
+  author remembers it — construction now routes through one `retained_refusal`
+  helper that appends it structurally.
+
+  The guard is demonstrably able to fail: it went red three times while being
+  written, surfacing progressively more sites, and the compiler validates every
+  converted call site's arguments.
+
 ## 0.35.191
 
 - **Perf (`#preflightprojpass`, partial): the resume-claim scan materialized

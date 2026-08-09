@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: 8a0685ca-5c83-4e3d-b670-aa5ab0e361ae
+resume: 522b4f86-d01b-4769-afb1-b3aa7a5e7691
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -483,6 +483,26 @@ Each rung sees something the one below it structurally cannot: the manifest prov
 `make check` green in lazily-rs end to end — 144/150 fixtures opened, **159/159 scenarios replayed, 0 excused**, 50 CI-reached targets. lazily-rs CI queued (`31299688256`), recorded pending.
 
 Queue: `#lzgdvocab`.
+
+### Re: do [#lzgdvocab] — merge group landed; the recycling group remains — opus-5
+
+lazily-gd's cell kernel has the **merge algebra**, and the five `merge_cell` fixtures replay. Named excuses drop from **7 to 2**; 19 of 150 canonical fixtures replayed. GDScript moves from `—` to `~` on merge-algebra. Commits `01f8b30` (gd, CI green `31300067414`) and `09621a7` (spec), superproject `24096b1`. Narrowed the item to the remaining group rather than closing it.
+
+**A merge cell is not a new node kind, and building it as one would have been the easy mistake.** `LazilyMergePolicy` carries an associative fold with its declared flags; `LazilySource` gains `merge()` and `ctx.source_with()`. Same class, so degree, read and dispose behave unchanged — which is precisely what `merge_cell_acquires_no_dependency_edge.json` asserts: the accumulator acquires **no** edge even when fed from a reactive, because the edge belongs to the effect doing the feeding.
+
+**The flags are declared, not derived, and that is deliberate.** No runtime check can establish "commutative for all inputs"; a transport skipping a redelivery because `idempotent` is true is trusting the claim. `mergecell_algebra.json` asserts them against the policy, so a policy that lies fails the corpus instead of quietly corrupting a replay.
+
+**Two distinctions the corpus forced, both of which I got wrong first — and both identical to the ones Go forced earlier this session.** `computes_of` on an **effect** is its run count, not a compute counter (`merge_folds`'s `watch` is an observer of the accumulator). And a feed effect's step asserts `value` on the cell it **feeds**, not on the effect, which has no value. Two bindings, same two traps, same order.
+
+**A third guard caught something neither of those did.** `merge_policy.gd` failed the load-graph check as a cross-family load edge — and the check was right to fire, but the fix is the opposite of what the message suggests: KeepLatest is the *default*, not an opt-in, so every `Source` drags the algebra in by construction. It belongs in `KERNEL_CLOSURE`, not outside it. That check measures what the engine actually resolved rather than scanning source, which is why it could see this at all.
+
+**Three mutants, all killed.** Making `merge` ignore its policy reddens all five. Making `Sum` drop the accumulator reddens all five. Making the feed effect track the accumulator — modelling the feed as a real edge *into* the merge cell — reddens `dependencies_of.feed` and `dependents_of.acc`, exactly the degree assertion the fixture names as the only thing that can catch a fourth node kind that is both writable and dependent.
+
+**What remains, and why it is genuinely harder.** `churn_returns_to_baseline` and `recycled_id_inherits_nothing` need the `fanout`/`churn`/`dispose_fanout`/`dispose_stale_handle` bulk ops **and real id recycling**. Godot's instance ids are monotonic and never alias, so there is nothing to recycle without an explicit id layer — that is a design decision about the binding's identity model, not more runner vocabulary. It stays as `#lzgdvocab`, narrowed to exactly that.
+
+`make check` green in lazily-gd: 26 tests, 0 failures, **0 orphans**. Exchange is at 463 lines across 22 sections; noting the size rather than stalling the queue for it.
+
+Queue: `#lzdefaultmodeuniform`.
 <!-- agent:boundary:c6ef3fb1 -->
 <!-- /agent:exchange -->
 
@@ -494,7 +514,7 @@ Queue: `#lzgdvocab`.
 - ~~do [#lzgomergeops]~~
 - ~~do [#lzzigcanonrunner]~~
 - ~~do [#lzregistersfixture]~~
-- do [#lzgdvocab]
+- ~~do [#lzgdvocab]~~
 - ~~do [#lzboundaryingressrow]~~
 - do [#lzdefaultmodeuniform]
 - do [#lzzigdiffmutant]
@@ -504,7 +524,7 @@ Queue: `#lzgdvocab`.
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzzigcanonrunner] lazily-zig has no canonical runner for the three collections CRDT fixtures, so Zig stays at ~ on the three CRDT rows (free-text-character-crdt, textcrdt-delta-sync, move-aware-sequence-crdt). text_crdt.zig and seq_crdt.zig exist with their own tests; what is missing is corpus replay. Add it for collections/{textcrdt_convergence,textcrdt_delta_sync,seqcrdt_convergence}.json — a distinct runner over two models (TextCrdt, SeqCrdt) with 9 ops (insert, insert_str, delete, gc, insert_back, insert_front, move_after, set_value, remove), 15 expect keys (text, len, texts_equal, a_starts_with/a_ends_with, tombstone_count, version_vector_on, text_on, order, get, orders_equal, contains_all, order_on, get_on, not_contains_on) and the clone/snapshot/delta/exchange/stable step forms. Follow src/lazily/lossless_tree_conformance.zig, which landed the other nine fixtures of this item. DONE already: all nine lossless-tree fixtures replay and Zig is shipped on those three rows.
-- [ ] [#lzgdvocab] Finish the lazily-gd conformance runner: 7 of the 21 canonical reactive-graph fixtures remain, in two op families. (a) merge_cell (5 fixtures: exact_fold_paths_stay_exact, merge_cell_acquires_no_dependency_edge, merge_feed_through_a_formula_coalesces, merge_folds_synchronously_in_batch, merge_per_settled_cone_not_per_write) — this is the one group needing KERNEL work, a folding Source with a merge policy (source_with/merge), plus the merges_of observable. (b) fanout/churn/dispose_fanout/dispose_stale_handle bulk ops plus real id recycling (2 fixtures: churn_returns_to_baseline, recycled_id_inherits_nothing) — recycling needs explicit work beyond Godot instance ids, which are monotonic and never alias. Each is named in KNOWN_UNCOVERED with its reason; removing an entry there is the definition of done for that group. Landed already: signal/dispose_signal (3), fail_next (1), shape=scenarios (1) — 14/149 replayed, 7 named excuses.
+- [ ] 🚧 [#lzgdvocab] lazily-gd's reactive-graph runner is missing the fanout/churn/dispose_fanout/dispose_stale_handle bulk ops AND real id recycling, so 2 canonical fixtures remain: churn_returns_to_baseline.json and recycled_id_inherits_nothing.json. Recycling is the hard half and is a DESIGN decision, not runner vocabulary: Godot instance ids are monotonic and never alias, so 'a recycled id inherits nothing' has no natural referent — the binding needs an explicit id layer (a free-list over slot indices with a generation tag, the shape lazily-rs's SlotId uses) before the fixture means anything. Removing both entries from KNOWN_UNCOVERED in scripts/check-conformance-coverage.sh is the definition of done. DONE already: the merge_cell group (5 fixtures) landed with LazilyMergePolicy + Source.merge + ctx.source_with, and GDScript is now ~ on merge-algebra.
 - [ ] [#lzdefaultmodeuniform] The materialization corpus's default_mode key gets FIVE different treatments across nine bindings, so the default_mode_eager clause is not uniformly proved. Rust (tests/materialization_conformance.rs) and C# (MaterializationConformanceTests.cs) assert the BEHAVIOUR the named mode implies — the mode selects the build, and a map built that way must be fully materialized at build time — and lazily-cpp now does the same via tests/test_materialization_replay.hpp. Python (_excuse_default_mode in tests/test_reactive_family.py), Kotlin and JS EXCUSE the key as 'no mode flag to read back', a reason C++ and C# disprove since neither has a mode flag either. Dart (materialization_conformance_test.dart) and Zig (reactive_map.zig) compare it against the string literal 'eager', which asserts only that the fixture equals itself (#lzconsumednotasserted). Go deserializes it into a DefaultMode struct field. Converge all nine on the behavioural assertion and delete the three excuses; a corpus that flips default_mode must redden every binding, which today it does not.
 - [ ] [#lzzigdiffmutant] lazily-zig's lossless-tree replay does not pin the anti-entropy FILTER, only convergence: mutating LosslessTreeCrdt.diff to ignore the partner frontier (ship every op in the log) reddens NONE of the nine fixtures, including non_contiguous_anti_entropy.json whose subject is a replica with a gap. deliver.only indexes into the diff, so a diff whose contents change should select different ops and change what the gapped replica renders (hole_before_repair expects b='013') — it does not, and the reason is not yet established. Either the runner's deliver path is not exercising the frontier as intended, or applyUpdate's idempotence absorbs the difference; find out which, then make the fixture discriminating (or record honestly that convergence is all it can pin). Contrast the at_byte char-offset mutant, which reddens six of the nine.
 <!-- /agent:backlog -->

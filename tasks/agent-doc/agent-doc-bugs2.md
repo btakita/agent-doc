@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 1368ec0d-99ec-44d1-92ba-22b87f6a2325
+resume: c57819cd-4705-4200-b25b-1d7e1a246a5d
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -359,12 +359,49 @@ Continuation now uses a separate `drain_stall_grace()` — default 600s, env-ove
 The test pins both halves deliberately: the grace exceeds the two measured gaps, **and** the ownership TTL is shorter than them. The second assertion isn't redundant — it records the precondition that caused the bug, so if someone later lengthens the TTL the test explains why this grace exists rather than silently passing.
 
 `make check` green, 0.35.193 installed, pushed, tagged, recycled, submodule pointer pushed. CI observed, not awaited. Exchange at 299 lines / 12 sections — noted, still draining.
+
+### Re: do [#ownershipverdictdiverges] — opus-5
+
+> **Queue prompt:**
+>
+> do [#ownershipverdictdiverges]
+
+
+Fixed in **0.35.194** (`60c940264`, tagged). This was the one I most wanted to reach, because 0.35.192 didn't remove the problem — it relocated it.
+
+**The defect, precisely.** `RetainedWriteOwnership::cycle_open` treats all three open phases as one fact. Any of `preflight_started`, `response_captured`, or `write_applied` yields `Deferred`, whose remedy promises *"the same intent commits itself once delivery converges … do NOT re-send."*
+
+But those phases are not equivalent:
+
+| phase | is a state edge still coming? |
+|---|---|
+| `preflight_started` | yes — the deferral promise is true |
+| `response_captured` | yes — the deferral promise is true |
+| `write_applied` | **no** — the write already landed; only the terminal commit is outstanding |
+
+At `write_applied` the write path told me to wait for something that was never going to happen, while `session-check` correctly called the same state INTERRUPTED. Three times today, and one `agent-doc commit` finished it every time.
+
+That's the same predicate-level divergence `#percellconverge` was built to prevent. Unifying the wording in 0.35.192 is exactly what made it visible: once every site said the same thing, it became obvious that the thing they agreed on was wrong.
+
+**The fix.** `write_applied` is now its own verdict, `AwaitingTerminalCommit`, checked *before* the broader `cycle_open` arm that used to swallow it. Its remedy names `agent-doc commit <FILE>` — the command that actually recovers — while still forbidding re-send, force-disk, and recycle, because the body **is** durable and a re-send would duplicate rather than repair. It sits deliberately between the other two: not lost, not self-completing.
+
+The old remedy named only `session-check`, an **observation** command. So an agent following it faithfully got an accurate diagnosis and no way to act on it — which is why I had to reach for `agent-doc commit` from prior knowledge rather than from what the tool told me.
+
+**Two things I want to be honest about.**
+
+The compiler found the second half, not me. Adding the variant broke `session-check`'s exhaustive match — and that's what revealed it was building the predicate *without* the phase. The site that had been right all along would have kept using the old two-fact constructor and silently disagreed again. An `if` instead of a `match` there, and this fix would have shipped half-done.
+
+And the new verdict's phrase went into the anti-drift guard's protected set. A third verdict is a third opportunity for a site to re-author the wording, which is the specific way this predicate has now drifted twice.
+
+`make check` green, 0.35.194 installed, pushed, tagged, recycled, submodule pointer pushed. CI observed, not awaited.
+
+**0.35.193 is confirmed in production:** this turn's preflight carried no `queue_stall_detected` warning — the first clean one in four cycles, with the same ~2-3 minute cycle gap that used to trip it.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#ownershipverdictdiverges]
+- ~~do [#ownershipverdictdiverges]~~
 - ~~do [#retainedwriteremedy]~~
 - ~~do [#queuestallloopfalsepositive]~~
 - ~~do [#idcollisionnamespace]~~
@@ -383,7 +420,6 @@ The test pins both halves deliberately: the grace exceeds the two measured gaps,
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ownershipverdictdiverges] #agent-doc-bug The retained-write OWNERSHIP VERDICT still contradicts session-check, even though 0.35.192 unified the wording. Observed 2026-08-09 on tasks/agent-doc/agent-doc-bugs2.md, three times in one session: `agent-doc respond` refused with the predicate-derived remedy 'The capture is already durable and the same intent commits itself once delivery converges - this is a deferral, not a lost response. Run agent-doc session-check once to observe the terminal state; do NOT re-send / force disk / admin recycle'. Following that instruction exactly, session-check then reported INTERRUPTED: cycle is still write_applied - response write landed but no terminal commit followed. The intent did NOT commit itself; a single `agent-doc commit <FILE>` was required each time and resolved it immediately. So RetainedWriteOwnership::verdict classifies this state as owned/self-committing when it is in fact awaiting a terminal commit, which is the exact predicate-level divergence #percellconverge exists to prevent - now relocated from the prose (fixed) to the verdict (not fixed). Two concrete defects: (1) the verdict must agree with session-check for the write_applied-without-terminal-commit state, and (2) even under the owned verdict the remedy names only session-check, an OBSERVATION command, and never names `agent-doc commit`, the command that actually recovers. Fix in agent-doc-turn/src/write_ownership.rs so the verdict distinguishes 'delivery pending, will self-commit' from 'write applied, terminal commit outstanding', and have the latter name `agent-doc commit <FILE>`. Add a regression asserting the verdict for a write_applied cycle matches what session-check reports for the same cycle state.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#hookhashfalsepositive] agent-doc's coined-id-pre-tool-use hook rejects C preprocessor directives as untracked backlog ids. Writing a file containing a line starting with a hash — pragma once, include <string> — is blocked with "would write coined id(s) #include, #pragma ... not tracked in agent:backlog". The same class of false positive already applies to CSS ids, shell comments, and agent-doc's own anchor tags quoted from SKILL.md. It is not a hard block (a bash heredoc bypasses the PreToolUse hook entirely, which is itself the interesting part — the guard is trivially avoidable while being obstructive to correct writes) but it forced a workaround into emitted C++: src/sdk-spike/ts/src/wire/code.ts assembles the directives via String.fromCharCode(35) with a comment explaining why. The guard should recognise language syntax — preprocessor directives, CSS selectors, shell/YAML comments, markdown headings — or scope itself to prose contexts. Fix belongs in agent-loop src/agent-doc, not here; remove the workaround in code.ts once it lands.
 - [ ] [#preflightprojpass] #agent-doc-bug Redundant full-document CRDT resolutions (~186ms each). NARROWED 2026-08-09 after measuring ops.log resolution sources: start_resume_id_capture 136, session 98, serialized_atomic_write 54, resume_id_owner 54, idle_watch_active_queue_head 50 -- the top consumer was resume-id handling, NOT the relay this item originally nominated. 0.35.191 fixed that one: resume_id_owner walked every canonical_path in state.db and materialized each document through the realtime authority to read two frontmatter fields; it now probes the cheap revision first and reads disk for Detached documents (a probe that ERRORS keeps the authoritative path -- a missed claim adopts someone else's conversation). REMAINING, both untouched: (a) RELAY HALF -- realtime_doc_resolve authority=editor_buffer reason=crdt_relay_current source=crdt_relay, measured at 170 resolutions in 8 minutes on a 22.8KB doc, up to 14 in a single second, every one returning identical len/hash; no preflight blocker gates this half, so it is still the next operator-visible latency win. (b) PREFLIGHT HALF -- still behind its recorded blocker: only agent-doc-commit-io/src/lib.rs:891 calls invalidate_current_document_projection, while preflight's seven mutating phases call it ZERO times (exact-replay converge run.rs:300, auto-repair base index 354, repair 479, run_pending_maintenance 537, commit ~709, run_queue_maintenance 858, baseline realign 936). Safe order: make each preflight mutator SELF-invalidate, THEN open the pass in run_with_options, THEN a regression test that a post-mutation read observes the new text. Do NOT write a new cache -- agent-doc-document-realtime-io/src/current_document_projection.rs already is the right one, keyed by live Yrs state vector or disk hash. Also worth measuring before assuming: session (98) and serialized_atomic_write (54) are the next-largest sources and neither has been investigated.

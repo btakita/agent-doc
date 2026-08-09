@@ -2,6 +2,45 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.204
+
+- **Fix (`#commitwritecommitdeadlock`): three commands named each other on a
+  `write_applied` cycle.**
+
+  Observed 2026-08-09 on `tasks/agent-doc/agent-doc-bugs2.md` at
+  `cycle-1786271908581`:
+
+  - `respond` failed with the `AwaitingTerminalCommit` remedy — "Finish it from
+    the pane that OWNS this session: `agent-doc commit <FILE>`"
+  - `agent-doc commit` reached the missing-captured-response guard — "Replay the
+    captured response with `agent-doc write --commit <FILE>`"
+  - `agent-doc write --commit` answered with the same `AwaitingTerminalCommit`
+    remedy, naming `agent-doc commit` again
+
+  A closed cycle with no exit. This is exactly the failure `#strandedremedydeadlock`
+  fixed in 0.35.197 for the `commit`/`session-check` pair — in a **different
+  pair that fix did not cover**. `AwaitingTerminalCommit` assumes `commit` can
+  always finish a `write_applied` cycle; the capture-materialization guard is an
+  independent predicate that can refuse exactly that.
+
+  The guard now picks its remedy from the same shared predicate
+  (`commit_is_the_named_recovery`, added by 0.35.197). When the verdict is one
+  that routes through `agent-doc commit`, naming `write --commit` is what closes
+  the loop, so the remedy names the next cycle instead — `agent-doc <FILE>`,
+  whose preflight owns capture materialisation. That is the recovery that
+  actually worked on the incident: it committed both responses with no text
+  lost. The ordinary missed-patchback case, where nothing owns a retained write,
+  still names `write --commit`, because there it genuinely works.
+
+  `agent-doc-git-io/src/capture_materialization_guard.rs` joins the
+  `#percellconverge` refusal-site guard as its **fifth** site. Two regressions
+  pin both branches, mutation-checked; the message may still *mention* the
+  wrong command to warn against it — prescribing it is what fails.
+
+  Trigger context, recorded but not itself fixed: two consecutive responses
+  shared an identical `### Re:` heading, so cell-merge keyed the second as
+  `:duplicate:1` and the snapshot never took it. Filed separately.
+
 ## 0.35.203
 
 - **Fix (`#passattrib`): a `realtime_doc_resolve` could not say why it missed,

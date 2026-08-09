@@ -47,7 +47,7 @@ const VERDICT_OWNER: &str = "agent-doc-turn/src/write_ownership.rs";
 
 /// Every refusal site that retains a write and instructs the agent. Each must
 /// reach the shared predicate rather than deciding for itself.
-const REFUSAL_SITES: [(&str, &str); 4] = [
+const REFUSAL_SITES: [(&str, &str); 5] = [
     (
         "agent-doc-git-io/src/live_buffer_guard.rs",
         "crdt_relay_pending_refusal",
@@ -70,6 +70,15 @@ const REFUSAL_SITES: [(&str, &str); 4] = [
     (
         "agent-doc-commit-io/src/lib.rs",
         "already-current typed-component drift refusal",
+    ),
+    // `#commitwritecommitdeadlock`: the fifth. This one sits INSIDE `commit`
+    // and used to send the agent to `write --commit`, which answers with the
+    // `AwaitingTerminalCommit` remedy naming `commit` again. Adding a site to
+    // this list is how a refusal stops being allowed to pick its remedy by
+    // hand — the fourth site proved the pattern repeats, and it did.
+    (
+        "agent-doc-git-io/src/capture_materialization_guard.rs",
+        "missing captured response refusal",
     ),
 ];
 

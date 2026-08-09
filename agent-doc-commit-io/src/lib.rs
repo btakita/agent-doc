@@ -334,6 +334,13 @@ impl agent_doc_git_io::capture_materialization_guard::CaptureMaterializationGuar
         }))
     }
 
+    fn retained_write_ownership(
+        &self,
+        file: &Path,
+    ) -> agent_doc_turn::write_ownership::RetainedWriteOwnership {
+        agent_doc_capture_io::retained_write_ownership(file)
+    }
+
     fn response_materialized_in_referenced_compact_archive(
         &self,
         file: &Path,

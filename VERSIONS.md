@@ -2,6 +2,50 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.217
+
+- **Fix (`#pullnoackdeadlock`): one editor replica that pulls and never ACKs
+  wedged every write on the document, permanently.**
+
+  `RelayHub::delivery_converged` required every **live** member to have an empty
+  pending queue. Liveness only flips on explicit `disconnect`, so a replica that
+  keeps pulling is maximally live — and the existing escape ("offline members are
+  excluded so a slow editor cannot deadlock") could never fire for it. A replica
+  that pulls the same undelivered head forever and never ACKs therefore held the
+  delivery barrier with no exit.
+
+  Observed on `tasks/agent-doc/agent-doc-bugs2.md`: editor client
+  `5162727547735464` re-pulled `current_generation=5 last_ack_generation=4` at
+  ~2/s indefinitely, with **zero** ACKs in the log. Every write blocked on the
+  pre-write delivery barrier, `commit` refused, and preflight stopped admitting
+  turns at all — `Lazily current authority remained delivery_pending`. The
+  session could not make progress by any route.
+
+  A member now holds the barrier only while its redelivery streak is within
+  budget: each pull that hands out the same unacked head increments a counter,
+  and any ACK that advances `last_ack_generation` (or a fresh enqueue) clears it.
+  Past `MAX_REDELIVERIES_WITHOUT_ACK` (50 — roughly 25s at the observed pull
+  rate, which no healthy editor approaches, since a healthy editor ACKs the
+  delivery it just pulled) the replica stops blocking everyone else.
+
+  It is **not** dropped: the update stays queued, so a recovered editor still
+  receives it, and an ACK rehabilitates the replica for its next delivery.
+  `nonconverging_replicas()` names them rather than releasing the barrier
+  silently. Counting redeliveries instead of stamping a clock keeps the decision
+  a pure function of the delivery stream, the shape `#idlerevisionreactive`
+  settled on.
+
+- **Fix: the same wedge re-flooded `ops.log`, defeating the `#crdtpullspam`
+  guard.**
+
+  That guard suppresses steady-state empty polls but logs whenever
+  `current_generation != last_ack_generation` — which a permanently-unacked head
+  makes true forever. 23372 lines were written for ONE undelivered generation.
+  A pull whose replica has stopped holding the barrier now logs the transition
+  once, naming `barrier=released reason=pull_without_ack`, then stays quiet.
+  `ReplicaDeliverySnapshot` carries `redeliveries_without_ack` and
+  `holds_delivery_barrier` so the state is inspectable rather than inferred.
+
 ## 0.35.216
 
 - **Fix (`#retainedmutdrop`): a closeout's tracked-work mutations were

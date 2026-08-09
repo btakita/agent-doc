@@ -2566,16 +2566,37 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
     // every empty steady-state poll floods ops.log (observed growing it to
     // ~800MB and starving the session) without recording anything actionable
     // (#crdtpullspam).
-    if !updates.is_empty() || delivery.current_generation != delivery.last_ack_generation {
+    //
+    // `#pullnoackdeadlock`: that guard assumed an unacked head is transient. A
+    // replica that pulls forever and never ACKs keeps
+    // `current_generation != last_ack_generation` true permanently, so every
+    // pull logged and the flood came back anyway — 23372 lines on
+    // `tasks/agent-doc/agent-doc-bugs2.md` for ONE undelivered generation. Once
+    // the replica has stopped holding the delivery barrier, log the transition
+    // and then stay quiet: repeating it per pull records nothing new.
+    const MAX_LOGGED_REDELIVERY_TRANSITION: u32 =
+        agent_doc_document_realtime::crdt_relay::MAX_REDELIVERIES_WITHOUT_ACK + 1;
+    let wedged = !delivery.holds_delivery_barrier && !updates.is_empty();
+    let crossed_now =
+        wedged && delivery.redeliveries_without_ack == MAX_LOGGED_REDELIVERY_TRANSITION;
+    if (!wedged && (!updates.is_empty() || delivery.current_generation != delivery.last_ack_generation))
+        || crossed_now
+    {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_replica_pull file={} authority=multi_replica client_id={} updates={} current_generation={} last_ack_generation={}",
+                "crdt_replica_pull file={} authority=multi_replica client_id={} updates={} current_generation={} last_ack_generation={} redeliveries={}{}",
                 file.display(),
                 client_id,
                 updates.len(),
                 delivery.current_generation,
                 delivery.last_ack_generation,
+                delivery.redeliveries_without_ack,
+                if crossed_now {
+                    " barrier=released reason=pull_without_ack recovery=replica_still_queued_ack_rehabilitates"
+                } else {
+                    ""
+                },
             ),
         );
     }

@@ -115,7 +115,26 @@ struct Member {
     generation: u64,
     last_ack_generation: u64,
     pending: VecDeque<PendingReplicaUpdate>,
+    /// `#pullnoackdeadlock`: how many times this member has been handed the same
+    /// undelivered head without its ACK ever advancing. Reset by any ACK that
+    /// moves `last_ack_generation`, and by a fresh enqueue.
+    redeliveries_without_ack: u32,
 }
+
+/// `#pullnoackdeadlock`: redeliveries of one unacked head before a replica stops
+/// holding the convergence barrier.
+///
+/// A healthy editor ACKs the delivery it just pulled, so this is never reached.
+/// The wedge it bounds is a replica that pulls forever and never ACKs: observed
+/// 2026-08-09 on `tasks/agent-doc/agent-doc-bugs2.md`, where client
+/// `5162727547735464` re-pulled `current_generation=5 last_ack_generation=4` at
+/// ~2/s indefinitely — 23372 `delivery_converged=false` observations — wedging
+/// every write behind the delivery barrier and making preflight refuse
+/// admission with `Lazily current authority remained delivery_pending`.
+///
+/// At the observed ~2 pulls/second this is roughly 25 seconds of a replica
+/// asking for the same bytes over and over, which no healthy editor does.
+pub const MAX_REDELIVERIES_WITHOUT_ACK: u32 = 50;
 
 /// A fan-out packet: an `update` (delta) originating from `origin` that must be
 /// delivered to each replica in `targets`. Returned by
@@ -202,6 +221,10 @@ pub struct ReplicaDeliverySnapshot {
     pub pending_updates: usize,
     pub current_generation: u64,
     pub last_ack_generation: u64,
+    /// `#pullnoackdeadlock`: redeliveries of the same unacked head.
+    pub redeliveries_without_ack: u32,
+    /// Whether this replica still blocks [`RelayHub::delivery_converged`].
+    pub holds_delivery_barrier: bool,
 }
 
 /// Outcome of routing an out-of-band disk change into the hub
@@ -832,6 +855,7 @@ impl RelayHub {
                 generation: 0,
                 last_ack_generation: 0,
                 pending: VecDeque::new(),
+                redeliveries_without_ack: 0,
             },
         );
         // Materialize this member's liveness cell (live-on-register) and bump the
@@ -893,6 +917,7 @@ impl RelayHub {
         let existed = match self.members.get_mut(&client_id) {
             Some(m) => {
                 m.pending.clear();
+                m.redeliveries_without_ack = 0;
                 true
             }
             None => false,
@@ -915,6 +940,7 @@ impl RelayHub {
             .get_mut(&client_id)
             .ok_or_else(|| anyhow!("replica {client_id} is not registered"))?;
         member.pending.clear();
+        member.redeliveries_without_ack = 0;
         // Pull the member's offline ops into canonical, then push back everything
         // the member missed. Both directions are state-vector deltas.
         let to_canonical = member.replica.diff(&self.canonical.state_vector())?;
@@ -1205,7 +1231,9 @@ impl RelayHub {
             };
             member.generation += 1;
             let generation = member.generation;
-            member.pending.push_back(PendingReplicaUpdate {
+            member.redeliveries_without_ack = 0;
+            member.redeliveries_without_ack = 0;
+        member.pending.push_back(PendingReplicaUpdate {
                 patch_id: format!("crdt:{}:{}:{}", packet.origin, target, generation),
                 origin: packet.origin,
                 target: *target,
@@ -1262,12 +1290,49 @@ impl RelayHub {
 
     /// Pull pending supervisor-to-editor updates for `client_id`. Updates remain in
     /// the queue until [`Self::ack_delivery`] confirms the editor applied them.
-    pub fn pending_updates(&self, client_id: u64) -> Result<Vec<PendingReplicaUpdate>> {
+    pub fn pending_updates(&mut self, client_id: u64) -> Result<Vec<PendingReplicaUpdate>> {
         let member = self
             .members
-            .get(&client_id)
+            .get_mut(&client_id)
             .ok_or_else(|| anyhow!("replica {client_id} is not registered"))?;
+        // `#pullnoackdeadlock`: a pull that hands out the same unacked head again
+        // is the observable that bounds the barrier. Counting redeliveries — not
+        // stamping a clock — keeps this a pure function of the delivery stream,
+        // the same shape `#idlerevisionreactive` settled on.
+        if !member.pending.is_empty() {
+            member.redeliveries_without_ack = member.redeliveries_without_ack.saturating_add(1);
+        }
         Ok(member.pending.iter().cloned().collect())
+    }
+
+    /// `#pullnoackdeadlock`: whether this member still holds the delivery barrier.
+    ///
+    /// A member with nothing pending has converged. A member whose pending head
+    /// has been redelivered past [`MAX_REDELIVERIES_WITHOUT_ACK`] without its ACK
+    /// ever advancing is **not converging** and must stop blocking everyone else.
+    ///
+    /// The update stays queued either way — this only removes the replica from
+    /// the barrier, exactly as an offline member already is, so a recovered
+    /// editor still receives it.
+    fn member_holds_delivery_barrier(member: &Member) -> bool {
+        !member.pending.is_empty()
+            && member.redeliveries_without_ack <= MAX_REDELIVERIES_WITHOUT_ACK
+    }
+
+    /// Replicas that are live but have stopped converging (`#pullnoackdeadlock`).
+    pub fn nonconverging_replicas(&self) -> Vec<u64> {
+        let mut ids: Vec<u64> = self
+            .members
+            .iter()
+            .filter(|(id, member)| {
+                self.is_live(**id)
+                    && !member.pending.is_empty()
+                    && member.redeliveries_without_ack > MAX_REDELIVERIES_WITHOUT_ACK
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        ids.sort_unstable();
+        ids
     }
 
     /// ACK one delivered update. Returns `Ok(false)` when the ACK is stale or
@@ -1343,6 +1408,8 @@ impl RelayHub {
             let acknowledged_generation = member.pending[matched_pos].generation;
             member.pending.drain(..=matched_pos);
             member.last_ack_generation = member.last_ack_generation.max(acknowledged_generation);
+            // `#pullnoackdeadlock`: forward progress clears the redelivery streak.
+            member.redeliveries_without_ack = 0;
             self.pending_rebootstrap.remove(&client_id);
             if acknowledged_projection {
                 self.canonical_projection_required
@@ -1357,6 +1424,7 @@ impl RelayHub {
             .remove(pos)
             .is_some_and(|update| update.patch_id.starts_with("crdt-bootstrap:"));
         member.last_ack_generation = member.last_ack_generation.max(generation);
+        member.redeliveries_without_ack = 0;
         if acknowledged_projection {
             self.canonical_projection_required
                 .set(&self.ctx, client_id, false);
@@ -1409,6 +1477,7 @@ impl RelayHub {
         let projected_generation = member.pending[matched_pos].generation;
         member.pending.drain(..=matched_pos);
         member.last_ack_generation = member.last_ack_generation.max(projected_generation);
+        member.redeliveries_without_ack = 0;
         self.pending_rebootstrap.remove(&client_id);
         if acknowledged_projection {
             self.canonical_projection_required
@@ -1447,7 +1516,7 @@ impl RelayHub {
         self.members
             .iter()
             .filter(|(id, _)| self.is_live(**id))
-            .all(|(_, member)| member.pending.is_empty())
+            .all(|(_, member)| !Self::member_holds_delivery_barrier(member))
     }
 
     pub fn delivery_snapshot(&self) -> Vec<ReplicaDeliverySnapshot> {
@@ -1460,6 +1529,8 @@ impl RelayHub {
                 pending_updates: member.pending.len(),
                 current_generation: member.generation,
                 last_ack_generation: member.last_ack_generation,
+                redeliveries_without_ack: member.redeliveries_without_ack,
+                holds_delivery_barrier: Self::member_holds_delivery_barrier(member),
             })
             .collect::<Vec<_>>();
         snapshot.sort_by_key(|entry| entry.client_id);
@@ -2367,6 +2438,95 @@ mod tests {
             .expect("target delivery snapshot");
         assert_eq!(target.current_generation, 1);
         assert_eq!(target.last_ack_generation, 1);
+    }
+
+    #[test]
+    /// `#pullnoackdeadlock`: a replica that pulls forever and never ACKs must
+    /// stop holding the delivery barrier.
+    ///
+    /// Observed 2026-08-09 on `tasks/agent-doc/agent-doc-bugs2.md`: editor
+    /// client `5162727547735464` re-pulled `current_generation=5
+    /// last_ack_generation=4` at ~2/s indefinitely — 23372
+    /// `delivery_converged=false` observations, zero ACKs — which wedged every
+    /// write behind the delivery barrier and made preflight refuse admission
+    /// with `Lazily current authority remained delivery_pending`. `is_live` only
+    /// flips on explicit disconnect, so the existing "offline members are
+    /// excluded so a slow editor cannot deadlock" escape never fired: a replica
+    /// that keeps pulling is maximally live.
+    #[test]
+    fn a_replica_that_pulls_without_acking_stops_holding_the_barrier() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+
+        let editor2 = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        editor2.apply_local_edit(0, 0, "never-acked");
+        let update = editor2.diff(&ReplicaState::new(99).state_vector()).unwrap();
+        hub.relay_update(2, &update).unwrap();
+
+        assert!(
+            !hub.delivery_converged(),
+            "precondition: the unacked delivery blocks convergence"
+        );
+
+        // Exactly the wedge: pull the same head over and over, never ACK.
+        for _ in 0..MAX_REDELIVERIES_WITHOUT_ACK {
+            assert_eq!(hub.pending_updates(3).unwrap().len(), 1);
+            assert!(
+                !hub.delivery_converged(),
+                "within the budget the barrier must still hold — a slow editor is not a broken one"
+            );
+        }
+
+        assert_eq!(hub.pending_updates(3).unwrap().len(), 1);
+        assert!(
+            hub.delivery_converged(),
+            "past the redelivery budget a non-ACKing replica must stop wedging everyone else"
+        );
+        assert_eq!(
+            hub.nonconverging_replicas(),
+            vec![3],
+            "and it must be nameable, not silently dropped"
+        );
+
+        // The update is NOT discarded — a recovered editor still receives it,
+        // exactly as an offline member would.
+        assert_eq!(hub.pending_updates(3).unwrap().len(), 1);
+    }
+
+    /// The other half: forward progress clears the streak, so a replica that
+    /// ACKs late still holds the barrier for its NEXT delivery.
+    #[test]
+    fn an_ack_clears_the_redelivery_streak() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+
+        let editor2 = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        editor2.apply_local_edit(0, 0, "first");
+        let update = editor2.diff(&ReplicaState::new(99).state_vector()).unwrap();
+        hub.relay_update(2, &update).unwrap();
+
+        for _ in 0..(MAX_REDELIVERIES_WITHOUT_ACK + 5) {
+            hub.pending_updates(3).unwrap();
+        }
+        assert!(hub.delivery_converged(), "precondition: the streak tripped");
+
+        let pending = hub.pending_updates(3).unwrap();
+        assert!(
+            hub.ack_delivery(3, &pending[0].patch_id, pending[0].generation)
+                .unwrap()
+        );
+        assert!(hub.nonconverging_replicas().is_empty(), "the ACK rehabilitates it");
+
+        // A NEW delivery to the rehabilitated replica blocks convergence again.
+        editor2.apply_local_edit(0, 0, "second");
+        let update = editor2.diff(&hub.canonical_state_vector()).unwrap();
+        hub.relay_update(2, &update).unwrap();
+        assert!(
+            !hub.delivery_converged(),
+            "a recovered replica must hold the barrier for its next delivery"
+        );
     }
 
     #[test]

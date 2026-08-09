@@ -1736,7 +1736,58 @@ fn parse_custom_id_prefix(text: &str) -> Result<(Option<String>, String)> {
     if let Some(rest) = trimmed.strip_prefix("id=") {
         return parse_explicit_custom_id_prefix(rest);
     }
+    reject_edit_shaped_id_prefix(trimmed)?;
     parse_bracketed_custom_id_prefix(trimmed)
+}
+
+/// `#addvseditidsyntax`: reject `--backlog-add "<id>=<text>"`.
+///
+/// `--backlog-edit` takes `<id>=<new text>`; `--backlog-add` takes
+/// `id=<custom> <text>` — the literal keyword `id`. The same `=` separator means
+/// opposite things, and getting it wrong FAILED SILENTLY: the whole string became
+/// the item body, so `--backlog-add "resumeuuidstallsdrain=#agent-doc-bug FIXED
+/// in 0.35.201..."` produced an item whose text opened with a stray
+/// `resumeuuidstallsdrain=` and whose id was auto-derived from the following
+/// words as `resumeuuidstallsdrainbug`. Three items in
+/// `tasks/agent-doc/agent-doc-bugs2.md` were written that way on 2026-08-09
+/// before anyone noticed — the id an agent later cites resolves to nothing,
+/// which is exactly what the coined-id guard exists to prevent.
+///
+/// Fail closed instead. A backlog item legitimately opening with `word=` is
+/// rare, and the error names both correct forms, so the cost of a false
+/// positive is one rephrase; the cost of the silent accept is a corrupted
+/// record nobody sees.
+fn reject_edit_shaped_id_prefix(trimmed: &str) -> Result<()> {
+    let Some((head, _)) = trimmed.split_once(char::is_whitespace) else {
+        return Ok(());
+    };
+    let Some((candidate_id, after_equals)) = head.split_once('=') else {
+        return Ok(());
+    };
+    // `=` must separate a plausible id from real text — not appear mid-token
+    // (`a=b=c`) or open the value (`x= y`).
+    if after_equals.is_empty() && !head.ends_with('=') {
+        return Ok(());
+    }
+    let candidate_id = candidate_id.trim();
+    // A LEADING `#` is a different, already-decided syntax: `#lazilyspecpin=Pin
+    // the vocabulary` is a compound topic label, and
+    // `op_add_leading_bare_tag_with_trailing_equals_keeps_auto_hash` pins that
+    // the `=` disqualifies promotion and the full text is preserved. The
+    // mistake this guard catches has no `#` — it is an id typed as if for
+    // `--backlog-edit`.
+    if candidate_id.starts_with('#') || candidate_id.is_empty() || !is_valid_pending_id(candidate_id)
+    {
+        return Ok(());
+    }
+    bail!(
+        "pending add: `{candidate_id}=` looks like `--backlog-edit` syntax. `--backlog-edit` takes \
+         `<id>=<new text>`; add takes the literal keyword `id`: `id={candidate_id} <text>` (or \
+         `[#{candidate_id}] <text>`). Accepting this silently would file the item with \
+         `{candidate_id}=` inside its body and an auto-generated id, so the id you meant would \
+         resolve to nothing later. If the text really must start with `{candidate_id}=`, rephrase \
+         it or pass an explicit `id=<id> ` prefix first."
+    )
 }
 
 /// Return the explicit, caller-provided custom id from a `--pending-add` item
@@ -1759,6 +1810,52 @@ pub fn explicit_custom_id(item: &str) -> Option<String> {
             }
         }
         Err(_) => None,
+    }
+}
+
+#[test]
+fn add_rejects_edit_shaped_id_prefix_instead_of_swallowing_it() {
+    // The exact string that produced `#resumeuuidstallsdrainbug` on
+    // `tasks/agent-doc/agent-doc-bugs2.md`.
+    let err = parse_custom_id_prefix("resumeuuidstallsdrain=#agent-doc-bug FIXED in 0.35.201.")
+        .expect_err("edit-shaped add input must fail closed, not become body text");
+    let err = err.to_string();
+    assert!(
+        err.contains("--backlog-edit") && err.contains("id=resumeuuidstallsdrain "),
+        "the error must name both forms so the fix is obvious: {err}"
+    );
+
+    // The correct add form is untouched.
+    let (id, text) = parse_custom_id_prefix("id=resumeuuidstallsdrain #agent-doc-bug FIXED")
+        .expect("the documented add form still parses");
+    assert_eq!(id.as_deref(), Some("resumeuuidstallsdrain"));
+    assert_eq!(text, "#agent-doc-bug FIXED");
+
+    // So is the bracketed compatibility form, and plain auto-id text.
+    let (id, _) = parse_custom_id_prefix("[#someid] some text").expect("bracketed form");
+    assert_eq!(id.as_deref(), Some("someid"));
+    let (id, text) = parse_custom_id_prefix("just ordinary item text").expect("auto id");
+    assert_eq!(id, None);
+    assert_eq!(text, "just ordinary item text");
+}
+
+/// The guard must not start rejecting ordinary prose. Only a leading token whose
+/// pre-`=` part is a VALID id shape is ambiguous with edit syntax.
+#[test]
+fn add_still_accepts_prose_that_merely_contains_an_equals() {
+    for text in [
+        "a == b is not an assignment in this context",
+        "set queue_active: true =/= flipping go mode",
+        "fix the x = y + 1 off-by-one in the parser",
+        "kernel arg root=/dev/sda1 breaks the initramfs",
+        // A leading bare tag with `=` is a compound topic label, not an id
+        // request — see `op_add_leading_bare_tag_with_trailing_equals_keeps_auto_hash`.
+        "#lazilyspecpin=Pin the vocabulary",
+    ] {
+        let (id, body) = parse_custom_id_prefix(text)
+            .unwrap_or_else(|e| panic!("prose must still add cleanly: {text:?} -> {e}"));
+        assert_eq!(id, None, "{text:?} must not be read as a custom id");
+        assert_eq!(body, text);
     }
 }
 

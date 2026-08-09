@@ -2,6 +2,36 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.202
+
+- **Fix (`#addvseditidsyntax`): `--backlog-add "<id>=<text>"` silently filed a
+  corrupted item instead of erroring.**
+
+  `--backlog-edit` takes `<id>=<new text>`. `--backlog-add` takes
+  `id=<custom> <text>` — the literal keyword `id`. The same `=` separator means
+  opposite things between two adjacent flags, and getting it wrong produced no
+  error at all: the entire string became the item body, so
+
+      --backlog-add "resumeuuidstallsdrain=#agent-doc-bug FIXED in 0.35.201..."
+
+  filed an item whose text opened with a stray `resumeuuidstallsdrain=` and
+  whose id was auto-derived from the *following* words as
+  `resumeuuidstallsdrainbug`. Three items in
+  `tasks/agent-doc/agent-doc-bugs2.md` were written that way on 2026-08-09
+  before it was noticed. The damage is not cosmetic: the id the author meant
+  never exists, so a later `--done`, `do [#id]`, or cross-reference resolves to
+  nothing — precisely what the coined-id guard exists to prevent, arriving
+  through the one path that bypasses it.
+
+  It now fails closed, naming both correct forms. The guard only fires when the
+  leading token's pre-`=` part is a *valid id shape* and carries no leading `#`,
+  so prose keeps adding cleanly (`fix the x = y + 1 off-by-one`, `kernel arg
+  root=/dev/sda1 breaks the initramfs`) and the established bare-tag label form
+  (`#lazilyspecpin=Pin the vocabulary`, which deliberately keeps an auto id) is
+  untouched — the first draft broke that case, and its own regression caught it.
+  Pinned by a second test, because a guard that starts rejecting ordinary text
+  would be worse than the bug. Mutation-checked.
+
 ## 0.35.201
 
 - **Fix (`#resumeuuidstallsdrain`): the binary's own `resume:` UUID rotation

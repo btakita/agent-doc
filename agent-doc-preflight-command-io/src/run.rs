@@ -3502,6 +3502,99 @@ mod tests {
             "HEAD should now contain the response after write_applied auto-recovery"
         );
     }
+    /// `#hookcontractlost`: document-only closeout drift used to be a
+    /// self-sustaining wedge. Preflight owns recovery *before* diffing, so
+    /// `enforce_no_uncommitted_closeout_drift` bailing aborted the
+    /// `UserPromptSubmit` hook before it could emit a cycle contract — and the
+    /// remedy the error named (`agent-doc commit`) can only be run by the
+    /// operator, because the agent is correctly instructed never to shell
+    /// preflight itself. Nothing else clears the drift, so every following turn
+    /// hit the same bail (observed across three consecutive turns on
+    /// 2026-08-09).
+    ///
+    /// Unlike the jb_cache_conflict_cancel shapes above, there is no response
+    /// body in play: the drift is document-only, so the recovery classifier
+    /// reports `Clean` and the binary-owned commit boundary closes it
+    /// losslessly.
+    #[test]
+    fn preflight_auto_commits_document_only_closeout_drift_instead_of_wedging() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+
+        let original = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ hello\n\n",
+            "### Re: hello — opus-4-6\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:status -->\n",
+            "idle\n",
+            "<!-- /agent:status -->\n"
+        );
+        std::fs::write(&doc, original).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        commit_all(root, "add doc", None);
+
+        // Document-only drift: a binary-owned `status` line moved in the
+        // snapshot only. The answered exchange is byte-identical and no
+        // response body is pending. The working file stays at HEAD, so this is
+        // NOT the jb_cache_conflict_cancel shape (which requires
+        // document == snapshot) and falls through to the bail this test covers.
+        let drifted = original.replace("idle\n", "draining\n");
+        assert_ne!(drifted, original, "precondition: drift must be real");
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &drifted,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(&drifted),
+            Some(&drifted),
+        )
+        .unwrap();
+
+        assert!(
+            matches!(
+                agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
+                agent_doc_snapshot_io::SnapshotCommitStatus::SnapshotDiffersFromHead { .. }
+            ),
+            "precondition: snapshot must differ from HEAD"
+        );
+        assert!(
+            !agent_doc_session_check_io::detect_jb_cache_conflict_cancel_recoverable(&doc).unwrap(),
+            "precondition: this must NOT be the jb_cache_conflict_cancel shape, \
+             otherwise the pre-existing recovery would handle it and prove nothing"
+        );
+        assert!(
+            agent_doc_closeout_runtime_io::document_only_drift_is_commit_recoverable(&doc),
+            "precondition: drift must classify as document-only (recovery state Clean)"
+        );
+
+        // Before the fix this bailed, aborting contract emission.
+        run(&doc).expect("preflight must recover document-only drift in place");
+
+        assert!(
+            matches!(
+                agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
+                agent_doc_snapshot_io::SnapshotCommitStatus::Committed
+            ),
+            "document-only drift should be committed, clearing the wedge"
+        );
+    }
     #[test]
     fn preflight_recovers_jb_cache_conflict_cancel_orphaned_capture_once() {
         let dir = setup_project();

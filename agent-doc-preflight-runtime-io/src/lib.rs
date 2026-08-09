@@ -286,6 +286,57 @@ pub fn enforce_no_uncommitted_closeout_drift(
             session_check_effects,
         )?
     {
+        // `#hookcontractlost`: bailing here is what made the wedge self-sustaining.
+        // Preflight owns recovery *before* diffing, so this error aborts the hook
+        // before it can emit a contract — and the remedy the message names
+        // (`agent-doc commit`) can only be run by the operator, because the agent
+        // is correctly instructed never to shell preflight itself. Nothing else
+        // clears the drift, so every following turn hits the same bail.
+        //
+        // When the drift is document-only there is no response body at risk, so
+        // run that remedy in place instead of printing it. Mirrors the
+        // jb_cache_conflict_cancel auto-commit above.
+        if session_check_effects.document_only_drift_is_commit_recoverable(file) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "preflight_document_only_drift_auto_commit_attempt file={}",
+                    file.display()
+                ),
+            );
+            eprintln!(
+                "[preflight] document-only closeout drift for {} -- running binary-owned auto-commit",
+                file.display()
+            );
+            match agent_doc_commit_io::commit(file) {
+                Ok(_) => {
+                    rc.invalidate_head_content();
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "preflight_document_only_drift_auto_commit_succeeded file={}",
+                            file.display()
+                        ),
+                    );
+                    return Ok(());
+                }
+                Err(err) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "preflight_document_only_drift_auto_commit_failed file={} error={}",
+                            file.display(),
+                            err.to_string().replace('\n', " ")
+                        ),
+                    );
+                    eprintln!(
+                        "[preflight] document-only drift auto-commit failed for {}: {}",
+                        file.display(),
+                        err
+                    );
+                }
+            }
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(

@@ -439,6 +439,10 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         closeout_recovery_hint(file)
     }
 
+    fn document_only_drift_is_commit_recoverable(&self, file: &Path) -> bool {
+        document_only_drift_is_commit_recoverable(file)
+    }
+
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
         agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
     }
@@ -1614,6 +1618,46 @@ mod tests {
             CyclePhase::WriteApplied | CyclePhase::Committed
         ));
     }
+}
+
+/// Whether closeout drift on `file` is document-only and therefore closable in
+/// place by the binary-owned commit boundary (`#hookcontractlost`).
+///
+/// Decided from **content alone** — `classify_snapshot_head_drift` is a pure
+/// function of the snapshot and HEAD blobs — rather than from
+/// `classify_closeout_recovery_state_for_file`. Two reasons:
+///
+/// 1. *Safety.* The recovery state `Clean` is returned both for "document-only
+///    drift" (the `#deadlockhint` branch that names `agent-doc commit`) and for
+///    "there is no recovery-cycle view at all". Those diverge: a document
+///    carrying a real `### Re:` body plus uncommitted tracked side-effect edits
+///    classifies `Clean` while genuinely needing `write --commit`, so keying off
+///    it would commit an unreviewed response — see
+///    `preflight_fails_closed_on_uncommitted_closeout_drift_even_without_diff`.
+/// 2. *Stability.* That classifier depends on cycle bookkeeping which preflight's
+///    own earlier recovery steps mutate, so it can answer differently before and
+///    inside the drift guard. The drift question — "does anything other than
+///    agent-doc's own artifacts differ?" — does not depend on cycle state.
+///
+/// `BoundaryOnly` (boundary / `(HEAD)` marker / answered-prompt-prefix artifacts)
+/// and `MetadataOnly` (queue / `queue_active` / status metadata, with
+/// user/response and tracked-item content byte-identical) are exactly the shapes
+/// whose recovery command is `agent-doc commit` because no response body is at
+/// risk. `Content` drift — which includes every unreviewed user or response
+/// edit — is rejected and still fails closed.
+pub fn document_only_drift_is_commit_recoverable(file: &Path) -> bool {
+    use agent_doc_turn::closeout_recovery::CloseoutRecoveryDrift;
+    let (Ok(Some(snapshot)), Ok(Some(head))) = (
+        agent_doc_snapshot_io::load_document_baseline(file),
+        agent_doc_git_io::revision::show_head(file),
+    ) else {
+        // No baseline or no HEAD to compare: nothing is proven, so fail closed.
+        return false;
+    };
+    matches!(
+        agent_doc_turn::closeout_recovery::classify_snapshot_head_drift(&snapshot, &head),
+        CloseoutRecoveryDrift::BoundaryOnly | CloseoutRecoveryDrift::MetadataOnly
+    )
 }
 
 pub fn closeout_recovery_hint(file: &Path) -> String {

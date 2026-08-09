@@ -320,6 +320,21 @@ pub trait SessionCheckEffects {
         anyhow::bail!("response-replay canonicalization settlement is unavailable")
     }
     fn closeout_recovery_hint(&self, file: &Path) -> String;
+    /// Whether observed closeout drift is *document-only* — the recovery
+    /// classifier finds nothing pending, so no response body is at risk and the
+    /// binary-owned `commit` boundary closes it losslessly.
+    ///
+    /// This is the same classification [`Self::closeout_recovery_hint`] already
+    /// uses to decide its wording (`#deadlockhint`); exposing it lets preflight
+    /// *run* that remedy instead of only printing it (`#hookcontractlost`).
+    /// Keeping both on one classifier is what stops the hint and the recovery
+    /// from drifting apart.
+    ///
+    /// Defaults to `false` so only the production runtime (and explicit test
+    /// effects) can authorize an in-place commit.
+    fn document_only_drift_is_commit_recoverable(&self, _file: &Path) -> bool {
+        false
+    }
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
     fn atomic_repair_write_if_current(
         &self,

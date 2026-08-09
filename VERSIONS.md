@@ -2,6 +2,46 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.207
+
+- **Fix (`#hookcontractlost`): the `UserPromptSubmit` hook could run preflight
+  and then emit nothing at all, leaving the agent with no contract and no
+  reason.**
+
+  A `UserPromptSubmit` hook injects **stdout** as turn context. Every preflight
+  diagnostic went to **stderr**, so when preflight refused, the reason reached
+  the operator's hook log and never the agent — which saw an ordinary prompt
+  with no contract, indistinguishable from a hook that was never wired.
+  Observed 2026-08-09 across three consecutive turns.
+
+  The hook now always names its outcome on stdout. Three states are separable:
+  the `[agent-doc] cycle contract ...` marker means admitted; the new
+  `[agent-doc] cycle contract UNAVAILABLE (preflight admission failed; ...)`
+  marker — followed by `document:`, `reason:`, and `remedy:` lines — means the
+  hook ran and preflight refused; neither marker means the hook never ran. The
+  failure marker is deliberately distinct from the success seal, since admission
+  did fail and the agent must not proceed as though a cycle were open.
+
+- **Fix (`#hookcontractlost`): a preflight recovery error that blocked contract
+  emission could only be cleared by preflight, so the wedge sustained itself.**
+
+  Preflight owns recovery *before* diffing, so `enforce_no_uncommitted_closeout_drift`
+  bailing aborted the hook before any contract could be emitted. The remedy the
+  error named (`agent-doc commit <FILE>`) can only be run by the operator,
+  because the agent is correctly instructed never to shell preflight itself —
+  and nothing else clears the drift, so every following turn hit the same bail.
+  The reported instance needed a hand-run `agent-doc commit` to escape.
+
+  Preflight now runs that remedy in place for *document-only* drift, mirroring
+  the jb_cache_conflict_cancel auto-commit beside it. The predicate is read
+  straight off the recovery classifier — `Clean`, `BoundaryOnlyDrift`,
+  `QueueMetadataDrift`, and `NestedParentPointerStale` are exactly the states
+  whose own recovery command is `agent-doc commit` and which have no response
+  body at risk — so it cannot drift from the remedy the hint prints.
+  `UnsafeUserContentDrift` (which says in so many words "do NOT `agent-doc
+  commit`"), the response-bearing states, and states needing a different
+  boundary are all excluded and still fail closed.
+
 ## 0.35.206
 
 - **Fix (`#preflightprojpass`): the embedded closeout path never opened a

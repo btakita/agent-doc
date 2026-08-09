@@ -3407,6 +3407,64 @@ fn test_agent_doc_codex_hook_io_owns_blocked_stop_payload_sidecar() {
     );
 }
 
+/// `#hookcontractlost`: a `UserPromptSubmit` hook injects **stdout** as turn
+/// context, so preflight diagnostics that go only to stderr reach the operator's
+/// log and never the agent. A refusing hook then looks exactly like a hook that
+/// never ran, and the agent has no reason and no remedy.
+///
+/// The hook must therefore always name its outcome on stdout: the contract
+/// marker on success, or an explicit machine-readable admission-failure marker.
+#[test]
+fn test_preflight_hook_never_emits_silence_on_admission_failure() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let preflight_hook_source =
+        fs::read_to_string(manifest_dir.join("src/preflight_hook.rs")).unwrap();
+
+    for required in [
+        "pub const ADMISSION_FAILURE_MARKER",
+        "fn emit_admission_failure(",
+        "println!(\"{ADMISSION_FAILURE_MARKER}\")",
+        "println!(\"reason: {err:#}\")",
+        "emit_admission_failure(&file.display().to_string(), &err)",
+    ] {
+        assert!(
+            preflight_hook_source.contains(required),
+            "preflight hook must emit a machine-readable admission failure: {required}"
+        );
+    }
+
+    // The failure marker is injected context, so it must go to stdout — the
+    // whole defect was a diagnostic that only ever reached stderr.
+    assert!(
+        !preflight_hook_source.contains("eprintln!(\"{ADMISSION_FAILURE_MARKER}\")"),
+        "the admission-failure marker must reach the agent on stdout, not stderr"
+    );
+
+    // Admission still failed, so the failure marker must stay distinct from the
+    // success seal; the skill keys "a cycle was opened" off the contract marker.
+    let marker_literal = |name: &str| -> String {
+        let anchor = format!("pub const {name}: &str =");
+        let start = preflight_hook_source
+            .find(&anchor)
+            .unwrap_or_else(|| panic!("{name} must be declared"))
+            + anchor.len();
+        let rest = &preflight_hook_source[start..];
+        let open = rest.find('"').expect("marker literal must be a string");
+        let close = rest[open + 1..].find('"').expect("marker literal unterminated");
+        rest[open + 1..open + 1 + close].to_string()
+    };
+    let contract = marker_literal("CONTRACT_MARKER");
+    let failure = marker_literal("ADMISSION_FAILURE_MARKER");
+    assert_ne!(
+        contract, failure,
+        "an admission failure must never be mistaken for an opened cycle"
+    );
+    assert!(
+        !failure.contains(&contract),
+        "the failure marker must not embed the contract marker a skill greps for"
+    );
+}
+
 #[test]
 fn test_agent_doc_repair_io_owns_repair_state_adapters() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -21057,6 +21115,12 @@ fn test_agent_doc_preflight_runtime_io_owns_closeout_drift_recovery_graph() {
         "recover_ipc_truncated_worktree_from_editor_buffer(file, rc)?",
         "detect_uncommitted_closeout_drift_with_context(",
         "preflight_blocked_uncommitted_closeout_drift file=",
+        // `#hookcontractlost`: document-only drift must be recovered in place,
+        // not reported with a remedy only the operator can run.
+        "document_only_drift_is_commit_recoverable(file)",
+        "preflight_document_only_drift_auto_commit_attempt file=",
+        "preflight_document_only_drift_auto_commit_succeeded file=",
+        "preflight_document_only_drift_auto_commit_failed file=",
     ] {
         assert!(
             preflight_runtime.contains(required),

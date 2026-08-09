@@ -2,6 +2,41 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.221
+
+- **Fix (`#resumeownerfmread`): `agent-doc start`'s resume-claim check paid two
+  controller round trips per attached sibling document; it now pays one, total.**
+
+  Measured 2026-08-09 over the window after 0.35.199 made resolve attribution
+  trustworthy, `resume_id_owner` was the single largest resolve source (213),
+  with `start_resume_id_capture` second (126). `#projpassstart` had already ruled
+  out a projection pass — each candidate is read exactly once per `start`, so a
+  memoizing cache has nothing to hit.
+
+  The original plan for this item, a frontmatter-scoped relay read, was **wrong**
+  and is corrected here: the cost is the round trip, not materialization.
+  `canonical_text` goes through Yrs `get_string`, which walks the whole tree
+  regardless of how few bytes the caller wants, so a prefix API would still pay
+  the per-candidate trip.
+
+  So the *question* moves to where the hubs already live. A `resume_claimant`
+  controller RPC takes the candidate list and answers from the local hub registry
+  with no IPC per candidate (`#lazily-hot-path`: ask the actor once instead of
+  polling it N times). Candidates whose hub is not allocated are detached, so
+  disk is already their authority and the controller reads their bytes directly.
+
+  Fail-safe by construction: an `Err` — no controller, or one that cannot answer
+  — falls through to the original per-candidate loop rather than reporting "no
+  owner", because a missed claim adopts someone else's conversation. The claim
+  rule is one predicate (`document_claims_resume_id`) checking BOTH `resume` and
+  `agent_doc_session`, so the batch and per-candidate paths cannot drift.
+  Mutation-checked: dropping the `agent_doc_session` half reddens its test.
+
+  The `state.db` `documents.session_id` shortcut stays rejected — it is a durable
+  sink (`#lzdurablesink`), and a stale row would either invent an owner (silently
+  losing a conversation resume via the `#resumeclaim` start-fresh path) or miss a
+  real one.
+
 ## 0.35.220
 
 - **Fix (`#pullnoackdeadlock`, follow-up to 0.35.217): a replica that never ACKs

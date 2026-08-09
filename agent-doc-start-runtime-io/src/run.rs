@@ -203,6 +203,28 @@ fn resume_id_owner(canonical: &Path, request: &agent_doc_harness::ResumeRequest)
         .ok()?
         .filter_map(Result::ok)
         .collect();
+
+    // `#resumeownerfmread`: ask the controller ONCE. Every attached candidate's
+    // hub already lives in that process, so it answers the whole question with
+    // no IPC per candidate; the loop below used to pay two round trips each (a
+    // revision probe, then the text). An `Err` — no controller, or one that
+    // cannot answer — falls through to that loop rather than reporting "no
+    // owner", because a missed claim adopts someone else's conversation.
+    let candidates: Vec<std::path::PathBuf> = paths
+        .iter()
+        .filter(|other| *other != &me)
+        .map(std::path::PathBuf::from)
+        .collect();
+    if !candidates.is_empty()
+        && let Ok(owner) = agent_doc_controller_io::project_controller::resume_id_claimant(
+            &project_root,
+            id,
+            &candidates,
+        )
+    {
+        return owner;
+    }
+
     for other in paths {
         if other == me {
             continue;

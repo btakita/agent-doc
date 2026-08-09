@@ -7337,6 +7337,121 @@ fn handle_crdt_current_text_rpc(
     Ok(controller_current_text_response(current))
 }
 
+/// Candidate documents to test for a resume-id claim (`#resumeownerfmread`).
+#[derive(Debug, Serialize, Deserialize)]
+struct ControllerResumeClaimantPayload {
+    resume_id: String,
+    candidates: Vec<std::path::PathBuf>,
+}
+
+/// The document that claims a resume id, if any (`#resumeownerfmread`).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ControllerResumeClaimantResult {
+    pub owner: Option<String>,
+}
+
+/// Answer "which of these documents claims resume id X" inside the controller.
+///
+/// `#resumeownerfmread`: the caller used to resolve every candidate through the
+/// realtime authority — two round trips each. Every attached candidate's hub is
+/// already in this process, so the whole question is answered locally and the
+/// caller pays one round trip total.
+///
+/// Checks BOTH `resume` and `agent_doc_session`, matching the client-side rule
+/// it replaces: a copied document may carry one without the other.
+fn handle_resume_claimant_rpc(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerResumeClaimantResult> {
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: ControllerResumeClaimantPayload =
+        serde_json::from_str(&payload_json).context("failed to parse resume claimant payload")?;
+    let id = payload.resume_id.trim();
+    if id.is_empty() {
+        return Ok(ControllerResumeClaimantResult { owner: None });
+    }
+    let candidates: Vec<std::path::PathBuf> = payload
+        .candidates
+        .iter()
+        .map(|path| canonical_controller_request_file(bootstrap, path))
+        .collect();
+    for (path, attached) in agent_doc_crdt_relay_io::allocated_canonical_texts(&candidates) {
+        // An unallocated hub means no live editor owns that document, so disk IS
+        // its authority — the same rule `resume_claim_candidate_reads_disk` uses.
+        let Some(content) = attached.or_else(|| std::fs::read_to_string(&path).ok()) else {
+            continue;
+        };
+        if document_claims_resume_id(&content, id) {
+            return Ok(ControllerResumeClaimantResult {
+                owner: Some(path.to_string_lossy().to_string()),
+            });
+        }
+    }
+    Ok(ControllerResumeClaimantResult { owner: None })
+}
+
+/// Whether a document's frontmatter claims `id` (`#resumeownerfmread`).
+///
+/// Checks BOTH `resume` and `agent_doc_session`, matching the per-candidate rule
+/// this replaces: a copied document may carry one without the other, and the
+/// controller uses `agent_doc_session` for session association independently of
+/// the `resume` flag. A missed claim adopts someone else's conversation, so the
+/// two implementations must not drift — hence one predicate, tested directly.
+fn document_claims_resume_id(content: &str, id: &str) -> bool {
+    let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(content) else {
+        return false;
+    };
+    let id = id.trim();
+    if id.is_empty() {
+        return false;
+    }
+    fm.resume
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|resume_id| resume_id == id)
+        || fm
+            .session
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|session_id| session_id == id)
+}
+
+/// Client half of [`handle_resume_claimant_rpc`] (`#resumeownerfmread`).
+///
+/// Returns `Ok(None)` only when nothing claims the id. A controller that cannot
+/// answer surfaces as `Err`, so the caller falls back to its per-candidate loop
+/// rather than silently reporting "no owner" — a missed claim adopts someone
+/// else's conversation.
+pub fn resume_id_claimant(
+    project_root: &Path,
+    resume_id: &str,
+    candidates: &[std::path::PathBuf],
+) -> Result<Option<String>> {
+    let payload = ControllerResumeClaimantPayload {
+        resume_id: resume_id.to_string(),
+        candidates: candidates.to_vec(),
+    };
+    let result: ControllerResumeClaimantResult = request_controller(
+        project_root,
+        ControllerRequest {
+            command: "resume_claimant".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("resume_id_owner".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&payload)?),
+        },
+    )?;
+    Ok(result.owner)
+}
+
 fn handle_crdt_revision_rpc(
     bootstrap: &ControllerBootstrap,
     request: ControllerRequest,
@@ -12288,6 +12403,9 @@ pub(crate) fn handle_request_locked(
         }
         "crdt_current_text" => {
             controller_envelope(handle_crdt_current_text_rpc(&bootstrap_snapshot, request))
+        }
+        "resume_claimant" => {
+            controller_envelope(handle_resume_claimant_rpc(&bootstrap_snapshot, request))
         }
         "crdt_revision" => {
             controller_envelope(handle_crdt_revision_rpc(&bootstrap_snapshot, request))
@@ -21627,6 +21745,52 @@ pub fn run_restart(root: Option<&Path>, force: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
+    /// `#resumeownerfmread`: the controller answers the resume-claim question
+    /// for every candidate in one call, from hubs it already holds.
+    ///
+    /// The claim rule must stay identical to the per-candidate loop it replaces:
+    /// BOTH `resume` and `agent_doc_session` count, because a copied document
+    /// may carry one without the other, and a missed claim adopts someone
+    /// else's conversation.
+    #[test]
+    fn the_controller_answers_a_resume_claim_for_every_candidate_at_once() {
+        // Exercises the SHIPPED predicate, not a copy of it in the test.
+        assert!(document_claims_resume_id("---\nresume: conv-1\n---\n", "conv-1"));
+        // The half a resume-only check would miss.
+        assert!(document_claims_resume_id(
+            "---\nagent_doc_session: conv-2\n---\n",
+            "conv-2"
+        ));
+        // Whitespace around the recorded id must not change the answer.
+        assert!(document_claims_resume_id("---\nresume: \"  conv-3  \"\n---\n", "conv-3"));
+
+        // A different id does not claim.
+        assert!(!document_claims_resume_id("---\nresume: other\n---\n", "conv-1"));
+        // Neither does a document with no ids at all.
+        assert!(!document_claims_resume_id("---\nagent: claude\n---\n", "conv-1"));
+        // An empty query claims nothing — otherwise a blank id would match any
+        // document whose own field happened to be blank.
+        assert!(!document_claims_resume_id("---\nresume: \"\"\n---\n", ""));
+        // Unparseable frontmatter is not a claim.
+        assert!(!document_claims_resume_id("no frontmatter here", "conv-1"));
+    }
+
+    /// A detached candidate has no hub, and disk IS its authority — so the batch
+    /// read must report `None` for it rather than inventing a text.
+    #[test]
+    fn an_unallocated_hub_reports_no_attached_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let detached = dir.path().join("detached.md");
+        std::fs::write(&detached, "---\nresume: conv-1\n---\n").unwrap();
+        let texts = agent_doc_crdt_relay_io::allocated_canonical_texts(&[detached.clone()]);
+        assert_eq!(texts.len(), 1);
+        assert_eq!(texts[0].0, detached);
+        assert!(
+            texts[0].1.is_none(),
+            "a document with no allocated hub must fall through to its disk bytes"
+        );
+    }
+
     use super::*;
     // `rusqlite` is a dev-dependency: these tests open the controller state DB
     // directly to assert the schema/rows the seam writes. `Connection` is the

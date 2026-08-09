@@ -537,6 +537,38 @@ fn hub_handle_or_insert_with(document_hash: &str, make: impl FnOnce() -> RelayHu
         .clone()
 }
 
+/// Canonical text for every path whose hub is already allocated, in one pass.
+///
+/// `#resumeownerfmread`: `agent-doc start`'s resume-claim check asks "does any
+/// other document claim this conversation id?" by resolving each candidate
+/// through the realtime authority — TWO controller round trips per attached
+/// candidate (a revision probe, then the text). Measured 2026-08-09 after
+/// 0.35.199 made attribution trustworthy, `resume_id_owner` was the single
+/// largest resolve source at 213, with `start_resume_id_capture` second at 126.
+///
+/// A projection pass cannot help (`#projpassstart`: each candidate is read
+/// exactly once per `start`), and a frontmatter-scoped read cannot either — the
+/// cost is the round trip, not materialization, since `canonical_text` walks the
+/// whole Yrs tree regardless of how few bytes the caller wants.
+///
+/// So the QUESTION moves to where the hubs already live. Running inside the
+/// controller, this answers every candidate from the local registry with no IPC
+/// at all — `#lazily-hot-path`: ask the actor once instead of polling it N
+/// times. Paths whose hub is not allocated return `None`; they are detached, so
+/// the caller reads their disk bytes, which is already the authority for them.
+pub fn allocated_canonical_texts(paths: &[std::path::PathBuf]) -> Vec<(std::path::PathBuf, Option<String>)> {
+    paths
+        .iter()
+        .map(|path| {
+            let text = agent_doc_fs::document_state_hash(path)
+                .ok()
+                .and_then(|hash| hub_handle(&hash))
+                .map(|handle| handle.lock().canonical_text());
+            (path.clone(), text)
+        })
+        .collect()
+}
+
 fn hub_is_allocated(document_hash: &str) -> bool {
     hub_registry().lock().contains_key(document_hash)
 }

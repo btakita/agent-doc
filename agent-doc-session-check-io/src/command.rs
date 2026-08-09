@@ -1896,7 +1896,27 @@ pub fn enforce_clean_closeout_with_force_disk(
     force_disk: bool,
     effects: &impl SessionCheckEffects,
 ) -> Result<()> {
-    crate::with_force_disk_resolution(force_disk, || enforce_clean_closeout_inner(file, effects))
+    // `#preflightprojpass`: open the same projection pass `run_with_options`
+    // opens. This is the EMBEDDED closeout path — what `respond` /
+    // `write --commit` run — and it went through the identical guard suite with
+    // no pass installed, so every guard paid a full document resolve.
+    //
+    // Measured 2026-08-09 on 0.35.204, once `pass=` made the outcome readable:
+    // 190 of 226 resolves were `uninstalled` — no pass open at all — against
+    // only 12 genuine `miss`. The redundancy was never invalidation tuning; the
+    // pass simply was not there. Note what that means for the ~11
+    // `invalidate_current_document_pass` calls in this file: they are inert
+    // while no pass is installed, so they have been correct-but-unused here,
+    // and opening the pass is what activates the design they were written for.
+    //
+    // Safe in the order this item recorded: the one mutating call on this path
+    // (`recover_retained_document_write`) already self-invalidates before any
+    // later read, so a post-mutation read observes the new text.
+    crate::with_current_document_pass(|| {
+        crate::with_force_disk_resolution(force_disk, || {
+            enforce_clean_closeout_inner(file, effects)
+        })
+    })
 }
 
 fn enforce_clean_closeout_inner(file: &Path, effects: &impl SessionCheckEffects) -> Result<()> {

@@ -177,6 +177,46 @@ pub(crate) fn operator_live_buffer_contains_heading(file: &Path, heading: &str) 
 }
 
 #[cfg(test)]
+mod closeout_pass_guard {
+    /// `#preflightprojpass`: BOTH session-check entry points must open the
+    /// projection pass.
+    ///
+    /// `run_with_options` (the CLI) opened one; `enforce_clean_closeout` (what
+    /// `respond` and `write --commit` run) did not, so the identical guard
+    /// suite paid a full document resolve per guard. Measured 2026-08-09 on
+    /// 0.35.204, once `pass=` made the outcome readable: 190 of 226 resolves
+    /// were `uninstalled` against 12 genuine `miss`.
+    ///
+    /// A behavioural test cannot see this — an unwrapped path is merely SLOWER,
+    /// never wrong — which is exactly why it survived. The entry points are
+    /// few and named, so guard them structurally.
+    #[test]
+    fn every_session_check_entry_point_opens_the_projection_pass() {
+        let command = include_str!("command.rs");
+        let body = command
+            .split_once("\n#[cfg(test)]")
+            .map(|(before, _)| before)
+            .unwrap_or(command);
+        for entry in [
+            "pub fn run_with_options(",
+            "pub fn enforce_clean_closeout_with_force_disk(",
+        ] {
+            let start = body
+                .find(entry)
+                .unwrap_or_else(|| panic!("entry point `{entry}` moved or was renamed"));
+            // The pass must be opened within the entry point itself, before it
+            // delegates into the guard suite.
+            let window = &body[start..(start + 1400).min(body.len())];
+            assert!(
+                window.contains("with_current_document_pass("),
+                "`{entry}` must open the projection pass; without it every guard \
+                 re-resolves the whole document"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod source_attribution_guard {
     /// `#passattrib`: `session-check` composed its resolve source as
     /// `format!("session-check {source}")` — WITH A SPACE — so every one of its

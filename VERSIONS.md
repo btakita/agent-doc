@@ -2,6 +2,37 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.206
+
+- **Fix (`#preflightprojpass`): the embedded closeout path never opened a
+  projection pass, so every guard re-resolved the whole document.**
+
+  With 0.35.203's `pass=` field finally making the outcome readable, the answer
+  this item had been chasing for four cycles came out in one measurement. Of 226
+  resolves on 0.35.204: **190 `uninstalled`** — no pass open at all — against
+  **12** genuine `miss` and **zero** `bypassed_no_revision`.
+
+  So the redundancy was never invalidation tuning. Both earlier hypotheses were
+  wrong in the same way: the pass was simply not there. `run_with_options` (the
+  `session-check` CLI) opened one; `enforce_clean_closeout` — the path `respond`
+  and `write --commit` actually run — did not, while going through the identical
+  guard suite.
+
+  Note what that implies for the ~11 `invalidate_current_document_pass` calls in
+  `session-check`: with no pass installed they were inert, so they have been
+  correct-but-unused on this path. Opening the pass is what activates the design
+  they were written for, and it is safe in the order this item recorded — the
+  one mutating call on the path (`recover_retained_document_write`) already
+  self-invalidates before any later read.
+
+  A behavioural test cannot catch this class: an unwrapped path is merely
+  *slower*, never wrong, which is exactly why it survived. The entry points are
+  few and named, so `every_session_check_entry_point_opens_the_projection_pass`
+  guards them structurally. Mutation-checked.
+
+  The preflight half stays closed: preflight phases contributed **zero**
+  resolves across every measurement window.
+
 ## 0.35.205
 
 - **Investigation (`#dupreheadingcollide`): two responses sharing a `### Re:`

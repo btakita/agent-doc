@@ -2,6 +2,37 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.188
+
+- **Fix (`#loopcontractseal`): the Claude Code queue auto-loop could not seal a
+  cycle contract, so a drain with work still on it stalled.**
+
+  Settled the open question the item recorded, with a third answer neither of its
+  branches anticipated. A `ScheduleWakeup`-fired `/loop` re-entry **is** a
+  `UserPromptSubmit` event, and the hook **does** run — `.claude/settings.json`
+  wires it unconditionally. But the loop skill re-arms with the original input
+  prefixed by `/loop `, and the agent-doc SKILL dispatches the auto-loop as
+  `Skill(loop, args: "agent-doc <FILE>")`, so the prompt's first word is `loop`.
+  `invoked_document` matches the trigger strictly on the first word, so it
+  returned `None`, preflight never ran, and no contract was emitted. The skill
+  then (correctly) failed closed on the missing marker — leaving drainable heads
+  with the operator, which `#drain-no-defer` forbids.
+
+  Observed directly: the operator-typed `/agent-doc` trigger logged
+  `preflight_diff_start` at 05:51:40Z; the `/loop agent-doc <FILE>` wakeup that
+  fired ~25 minutes later logged nothing.
+
+  `invoked_document` now consumes an optional leading `loop` / `/loop` wrapper —
+  with the optional interval token the loop skill accepts (`5m`, `30s`, `2h`,
+  `1d`) — before matching, so the auto-loop re-entry seals a contract exactly
+  like the operator-typed trigger. Only that one wrapper is recognized, and it
+  loosens nothing else: non-cycle subcommands, extra arguments, non-`.md`
+  targets, nested `/loop /loop`, other wrappers such as `/schedule`, and prose
+  after `loop` all still return `None`.
+
+  Coverage: `the_queue_auto_loop_reentry_is_the_same_trigger` and
+  `the_loop_wrapper_does_not_widen_admission` in `agent-doc-hooks-io`.
+
 ## 0.35.187
 
 - **Fix (`#panewindowdrift`): editor auto-focus was mirrored onto a pane the

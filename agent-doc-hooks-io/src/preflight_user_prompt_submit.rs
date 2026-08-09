@@ -70,11 +70,30 @@ const NON_CYCLE_SUBCOMMANDS: &[&str] = &[
 /// - a recognized non-cycle subcommand ([`NON_CYCLE_SUBCOMMANDS`]) returns
 ///   `None`, since those flows own their own boundaries;
 /// - an unrecognized extra argument returns `None` rather than guessing.
+///
+/// `#loopcontractseal`: the queue auto-loop re-enters as `/loop agent-doc <FILE>`
+/// (the `loop` skill re-arms with the original input prefixed by `/loop `, and
+/// the agent-doc SKILL dispatches it as `Skill(loop, args: "agent-doc <FILE>")`).
+/// That is the *same* trigger, so an optional leading `loop` wrapper — with the
+/// optional interval token the skill accepts — is consumed before matching. Only
+/// this one wrapper is recognized; every other leading word still means the
+/// prompt merely mentions the command.
 pub fn invoked_document(prompt: &str) -> Option<String> {
     let first_line = prompt.trim().lines().next()?.trim();
-    let mut words = first_line.split_whitespace();
+    let mut words = first_line.split_whitespace().peekable();
     let command = words.next()?;
     let command = command.strip_prefix('/').unwrap_or(command);
+    let command = if command == "loop" {
+        // An interval is optional in `/loop [interval] <prompt>`; a bare
+        // `/loop 5m` with no prompt simply runs out of words below.
+        if words.peek().is_some_and(|word| is_loop_interval(word)) {
+            words.next();
+        }
+        let wrapped = words.next()?;
+        wrapped.strip_prefix('/').unwrap_or(wrapped)
+    } else {
+        command
+    };
     if command != "agent-doc" {
         return None;
     }
@@ -91,6 +110,15 @@ pub fn invoked_document(prompt: &str) -> Option<String> {
         return None;
     }
     Some(target.to_string())
+}
+
+/// A `/loop` interval token: `<digits><s|m|h|d>`, per the `loop` skill's own
+/// leading-token rule.
+fn is_loop_interval(word: &str) -> bool {
+    let Some(digits) = word.strip_suffix(['s', 'm', 'h', 'd']) else {
+        return false;
+    };
+    !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 /// Resolve the document against the harness-reported working directory.
@@ -126,6 +154,75 @@ mod tests {
             invoked_document("  agent-doc /abs/tasks/plan.md  \n"),
             Some("/abs/tasks/plan.md".to_string()),
             "surrounding whitespace and absolute paths"
+        );
+    }
+
+    /// `#loopcontractseal`: the queue auto-loop's own re-entry shape. Without
+    /// this the drain silently loses binary-owned admission — the hook emits no
+    /// cycle contract, and the skill (correctly) fails closed instead of
+    /// draining, so the queue stalls with work still on it.
+    #[test]
+    fn the_queue_auto_loop_reentry_is_the_same_trigger() {
+        assert_eq!(
+            invoked_document("/loop agent-doc tasks/plan.md"),
+            Some("tasks/plan.md".to_string()),
+            "ScheduleWakeup re-arms with the original input prefixed by `/loop `"
+        );
+        assert_eq!(
+            invoked_document("loop agent-doc tasks/plan.md"),
+            Some("tasks/plan.md".to_string()),
+            "bare `loop` wrapper"
+        );
+        assert_eq!(
+            invoked_document("/loop agent-doc /abs/tasks/plan.md"),
+            Some("/abs/tasks/plan.md".to_string()),
+        );
+        assert_eq!(
+            invoked_document("/loop /agent-doc tasks/plan.md"),
+            Some("tasks/plan.md".to_string()),
+            "the wrapped trigger may keep its own slash"
+        );
+        for interval in ["5m", "30s", "2h", "1d"] {
+            assert_eq!(
+                invoked_document(&format!("/loop {interval} agent-doc tasks/plan.md")),
+                Some("tasks/plan.md".to_string()),
+                "fixed-interval loop form"
+            );
+        }
+    }
+
+    /// The wrapper does not loosen any other rule: subcommands, extra
+    /// arguments, non-`.md` targets, and unrelated wrappers stay rejected.
+    #[test]
+    fn the_loop_wrapper_does_not_widen_admission() {
+        assert_eq!(invoked_document("/loop"), None);
+        assert_eq!(invoked_document("/loop 5m"), None);
+        assert_eq!(invoked_document("/loop agent-doc"), None);
+        assert_eq!(invoked_document("/loop tasks/plan.md"), None);
+        assert_eq!(
+            invoked_document("/loop agent-doc compact tasks/plan.md"),
+            None,
+            "a non-cycle subcommand is still not a cycle"
+        );
+        assert_eq!(
+            invoked_document("/loop agent-doc tasks/plan.md --force"),
+            None
+        );
+        assert_eq!(invoked_document("/loop agent-doc tasks/plan.txt"), None);
+        assert_eq!(
+            invoked_document("/loop /loop agent-doc tasks/plan.md"),
+            None,
+            "exactly one wrapper — nested loops are not a trigger shape"
+        );
+        assert_eq!(
+            invoked_document("/schedule agent-doc tasks/plan.md"),
+            None,
+            "only the loop wrapper is recognized"
+        );
+        assert_eq!(
+            invoked_document("loop over agent-doc tasks/plan.md"),
+            None,
+            "prose after `loop` is not the trigger"
         );
     }
 

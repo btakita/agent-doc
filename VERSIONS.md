@@ -2,6 +2,41 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.196
+
+- **Fix (`#backlogeditcorruptsreview`): a scoped tracked-work edit could destroy
+  items in a DIFFERENT component, silently.**
+
+  Observed 2026-08-09 on `tasks/agent-doc/agent-doc-bugs2.md`: one long
+  `--backlog-edit`, issued in the same `respond` invocation as the response body,
+  applied correctly to its backlog line AND ALSO truncated `agent:review` item
+  `#stalesupervisorreexecdrain` mid-word — splicing the replacement text onto it
+  — while deleting `#stickymdpaneverify` and `#operatorverifyrestart` entirely.
+  Review count 8 -> 6. Only a clean HEAD made it recoverable; the CRDT replica
+  pushed the corruption back over a `git checkout`, so it lived in the editor
+  authority, and repair had to go back through `--review-edit` / `--review-add`.
+
+  **The mechanism is still unproven, and this fix deliberately does not depend on
+  one.** The staging transaction was audited and is sound — it reads virtual
+  content between mutations and fails closed on a lost cursor. The same
+  invocation logged a 24.9s CRDT settle and a `cell_merge` Content conflict on a
+  DUPLICATE exchange heading identity, which is the strongest remaining lead.
+
+  Whatever produced the target, the invariant holds: a write scoped to one
+  component must leave every other component byte-identical.
+  `ensure_only_component_changed` now checks that before the edit path publishes,
+  and refuses otherwise. Silent destruction of tracked work becomes a failed
+  command.
+
+  Coverage includes the exact live shapes — vanished review items, and a
+  replacement spliced onto a truncated neighbour. One test also pins a
+  correction: `element::parse` does NOT error on unstructured text, it returns
+  zero components, so the component-set comparison is what catches that case; the
+  first draft of the test assumed a parse error and asserted the opposite.
+
+  Scope: the guard covers the edit path where the corruption was observed. The
+  add path and the multi-component `respond` envelope are not yet covered.
+
 ## 0.35.195
 
 - **Fix (`#preflightprojpass`, relay half): the current-document projection cache

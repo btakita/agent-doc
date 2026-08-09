@@ -1066,6 +1066,61 @@ fn gate_in_place(file: &Path, id: &str) -> Result<()> {
 }
 
 /// Edit an item's text, preserving its hash id.
+/// Fail closed when a single-component write changed bytes outside that component.
+///
+/// `#backlogeditcorruptsreview`: on 2026-08-09 a `--backlog-edit` applied
+/// correctly to its backlog line AND ALSO truncated an `agent:review` item
+/// mid-word, splicing the replacement text on and deleting two other gated
+/// items (review count 8 -> 6). Only HEAD being clean made it recoverable.
+///
+/// The mechanism is not yet proven, so this guard deliberately does not depend
+/// on one: whatever produced the target, a write scoped to ONE component must
+/// leave every other component byte-identical. Publishing a target that fails
+/// this check destroys tracked work silently; refusing it costs one failed
+/// command.
+fn ensure_only_component_changed(before: &str, after: &str, component: &str) -> Result<()> {
+    let (Ok(before_components), Ok(after_components)) =
+        (element::parse(before), element::parse(after))
+    else {
+        // A hard parse error is its own failure; leave that to the callers and
+        // guards that already own it. Note this is rarely hit: `element::parse`
+        // returns ZERO components for unstructured text rather than erroring,
+        // and that case is caught by the component-set comparison below.
+        return Ok(());
+    };
+    let named = |components: &[element::Component], content: &str| {
+        components
+            .iter()
+            .map(|c| (c.name.clone(), c.content(content).to_string()))
+            .collect::<Vec<_>>()
+    };
+    let before_named = named(&before_components, before);
+    let after_named = named(&after_components, after);
+
+    if before_named.len() != after_named.len() {
+        anyhow::bail!(
+            "tracked-work write for `{component}` changed the document's component set              ({} -> {}); refusing to publish because a scoped edit must not add or remove              components (#backlogeditcorruptsreview)",
+            before_named.len(),
+            after_named.len()
+        );
+    }
+    for ((before_name, before_body), (after_name, after_body)) in
+        before_named.iter().zip(after_named.iter())
+    {
+        if before_name != after_name {
+            anyhow::bail!(
+                "tracked-work write for `{component}` reordered or renamed components                  (`{before_name}` -> `{after_name}`); refusing to publish                  (#backlogeditcorruptsreview)"
+            );
+        }
+        if before_name != component && before_body != after_body {
+            anyhow::bail!(
+                "tracked-work write for `{component}` also modified `{before_name}`; refusing                  to publish. A scoped edit must leave every other component byte-identical —                  publishing this target would silently destroy tracked work                  (#backlogeditcorruptsreview)"
+            );
+        }
+    }
+    Ok(())
+}
+
 fn edit_list(file: &Path, list: backlog::TrackedWorkList, id: &str, text: &str) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
@@ -1075,6 +1130,7 @@ fn edit_list(file: &Path, list: backlog::TrackedWorkList, id: &str, text: &str) 
         &agent_doc_hash::document_id_for_path(file),
     );
     let new_doc = comp.replace_content(&full_content, &canonical);
+    ensure_only_component_changed(&full_content, &new_doc, &comp.name)?;
     persist_pending_write(file, &full_content, &new_doc)?;
     Ok(())
 }
@@ -1428,6 +1484,72 @@ pub fn icebox_list(file: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// `#backlogeditcorruptsreview`: the observed corruption shape, and the
+    /// legitimate edit it must not block.
+    mod component_scope_guard {
+        use super::super::ensure_only_component_changed;
+
+        fn document(backlog: &str, review: &str) -> String {
+            format!(
+                "<!-- agent:backlog -->\n{backlog}\n<!-- /agent:backlog -->\n\
+                 <!-- agent:review -->\n{review}\n<!-- /agent:review -->\n"
+            )
+        }
+
+        #[test]
+        fn a_scoped_edit_that_only_touches_its_own_component_is_allowed() {
+            let before = document("- [ ] [#a] old text", "- [/] [#r1] keep\n- [/] [#r2] keep");
+            let after = document("- [ ] [#a] new text", "- [/] [#r1] keep\n- [/] [#r2] keep");
+            assert!(ensure_only_component_changed(&before, &after, "backlog").is_ok());
+        }
+
+        /// The live failure: the backlog edit applied AND review items vanished.
+        #[test]
+        fn an_edit_that_destroys_review_items_is_refused() {
+            let before = document("- [ ] [#a] old text", "- [/] [#r1] keep\n- [/] [#r2] keep");
+            let after = document("- [ ] [#a] new text", "- [/] [#r1] keep");
+
+            let err = ensure_only_component_changed(&before, &after, "backlog")
+                .expect_err("destroying review items must not publish");
+            let message = format!("{err:#}");
+            assert!(message.contains("also modified `review`"), "{message}");
+            assert!(message.contains("#backlogeditcorruptsreview"), "{message}");
+        }
+
+        /// The exact splice seen live: a review item truncated mid-word with the
+        /// backlog replacement text appended to it.
+        #[test]
+        fn an_edit_spliced_into_a_neighbouring_component_is_refused() {
+            let before = document(
+                "- [ ] [#a] old text",
+                "- [/] [#r1] One supervisor is still stranded and cannot self-rescue",
+            );
+            let after = document(
+                "- [ ] [#a] RE-NARROWED text",
+                "- [/] [#r1] One supervisor is still stranded and cannotRE-NARROWED text",
+            );
+
+            assert!(
+                ensure_only_component_changed(&before, &after, "backlog").is_err(),
+                "a splice into a neighbouring component must not publish"
+            );
+        }
+
+        /// A target that lost its components entirely is refused.
+        ///
+        /// Note `element::parse` does NOT error on plain text — it returns zero
+        /// components — so the component-set comparison, not a parse failure, is
+        /// what catches this. Worth pinning: the first draft of this test
+        /// assumed a parse error and asserted the opposite.
+        #[test]
+        fn a_target_that_lost_every_component_is_refused() {
+            let before = document("- [ ] [#a] text", "- [/] [#r1] keep");
+            let err = ensure_only_component_changed(&before, "not a document", "backlog")
+                .expect_err("a target with no components must not publish");
+            assert!(format!("{err:#}").contains("component set"), "{err:#}");
+        }
+    }
+
     use super::*;
     use std::{fs, path::PathBuf};
     use tempfile::TempDir;

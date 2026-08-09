@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-config"
-version = "0.35.195"
+version = "0.35.196"
 edition = "2024"
 description = "Global user configuration types and file loading for agent-doc"
 license = "MIT"
@@ -11,8 +11,8 @@ publish = false
 name = "agent_doc_config"
 
 [dependencies]
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.195" }
-agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.35.195" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.196" }
+agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.35.196" }
 anyhow = "1"
 indexmap = { version = "2", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }

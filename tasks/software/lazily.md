@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: fd5cd3fd-d5f5-4897-a141-68c23ea2e4d3
+resume: f4aefe6a-bb23-456b-a937-e4d5c732e3d2
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -300,21 +300,47 @@ Three op families landed, in the order the item itself prescribes.
 **What remains, and why it is not done.** Two families, 7 fixtures. `merge_cell` (5) is the only group needing **kernel** work — a folding `Source` with a merge policy, plus the `merges_of` observable — and `fanout`/`churn` (2) needs real id recycling, which Godot's monotonic instance ids do not provide. I narrowed `#lzgdvocab` to exactly those two rather than closing it, since the item's own framing is one op family per step and each group's definition of done is removing its `KNOWN_UNCOVERED` entries.
 
 `make check` green: 26 test cases, 0 orphans.
+
+### Re: do [#lzcoveragerowfixtures] — opus-5
+
+`check-coverage-claims.mjs` now verifies **415 shipped marks across 49 rows**, up from 84 across 11. Commit `5e351b7` in lazily-spec, 11 sibling README syncs, superproject at `e98df71c70`; spec CI green (run 31293119177).
+
+**38 rows now cite the fixtures that back their prose.** The guard was sound and had almost nothing to read — including row 0, the one row lazily-gd is scored on. Citations went on reactive-graph, materialization, familysync, statechart, collections, queue, topic, work-queue, merge-algebra, relaycell, crdt, lossless-tree, and stdlib.
+
+**The two citations worth arguing about, and one of them I got wrong first.**
+
+RelayCell does **not** cite `egress/*`. I was about to, because the row lives in the `egress` family and seven bindings excuse those four fixtures — which would have made this item look productive by reddening seven columns. `docs/relaycell.md` §8 says the opposite: conformance is pinned by replaying `mergecell_algebra.json` through a relay, and overflow validation, spill, and transport are proved by each binding's own model checker "not a portable fixture." The `egress/*` fixtures back `EgressCore` (`docs/transport-egress.md`) — the send-side core with sequence, window, watermark, retry, fence. **coverage.json has no row for it at all.** So four canonical fixtures score nothing and seven bindings excuse them against no claim. That is a real gap and it is now `#lzegressrow`, not a misattribution folded into RelayCell.
+
+Merge-algebra cites the reactive-graph merge fixtures alongside `mergecell_algebra.json`, because `merge_cell_acquires_no_dependency_edge` is what pins the row's own "read-any-cell / write-`Source` split" clause structurally. That is the citation that reddened Go.
+
+**Ten marks were unbacked, and every one is confirmed by that binding's own ledger, not inferred from a red guard.**
+
+- **C++, three materialization rows.** Its `KNOWN_UNCOVERED` comment states it: `observational_transparency` and `deferral_not_deallocation` are "mirrored by hand in test_reactive_family.cpp and its async / thread-safe siblings; only `entry_kind_orthogonal_to_mode.json` is replayed from the canonical bytes." Two of three, hand-transcribed.
+- **Go, merge-algebra.** `merge.go` and `relay.go` implement `MergePolicy` — the library is there. The reactive-graph *runner* has no merge/fold node kind, so all five merge/exact-fold fixtures sit in `reactiveGraphUnsupported` with "merge ops are NOT implemented and the drift assertion is NOT loosened."
+- **Zig, three CRDT rows and three lossless-tree rows.** `text_crdt.zig`, `seq_crdt.zig`, and `lossless_tree.zig` exist with their own tests; the ledger reason is "No runner at all in this binding."
+
+All three are "implemented, but not this wire" — which is what `~` is for, per the guard's own header — so those cells are `~`, not deleted citations. Roll-ups follow: Go reactive-graph, C++ materialization, Zig CRDT, Zig lossless-tree.
+
+**What I did not cite.** Registers (LWW/MV + `PnCounter` + `CellCrdt`) has no canonical fixture anywhere in the corpus, so it stays unverifiable — filed rather than papered over. Row 0 cites only the fixtures matching its prose (two cell kinds, Effect sink, eager `Computed`, batch); the disposal and scoping fixtures are real but no coverage row claims them, and citing them on row 0 would have over-claimed to inflate the verified count.
+
+`make check` green in lazily-spec: 279 schema tests, Lean build, all nine guards.
 <!-- agent:boundary:139c989e:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~⏭️ do [#lzgdvocab]~~
-- do [#lzcoveragerowfixtures]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzegressrow] coverage.json has NO row for transport-agnostic reactive egress (EgressCore, docs/transport-egress.md) — sequence assignment, bounded inflight window, cumulative ack watermark, retry/backoff/exhaustion, producer-generation fence. Four canonical fixtures (egress/egress_ordered_ack, egress_inflight_window, egress_retry_budget, egress_generation_fence) therefore score nothing, and seven bindings (py, kt, js, dart, zig, go, cs) carry them in KNOWN_UNCOVERED against no claim at all. The egress family currently holds only the RelayCell row, whose conformance docs/relaycell.md section 8 pins to mergecell_algebra.json instead. Add the EgressCore row (or rows, if the three context flavors are scored separately like queue/topic/work-queue), cite the four fixtures, and score each binding honestly — expect Rust shipped and most others absent.
+- [ ] [#lzcppmatreplay] lazily-cpp replays only 1 of 3 canonical materialization fixtures from the corpus bytes; observational_transparency.json and deferral_not_deallocation.json are transcribed BY HAND into tests/test_reactive_family.cpp and its async/thread-safe siblings, which is why C++ dropped to ~ on all three materialization rows. A mirror transcribed from the implementation cannot catch a divergence between the implementation and the corpus — the same failure retiring lazily-zig's eight inline mirrors turned up three real wire defects. Replay both from conformance/materialization/, delete the two KNOWN_UNCOVERED entries, and restore the marks.
+- [ ] [#lzgomergeops] lazily-go's reactive-graph runner has no merge/fold node kind, so all five merge fixtures (merge_cell_acquires_no_dependency_edge, merge_folds_synchronously_in_batch, merge_per_settled_cone_not_per_write, merge_feed_through_a_formula_coalesces, exact_fold_paths_stay_exact) plus feedback_drain_bound_reports_exhaustion sit in reactiveGraphUnsupported — which is why Go dropped to ~ on merge-algebra. The library half exists (merge.go, relay.go implement MergePolicy); this is a runner op gap. Teach the runner the merge_cell op family and the drain_exhausted/writes_own_cone assertion keys, then delete the entries. Note memory: welding eagerness into invalidation is the known lazily-go clause-3 defect, and signal_materializes_once_per_batch is the only fixture that catches it.
+- [ ] [#lzzigcanonrunner] lazily-zig implements text_crdt.zig, seq_crdt.zig, and lossless_tree.zig with its own tests but has no canonical runner for collections CRDT or lossless-tree, so 12 fixtures sit under 'No runner at all in this binding' and Zig dropped to ~ on three CRDT rows and three lossless-tree rows. Add canonical replay for collections/{textcrdt_convergence,textcrdt_delta_sync,seqcrdt_convergence}.json and the nine lossless-tree/*.json, following the pattern that already retired this binding's eight inline mirrors in src/lazily/{collections,distributed,signaling}_conformance.zig — that retirement found three wire defects the mirrors could not see.
+- [ ] [#lzregistersfixture] The Registers row (LWW / MV + PnCounter + CellCrdt) is marked shipped in nine bindings and has NO canonical fixture anywhere in the corpus, so check-coverage-claims.mjs cannot verify a single one of those marks. seqcrdt_convergence.json exercises LWW registers only incidentally, as the substrate for move-aware sequence order, and backs the SeqCrdt row instead. Author a canonical crdt fixture pinning LWW resolution (including the equal-timestamp tiebreak), MV concurrent-value retention, PnCounter increment/decrement convergence, and the CellCrdt reactive projection; then cite it on the row.
 - [ ] [#lzgdvocab] Finish the lazily-gd conformance runner: 7 of the 21 canonical reactive-graph fixtures remain, in two op families. (a) merge_cell (5 fixtures: exact_fold_paths_stay_exact, merge_cell_acquires_no_dependency_edge, merge_feed_through_a_formula_coalesces, merge_folds_synchronously_in_batch, merge_per_settled_cone_not_per_write) — this is the one group needing KERNEL work, a folding Source with a merge policy (source_with/merge), plus the merges_of observable. (b) fanout/churn/dispose_fanout/dispose_stale_handle bulk ops plus real id recycling (2 fixtures: churn_returns_to_baseline, recycled_id_inherits_nothing) — recycling needs explicit work beyond Godot instance ids, which are monotonic and never alias. Each is named in KNOWN_UNCOVERED with its reason; removing an entry there is the definition of done for that group. Landed already: signal/dispose_signal (3), fail_next (1), shape=scenarios (1) — 14/149 replayed, 7 named excuses.
-- [ ] [#lzcoveragerowfixtures] Only 11 of coverage.json's 70 rows carry a `fixtures` citation, so check-coverage-claims.mjs verifies 84 shipped marks and leaves every other mark structurally unverifiable — including row 0 (reactive-graph), the one row lazily-gd is scored on. The guard is sound; it just has almost nothing to read. Add `fixtures` to the reactive-graph, materialization, statechart, collections, queue, topic, work-queue, crdt, lossless-tree, egress, and stdlib rows, citing the canonical fixtures that actually back each row's normative prose. Expect this to redden bindings whose marks are currently unbacked — that is the point, and it is why this is its own cycle rather than a rider on the GDScript column. Do NOT weaken a mark to make the guard pass without first checking whether the binding replays the fixture.
 <!-- /agent:backlog -->
 
 ## Review

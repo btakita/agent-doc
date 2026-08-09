@@ -362,11 +362,6 @@ The test pins both halves deliberately: the grace exceeds the two measured gaps,
 
 ### Re: do [#ownershipverdictdiverges] — opus-5
 
-> **Queue prompt:**
->
-> do [#ownershipverdictdiverges]
-
-
 Fixed in **0.35.194** (`60c940264`, tagged). This was the one I most wanted to reach, because 0.35.192 didn't remove the problem — it relocated it.
 
 **The defect, precisely.** `RetainedWriteOwnership::cycle_open` treats all three open phases as one fact. Any of `preflight_started`, `response_captured`, or `write_applied` yields `Deferred`, whose remedy promises *"the same intent commits itself once delivery converges … do NOT re-send."*

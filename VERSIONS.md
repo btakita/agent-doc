@@ -2,6 +2,27 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.220
+
+- **Fix (`#pullnoackdeadlock`, follow-up to 0.35.217): a replica that never ACKs
+  re-earned the full redelivery budget on every new write.**
+
+  0.35.217 cleared the redelivery streak on ANY enqueue, reasoning that "a NEW
+  head is not a redelivery of the old one". That is right for a replica that was
+  caught up and wrong for one already behind: each new write re-armed the whole
+  budget, so the barrier came back for ~25 seconds per write instead of staying
+  released. Observed immediately after 0.35.217 shipped, on the release cycle
+  itself — the same client re-armed at `redeliveries=0` on generation 7 while its
+  `last_ack_generation` had been stuck at 5, and two consecutive closeouts hit
+  the pre-write delivery barrier again.
+
+  The streak now clears only when the member was actually caught up
+  (`pending.is_empty()` before the push) — forward progress, not mere activity.
+  Both enqueue sites (fan-out relay and bootstrap) follow the same rule.
+
+  Also removed a duplicated assignment left in the 0.35.217 patch at the fan-out
+  enqueue; it was harmless but wrong-looking, and its indentation was mangled.
+
 ## 0.35.219
 
 - **Fix (`#hooktriggerunresolved`): a trigger whose document path did not resolve

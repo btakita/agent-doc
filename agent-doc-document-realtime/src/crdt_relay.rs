@@ -1231,9 +1231,17 @@ impl RelayHub {
             };
             member.generation += 1;
             let generation = member.generation;
-            member.redeliveries_without_ack = 0;
-            member.redeliveries_without_ack = 0;
-        member.pending.push_back(PendingReplicaUpdate {
+            // `#pullnoackdeadlock`: only a member that was CAUGHT UP earns a
+            // fresh budget. Clearing the streak on every enqueue let a replica
+            // that never ACKs anything re-earn the full budget per write, so the
+            // barrier was re-imposed for ~25s on each new write instead of
+            // staying released — observed 2026-08-09 immediately after 0.35.217,
+            // where the same client re-armed at `redeliveries=0` on generation 7
+            // while `last_ack_generation` had been stuck at 5.
+            if member.pending.is_empty() {
+                member.redeliveries_without_ack = 0;
+            }
+            member.pending.push_back(PendingReplicaUpdate {
                 patch_id: format!("crdt:{}:{}:{}", packet.origin, target, generation),
                 origin: packet.origin,
                 target: *target,
@@ -1276,6 +1284,11 @@ impl RelayHub {
         }
         member.generation += 1;
         let generation = member.generation;
+        // `#pullnoackdeadlock`: same rule as the fan-out enqueue — only a
+        // caught-up member earns a fresh budget.
+        if member.pending.is_empty() {
+            member.redeliveries_without_ack = 0;
+        }
         member.pending.push_back(PendingReplicaUpdate {
             patch_id: format!("crdt-bootstrap:{canonical_id}:{client_id}:{generation}"),
             origin: canonical_id,
@@ -2492,6 +2505,44 @@ mod tests {
         // The update is NOT discarded — a recovered editor still receives it,
         // exactly as an offline member would.
         assert_eq!(hub.pending_updates(3).unwrap().len(), 1);
+    }
+
+    /// `#pullnoackdeadlock`: a replica that never ACKs must not re-earn the
+    /// budget on every new write.
+    ///
+    /// The first cut cleared the streak on ANY enqueue, reasoning that "a NEW
+    /// head is not a redelivery of the old one". That is true for a replica that
+    /// was caught up, and wrong for one that is already behind: each new write
+    /// re-armed the full budget, so the barrier came back for ~25s per write
+    /// instead of staying released. Observed immediately after 0.35.217 shipped
+    /// — the same client re-armed at `redeliveries=0` on generation 7 while
+    /// `last_ack_generation` had been stuck at 5.
+    #[test]
+    fn a_new_write_does_not_re_arm_the_budget_for_a_replica_still_behind() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+
+        let editor2 = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        editor2.apply_local_edit(0, 0, "first");
+        let update = editor2.diff(&ReplicaState::new(99).state_vector()).unwrap();
+        hub.relay_update(2, &update).unwrap();
+
+        for _ in 0..(MAX_REDELIVERIES_WITHOUT_ACK + 1) {
+            hub.pending_updates(3).unwrap();
+        }
+        assert!(hub.delivery_converged(), "precondition: the budget tripped");
+
+        // A second write arrives while replica 3 is STILL behind (no ACK).
+        editor2.apply_local_edit(0, 0, "second");
+        let update = editor2.diff(&hub.canonical_state_vector()).unwrap();
+        hub.relay_update(2, &update).unwrap();
+
+        assert!(
+            hub.delivery_converged(),
+            "a replica that has never ACKed must not re-earn the budget on a new write"
+        );
+        assert_eq!(hub.nonconverging_replicas(), vec![3]);
     }
 
     /// The other half: forward progress clears the streak, so a replica that

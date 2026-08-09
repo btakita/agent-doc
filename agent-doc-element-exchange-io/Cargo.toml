@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-exchange-io"
-version = "0.35.219"
+version = "0.35.220"
 edition = "2024"
 description = "Exchange element write-path logging adapters for agent-doc"
 license = "MIT"
@@ -11,9 +11,9 @@ publish = false
 name = "agent_doc_element_exchange_io"
 
 [dependencies]
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.219" }
-agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.35.219" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.219" }
-agent-doc-template = { path = "../agent-doc-template", version = "0.35.219" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.219" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.220" }
+agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.35.220" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.220" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.35.220" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.220" }
 anyhow = "1"

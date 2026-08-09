@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 9094b3ea-3cb6-4a75-a8f9-215caeedb493
+resume: ff3c3946-2acf-4388-9445-96219dd97c20
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -752,13 +752,51 @@ Ordering stays safe by construction: `CONTRACT_MARKER` is printed only after pre
 I did not touch `#preflightprojpass` — its own item already carries an ordered plan with a self-invalidation audit that must run before anything gets wrapped, and guessing at it here would have burned that analysis.
 
 **Verification.** `make check` green both times (8817 then 8822 passed, 249 skipped); `make install` on both; pushed to `main` with tags `v0.35.208` and `v0.35.209`; controllers recycled. Both CI runs were still `in_progress` at closeout, recorded rather than waited on.
+
+### Re: do [#ctrlsockpathtoolong] — opus-5
+
+> **Queue prompt:**
+>
+> do [#ctrlsockpathtoolong]
+
+
+Fixed and shipped as **0.35.210**, plus **0.35.211** to repair a CI regression my own previous release introduced. Measured on the original repro: **90s → 1.3s**.
+
+**The item's premise held, and the fix is narrower than "fail fast" implied.** The supervisor socket already answers a `sun_path` overflow by relocating to a short runtime path, so the obvious move was to copy that. I did not, and the reason matters: the JetBrains and VS Code plugins resolve `.agent-doc/controller.sock` *themselves* (hardcoded in `CpRouteClient.kt` and `crdtReplica.ts`). Relocating the controller socket would bind it somewhere no editor ever looks — trading a loud failure for a permanently missing editor authority, which is a strictly worse bug and one that would present as `editor_attached_model_missing` rather than anything pointing at path length. So an over-long root is genuinely permanent here, and naming it immediately is the correct answer rather than the cheap one.
+
+**Why it cost the whole budget instead of one error.** The bind failed with a bare OS error indistinguishable from "the controller has not started yet", so `wait_for_controller_path_with_timeout` polled it on a 250ms cadence until its timeout. Nothing in the path was wrong except that it could never work.
+
+One predicate now, `agent_doc_controller::paths::resolved_socket_path_rejection`, enforced at the three places that used to hide it:
+
+- the wait loop bails **before its first sleep** — retrying a permanent condition only converts a one-line diagnosis into a budget-length stall;
+- `connect_path` / `connect_path_async` replace the bare OS error;
+- `serve_with_options` refuses before touching the filesystem, so a controller never half-starts.
+
+It measures the path actually being bound rather than re-deriving a canonical one, which matters because generation-scoped handoff sockets (`controller-handoff-*`) are longer than `controller.sock` and would otherwise slip through a root-based check.
+
+Coverage pins the property, not the mechanism: a 30s wait must refuse in under a second **and must not report a timeout**; a single connect must name the limit and say the condition is permanent; and — guarding the false positive that would refuse every controller connect in the product — an ordinary root must still fail as an ordinary connect failure. The `sun_path` boundary is asserted exactly on both sides.
+
+Live proof on the exact scratchpad root that burned 90s last cycle:
+
+```
+reason: project controller socket path is 135 bytes, over the 107-byte AF_UNIX
+sun_path limit: .../hookok2/.agent-doc/controller.sock. No controller can bind or
+be reached here, so retrying cannot help. Move the project under a shorter root...
+elapsed 1.3s
+```
+
+**A correction on my own work.** CI went red on **0.35.209** — my `budget_overrun_reports_a_reason_instead_of_hanging` test drove the timeout with a 1ns budget against real preflight. That is a race, not a test: preflight can fail *faster* than the budget expires, so `recv_timeout` returns the completed result and the assertion lands on the wrong branch. It passed locally and failed on CI, which is exactly the signature. `run_within_budget` now takes the work as a parameter so the overrun test supplies a worker that provably does not finish, and I pinned the two branches the racy version was silently skipping: work finishing inside its budget still admits (the guard must not refuse an ordinary fast preflight), and a failing preflight keeps its own reason instead of being relabelled an overrun. Deterministic over 8 consecutive runs.
+
+**Verification.** `make check` green on both (8828 then 8830 passed, 249 skipped); installed; pushed with tags `v0.35.210` and `v0.35.211`; controllers recycled. `v0.35.208` CI is green, `v0.35.209` is the red run 0.35.211 repairs, and both new runs were still `in_progress` at closeout — recorded, not waited on. Exchange is 720 lines across 31 sections; the queue is active so I am not stalling to compact.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#bugprojectcontroller]
-- 🚧 do [#hookcontractlost]
+- ~~do [#bugprojectcontroller]~~
+- ~~do [#hookcontractlost]~~
+- ~~do [#ctrlsockpathtoolong]~~
+- do [#operatorverifylive]
 - do [#prmergeguardpr]
 - ~~do [#backlogclosemarkeroffbyone]~~
 - do [#run3rdpaneswitchverify]
@@ -775,7 +813,6 @@ I did not touch `#preflightprojpass` — its own item already carries an ordered
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ctrlsockpathtoolong] #agent-doc-bug When the project controller socket path exceeds the AF_UNIX sun_path limit (108 bytes), preflight burns its entire admission budget waiting for a controller that can never bind, instead of failing immediately with a clear reason. Observed 2026-08-09 while verifying the 0.35.209 hook budget: a brand-new EMPTY document under a 96-char session-scratchpad root blew the full 90s budget; that root plus /.agent-doc/controller.sock is 123 bytes. Document size is not the driver -- an empty document is as slow as an 87KB one under a long root. Fix: check the resolved controller socket path length against sun_path BEFORE any bind/connect wait, and fail fast naming the path, its length, the 108-byte limit, and the remedy (shorter project root, or a socket path indirection such as a per-project directory under a short runtime dir). Add coverage that a too-long root fails in well under the admission budget with that reason, and confirm agent-doc start / sync / route take the same precondition rather than only preflight.
 - [ ] [#prmergeguardpr] Closeout atomicity is violated (#agent-doc-bug): a turn's response body can become visible while the SAME closeout's backlog/queue mutations never land. Observed 2026-08-09 twice. (a) src/haiven-dev/tasks/haiven-dev.md: working tree carries the response body (`prmergeguardpr` — done, line 54) while the backlog item is still `[ ]` (line 87) and the queue still holds `do ` (line 70); HEAD has neither. session-check reports the visible write retained by the lazy delivery projection, cycle INTERRUPTED at write_applied, remedy `agent-doc commit <FILE>` from the owning pane. A real owner exists (pane %20, gen 69, controller:fresh supervisor:fresh, supervisor_pid 3854486), so refusing --force-disk was correct — but stopping leaves a half-applied turn only a manual owning-pane commit can finish. (b) Reproduced in-session on this document: `respond --stream --done ... --backlog-add ...` added the response cell via realtime backbone (r:6d9396a0846e) and THEN failed the tracked-work mutations (#preset-item-id-collision-enforce rejected a leading `#agent-doc-bug` token as an explicit id), leaving cycle-1786292460900 at write_applied with the response on disk and neither the --done nor the --backlog-add applied. AGENTS.md requires response + queue-head consumption + backlog/done mutations + snapshot + commit to succeed as one transaction or none become authoritative; case (b) proves a mutation-validation error alone can split that transaction after the response is already durable. Fix: validate ALL tracked-work mutations BEFORE the response cell is published, so a rejectable id/preset collision fails the turn with nothing applied instead of stranding a half-applied cycle. Also determine whether the retained-write guidance should distinguish 'response landed, mutations pending' from 'whole write pending', since the operator currently reads a document whose response claims an item is done while the backlog still shows it open.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.

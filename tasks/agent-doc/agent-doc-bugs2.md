@@ -474,11 +474,6 @@ There are no actionable follow-up items and no plan file is needed: the fix, its
 
 ### Re: #run3rdpaneswitch — opus-5
 
-> **Queue prompt:**
->
-> do [#run3rdpaneswitch]
-
-
 Reproduced deterministically and fixed in **0.35.198**. The hypothesis in the report was right, and the culprit was the entry point nobody had checked.
 
 **It is `src/layout.rs`, not `sync.rs`.** `sync.rs` already handles this correctly — its module docs say so outright ("Stashing is non-destructive, so the closeout keeps running without forcing a third visible pane into a two-document editor projection") and `safe_passive_protected_open_cycle_sync_grows_...` proves it stashes open-cycle panes. That is why the sync path looked clean. But `agent-doc layout`, which mirrors the editor split, had the opposite rule:

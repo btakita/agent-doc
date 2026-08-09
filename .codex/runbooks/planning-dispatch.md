@@ -22,7 +22,7 @@ The command emits a structured planning record as JSON.
 - `execution_scope` — `normal | plan_backlog_only`; `plan_backlog_only` means the active prompt is a report/planning contract such as `#agent-doc-bug`, so the cycle must create plan/backlog artifacts and must not start repo implementation yet
 - `repo_actions` — concrete repo work to complete before response persistence
 - `required_commands` — binary/harness commands that must run this cycle
-- `pending_mutations` — pending items that must be resolved before persistence
+- `pending_mutations` — legacy-named planning field for backlog/review tracked-work mutations that must be resolved before persistence
 - `handoff` — `none | orchestrate | compact | claim | other`
 - `blockers` — concrete blockers that mean the cycle should fail closed
 
@@ -34,7 +34,7 @@ The command emits a structured planning record as JSON.
 4. If `handoff=compact`, follow the emitted compact/restart instruction and stop before normal repo work or response finalization. `handoff=compact` requires an explicit prompt or document compaction request; advisory session-accretion signals such as repeated no-op closeout churn must not force this handoff.
 5. If `execution_scope=plan_backlog_only`, do not start repo implementation, tests, builds, installs, commits, or pushes from this cycle even if the raw prompt contained imperative wording. Capture the plan and backlog items first, then wait for a later `do #id ...` turn to authorize implementation.
 6. Otherwise, execute `repo_actions` before `finalize` / `write --commit`.
-7. Resolve `pending_mutations` in the same cycle so pending state does not drift.
+7. Resolve `pending_mutations` in the same cycle so backlog/review tracked-work state does not drift.
 8. If `blockers` is non-empty, surface the blocker and stop instead of freelancing around it.
 
 ## Notes

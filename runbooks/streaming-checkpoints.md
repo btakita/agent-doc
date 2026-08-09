@@ -1,39 +1,89 @@
-# Streaming Checkpoints
+# Final Response Transactions
 
-For long, multi-topic responses, flush partial content at natural breakpoints so the user sees progress in their editor without waiting for the final write.
+The live response is a monotonic document transaction. Lazily is the sole live
+buffer authority: the binary may advance that transaction with cumulative,
+semantically complete response checkpoints before the turn is sealed.
 
-## When to checkpoint
+## Operator-visible progress
 
-- After each `### Re:` section in a multi-topic response.
-- After completing a code-implementation summary.
-- After any response block that takes >15s to generate.
+- Send concise progress through the harness console/commentary channel.
+- Incomplete token prefixes may be retained as crash-recovery evidence, but they
+are never a live-buffer sidecar and never become document authority.
+- When a standalone conclusion is valuable before closeout, send its complete
+  Markdown body to `agent-doc salient-checkpoint <FILE>`. The binary rejects
+  empty bodies, protocol markers, and unbalanced fences, then upserts one
+  cycle-scoped `Live response (not final)` node through controller/CRDT
+  authority.
+- At a semantic breakpoint, pipe the cumulative complete response through
+  `agent-doc response-checkpoint <FILE>`. Pass the response **cumulatively** —
+  every section so far, not just the new one. The binary appends only the
+  sections that are not already the tail of the exchange, so the visible result
+  is the same as replacing the prior uncommitted tail, without rewriting nodes
+  the editor already has. Replaying an unchanged cumulative response is a no-op
+  (`applied=false`), and finalize carrying the full response on top of earlier
+  checkpoints appends only what is left (`#crdtcaschkpt`).
+- A semantic breakpoint is the end of a complete `### Re:` section with balanced
+  code fences and component/patch markers. In a multi-response stream, seeing the
+  next `### Re:` heading proves that the preceding section is complete. Arbitrary
+  token, sentence, timer, or byte-count boundaries are not checkpoints.
+- Checkpointing never consumes queue heads, mutates backlog/done, advances the
+  cycle to `write_applied`, or commits.
 
-Skip checkpoints for short single-topic responses — one final write is fine.
+## When checkpointing is worth it
 
-## How to flush
+Checkpointing is **opt-in, not a per-turn default**. Each checkpoint is a real
+editor round trip that waits for a delivery ACK, so it costs roughly as much as
+it saves unless the response is genuinely large or the document is contended.
 
-1. Build the partial response as patch blocks (typically `<!-- patch:exchange -->`).
-2. Pipe through `agent-doc write` with `--stream` and the current baseline:
+Measured on `tasks/agent-doc/agent-doc-bugs2.md` (`#crdtcaschkptdrive`): across
+five closeouts, `git_commit` plus `session_check` accounted for **94-96%** of
+total closeout latency (for example `total_ms=9479` = `git_commit:6491ms` +
+`session_check:2631ms`), leaving CRDT convergence in the low hundreds of
+milliseconds. A single checkpoint on the same document cost **1317ms** of
+`delivery_ack_pending` by itself. Checkpointing every section would therefore
+have made those turns slower, not faster.
 
-   ```bash
-   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream --origin skill
-   <partial patch blocks>
-   RESPONSE
-   ```
+Reach for it when the finalize convergence window is *demonstrably* the
+bottleneck — a very large response, or a document under concurrent editing where
+`compare_and_swap_raced` shows up in `ops.log`. Confirm with the
+`closeout_latency` phase breakdown before adopting it as a habit; do not assume
+the convergence window is the expensive part, because usually it is not.
 
-3. **Re-save the baseline** after each flush — the document has changed:
+Salient checkpoints are deliberately sparse: routine status stays console-only.
+They never count as answer evidence, and the final response removes the
+cycle-scoped salient node even when final closeout is replayed.
 
-   ```bash
-   cp <FILE> /tmp/agent-doc-baseline-$$.md
-   ```
+## Final write
 
-4. Continue responding; pass the updated baseline to the next `agent-doc write`.
+1. Finish the complete response, including every required `### Re:` section and
+   balanced patch/component marker. Its cumulative text may already be visible
+   through one or more response checkpoints.
+2. Seal the response transaction through the binary-owned closeout boundary:
 
-## Why `--stream`
+```bash
+agent-doc respond <FILE> --stream --origin skill
+```
 
-`--stream` uses CRDT merge — the user's concurrent edits merge without conflicts with the agent's incoming patches. All write-back in this skill uses `--stream`; there is no non-stream path for checkpoints.
+3. Run `agent-doc session-check <FILE>`. A healthy turn must reach `committed`
+   without invoking `agent-doc repair`.
 
-## Baseline rules
+`respond` is the binary-owned turn-resolution command: it seals and commits, but
+is not the first document write. `finalize` is a compatibility alias. Harness
+integrations should checkpoint completed sections and invoke `respond`
+automatically at turn end. `agent-doc write --commit` remains
+the explicit missed-patchback/crash-recovery spelling. Bare `agent-doc write`,
+including `write --stream`, remains rejected for session responses.
 
-- **First write in a cycle:** use `preflight.baseline_file` (a post-commit snapshot).
-- **Subsequent checkpoints:** re-save from the current file after each successful flush. A stale baseline means the CRDT merge re-applies old content.
+## Atomicity rules
+
+- Response text may become authoritative before closeout, but answered queue-head
+  removal, backlog/done mutations, sealing, and commit remain one exact-once
+  transaction.
+- `AlreadyApplied` is acceptable only as proof that the same cumulative response
+  cell is visible. A checkpoint is not proof that closeout mutations or commit ran.
+- The immutable preflight baseline is binary-owned in `state.db` cycle state and is
+  reused for the whole cycle. There is no baseline flag to pass, and no write path
+  may re-save the document as a new baseline after checkpointing.
+- `compact`, `preflight`, and `session-check` must reject malformed component trees
+  and inline exchange boundaries. Duplicate response-replay cells or standalone
+  protocol boundaries are normalized through Lazily before that generic gate.

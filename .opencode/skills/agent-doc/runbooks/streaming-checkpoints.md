@@ -8,7 +8,12 @@ semantically complete response checkpoints before the turn is sealed.
 
 - Send concise progress through the harness console/commentary channel.
 - Incomplete token prefixes may be retained as crash-recovery evidence, but they
-  are never a live-buffer sidecar and never become document authority.
+are never a live-buffer sidecar and never become document authority.
+- When a standalone conclusion is valuable before closeout, send its complete
+  Markdown body to `agent-doc salient-checkpoint <FILE>`. The binary rejects
+  empty bodies, protocol markers, and unbalanced fences, then upserts one
+  cycle-scoped `Live response (not final)` node through controller/CRDT
+  authority.
 - At a semantic breakpoint, pipe the cumulative complete response through
   `agent-doc response-checkpoint <FILE>`. Pass the response **cumulatively** —
   every section so far, not just the new one. The binary appends only the
@@ -44,6 +49,10 @@ bottleneck — a very large response, or a document under concurrent editing whe
 `closeout_latency` phase breakdown before adopting it as a habit; do not assume
 the convergence window is the expensive part, because usually it is not.
 
+Salient checkpoints are deliberately sparse: routine status stays console-only.
+They never count as answer evidence, and the final response removes the
+cycle-scoped salient node even when final closeout is replayed.
+
 ## Final write
 
 1. Finish the complete response, including every required `### Re:` section and
@@ -52,7 +61,7 @@ the convergence window is the expensive part, because usually it is not.
 2. Seal the response transaction through the binary-owned closeout boundary:
 
 ```bash
-agent-doc respond <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill
+agent-doc respond <FILE> --stream --origin skill
 ```
 
 3. Run `agent-doc session-check <FILE>`. A healthy turn must reach `committed`
@@ -72,8 +81,9 @@ including `write --stream`, remains rejected for session responses.
   transaction.
 - `AlreadyApplied` is acceptable only as proof that the same cumulative response
   cell is visible. A checkpoint is not proof that closeout mutations or commit ran.
-- Save and reuse the immutable preflight baseline. Never re-save the document as a
-  new baseline after checkpointing.
+- The immutable preflight baseline is binary-owned in `state.db` cycle state and is
+  reused for the whole cycle. There is no baseline flag to pass, and no write path
+  may re-save the document as a new baseline after checkpointing.
 - `compact`, `preflight`, and `session-check` must reject malformed component trees
   and inline exchange boundaries. Duplicate response-replay cells or standalone
   protocol boundaries are normalized through Lazily before that generic gate.

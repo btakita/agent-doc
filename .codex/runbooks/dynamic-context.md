@@ -13,9 +13,13 @@ runbooks or binary-generated preflight/plan output.
   stable across prompt sessions.
 - `agent-doc preflight`, `agent-doc plan`, `tsift` envelopes, and session-memory
   commands own generated context for the current document and repo.
-- Managed generated files (`.claude/skills/agent-doc/SKILL.md`, `.codex/AGENTS.md`,
-  `.opencode/skills/agent-doc/SKILL.md`, root `AGENTS.md`) are mirrors. Change the
-  bundled source and reinstall instead of manually editing each mirror.
+- Managed generated skill files (`.claude/skills/agent-doc/SKILL.md`,
+  `.codex/skills/agent-doc/SKILL.md`, `.opencode/skills/agent-doc/SKILL.md`)
+  are mirrors. Change the bundled source and reinstall instead of manually
+  editing each mirror.
+- Do not put the agent-doc hot-path workflow in always-on instruction files
+  such as root `AGENTS.md` or `.codex/AGENTS.md`; installs retire old generated
+  copies while preserving custom project instructions.
 
 ## Entry Rule
 

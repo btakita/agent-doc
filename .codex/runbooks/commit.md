@@ -1,42 +1,95 @@
 # Commit Boundary
 
-Every appended `agent-doc` response must be committed unless the user explicitly tells you otherwise.
+Every appended `agent-doc` session response is one complete, validated write+commit
+transaction. Partial or intentionally uncommitted session responses are forbidden.
 
 A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `agent-doc <FILE>` in Codex/OpenCode/direct-exec, or an equivalent direct entry in another harness) starts the binary-owned response cycle. It is not permission to patch the document manually and stop short of closeout.
 
 ## Default Paths
 
-- **Normal session response:** use `agent-doc finalize <FILE>` with the same write flags you would otherwise pass to `agent-doc write`.
+- **Normal session response:** use `agent-doc respond <FILE>` with the same write flags you would otherwise pass to `agent-doc write`; `finalize` remains a compatibility alias.
 - **Manual repair / missed patchback:** when the user prompt is already present in the document, use `agent-doc write --commit <FILE>`.
 
 ## Normal Happy Path
 
-- Finish the turn's requested implementation / verification / build-install work before the response-persistence command. `finalize` is the close-out boundary, not a mid-turn checkpoint.
-- The default response-cycle command is `agent-doc finalize <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill`.
-- `finalize` is the binary-owned happy path: it writes the response, runs commit, and fails closed unless the cycle reaches `committed`.
-- If the turn also includes ordinary repo `commit + push`, keep the active session document out of that manual git commit. Resolve the exact intended non-session path set first, run stage commands only for that set, stop immediately if any stage step fails, verify `git diff --cached --name-only` (or a stricter submodule-pointer inspection) still matches the intended set, then commit only that validated non-session set before `finalize` or `write --commit` creates the session-document closeout commit. Push only after the binary-owned closeout so the response commit is included.
-- Use `finalize` for the normal preflight → respond → persist flow across Claude Code, Codex, OpenCode, Cursor, and generic harnesses. Harness-specific command dispatch lives in `harness-invocation.md`.
+- Finish the turn's requested implementation / verification / build-install work before the turn-resolution command. `response-checkpoint` may persist earlier complete sections; `respond` is the close-out boundary, not the first document write.
+- The default response-cycle command is `agent-doc respond <FILE> --stream --origin skill`. The cycle baseline is binary-owned in `state.db`; there is no `--baseline-file` flag to pass.
+- `respond` is the binary-owned happy path: it resolves the response, runs commit, and fails closed unless the cycle reaches `committed`; `finalize` is the same command's compatibility alias.
+- If the turn also includes ordinary repo `commit + push`, keep the active session document out of that manual git commit. Resolve the exact intended non-session path set first, run stage commands only for that set, stop immediately if any stage step fails, verify `git diff --cached --name-only` (or a stricter submodule-pointer inspection) still matches the intended set, then commit only that validated non-session set before `respond` or `write --commit` creates the session-document closeout commit. Push only after the binary-owned closeout so the response commit is included.
+- Use `respond` for the normal preflight → respond → persist flow across Claude Code, Codex, OpenCode, Cursor, and generic harnesses. Harness-specific command dispatch lives in `harness-invocation.md`.
 - For direct-exec harness paths such as Codex and OpenCode, run `agent-doc session-check <FILE>` immediately after the persistence command returns. A nonzero check means the cycle is still open, so do not report success.
+- Connected clients stop at the successful `agent_doc_finalize` result: it already carries the terminal binary-owned closeout report and any next queue continuation. Do not issue `agent_doc_session_check` as a companion hot-path call. The next turn's admit/preflight resolves the current document and re-evaluates the open-cycle, prompt-only-tail, and bypassed-patchback guards; the explicit session-check tool remains for diagnostics.
 - Do **not** describe a normal harness-native `agent-doc` turn as successful while also saying the response is still uncommitted, unless the user explicitly requested that exception.
-- After `finalize` returns, do not continue with more long-running task work for that same turn. Only `session-check`, failure recovery, and final reporting should remain.
-- When the turn resolves a `do [#id]` / `do #id` directive whose target is an open `agent:backlog` item, that id must reach a lifecycle outcome in the same closeout (`--done <id>`, `--pending-gate <id>`, or an explicit kept-open `--pending-edit`). `session-check` fails closed if the directive cleared the queue but left the target `[ ]` in `agent:backlog` (`#do-id-closeout-open-backlog`); see `pending-ops.md`.
-- Reserve `--pending-gate <id>` for implementation-complete work awaiting review/external validation. If a `do [#id]` cycle gates its target but the response says the work is blocked / still needs future action, `session-check` fails closed (`#blocked-closeout-followup-capture`) unless the cycle keeps the id open with the narrowed next step (`--pending-edit`), adds a new follow-up (`--pending-add*`), or states an explicit "no additional backlog follow-up is needed because …" justification; see `pending-ops.md`.
+- After `respond` returns, do not continue with more long-running task work for that same turn. Only a direct-exec distrust check when required, failure recovery, and final reporting should remain.
+- When the turn resolves a `do [#id]` / `do #id` directive whose target is an open `agent:backlog` item, that id must reach a lifecycle outcome in the same closeout (`--done <id>`, `--backlog-gate <id>`, or an explicit kept-open `--backlog-edit`). `session-check` fails closed if the directive cleared the queue but left the target `[ ]` in `agent:backlog` (`#do-id-closeout-open-backlog`); see `pending-ops.md`.
+- Reserve `--backlog-gate <id>` for implementation-complete work awaiting review/external validation. If a `do [#id]` cycle gates its target but the response says the work is blocked / still needs future action, `session-check` fails closed (`#blocked-closeout-followup-capture`) unless the cycle keeps the id open with the narrowed next step (`--backlog-edit`), adds a new follow-up (`--backlog-add*`), or states an explicit "no additional backlog follow-up is needed because …" justification; see `pending-ops.md`.
 
 ## Degraded IPC And Retry-Only Failures (`#degraded-ipc-no-stall`)
 
-A `finalize` / `write --commit` that reached `committed` with `session-check` OK is a **successful closeout even when the socket IPC degraded** only when delivery was proven through the editor/socket or file-IPC path. Console lines like `IPC socket degraded` and `falling back to file-IPC` describe the transport; they are not failures by themselves when the closeout reached `committed`.
+A `respond` / `write --commit` that reached `committed` with `session-check` OK is a successful closeout. The only attached-editor delivery transport is the PID-scoped socket; acceptance is insufficient until Lazily publishes matching accepted and visible receipts and the disk projection is proven.
 
-Console lines like `IPC timeout — response saved as patch`, `IPC proof insufficient … recovery=retry_without_disk_write`, `IPC proof insufficient … recovery=direct_write_fallback`, `missing_response_probe`, or `no_ack` are different: they mean the editor path did not prove delivery. Do not treat that as a successful response closeout for an active editor buffer, do not continue the queue past it, and do not choose an automatic direct session-document disk write. Retry through the editor/CRDT path so the editor buffer remains authoritative. Use `--force-disk` only when the operator explicitly asks for that escape hatch or no live editor owns the file.
+An IPC timeout, `recovery=retry_without_disk_write`, `missing_response_probe`, or `no_ack` means the editor path did not prove delivery. The same intent remains durable in `state.db`; do not recapture it, continue the queue, or elect another transport. Let the state-machine worker resume against the registered endpoint and observe with `session-check`. Use `--force-disk` only when the operator explicitly asks for that detached-document escape hatch.
 
-Crucially, a degraded-but-proven transport is **not** a reason to stall an active queue drain. When `queue_continuation_required == true`, the binary emits `queue_continuation_guidance` (and `session-check` prints the same line) restating that degraded IPC, high session-accretion, and `semantic_completion_match` warnings are **not** stop reasons after a proven closeout. The stop conditions are a failed closeout, an unproven IPC/delivery retry condition, a `session-check` interruption, or a `lint-gate` block. A stale-binary supervisor is not a passive keep-going condition: recycle/yield at the boundary, then continue on the fresh binary. The mechanism depends on the staleness kind (`#supselfheal`): a busy/idle supervisor is freed when the short-TTL drain lease expires, but a stale-**binary** supervisor (older than the installed build) does **not** self-heal by lease expiry — it recycles non-disruptively via the recycle-yield request, the wedge-triggered recycle (a wedged editor-IPC write requests a recycle through the policy owner), an explicit `agent-doc admin recycle`, or a bounded kill+relaunch when the in-place `execve` cannot start. Do not invent a stop reason from proven transport degradation, and do not punt a drainable head to "a fresh session" because the supervisor looked stale. When a stale-**binary** supervisor is genuinely blocking the drain (a live recycle-yield request, a `stale_install` warning, or persistent `live_prompt_drift_after_preflight` traced to a finalize client newer than the running supervisor), the recovery is active, not passive (`#staleloop-recycle-restart`): yield/restart the loop when recycle-yield guidance is emitted; otherwise run the install if the binary is stale relative to source (`make install` — fast local profile, incremental target dir, and cdylib install), run `agent-doc admin recycle <FILE>`, then **restart the loop** so the turn ends, the supervisor recycles onto the new binary at idle, and the next iteration drains against a matched supervisor. Recycling but then stopping instead of restarting the loop is itself the bug; only stop-and-report if the recycle cannot be initiated.
+`recovery=await_editor_replica_no_disk_write_then_session_check` is the zero-replica form of that retry-only state. The binary has retained the complete target and requested re-registration. Let reconnect complete, then run only `agent-doc session-check <FILE>`; do not run another response payload, reconstruct the response, or choose `--force-disk`.
+
+A `session-check` interruption with `editor_convergence_required` or missing
+`operator_text_authority_v1` is the same class of retry-only failure. It means
+the live editor buffer is still authoritative, but the harness lacks proof that
+delivery can preserve the operator-visible text. Do not continue queue drain or final-answer delivery past this guard. Retry after the editor plugin/supervisor
+has the required capability or after the live editor state is otherwise proven.
+Do not run `--force-disk` from a harness unless the operator explicitly chooses
+that escape hatch, because force-disk is a human recovery decision rather than
+an automatic closeout strategy.
+
+`controller_model_backpressure`, a pending delivery ACK, or a response that is
+already present in the live editor is also a settle-and-observe state. The target
+is retained and exact response cells are idempotent, so repeated `finalize` /
+`write --commit` calls only add contention. Stop concurrent closeout attempts,
+keep the live editor authoritative, wait for the shared cooldown/reconnect path,
+and retry only `session-check`. A replacement replica can bootstrap from the
+retained canonical target with no pending ACK; `session-check` then retires the
+historical deferred slot, refreshes the exact response snapshot, and commits the
+same durable capture. Do not kill the project controller to clear a queue strike
+or backpressure, and do not use `--force-disk` while the editor is live.
+
+A live editor buffer that differs from disk is usually a **valid unsaved-document
+state, not a wedge** (`#unsaved-buffer-divergence-valid`). When the editor has the
+document open with unsaved changes, its in-memory buffer legitimately diverges from
+disk, and `finalize` / `write --commit` will report `live_prompt_drift`,
+`content_ours` (editor) ≠ candidate (disk/CRDT), or `visible document write …
+deferred: document changed after the response merge was computed; retry after
+typing stops`. This is the expected behavior of the safety guard, not a stale
+plugin. Do **not** escalate it with `make install` + `agent-doc admin recycle` +
+`write --commit --force-disk` to force the write through — forcing disk over a valid
+guard can clobber the operator's unsaved edits. Distinguish the two causes before
+acting: only treat drift as the stale-binary case (`#staleloop-recycle-restart`,
+below) when there is an actual `stale_install` warning or a controller recycle-yield
+projection tracing the drift to a binary older than the installed build; a divergence
+with no such signal is just an unsaved buffer and needs no fix. In particular, once
+the assistant response has already reached `committed` in HEAD (verify with
+`git show HEAD:<FILE>`) and `session-check` returns OK / `no_drainable_work`, the
+closeout is complete — state-only leftovers from `--done <id>` / queue-strike
+mutations that land in the working tree but not HEAD are fine and reconcile when the
+operator saves the buffer or on the next cycle. Leave them; do not chase them with
+force-disk or a rebuild. A stale deferred response projection is different: when its
+only difference from committed `HEAD` is agent-doc boundary/guard markers,
+`session-check` automatically clears the old intent lineage and CAS-restores exact
+committed bytes through editor authority. Retry `session-check` after any requested
+recycle; do not run `repair` or force-disk.
+
+Crucially, a transport warning is not a reason to stall an active queue drain after the write pipeline has reached `committed` and `session-check` is OK. A failed closeout, missing Lazily visibility proof, `session-check` interruption, or lint gate is a stop condition. A stale binary recycles at an idle boundary through the controller recycle-yield projection or `agent-doc admin recycle`, then the queue continues on the fresh build. `make install` / `agent-doc lib-install` sends the shared `reload_library` intent to every live Lazily editor registration through its PID-scoped endpoint; `agent-doc admin reload-lib` repeats that typed fan-out. Disconnected editors reload lazily on their next native call. No filesystem delivery or reload broadcast participates in closeout or recovery.
+
+The typed reload intent updates only the native cdylib already hosted by an installed editor plugin. It cannot update the JetBrains Kotlin plugin, the VS Code TypeScript extension, or their reported package versions. When `stale_plugin` reports an older plugin version, install/update the plugin package and restart/reload the IDE host. At every replay/ACK boundary, use the latest live registration; an expected-or-newer registration supersedes the earlier one. If a new prompt arrives while an older closeout is pending, Lazily records it as a newer operator edit and the retained agent intent rebases without replacing the buffer.
 
 ## Explicit Exceptions
 
-- Bare `agent-doc write` is acceptable only when the user explicitly wants the response left uncommitted, or when you are writing an intermediate checkpoint rather than the final response.
-- On real session documents, that path is deliberately nonterminal: the response/capture may be preserved for recovery, but the command now fails closed instead of reporting success while the cycle is still at `response_captured` / `write_applied`.
-- If you intentionally leave a response uncommitted, say so clearly and do not describe the cycle as complete.
+- There is no partial-response exception for session documents. Bare `agent-doc
+  write`, including `write --stream`, fails before reading the response or mutating
+  capture/document state.
+- Streaming backends may retain cold recovery projections, but those are never
+  visible response placement, current-document authority, or a delivery transport.
 - `agent-doc write --commit` remains the documented repair path because it preserves the older CLI surface while still crossing the write/commit boundary in one invocation.
-- For real session documents (`agent_doc_session` / legacy `session`) that command now fails closed like `finalize`: non-git docs are rejected before mutation, commit errors fail the command, and success means the cycle reached `committed`. Best-effort behavior remains only for non-session docs and `--pending-only` maintenance.
+- For real session documents (`agent_doc_session` / legacy `session`) that command now fails closed like `finalize`: non-git docs are rejected before mutation, commit errors fail the command, and success means the cycle reached `committed`. Best-effort behavior remains only for non-session docs and `--backlog-only` maintenance (legacy alias: `--pending-only`).
 - The same post-write `agent-doc session-check <FILE>` guard applies after manual repair with `agent-doc write --commit`.
 - Manual repair uses the same ordering rule: do the repair write-back last, then `session-check`, then stop.
 
@@ -59,9 +112,9 @@ The error message preserves tagpath's CLI format — `<path>:<line>:<col> <sever
 
 ## JetBrains File Cache Conflict
 
-When the IDE surfaces a File Cache Conflict dialog mid-IPC and the user cancels, `preflight` auto-recovers the wedge via the binary-owned commit boundary when the working tree still matches the snapshot. The cancel-branch contract, the auto-recovery preconditions, and the manual fallback for cases auto-recovery declines live in [jb-cache-conflict.md](jb-cache-conflict.md).
+Current attached-document writes wait for typing quiescence, coalesce behind unacknowledged delivery, apply through CRDT only, and project to disk only after the visible frontier is acknowledged. When an older/degraded path still surfaces a File Cache Conflict dialog and the user cancels, `preflight` auto-recovers the wedge via the binary-owned commit boundary when the working tree still matches the snapshot. The convergence contract, cancel-branch recovery preconditions, and manual fallback live in [jb-cache-conflict.md](jb-cache-conflict.md).
 
-Compact Exchange does not use the normal response IPC `fullContent` path. With a live editor listener it closes through component `op:replace` editor IPC; the guarded direct disk write is only the no-listener fallback plus the standard compact commit/VCS refresh boundary. Stale JetBrains live-buffer/file-cache proof or unproven active-listener apply must fail before document or snapshot replacement, then the operator resolves the IDE buffer or listener and reruns compact. See [compact-exchange.md](compact-exchange.md) and the Compact Exchange section of [jb-cache-conflict.md](jb-cache-conflict.md).
+Compact Exchange does not use the normal response IPC `fullContent` path. With an attached replica it uses the same CRDT-only convergence contract; component `op:replace` remains only for a reliable legacy endpoint without an attached model, and guarded direct disk write is the detached fallback plus the standard compact commit/VCS refresh boundary. Stale JetBrains live-buffer/file-cache proof or unproven active delivery must fail before document or snapshot replacement, then the operator resolves the IDE buffer or listener and reruns compact. See [compact-exchange.md](compact-exchange.md) and the Compact Exchange section of [jb-cache-conflict.md](jb-cache-conflict.md).
 
 ## Baseline Drift After Manual Commits
 

@@ -33,13 +33,21 @@ free-text queue prompt (a queue head with **no** `#id`), quote it verbatim as a
 `> **Queue prompt:**` blockquote at the top of your response. The position-
 independent strike (`#ftstrike` / `strike_answered_free_text_queue_heads`) matches
 the head's prose against your response's **blockquote** region — a `### Re:` heading
-alone is not enough, so a heading-only answer leaves the head queued and the loop
-churns re-answering it forever. This matters most when the free-text head sits
+alone is normally not enough, so a heading-only answer leaves the head queued and
+the loop churns re-answering it forever. The narrow historical-recovery exception
+is a heading that repeats the head's same long underscore-delimited code identifier;
+ordinary prose topics, filenames, and short symbols do not qualify. This matters
+most when the free-text head sits
 *behind* a deferred `[operator-verify]`/`[focused-cycle]` id-head: the leading
 consume stops at that deferred id-head, so the **only** path that can strike the
 free-text item is the blockquote-matched `#ftstrike`. `do [#id]` heads are
 different — they strike by id via `--done <id>` regardless of position and need no
 quote.
+
+An in-progress marker on a free-text head records selection, not completion
+(`#bugautostruck`). It never replaces the exact `> **Queue prompt:**` evidence.
+If the response does not actually quote and answer that head, closeout must leave
+it active even when the marker was added earlier in the cycle.
 
 **Already-complete or backlog-tracked free-text heads auto-strike (`#qftbklgstrike`).**
 Separately from the exchange-answer strike above, preflight queue maintenance
@@ -73,10 +81,15 @@ model identity. Never use the harness label (`codex`, `claude`) as the suffix, a
 never omit it.
 
 **Response checkpoints and sealing:** stream incomplete progress only to the
-harness console. After each complete `### Re:` section (balanced fences and
-component markers), the harness may persist the cumulative response with
-`agent-doc response-checkpoint <FILE>`. The binary replaces the uncommitted
-response tail in Lazily; it does not consume queue/backlog work or commit.
+harness console. A standalone conclusion that remains useful before closeout may
+be written with `agent-doc salient-checkpoint <FILE>`. The binary structurally
+validates the complete Markdown body and upserts one cycle-scoped
+`Live response (not final)` node. It is not answer evidence and does not consume
+queue/backlog work or commit. After each complete `### Re:` section (balanced
+fences and component markers), the harness may persist the cumulative response
+with `agent-doc response-checkpoint <FILE>`. The binary replaces the
+uncommitted response tail in Lazily; it does not consume queue/backlog work or
+commit. A final response removes any live-response node for the cycle.
 Turn-end `agent-doc respond` asks the binary to resolve those closeout mutations
 and commit exactly once (`finalize` remains an alias). See
 [streaming-checkpoints.md](streaming-checkpoints.md).

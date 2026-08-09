@@ -1,53 +1,57 @@
 # Dynamic Context
 
-Use AGENTS.md and SKILL.md files as routing surfaces. They should say when to
-load context and which file or command owns it; they should not restate detailed
-workflow, schema, history, or example content already stored elsewhere.
+Use the installed agent-doc SKILL/AGENTS surface as a hot-path router. Keep only
+cycle-critical triggers and invariants inline; put branch detail in bundled
+runbooks or binary-generated preflight/plan output.
 
-## Authoring Rule
+## Instruction Surface Pattern
 
-- Keep trigger metadata, irreversible safety rules, and one-line handoff rules in
-  AGENTS.md or SKILL.md.
-- Move procedures to `runbooks/`, domain facts to `references/`, generated state
-  to a command or service, and concrete examples to `examples/` or fixtures.
-- Make each AGENTS/SKILL entry name the file or command that owns the detail:
-  `Use runbooks/persist-closeout.md for closeout`, not an inline copy of the
-  closeout procedure.
-- Prefer `skill-harness install-dir` / `check-dir` for skills with companion
-  resources so installed harnesses receive the same dynamic files as the source.
-- Treat generated harness files as mirrors. Edit the canonical source surface and
-  regenerate or reinstall instead of hand-maintaining each mirror.
+- `SKILL.md` owns trigger wording, mandatory closeout boundaries, and the ordered
+  cycle spine.
+- `runbooks/*.md` own branch-specific procedure detail.
+- `okf/*.md` owns durable concept definitions and vocabulary that should remain
+  stable across prompt sessions.
+- `agent-doc preflight`, `agent-doc plan`, `tsift` envelopes, and session-memory
+  commands own generated context for the current document and repo.
+- Managed generated skill files (`.claude/skills/agent-doc/SKILL.md`,
+  `.codex/skills/agent-doc/SKILL.md`, `.opencode/skills/agent-doc/SKILL.md`)
+  are mirrors. Change the bundled source and reinstall instead of manually
+  editing each mirror.
+- Do not put the agent-doc hot-path workflow in always-on instruction files
+  such as root `AGENTS.md` or `.codex/AGENTS.md`; installs retire old generated
+  copies while preserving custom project instructions.
 
-## Dynamic Context Service
+## Entry Rule
 
-Use a local service when context depends on mutable state, queries, or large
-corpora. A good service exposes small deterministic commands such as:
+Every new AGENTS/SKILL entry should name its dynamic source:
 
-```text
-context status
-context pack --scope <repo|skill|doc> --query <topic> --budget normal
-context explain --id <symbol|task|rule>
-context diff --since <rev>
-```
+- Procedure: `Follow runbooks/<name>.md when <condition>.`
+- Durable vocabulary: `Use okf/<name>.md when <term or concept> needs a stable
+  definition.`
+- Dynamic state: `Use agent-doc <command> and trust its emitted fields.`
+- Code context: `Use tsift <envelope> instead of raw recursive reads.`
+- Historical/session context: `Use agent-doc memory/search or session-review packs
+  instead of replaying the full document or transcript.`
 
-The service should return bounded markdown or JSON with stable source handles,
-timestamps, and commands to expand. AGENTS/SKILL entries then point to the command
-instead of carrying a stale digest.
+## Service / DB Shape
 
-## Storage Model
+Keep dynamic context local-first and deterministic. SQLite is enough for the
+agent-doc family:
 
-Use SQLite for local-first context. Keep tables separated by freshness class:
-
-- `source_index`: file path, symbol/rule id, content hash, mtime, summary.
-- `session_memory`: task id, decision, outcome, source document, committed rev.
-- `runtime_state`: active queue, claims, live supervisor/session facts.
+- `session_memory`: document id, component, item id, status, source commit, summary.
 - `context_pack_cache`: query, budget, input hashes, generated pack, expiry.
+- `runtime_state`: controller/session facts already owned by the binary.
+- `source_index`: file/rule/runbook hash, summary, and expansion command.
+- `okf_index`: concept path, type, tags, content hash, and expansion command.
 
-Do not put policy directly in the database. Store policy in committed files and
-store generated summaries with source hashes so stale packs can be invalidated.
+Expose this through small commands that return bounded packs with source handles,
+for example `agent-doc memory search`, `tsift --envelope context-pack`, or a future
+`agent-doc context pack --budget normal`. Never make the database the source of
+policy; committed files own policy, and generated rows must carry source hashes so
+stale context can be invalidated.
 
 ## Invalidation
 
-Recompute dynamic packs when any source file hash, git revision, package version,
-or config fingerprint used by the pack changes. Generated context should include
-the source handles it used so an agent can inspect exact files when needed.
+A pack is stale when any referenced file hash, git revision, binary version,
+frontmatter/config fingerprint, or session-memory source id changes. Emit those
+inputs with each pack so agents can decide whether to reuse, refresh, or expand.

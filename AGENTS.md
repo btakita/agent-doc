@@ -26,6 +26,7 @@ the dynamic file that owns its details:
 - **agent-doc workflow:** See [`.claude/skills/agent-doc/SKILL.md`](.claude/skills/agent-doc/SKILL.md); load its linked runbooks only when that workflow branch is active.
 - **Code navigation:** See [`runbooks/code-navigation.md`](runbooks/code-navigation.md); use `tsift` envelopes instead of copying search, diff, log, or transcript content into prompts.
 - **Private name hygiene:** See [`runbooks/private-name-hygiene.md`](runbooks/private-name-hygiene.md) before editing public or shared subrepos from this private workspace.
+- **Dogfood watch:** See [`runbooks/dogfood-watch.md`](runbooks/dogfood-watch.md) — `bin/agent-doc-dogfood-watch` turns issues in the live agent-doc sessions into backlog + queue items in `tasks/agent-doc/agent-doc-bugs2.md`.
 - **Task-specific procedures:** Use the referenced file under [`runbooks/`](runbooks/) rather than expanding procedures inline.
 - **Operator memory (all harnesses):** Curated cross-session memories live in [`memory/`](memory/) (index: [`memory/MEMORY.md`](memory/MEMORY.md)); retrieve via `tsift --envelope search '<query>'` or `tsift graph-db --path . --json related '<query>'`. Session-event memory lives in `.tsift/memory.db` (query via `tsift memory status` / `graph-db related`). Claude Code's memory dir symlinks to `memory/`, so treat `memory/` as the single source of truth; other harnesses read it the same way.
 
@@ -35,7 +36,7 @@ the dynamic file that owns its details:
 
 **Runbooks:** [runbooks/](runbooks/) — dynamic-context, harness-invocation, commit, planning-dispatch, pending-ops, model-tier-gate, compact-exchange, streaming-checkpoints, document-format, code-enforced-directives, architecture-first (agent-doc development/dogfooding only), and more.
 
-<!-- tsift:code-navigation v=0.1.78 -->
+<!-- tsift:code-navigation v=0.1.80 -->
 ## Code Navigation
 
 Run `tsift status` at session start from the owning repo root. If the task or file lives under a git submodule (for example `src/tsift/...`), switch to that submodule root first so the harness loads the narrower local instructions and repo state instead of the superproject root. If status prints a `run:` recommendation for stale or missing tsift state, run `tsift status --fix` before relying on tsift results; when the harness cannot perform write commands, ask the user to run the printed command instead.

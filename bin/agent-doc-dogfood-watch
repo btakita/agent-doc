@@ -1,0 +1,368 @@
+#!/usr/bin/env python3
+"""Dogfood watcher: turn live agent-doc session logs into backlog + queue items.
+
+Watches every running `agent-doc start` supervisor (plus any documents named on
+the command line), asks the binary to classify each project's `ops.log`, and
+files anything new into a target bug document's `agent:backlog`, then mirrors it
+into `agent:queue`.
+
+Deliberately thin: all log classification is `agent-doc ops summary --json`, and
+all document mutation is `agent-doc backlog <doc> add` / `agent-doc queue sync`.
+No document parsing or writing happens here -- per src/agent-doc/AGENTS.md,
+deterministic document logic lives in the binary, never in a script.
+
+Usage:
+  bin/agent-doc-dogfood-watch --once --dry-run
+  bin/agent-doc-dogfood-watch --interval 300
+  bin/agent-doc-dogfood-watch --doc src/haiven-dev/tasks/haiven-dev.md --once
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_TARGET = REPO_ROOT / "tasks/agent-doc/agent-doc-bugs2.md"
+STATE_PATH = REPO_ROOT / ".agent-doc/dogfood-watch-state.json"
+
+SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
+# Documents the operator explicitly asked to track, matched by filename stem so a
+# session named `lazily.md` and one named `lazily.py` both count.
+TRACKED_STEMS = {
+    "agent-doc-bugs2",
+    "lazily",
+    "haiven-dev",
+    "sdk",
+    "monsterrodholders",
+}
+
+# Supervisor stderr is not covered by `ops summary`; these are the shapes worth
+# filing when they show up there.
+STDERR_SIGNATURES = [
+    (re.compile(r"thread '.*' panicked at"), "supervisor panic", "critical"),
+    (re.compile(r"\bfatal runtime error\b"), "supervisor runtime abort", "critical"),
+    (re.compile(r"\bSIGKILL\b|\bkilled\b.*out of memory|\bOut of memory\b", re.I), "supervisor OOM/kill", "critical"),
+    (re.compile(r"^error: "), "supervisor error", "high"),
+]
+
+
+def run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        cmd,
+        cwd=str(cwd) if cwd else None,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def find_project_root(doc: Path) -> Path | None:
+    """Nearest ancestor holding a `.agent-doc/` directory."""
+    for candidate in [doc.parent, *doc.parent.parents]:
+        if (candidate / ".agent-doc").is_dir():
+            return candidate
+    return None
+
+
+def live_session_docs() -> list[Path]:
+    """Documents owned by a running `agent-doc start` supervisor.
+
+    Supervisors are commonly started with a document path relative to their own
+    working directory (`agent-doc start tasks/sdk.md`), and that directory is
+    frequently a submodule rather than this repo root -- so resolve each relative
+    path against `/proc/<pid>/cwd`, not against `REPO_ROOT`.
+    """
+    proc = run(["ps", "-eo", "pid=,args="])
+    docs: list[Path] = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if "agent-doc start" not in line:
+            continue
+        pid, _, args = line.partition(" ")
+        if not pid.isdigit():
+            continue
+        try:
+            cwd = Path(os.readlink(f"/proc/{pid}/cwd"))
+        except OSError:
+            cwd = REPO_ROOT
+        for token in args.split():
+            if not token.endswith(".md"):
+                continue
+            path = Path(token)
+            if not path.is_absolute():
+                path = cwd / token
+            if path.exists():
+                docs.append(path.resolve())
+    return sorted(set(docs))
+
+
+def signature_id(family: str, example: str) -> str:
+    """Stable per-cluster id so re-runs never file the same finding twice."""
+    # Strip volatile ids so the same defect keeps one signature across sessions.
+    normalized = re.sub(r"\b(session|cycle|patch|pid|generation)=\S+", "", example)
+    normalized = re.sub(r"\b[0-9a-f]{8,}\b", "", normalized)
+    normalized = re.sub(r"\d{6,}", "", normalized)
+    normalized = " ".join(normalized.split())
+    digest = hashlib.sha1(f"{family}|{normalized}".encode()).hexdigest()[:7]
+    return f"dfw{digest}"
+
+
+def known_ids(target: Path) -> set[str]:
+    """Ids already tracked in the target document (open, gated, iceboxed, or done).
+
+    `agent:done` matters as much as `agent:backlog`: a finding that was filed and
+    closed must not be re-filed the next time the same line is still in the log
+    tail.
+    """
+    ids: set[str] = set()
+    for component in ("backlog", "review", "icebox", "done", "queue"):
+        proc = run(["agent-doc", "read", str(target), "--component", component])
+        if proc.returncode != 0:
+            continue
+        ids.update(re.findall(r"\[#([A-Za-z0-9_-]+)\]", proc.stdout))
+    return ids
+
+
+def ops_clusters(root: Path, limit: int) -> list[dict]:
+    proc = run(
+        [
+            "agent-doc",
+            "ops",
+            "summary",
+            "--json",
+            "--project-root",
+            str(root),
+            "--limit",
+            str(limit),
+        ]
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return []
+    try:
+        return json.loads(proc.stdout).get("bug_clusters") or []
+    except json.JSONDecodeError:
+        return []
+
+
+def stderr_clusters(root: Path, limit: int) -> list[dict]:
+    log = root / ".agent-doc/logs/supervisor-stderr.log"
+    if not log.is_file():
+        return []
+    try:
+        lines = log.read_text(errors="ignore").splitlines()[-limit:]
+    except OSError:
+        return []
+    found: dict[str, dict] = {}
+    for line in lines:
+        for pattern, family, severity in STDERR_SIGNATURES:
+            if not pattern.search(line):
+                continue
+            entry = found.setdefault(
+                family,
+                {
+                    "family": family,
+                    "severity": severity,
+                    "count": 0,
+                    "examples": [],
+                    "files": [],
+                    "recommendation": "inspect supervisor-stderr.log around this line and fix the crashing path",
+                    "source": "supervisor-stderr.log",
+                },
+            )
+            entry["count"] += 1
+            if len(entry["examples"]) < 3:
+                entry["examples"].append(line.strip()[:400])
+            break
+    return list(found.values())
+
+
+def format_item(finding: dict, item_id: str) -> str:
+    """One backlog line per defect signature, aggregated across every project it hit.
+
+    The same family shows up in several project roots at once (all the live
+    sessions share one binary), so a per-root item would file the same defect
+    four times. Aggregate instead and name every affected root/document.
+    """
+    roots = ", ".join(sorted(finding["roots"]))
+    docs = ", ".join(sorted(finding["docs"])) or "(no document attributed)"
+    probe_root = sorted(finding["roots"])[0]
+    return (
+        f"id={item_id} [dogfood] #agent-doc-bug {finding['family']} "
+        f"({finding['severity']}, {finding['count']} hits across {len(finding['roots'])} project(s)) "
+        f"seen in {roots} via {finding['source']}; documents: {docs}. "
+        f"Example: {finding['example']} "
+        f"Auto-filed by bin/agent-doc-dogfood-watch. Recommendation: {finding['recommendation']} "
+        f"Reproduce with `agent-doc ops summary --project-root {probe_root} --limit 4000` "
+        f"and `agent-doc ops diagnose --project-root {probe_root}`."
+    )
+
+
+def load_state() -> dict:
+    if STATE_PATH.is_file():
+        try:
+            return json.loads(STATE_PATH.read_text())
+        except (OSError, json.JSONDecodeError):
+            pass
+    return {"filed": {}}
+
+
+def save_state(state: dict) -> None:
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(json.dumps(state, indent=2, sort_keys=True))
+
+
+def scan_once(args: argparse.Namespace) -> int:
+    target = Path(args.target).resolve()
+    docs = [Path(d).resolve() for d in args.doc] or live_session_docs()
+    if not args.all_sessions:
+        docs = [d for d in docs if d.stem in TRACKED_STEMS]
+    if target not in docs and target.exists():
+        docs.append(target)
+
+    roots: dict[Path, list[str]] = {}
+    for doc in docs:
+        root = find_project_root(doc)
+        if root is None:
+            print(f"[skip] no .agent-doc project root for {doc}", file=sys.stderr)
+            continue
+        roots.setdefault(root, []).append(str(doc))
+
+    if not roots:
+        print("[dogfood] no tracked agent-doc sessions found", file=sys.stderr)
+        return 0
+
+    state = load_state()
+    # Scope the ledger per target: filing into a scratch document must never
+    # suppress the same finding in the real bug document.
+    filed_for_target = state.setdefault("filed", {}).setdefault(str(target), {})
+    already = known_ids(target) | set(filed_for_target)
+    threshold = SEVERITY_ORDER.get(args.min_severity, 2)
+    excluded = {f.strip().lower() for f in args.exclude_family}
+
+    # Aggregate by defect signature first: one item per signature, every affected
+    # project named on it.
+    findings: dict[str, dict] = {}
+    for root, root_docs in sorted(roots.items()):
+        clusters = ops_clusters(root, args.limit) + stderr_clusters(root, args.limit)
+        for cluster in clusters:
+            family = cluster.get("family", "unknown")
+            if family.lower() in excluded:
+                continue
+            severity = cluster.get("severity", "low")
+            if SEVERITY_ORDER.get(severity, 0) < threshold:
+                continue
+            examples = cluster.get("examples") or []
+            example = examples[0] if examples else "(no example line)"
+            item_id = signature_id(family, example)
+            finding = findings.setdefault(
+                item_id,
+                {
+                    "family": family,
+                    "severity": severity,
+                    "count": 0,
+                    "roots": set(),
+                    "docs": set(),
+                    "example": example,
+                    "source": cluster.get("source", "ops.log"),
+                    "recommendation": cluster.get("recommendation") or "triage the cluster in ops.log",
+                },
+            )
+            finding["count"] += cluster.get("count", 0)
+            finding["roots"].add(str(root))
+            finding["docs"].update(str(f) for f in (cluster.get("files") or root_docs))
+            if SEVERITY_ORDER.get(severity, 0) > SEVERITY_ORDER.get(finding["severity"], 0):
+                finding["severity"] = severity
+
+    filed = 0
+    for item_id, finding in sorted(findings.items(), key=lambda kv: -SEVERITY_ORDER.get(kv[1]["severity"], 0)):
+        if item_id in already:
+            continue
+        text = format_item(finding, item_id)
+        if args.dry_run:
+            print(f"[dry-run] would file #{item_id}: {text}")
+        else:
+            proc = run(["agent-doc", "backlog", str(target), "add", text])
+            if proc.returncode != 0:
+                print(f"[error] backlog add failed for #{item_id}: {proc.stderr.strip()}", file=sys.stderr)
+                continue
+            print(
+                f"[filed] #{item_id} {finding['family']} "
+                f"({finding['severity']}, {finding['count']} hits) in {len(finding['roots'])} project(s)"
+            )
+            filed_for_target[item_id] = {
+                "family": finding["family"],
+                "severity": finding["severity"],
+                "roots": sorted(finding["roots"]),
+                "filed_at": int(time.time()),
+            }
+        already.add(item_id)
+        filed += 1
+
+    if filed and not args.dry_run:
+        sync = run(["agent-doc", "queue", "sync", str(target)])
+        if sync.returncode != 0:
+            print(f"[error] queue sync failed: {sync.stderr.strip()}", file=sys.stderr)
+        else:
+            print(f"[dogfood] queue synced: {filed} new item(s) mirrored into agent:queue")
+        save_state(state)
+    elif not filed:
+        print("[dogfood] no new issue clusters above threshold")
+    return filed
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--target", default=str(DEFAULT_TARGET), help="document that receives backlog + queue items")
+    parser.add_argument("--doc", action="append", default=[], help="explicit session document to watch (repeatable)")
+    parser.add_argument("--all-sessions", action="store_true", help="watch every live session, not just the tracked set")
+    parser.add_argument("--limit", type=int, default=4000, help="trailing log lines to scan per project")
+    parser.add_argument(
+        "--min-severity",
+        default="high",
+        choices=sorted(SEVERITY_ORDER),
+        help="lowest severity to file (default high; medium includes routine guardrail noise such as commit_noop)",
+    )
+    parser.add_argument(
+        "--exclude-family",
+        action="append",
+        default=[],
+        help="cluster family to never file (repeatable, case-insensitive)",
+    )
+    parser.add_argument("--interval", type=int, default=0, help="seconds between scans; 0 or --once scans once")
+    parser.add_argument("--once", action="store_true", help="scan once and exit")
+    parser.add_argument("--dry-run", action="store_true", help="print what would be filed without mutating the document")
+    parser.add_argument("--list", action="store_true", help="print the live agent-doc session table and exit")
+    args = parser.parse_args()
+
+    if args.list:
+        for doc in live_session_docs():
+            root = find_project_root(doc)
+            tracked = "tracked" if doc.stem in TRACKED_STEMS else "untracked"
+            print(f"{tracked:9} {doc}  (root: {root})")
+        return 0
+
+    if args.once or args.interval <= 0:
+        scan_once(args)
+        return 0
+
+    while True:
+        try:
+            scan_once(args)
+        except KeyboardInterrupt:
+            return 0
+        except Exception as exc:  # keep the watcher alive across transient failures
+            print(f"[error] scan failed: {exc}", file=sys.stderr)
+        time.sleep(args.interval)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

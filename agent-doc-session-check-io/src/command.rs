@@ -964,12 +964,17 @@ fn run_with_options_inner(
         // `agent_doc_turn::write_ownership` and the write path calls the same
         // one. Fixing this site alone left an agent obeying whichever of the
         // other two refusals it happened to reach first.
-        let ownership = agent_doc_turn::write_ownership::RetainedWriteOwnership::new(
+        // `#ownershipverdictdiverges`: carry the phase. A `write_applied` cycle
+        // is neither a self-completing deferral nor a stranded write, and this
+        // site is the one that already reported it correctly as INTERRUPTED —
+        // its note must name the same recovery the write path now names.
+        let ownership = agent_doc_turn::write_ownership::RetainedWriteOwnership::new_with_phase(
             cycle_phase.is_some_and(agent_doc_turn::CyclePhase::is_open),
             agent_doc_capture_io::load_active(file)
                 .ok()
                 .flatten()
                 .is_some(),
+            cycle_phase == Some(agent_doc_turn::CyclePhase::WriteApplied),
         );
         let divergence_owner_note = match ownership.verdict() {
             agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred => {
@@ -977,7 +982,8 @@ fn run_with_options_inner(
                  Do not ask the operator to save, rerun session-check, or resubmit finalize"
                     .to_string()
             }
-            agent_doc_turn::write_ownership::RetainedWriteVerdict::Stranded => {
+            agent_doc_turn::write_ownership::RetainedWriteVerdict::Stranded
+            | agent_doc_turn::write_ownership::RetainedWriteVerdict::AwaitingTerminalCommit => {
                 agent_doc_turn::write_ownership::retained_write_remedy(
                     ownership,
                     &file.display().to_string(),

@@ -459,8 +459,16 @@ fn checkpoint_partial_response_for_cycle_with_current_content(
 pub fn retained_write_ownership(
     file: &Path,
 ) -> agent_doc_turn::write_ownership::RetainedWriteOwnership {
+    // `#ownershipverdictdiverges`: carry the PHASE, not just "open". A
+    // `write_applied` cycle has already landed its write and needs
+    // `agent-doc commit`; the other open phases still self-commit. Collapsing
+    // them here is what let the verdict contradict `session-check`.
+    let mut write_applied = false;
     let cycle_open = match agent_doc_cycle_state_io::load_with_closeout_projection(file) {
-        Ok(state) => state.is_some_and(|state| state.phase.is_open()),
+        Ok(state) => state.is_some_and(|state| {
+            write_applied = state.phase == agent_doc_turn::CyclePhase::WriteApplied;
+            state.phase.is_open()
+        }),
         Err(err) => {
             agent_doc_ops_log_io::log_op(
                 file,
@@ -485,7 +493,11 @@ pub fn retained_write_ownership(
             false
         }
     };
-    agent_doc_turn::write_ownership::RetainedWriteOwnership::new(cycle_open, retained_capture)
+    agent_doc_turn::write_ownership::RetainedWriteOwnership::new_with_phase(
+        cycle_open,
+        retained_capture,
+        write_applied,
+    )
 }
 
 pub fn load_active(file: &Path) -> Result<Option<CaptureRecord>> {

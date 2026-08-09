@@ -2,6 +2,45 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.194
+
+- **Fix (`#ownershipverdictdiverges`): the retained-write VERDICT contradicted
+  `session-check`, even after 0.35.192 unified the wording.**
+
+  `RetainedWriteOwnership::cycle_open` lumped all three open phases together —
+  `preflight_started`, `response_captured`, and `write_applied` — and any of them
+  produced `Deferred`, whose remedy promises "the same intent commits itself once
+  delivery converges ... do NOT re-send".
+
+  Those phases are not equivalent. At `preflight_started` and `response_captured`
+  a state edge really does still fire. At `write_applied` the response write has
+  ALREADY landed and only the terminal commit is outstanding — `session-check`
+  reports that cycle INTERRUPTED, and only `agent-doc commit` advances it. So the
+  write path told the agent to wait for something that was never going to happen,
+  while `session-check` correctly called the same state interrupted. That is the
+  exact predicate-level divergence `#percellconverge` exists to prevent, which
+  0.35.192 relocated from the prose to the verdict rather than removing.
+
+  Observed three times on 2026-08-09 on `tasks/agent-doc/agent-doc-bugs2.md`.
+  Each time the refusal said to wait, `session-check` then reported
+  `write_applied`, and one `agent-doc commit` finished it.
+
+  `write_applied` is now its own verdict, `AwaitingTerminalCommit`, checked
+  BEFORE the broader `cycle_open` arm that used to swallow it. Its remedy names
+  `agent-doc commit <FILE>` — the command that actually recovers — while still
+  forbidding re-send, force-disk, and recycle, because the body IS durable and a
+  re-send would duplicate rather than repair. The previous remedy named only
+  `session-check`, an OBSERVATION command, leaving an agent with an accurate
+  diagnosis and no way to act on it.
+
+  `session-check` now builds the predicate with the phase too, so the site that
+  was already right and the write path derive the same answer from the same
+  facts. The new verdict's phrase joins the anti-drift guard's protected set.
+
+  Found by the compiler, not by review: adding the variant broke `session-check`'s
+  exhaustive match, which is what surfaced that it was constructing the predicate
+  without the phase.
+
 ## 0.35.193
 
 - **Fix (`#queuestallloopfalsepositive`): `queue_stall_detected` fired on every

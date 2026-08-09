@@ -29,7 +29,14 @@ use std::path::{Path, PathBuf};
 
 /// Phrases that state a verdict. Each belongs to exactly one branch of
 /// `retained_write_remedy` and must not be authored anywhere else.
-const VERDICT_PHRASES: [&str; 2] = ["deferral, not a lost response", "STRANDED, not deferred"];
+const VERDICT_PHRASES: [&str; 3] = [
+    "deferral, not a lost response",
+    "STRANDED, not deferred",
+    // `#ownershipverdictdiverges`: the third verdict. `write_applied` is neither
+    // lost nor self-completing, and its phrase needs the same protection or a
+    // site will eventually re-author it into a fourth dialect.
+    "ALREADY LANDED",
+];
 
 /// The file allowed to author them.
 const VERDICT_OWNER: &str = "agent-doc-turn/src/write_ownership.rs";

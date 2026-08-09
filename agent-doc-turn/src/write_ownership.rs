@@ -45,6 +45,16 @@ pub struct RetainedWriteOwnership {
     pub cycle_open: bool,
     /// A response capture is retained for this document.
     pub retained_capture: bool,
+    /// The open cycle is specifically at `write_applied`
+    /// (`#ownershipverdictdiverges`).
+    ///
+    /// Not every open phase is self-committing, and treating them alike is what
+    /// made this predicate contradict `session-check`. At `preflight_started` and
+    /// `response_captured` a state edge really does still fire. At
+    /// `write_applied` the response write has ALREADY landed and only the
+    /// terminal commit is outstanding — `session-check` calls that cycle
+    /// INTERRUPTED, and only `agent-doc commit` advances it.
+    pub write_applied: bool,
 }
 
 impl RetainedWriteOwnership {
@@ -54,17 +64,37 @@ impl RetainedWriteOwnership {
     pub const UNOWNED: Self = Self {
         cycle_open: false,
         retained_capture: false,
+        write_applied: false,
     };
 
     pub const fn new(cycle_open: bool, retained_capture: bool) -> Self {
         Self {
             cycle_open,
             retained_capture,
+            write_applied: false,
+        }
+    }
+
+    /// [`Self::new`] for a caller that knows the open cycle's phase.
+    pub const fn new_with_phase(
+        cycle_open: bool,
+        retained_capture: bool,
+        write_applied: bool,
+    ) -> Self {
+        Self {
+            cycle_open,
+            retained_capture,
+            write_applied,
         }
     }
 
     pub const fn verdict(self) -> RetainedWriteVerdict {
-        if self.cycle_open || self.retained_capture {
+        // Checked FIRST: `write_applied` implies `cycle_open`, and the broader
+        // arm would otherwise swallow it and promise a self-commit that never
+        // comes.
+        if self.write_applied {
+            RetainedWriteVerdict::AwaitingTerminalCommit
+        } else if self.cycle_open || self.retained_capture {
             RetainedWriteVerdict::Deferred
         } else {
             RetainedWriteVerdict::Stranded
@@ -85,6 +115,13 @@ pub enum RetainedWriteVerdict {
     /// Nothing holds the write. No state edge can fire, so waiting never
     /// commits it — the visible edits are stranded, not deferred.
     Stranded,
+    /// The response write already landed; only the terminal commit is
+    /// outstanding (`#ownershipverdictdiverges`).
+    ///
+    /// Between the other two: the response is NOT lost, so re-sending it would
+    /// duplicate work — but nothing is going to finish it either, so waiting is
+    /// equally wrong. `agent-doc commit` is the one command that advances it.
+    AwaitingTerminalCommit,
 }
 
 impl RetainedWriteVerdict {
@@ -92,6 +129,7 @@ impl RetainedWriteVerdict {
         match self {
             Self::Deferred => "deferred",
             Self::Stranded => "stranded",
+            Self::AwaitingTerminalCommit => "awaiting_terminal_commit",
         }
     }
 }
@@ -116,6 +154,14 @@ pub fn retained_write_remedy(ownership: RetainedWriteOwnership, file: &str) -> S
              `agent-doc commit {file}`, or `agent-doc write --commit {file}` if an unwritten \
              response body remains. From any other pane both abort with `pane ownership \
              mismatch`"
+        ),
+        RetainedWriteVerdict::AwaitingTerminalCommit => format!(
+            "The response write ALREADY LANDED and only the terminal commit is outstanding — \
+             this is neither a lost response nor a self-completing deferral, and \
+             `agent-doc session-check {file}` will report the cycle INTERRUPTED at \
+             `write_applied`. Finish it from the pane that OWNS this session: \
+             `agent-doc commit {file}`. Do NOT re-send the response (the body is already \
+             durable and would duplicate), force disk, `admin recycle`, or `admin reload-lib`"
         ),
     }
 }
@@ -166,6 +212,61 @@ mod tests {
                 remedy.contains(invented),
                 "must explicitly rule out `{invented}`: {remedy}"
             );
+        }
+    }
+
+    /// `#ownershipverdictdiverges`: `write_applied` is not self-committing, and
+    /// lumping it in with the other open phases made this predicate contradict
+    /// `session-check`. Observed three times on 2026-08-09 on
+    /// `tasks/agent-doc/agent-doc-bugs2.md`: the refusal promised the intent
+    /// "commits itself once delivery converges", `session-check` then reported
+    /// INTERRUPTED at `write_applied`, and a single `agent-doc commit` finished
+    /// it every time.
+    #[test]
+    fn write_applied_is_awaiting_a_terminal_commit_not_self_committing() {
+        let applied = RetainedWriteOwnership::new_with_phase(true, true, true);
+        assert_eq!(
+            applied.verdict(),
+            RetainedWriteVerdict::AwaitingTerminalCommit,
+            "write_applied must not be swallowed by the broader cycle_open arm"
+        );
+        assert!(!applied.is_stranded(), "the response body IS durable");
+
+        // The other open phases are unchanged: a state edge really does still fire.
+        assert_eq!(
+            RetainedWriteOwnership::new_with_phase(true, false, false).verdict(),
+            RetainedWriteVerdict::Deferred
+        );
+        assert_eq!(
+            RetainedWriteOwnership::new_with_phase(false, true, false).verdict(),
+            RetainedWriteVerdict::Deferred
+        );
+    }
+
+    /// The remedy must name the command that actually recovers. Naming only
+    /// `session-check` — an OBSERVATION — is what left the agent with an
+    /// accurate diagnosis and no way to act on it.
+    #[test]
+    fn the_awaiting_commit_remedy_names_agent_doc_commit() {
+        let remedy = retained_write_remedy(
+            RetainedWriteOwnership::new_with_phase(true, true, true),
+            "plan.md",
+        );
+
+        assert!(remedy.contains("agent-doc commit plan.md"));
+        assert!(remedy.contains("ALREADY LANDED"));
+        assert!(
+            !remedy.contains("commits itself"),
+            "promising a self-commit is the defect being fixed: {remedy}"
+        );
+        assert!(
+            !remedy.contains("deferral, not a lost response"),
+            "must not reuse the deferred verdict's phrase: {remedy}"
+        );
+        // Re-sending is still forbidden: the body is durable, so a re-send
+        // duplicates rather than recovers.
+        for invented in ["re-send", "force disk", "admin recycle", "admin reload-lib"] {
+            assert!(remedy.contains(invented), "must rule out `{invented}`: {remedy}");
         }
     }
 

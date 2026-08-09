@@ -2,6 +2,29 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.215
+
+- **Fix (`#compactclearidempotent`): a compact reported a failed editor-op clear
+  for an epoch that was already consumed, turning CI red.**
+
+  `clear_op_capture` runs on a bounded 250ms budget. Under CI load that budget
+  expired *after* the epoch was gone, so one compact logged the contradictory
+  pair: `load_op_capture` read the capture as absent (the state was correct)
+  while the same run logged `compact_pending_editor_cut_clear_failed` and never
+  logged `compact_pending_editor_cut_consumed`. The 0.35.212 CI run failed on
+  exactly that.
+
+  `clear_replayed_editor_ops_after_compact` answers "is the epoch consumed?",
+  not "did my transaction win", so it now re-reads the state after a clear error
+  and reports `consumed outcome=already_absent_after_clear_error`. A clear error
+  with the epoch **still outstanding** remains a real failure and still says so
+  — this is not a blanket "report success on error".
+
+  The decision is a pure function (`editor_cut_clear_outcome`) so all three
+  cases are testable; the first attempt at this test was vacuous (with nothing
+  to clear, `clear_op_capture` simply succeeds and the error branch never ran),
+  which the seam fixes. Mutation-checked.
+
 ## 0.35.214
 
 - **Fix (`#baretagidcollide`): a document-wide classification tag was single-use,

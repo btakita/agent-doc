@@ -250,13 +250,35 @@ Queue: `#lzgdvocab`, then `#lzcppwasm`.
 **CI is still running** (`31290533974`) — the emsdk download is slow. Local evidence is green, but the wasm job has never been observed passing, and its `setup-emsdk@v14` pin at `6.0.6` is the one thing I could not verify locally. Filed as `#lzcppwasmci` rather than called proven.
 
 Queue: `#lzcoveragerowfixtures`.
+
+### Re: do [#lzcppwasmci] — wasm CI green; the red run was worth having — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzcppwasmci]
+
+Run `31290754362` is **fully green**: `wasm`, `test (g++)`, `test (clang++)`. The guard reached its verdict rather than merely exiting zero — `wasm tier/matrix guard: OK (87 core + 44 threaded distinct fixtures replayed)`, the same numbers the local run reports, which is the actual confirmation that the environment-independence fix worked. Fix in `9436a88`, superproject at `885c1bcc00`.
+
+**The `setup-emsdk@v14` pin at `6.0.6` was fine** — that was the risk I filed this item for, and it wasn't the problem. Both tiers built and replayed on the runner on the first attempt (24 core runners / 25 tests, 7 threaded / 8 tests).
+
+**What actually failed was my matrix, and it was a design error rather than a CI quirk.** The table carried a Native column sourced from `build/conformance-fixtures-loaded.txt` — a manifest the *native* job writes. The wasm job never builds the native suite, so every native cell read zero there and the generated table could never match the committed one. A published table has to be derivable entirely from evidence its own job produces; mine wasn't, and no amount of local testing would have shown that, because locally both manifests always exist.
+
+The audit is now stated against the **canonical corpus** instead of against native coverage. That is environment-independent and a stronger claim: every family the spec ships either replays on a wasm tier or carries a recorded reason, whatever the native suite happens to do.
+
+**Second bug in the same failure:** `sort` is locale-dependent, so `(root)` ordered differently on the runner than on this machine. Pinned with `LC_ALL=C`. Any script generating a committed, diffed artifact needs that.
+
+**Restating the audit against the corpus surfaced something the native comparison was hiding.** Three families — `egress`, `protobuf`, `agent-doc` — are replayed by lazily-cpp in **no** target at all, native included. Against native coverage they were invisible, because native replays them zero times too. Their reasons now say "a binding gap, not a wasm limit" explicitly. Collapsing those two kinds of absence would let "we never wrote this runner" hide behind "wasm cannot do this" — the same has-not/cannot distinction `⊘` preserves in `coverage.json`, which is why I kept the thread-safe rows at `—` last cycle.
+
+Re-driven after the change: stale excuse and unexcused gap both still fail, and the guard passes with the native manifest absent — the exact CI condition that failed. `make check` green (57 tests), `make wasm` green on both tiers.
+
+Queue: `#lzcoveragerowfixtures`.
 <!-- agent:boundary:139c989e:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzcppwasmci]
+- ~~do [#lzcppwasmci]~~
 - ~~do [#lzgdcoveragecolumn]~~
 - ⏭️ do [#lzgdvocab]
 - ~~do [#lzcppwasm]~~
@@ -266,7 +288,6 @@ Queue: `#lzcoveragerowfixtures`.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcppwasmci] Verify the first run of the new lazily-cpp wasm CI job (run 31290533974 onward). It was authored but never observed green: mymindstorm/setup-emsdk@v14 with the pin version 6.0.6 cannot be exercised locally, and that job is the only thing enforcing the WASM.md matrix. If setup-emsdk rejects the pin, read the action's supported version list rather than falling back to 'latest' — an unpinned toolchain turns 'the tiers built' into 'the tiers built on whatever shipped this morning'. Local evidence is already green: make wasm passes both tiers with 87 core + 44 threaded distinct fixtures replayed.
 - [ ] [#lzgdvocab] Extend the lazily-gd conformance runner to the 12 reactive-graph fixtures it cannot yet replay, one op family per step: merge_cell (5 fixtures, needs the multi-write ingress mechanism), signal/dispose_signal materialization (3), fanout/churn/dispose_fanout/dispose_stale_handle bulk ops plus real id recycling (2), fail_next injectable compute failure (1), and shape=scenarios support (1). Each is named in KNOWN_UNCOVERED with its reason. Removing an entry there is the definition of done for that group.
 - [ ] [#lzcoveragerowfixtures] Only 11 of coverage.json's 70 rows carry a `fixtures` citation, so check-coverage-claims.mjs verifies 84 shipped marks and leaves every other mark structurally unverifiable — including row 0 (reactive-graph), the one row lazily-gd is scored on. The guard is sound; it just has almost nothing to read. Add `fixtures` to the reactive-graph, materialization, statechart, collections, queue, topic, work-queue, crdt, lossless-tree, egress, and stdlib rows, citing the canonical fixtures that actually back each row's normative prose. Expect this to redden bindings whose marks are currently unbacked — that is the point, and it is why this is its own cycle rather than a rider on the GDScript column. Do NOT weaken a mark to make the guard pass without first checking whether the binding replays the fixture.
 <!-- /agent:backlog -->

@@ -2396,6 +2396,12 @@ pub enum RoutedDispatchStartProof {
     HookPromptMatched,
     HookStateAdvanced,
     PaneStateChanged,
+    /// (`#strandeddraftresubmit`) A trigger already stranded unsubmitted in the
+    /// composer was submitted by this route instead of having a second trigger
+    /// appended to it, and the controller then projected turn admission. That
+    /// projection IS dispatch-start proof, so this is a full dispatch-start
+    /// outcome, not accepted-only.
+    StrandedDraftSubmitted,
 }
 
 impl RoutedDispatchStartProof {
@@ -2408,6 +2414,7 @@ impl RoutedDispatchStartProof {
             Self::HookPromptMatched => "consumed",
             Self::HookStateAdvanced => "submitted",
             Self::PaneStateChanged => "pane_state_changed",
+            Self::StrandedDraftSubmitted => "stranded_draft_submitted",
         }
     }
 
@@ -2417,9 +2424,10 @@ impl RoutedDispatchStartProof {
             Self::CommandAcceptedOnly
             | Self::DispatchStartUnproven
             | Self::AcceptedQueuedBehindActiveTurn => "accepted_only",
-            Self::HookPromptMatched | Self::HookStateAdvanced | Self::PaneStateChanged => {
-                "dispatch_start"
-            }
+            Self::HookPromptMatched
+            | Self::HookStateAdvanced
+            | Self::PaneStateChanged
+            | Self::StrandedDraftSubmitted => "dispatch_start",
         }
     }
 
@@ -2438,6 +2446,9 @@ impl RoutedDispatchStartProof {
             Self::HookPromptMatched => "dispatch-start proof matched the routed prompt",
             Self::HookStateAdvanced => "dispatch-start proof observed newer harness prompt state",
             Self::PaneStateChanged => "dispatch-start proof observed pane state leave idle chrome",
+            Self::StrandedDraftSubmitted => {
+                "dispatch-start proof projected turn admission after submitting a stranded composer draft"
+            }
         }
     }
 
@@ -2450,6 +2461,7 @@ impl RoutedDispatchStartProof {
             Self::HookPromptMatched => "consumption",
             Self::HookStateAdvanced => "submission",
             Self::PaneStateChanged => "pane-state-change",
+            Self::StrandedDraftSubmitted => "stranded-draft-submission",
         }
     }
 
@@ -2467,7 +2479,10 @@ impl RoutedDispatchStartProof {
     pub const fn confirms_dispatch_start(self) -> bool {
         matches!(
             self,
-            Self::HookPromptMatched | Self::HookStateAdvanced | Self::PaneStateChanged
+            Self::HookPromptMatched
+                | Self::HookStateAdvanced
+                | Self::PaneStateChanged
+                | Self::StrandedDraftSubmitted
         )
     }
 }
@@ -2912,6 +2927,102 @@ pub fn pass_through_stranded_draft_log_line(facts: PassThroughStrandedDraftLogFa
         facts.elapsed_ms,
         facts.capture_failed,
     )
+}
+
+/// What a routed dispatch should do about the composer state it observes
+/// *before* it injects anything (`#strandeddraftresubmit`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreDispatchStrandedDraftAction {
+    /// The pane could not be captured. "I did not look" is not "the composer is
+    /// empty" and it is certainly not "a draft is stranded"
+    /// (`#idlerevisionreactive`): unknown pane state never authorizes pressing a
+    /// submit key, and never blocks the normal dispatch path either.
+    ObserveUnavailable,
+    /// The composer holds no draft of this trigger, so the normal
+    /// text-plus-submit dispatch is correct.
+    DispatchFresh,
+    /// A draft is visible but the harness is mid-turn, so the text is queued
+    /// behind that turn rather than stranded. Pressing a submit key into an
+    /// active turn is never the repair; the caller's own busy short-circuit owns
+    /// this case.
+    DeferPaneBusy,
+    /// An idle, dispatch-ready composer is still holding this trigger
+    /// unsubmitted. Submit that draft instead of appending a second trigger to
+    /// it.
+    ResubmitStrandedDraft,
+}
+
+impl PreDispatchStrandedDraftAction {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ObserveUnavailable => "observe_unavailable",
+            Self::DispatchFresh => "dispatch_fresh",
+            Self::DeferPaneBusy => "defer_pane_busy",
+            Self::ResubmitStrandedDraft => "resubmit_stranded_draft",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PreDispatchStrandedDraftFacts {
+    /// Whether the pane capture succeeded at all.
+    pub pane_captured: bool,
+    /// Whether this trigger is visible in the CURRENT draft of a dispatch-ready
+    /// composer. Callers on long-lived panes must derive this from a
+    /// cursor-anchored ready prompt plus
+    /// [`route_trigger_visible_in_current_draft`], never a whole-capture
+    /// substring match — scrollback holds every previously submitted trigger
+    /// (`#autotriggerscrollbackecho`).
+    pub trigger_drafted: bool,
+    /// Whether the harness shows a busy cue.
+    pub pane_busy: bool,
+}
+
+/// (`#strandeddraftresubmit`) Classify the composer BEFORE a routed dispatch
+/// injects a trigger into it.
+///
+/// The live failure, operator-reported 2026-08-09 on `sdk.md` pane `%926`: an
+/// earlier injection left `agent-doc <FILE>` sitting unsubmitted in the Claude
+/// Code composer. `agent-doc` sent nothing to that pane for 29 seconds (zero
+/// `tmux_input_event`), route waited 26.3s on the starting actor, and then
+/// injected a SECOND trigger — which appended to the stranded draft and
+/// submitted both as one prompt.
+///
+/// [`repair_pass_through_stranded_draft`]-style repair already existed, but it
+/// is wired to the POST-dispatch path: it can only fix a draft the same call
+/// created, so a draft stranded BEFORE the ready-wait is never submitted on its
+/// own. `#jbtsiftnosub2` implements exactly this pre-check for FRESH route panes;
+/// an existing dispatch-only pane needs the same guarantee.
+///
+/// The classification stays a strict tightening: only a successful capture that
+/// proves an idle, dispatch-ready composer still holding this exact trigger
+/// diverts from the normal dispatch. Everything else — capture failure, no
+/// draft, busy pane — proceeds as before.
+pub const fn classify_pre_dispatch_stranded_draft_action(
+    facts: PreDispatchStrandedDraftFacts,
+) -> PreDispatchStrandedDraftAction {
+    if !facts.pane_captured {
+        PreDispatchStrandedDraftAction::ObserveUnavailable
+    } else if !facts.trigger_drafted {
+        PreDispatchStrandedDraftAction::DispatchFresh
+    } else if facts.pane_busy {
+        PreDispatchStrandedDraftAction::DeferPaneBusy
+    } else {
+        PreDispatchStrandedDraftAction::ResubmitStrandedDraft
+    }
+}
+
+/// How long a pre-dispatch stranded-draft resubmit waits for the controller to
+/// project turn admission before falling through to the normal dispatch.
+///
+/// Bounded well under the dispatch-start proof budget: this is a repair attempt
+/// on an already-typed request, and falling through re-runs the normal path.
+pub const fn pre_dispatch_stranded_draft_admission_timeout(is_test: bool) -> Duration {
+    if is_test {
+        Duration::from_millis(50)
+    } else {
+        Duration::from_secs(3)
+    }
 }
 
 pub fn direct_pane_submit_acceptance_timeout() -> Duration {
@@ -6258,6 +6369,84 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert_eq!(
             pass_through_stranded_draft_max_enter_resubmits_from_env_value(None),
             PASS_THROUGH_STRANDED_DRAFT_MAX_ENTER_RESUBMITS_DEFAULT
+        );
+    }
+
+    fn idle_ready_composer_facts() -> PreDispatchStrandedDraftFacts {
+        PreDispatchStrandedDraftFacts {
+            pane_captured: true,
+            trigger_drafted: true,
+            pane_busy: false,
+        }
+    }
+
+    /// `#strandeddraftresubmit`: the operator-reported live shape — an idle,
+    /// dispatch-ready composer still holding the trigger from an EARLIER
+    /// injection. Route must submit that draft, not append a second trigger to
+    /// it.
+    #[test]
+    fn pre_dispatch_stranded_draft_submits_an_idle_held_trigger() {
+        assert_eq!(
+            classify_pre_dispatch_stranded_draft_action(idle_ready_composer_facts()),
+            PreDispatchStrandedDraftAction::ResubmitStrandedDraft
+        );
+    }
+
+    /// A capture failure is neither "clear" nor "stranded". Unknown pane state
+    /// never authorizes pressing a submit key, and never diverts the normal
+    /// dispatch either (`#idlerevisionreactive`).
+    #[test]
+    fn pre_dispatch_stranded_draft_never_reads_an_unobserved_pane_as_stranded() {
+        assert_eq!(
+            classify_pre_dispatch_stranded_draft_action(PreDispatchStrandedDraftFacts {
+                pane_captured: false,
+                trigger_drafted: true,
+                pane_busy: false,
+            }),
+            PreDispatchStrandedDraftAction::ObserveUnavailable
+        );
+    }
+
+    #[test]
+    fn pre_dispatch_stranded_draft_defers_a_busy_pane_and_dispatches_a_clear_one() {
+        assert_eq!(
+            classify_pre_dispatch_stranded_draft_action(PreDispatchStrandedDraftFacts {
+                pane_busy: true,
+                ..idle_ready_composer_facts()
+            }),
+            PreDispatchStrandedDraftAction::DeferPaneBusy
+        );
+        assert_eq!(
+            classify_pre_dispatch_stranded_draft_action(PreDispatchStrandedDraftFacts {
+                trigger_drafted: false,
+                ..idle_ready_composer_facts()
+            }),
+            PreDispatchStrandedDraftAction::DispatchFresh
+        );
+    }
+
+    /// A stranded draft that the route submitted, and whose admission the
+    /// controller then projected, is full dispatch-start proof — not the
+    /// accepted-only scope a dispatch-only route otherwise reports.
+    #[test]
+    fn stranded_draft_submission_is_dispatch_start_scope() {
+        let proof = RoutedDispatchStartProof::StrandedDraftSubmitted;
+        assert!(proof.confirms_dispatch_start());
+        assert_eq!(proof.proof_scope_label(), "dispatch_start");
+        assert_eq!(proof.dispatch_stage_label(), "stranded_draft_submitted");
+        assert!(!proof.is_queued_behind_active_turn());
+    }
+
+    #[test]
+    fn pre_dispatch_stranded_draft_admission_wait_is_bounded() {
+        assert_eq!(
+            pre_dispatch_stranded_draft_admission_timeout(false),
+            Duration::from_secs(3)
+        );
+        assert!(
+            pre_dispatch_stranded_draft_admission_timeout(false)
+                < routed_dispatch_start_timeout_for_binary(Some("claude"), false),
+            "the pre-dispatch repair must stay well under the dispatch-start proof budget"
         );
     }
 

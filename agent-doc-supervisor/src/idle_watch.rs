@@ -339,8 +339,93 @@ impl QueueContinuationTriggers {
         self.scope.ctx().set(&self.projection, projection);
     }
 
+    /// (`#strandeddraftresubmit`) The effect finished but nothing could observe
+    /// whether it started a turn.
+    ///
+    /// Distinct from [`Self::observe_effect_failed`] on purpose: bumping the
+    /// retry epoch is a claim that a blind retry is warranted, and a retry here
+    /// means writing a SECOND trigger into a composer that may already hold the
+    /// first one. Releasing the in-flight flag without that bump keeps the
+    /// un-consumed document edge live, so the next tick re-observes the pane and
+    /// reaches the pending-payload resubmit instead of re-injecting
+    /// (`#idlerevisionreactive`).
+    pub fn observe_effect_unobservable(&self) {
+        let mut projection = self.scope.ctx().get(&self.projection);
+        projection.dispatch_effect_in_flight = false;
+        self.scope.ctx().set(&self.projection, projection);
+    }
+
     pub fn ready(&self) -> bool {
         self.scope.ctx().get(&self.ready)
+    }
+}
+
+/// Whether an idle-queue dispatch proved that it started a turn.
+///
+/// `Unobservable` is deliberately distinct from `Unproven`: "the controller
+/// projected no admission and the pane told us nothing" and "the trigger is
+/// visibly still sitting in the composer" are different facts, and only the
+/// second one is evidence that nothing was submitted (`#idlerevisionreactive`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QueueDispatchStartObservation {
+    Proven,
+    Unproven,
+    Unobservable,
+}
+
+impl QueueDispatchStartObservation {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Proven => "proven",
+            Self::Unproven => "unproven",
+            Self::Unobservable => "unobservable",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QueueDispatchStartFacts {
+    /// Whether this payload needs dispatch-start proof at all. A slash command
+    /// or a non-pane delivery has no admission projection to advance.
+    pub proof_required: bool,
+    /// Whether the controller's turn-admission projection advanced past the
+    /// pre-dispatch baseline.
+    pub admission_advanced: bool,
+    /// Whether the pane could be captured after the send.
+    pub pane_observed: bool,
+    /// Whether the harness shows a busy cue. Accept-only evidence: a pane that
+    /// is working right after a send from a proven-idle prompt is running our
+    /// turn, which is why the auto-trigger path already races this against the
+    /// admission RPC (`#autotriggeradmissionstall`).
+    pub pane_busy: bool,
+    /// Whether the payload is still visible unsubmitted in the current input.
+    /// This is the ONLY positive evidence that the dispatch did not start.
+    pub payload_still_pending: bool,
+}
+
+/// (`#strandeddraftresubmit`) Classify an idle-queue dispatch from the admission
+/// projection plus one post-send pane observation.
+///
+/// The live failure this replaces: a null `turn_admission_projection`
+/// (`controller_response_missing_data command=turn_admission_projection raw data
+/// null ok true`) was read as `dispatch_start_unproven`, which bumped the
+/// effect-retry epoch and rearmed the drain. A legitimately no-op turn never
+/// projects an admission at all, so that inverted "could not observe" into "was
+/// not submitted" and turned it into a fresh injection on top of whatever was
+/// already in the composer.
+pub const fn classify_queue_dispatch_start_observation(
+    facts: QueueDispatchStartFacts,
+) -> QueueDispatchStartObservation {
+    if !facts.proof_required
+        || facts.admission_advanced
+        // Accept-only pane proof.
+        || (facts.pane_observed && facts.pane_busy)
+    {
+        QueueDispatchStartObservation::Proven
+    } else if facts.pane_observed && facts.payload_still_pending {
+        QueueDispatchStartObservation::Unproven
+    } else {
+        QueueDispatchStartObservation::Unobservable
     }
 }
 
@@ -490,6 +575,112 @@ pub fn idle_queue_context_reset_ops_log_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn proof_required_facts() -> QueueDispatchStartFacts {
+        QueueDispatchStartFacts {
+            proof_required: true,
+            admission_advanced: false,
+            pane_observed: true,
+            pane_busy: false,
+            payload_still_pending: false,
+        }
+    }
+
+    #[test]
+    fn queue_dispatch_start_proof_is_not_required_without_a_pane_admission_edge() {
+        assert_eq!(
+            classify_queue_dispatch_start_observation(QueueDispatchStartFacts {
+                proof_required: false,
+                ..proof_required_facts()
+            }),
+            QueueDispatchStartObservation::Proven
+        );
+    }
+
+    #[test]
+    fn queue_dispatch_start_is_proven_by_an_advanced_admission_or_a_busy_pane() {
+        assert_eq!(
+            classify_queue_dispatch_start_observation(QueueDispatchStartFacts {
+                admission_advanced: true,
+                ..proof_required_facts()
+            }),
+            QueueDispatchStartObservation::Proven
+        );
+        // Accept-only pane proof: a harness working right after the send is
+        // running our turn (`#autotriggeradmissionstall`).
+        assert_eq!(
+            classify_queue_dispatch_start_observation(QueueDispatchStartFacts {
+                pane_busy: true,
+                ..proof_required_facts()
+            }),
+            QueueDispatchStartObservation::Proven
+        );
+    }
+
+    /// `#strandeddraftresubmit`: only a visibly pending payload proves the
+    /// dispatch did not start. Every other unproven shape is UNOBSERVABLE, so a
+    /// null admission projection can never rearm a blind retry that appends a
+    /// second trigger to the first (`#idlerevisionreactive`).
+    #[test]
+    fn queue_dispatch_start_separates_unobservable_from_unproven() {
+        assert_eq!(
+            classify_queue_dispatch_start_observation(QueueDispatchStartFacts {
+                payload_still_pending: true,
+                ..proof_required_facts()
+            }),
+            QueueDispatchStartObservation::Unproven
+        );
+        // Controller projected nothing and the pane shows an idle, empty
+        // composer: this is the legitimate no-op turn shape as much as it is a
+        // strand, so it must not be called unproven.
+        assert_eq!(
+            classify_queue_dispatch_start_observation(proof_required_facts()),
+            QueueDispatchStartObservation::Unobservable
+        );
+        // Pane could not be captured at all.
+        assert_eq!(
+            classify_queue_dispatch_start_observation(QueueDispatchStartFacts {
+                pane_observed: false,
+                payload_still_pending: true,
+                ..proof_required_facts()
+            }),
+            QueueDispatchStartObservation::Unobservable
+        );
+    }
+
+    /// The load-bearing difference between the two non-proven closeouts: a
+    /// failed effect rearms a retry, an unobservable one must not.
+    #[test]
+    fn unobservable_dispatch_release_does_not_rearm_a_blind_retry() {
+        let triggers = QueueContinuationTriggers::new();
+        triggers.observe_head(Some("do [#head]".to_string()));
+        assert!(triggers.ready());
+
+        triggers.begin_dispatch_effect();
+        assert!(!triggers.ready());
+        triggers.observe_effect_unobservable();
+        let after_unobservable = triggers.scope.ctx().get(&triggers.projection);
+        assert_eq!(
+            after_unobservable.effect_retry_epoch, 0,
+            "an unobservable dispatch must not bump the effect-retry epoch"
+        );
+        assert!(
+            triggers.ready(),
+            "the un-consumed document edge keeps the next tick re-observing"
+        );
+
+        triggers.begin_dispatch_effect();
+        triggers.observe_effect_failed();
+        assert_eq!(
+            triggers
+                .scope
+                .ctx()
+                .get(&triggers.projection)
+                .effect_retry_epoch,
+            1,
+            "a proven-failed dispatch still rearms"
+        );
+    }
 
     fn ready_resume_facts() -> CapturedFinalizeResumeFacts {
         CapturedFinalizeResumeFacts {

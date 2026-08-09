@@ -4199,8 +4199,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             ),
                         );
                     }
-                    let dispatch_admission_baseline =
-                        if slash_command.is_none() && shared.inject_pane.is_some() {
+                    let dispatch_start_proof_required =
+                        slash_command.is_none() && shared.inject_pane.is_some();
+                    let dispatch_admission_baseline = if dispatch_start_proof_required {
                             agent_doc_controller_io::project_controller::current_turn_admission_projection_for_file(
                                 &path,
                             )
@@ -4219,30 +4220,73 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                     &path,
                                 )
                                 .ok();
-                            let dispatch_start_proven =
-                                slash_command.is_some()
-                                    || shared.inject_pane.is_none()
-                                    || dispatch_admission_baseline
-                                        .as_ref()
-                                        .zip(current_dispatch_admission.as_ref())
-                                        .is_some_and(|(baseline, current)| {
-                                            queue_dispatch_cycle_advanced(
-                                                baseline.as_deref(),
-                                                current
-                                                    .as_ref()
-                                                    .map(|projection| {
-                                                        projection.cycle_id.as_str()
-                                                    }),
-                                            )
-                                    });
-                            if !dispatch_start_proven {
-                                queue_continuation_triggers.observe_effect_failed();
+                            let admission_advanced = dispatch_admission_baseline
+                                .as_ref()
+                                .zip(current_dispatch_admission.as_ref())
+                                .is_some_and(|(baseline, current)| {
+                                    queue_dispatch_cycle_advanced(
+                                        baseline.as_deref(),
+                                        current
+                                            .as_ref()
+                                            .map(|projection| projection.cycle_id.as_str()),
+                                    )
+                                });
+                            // `#strandeddraftresubmit`: when the admission
+                            // projection cannot prove the dispatch started, ask
+                            // the pane. A busy cue is accept-only proof; a
+                            // payload still visible in the composer is the only
+                            // positive evidence that nothing was submitted.
+                            // Everything else stays UNOBSERVABLE and must not
+                            // rearm a blind retry that would append a second
+                            // trigger to the first (`#idlerevisionreactive`).
+                            let post_dispatch_observation = if dispatch_start_proof_required
+                                && !admission_advanced
+                            {
+                                supervisor_pane_payload_observation(
+                                    &shared,
+                                    &drain_payload,
+                                    &harness,
+                                )
+                            } else {
+                                None
+                            };
+                            let dispatch_start_observation =
+                                agent_doc_supervisor::idle_watch::classify_queue_dispatch_start_observation(
+                                    agent_doc_supervisor::idle_watch::QueueDispatchStartFacts {
+                                        proof_required: dispatch_start_proof_required,
+                                        admission_advanced,
+                                        pane_observed: post_dispatch_observation.is_some(),
+                                        pane_busy: post_dispatch_observation
+                                            .as_ref()
+                                            .is_some_and(|observation| {
+                                                harness.has_busy_cue(&observation.content)
+                                            }),
+                                        payload_still_pending: post_dispatch_observation
+                                            .as_ref()
+                                            .is_some_and(|observation| {
+                                                observation.payload_already_pending
+                                            }),
+                                    },
+                                );
+                            if dispatch_start_observation
+                                != agent_doc_supervisor::idle_watch::QueueDispatchStartObservation::Proven
+                            {
+                                match dispatch_start_observation {
+                                    agent_doc_supervisor::idle_watch::QueueDispatchStartObservation::Unproven => {
+                                        queue_continuation_triggers.observe_effect_failed();
+                                    }
+                                    _ => {
+                                        queue_continuation_triggers
+                                            .observe_effect_unobservable();
+                                    }
+                                }
                                 agent_doc_ops_log_io::log_op(
                                     &path,
                                     &format!(
-                                        "idle_queue_dispatch_not_consumed file={} harness={} reason=dispatch_start_unproven head_sha256={} payload_sha256={}",
+                                        "idle_queue_dispatch_not_consumed file={} harness={} reason=dispatch_start_{} head_sha256={} payload_sha256={}",
                                         path.display(),
                                         harness.binary,
+                                        dispatch_start_observation.as_str(),
                                         agent_doc_hash::content_hash(&head),
                                         agent_doc_hash::content_hash(&drain_payload),
                                     ),

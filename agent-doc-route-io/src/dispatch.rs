@@ -19,15 +19,17 @@ use crate::supervisor_runtime::supervisor_socket_path;
 use agent_doc_controller::dispatch::{
     DirectPaneDispatchStartProofFacts, DirectPaneSubmitPolicy,
     PASS_THROUGH_STRANDED_DRAFT_SETTLE, PassThroughStrandedDraftAction,
-    PassThroughStrandedDraftFacts, PassThroughStrandedDraftLogFacts, RouteSubmitObservation,
+    PassThroughStrandedDraftFacts, PassThroughStrandedDraftLogFacts,
+    PreDispatchStrandedDraftAction, PreDispatchStrandedDraftFacts, RouteSubmitObservation,
     RoutedDispatchStartProof, RoutedTriggerPayloadFacts, busy_dispatch_start_outcome,
-    classify_pass_through_stranded_draft_action, direct_pane_should_await_dispatch_start_proof,
-    direct_pane_submit_acceptance_budget, direct_pane_submit_outcome,
-    dispatch_start_busy_probe_timeout, dispatch_start_early_resubmit_probe_timeout,
-    pass_through_stranded_draft_log_line, pass_through_stranded_draft_max_enter_resubmits,
+    classify_pass_through_stranded_draft_action, classify_pre_dispatch_stranded_draft_action,
+    direct_pane_should_await_dispatch_start_proof, direct_pane_submit_acceptance_budget,
+    direct_pane_submit_outcome, dispatch_start_busy_probe_timeout,
+    dispatch_start_early_resubmit_probe_timeout, pass_through_stranded_draft_log_line,
+    pass_through_stranded_draft_max_enter_resubmits,
     pass_through_stranded_draft_required_clear_observations,
-    route_trigger_visible_in_current_draft, routed_dispatch_start_timeout_for_binary,
-    routed_trigger_payload_rejection,
+    pre_dispatch_stranded_draft_admission_timeout, route_trigger_visible_in_current_draft,
+    routed_dispatch_start_timeout_for_binary, routed_trigger_payload_rejection,
 };
 use agent_doc_harness::HarnessConfig;
 use agent_doc_session_registry_io::dispatch_registry;
@@ -643,6 +645,129 @@ fn send_pass_through_stranded_draft_enter(
     }
 }
 
+/// (`#strandeddraftresubmit`) Observe the composer BEFORE injecting a trigger.
+///
+/// The "still unsubmitted" test is scoped to the CURRENT draft of a
+/// cursor-anchored dispatch-ready prompt. This path runs against long-lived
+/// panes whose scrollback holds every previously submitted trigger and whose
+/// queued-input region echoes an accepted trigger verbatim, so a whole-capture
+/// substring match (`pane_composer_has_pending_trigger`, sound only on the
+/// brand-new fresh pane it was written for) would read consumed history as a
+/// stranded draft (`#autotriggerscrollbackecho`).
+fn observe_pre_dispatch_stranded_draft(
+    tmux: &Tmux,
+    pane: &str,
+    harness: &HarnessConfig,
+    trigger: &str,
+) -> PreDispatchStrandedDraftAction {
+    let capture = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane).ok();
+    let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, pane);
+    classify_pre_dispatch_stranded_draft_action(PreDispatchStrandedDraftFacts {
+        pane_captured: capture.is_some(),
+        trigger_drafted: capture.as_deref().is_some_and(|content| {
+            agent_doc_harness::ready_prompt_candidate_at_cursor(content, harness, cursor_y)
+                .is_some()
+                && route_trigger_visible_in_current_draft(content, trigger, |line| {
+                    harness.is_prompt_line(line)
+                })
+        }),
+        pane_busy: capture
+            .as_deref()
+            .is_some_and(|content| harness.has_busy_cue(content)),
+    })
+}
+
+/// (`#strandeddraftresubmit`) Submit a trigger already stranded in the composer
+/// instead of appending a second one to it.
+///
+/// Returns `Ok(Some(proof))` when the stranded draft was submitted and the
+/// controller then projected turn admission — the routed request is running, so
+/// the caller must NOT inject. Returns `Ok(None)` in every other case (nothing
+/// stranded, unobservable pane, busy pane, submit-key failure, or no admission
+/// within the bounded window) so the normal dispatch path runs exactly as
+/// before. Falling through is deliberately safe: the post-dispatch repair still
+/// owns a draft this call creates.
+fn try_pre_dispatch_stranded_draft_submit(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    file_path: &str,
+    harness: &HarnessConfig,
+) -> Result<Option<RoutedDispatchStartProof>> {
+    let trigger = harness.trigger_command(file_path);
+    let action = observe_pre_dispatch_stranded_draft(tmux, pane, harness, &trigger);
+    if action != PreDispatchStrandedDraftAction::ResubmitStrandedDraft {
+        // Only log the states that diverted or could not be observed; a clean
+        // fresh dispatch is the common case and stays silent.
+        if action != PreDispatchStrandedDraftAction::DispatchFresh {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_pre_dispatch_draft_observation file={} pane={} harness={} action={}",
+                    file.display(),
+                    pane,
+                    harness.binary,
+                    action.as_str(),
+                ),
+            );
+        }
+        return Ok(None);
+    }
+
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_pre_dispatch_stranded_draft_resubmit file={} pane={} harness={} action={} note=composer already held this trigger unsubmitted; submitting it instead of appending a second trigger",
+            file.display(),
+            pane,
+            harness.binary,
+            action.as_str(),
+        ),
+    );
+    eprintln!(
+        "[route] {} composer in pane {} still holds the {} trigger unsubmitted — submitting that draft instead of injecting a second one",
+        harness.binary,
+        pane,
+        file.display()
+    );
+    let baseline = agent_doc_cycle_state_io::load(file).ok().flatten();
+    send_pass_through_stranded_draft_enter(tmux, file, pane, harness);
+    let timeout = pre_dispatch_stranded_draft_admission_timeout(cfg!(test));
+    match crate::admission_projection::wait_for_start_projection(file, baseline.as_ref(), timeout) {
+        Some(state) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_pre_dispatch_stranded_draft_admitted file={} pane={} harness={} cycle={} phase={} timeout_ms={}",
+                    file.display(),
+                    pane,
+                    harness.binary,
+                    state.cycle_id,
+                    state.phase.as_str(),
+                    timeout.as_millis(),
+                ),
+            );
+            Ok(Some(RoutedDispatchStartProof::StrandedDraftSubmitted))
+        }
+        None => {
+            // "Could not observe admission" must stay distinct from "the draft
+            // was not submitted" (`#idlerevisionreactive`). Neither claims the
+            // dispatch, so the normal path runs and owns the outcome.
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_pre_dispatch_stranded_draft_admission_unobserved file={} pane={} harness={} timeout_ms={} note=falling through to the normal dispatch path",
+                    file.display(),
+                    pane,
+                    harness.binary,
+                    timeout.as_millis(),
+                ),
+            );
+            Ok(None)
+        }
+    }
+}
+
 pub fn dispatch_routed_reopen_with_mode(
     tmux: &Tmux,
     file: &Path,
@@ -657,6 +782,13 @@ pub fn dispatch_routed_reopen_with_mode(
         pane,
         &harness.binary,
     )?;
+    // `#strandeddraftresubmit`: a trigger already stranded in the composer must
+    // be submitted, never have a second trigger appended to it.
+    if let Some(proof) =
+        try_pre_dispatch_stranded_draft_submit(tmux, file, pane, file_path, harness)?
+    {
+        return Ok(proof);
+    }
     if options.submit_policy == DirectPaneSubmitPolicy::PassThroughSingleSubmit {
         let submit_start = Instant::now();
         let trigger = send_command_once_checked(tmux, pane, file_path, harness)?;

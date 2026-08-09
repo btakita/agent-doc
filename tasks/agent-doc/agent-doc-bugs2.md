@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: a4612e7a-e1a6-40d7-ae91-90bfe7c7724c
+resume: 414e5502-a3a8-4dd0-9558-21c14312c165
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -975,13 +975,35 @@ Recap for the record: `run_preflight_for_prompt` collapsed two very different ou
 Worth stating plainly after a long run of these: six of the last eight items were defects in agent-doc's own *self-observation* — a response classified as an operator edit, the binary's own bookkeeping read as user intent, a hardcoded caller field, a trigger that could not report its own failure. The pattern is consistent: wherever the binary writes into the document or logs its own actions, the code that later reads it must be able to tell "I wrote this" from "someone else did", and every place that judgement is re-derived locally is where it drifts.
 
 Exchange is 926 lines across 41 sections and accretion is at `block`, but the queue is active, so I am noting it rather than stalling to compact.
+
+### Re: moving the question instead of shrinking the answer — opus-5
+
+> **Queue prompt:**
+>
+> do [#resumeownerfmread]
+
+
+`#resumeownerfmread` is implemented and shipped as **0.35.221**, against the corrected plan rather than the one I originally filed.
+
+**Why the original plan was wrong.** I proposed a frontmatter-scoped relay read so an attached document could answer a bounded leading-block query without materializing its whole text. That cannot help: `canonical_text` goes through Yrs `get_string`, which walks the entire tree no matter how few bytes the caller wants, and the profiling note on the hook budget records preflight as "almost entirely blocked on controller round trips". A prefix API would still pay the per-candidate round trip — the actual cost. Shrinking the answer was never the lever.
+
+**What shipped.** The *question* moved to where the hubs already live. A `resume_claimant` controller RPC takes the candidate list and answers from the local hub registry with no IPC per candidate — one round trip total, where the loop previously paid **two** per attached candidate (a revision probe, then the text resolve). That is `#lazily-hot-path` applied literally: ask the actor once instead of polling it N times. Candidates whose hub is not allocated are detached, so disk is already their authority and the controller reads those bytes directly — the same rule `resume_claim_candidate_reads_disk` encodes.
+
+**Fail-safe by construction, because the failure mode here is severe.** A missed claim adopts someone else's conversation. So an `Err` — no controller, or one that cannot answer — falls through to the original per-candidate loop rather than reporting "no owner". And the claim rule is one predicate checking BOTH `resume` and `agent_doc_session`, so the batch and per-candidate paths cannot drift apart; dropping the `agent_doc_session` half reddens its test. My first version of that test reimplemented the rule inside the test instead of calling the shipped code — vacuous — so it now exercises the real predicate directly.
+
+The `state.db` `documents.session_id` shortcut stays rejected, and the item text says why so nobody reaches for it later: it is a durable sink, and a stale row would either invent an owner or miss a real one.
+
+**One thing this cycle exposed, filed as `#mutprovenancepreresponse`.** Recovering the previous closeout showed a gap in `#retainedmutdrop`'s fix. The provenance it reads — `pending_done_ids` / `pending_added_ids` — is only recorded when the mutation phase runs, which is *after* the response write. When the write fails after the response has landed, nothing is recorded, the predicate correctly reports "no unlanded mutations of mine", and the divergence is classified as an unanswered edit again. Recovery worked only because I still knew the intent; nothing in the document or state proved it. The fix is to persist the requested intent at the point `#prmergeguardpr` already validates the envelope — before publication — so provenance exists no matter where the write fails.
+
+**Verification.** `make check` green (8853 passed, 249 skipped); installed 0.35.221, committed, tagged, pushed, superproject pointer pushed. CI: `0.35.216`–`0.35.219` all green; `0.35.220` and `0.35.221` in progress at closeout.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#mutprovenancepreresponse]
 - ~~do [#hooktriggerunresolved]~~
-- do [#resumeownerfmread]
+- ~~do [#resumeownerfmread]~~
 - ~~do [#queueblockquoteintent]~~
 - ~~do [#pullnoackdeadlock]~~
 - ~~do [#retainedmutdrop]~~
@@ -1004,7 +1026,7 @@ Exchange is 926 lines across 41 sections and accretion is at `block`, but the qu
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#resumeownerfmread] agent-doc start pays TWO controller round trips per attached sibling document to answer one ownership question, and it is the single largest resolve source. Measured 2026-08-09 over the window AFTER 0.35.199 landed, so this profile is trustworthy: resume_id_owner 213 and start_resume_id_capture 126 top every other caller (next is observe_live_queue_heads at 107). #projpassstart already proved a projection pass cannot help — resume_id_owner runs once per start and reads each candidate exactly once. CORRECTION to this item's original plan (2026-08-09): it proposed a frontmatter-scoped relay read so an attached document could answer a bounded leading-block query without materializing its whole text. That will NOT help, and the reason matters. The cost is not string materialization: canonical_text goes through Yrs get_string, which walks the whole tree regardless of how few bytes the caller wants, and the profiling note on the hook budget says preflight is 'almost entirely blocked on controller round trips'. A prefix API would still pay the per-candidate round trip, which is the actual cost. The right design is to move the QUESTION to where the hubs already live: one controller-side query answering 'which registered document claims resume id X' across all hubs, replacing N per-candidate round trips with one. That matches #lazily-hot-path — ask the actor rather than have the caller poll it N times. Note resume_id_owner currently pays TWO round trips per attached candidate (current_revision_for_file, then the text resolve). Do NOT substitute state.db documents.session_id for the frontmatter read: it is a durable sink (#lzdurablesink) and a stale row would either invent an owner, silently losing a conversation resume via the #resumeclaim start-fresh path, or miss a real one.
+- [ ] [#mutprovenancepreresponse] The provenance record that #retainedmutdrop relies on is written AFTER the response, so a write that fails post-landing leaves nothing to prove the mutations were ours (#agent-doc-bug). 0.35.216 taught session-check and commit to distinguish 'this closeout's own unlanded mutations' from 'a fresh operator edit' by reading CycleState pending_done_ids / pending_added_ids. That works whenever the mutation phase RAN. It does not when the response write itself fails after the response has landed: apply_pending_and_status_mutations never executes, so nothing is recorded, recorded_tracked_work_is_unlanded correctly returns false, and the divergence is classified UnansweredEditPending again. Observed 2026-08-09 closing #hooktriggerunresolved: respond hit the pre-write delivery barrier, the response reached HEAD, the --done never applied and was never recorded, and session-check reported the unanswered-edit verdict with the queue head unstruck. Recovery worked (agent-doc write --commit --backlog-only --done <id>) but only because I still knew the intent; nothing in the document or state proved it. Fix: record the REQUESTED mutation intent before the response cell is published, not after it lands. The captured_closeout_mutation_plan already exists in the write flags and is serialized into mutation_plan_json — persist that as cycle-state provenance at the same point #prmergeguardpr validates the envelope, so provenance exists for any failure position. Then teach recorded_tracked_work_is_unlanded to read the intent, not just the post-hoc record.
 - [ ] [#planhead] `agent-doc plan` reports a queue head the in-session loop is not allowed to drain (#agent-doc-bug). Observed twice this session: preflight's `selected_queue_prompts` correctly named the drainable head (`do [#prmergeguardpr]`, then `do [#preflightprojpass]`) while plan's `prompt_targets` / `repo_actions` / `required_commands` all named `do [#operatorverifylive]` — an [operator-verify] head that needs a human watching a real IDE + tmux session and that preflight had already deferred. SKILL.md step 0d says to treat plan's output as the execution contract, so an agent following it verbatim works the wrong item and would then --done an operator-gated one. Fix: drop plan's own head selection and defer to preflight.selected_queue_prompts. Two independent derivations of 'which head is next' is the defect class, not the specific filter.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.

@@ -2,6 +2,57 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.213
+
+- **Fix (`#preflightprojpass`): the missing projection pass was at the write
+  command, not inside session-check.**
+
+  0.35.206 wrapped session-check's two entry points and claimed that stopped the
+  guard suite re-resolving per guard. It did not, and the next closeout's
+  measurement said so: `session-check:pending_done_mode` still resolved
+  `uninstalled` four times. The guards that dominated the 190-of-226
+  `uninstalled` measurement never enter a wrapped session-check entry point.
+  `respond` / `write --commit` call `precommit_pending_done_check_with_options`,
+  `run_closeout_pending_maintenance`, and `enforce_review_done_guard` **directly**,
+  and the command's own readers — `observe_live_queue_heads` (18),
+  `pre_write_guards` (17), `verify_pane_ownership` (17),
+  `canonicalize_response_for_capture` (17),
+  `captured_finalize_resume_pre_capture_editor_save` (13) — never go near
+  session-check at all. The pass belongs one level up, at the write command.
+  `run_command_inner` now opens it, guarded structurally by
+  `the_write_command_entry_point_opens_the_projection_pass`. The 0.35.206
+  VERSIONS.md entry carries the correction.
+
+  Opening a pass over a *mutating* path is the part that can be wrong, so two
+  properties had to hold first, and neither did:
+
+  - **Every write self-invalidates.** Requiring each mutating caller to remember
+    `invalidate_current_document_projection` is how a cache starts serving stale
+    text: one forgotten call is a silent wrong answer, and "did every mutator
+    remember?" is not a property review keeps true. Invalidation moved to the two
+    write chokepoints in `agent-doc-document-realtime-io` — the rebased-write
+    inner (wrapping its several success exits, since the CRDT/editor delivery
+    returns never reach the disk write below them) and
+    `atomic_write_authority_raw` (which force-disk writes reach without the
+    former). Both run on failure too: a refused or retained write may still have
+    advanced the CRDT, and a spare invalidation costs one re-resolve while a
+    missing one is incorrect. `both_write_chokepoints_invalidate_the_projection`
+    guards them structurally, because a behavioural test cannot see a *missing*
+    invalidation on a path whose revision happens to move anyway.
+  - **A revision that cannot move is never a cache key.**
+    `CurrentRevision::EditorAttachedMissingReplica` is a unit-like constant: with
+    no replica, neither the canonical state vector nor the disk bytes identify
+    what a reader will get, so memoizing under it pinned the first resolve for a
+    whole pass. It now returns no key at all and the read bypasses the pass,
+    tagged `bypassed_no_content_identity` so the choice is visible in `pass=`.
+    (`Detached` was already safe — the disk hash is substituted for it.)
+
+  Mutation-checked: dropping the missing-replica case, dropping a chokepoint
+  invalidation, and removing the pass wrap each redden their own guard.
+
+  The preflight half stays closed: preflight phases contributed zero resolves in
+  every window measured.
+
 ## 0.35.212
 
 - **Fix: a rejectable tracked-work mutation could split the closeout
@@ -242,6 +293,23 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
   The preflight half stays closed: preflight phases contributed **zero**
   resolves across every measurement window.
+
+  **CORRECTION (0.35.213).** The claim above that wrapping
+  `enforce_clean_closeout` stops the guard suite re-resolving per guard is
+  **wrong**, and a post-install measurement of the very next closeout disproved
+  it: `session-check:pending_done_mode` still resolved `uninstalled` four times.
+  The guards that dominated the measurement never enter *either* wrapped
+  session-check entry point — `respond` / `write --commit` call
+  `precommit_pending_done_check_with_options`,
+  `run_closeout_pending_maintenance`, and `enforce_review_done_guard` directly,
+  and the command's own readers (`observe_live_queue_heads`,
+  `pre_write_guards`, `verify_pane_ownership`,
+  `canonicalize_response_for_capture`) never went near session-check at all. The
+  missing pass was one level up, at the write command itself. 0.35.213 opens it
+  there. The paragraph above about the ~11 `invalidate_current_document_pass`
+  calls being inert stands; the sentence about "the one mutating call on the
+  path" does not generalize to the write path, which mutates constantly — see
+  0.35.213 for why that is safe.
 
 ## 0.35.205
 

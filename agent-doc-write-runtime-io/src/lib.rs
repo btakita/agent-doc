@@ -1656,7 +1656,34 @@ fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<()> {
     run_command_inner(options, commit_mode, None)
 }
 
+/// `#preflightprojpass`: the write/respond command is a projection pass.
+///
+/// 0.35.206 wrapped session-check's own entry points, but the closeout guards
+/// that dominated the measurement — `pending_done_mode`,
+/// `unstarted_prompt_bearing`, `bypassed_response_write` — are called *directly*
+/// from this command (`precommit_pending_done_check_with_options`,
+/// `run_closeout_pending_maintenance`, `enforce_review_done_guard`), so they
+/// never entered a wrapped entry point at all. Neither did this command's own
+/// readers: `observe_live_queue_heads`, `pre_write_guards`,
+/// `verify_pane_ownership`, `canonicalize_response_for_capture`,
+/// `captured_finalize_resume_pre_capture_editor_save`. Measured 2026-08-09 on
+/// 0.35.204: 190 of 226 resolves were `uninstalled` against 12 genuine `miss`.
+///
+/// This is safe only because writes self-invalidate at the chokepoints in
+/// `agent-doc-document-realtime-io`, and because a revision that cannot carry
+/// content identity now bypasses the pass instead of memoizing under a
+/// constant. Do not open a pass over a mutating path without both.
 fn run_command_inner(
+    options: CommandOptions,
+    commit_mode: CommitMode,
+    empty_response_recovery: Option<EmptyResponseRecovery>,
+) -> Result<()> {
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        run_command_inner_within_pass(options, commit_mode, empty_response_recovery)
+    })
+}
+
+fn run_command_inner_within_pass(
     options: CommandOptions,
     commit_mode: CommitMode,
     empty_response_recovery: Option<EmptyResponseRecovery>,
@@ -4961,6 +4988,38 @@ original
         assert_eq!(
             result, target,
             "target should be returned unchanged when target has no pending"
+        );
+    }
+}
+
+#[cfg(test)]
+mod closeout_pass_guard {
+    /// `#preflightprojpass`: the write/respond command must open the projection
+    /// pass.
+    ///
+    /// 0.35.206 wrapped session-check's two entry points and its VERSIONS.md
+    /// entry claimed that stopped the guard suite re-resolving per guard. It did
+    /// not: the guards that dominated the measurement are called *directly* from
+    /// this command, never through a wrapped entry point, and a post-install
+    /// measurement of the very next closeout still showed
+    /// `session-check:pending_done_mode` resolving `uninstalled` four times.
+    ///
+    /// A behavioural test cannot see this — an unwrapped path is merely SLOWER,
+    /// never wrong — which is exactly why it survived one release. The entry is
+    /// single and named, so guard it structurally.
+    #[test]
+    fn the_write_command_entry_point_opens_the_projection_pass() {
+        let source = include_str!("lib.rs");
+        // Anchor on the definition (line-initial), not the quoted copy below.
+        let entry = "\nfn run_command_inner(";
+        let start = source
+            .find(entry)
+            .unwrap_or_else(|| panic!("entry point `{entry}` moved or was renamed"));
+        let window = &source[start..(start + 600).min(source.len())];
+        assert!(
+            window.contains("with_current_document_projection_pass("),
+            "`{entry}` must open the projection pass before delegating; without it \
+             every closeout guard re-resolves the whole document"
         );
     }
 }

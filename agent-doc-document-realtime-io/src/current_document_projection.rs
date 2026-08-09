@@ -215,16 +215,41 @@ pub fn invalidate_current_document_projection(file: &Path) {
     });
 }
 
-fn observed_revision(file: &Path) -> Result<ProjectionRevision> {
-    match agent_doc_crdt_relay_io::current_revision_for_file(file)? {
-        CurrentRevision::Detached => {
-            let content = std::fs::read_to_string(file)?;
-            Ok(ProjectionRevision::DiskHash(agent_doc_hash::content_hash(
-                &content,
-            )))
-        }
-        revision => Ok(ProjectionRevision::Crdt(revision)),
+/// Observe a revision that actually **identifies content**, or refuse to memoize.
+///
+/// `#preflightprojpass`: a cache key that cannot change when the document
+/// changes is worse than no cache. Two `CurrentRevision` variants are unit-like
+/// constants carrying no content identity:
+///
+/// - `Detached` — no editor is attached, so the disk bytes are the document.
+///   Hashing them gives the key its identity back.
+/// - `EditorAttachedMissingReplica` — an editor is attached but the relay hub
+///   has no replica, so neither the canonical state vector nor the disk bytes
+///   are a trustworthy identity for what the reader will get. There is nothing
+///   to key on, so this returns `None` and the caller must bypass the pass
+///   entirely rather than memoize under a constant that never moves.
+///
+/// The third variant, `Current { state_vector, .. }`, moves on every CRDT
+/// mutation — agent-authored or operator — and needs no help.
+fn projection_revision_for(
+    revision: CurrentRevision,
+    disk_hash: impl FnOnce() -> Result<String>,
+) -> Result<Option<ProjectionRevision>> {
+    match revision {
+        CurrentRevision::Detached => Ok(Some(ProjectionRevision::DiskHash(disk_hash()?))),
+        CurrentRevision::EditorAttachedMissingReplica => Ok(None),
+        revision => Ok(Some(ProjectionRevision::Crdt(revision))),
     }
+}
+
+fn observed_revision(file: &Path) -> Result<Option<ProjectionRevision>> {
+    projection_revision_for(
+        agent_doc_crdt_relay_io::current_revision_for_file(file)?,
+        || {
+            let content = std::fs::read_to_string(file)?;
+            Ok(agent_doc_hash::content_hash(&content))
+        },
+    )
 }
 
 fn pass_projection(
@@ -273,6 +298,10 @@ pub(crate) fn resolve_projection(
     // - `bypassed_no_revision`: `observed_revision` failed, so the pass was
     //   never consulted. Every such call is an unconditional re-resolve that no
     //   amount of pass tuning removes.
+    // - `bypassed_no_content_identity`: a revision was observed but it is a
+    //   constant that cannot move when the document does
+    //   (`EditorAttachedMissingReplica`). Memoizing under it would serve stale
+    //   text, so the pass is deliberately bypassed.
     // - `uninstalled`: no pass is open on this thread — the caller never
     //   wrapped its work in `with_current_document_projection_pass`.
     // - `miss`: a pass IS open and was consulted; the revision or manual epoch
@@ -293,6 +322,11 @@ pub(crate) fn resolve_projection(
 
     let Ok(revision) = observed_revision(&file) else {
         return resolve_tagged("bypassed_no_revision")()
+            .map(CurrentDocumentProjection::new)
+            .map(Arc::new);
+    };
+    let Some(revision) = revision else {
+        return resolve_tagged("bypassed_no_content_identity")()
             .map(CurrentDocumentProjection::new)
             .map(Arc::new);
     };
@@ -353,7 +387,12 @@ mod tests {
             .split_once("#[cfg(test)]")
             .map(|(before, _)| before)
             .unwrap_or(source);
-        let reasons = ["bypassed_no_revision", "uninstalled", "miss"];
+        let reasons = [
+            "bypassed_no_revision",
+            "bypassed_no_content_identity",
+            "uninstalled",
+            "miss",
+        ];
         for reason in reasons {
             assert!(
                 body.contains(&format!("resolve_tagged(\"{reason}\")")),
@@ -372,6 +411,95 @@ mod tests {
             assert!(!reason.contains(' '), "`{reason}` must be a single token");
             assert!(seen.insert(reason), "`{reason}` must be distinct");
         }
+    }
+
+    /// `#preflightprojpass`: a cache key that cannot move when the document
+    /// moves is worse than no cache — it serves pre-mutation text.
+    ///
+    /// Two `CurrentRevision` variants are unit-like constants. `Detached` is
+    /// safe only because the disk hash is substituted for it. The other,
+    /// `EditorAttachedMissingReplica`, has no substitute available: neither the
+    /// canonical state vector (there is no replica) nor the disk bytes (an
+    /// editor owns the document) identify what a reader will get. Memoizing
+    /// under it would pin the first resolve for the whole pass, so it must
+    /// refuse to key at all.
+    #[test]
+    fn a_revision_that_cannot_move_never_becomes_a_cache_key() {
+        let hash = || Ok("disk-hash".to_string());
+
+        assert_eq!(
+            projection_revision_for(CurrentRevision::EditorAttachedMissingReplica, hash).unwrap(),
+            None,
+            "a constant revision must bypass the pass, not key it"
+        );
+
+        assert_eq!(
+            projection_revision_for(CurrentRevision::Detached, hash).unwrap(),
+            Some(ProjectionRevision::DiskHash("disk-hash".to_string())),
+            "detached documents key on their disk content, not on the constant"
+        );
+
+        let current = CurrentRevision::Current {
+            state_vector: vec![1, 2, 3],
+            live_editors: 1,
+            delivery_converged: true,
+        };
+        assert_eq!(
+            projection_revision_for(current.clone(), hash).unwrap(),
+            Some(ProjectionRevision::Crdt(current)),
+            "a state vector already carries content identity"
+        );
+    }
+
+    /// `#preflightprojpass`: opening a pass over the mutating write path is only
+    /// sound because every write self-invalidates. Relying on each mutating
+    /// caller to remember the call is what makes a cache serve stale text, and a
+    /// behavioural test cannot see a *missing* invalidation on a path whose
+    /// revision happens to move anyway — so the chokepoints are guarded
+    /// structurally.
+    #[test]
+    fn both_write_chokepoints_invalidate_the_projection() {
+        let source = include_str!("lib.rs");
+        for chokepoint in [
+            "fn atomic_write_rebased_through_authority_inner(",
+            "fn atomic_write_authority_raw(",
+        ] {
+            let start = source
+                .find(chokepoint)
+                .unwrap_or_else(|| panic!("write chokepoint `{chokepoint}` moved or was renamed"));
+            let window = &source[start..(start + 1400).min(source.len())];
+            assert!(
+                window.contains("invalidate_current_document_projection(path)"),
+                "`{chokepoint}` must invalidate the projection; without it a pass \
+                 opened over the write path serves pre-mutation text"
+            );
+        }
+    }
+
+    /// The end-to-end property step 4 of `#preflightprojpass` asked for: with a
+    /// pass open, a read taken *after* a mutation observes the new text.
+    #[test]
+    fn a_read_after_a_mutation_inside_a_pass_observes_the_new_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("plan.md");
+        let before = "<!-- agent:queue -->\n- [ ] #before\n<!-- /agent:queue -->\n";
+        let after = "<!-- agent:queue -->\n- [ ] #after\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, before).unwrap();
+
+        with_current_document_projection_pass(|| {
+            let first = resolve_projection(&file, "test_pre_mutation").unwrap();
+            assert!(first.document().content().contains("#before"));
+
+            crate::atomic_write_through_authority(&file, after).unwrap();
+
+            let second = resolve_projection(&file, "test_post_mutation").unwrap();
+            assert!(
+                second.document().content().contains("#after"),
+                "a post-mutation read must not be answered from the pre-mutation \
+                 projection:\n{}",
+                second.document().content()
+            );
+        });
     }
 
     #[test]

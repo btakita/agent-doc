@@ -968,7 +968,33 @@ pub fn atomic_write_rebased_through_authority(
     atomic_write_rebased_through_authority_inner(path, expected_current, content, source)
 }
 
+/// `#preflightprojpass`: every write is self-invalidating.
+///
+/// Opening a projection pass over the write/closeout path is only safe if a
+/// mutation can never leave a memoized pre-mutation projection behind. Relying
+/// on each mutating caller to remember an explicit
+/// `invalidate_current_document_projection` is the failure mode that makes a
+/// cache serve stale text — one forgotten call is a silent wrong answer, and
+/// "did every mutator remember?" is not a property a review can keep true.
+///
+/// So invalidation happens here, at the write chokepoint, wrapping the body's
+/// several success exits (the CRDT/editor delivery returns never reach the disk
+/// write below them). It runs on failure too: a refused or retained write may
+/// still have advanced the CRDT, and an unnecessary invalidation only costs one
+/// re-resolve, while a missing one is incorrect.
 fn atomic_write_rebased_through_authority_inner(
+    path: &Path,
+    projection_base: &str,
+    content: &str,
+    source: &str,
+) -> Result<()> {
+    let result =
+        atomic_write_rebased_through_authority_body(path, projection_base, content, source);
+    current_document_projection::invalidate_current_document_projection(path);
+    result
+}
+
+fn atomic_write_rebased_through_authority_body(
     path: &Path,
     projection_base: &str,
     content: &str,
@@ -3569,6 +3595,10 @@ fn atomic_write_authority_raw(path: &Path, content: &str) -> Result<()> {
     tmp.persist(path)
         .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
     record_document_write_provenance(path, content);
+    // `#preflightprojpass`: the other write chokepoint. Force-disk writes reach
+    // disk without passing through the rebased-write path, so they invalidate
+    // here; the rebased path invalidating again is a harmless epoch bump.
+    current_document_projection::invalidate_current_document_projection(path);
     Ok(())
 }
 

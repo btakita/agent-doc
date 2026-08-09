@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: c57819cd-4705-4200-b25b-1d7e1a246a5d
+resume: 8c43cf6c-d902-4b7a-85bc-159e772b8586
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -391,6 +391,33 @@ And the new verdict's phrase went into the anti-drift guard's protected set. A t
 `make check` green, 0.35.194 installed, pushed, tagged, recycled, submodule pointer pushed. CI observed, not awaited.
 
 **0.35.193 is confirmed in production:** this turn's preflight carried no `queue_stall_detected` warning — the first clean one in four cycles, with the same ~2-3 minute cycle gap that used to trip it.
+
+### Re: do [#preflightprojpass] — opus-5
+
+Landed the relay half in **0.35.195** (`f25cab049`, tagged). Still not closing the item.
+
+**Correcting myself from two cycles ago.** I said the item's relay hypothesis was wrong and resume-id handling was the real hot consumer. That was measured on the wrong line type — `crdt_current_text`. Counting `realtime_doc_resolve` instead, `source=crdt_relay` is **144 resolutions in a 20-minute window**, the largest single consumer. The item was right; my counting was too narrow. Both fixes were worth having, but the item deserves the credit for pointing here.
+
+**What the log actually showed.** Broken down by file, the same document appears twice:
+
+```
+43  file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md
+40  file=tasks/agent-doc/agent-doc-bugs2.md
+```
+
+One document, two spellings — absolute and repo-relative. `pass_projection` and `invalidate_current_document_projection` key on the path *as given*, so those never shared an entry. Every alternation was a guaranteed miss costing a full CRDT materialization.
+
+**The wasted work is the smaller problem.** Two entries hold two independent revisions, and invalidation clears only the spelling it is handed. So an agent-authored mutation invalidated under one spelling leaves the other serving **pre-mutation text**. That is exactly the trap this module's own doc comment warns about — *"memoizing only by path can hide operator edits made during the pass"* — reached by a route the comment did not anticipate. A latency item turned out to have a correctness edge underneath it.
+
+Both sites now key on the canonical path, falling back to the given path when canonicalization fails, which preserves prior behavior for a document that does not exist yet.
+
+**The test nearly tested nothing.** My first alias was a `.` hop — and `Path` equality normalizes `.` away component-wise, so the two spellings compared *equal* and the alias was never distinct. The assertion caught it. I switched to a `..` hop, which survives comparison but canonicalizes away. Then I mutated the fix out to confirm the test reddens, and restored with a fresh mtime so Cargo could not hand me a stale build.
+
+**Why the item stays open.** This removes a major source of redundant relay resolutions; it is not proven to be the only one. And the preflight half is untouched, still behind its recorded blocker — the seven mutating phases must self-invalidate before the pass may wrap `run_with_options`. I would rather re-measure next cycle and see what the distribution looks like now than declare victory from a single fix.
+
+`make check` green, 0.35.195 installed, pushed, tagged, recycled, submodule pointer pushed.
+
+Exchange is at 359 lines / 14 sections against a threshold of 15 — noting it, not stalling; the supervisor owns context resets.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
@@ -401,7 +428,7 @@ And the new verdict's phrase went into the anti-drift guard's protected set. A t
 - ~~do [#queuestallloopfalsepositive]~~
 - ~~do [#idcollisionnamespace]~~
 - ~~do [#operatorverifylive]~~
-- do [#preflightprojpass]
+- 🚧 do [#preflightprojpass]
 - ~~do [#loopcontractseal]~~
 - do [#respondbaselineflag]
 - do [#hookhashfalsepositive]
@@ -417,7 +444,7 @@ And the new verdict's phrase went into the anti-drift guard's protected set. A t
 <!-- agent:backlog priority queue -->
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#hookhashfalsepositive] agent-doc's coined-id-pre-tool-use hook rejects C preprocessor directives as untracked backlog ids. Writing a file containing a line starting with a hash — pragma once, include <string> — is blocked with "would write coined id(s) #include, #pragma ... not tracked in agent:backlog". The same class of false positive already applies to CSS ids, shell comments, and agent-doc's own anchor tags quoted from SKILL.md. It is not a hard block (a bash heredoc bypasses the PreToolUse hook entirely, which is itself the interesting part — the guard is trivially avoidable while being obstructive to correct writes) but it forced a workaround into emitted C++: src/sdk-spike/ts/src/wire/code.ts assembles the directives via String.fromCharCode(35) with a comment explaining why. The guard should recognise language syntax — preprocessor directives, CSS selectors, shell/YAML comments, markdown headings — or scope itself to prose contexts. Fix belongs in agent-loop src/agent-doc, not here; remove the workaround in code.ts once it lands.
-- [ ] [#preflightprojpass] #agent-doc-bug Redundant full-document CRDT resolutions (~186ms each). NARROWED 2026-08-09 after measuring ops.log resolution sources: start_resume_id_capture 136, session 98, serialized_atomic_write 54, resume_id_owner 54, idle_watch_active_queue_head 50 -- the top consumer was resume-id handling, NOT the relay this item originally nominated. 0.35.191 fixed that one: resume_id_owner walked every canonical_path in state.db and materialized each document through the realtime authority to read two frontmatter fields; it now probes the cheap revision first and reads disk for Detached documents (a probe that ERRORS keeps the authoritative path -- a missed claim adopts someone else's conversation). REMAINING, both untouched: (a) RELAY HALF -- realtime_doc_resolve authority=editor_buffer reason=crdt_relay_current source=crdt_relay, measured at 170 resolutions in 8 minutes on a 22.8KB doc, up to 14 in a single second, every one returning identical len/hash; no preflight blocker gates this half, so it is still the next operator-visible latency win. (b) PREFLIGHT HALF -- still behind its recorded blocker: only agent-doc-commit-io/src/lib.rs:891 calls invalidate_current_document_projection, while preflight's seven mutating phases call it ZERO times (exact-replay converge run.rs:300, auto-repair base index 354, repair 479, run_pending_maintenance 537, commit ~709, run_queue_maintenance 858, baseline realign 936). Safe order: make each preflight mutator SELF-invalidate, THEN open the pass in run_with_options, THEN a regression test that a post-mutation read observes the new text. Do NOT write a new cache -- agent-doc-document-realtime-io/src/current_document_projection.rs already is the right one, keyed by live Yrs state vector or disk hash. Also worth measuring before assuming: session (98) and serialized_atomic_write (54) are the next-largest sources and neither has been investigated.
+- [ ] 🚧 [#preflightprojpass] #agent-doc-bug Redundant full-document CRDT resolutions (~186ms each). NARROWED 2026-08-09 after measuring ops.log resolution sources: start_resume_id_capture 136, session 98, serialized_atomic_write 54, resume_id_owner 54, idle_watch_active_queue_head 50 -- the top consumer was resume-id handling, NOT the relay this item originally nominated. 0.35.191 fixed that one: resume_id_owner walked every canonical_path in state.db and materialized each document through the realtime authority to read two frontmatter fields; it now probes the cheap revision first and reads disk for Detached documents (a probe that ERRORS keeps the authoritative path -- a missed claim adopts someone else's conversation). REMAINING, both untouched: (a) RELAY HALF -- realtime_doc_resolve authority=editor_buffer reason=crdt_relay_current source=crdt_relay, measured at 170 resolutions in 8 minutes on a 22.8KB doc, up to 14 in a single second, every one returning identical len/hash; no preflight blocker gates this half, so it is still the next operator-visible latency win. (b) PREFLIGHT HALF -- still behind its recorded blocker: only agent-doc-commit-io/src/lib.rs:891 calls invalidate_current_document_projection, while preflight's seven mutating phases call it ZERO times (exact-replay converge run.rs:300, auto-repair base index 354, repair 479, run_pending_maintenance 537, commit ~709, run_queue_maintenance 858, baseline realign 936). Safe order: make each preflight mutator SELF-invalidate, THEN open the pass in run_with_options, THEN a regression test that a post-mutation read observes the new text. Do NOT write a new cache -- agent-doc-document-realtime-io/src/current_document_projection.rs already is the right one, keyed by live Yrs state vector or disk hash. Also worth measuring before assuming: session (98) and serialized_atomic_write (54) are the next-largest sources and neither has been investigated.
 - [ ] [#respondbaselineflag] #agent-doc-bug SKILL.md's MANDATORY persist step documents `agent-doc respond <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill`, but neither `respond` nor `write` accepts `--baseline-file` in 0.35.184 (`agent-doc respond --help` has no baseline/snapshot flag). An agent following the hot-path skill verbatim gets a clap parse error on the one step the skill calls mandatory, and the documented 'use preflight's baseline, do NOT save your own' contract has no way to be honoured. Decide one way: either add `--baseline-file` to respond/write and thread it into the diff baseline, or remove it from SKILL.md + every generated harness surface (.claude/.codex/.opencode/.cursor) and the runbooks. Reported by the operator 2026-08-08 while diagnosing the haiven-dev wedge.
 <!-- /agent:backlog -->
 

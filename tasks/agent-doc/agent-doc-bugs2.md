@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 82025888-a1ce-4343-8db7-153f3ef4c7f0
+resume: 1239cc87-c472-49e7-a0ff-1a85a6f2b41f
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -902,12 +902,31 @@ Worth noting the message itself conceded the gap — "this check compares compon
 **One thing I noticed closing this out.** Preflight reported `queue_active: true` with 4 drainable heads but `queue_continuation_required: false`, because `user_intent_prompt_changes` held a single `content_edit` — the `> **Queue prompt:**` blockquote the *previous closeout itself* wrote for `#ftstrike`. That is binary bookkeeping being read as operator steering, and it stops a drain for a cycle with no visible reason (`ui_outcome` and `queue_continuation_guidance` were both null). Filed as `#queueblockquoteintent`.
 
 **Verification.** `make check` green (8846 passed, 249 skipped); mutation-checked — reverting the redelivery budget reddens both new relay tests. Installed 0.35.217, committed, tagged `v0.35.217`, pushed, controllers recycled, superproject pointer pushed. CI: `0.35.213`–`0.35.215` and the measurement commit all green; `0.35.216` and `0.35.217` in progress at closeout.
+
+### Re: the binary's bookkeeping stalling the binary's drain — opus-5
+
+> **Queue prompt:**
+>
+> do [#queueblockquoteintent]
+
+
+`#queueblockquoteintent` is fixed and shipped as **0.35.218**, both halves.
+
+**The classifier.** The consumed-queue echo is written by the closeout that drains a head, so `#ftstrike` can prove which head the response answered — and `tail_repair` already calls it "binary conversation scaffold" when refusing to accept it as tracked component content. But it lives in `exchange`, not in a managed component, so the per-line managed-state filter never saw it and it classified as fresh user intent. `text_is_managed_state_only` now recognises the labeled echo block.
+
+Deliberately strict: **every** line must belong to the quote block. An operator who quotes a prompt and then writes prose underneath is steering, and still preempts. That case has its own test, because the easy over-broad version of this fix would swallow real steering.
+
+This is the same shape as `#resumeuuidstallsdrain` sitting a few lines above it in the same file — the binary's own bookkeeping read as operator intent, halting the binary's own drain. Two instances in one file suggests the general rule is worth stating: anything the binary writes into a document must be classifiable as binary-authored, and a text-shape filter can only be as good as the shapes someone remembered to list.
+
+**The silence.** The preemption was ANDed into `raw_required` *before* `effective_continuation_output` saw it, so the result was `required: false, guidance: None` — byte-identical to a genuinely drained queue. That is why this cost a cycle to find: four heads remained, `queue_active` was `true`, and `ui_outcome` and `queue_continuation_guidance` were both null, so nothing named the cause and I had to read `user_intent_prompt_changes` by hand. The preemption is now passed in rather than pre-folded, and a drain stopped with heads remaining names its reason and points at the field that proves it. Recycle-yield still takes precedence; a genuinely drained queue stays silent, because there is no reason to give.
+
+**Verification.** `make check` green (8849 passed, 249 skipped); both halves mutation-checked — removing the echo recognition reddens the classifier test, removing the preemption branch reddens the guidance test. Installed 0.35.218, committed, tagged `v0.35.218`, pushed, controllers recycled, superproject pointer pushed. CI: `0.35.216` came back green; `0.35.217` and `0.35.218` in progress at closeout. Exchange is 870 lines across 38 sections; the queue is active so I am not stalling to compact.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#queueblockquoteintent]
+- ~~do [#queueblockquoteintent]~~
 - ~~do [#pullnoackdeadlock]~~
 - ~~do [#retainedmutdrop]~~
 - do [#relayresolveblind]
@@ -929,7 +948,6 @@ Worth noting the message itself conceded the gap — "this check compares compon
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#queueblockquoteintent] The binary's own drained-queue quote block is classified as an operator prompt and suppresses queue continuation (#agent-doc-bug). Observed 2026-08-09 on this document: preflight returned queue_active=true and queue_drainable_head_count=4 but queue_continuation_required=false, because user_intent_prompt_changes held exactly one entry of kind=content_edit whose text was the quoted free-text queue head that the PREVIOUS closeout itself wrote for #ftstrike so the head could be struck. That is agent-doc's own bookkeeping, not operator steering. SKILL.md says managed-component state edits are filtered out of user_intent_prompt_changes precisely so routine bookkeeping does not block the auto-loop, and this is exactly such an edit — it just lives in exchange rather than in a managed component, so the filter misses it. Effect: a drain stops for one cycle for no reason, and the stop is invisible — ui_outcome and queue_continuation_guidance were BOTH null, so nothing named the cause and it had to be found by reading user_intent_prompt_changes by hand. Fix: teach the affectedness classifier to recognise a binary-authored quoted queue head in exchange as managed bookkeeping, the same as a queue item add or strike. Also populate ui_outcome and queue_continuation_guidance whenever continuation is suppressed, so a suppressed drain always names its reason instead of being indistinguishable from a drained queue.
 - [ ] [#relayresolveblind] 6621 document resolves are invisible to every measurement the #preflightprojpass series took (#agent-doc-bug). Measured 2026-08-09 from the project ops.log: source=crdt_relay accounts for 6621 realtime_doc_resolve lines (3211 that day alone) — 35x every other source combined — and 6612 of them carry NO pass= field at all. Every projection-routed resolve carries pass=miss/uninstalled/bypassed_*; these do not, which means they never enter resolve_projection and never participate in a projection pass. So the '226 resolves, 190 uninstalled' window that drove #preflightprojpass measured only the projection-routed minority and the dominant path was never counted (its conclusions still hold — 0.35.213 CI is green — but the scale was understated by more than an order of magnitude). Shape: authority=editor_buffer reason=crdt_relay_current live_editors=1 delivery_converged=true, emitted via record_editor_relay_authority in agent-doc-document-realtime-io. Work, in order: (1) find which entry point passes source=crdt_relay — it is NOT the rpc.rs caller: Some(crdt_relay) label, since handle_crdt_cp_write_rpc correctly threads payload.source through, so look at the editor/FFI ingress; (2) give it a real caller-attributed source per #passattrib — a hardcoded source field is as good as a missing one, and this is the third time it has hidden this data; (3) only THEN decide whether this path should participate in a pass, because until it is attributed there is no way to tell a wasted re-read from a necessary one. Do not tune anything before step 2.
 - [ ] [#planhead] `agent-doc plan` reports a queue head the in-session loop is not allowed to drain (#agent-doc-bug). Observed twice this session: preflight's `selected_queue_prompts` correctly named the drainable head (`do [#prmergeguardpr]`, then `do [#preflightprojpass]`) while plan's `prompt_targets` / `repo_actions` / `required_commands` all named `do [#operatorverifylive]` — an [operator-verify] head that needs a human watching a real IDE + tmux session and that preflight had already deferred. SKILL.md step 0d says to treat plan's output as the execution contract, so an agent following it verbatim works the wrong item and would then --done an operator-gated one. Fix: drop plan's own head selection and defer to preflight.selected_queue_prompts. Two independent derivations of 'which head is next' is the defect class, not the specific filter.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.

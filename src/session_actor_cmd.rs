@@ -179,6 +179,14 @@ struct SessionContext {
     log_status: Option<SessionLogStatus>,
     supervisor_runtime: SupervisorRuntime,
     supervisor_socket: PathBuf,
+    /// The window the bound pane actually lives in *right now*, read from tmux.
+    ///
+    /// The actor record and the registry both carry a `window` captured at bind
+    /// time; neither is re-derived, so a pane moved into `stash` keeps naming the
+    /// visible window in both and every record-vs-record check still agrees.
+    /// `None` when there is no bound pane or tmux could not answer — which is
+    /// never treated as drift.
+    live_pane_window: Option<String>,
 }
 
 fn manual_clear_cooldown_target(ctx: &SessionContext) -> String {
@@ -2892,6 +2900,12 @@ fn build_context(file: &Path) -> Result<SessionContext> {
         &supervisor_runtime,
     )?;
     let actor_record = operator_status.record.clone();
+    let live_pane_window = actor_record
+        .as_ref()
+        .map(|record| record.pane_id.clone())
+        .or_else(|| registry_entry.as_ref().map(|entry| entry.pane.clone()))
+        .filter(|pane| !pane.trim().is_empty())
+        .and_then(|pane| observe_live_pane_window(&pane));
     Ok(SessionContext {
         canonical_file,
         base_dir,
@@ -2904,7 +2918,19 @@ fn build_context(file: &Path) -> Result<SessionContext> {
         log_status,
         supervisor_runtime,
         supervisor_socket,
+        live_pane_window,
     })
+}
+
+/// Read the window a pane currently lives in. Best-effort: a tmux that cannot
+/// answer yields `None`, which `pane_window_binding_drifted` never treats as
+/// drift.
+fn observe_live_pane_window(pane_id: &str) -> Option<String> {
+    tmux_router::Tmux::default_server()
+        .pane_window(pane_id)
+        .ok()
+        .map(|window| window.trim().to_string())
+        .filter(|window| !window.is_empty())
 }
 
 fn lookup_registry_entry(
@@ -3909,6 +3935,32 @@ fn collect_doctor_issues(ctx: &SessionContext) -> Vec<String> {
             ));
         }
     }
+    // Record-vs-record above cannot see a pane that MOVED: both records keep the
+    // window captured at bind time, so a pane stashed after binding still reads as
+    // co-visible and editor focus mirrors onto a pane the operator cannot see.
+    // Compare the recorded binding against where the pane actually is.
+    if let Some(live_window) = ctx.live_pane_window.as_deref() {
+        for (source, pane, recorded_window) in [
+            ctx.actor_record
+                .as_ref()
+                .map(|actor| ("actor", actor.pane_id.as_str(), actor.window_id.as_str())),
+            ctx.registry_entry
+                .as_ref()
+                .map(|entry| ("registry", entry.pane.as_str(), entry.window.as_str())),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if agent_doc_controller::pane_layout::pane_window_binding_drifted(
+                recorded_window,
+                Some(live_window),
+            ) {
+                issues.push(format!(
+                    "{source} window {recorded_window} for pane {pane} is stale — the pane now lives in {live_window} (a pane moved out of the visible window cannot mirror editor focus; repair with `agent-doc sync`)"
+                ));
+            }
+        }
+    }
     if let Some(status) = &ctx.log_status
         && status.latest_session_open()
         && matches!(ctx.supervisor_runtime.health, SupervisorHealth::NoSocket)
@@ -4300,6 +4352,7 @@ mod tests {
             log_status: None,
             supervisor_runtime: runtime,
             supervisor_socket: PathBuf::from("/tmp/supervisor.sock"),
+            live_pane_window: None,
         }
     }
 
@@ -5163,6 +5216,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                 cwd_source: Some("config".to_string()),
             },
             supervisor_socket: PathBuf::from("/tmp/supervisor.sock"),
+            live_pane_window: None,
         };
         let evidence = LivePaneEvidence {
             pane_id: Some("%7".to_string()),
@@ -5345,6 +5399,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             log_status: None,
             supervisor_runtime: runtime,
             supervisor_socket: PathBuf::from("/tmp/missing.sock"),
+            live_pane_window: None,
         };
         let issues = collect_doctor_issues(&ctx);
         assert!(issues.iter().any(|issue| issue.contains("actor record")));
@@ -5551,6 +5606,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                 cwd_source: Some("config".to_string()),
             },
             supervisor_socket: dir.path().join("session-clear.sock"),
+            live_pane_window: None,
         };
 
         assert_eq!(
@@ -5617,6 +5673,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                 cwd_source: Some("config".to_string()),
             },
             supervisor_socket: dir.path().join("session-clear.sock"),
+            live_pane_window: None,
         };
 
         assert_eq!(

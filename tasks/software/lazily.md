@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: 80daccd4-dc32-4f4e-9e80-ec1efe7eb87a
+resume: 8776bc3a-4690-43c8-bf79-5aba9759af50
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -523,14 +523,47 @@ Queue: `#lzdefaultmodeuniform`.
 Also noted, not acted on: the running `agent-doc` binary is missing committed change `cf91baec`, but `src/agent-doc` holds another session's in-flight release (version bumps across every `Cargo.toml`), so `make install` there would build their uncommitted state rather than HEAD. Exchange is at 483 lines across 23 sections.
 
 Queue: `#lzzigdiffmutant`.
+
+### Re: do [#lzoverrideallrunners] — five bindings converged; the attribution literal was the real defect — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzoverrideallrunners]
+
+
+Every conformance runner in cs, go, dart, js and py now resolves the corpus through one seam per binding, so `LAZILY_SPEC_CONFORMANCE_DIR` reaches the whole suite by construction rather than per call site. Five commits, five pushes, five green CI runs, superproject pointers bumped in `d7f419d4`.
+
+**The item's premise was right but named the smaller half of the defect.** Routing ~20-40 runners per binding through a shared seam was the mechanical part. The load-bearing find is that in four of the five bindings, fixture read-attribution keyed off a hardcoded `"lazily-spec/conformance"` substring in the opened path: go's `recordConformanceRead`, dart's `recordConformanceRead`, js's `conformance-manifest.cjs`, py's `conftest._MARKER`. Point the suite at a scratch directory whose path lacks that literal and the manifest records **zero** opens, at which point `check-conformance-coverage` reports OK over an empty ledger. So the seam alone would have delivered a probe that runs, reads perturbed bytes, and is then audited by a guard that saw nothing. py's pre-fix negative control is the crisp version: the stashed HEAD runner against the perturbed corpus reported **1 passed** with **4** manifest lines, against 139 after the fix. Attribution is now anchored to the resolved root in all four; lazily-cs was already root-relative and is the only one that never had the bug.
+
+**lazily-cs's "already done" claim held for the test host and was false for the guard.** `SpecCorpus.Locate` genuinely fails closed and its manifest keys were already corpus-relative, and a sweep for `File.ReadAll*`, `Directory.Enumerate*`, embedded resources and `".."` literals across all 63 test files found zero corpus reads outside the seam, so no `.cs` change was needed. But `scripts/check-conformance-coverage.sh` could not distinguish *override set to a typo* from *no sibling checkout*: off CI it printed `SKIP` and exited **0**. The guard auditing the run was itself the vacuous green. That is one file changed, and it is the only reason this binding was not already done.
+
+**Fail-closed is now uniform and was not free.** An explicitly-set override that cannot be read raises in all five, rather than falling back to the canonical sibling or a vendored mirror. That fallback was live in py (`tests/conformance/`), js (three `test/conformance/...` family runners), dart (the mirror) and go (the vendored copy). The zig trap recorded under `#lzzigspecdiroption`, where an unreadable path silently converts red into skip, has the same shape; py's `corpus_subdir` and go's `specFixtureMissing` now `Fatal` under an override instead of skipping.
+
+**I verified the fan-out rather than accepting it.** I perturbed `statechart/flat_cycle.json` in my own scratch copy and ran lazily-go's statechart runner, which no agent touched: `step 0 "TICK" active: got [yellow], want [purple]`, then green with the variable unset. A different runner and a different fixture from the agent's own probe, so the result is the seam, not one wired call site. `src/lazily-spec` shows zero dirty lines under `conformance/` throughout. The LSP also reported a `conformanceMarker redeclared` compile error in lazily-go; it was a stale mid-edit snapshot, `go vet ./...` exits 0.
+
+Three bindings now keep this true mechanically instead of by review: go added `TestNoTestFileSpellsTheCorpusPathItself` (a go/parser AST scan of string literals only, so comments are unaffected), js added a fourth claim to `conformance-guard.test.js`, and dart is grep-verified down to the single `defaultSpecCorpusPath` constant.
+
+Per-binding acceptance, each a non-materialization fixture flipped in a scratch copy: py `temporal/timer_single_shot.json` `next_fire 3→99`; go `collections/mergecell_algebra.json` `value 3→4`; dart `stdlib/timer.json` `fired_at 10→11`; js `windowing/tumbling_count.json` `output 6→7`; cs `collections/keyed_reconciliation_lis.json` `result_order` reordered. Each reddens exactly its own runner and is green on the canonical corpus and on an unperturbed scratch copy. `make check` exit 0 in all five; CI `31338909121` (py), `31338817029` (go), `31338884699` (dart), `31338956181` (js), `31338715873` (cs).
+
+**Three caveats I am not papering over.** `lazily-spec/schemas` is deliberately *not* redirected by the override in go, js and cs, because a corpus copy carries no `schemas/` sibling; a probe that needs to perturb a schema still has nowhere to point, which is this same defect one level up and is filed as `#lzspecschemasoverride`. go's default root *order* is now unified across runners rather than preserved per-runner; the canonical sibling exists and wins first here, so observable behaviour is unchanged, but it is a unification, not a byte-for-byte preservation. And dart's `conformance_fixture_drift_test.dart` now compares the mirror against the *resolved* corpus, so perturbing a mirrored family reddens the drift test alongside the runner; the agent picked `stdlib/`, which has no mirror, to keep the acceptance run attributable to one runner.
+
+cs additionally reports that xunit's collection formatter truncates the red assertion text to `"keyed_reconciliation_lis.json:result_order — got b"···`, which is unambiguous but not legible; left alone as out of scope for this item.
+
+The audit this item existed to unblock has not been run. Five bindings can now be probed and none has been, beyond the one fixture each that proves the seam. Filed as `#lzperturbaudit` at the top of the backlog.
+
+Exchange is at 503 lines across 24 sections; noting the size rather than stalling the queue for it.
+
+Queue: `#lzzigspecdiroption`.
 <!-- agent:boundary:c6ef3fb1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- do [#lzperturbaudit]
+- do [#lzspecschemasoverride]
 - ~~do [#lzzigcanonrunner]~~
-- 🚧 do [#lzoverrideallrunners]
+- ~~do [#lzoverrideallrunners]~~
 - ⏭️ do [#lzzigspecdiroption]
 - do [#lzcsregistersreplay]
 - do [#lzktcorpusnotgradleinput]
@@ -541,7 +574,8 @@ Queue: `#lzzigdiffmutant`.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzoverrideallrunners] The corpus-dir override landed in ONE runner per binding (lazily-cs/go/dart/js/py materialization only), so every OTHER conformance runner in those five repos still hardcodes '../lazily-spec/conformance' and cannot be perturbation-probed at all — roughly 20-30 runners per binding. The corpus-perturbation audit lazily-rs's AGENTS.md documents as the pass a static detector cannot replace is therefore unreachable for almost the whole suite in five of nine bindings, and the suite could be pointed at a different corpus than the guard auditing it. Move resolution into each binding's shared corpus seam (py tests/conformance_assert.py corpus_dir(), dart conformance_manifest.dart, js the loadFixture helper, go fixtureCandidateDirs(), cs SpecCorpus.Locate is already done) so every runner honours LAZILY_SPEC_CONFORMANCE_DIR by construction rather than per call site. Definition of done: pick one non-materialization fixture per binding, flip one assertion key in a scratch copy, and prove that runner reddens.
+- [ ] [#lzperturbaudit] The corpus-perturbation audit that #lzoverrideallrunners existed to unblock has NOT been run. All five bindings (cs/go/dart/js/py) can now be pointed at a scratch corpus, but each has been probed with exactly ONE fixture, the one proving its seam. lazily-rs's AGENTS.md documents this audit as the pass a static detector cannot replace. For each of the five, walk the conformance families and perturb at least one fixture per family, recording which runners redden and which are convergence-only (a fixture that cannot be made to fail by flipping a declared expectation is pinning nothing). Expect finds of the #lzzigdiffmutant shape: an assertion that survives a mutation because an earlier assertion fires first, or because the runner never reaches it. Definition of done: a per-binding table of family -> perturbed key -> reddened runner, with every non-reddening cell explained rather than dropped.
+- [ ] [#lzspecschemasoverride] LAZILY_SPEC_CONFORMANCE_DIR redirects the conformance CORPUS only; lazily-spec/schemas always resolves to the canonical sibling in go (specSchemasDir, 2 sites in ipc_conformance_test.go), js (schemasRoot/schemaPath, used by schema-conformance + lossless-tree-crdt + ipc) and cs (5 schema roots derived from SpecCorpus.Root via '..'). This is deliberate today because a corpus scratch copy carries no schemas/ sibling, but it means a probe that needs to perturb a SCHEMA has nowhere to point except the shared ../lazily-spec checkout, which reddens all nine bindings at once. That is the exact defect #lzoverrideallrunners just fixed, one level up. Add a spec-ROOT override (or a second LAZILY_SPEC_SCHEMAS_DIR) threaded through the same seams, default unchanged, fail-closed on an unreadable explicit value. Audit dart/py/kt/rs/cpp/zig/gd for the same split while there. Definition of done: flip one field in a scratch schemas copy and prove a schema-validating runner reddens without touching the canonical checkout.
 - [ ] [#lzzigspecdiroption] lazily-zig has NO corpus-dir override: SPEC_DIR in src/lazily/reactive_map.zig is a comptime const used as SPEC_DIR ++ '/x.json', so the #lzdefaultmodeuniform probe had to temporarily edit the constant and restore it. Every future corpus probe in this binding pays that cost, and a probe that edits the shared ../lazily-spec checkout instead reddens all nine bindings concurrently. Add a '-Dspec-dir' build option (or a runtime env read) threaded to every fixture path, and keep the default unchanged. Compounding trap to preserve: specFixturesPresent() makes the tests 'return error.SkipZigTest' when the path is unreadable, so a probe that changes the PATH silently converts red into skip — the option must change which bytes are read, never whether they exist.
 - [ ] [#lzcsregistersreplay] lazily-cs declares collections/registers_convergence.json in CollectionsConformanceTests.Unsupported (and in KNOWN_UNCOVERED) because it has no canonical registers replay: the scenario op vocabulary (set/merge/fork over LWW/MV/PnCounter, with the (wall_time, logical, peer) tiebreak) has no dispatch there. The register CRDTs themselves ARE implemented in this binding, so only the runner is missing. Follow lazily-rs's tests as the reference executor over the nine scenarios, then delete both ledger entries — removing them is the definition of done. Note the Registers coverage row stays '~' for cs until this lands.
 - [ ] [#lzktcorpusnotgradleinput] lazily-kt's conformance corpus is NOT a declared input of the gradle 'test' task, so editing a fixture leaves 'test' UP-TO-DATE and the run reports green having replayed nothing — a false green that defeats any corpus-perturbation probe. Compounding it, tasks.test wires no environment(...), so the test JVM inherits the DAEMON's environment and a daemon started before LAZILY_SPEC_DIR was set serves the stale path. Today the only defence is remembering '--no-daemon --rerun-tasks'. Declare the corpus directory as a task input so a fixture change invalidates the task, and pass the corpus-dir variable through environment(...) explicitly. Definition of done: flip one assertion key in a scratch corpus and prove a plain 'make check' (no flags, warm daemon) reddens.

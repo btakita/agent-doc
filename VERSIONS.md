@@ -2,6 +2,44 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.198
+
+- **Fix (`#run3rdpaneswitch`): switching documents while a turn was running grew
+  a two-column editor into a three-pane tmux window.**
+
+  Operator-reported 2026-08-09: run Agent Doc, then switch to another document.
+  The pane auto-syncs, and a THIRD pane appears holding the PREVIOUS session
+  with its prompt submitted and its turn still running — a live agent session,
+  not inert layout drift.
+
+  `src/layout.rs` was the wrong half. When it arranges panes to mirror the
+  editor split, it breaks unwanted registered panes out of the target window —
+  except that a pane running a live agent session was **skipped**: "skip busy
+  panes (running agent-doc/claude sessions)". So the outgoing pane stayed
+  visible, the incoming document's pane joined the same window below it, and a
+  two-document projection became three panes.
+
+  Skipping was never what protected the session. `break_pane` moves a pane to
+  another window; the process and its turn keep running either way, so
+  visibility and survival are independent properties. `sync.rs` had already
+  settled this for open-cycle panes — "Stashing is non-destructive, so the
+  closeout keeps running without forcing a third visible pane into a
+  two-document editor projection" — and its regressions prove it stashes them.
+  `layout.rs` never got the same treatment, which is why the two entry points
+  behaved differently on the same layout.
+
+  A busy pane now moves to the tracked `stash` window (`break_pane_to_stash`)
+  rather than an untracked orphan window, so a later sync can rescue it. Busy
+  changes *where* a pane goes; it never changes *whether* it leaves the visible
+  projection.
+
+  Coverage: `unwanted_pane_disposition` makes the rule a pure function pinned by
+  `a_busy_unwanted_pane_is_stashed_never_left_visible`, and
+  `switching_documents_while_the_outgoing_turn_runs_stays_two_panes` stages the
+  operator's report end to end against live tmux through an injected busy probe.
+  Both were mutation-checked against the pre-fix behavior; the live test
+  reproduces the exact three-pane window.
+
 ## 0.35.197
 
 - **Fix (`#strandedremedydeadlock`): `session-check` told the agent to run

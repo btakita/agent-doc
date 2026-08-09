@@ -25,6 +25,10 @@
 //!     existing layout.
 //!   - Breaks out session-registered panes that are in the target window but not in the
 //!     wanted set (`tmux break-pane`); non-session panes (shells, tools) are untouched.
+//!     A pane running a live agent turn is moved to the tracked `stash` window instead of
+//!     its own window, but it is never left visible: breaking a pane out is
+//!     non-destructive, so a busy session survives the move and must not be allowed to
+//!     grow a two-document projection into three panes (`#run3rdpaneswitch`).
 //!   - Joins each wanted pane that is outside the target window into it via `join-pane`
 //!     with the `Split` flag.
 //!   - Focuses the first file's pane after the layout is complete.
@@ -57,6 +61,12 @@
 //!   only the registered pane is broken out; the shell pane remains.
 //! - `layout_empty_files_errors` (aspirational): `files` is empty → `anyhow::bail!`
 //!   with "at least one file required".
+//! - `a_busy_unwanted_pane_is_stashed_never_left_visible`: eligible + busy → `Stash`,
+//!   never `Leave` — the `#run3rdpaneswitch` third-pane regression.
+//! - `switching_documents_while_the_outgoing_turn_runs_stays_two_panes`: live tmux, a
+//!   registered busy pane plus two wanted panes → the busy pane leaves the target
+//!   window into a `stash` window, stays alive, and the window holds exactly the
+//!   wanted panes.
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -92,6 +102,24 @@ pub fn run_with_tmux(
     pane: Option<&str>,
     window: Option<&str>,
     tmux: &Tmux,
+) -> Result<()> {
+    run_with_tmux_and_busy_probe(files, split, pane, window, tmux, &is_pane_busy)
+}
+
+/// [`run_with_tmux`] with the "is this pane running a live agent turn" probe
+/// injected.
+///
+/// The real probe walks the pane's process tree, which a test cannot stage
+/// without launching an actual agent. The `#run3rdpaneswitch` regression is
+/// entirely about what happens to a pane the probe says is BUSY, so the seam
+/// exists to let that case be exercised against real tmux.
+pub(crate) fn run_with_tmux_and_busy_probe(
+    files: &[&Path],
+    split: Split,
+    pane: Option<&str>,
+    window: Option<&str>,
+    tmux: &Tmux,
+    pane_busy: &dyn Fn(&Tmux, &str) -> bool,
 ) -> Result<()> {
     tracing::debug!(file_count = files.len(), split = ?split, window, "layout::run start");
     if files.is_empty() {
@@ -221,23 +249,29 @@ pub fn run_with_tmux(
 
     let window_panes = tmux.list_window_panes(&target_window)?;
     for existing_pane in &window_panes {
-        if !wanted.contains(existing_pane.as_str())
+        let eligible = !wanted.contains(existing_pane.as_str())
             && session_panes.contains(existing_pane)
-            && window_panes.len() > 1
-        {
-            // Skip busy panes (running agent-doc/claude sessions)
-            if is_pane_busy(tmux, existing_pane) {
+            && window_panes.len() > 1;
+        // Short-circuits so the process-tree walk only runs for a pane that is
+        // actually going to move.
+        let busy = eligible && pane_busy(tmux, existing_pane);
+        match unwanted_pane_disposition(eligible, busy) {
+            UnwantedPaneDisposition::Leave => {}
+            UnwantedPaneDisposition::Stash => {
+                let session = tmux.pane_session(existing_pane).unwrap_or_default();
+                tmux.break_pane_to_stash(existing_pane, &session)?;
                 eprintln!(
-                    "Skipped busy pane {} in window {}",
+                    "Stashed busy pane {} from window {}",
                     existing_pane, target_window
                 );
-                continue;
             }
-            tmux.break_pane(existing_pane)?;
-            eprintln!(
-                "Broke out pane {} from window {}",
-                existing_pane, target_window
-            );
+            UnwantedPaneDisposition::BreakOut => {
+                tmux.break_pane(existing_pane)?;
+                eprintln!(
+                    "Broke out pane {} from window {}",
+                    existing_pane, target_window
+                );
+            }
         }
     }
 
@@ -268,6 +302,48 @@ pub fn run_with_tmux(
         }
     );
     Ok(())
+}
+
+/// What `arrange` does with a pane that is already sitting in the target window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UnwantedPaneDisposition {
+    /// Wanted, unmanaged, or the last pane in the window — leave it alone.
+    Leave,
+    /// Registered and idle: move it to its own window.
+    BreakOut,
+    /// Registered and running a live agent turn: move it to the tracked `stash`
+    /// window, where `sync` can rescue it later.
+    Stash,
+}
+
+/// `#run3rdpaneswitch`: a busy pane must still leave the visible projection.
+///
+/// This used to `continue` on a busy pane — "skip busy panes (running
+/// agent-doc/claude sessions)" — which left it visible while the incoming
+/// document's pane joined the same window below. Switching documents while the
+/// outgoing turn was still running therefore produced a THIRD pane in a
+/// two-column editor projection, holding the previous session with its prompt
+/// submitted and its turn running. Operator-reported 2026-08-09.
+///
+/// Skipping was never what protected the session. `break_pane` moves a pane to
+/// another window; the process and its turn keep running either way, so
+/// visibility and survival are independent. `sync.rs` already settled this for
+/// open-cycle panes — "Stashing is non-destructive, so the closeout keeps
+/// running without forcing a third visible pane into a two-document editor
+/// projection" — and layout now mirrors it, routing the busy pane to the
+/// tracked `stash` window rather than an untracked orphan so a later sync can
+/// bring it back.
+pub(crate) const fn unwanted_pane_disposition(
+    eligible: bool,
+    busy: bool,
+) -> UnwantedPaneDisposition {
+    if !eligible {
+        UnwantedPaneDisposition::Leave
+    } else if busy {
+        UnwantedPaneDisposition::Stash
+    } else {
+        UnwantedPaneDisposition::BreakOut
+    }
 }
 
 /// Check if a tmux pane is running an active agent-doc or claude session.
@@ -311,4 +387,152 @@ fn pid_is_agent_session(pid: &str) -> bool {
     };
     let cmdline = String::from_utf8_lossy(&output.stdout);
     cmdline.contains("agent-doc") || cmdline.contains("claude")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+    use tmux_router::{IsolatedTmux, Registry as SessionRegistry, RegistryEntry as SessionEntry};
+
+    /// `#run3rdpaneswitch`, as a pure rule: BUSY changes where a pane goes, never
+    /// whether it leaves. The regression was the opposite — busy meant "skip",
+    /// so the outgoing session stayed visible and the incoming document's pane
+    /// joined beside it.
+    #[test]
+    fn a_busy_unwanted_pane_is_stashed_never_left_visible() {
+        assert_eq!(
+            unwanted_pane_disposition(true, true),
+            UnwantedPaneDisposition::Stash,
+            "a busy pane must still leave the visible projection"
+        );
+        assert_ne!(
+            unwanted_pane_disposition(true, true),
+            UnwantedPaneDisposition::Leave,
+            "leaving a busy pane visible is the third-pane defect"
+        );
+        assert_eq!(
+            unwanted_pane_disposition(true, false),
+            UnwantedPaneDisposition::BreakOut
+        );
+        // Ineligible panes are untouched regardless of what they are running:
+        // wanted panes, unmanaged shells, and the last pane in a window.
+        for busy in [false, true] {
+            assert_eq!(
+                unwanted_pane_disposition(false, busy),
+                UnwantedPaneDisposition::Leave
+            );
+        }
+    }
+
+    fn write_doc(dir: &Path, name: &str, session: &str) -> std::path::PathBuf {
+        let path = dir.join("tasks").join(name);
+        std::fs::write(
+            &path,
+            format!("---\nagent_doc_session: {session}\n---\n\n# {name}\n"),
+        )
+        .unwrap();
+        path
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn register(dir: &Path, session: &str, pane: &str, file: &str, window: &str) {
+        let mut reg = agent_doc_session_registry_io::load_in(dir).unwrap_or_default();
+        reg.insert(
+            session.to_string(),
+            SessionEntry {
+                pane: pane.to_string(),
+                pid: std::process::id(),
+                cwd: dir.to_string_lossy().to_string(),
+                started: "2026-01-01T00:00:00Z".to_string(),
+                session_id: session.to_string(),
+                file: file.to_string(),
+                window: window.to_string(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        agent_doc_session_registry_io::save_in(dir, &reg).unwrap();
+    }
+
+    /// The operator's report, staged end to end: a document is running a turn,
+    /// the editor switches to two other documents, and `layout` mirrors the new
+    /// two-column split. The outgoing busy pane must leave the window — it used
+    /// to stay, making three panes for a two-column editor — while staying alive
+    /// in a `stash` window so a later sync can bring it back.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn switching_documents_while_the_outgoing_turn_runs_stays_two_panes() {
+        let _env_guard = crate::test_support::env_lock();
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        let previous = write_doc(root, "previous.md", "sess-previous");
+        let first = write_doc(root, "first.md", "sess-first");
+        let second = write_doc(root, "second.md", "sess-second");
+
+        let iso = IsolatedTmux::new("layout-switch-while-busy");
+        let busy_pane = iso.new_session("test", root).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let pane_first = iso.split_window(&busy_pane, root, "-dh").unwrap();
+        let pane_second = iso.split_window(&busy_pane, root, "-dh").unwrap();
+        let target_window = iso.pane_window(&busy_pane).unwrap();
+
+        let _reg_seed: SessionRegistry = SessionRegistry::new();
+        for (session, pane, file) in [
+            ("sess-previous", &busy_pane, "tasks/previous.md"),
+            ("sess-first", &pane_first, "tasks/first.md"),
+            ("sess-second", &pane_second, "tasks/second.md"),
+        ] {
+            register(root, session, pane, file, &target_window);
+        }
+
+        let cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(root).unwrap();
+        let result = run_with_tmux_and_busy_probe(
+            &[first.as_path(), second.as_path()],
+            Split::Horizontal,
+            None,
+            Some(&target_window),
+            &iso,
+            // The outgoing document's turn is still running.
+            &|_tmux, pane_id| pane_id == busy_pane,
+        );
+        std::env::set_current_dir(cwd).unwrap();
+        result.expect("layout should mirror the two-column editor split");
+
+        let visible = iso.list_panes_ordered(&target_window).unwrap();
+        assert!(
+            !visible.contains(&busy_pane),
+            "the outgoing busy pane must leave the two-column projection, got {visible:?}"
+        );
+        assert!(
+            visible.contains(&pane_first) && visible.contains(&pane_second),
+            "both requested documents must be visible, got {visible:?}"
+        );
+        assert_eq!(
+            visible.len(),
+            2,
+            "a two-document editor projection must not grow a third pane: {visible:?}"
+        );
+        assert!(
+            iso.pane_alive(&busy_pane),
+            "moving the pane must not kill the running turn"
+        );
+        let stashed_window = iso.pane_window(&busy_pane).unwrap();
+        assert_ne!(stashed_window, target_window);
+        let name = iso
+            .raw_cmd(&[
+                "display-message",
+                "-p",
+                "-t",
+                &stashed_window,
+                "#{window_name}",
+            ])
+            .unwrap_or_default();
+        assert!(
+            name.trim() == "stash",
+            "the busy pane must land in the tracked stash window so sync can rescue it, got {name:?}"
+        );
+        let _ = previous;
+    }
 }

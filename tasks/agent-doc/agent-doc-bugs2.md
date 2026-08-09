@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: de8d610d-f705-4362-9afc-1c13527585fd
+resume: 34ac6c09-1abb-477b-b1ee-7c3300e10400
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -471,6 +471,38 @@ Fixed and shipped in **0.35.197**.
 **Verification:** `make check` green — 8797 passed, 0 failed, exit 0 (checked explicitly; RTK masks the exit code). Installed 0.35.197, pushed, tagged `v0.35.197`, controller recycled, superproject submodule pointer pushed. CI run 31306112739 was queued at push time — observed, not awaited.
 
 There are no actionable follow-up items and no plan file is needed: the fix, its regressions, and its architecture guard all landed in this cycle.
+
+### Re: #run3rdpaneswitch — opus-5
+
+> **Queue prompt:**
+>
+> do [#run3rdpaneswitch]
+
+
+Reproduced deterministically and fixed in **0.35.198**. The hypothesis in the report was right, and the culprit was the entry point nobody had checked.
+
+**It is `src/layout.rs`, not `sync.rs`.** `sync.rs` already handles this correctly — its module docs say so outright ("Stashing is non-destructive, so the closeout keeps running without forcing a third visible pane into a two-document editor projection") and `safe_passive_protected_open_cycle_sync_grows_...` proves it stashes open-cycle panes. That is why the sync path looked clean. But `agent-doc layout`, which mirrors the editor split, had the opposite rule:
+
+```rust
+// Skip busy panes (running agent-doc/claude sessions)
+if is_pane_busy(tmux, existing_pane) { continue; }
+tmux.break_pane(existing_pane)?;
+```
+
+So the outgoing pane stayed visible, the loop below joined the incoming document's pane into the same window, and a two-column editor became three panes — the extra one holding the previous session with its turn running, exactly as reported.
+
+**Skipping was never what protected the session.** `break_pane` moves a pane to another window; the process and its turn keep running either way. Visibility and survival are independent properties, and conflating them is the whole bug. A busy pane now goes to the tracked `stash` window (`break_pane_to_stash`) rather than an untracked orphan, so a later sync can rescue it. Busy changes *where* a pane goes, never *whether* it leaves.
+
+**Coverage, both mutation-checked:**
+
+- `unwanted_pane_disposition` extracts the rule as a pure function; `a_busy_unwanted_pane_is_stashed_never_left_visible` pins `busy ⇒ Stash`, never `Leave`.
+- `switching_documents_while_the_outgoing_turn_runs_stays_two_panes` stages the operator's report end to end against live tmux, through a `pane_busy` probe injected into `run_with_tmux_and_busy_probe` (the real probe walks a process tree a test cannot stage). Reverting the busy branch to `continue` makes it fail with `["%0", "%2", "%1"]` — the exact three-pane window, `%0` being the outgoing busy pane.
+
+**Verification:** `make check` green — 8798 passed, 0 failed, exit 0 (checked explicitly; RTK masks the exit code). Installed 0.35.198, pushed, tagged `v0.35.198`, controller recycled, superproject submodule pointer pushed. CI runs 31306850204 and 31306112739 were in progress at push time — observed, not awaited.
+
+Exchange is now 439 lines across 18 sections; the queue is active so I am not stalling to compact.
+
+There are no actionable follow-up items and no plan file is needed: the fix, both regressions, and the spec/eval docs landed in this cycle. The one thing an agent cannot do is watch a real IDE, so I filed `#run3rdpaneswitchverify` as a non-blocking `[operator-verify]` eyeball — the deterministic test stages tmux directly rather than driving the JetBrains layout path.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
@@ -478,7 +510,7 @@ There are no actionable follow-up items and no plan file is needed: the fix, its
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#operatorverifylive]~~
 - ~~do [#strandedremedydeadlock]~~
-- do [#run3rdpaneswitch]
+- ~~do [#run3rdpaneswitch]~~
 - do [#preflightprojpass]
 - do [#respondbaselineflag]
 - do [#hookhashfalsepositive]
@@ -492,7 +524,7 @@ There are no actionable follow-up items and no plan file is needed: the fix, its
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#run3rdpaneswitch] #agent-doc-bug OPERATOR-REPORTED 2026-08-09: Run Agent Doc, then switch to another document. The tmux pane auto-syncs, then a THIRD pane appears holding the PREVIOUS tmux pane, with its prompt submitted and its turn running. The extra pane is a live agent session, not inert layout drift, which distinguishes it from #jb-nav-3pane-promote-swap. Hypothesis to confirm against a live layout, not assume: the outgoing pane is BUSY with a running turn, passive sync refuses to stash a busy pane, and the incoming document still attaches, so the agent-doc window grows to 3 panes for a 2-column editor. Check the focus-path promote vs debounced reconcile ordering in focus.rs and sync.rs, the busy-pane stash refusal, and whether Run Agent Doc dispatches into the outgoing pane before the switch is reconciled. Reproduce, then add SimWorld coverage for switch-while-busy.
+- [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#hookhashfalsepositive] agent-doc's coined-id-pre-tool-use hook rejects C preprocessor directives as untracked backlog ids. Writing a file containing a line starting with a hash — pragma once, include <string> — is blocked with "would write coined id(s) #include, #pragma ... not tracked in agent:backlog". The same class of false positive already applies to CSS ids, shell comments, and agent-doc's own anchor tags quoted from SKILL.md. It is not a hard block (a bash heredoc bypasses the PreToolUse hook entirely, which is itself the interesting part — the guard is trivially avoidable while being obstructive to correct writes) but it forced a workaround into emitted C++: src/sdk-spike/ts/src/wire/code.ts assembles the directives via String.fromCharCode(35) with a comment explaining why. The guard should recognise language syntax — preprocessor directives, CSS selectors, shell/YAML comments, markdown headings — or scope itself to prose contexts. Fix belongs in agent-loop src/agent-doc, not here; remove the workaround in code.ts once it lands.
 - [ ] [#preflightprojpass] #agent-doc-bug Redundant full-document CRDT resolutions (~186ms each). RE-NARROWED 2026-08-09 after 0.35.195. Correction to the earlier narrowing: the relay half WAS the top consumer -- the previous measurement counted crdt_current_text lines only; counting realtime_doc_resolve shows source=crdt_relay at 144 resolutions in a 20-minute window, the largest single source. 0.35.195 fixed a major cause: pass_projection and invalidate_current_document_projection keyed on the path AS GIVEN, so one document split into two cache entries across absolute vs repo-relative spellings (measured 43 + 40 for the same file in one window) -- guaranteed misses, plus a correctness edge where invalidation under one spelling leaves the other serving pre-mutation text. Both sites now key on the canonical path. 0.35.191 separately fixed resume_id_owner materializing every document in state.db. REMAINING: (a) RE-MEASURE FIRST -- rerun the realtime_doc_resolve source distribution and the per-file spelling breakdown post-0.35.195 to see how much relay redundancy survives canonical keying before assuming more work is needed; the next largest sources to check are session, idle_watch_active_queue_head and serialized_atomic_write. (b) PREFLIGHT HALF, still behind its recorded blocker: only agent-doc-commit-io/src/lib.rs:891 calls invalidate_current_document_projection while preflight's seven mutating phases call it ZERO times (exact-replay converge run.rs:300, auto-repair base index 354, repair 479, run_pending_maintenance 537, commit ~709, run_queue_maintenance 858, baseline realign 936). Safe order unchanged: make each preflight mutator SELF-invalidate, THEN open the pass in run_with_options, THEN a regression that a post-mutation read observes the new text. Do NOT write a new cache.

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 3c4e9bbc-6401-4daf-ba00-badc1295fa37
+resume: 3cc211ff-1a91-4d43-af13-874685dd6774
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -590,17 +590,55 @@ Worth noting where this came from: I hit this three times in a row and read it a
 Exchange is 530 lines across 21 sections; the queue is active so I am not stalling to compact.
 
 No new plan file and no new actionable follow-up items: the fix, both regressions, and the version entry landed in this cycle.
+
+### Re: preflightprojpass measurement — opus-5
+
+Third pass at this item, and the instrument was the blocker again — twice over. Shipped **0.35.203**.
+
+**First: the wedge from last cycle cleared with no data loss.** Preflight recovered it, exactly as designed. Both responses are in HEAD, worktree matches. My read was right that nothing was at risk; I was right to stop rather than improvise more recovery commands.
+
+**Profile of a live `session-check`** (2485ms total):
+
+| | |
+|---|---|
+| `resolve_current_document_content` | **624ms / 8 calls** — 25%, the largest *repeated* cost |
+| `inspect_with_warnings` | 709ms / 1× |
+| `self_heal_response_replay_duplication` | 675ms / 1× |
+
+So the resolve fan-out is real. But the attribution needed two more instrument fixes before it could be acted on:
+
+1. **`session-check` composed its source with a space** — `format!("session-check {source}")` — so all 62 of its resolutions parsed as the bare token `session-check`. They were really *ten distinct guards*. This is the same defect 0.35.199 fixed one level up, one layer down: an unparseable field is as good as a missing one.
+2. **Every logged resolve is already a pass miss** (a hit never calls `resolve`), but the line couldn't say *which kind* — and the three want opposite fixes. `bypassed_no_revision` means the pass was never consulted and no tuning removes the re-read; `uninstalled` means the guard runs outside the pass; `miss` means the revision genuinely moved and the work is necessary.
+
+**Why I stopped there rather than optimizing.** With the field parseable I could finally see the shape: the same guards resolve 2–3× within one run. But `session-check` *does* open a shared pass, and all ~10 of its `invalidate_current_document_pass` calls are correctly gated on an actual mutation (`if replay_healed`, `if late_ipc_healed`, …). So the repeats are not obviously waste, and nothing on the line told me whether any given re-read was necessary. Removing invalidations on a correctness path without that evidence is precisely the guess this item has already been wrong about twice. The item now carries the exact next step: read the new `pass=` field and let it choose the fix.
+
+### Re: the closeout deadlock — opus-5
+
+Filed as `#commitwritecommitdeadlock`. Three commands, a closed cycle, each naming another:
+
+- `respond` → "Finish it… `agent-doc commit <FILE>`"
+- `commit` → "captured response body is not present in the staged snapshot… Replay with `agent-doc write --commit <FILE>`"
+- `write --commit` → the same `AwaitingTerminalCommit` remedy, naming `commit` again
+
+This is the `#strandedremedydeadlock` class I fixed this morning in 0.35.197 — but a **different pair** the one-predicate fix didn't cover. `AwaitingTerminalCommit` assumes `commit` can always finish a `write_applied` cycle; commit's captured-response-in-snapshot guard is an independent predicate that can refuse exactly that. The setup was two consecutive responses sharing an identical `### Re:` heading, so cell-merge keyed the second as `:duplicate:1` and the snapshot never took it.
+
+**Verification:** `make check` green — 8805 passed, 0 failed, exit 0 (checked explicitly; RTK masks the exit code). Installed 0.35.203, pushed, tagged, recycled, submodule pointer pushed. CI: 0.35.201 and 0.35.202 completed green; 31311925390 in progress — observed, not awaited.
+
+Exchange is 558 lines across 23 sections; the queue is active so I am not stalling to compact.
+
+No new plan file: `#preflightprojpass` carries its own next step, and `#commitwritecommitdeadlock` is filed with the full reproduction.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#commitwritecommitdeadlock]
 - ~~do [#resumeuuidstallsdrainbug]~~
 - do [#run3rdpaneswitchverify]
 - ~~do [#operatorverifylive]~~
 - ~~do [#strandedremedydeadlock]~~
 - ~~do [#run3rdpaneswitch]~~
-- ⏭️ do [#preflightprojpass]
+- 🚧 do [#preflightprojpass]
 - ~~do [#projpassmeasurebugrun]~~
 - ~~do [#projpasspreflightbugdeci]~~
 - do [#respondbaselineflag]
@@ -615,10 +653,11 @@ No new plan file and no new actionable follow-up items: the fix, both regression
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#commitwritecommitdeadlock] #agent-doc-bug commit and write --commit name EACH OTHER as the remedy, deadlocking closeout. Observed 2026-08-09 on tasks/agent-doc/agent-doc-bugs2.md at cycle-1786271908581, stuck at write_applied. respond failed with the AwaitingTerminalCommit remedy 'Finish it from the pane that OWNS this session: agent-doc commit <FILE>'. Running commit failed with 'captured response body is not present in the staged snapshot for <FILE> even though the snapshot already matches HEAD; refusing already-committed closeout. Replay the captured response with agent-doc write --commit <FILE>'. Running write --commit failed with the SAME AwaitingTerminalCommit remedy naming commit again. Three commands, a closed cycle. This is the #strandedremedydeadlock class (fixed 0.35.197 for the commit/session-check pair) but a DIFFERENT pair that the one-predicate fix did not cover: the AwaitingTerminalCommit verdict assumes commit can always finish a write_applied cycle, and commit's captured-response-in-snapshot guard is an independent predicate that can refuse exactly that. Trigger context: two consecutive responses shared an identical '### Re: #resumeuuidstallsdrain -- opus-5' heading, so cell_merge keyed the second as :duplicate:1 (policy_chose_ours=true) and the snapshot never took the new body while HEAD had the old one. NO data was lost -- both responses were complete in the worktree and the next cycle's preflight recovered and committed both. Two things to fix: (1) apply the one-predicate rule to this pair so commit's snapshot guard and the AwaitingTerminalCommit remedy cannot disagree -- whichever refuses must not name the other; (2) investigate whether an identical ### Re: heading across consecutive cycles should be disambiguated at capture time, since that is what set up the collision.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#hookhashfalsepositive] agent-doc's coined-id-pre-tool-use hook rejects C preprocessor directives as untracked backlog ids. Writing a file containing a line starting with a hash — pragma once, include <string> — is blocked with "would write coined id(s) #include, #pragma ... not tracked in agent:backlog". The same class of false positive already applies to CSS ids, shell comments, and agent-doc's own anchor tags quoted from SKILL.md. It is not a hard block (a bash heredoc bypasses the PreToolUse hook entirely, which is itself the interesting part — the guard is trivially avoidable while being obstructive to correct writes) but it forced a workaround into emitted C++: src/sdk-spike/ts/src/wire/code.ts assembles the directives via String.fromCharCode(35) with a comment explaining why. The guard should recognise language syntax — preprocessor directives, CSS selectors, shell/YAML comments, markdown headings — or scope itself to prose contexts. Fix belongs in agent-loop src/agent-doc, not here; remove the workaround in code.ts once it lands.
-- [ ] [#preflightprojpass] #agent-doc-bug Redundant full-document CRDT resolutions (~186ms each). MEASURED 2026-08-09 on 0.35.199+ with real caller attribution (both prior narrowings were reading a hardcoded constant, fixed in 0.35.199). Result: 112 resolutions in ~15 minutes across ~20 DISTINCT callers, answered_by=crdt_relay 100% (the relay is the transport, not a consumer). Top callers: session-check 17, observe_live_queue_heads 10, then pre_write_guards / verify_pane_ownership / canonicalize_response_for_capture / resume_id_owner at 8 each, long tail below. NO preflight phase appears at all, which closed the preflight half -- its premise was never supported. There is no single hot consumer left; the cost is spread. REMAINING, much narrower than the original item: session-check is the fattest single consumer at ~8 full-document resolutions per closeout on one document. Audit agent-doc-session-check-io's guard sequence (it runs ~30 named guards per closeout and several call resolve_current_document_content independently) and thread ONE resolved document through the sequence instead of re-resolving per guard. Within-command change. Do NOT open a projection pass or write a new cache; the measurement says the win is one command's internal fan-out, not a shared cache.
+- [ ] 🚧 [#preflightprojpass] #agent-doc-bug Redundant full-document CRDT resolutions. RE-SCOPED AGAIN 2026-08-09 on real profile data (0.35.203). PROFILE of a live session-check: total 2485ms, of which resolve_current_document_content is 624ms across 8 calls (~78ms each, 25% of the command) -- the largest REPEATED cost; inspect_with_warnings 709ms and self_heal_response_replay_duplication 675ms are each 1x. Per-guard attribution (only readable after 0.35.203 made the source parseable): ten distinct guards, and the same guards repeat 2-3x within ONE run -- unstarted_prompt_bearing 3x, bypassed_response_write 3x, jb_cache_conflict_accept_duplicate 2x, late_ipc_response_overapplication 2x, uncommitted_exchange_drift 2x. session-check DOES open a shared projection pass (command.rs ~672) and every one of its ~10 invalidate_current_document_pass calls is correctly gated on an actual mutation, so the repeats are NOT obviously waste. A pass hit never logs, so every logged resolve is a miss. NEXT STEP, now unblocked: run one session-check on 0.35.203+ and read the new pass= field on each resolve. bypassed_no_revision means current_revision_for_file failed and the pass was never consulted (fix the revision lookup); uninstalled means the guard runs outside with_current_document_pass (widen the pass); miss means the revision genuinely moved (leave it alone). Only then change behaviour. Do NOT remove invalidations without that evidence and do NOT write a new cache -- this item has been wrong twice by guessing.
 - [ ] [#respondbaselineflag] #agent-doc-bug SKILL.md's MANDATORY persist step documents `agent-doc respond <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill`, but neither `respond` nor `write` accepts `--baseline-file` in 0.35.184 (`agent-doc respond --help` has no baseline/snapshot flag). An agent following the hot-path skill verbatim gets a clap parse error on the one step the skill calls mandatory, and the documented 'use preflight's baseline, do NOT save your own' contract has no way to be honoured. Decide one way: either add `--baseline-file` to respond/write and thread it into the diff baseline, or remove it from SKILL.md + every generated harness surface (.claude/.codex/.opencode/.cursor) and the runbooks. Reported by the operator 2026-08-08 while diagnosing the haiven-dev wedge.
 <!-- /agent:backlog -->
 

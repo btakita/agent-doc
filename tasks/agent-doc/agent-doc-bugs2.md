@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: ff3c3946-2acf-4388-9445-96219dd97c20
+resume: d97ee30e-5ee9-4c4d-a499-915e2dd71cac
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -788,17 +788,29 @@ elapsed 1.3s
 **A correction on my own work.** CI went red on **0.35.209** — my `budget_overrun_reports_a_reason_instead_of_hanging` test drove the timeout with a 1ns budget against real preflight. That is a race, not a test: preflight can fail *faster* than the budget expires, so `recv_timeout` returns the completed result and the assertion lands on the wrong branch. It passed locally and failed on CI, which is exactly the signature. `run_within_budget` now takes the work as a parameter so the overrun test supplies a worker that provably does not finish, and I pinned the two branches the racy version was silently skipping: work finishing inside its budget still admits (the guard must not refuse an ordinary fast preflight), and a failing preflight keeps its own reason instead of being relabelled an overrun. Deterministic over 8 consecutive runs.
 
 **Verification.** `make check` green on both (8828 then 8830 passed, 249 skipped); installed; pushed with tags `v0.35.210` and `v0.35.211`; controllers recycled. `v0.35.208` CI is green, `v0.35.209` is the red run 0.35.211 repairs, and both new runs were still `in_progress` at closeout — recorded, not waited on. Exchange is 720 lines across 31 sections; the queue is active so I am not stalling to compact.
+
+### Re: closeout atomicity — the response could land without its mutations — opus-5
+
+`#prmergeguardpr` is fixed and shipped as **0.35.212**.
+
+**The split.** `respond --stream --done ... --backlog-add ...` published the response cell first and applied the tracked-work mutations second. So a mutation that turns out to be *rejectable* — an explicit `[#id]` colliding with an active backlog id under `#preset-item-id-collision-enforce`, a malformed `id=text` pair, a `--done` naming an item that is not there — failed the turn **after** the response was already durable. Case (b) in the item is exactly that: the response cell landed via the realtime backbone and neither the `--done` nor the `--backlog-add` applied. A validation error alone was enough to break the one-transaction rule, which is worse than a delivery failure because nothing is retained to resume.
+
+**The fix.** Closeout now runs the mutation envelope twice. The first pass is a dry run: the *identical* mutation code, executed against virtual document content inside a new `with_pending_write_transaction_dry_run`, with every buffered document and archive target discarded and no cycle state, queue projection, snapshot checkpoint, or status write recorded. It runs before the response cell is written, so a rejectable flag set fails the turn with nothing applied. The second pass applies and publishes as before. Running the same code both times is the point — a hand-written pre-validator would drift from the mutations it claims to check, which is how this class of bug survives.
+
+Cost is bounded: backlog commands read through the transaction buffer after the first resolve, so the dry run adds roughly one document resolution, not one per flag.
+
+**Second half of the item.** With validation moved ahead of the response, a tracked-work failure that still occurs is a *delivery/projection* failure, not a validation error — and the retained-write guidance already distinguished "response retained, mutations failed to retain." What it did not name was the case this item actually observed: response **applied**, mutations not. That branch now says the document is half-applied and gives both recovery commands (`agent-doc commit <FILE>` from the owning pane, or re-running the tracked-work half with `write --commit --backlog-only`).
+
+**Proof.** Two regression tests in `tests/finalize_integration.rs`: a colliding `--backlog-add` leaves no `### Re:` on disk or in HEAD and leaves the existing backlog item open; a valid envelope still lands the response and its mutations exactly once (the dry run does not double-apply). I ran a mutation probe with the validation call disabled — it reproduces the original split precisely: `### Re: split — gpt-5 (HEAD)` on disk beside `- [ ] [#gscaccess] existing tracked work` still open. Without that probe the test would only have proven the fix's own path.
+
+**Verification.** `make check` green twice (8832 passed, 249 skipped); installed 0.35.212; committed, pushed, tagged `v0.35.212`; controllers recycled; superproject submodule pointer committed and pushed. CI: `0.35.210` is green, `0.35.211` and `0.35.212` were both still `in_progress` at closeout — recorded, not waited on.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#bugprojectcontroller]~~
-- ~~do [#hookcontractlost]~~
-- ~~do [#ctrlsockpathtoolong]~~
 - do [#operatorverifylive]
-- do [#prmergeguardpr]
-- ~~do [#backlogclosemarkeroffbyone]~~
+- ~~do [#prmergeguardpr]~~
 - do [#run3rdpaneswitchverify]
 - do [#preflightprojpass]
 - do [#respondbaselineflag]
@@ -813,7 +825,6 @@ elapsed 1.3s
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#prmergeguardpr] Closeout atomicity is violated (#agent-doc-bug): a turn's response body can become visible while the SAME closeout's backlog/queue mutations never land. Observed 2026-08-09 twice. (a) src/haiven-dev/tasks/haiven-dev.md: working tree carries the response body (`prmergeguardpr` — done, line 54) while the backlog item is still `[ ]` (line 87) and the queue still holds `do ` (line 70); HEAD has neither. session-check reports the visible write retained by the lazy delivery projection, cycle INTERRUPTED at write_applied, remedy `agent-doc commit <FILE>` from the owning pane. A real owner exists (pane %20, gen 69, controller:fresh supervisor:fresh, supervisor_pid 3854486), so refusing --force-disk was correct — but stopping leaves a half-applied turn only a manual owning-pane commit can finish. (b) Reproduced in-session on this document: `respond --stream --done ... --backlog-add ...` added the response cell via realtime backbone (r:6d9396a0846e) and THEN failed the tracked-work mutations (#preset-item-id-collision-enforce rejected a leading `#agent-doc-bug` token as an explicit id), leaving cycle-1786292460900 at write_applied with the response on disk and neither the --done nor the --backlog-add applied. AGENTS.md requires response + queue-head consumption + backlog/done mutations + snapshot + commit to succeed as one transaction or none become authoritative; case (b) proves a mutation-validation error alone can split that transaction after the response is already durable. Fix: validate ALL tracked-work mutations BEFORE the response cell is published, so a rejectable id/preset collision fails the turn with nothing applied instead of stranding a half-applied cycle. Also determine whether the retained-write guidance should distinguish 'response landed, mutations pending' from 'whole write pending', since the operator currently reads a document whose response claims an item is done while the backlog still shows it open.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#hookhashfalsepositive] agent-doc's coined-id-pre-tool-use hook rejects C preprocessor directives as untracked backlog ids. Writing a file containing a line starting with a hash — pragma once, include <string> — is blocked with "would write coined id(s) #include, #pragma ... not tracked in agent:backlog". The same class of false positive already applies to CSS ids, shell comments, and agent-doc's own anchor tags quoted from SKILL.md. It is not a hard block (a bash heredoc bypasses the PreToolUse hook entirely, which is itself the interesting part — the guard is trivially avoidable while being obstructive to correct writes) but it forced a workaround into emitted C++: src/sdk-spike/ts/src/wire/code.ts assembles the directives via String.fromCharCode(35) with a comment explaining why. The guard should recognise language syntax — preprocessor directives, CSS selectors, shell/YAML comments, markdown headings — or scope itself to prose contexts. Fix belongs in agent-loop src/agent-doc, not here; remove the workaround in code.ts once it lands.

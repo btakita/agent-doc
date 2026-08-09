@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 8c43cf6c-d902-4b7a-85bc-159e772b8586
+resume: e7533783-c37d-46b8-ad7a-fb0503f920ef
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -418,18 +418,46 @@ Both sites now key on the canonical path, falling back to the given path when ca
 `make check` green, 0.35.195 installed, pushed, tagged, recycled, submodule pointer pushed.
 
 Exchange is at 359 lines / 14 sections against a threshold of 15 — noting it, not stalling; the supervisor owns context resets.
+
+### Re: do [#backlogeditcorruptsreview] — opus-5
+
+Guarded in **0.35.196** (`1bce5e337`, tagged). I did not find the cause, and the fix is built so that it does not need to.
+
+**What I ruled out.** The staging transaction was my first suspect and it is sound: `read_command_document` returns the *virtual* staged content between mutations, and `stage_transaction_pending_write` fails closed with "lost its document cursor" rather than splicing against a stale base. So a naive stale-offset story does not survive contact with the code.
+
+**The strongest remaining lead**, unproven: that same invocation logged a **24.9-second** CRDT settle and a `cell_merge` Content conflict on a **duplicate exchange heading identity** — `### Re: do [#preflightprojpass] — opus-5:duplicate:1`. I had written two responses with byte-identical headings, so exchange-node identity was genuinely ambiguous. That is a plausible route to a mis-merge, but I have not reproduced it and I am not going to claim it.
+
+**So I fixed the invariant instead of the theory.** Whatever produced the target, a write scoped to one component must leave every other component byte-identical. `ensure_only_component_changed` checks that before the edit path publishes. Silent destruction of tracked work becomes a failed command — which is the property I actually want, and it holds no matter which mechanism turns out to be responsible.
+
+The tests use the real shapes from the incident: review items vanishing, and a replacement spliced onto a truncated neighbour. One of them records a mistake worth keeping — I assumed `element::parse` errors on unstructured text and asserted the guard should pass it through. It does not error; it returns zero components, and the component-set check refuses it. My assumption was wrong and the stricter behavior was right, so I corrected the test rather than loosen the code.
+
+**Scope, stated plainly:** this covers the edit path where the corruption happened. The **add** path and the multi-component `respond` envelope are not covered yet, and the root cause is still open.
+
+### Re: 3rd pane appears after Run Agent Doc + document switch — opus-5
+
+> **Queue prompt:**
+>
+> do [#backlogeditcorruptsreview]
+
+
+Filed as `#run3rdpaneswitch` at the top of the queue; taking it next, as you asked.
+
+Recording what you described precisely, because the detail that a **prompt is submitted and a turn is running** in that third pane matters: it means the extra pane is not inert layout drift, it is a live agent session. That distinguishes it from the known `#jb-nav-3pane-promote-swap` symptom, where focus-path promotion joins an incoming pane while the reconcile fails to stash the displaced one. Here the displaced pane is *busy*, and the spec's own passive-sync rule says a busy outgoing pane cannot be stashed — so the window grows instead. That is my starting hypothesis, and I will confirm it against the live layout rather than assume it.
+
+Everything above is shipped: `make check` green, 0.35.196 installed, pushed, tagged, recycled, submodule pointer pushed.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#backlogeditcorruptsreview]
+- do [#run3rdpaneswitch]
+- ~~do [#backlogeditcorruptsreview]~~
 - ~~do [#ownershipverdictdiverges]~~
 - ~~do [#retainedwriteremedy]~~
 - ~~do [#queuestallloopfalsepositive]~~
 - ~~do [#idcollisionnamespace]~~
 - ~~do [#operatorverifylive]~~
-- 🚧 do [#preflightprojpass]
+- ⏭️ do [#preflightprojpass]
 - ~~do [#loopcontractseal]~~
 - do [#respondbaselineflag]
 - do [#hookhashfalsepositive]
@@ -443,10 +471,10 @@ Exchange is at 359 lines / 14 sections against a threshold of 15 — noting it, 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#backlogeditcorruptsreview] #agent-doc-bug DATA LOSS: a --backlog-edit spliced its replacement text into the agent:review component, deleting two gated items. Observed 2026-08-09 on tasks/agent-doc/agent-doc-bugs2.md during cycle-1786263984672. A single long --backlog-edit on #preflightprojpass, issued in the same agent-doc respond invocation as the response body, applied correctly to the backlog line AND ALSO truncated review item #stalesupervisorreexecdrain mid-word ('...and cannot' + the replacement text spliced on) while removing #stickymdpaneverify and #operatorverifyrestart entirely. Review count went 8 -> 6. HEAD was clean; the corruption was worktree-only and was recovered with git checkout HEAD -- <file>. Suspected mechanism (NOT confirmed): the edit is applied at byte offsets computed against one document revision and applied against another. The same invocation logged 'Waiting for typing/CRDT versions to settle ... elapsed=24886ms' and a cell_merge Content conflict on a duplicate exchange heading, so the document demonstrably moved under the edit. Investigate whether op_edit / component replace_content resolves offsets after the CRDT settle rather than before, and whether a component write is bounded to its own open_end..close_start range. A tracked-work edit must never be able to modify bytes outside its own component: add an assertion that the post-edit document parses with the same component set and item counts everywhere except the edited component, and a regression that drives an edit concurrent with a settling write.
+- [ ] [#run3rdpaneswitch] #agent-doc-bug OPERATOR-REPORTED 2026-08-09: Run Agent Doc, then switch to another document. The tmux pane auto-syncs, then a THIRD pane appears holding the PREVIOUS tmux pane, with its prompt submitted and its turn running. The extra pane is a live agent session, not inert layout drift, which distinguishes it from #jb-nav-3pane-promote-swap. Hypothesis to confirm against a live layout, not assume: the outgoing pane is BUSY with a running turn, passive sync refuses to stash a busy pane, and the incoming document still attaches, so the agent-doc window grows to 3 panes for a 2-column editor. Check the focus-path promote vs debounced reconcile ordering in focus.rs and sync.rs, the busy-pane stash refusal, and whether Run Agent Doc dispatches into the outgoing pane before the switch is reconciled. Reproduce, then add SimWorld coverage for switch-while-busy.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#hookhashfalsepositive] agent-doc's coined-id-pre-tool-use hook rejects C preprocessor directives as untracked backlog ids. Writing a file containing a line starting with a hash — pragma once, include <string> — is blocked with "would write coined id(s) #include, #pragma ... not tracked in agent:backlog". The same class of false positive already applies to CSS ids, shell comments, and agent-doc's own anchor tags quoted from SKILL.md. It is not a hard block (a bash heredoc bypasses the PreToolUse hook entirely, which is itself the interesting part — the guard is trivially avoidable while being obstructive to correct writes) but it forced a workaround into emitted C++: src/sdk-spike/ts/src/wire/code.ts assembles the directives via String.fromCharCode(35) with a comment explaining why. The guard should recognise language syntax — preprocessor directives, CSS selectors, shell/YAML comments, markdown headings — or scope itself to prose contexts. Fix belongs in agent-loop src/agent-doc, not here; remove the workaround in code.ts once it lands.
-- [ ] 🚧 [#preflightprojpass] #agent-doc-bug Redundant full-document CRDT resolutions (~186ms each). RE-NARROWED 2026-08-09 after 0.35.195. Correction to the earlier narrowing: the relay half WAS the top consumer -- the previous measurement counted crdt_current_text lines only; counting realtime_doc_resolve shows source=crdt_relay at 144 resolutions in a 20-minute window, the largest single source. 0.35.195 fixed a major cause: pass_projection and invalidate_current_document_projection keyed on the path AS GIVEN, so one document split into two cache entries across absolute vs repo-relative spellings (measured 43 + 40 for the same file in one window) -- guaranteed misses, plus a correctness edge where invalidation under one spelling leaves the other serving pre-mutation text. Both sites now key on the canonical path. 0.35.191 separately fixed resume_id_owner materializing every document in state.db. REMAINING: (a) RE-MEASURE FIRST -- rerun the realtime_doc_resolve source distribution and the per-file spelling breakdown post-0.35.195 to see how much relay redundancy survives canonical keying before assuming more work is needed; the next largest sources to check are session, idle_watch_active_queue_head and serialized_atomic_write. (b) PREFLIGHT HALF, still behind its recorded blocker: only agent-doc-commit-io/src/lib.rs:891 calls invalidate_current_document_projection while preflight's seven mutating phases call it ZERO times (exact-replay converge run.rs:300, auto-repair base index 354, repair 479, run_pending_maintenance 537, commit ~709, run_queue_maintenance 858, baseline realign 936). Safe order unchanged: make each preflight mutator SELF-invalidate, THEN open the pass in run_with_options, THEN a regression that a post-mutation read observes the new text. Do NOT write a new cache.
+- [ ] [#preflightprojpass] #agent-doc-bug Redundant full-document CRDT resolutions (~186ms each). RE-NARROWED 2026-08-09 after 0.35.195. Correction to the earlier narrowing: the relay half WAS the top consumer -- the previous measurement counted crdt_current_text lines only; counting realtime_doc_resolve shows source=crdt_relay at 144 resolutions in a 20-minute window, the largest single source. 0.35.195 fixed a major cause: pass_projection and invalidate_current_document_projection keyed on the path AS GIVEN, so one document split into two cache entries across absolute vs repo-relative spellings (measured 43 + 40 for the same file in one window) -- guaranteed misses, plus a correctness edge where invalidation under one spelling leaves the other serving pre-mutation text. Both sites now key on the canonical path. 0.35.191 separately fixed resume_id_owner materializing every document in state.db. REMAINING: (a) RE-MEASURE FIRST -- rerun the realtime_doc_resolve source distribution and the per-file spelling breakdown post-0.35.195 to see how much relay redundancy survives canonical keying before assuming more work is needed; the next largest sources to check are session, idle_watch_active_queue_head and serialized_atomic_write. (b) PREFLIGHT HALF, still behind its recorded blocker: only agent-doc-commit-io/src/lib.rs:891 calls invalidate_current_document_projection while preflight's seven mutating phases call it ZERO times (exact-replay converge run.rs:300, auto-repair base index 354, repair 479, run_pending_maintenance 537, commit ~709, run_queue_maintenance 858, baseline realign 936). Safe order unchanged: make each preflight mutator SELF-invalidate, THEN open the pass in run_with_options, THEN a regression that a post-mutation read observes the new text. Do NOT write a new cache.
 - [ ] [#respondbaselineflag] #agent-doc-bug SKILL.md's MANDATORY persist step documents `agent-doc respond <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill`, but neither `respond` nor `write` accepts `--baseline-file` in 0.35.184 (`agent-doc respond --help` has no baseline/snapshot flag). An agent following the hot-path skill verbatim gets a clap parse error on the one step the skill calls mandatory, and the documented 'use preflight's baseline, do NOT save your own' contract has no way to be honoured. Decide one way: either add `--baseline-file` to respond/write and thread it into the diff baseline, or remove it from SKILL.md + every generated harness surface (.claude/.codex/.opencode/.cursor) and the runbooks. Reported by the operator 2026-08-08 while diagnosing the haiven-dev wedge.
 <!-- /agent:backlog -->
 

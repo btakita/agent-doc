@@ -2,6 +2,43 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.203
+
+- **Fix (`#passattrib`): a `realtime_doc_resolve` could not say why it missed,
+  and `session-check`'s resolve source was unparseable.**
+
+  Two instrument defects in the same measurement, both blocking the remaining
+  `#preflightprojpass` work.
+
+  **`session-check` composed its source with a space** —
+  `format!("session-check {source}")` — so all 62 of its resolutions parsed as
+  the bare token `session-check` from a space-delimited ops line. They were
+  really ten distinct guards; the breakdown only appeared after re-parsing the
+  field by hand (`pending_done_mode` 16, `late_ipc_response_overapplication` 11,
+  `unstarted_prompt_bearing` 9, …). This is the same defect 0.35.199 fixed one
+  level up, where a hardcoded `source=crdt_relay` hid every caller: an
+  unparseable field is as good as a missing one. The separator is now `:`.
+
+  **Every emitted resolve is already a pass MISS** — a hit never calls
+  `resolve` — but the line could not distinguish the three kinds, which want
+  completely different fixes: `bypassed_no_revision` (revision lookup failed,
+  so the pass was never consulted, and no pass tuning can remove the re-read),
+  `uninstalled` (no pass open on this thread), and `miss` (a pass was consulted
+  and the revision or manual epoch genuinely moved). Each now reaches the log as
+  its own `pass=` field.
+
+  Why this and not the optimization itself: a live `session-check` spends
+  **624ms across 8 resolves — 25% of a 2485ms run** — and the same handful of
+  guards repeat 2–3× within one run. But every pass invalidation in
+  `session-check` is correctly gated on an actual mutation, so the repeats are
+  not obviously waste, and nothing on the line said whether a given re-read was
+  necessary. Removing invalidations on a delicate correctness path without that
+  evidence is exactly the guess this item has already been wrong about twice.
+
+  Both properties are guarded and mutation-checked: restoring the space fails
+  the session-check guard, and collapsing two pass reasons into one fails the
+  projection guard.
+
 ## 0.35.202
 
 - **Fix (`#addvseditidsyntax`): `--backlog-add "<id>=<text>"` silently filed a

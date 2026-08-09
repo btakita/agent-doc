@@ -65,7 +65,7 @@ pub(crate) fn resolve_current_document(
     if force_disk_resolution_enabled() {
         return agent_doc_document_realtime_io::resolve_disk_current_document(
             file,
-            &format!("session-check {source}"),
+            &format!("session-check:{source}"),
         );
     }
     // The shared pass projection is revision-aware: repeated guards reuse one
@@ -73,11 +73,11 @@ pub(crate) fn resolve_current_document(
     // state vector (or detached disk hash) and invalidates before this read.
     agent_doc_document_realtime_io::try_resolve_current_document_with_source(
         file,
-        &format!("session-check {source}"),
+        &format!("session-check:{source}"),
     )
     .with_context(|| {
         format!(
-            "session-check {source}: resolve current document {}",
+            "session-check:{source}: resolve current document {}",
             file.display()
         )
     })
@@ -93,7 +93,7 @@ pub(crate) fn resolve_current_document_with_force_disk(
     }
     agent_doc_document_realtime_io::resolve_disk_current_document(
         file,
-        &format!("session-check {source}"),
+        &format!("session-check:{source}"),
     )
 }
 
@@ -110,7 +110,7 @@ pub(crate) fn resolve_disk_document_content(file: &Path, source: &str) -> Result
     profile::timed("resolve_disk_document_content", || {
         agent_doc_document_realtime_io::resolve_disk_current_document_content(
             file,
-            &format!("session-check {source}"),
+            &format!("session-check:{source}"),
         )
     })
 }
@@ -174,6 +174,36 @@ pub(crate) fn operator_live_buffer_contains_heading(file: &Path, heading: &str) 
         }
     }
     false
+}
+
+#[cfg(test)]
+mod source_attribution_guard {
+    /// `#passattrib`: `session-check` composed its resolve source as
+    /// `format!("session-check {source}")` — WITH A SPACE — so every one of its
+    /// resolutions parsed as the bare token `session-check` from a
+    /// space-delimited ops line. Measured 2026-08-09: 62 resolutions that
+    /// looked like one caller were really ten distinct guards, and the
+    /// per-guard breakdown only appeared after re-parsing the field by hand.
+    ///
+    /// This is the same defect 0.35.199 fixed one level up, where a hardcoded
+    /// `source=crdt_relay` hid every caller. An unparseable field is as good as
+    /// a missing one.
+    #[test]
+    fn composed_resolve_sources_stay_single_token() {
+        let source = include_str!("lib.rs");
+        let body = source
+            .split_once("#[cfg(test)]")
+            .map(|(before, _)| before)
+            .unwrap_or(source);
+        assert!(
+            !body.contains("\"session-check {source}\""),
+            "a space in `source=` makes every session-check resolve unattributable"
+        );
+        assert!(
+            body.contains("\"session-check:{source}\""),
+            "compose the guard name onto the caller with a non-space separator"
+        );
+    }
 }
 
 #[cfg(test)]

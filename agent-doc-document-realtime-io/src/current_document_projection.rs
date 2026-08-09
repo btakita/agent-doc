@@ -264,20 +264,44 @@ pub(crate) fn resolve_projection(
     source: &str,
 ) -> Result<Arc<CurrentDocumentProjection>> {
     let file = file.to_path_buf();
-    let source = source.to_string();
-    let resolve: Arc<dyn Fn() -> Result<CurrentDocument> + Send + Sync> = Arc::new({
-        let file = file.clone();
-        let source = source.clone();
-        move || super::try_resolve_current_document_uncached_with_source(&file, &source)
-    });
+    // `#passattrib`: tag every resolve with WHY the pass did not answer it.
+    //
+    // A pass HIT never calls `resolve`, so each emitted `realtime_doc_resolve`
+    // is already a miss — but the line could not say which kind, and the three
+    // kinds want completely different fixes:
+    //
+    // - `bypassed_no_revision`: `observed_revision` failed, so the pass was
+    //   never consulted. Every such call is an unconditional re-resolve that no
+    //   amount of pass tuning removes.
+    // - `uninstalled`: no pass is open on this thread — the caller never
+    //   wrapped its work in `with_current_document_projection_pass`.
+    // - `miss`: a pass IS open and was consulted; the revision or manual epoch
+    //   moved, so the re-read is genuine work.
+    //
+    // Measured 2026-08-09: one `session-check` run logged 8 resolves with the
+    // same handful of guards repeating 2-3x each, and nothing distinguished a
+    // wasted re-read from a necessary one. That ambiguity is the blocker on the
+    // remaining `#preflightprojpass` work, not the resolve count itself.
+    let resolve_tagged =
+        |pass: &'static str| -> Arc<dyn Fn() -> Result<CurrentDocument> + Send + Sync> {
+            let file = file.clone();
+            let source = format!("{source} pass={pass}");
+            Arc::new(move || {
+                super::try_resolve_current_document_uncached_with_source(&file, &source)
+            })
+        };
 
     let Ok(revision) = observed_revision(&file) else {
-        return resolve().map(CurrentDocumentProjection::new).map(Arc::new);
+        return resolve_tagged("bypassed_no_revision")()
+            .map(CurrentDocumentProjection::new)
+            .map(Arc::new);
     };
-    if let Some(projection) = pass_projection(&file, revision, Arc::clone(&resolve)) {
+    if let Some(projection) = pass_projection(&file, revision, resolve_tagged("miss")) {
         return Ok(projection);
     }
-    resolve().map(CurrentDocumentProjection::new).map(Arc::new)
+    resolve_tagged("uninstalled")()
+        .map(CurrentDocumentProjection::new)
+        .map(Arc::new)
 }
 
 #[cfg(test)]
@@ -314,6 +338,40 @@ mod tests {
             resolve,
         )
         .expect("test pass must be installed")
+    }
+
+    /// `#passattrib`: a resolve that cannot say why it missed cannot be acted
+    /// on. Every emitted `realtime_doc_resolve` is a miss (a hit never calls
+    /// `resolve`), and the three miss kinds want different fixes, so the reason
+    /// must be on the line.
+    #[test]
+    fn every_pass_outcome_is_named_and_the_names_are_distinct() {
+        // The reasons are the contract this guard protects; keep them in sync
+        // with `resolve_projection`.
+        let source = include_str!("current_document_projection.rs");
+        let body = source
+            .split_once("#[cfg(test)]")
+            .map(|(before, _)| before)
+            .unwrap_or(source);
+        let reasons = ["bypassed_no_revision", "uninstalled", "miss"];
+        for reason in reasons {
+            assert!(
+                body.contains(&format!("resolve_tagged(\"{reason}\")")),
+                "`resolve_projection` must tag its {reason} path"
+            );
+        }
+        assert!(
+            body.contains("format!(\"{source} pass={pass}\")"),
+            "the reason must reach the emitted log line as its own `pass=` field"
+        );
+        // Distinct, single-token values: a reason with a space would be
+        // unparseable from a space-delimited log line — the exact defect that
+        // hid this data twice already.
+        let mut seen = std::collections::HashSet::new();
+        for reason in reasons {
+            assert!(!reason.contains(' '), "`{reason}` must be a single token");
+            assert!(seen.insert(reason), "`{reason}` must be distinct");
+        }
     }
 
     #[test]

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: f782d857-9380-412d-a881-13e43d75bc5b
+resume: f9280000-1126-44ff-9411-3c74968526a1
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -40,6 +40,24 @@ completed
 Compacted content:
 - Archived 5 response topic(s): do [#hvw0publishgrep]; do [#dedupepresettle]; haiven-dev.md wedge and the manifest diagnosis; 2 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): do [#ptsubmitmetric]; do [#claudesplitsubmit]; do [#compactstr...
+
+### Re: file all 3 diagnosed defects into the backlog — opus-5
+
+Filed, in the requested order, with `#panewindowdrift` at the top of both `agent:backlog` and the go queue.
+
+| id | defect | status |
+|---|---|---|
+| `#panewindowdrift` | editor auto-focus mirrors onto an invisible stashed pane | starting now |
+| `#strandeddraftresubmit` | stranded composer draft not resubmitted before the ready-wait | queued |
+| `#preflightprojpass` | preflight never opens the current-document projection pass | queued, blocker recorded |
+
+Each item carries the measured evidence rather than a restatement of the symptom, so none of it has to be re-derived:
+
+- **`#panewindowdrift`** — doctor/registry said `sdk.md -> pane=%926 window=@894` (visible `0:0 agent-doc`) while tmux had `%926` live in `@904` (`0:1 stash`). The layout projection still counted it as the co-visible column-2 pane and applied focus to it, then bounced to the genuinely-visible pane ~5s later. `session doctor` reports `no issues detected` for this exact state because it never compares the recorded `window=` against the pane's live window.
+- **`#strandeddraftresubmit`** — zero `tmux_input_event` to `%926` between 02:27:00 and 02:27:29, so the draft was already stranded; route waited 26.3s on `route_wait_for_ready_override`, then injected a *second* trigger onto it. The `pass_through_draft_resubmit` repair exists but is wired to the post-dispatch path. Also records that `dispatch_start_unproven` is being derived from a null `turn_admission_projection`.
+- **`#preflightprojpass`** — ~49 redundant full-document CRDT resolutions per preflight (~186ms each). The item explicitly says **do not write a new cache** — `current_document_projection.rs` already is the right one, revision-keyed — and records the blocker: only `commit-io:891` invalidates, while preflight's seven mutating phases invalidate zero times, so opening the pass before making those mutators self-invalidate would serve stale text.
+
+Starting on `#panewindowdrift`.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue

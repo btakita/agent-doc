@@ -163,6 +163,30 @@ fn degrade_resume_if_transcript_missing(
 /// `agent_doc_session` for session association independently of the `resume`
 /// flag that drives harness CLI resumption. Also resolves through the realtime
 /// authority when the disk read is unavailable (editor buffer is authoritative).
+///
+/// `#projpassstart`: **a projection pass cannot help this loop — do not wrap
+/// it.** The measurement that closed `#preflightprojpass` listed
+/// `resume_id_owner` among the top `uninstalled` resolve sources (18 in one
+/// window), which reads like a candidate for the same fix. It is not:
+///
+/// - `resolve_resume_claim_for_start` has exactly one call site, in `run()`, so
+///   this loop runs once per `start`.
+/// - The loop iterates distinct `canonical_path` rows and `continue`s on self,
+///   so within one invocation each candidate is read **exactly once**. A
+///   memoizing pass needs a repeated read of the same document to have anything
+///   to hit.
+/// - Measured 2026-08-09 over the project ops log: 2027 `source=resume_id_owner`
+///   resolves spread across only 5 distinct documents, i.e. ~405 separate
+///   invocations each reading those 5 once. The same-second repeats of one file
+///   are separate `start` invocations (separate processes — separate
+///   thread-locals), not repeats inside one loop.
+///
+/// The residual cost is real but its fix is a different change: materializing a
+/// whole attached document to read two frontmatter fields. Note the obvious
+/// shortcut is **wrong** — `state.db`'s `documents.session_id` looks like an
+/// index for this lookup, but it is a durable sink (`#lzdurablesink`), and a
+/// stale row would either invent an owner (silently losing a conversation
+/// resume via the `#resumeclaim` start-fresh path) or miss a real one.
 fn resume_id_owner(canonical: &Path, request: &agent_doc_harness::ResumeRequest) -> Option<String> {
     let agent_doc_harness::ResumeRequest::Id(id) = request else {
         return None;
@@ -285,6 +309,12 @@ fn assign_and_record_session_id(
 ///
 /// Not a raw disk write: the document may be open in an editor, and the realtime
 /// model is the authority for its current text. Returns whether anything changed.
+///
+/// `#projpassstart`: the other `start`-side resolve source named as a pass
+/// candidate (12 in one window). Also not one — this is a single resolve
+/// followed by a single write, so there is no second read for a pass to answer.
+/// Wrapping a resolve/write pair in a memoizing pass adds a scope and saves
+/// nothing.
 pub fn record_document_resume_id(file: &Path, id: &str) -> Result<bool> {
     let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,

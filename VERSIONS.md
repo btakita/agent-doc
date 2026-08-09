@@ -2,6 +2,43 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.212
+
+- **Fix: a rejectable tracked-work mutation could split the closeout
+  transaction after the response was already durable (`#prmergeguardpr`).**
+
+  `respond --stream --done ... --backlog-add ...` published the response cell
+  first and applied the tracked-work mutations second. When a mutation turned
+  out to be rejectable — an explicit `[#id]` colliding with an active backlog id
+  per `#preset-item-id-collision-enforce`, a malformed `id=text` pair, a `--done`
+  naming an item that is not there — the turn failed *after* the response was
+  durable, leaving neither the `--done` nor the `--backlog-add` applied. The
+  operator was then reading a document whose response claimed an item was done
+  while the backlog still showed it open, recoverable only by a manual
+  owning-pane commit. AGENTS.md requires response + queue-head consumption +
+  backlog/done mutations + snapshot + commit to succeed as one transaction or
+  none become authoritative; a mutation-validation error alone was enough to
+  break that.
+
+  Closeout now runs the mutation envelope twice. The first pass is a dry run
+  through `with_pending_write_transaction_dry_run`: the identical mutation code
+  against virtual document content, every buffered document/archive target
+  discarded, no cycle state, queue projection, snapshot checkpoint, or status
+  write recorded. It runs before the response cell is written, so a rejectable
+  flag set fails the turn with nothing applied. The second pass applies and
+  publishes as before.
+
+  A tracked-work failure that survives the dry run is a delivery/projection
+  failure rather than a validation error, and its message now distinguishes
+  "response landed, mutations pending" (naming the half-applied state and both
+  recovery commands) from the already-distinct "whole write pending" case.
+
+  Regression coverage in `tests/finalize_integration.rs`: a colliding
+  `--backlog-add` leaves no `### Re:` on disk or in HEAD and leaves the existing
+  backlog item open; a valid envelope still applies the response and its
+  mutations exactly once. A mutation probe with the validation call disabled
+  reproduces the original split exactly.
+
 ## 0.35.211
 
 - **Fix: 0.35.209's budget-overrun test was racy and turned CI red.**

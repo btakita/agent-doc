@@ -1182,6 +1182,27 @@ struct PendingStatusMutationOutcome {
     queue_completion_projected: bool,
 }
 
+/// `#prmergeguardpr`: closeout runs the tracked-work mutation envelope twice —
+/// once to validate it *before* the response cell is published, and once to
+/// apply it after. Both passes execute the identical mutation code, so a
+/// rejectable flag (an id colliding with a prompt preset, a malformed
+/// `id=text` pair, a `--done` naming an item that is not there) fails the turn
+/// with nothing applied instead of stranding a durable response beside
+/// tracked-work mutations that never landed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TrackedWorkMutationMode {
+    /// Plan the envelope against virtual content and discard it.
+    Validate,
+    /// Plan and publish the envelope, recording cycle state.
+    Apply,
+}
+
+impl TrackedWorkMutationMode {
+    fn is_validate(self) -> bool {
+        self == TrackedWorkMutationMode::Validate
+    }
+}
+
 fn apply_pending_and_status_mutations(
     file: &Path,
     options: &CommandOptions,
@@ -1189,8 +1210,47 @@ fn apply_pending_and_status_mutations(
     has_pending_ops: bool,
     reap_done_in_same_write: bool,
 ) -> Result<PendingStatusMutationOutcome> {
+    apply_pending_and_status_mutations_with_mode(
+        file,
+        options,
+        pending_kept_open_ids,
+        has_pending_ops,
+        reap_done_in_same_write,
+        TrackedWorkMutationMode::Apply,
+    )
+}
+
+/// `#prmergeguardpr`: dry-run the same envelope the closeout will apply. Any
+/// rejection surfaces here, before the response write, with nothing mutated.
+fn validate_tracked_work_mutations(
+    file: &Path,
+    options: &CommandOptions,
+    pending_kept_open_ids: &[String],
+    has_pending_ops: bool,
+    reap_done_in_same_write: bool,
+) -> Result<()> {
+    apply_pending_and_status_mutations_with_mode(
+        file,
+        options,
+        pending_kept_open_ids,
+        has_pending_ops,
+        reap_done_in_same_write,
+        TrackedWorkMutationMode::Validate,
+    )
+    .map(|_| ())
+}
+
+fn apply_pending_and_status_mutations_with_mode(
+    file: &Path,
+    options: &CommandOptions,
+    pending_kept_open_ids: &[String],
+    has_pending_ops: bool,
+    reap_done_in_same_write: bool,
+    mode: TrackedWorkMutationMode,
+) -> Result<PendingStatusMutationOutcome> {
+    let validate_only = mode.is_validate();
     let queue_completion_projected = std::cell::Cell::new(false);
-    if has_pending_ops || options.status.is_some() {
+    if !validate_only && (has_pending_ops || options.status.is_some()) {
         let current_content =
             agent_doc_document_realtime_io::try_resolve_current_doc_from_file_with_source(
                 file,
@@ -1216,23 +1276,26 @@ fn apply_pending_and_status_mutations(
         // cycle must therefore know that tracked work is still part of the same
         // closeout before any individual backlog write can block on its own ACK.
         // Concrete content guards still prove that promised ids actually land.
-        agent_doc_cycle_state_io::mark_pending_mutations(file)?;
-        if !options.pending_done.is_empty() {
-            agent_doc_cycle_state_io::record_pending_done_ids(file, &options.pending_done)?;
-        }
-        if !options.pending_add.is_empty()
-            || !options.pending_add_to.is_empty()
-            || !options.pending_add_gated.is_empty()
-            || !options.pending_add_after.is_empty()
-            || !options.pending_add_before.is_empty()
-            || !options.pending_add_back.is_empty()
-            || !options.icebox_add.is_empty()
-            || !options.icebox_add_after.is_empty()
-            || !options.icebox_add_before.is_empty()
-            || !options.icebox_add_back.is_empty()
-            || !options.review_add.is_empty()
-        {
-            agent_doc_cycle_state_io::mark_pending_added(file)?;
+        // A validation pass records none of this: it must leave no trace.
+        if !validate_only {
+            agent_doc_cycle_state_io::mark_pending_mutations(file)?;
+            if !options.pending_done.is_empty() {
+                agent_doc_cycle_state_io::record_pending_done_ids(file, &options.pending_done)?;
+            }
+            if !options.pending_add.is_empty()
+                || !options.pending_add_to.is_empty()
+                || !options.pending_add_gated.is_empty()
+                || !options.pending_add_after.is_empty()
+                || !options.pending_add_before.is_empty()
+                || !options.pending_add_back.is_empty()
+                || !options.icebox_add.is_empty()
+                || !options.icebox_add_after.is_empty()
+                || !options.icebox_add_before.is_empty()
+                || !options.icebox_add_back.is_empty()
+                || !options.review_add.is_empty()
+            {
+                agent_doc_cycle_state_io::mark_pending_added(file)?;
+            }
         }
         agent_doc_element_backlog_io::with_backlog_command_effects(
             &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
@@ -1241,7 +1304,7 @@ fn apply_pending_and_status_mutations(
                     let added_ids = std::cell::RefCell::new(None);
                     let reap_outcome = std::cell::RefCell::new(None);
                     let composed_queue_completion = std::cell::RefCell::new(None);
-                    backlog_cmd::with_pending_write_transaction(file, || {
+                    let tracked_work_envelope = || {
                         if options.pending_clear {
                             backlog_cmd::clear(file)?;
                         }
@@ -1453,7 +1516,19 @@ fn apply_pending_and_status_mutations(
                             anchored_added_ids,
                         )));
                         Ok(())
-                    })?;
+                    };
+                    if validate_only {
+                        // `#prmergeguardpr`: the envelope planned cleanly and
+                        // every buffered target was discarded. Record no cycle
+                        // state, queue projection, or snapshot checkpoint — the
+                        // apply pass owns all of that after the response lands.
+                        backlog_cmd::with_pending_write_transaction_dry_run(
+                            file,
+                            tracked_work_envelope,
+                        )?;
+                        return Ok(());
+                    }
+                    backlog_cmd::with_pending_write_transaction(file, tracked_work_envelope)?;
 
                     let (same_cycle_added_ids, review_added_ids, anchored_added_ids) =
                         added_ids.into_inner().unwrap_or_default();
@@ -1542,7 +1617,9 @@ fn apply_pending_and_status_mutations(
         )?;
     }
 
-    if let Some(ref status_text) = options.status {
+    if let Some(ref status_text) = options.status
+        && !validate_only
+    {
         set_status_with_options(file, status_text, options.force_disk)?;
     }
 
@@ -1851,6 +1928,28 @@ fn run_command_inner(
         return finalize_commit(file, commit_mode, options.force_disk);
     }
 
+    // `#prmergeguardpr`: closeout is one transaction. A tracked-work mutation
+    // that this envelope will reject must fail the turn HERE, while nothing is
+    // authoritative — not after the response cell is already durable, which
+    // leaves the operator reading a response that claims an item is done beside
+    // a backlog that still shows it open. The dry run executes the same
+    // mutation code against virtual content and discards every target.
+    if has_pending_ops {
+        validate_tracked_work_mutations(
+            file,
+            &options,
+            &pending_kept_open_ids,
+            has_pending_ops,
+            commit_mode != CommitMode::None,
+        )
+        .with_context(|| {
+            format!(
+                "tracked-work mutations for {} were rejected before the response was written; nothing was applied",
+                file.display()
+            )
+        })?;
+    }
+
     let write_flags = WriteFlags {
         allow_replace_pending: options.allow_replace_pending,
         has_pending_add: !options.pending_add.is_empty()
@@ -2054,8 +2153,18 @@ fn run_command_inner(
                     file.display()
                 )
             } else {
+                // `#prmergeguardpr`: the response half of this closeout is
+                // already applied to the document while its tracked-work half
+                // is not. Say so explicitly — "whole write pending" and
+                // "response landed, mutations pending" need different recovery,
+                // and the operator is currently reading a response that claims
+                // an item is resolved beside a backlog that still shows it
+                // open. Rejectable flag sets can no longer reach this state;
+                // what remains here is a delivery/projection failure.
                 format!(
-                    "failed to apply tracked-work mutations for {}",
+                    "response for {} is already applied but the same closeout's tracked-work mutations are not: the document is half-applied. Recover with `agent-doc commit {}` from the owning pane, or re-run the tracked-work half via `agent-doc write --commit {} --backlog-only ...`",
+                    file.display(),
+                    file.display(),
                     file.display()
                 )
             }

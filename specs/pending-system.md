@@ -59,6 +59,22 @@ Every bullet in `agent:backlog` carries a 4-char base32 hash as a visible prefix
   (no explicit prefix) are never blocked. Dispatch-time enforcement on a
   *pre-existing* collision stays a preflight warning (`preset_item_id_collision`)
   rather than a hard block, to avoid over-blocking live sessions.
+- **Mutations validate before the response is published (`#prmergeguardpr`):**
+  closeout runs the tracked-work mutation envelope twice. The first pass is a
+  dry run — the identical mutation code executed against virtual document
+  content inside `with_pending_write_transaction_dry_run`, with every buffered
+  document/archive target discarded and no cycle state, queue projection, or
+  snapshot checkpoint recorded. It runs **before** the response cell is written,
+  so a rejectable flag set (an explicit id colliding per the rule above, a
+  malformed `id=text` pair, a `--done` naming an absent item) fails the turn with
+  nothing applied. Without it, a mutation-validation error alone could split the
+  closeout transaction after the response was already durable, leaving the
+  operator reading a response that claims an item is done beside a backlog that
+  still shows it open, recoverable only by a manual owning-pane commit. The
+  second pass applies and publishes the envelope as before. A tracked-work
+  failure that survives the dry run is a delivery/projection failure, and its
+  error distinguishes "response landed, mutations pending" from "whole write
+  pending" so the two recovery paths are not confused.
 - Stable across reorders, text edits, and cycles.
 - Visible in rendered markdown (like a GitHub issue number) — no hidden state.
 - Opaque: the hash is not meaningful, just unique within the component.

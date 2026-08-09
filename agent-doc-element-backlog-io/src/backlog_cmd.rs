@@ -212,6 +212,27 @@ pub fn with_pending_write_transaction<T>(
     primary_file: &Path,
     f: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
+    run_pending_write_transaction(primary_file, true, f)
+}
+
+/// `#prmergeguardpr`: plan the same tracked-work mutation envelope against
+/// virtual document contents and then **discard** every buffered target. The
+/// caller learns whether the flag set would be rejected without any document,
+/// archive, or editor write happening — so closeout can validate mutations
+/// before the response cell is published instead of stranding a half-applied
+/// cycle when a later mutation turns out to be rejectable.
+pub fn with_pending_write_transaction_dry_run<T>(
+    primary_file: &Path,
+    f: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    run_pending_write_transaction(primary_file, false, f)
+}
+
+fn run_pending_write_transaction<T>(
+    primary_file: &Path,
+    publish: bool,
+    f: impl FnOnce() -> Result<T>,
+) -> Result<T> {
     let primary_file = transaction_path(primary_file);
     PENDING_WRITE_TRANSACTION.with(|slot| {
         if slot.borrow().is_some() {
@@ -236,6 +257,12 @@ pub fn with_pending_write_transaction<T>(
         Ok(Err(err)) => return Err(err),
         Err(payload) => std::panic::resume_unwind(payload),
     };
+
+    if !publish {
+        // Validation-only pass: the whole envelope planned successfully, so the
+        // buffered targets are dropped and nothing becomes authoritative.
+        return Ok(value);
+    }
 
     for raw_write in transaction.raw_writes {
         if let Some(parent) = raw_write.file.parent() {

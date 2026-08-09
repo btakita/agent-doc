@@ -3643,3 +3643,118 @@ fn finalize_keeps_queue_head_when_later_strict_pending_gate_fails() {
         "HEAD should remain unchanged when strict pre-commit gates reject finalize"
     );
 }
+
+/// `#prmergeguardpr`: closeout is one transaction. A tracked-work mutation the
+/// envelope will reject must fail the turn BEFORE the response cell is
+/// published — otherwise the operator reads a durable response claiming an item
+/// is done beside a backlog that still shows it open, and only a manual
+/// owning-pane commit can finish the half-applied cycle.
+#[test]
+fn finalize_rejecting_a_tracked_work_mutation_never_publishes_the_response() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n- [ ] [#gscaccess] existing tracked work\n<!-- /agent:backlog -->\n",
+    )
+    .unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let original = fs::read_to_string(&doc).unwrap();
+    checkpoint_baseline(tmp.path(), &original);
+
+    // `[#gscaccess]` collides with the active backlog id, so the add is
+    // rejectable — exactly the shape that used to strand a durable response.
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--stream",
+            "--origin",
+            "skill",
+            "--done",
+            "gscaccess",
+            "--backlog-add",
+            "[#gscaccess] duplicate id",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: split — gpt-5\n\nHalf-applied body.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !content.contains("### Re: split — gpt-5"),
+        "a rejected mutation envelope must not leave the response on disk:\n{content}"
+    );
+    assert!(
+        content.contains("- [ ] [#gscaccess] existing tracked work"),
+        "the existing backlog item must stay open and unmodified:\n{content}"
+    );
+    assert!(
+        !content.contains("duplicate id"),
+        "the rejected add must not land:\n{content}"
+    );
+
+    let head_text = head_blob(tmp.path());
+    assert!(
+        !head_text.contains("### Re: split — gpt-5"),
+        "HEAD must not carry the response of a rejected cycle:\n{head_text}"
+    );
+}
+
+/// The pre-write validation pass is a dry run: a valid envelope still applies
+/// exactly once, and the response and its mutations land together.
+#[test]
+fn finalize_valid_tracked_work_mutations_still_apply_exactly_once() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n- [ ] [#gscaccess] existing tracked work\n<!-- /agent:backlog -->\n",
+    )
+    .unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let original = fs::read_to_string(&doc).unwrap();
+    checkpoint_baseline(tmp.path(), &original);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--stream",
+            "--origin",
+            "skill",
+            "--done",
+            "gscaccess",
+            "--backlog-add",
+            "id=followup a genuinely new item",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: whole — gpt-5\n\nWhole body.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let head_text = head_blob(tmp.path());
+    assert_eq!(
+        head_text.matches("### Re: whole — gpt-5").count(),
+        1,
+        "the response must land exactly once:\n{head_text}"
+    );
+    assert_eq!(
+        head_text.matches("a genuinely new item").count(),
+        1,
+        "the dry run must not double-apply the add:\n{head_text}"
+    );
+    assert!(
+        !head_text.contains("- [ ] [#gscaccess] existing tracked work"),
+        "the --done item must not remain open:\n{head_text}"
+    );
+}

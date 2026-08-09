@@ -1799,6 +1799,84 @@ where
     }
 
     let mut binary_owned_side_effects = binary_owned_commit_side_effects(file, &file_content)?;
+    // `#strandedremedydeadlock`: refusing here is correct — a fresh operator
+    // queue/backlog edit is the NEXT turn's prompt and committing it would
+    // swallow that prompt — but the refusal used to end at "without an exact
+    // binary-owned retained-target proof", which names no next move. Meanwhile
+    // `session-check` read the same state through the ownership predicate, saw
+    // no cycle and no capture, called it `Stranded`, and told the agent to run
+    // `agent-doc commit <FILE>` — this exact command. Observed 2026-08-09 on
+    // `tasks/agent-doc/agent-doc-bugs2.md`: the named recovery was refused by
+    // the state that named it, and an agent obeying faithfully had no move.
+    //
+    // Two commands, one state, two predicates. The verdict owns it now: this
+    // site proves the diverging components are an operator edit the turn never
+    // wrote and hands that fact to the shared predicate, which resolves to
+    // `OperatorEditPending` and stops naming `commit` as the recovery. The
+    // refusal then quotes that same remedy, so both commands say the one
+    // actionable thing — answer the edit by running the document again.
+    if snapshot_matches_head
+        && binary_owned_side_effects.is_empty()
+        && let Some(head) = head_doc.as_deref()
+        && has_blocking_non_exchange_component_drift(head, &file_content, None)
+    {
+        let ownership = agent_doc_git_io::live_buffer_guard::LiveBufferGuardEffects::retained_write_ownership(
+            ports.live_buffer_guard,
+            file,
+        )
+        // Proven, not assumed: we are inside the branch that just compared the
+        // components, and the exchange — where a response would live — is
+        // converged. Whatever diverges is not this turn's write.
+        .with_unanswered_operator_edit(true);
+        let verdict = ownership.verdict();
+        // The one verdict whose remedy names THIS command. `write_applied` means
+        // the binary's own response write already landed and only the terminal
+        // commit is outstanding, so refusing here would deadlock exactly the way
+        // the unowned case did — and the drift is the binary's own, not a fresh
+        // operator prompt. Absorb it and fall through to a real commit.
+        if verdict == agent_doc_turn::write_ownership::RetainedWriteVerdict::AwaitingTerminalCommit
+        {
+            eprintln!(
+                "[commit] committing typed-component drift for {} awaiting its terminal commit",
+                file.display()
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "commit_reconciled_head_current_component_drift file={} basis=head verdict={} snap_len={} file_len={}",
+                    file.display(),
+                    verdict.as_str(),
+                    snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0),
+                    file_content.len()
+                ),
+            );
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                file,
+                &file_content,
+                agent_doc_ops_log_io::log_op,
+            )?;
+            snapshot_content = Some(file_content.clone());
+            snapshot_matches_head = false;
+        }
+        if snapshot_matches_head {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "commit_blocked_unproved_head_current_component_drift file={} basis=head verdict={}",
+                file.display(),
+                verdict.as_str()
+            ),
+        );
+        anyhow::bail!(
+            "refusing to close {} as already committed: the staged snapshot matches HEAD, but the editor-authoritative document has uncommitted queue, backlog, status, or other typed-component drift without an exact binary-owned retained-target proof. {}",
+            file.display(),
+            agent_doc_turn::write_ownership::retained_write_remedy(
+                ownership,
+                &file.display().to_string()
+            )
+        );
+        }
+    }
     if snapshot_matches_head && binary_owned_side_effects.is_empty() {
         agent_doc_git_io::capture_materialization_guard::ensure_active_capture_materialized_for_head_current_noop(
             ports.capture_materialization_guard,
@@ -1830,21 +1908,6 @@ where
                 did_commit: false,
                 vcs_refresh_signaled: None,
             });
-        }
-        if let Some(head) = head_doc.as_deref()
-            && has_blocking_non_exchange_component_drift(head, &file_content, None)
-        {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "commit_blocked_unproved_head_current_component_drift file={} basis=head",
-                    file.display()
-                ),
-            );
-            anyhow::bail!(
-                "refusing to close {} as already committed: the staged snapshot matches HEAD, but the editor-authoritative document has uncommitted queue, backlog, status, or other typed-component drift without an exact binary-owned retained-target proof",
-                file.display()
-            );
         }
         eprintln!(
             "[commit] staged snapshot already matches HEAD for {} - closing cycle as already committed",

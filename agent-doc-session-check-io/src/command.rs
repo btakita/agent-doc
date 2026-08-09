@@ -976,6 +976,27 @@ fn run_with_options_inner(
                 .is_some(),
             cycle_phase == Some(agent_doc_turn::CyclePhase::WriteApplied),
         );
+        // `#strandedremedydeadlock`: ownership alone cannot tell "the agent's
+        // write is stranded" from "the operator typed the next prompt into the
+        // live buffer" — both have no cycle and no capture. This site reported
+        // the second as the first and handed out the `Stranded` remedy, which
+        // names `agent-doc commit <FILE>`; that command then refused, correctly,
+        // because committing a fresh operator edit swallows the next turn's
+        // prompt. Observed 2026-08-09 on `tasks/agent-doc/agent-doc-bugs2.md`
+        // with `component_divergence=queue:<a>-><b>`, HEAD holding the whole
+        // committed response and the git tree clean.
+        //
+        // The distinguishing fact is which components diverge. `exchange` is
+        // where a response lives, so an exchange-clean divergence in
+        // queue/backlog/status is by construction not this turn's write. Prove
+        // it and let the shared predicate resolve the verdict.
+        let ownership = ownership.with_unanswered_operator_edit(
+            agent_doc_git::has_blocking_non_exchange_component_drift(
+                &disk_content,
+                &authority_content,
+                None,
+            ),
+        );
         let divergence_owner_note = match ownership.verdict() {
             agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred => {
                 "The controller owns the next closeout attempt and will wake on that state edge. \
@@ -983,7 +1004,8 @@ fn run_with_options_inner(
                     .to_string()
             }
             agent_doc_turn::write_ownership::RetainedWriteVerdict::Stranded
-            | agent_doc_turn::write_ownership::RetainedWriteVerdict::AwaitingTerminalCommit => {
+            | agent_doc_turn::write_ownership::RetainedWriteVerdict::AwaitingTerminalCommit
+            | agent_doc_turn::write_ownership::RetainedWriteVerdict::OperatorEditPending => {
                 agent_doc_turn::write_ownership::retained_write_remedy(
                     ownership,
                     &file.display().to_string(),

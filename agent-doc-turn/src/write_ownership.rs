@@ -55,6 +55,17 @@ pub struct RetainedWriteOwnership {
     /// terminal commit is outstanding — `session-check` calls that cycle
     /// INTERRUPTED, and only `agent-doc commit` advances it.
     pub write_applied: bool,
+    /// The divergence is an operator edit to typed components this turn never
+    /// wrote — a queue strike, a backlog add — that the disk projection does
+    /// not have yet (`#strandedremedydeadlock`).
+    ///
+    /// This is what distinguishes "the agent's write is stranded" from "the
+    /// operator typed the next prompt into the live buffer". Both look
+    /// identical to an ownership check — no cycle, no capture — but only the
+    /// first is recoverable by committing. A fresh operator edit **must not**
+    /// be committed: it is the next turn's input, and every command that
+    /// commits the session document deliberately refuses it.
+    pub unanswered_operator_edit: bool,
 }
 
 impl RetainedWriteOwnership {
@@ -65,6 +76,7 @@ impl RetainedWriteOwnership {
         cycle_open: false,
         retained_capture: false,
         write_applied: false,
+        unanswered_operator_edit: false,
     };
 
     pub const fn new(cycle_open: bool, retained_capture: bool) -> Self {
@@ -72,6 +84,7 @@ impl RetainedWriteOwnership {
             cycle_open,
             retained_capture,
             write_applied: false,
+            unanswered_operator_edit: false,
         }
     }
 
@@ -85,7 +98,17 @@ impl RetainedWriteOwnership {
             cycle_open,
             retained_capture,
             write_applied,
+            unanswered_operator_edit: false,
         }
+    }
+
+    /// Record that the diverging components are an operator edit this turn
+    /// never wrote. Only a site that has actually compared the components may
+    /// set it; the default is `false`, so a site that has not looked keeps the
+    /// conservative retained-write reading.
+    pub const fn with_unanswered_operator_edit(mut self, unanswered_operator_edit: bool) -> Self {
+        self.unanswered_operator_edit = unanswered_operator_edit;
+        self
     }
 
     pub const fn verdict(self) -> RetainedWriteVerdict {
@@ -96,6 +119,11 @@ impl RetainedWriteOwnership {
             RetainedWriteVerdict::AwaitingTerminalCommit
         } else if self.cycle_open || self.retained_capture {
             RetainedWriteVerdict::Deferred
+        } else if self.unanswered_operator_edit {
+            // Refines the unowned case only. With a durable holder the write
+            // is genuinely deferred and the operator's edit rides along with
+            // it; it is the *unowned* shape the two readings collide on.
+            RetainedWriteVerdict::OperatorEditPending
         } else {
             RetainedWriteVerdict::Stranded
         }
@@ -122,6 +150,15 @@ pub enum RetainedWriteVerdict {
     /// duplicate work — but nothing is going to finish it either, so waiting is
     /// equally wrong. `agent-doc commit` is the one command that advances it.
     AwaitingTerminalCommit,
+    /// Nothing owns a write because there is no write — the divergence is an
+    /// operator edit to typed components this turn never wrote
+    /// (`#strandedremedydeadlock`).
+    ///
+    /// Indistinguishable from [`Self::Stranded`] by ownership alone, and the
+    /// opposite instruction: committing a fresh operator edit would swallow the
+    /// next turn's prompt, so every commit path refuses it on purpose.
+    /// Answering it — running the document again — is what resolves it.
+    OperatorEditPending,
 }
 
 impl RetainedWriteVerdict {
@@ -130,6 +167,34 @@ impl RetainedWriteVerdict {
             Self::Deferred => "deferred",
             Self::Stranded => "stranded",
             Self::AwaitingTerminalCommit => "awaiting_terminal_commit",
+            Self::OperatorEditPending => "operator_edit_pending",
+        }
+    }
+
+    /// Whether `agent-doc commit <FILE>` is the recovery this verdict names.
+    ///
+    /// `#strandedremedydeadlock`: naming a command is a promise that the command
+    /// runs. `commit`'s already-current path used to hold an *independent*
+    /// predicate — any non-exchange typed-component drift without a
+    /// binary-owned retained-target proof was a terminal refusal — so the two
+    /// commands could and did contradict each other. Observed 2026-08-09 on
+    /// `tasks/agent-doc/agent-doc-bugs2.md`: `session-check` returned the
+    /// `Stranded` verdict whose remedy is "run `agent-doc commit <FILE>`", and
+    /// that exact command answered "refusing to close as already committed …
+    /// typed-component drift without an exact binary-owned retained-target
+    /// proof". An agent obeying the instruction faithfully had no next move,
+    /// and the live queue drift it described could never be committed by
+    /// anything.
+    ///
+    /// So the refusal is derived from the verdict rather than re-decided:
+    /// `commit` reconciles exactly when the remedy sends the agent to it.
+    /// `Deferred` is the one verdict that does not — something durable holds
+    /// the write and commits it itself, and the 2026-07-26 "do NOT invent a
+    /// recovery" guidance still governs there.
+    pub const fn commit_is_the_named_recovery(self) -> bool {
+        match self {
+            Self::Deferred | Self::OperatorEditPending => false,
+            Self::Stranded | Self::AwaitingTerminalCommit => true,
         }
     }
 }
@@ -162,6 +227,16 @@ pub fn retained_write_remedy(ownership: RetainedWriteOwnership, file: &str) -> S
              `write_applied`. Finish it from the pane that OWNS this session: \
              `agent-doc commit {file}`. Do NOT re-send the response (the body is already \
              durable and would duplicate), force disk, `admin recycle`, or `admin reload-lib`"
+        ),
+        RetainedWriteVerdict::OperatorEditPending => format!(
+            "NO write is retained — the response is already committed and the divergence is an \
+             UNANSWERED OPERATOR EDIT to typed components this turn never wrote (a queue or \
+             backlog line the live buffer has and the disk projection does not). This is normal \
+             realtime steering, not a failed closeout. Answer it: run `agent-doc {file}` to open \
+             the next cycle, which reads that edit as its prompt. Do NOT run `agent-doc commit \
+             {file}` — every commit path refuses a fresh operator edit on purpose, because \
+             committing it would swallow the next turn's prompt — and do NOT force disk, which \
+             clobbers the operator's live edits"
         ),
     }
 }
@@ -267,6 +342,43 @@ mod tests {
         // duplicates rather than recovers.
         for invented in ["re-send", "force disk", "admin recycle", "admin reload-lib"] {
             assert!(remedy.contains(invented), "must rule out `{invented}`: {remedy}");
+        }
+    }
+
+    /// `#strandedremedydeadlock`: the deadlock was two predicates disagreeing
+    /// about one state — the remedy sent the agent to `agent-doc commit`, and
+    /// `commit` refused. Naming the command and accepting it are now the SAME
+    /// fact, so they cannot drift apart again: whatever `retained_write_remedy`
+    /// prints, `commit_is_the_named_recovery` must agree with, for every
+    /// verdict.
+    #[test]
+    fn commit_accepts_exactly_the_verdicts_whose_remedy_names_it() {
+        for verdict in [
+            RetainedWriteVerdict::Deferred,
+            RetainedWriteVerdict::Stranded,
+            RetainedWriteVerdict::AwaitingTerminalCommit,
+            RetainedWriteVerdict::OperatorEditPending,
+        ] {
+            let ownership = match verdict {
+                RetainedWriteVerdict::Deferred => RetainedWriteOwnership::new(true, false),
+                RetainedWriteVerdict::Stranded => RetainedWriteOwnership::UNOWNED,
+                RetainedWriteVerdict::AwaitingTerminalCommit => {
+                    RetainedWriteOwnership::new_with_phase(true, true, true)
+                }
+                RetainedWriteVerdict::OperatorEditPending => {
+                    RetainedWriteOwnership::UNOWNED.with_unanswered_operator_edit(true)
+                }
+            };
+            assert_eq!(ownership.verdict(), verdict, "fixture builds {verdict:?}");
+
+            let remedy = retained_write_remedy(ownership, "plan.md");
+            let names_commit = remedy.contains("`agent-doc commit plan.md`");
+            let forbids_commit = remedy.contains("Do NOT run `agent-doc commit plan.md`");
+            assert_eq!(
+                names_commit && !forbids_commit,
+                verdict.commit_is_the_named_recovery(),
+                "{verdict:?}: the remedy and the commit-side predicate must not disagree: {remedy}"
+            );
         }
     }
 

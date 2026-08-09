@@ -29,13 +29,17 @@ use std::path::{Path, PathBuf};
 
 /// Phrases that state a verdict. Each belongs to exactly one branch of
 /// `retained_write_remedy` and must not be authored anywhere else.
-const VERDICT_PHRASES: [&str; 3] = [
+const VERDICT_PHRASES: [&str; 4] = [
     "deferral, not a lost response",
     "STRANDED, not deferred",
     // `#ownershipverdictdiverges`: the third verdict. `write_applied` is neither
     // lost nor self-completing, and its phrase needs the same protection or a
     // site will eventually re-author it into a fourth dialect.
     "ALREADY LANDED",
+    // `#strandedremedydeadlock`: the fourth. An unanswered operator edit looks
+    // exactly like a stranded write to an ownership check and takes the
+    // opposite instruction, so its wording needs the same single owner.
+    "UNANSWERED OPERATOR EDIT",
 ];
 
 /// The file allowed to author them.
@@ -43,7 +47,7 @@ const VERDICT_OWNER: &str = "agent-doc-turn/src/write_ownership.rs";
 
 /// Every refusal site that retains a write and instructs the agent. Each must
 /// reach the shared predicate rather than deciding for itself.
-const REFUSAL_SITES: [(&str, &str); 3] = [
+const REFUSAL_SITES: [(&str, &str); 4] = [
     (
         "agent-doc-git-io/src/live_buffer_guard.rs",
         "crdt_relay_pending_refusal",
@@ -55,6 +59,17 @@ const REFUSAL_SITES: [(&str, &str); 3] = [
     (
         "agent-doc-document-realtime-io/src/lib.rs",
         "await_editor_replica_no_disk_write",
+    ),
+    // `#strandedremedydeadlock`: the fourth site is the one the other three
+    // send the agent TO. `commit`'s already-current path held its own
+    // predicate — any unproved typed-component drift was a terminal refusal —
+    // so `session-check` could print "recover with `agent-doc commit <FILE>`"
+    // and that command could answer "refusing to close as already committed"
+    // about the same state. A remedy that names a command it cannot reach
+    // agreement with is the same defect as a fourth wording dialect.
+    (
+        "agent-doc-commit-io/src/lib.rs",
+        "already-current typed-component drift refusal",
     ),
 ];
 

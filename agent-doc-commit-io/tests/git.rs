@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use agent_doc_commit_io::{
@@ -2344,10 +2344,10 @@ Duplicate replay should stay live.
         );
     }
 
-    #[test]
-    fn commit_rejects_unproved_typed_component_drift_when_snapshot_matches_head() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let root = dir.path();
+    /// Sets up the `#strandedremedydeadlock` shape: `snapshot == HEAD`, and the
+    /// only difference is typed-component (queue/backlog) drift in the
+    /// editor-authoritative document.
+    fn head_current_doc_with_typed_component_drift(root: &Path) -> (PathBuf, String) {
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
         init_repo(root);
         commit_file(root, "README.md", "# test\n", "initial");
@@ -2372,17 +2372,119 @@ Duplicate replay should stay live.
         )
         .unwrap();
 
-        let unproved = committed.replace(
+        let drifted = committed.replace(
             "- [ ] [#old] finish old work",
             "- [ ] [#old] silently changed work",
         );
-        fs::write(&doc, unproved).unwrap();
+        fs::write(&doc, &drifted).unwrap();
+        (doc, drifted)
+    }
 
-        let err = commit(&doc).expect_err("unproved typed-component drift must fail closed");
+    /// `#strandedremedydeadlock`: refusing is right — a fresh operator queue or
+    /// backlog edit is the NEXT turn's prompt, and committing it would swallow
+    /// that prompt. What deadlocked was the *instruction*. `session-check` read
+    /// the same state through the ownership predicate, found no cycle and no
+    /// capture, called it `Stranded`, and told the agent to run `agent-doc
+    /// commit <FILE>` — which then answered "refusing to close as already
+    /// committed" and named no next move. Observed 2026-08-09 on
+    /// `tasks/agent-doc/agent-doc-bugs2.md` with `component_divergence=queue`,
+    /// the whole response committed in HEAD and the tree clean.
+    ///
+    /// So the refusal must never send the agent to a command that refuses: it
+    /// resolves to `OperatorEditPending` and quotes that remedy, which names
+    /// `agent-doc <FILE>` — answering the edit is what clears it.
+    #[test]
+    fn commit_refuses_an_operator_edit_without_naming_itself_as_the_recovery() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        let (doc, _drifted) = head_current_doc_with_typed_component_drift(root);
+
+        // No cycle, no retained capture: ownership alone reads `Stranded`, and
+        // the `Stranded` remedy is what named `agent-doc commit`.
+        assert_eq!(
+            agent_doc_capture_io::retained_write_ownership(&doc).verdict(),
+            agent_doc_turn::write_ownership::RetainedWriteVerdict::Stranded
+        );
+
+        let err = commit(&doc).expect_err("a fresh operator edit must still fail closed");
+        let err = format!("{err:#}");
         assert!(
-            err.to_string()
-                .contains("without an exact binary-owned retained-target proof"),
-            "unexpected error: {err:#}"
+            err.contains("UNANSWERED OPERATOR EDIT"),
+            "the refusal must classify the drift, not just decline: {err}"
+        );
+        assert!(
+            err.contains(&format!("run `agent-doc {}`", doc.display())),
+            "the refusal must name the command that actually clears it: {err}"
+        );
+        assert!(
+            err.contains(&format!("Do NOT run `agent-doc commit {}`", doc.display())),
+            "the deadlock was naming this command as the recovery: {err}"
+        );
+        assert!(
+            !err.contains("STRANDED, not deferred"),
+            "an operator edit is not a stranded write: {err}"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_blocked_unproved_head_current_component_drift")
+                && log.contains("verdict=operator_edit_pending"),
+            "the refusal must record the verdict that decided it:\n{log}"
+        );
+
+        let head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&head.stdout).contains("finish old work"),
+            "the operator's edit must stay uncommitted — it is the next turn's prompt"
+        );
+    }
+
+    /// The verdict whose remedy DOES name this command must not deadlock the
+    /// same way. At `write_applied` the binary's own response write has already
+    /// landed, the drift is its own rather than a fresh operator prompt, and
+    /// `agent-doc commit` is the only thing that advances it — so it commits.
+    #[test]
+    fn commit_finishes_typed_component_drift_awaiting_its_terminal_commit() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        let (doc, drifted) = head_current_doc_with_typed_component_drift(root);
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&drifted), Some(&drifted)).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(&drifted),
+            Some(&drifted),
+        )
+        .unwrap();
+        assert_eq!(
+            agent_doc_capture_io::retained_write_ownership(&doc).verdict(),
+            agent_doc_turn::write_ownership::RetainedWriteVerdict::AwaitingTerminalCommit
+        );
+
+        let did_commit = commit(&doc).expect("the named recovery must run, not refuse");
+        assert!(did_commit, "the drift must reach HEAD, not close as a no-op");
+
+        let head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        let head = String::from_utf8_lossy(&head.stdout);
+        assert!(
+            head.contains("silently changed work") && !head.contains("finish old work"),
+            "the reconciled document must be what landed:\n{head}"
+        );
+
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_reconciled_head_current_component_drift")
+                && log.contains("verdict=awaiting_terminal_commit"),
+            "the reconcile must record the verdict that authorized it:\n{log}"
         );
     }
 

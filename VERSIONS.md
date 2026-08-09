@@ -2,6 +2,49 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.197
+
+- **Fix (`#strandedremedydeadlock`): `session-check` told the agent to run
+  `agent-doc commit <FILE>`, and `agent-doc commit <FILE>` refused.**
+
+  Observed 2026-08-09 on `tasks/agent-doc/agent-doc-bugs2.md` after
+  `cycle-1786265239202` closed. `session-check` returned INTERRUPTED with
+  `component_divergence=queue:<a>-><b>`, the `Stranded` verdict, and its remedy:
+  "nothing owns this write … recover from the pane that OWNS this session:
+  `agent-doc commit <FILE>`". Running exactly that command answered "refusing to
+  close as already committed: the staged snapshot matches HEAD, but the
+  editor-authoritative document has uncommitted queue, backlog, status, or other
+  typed-component drift without an exact binary-owned retained-target proof".
+
+  The named recovery was refused by the state that named it. Worse than a bad
+  error message: `Stranded` means *nothing holds this write*, so no other
+  command was going to commit it either — the operator's live queue edits had no
+  path to `HEAD` at all, and an agent following the instruction faithfully had
+  no next move.
+
+  Two predicates, one state. `commit`'s already-current path held its own rule
+  (any non-exchange typed-component drift without a retained-target proof is
+  terminal) with no connection to the ownership predicate that sends agents
+  there. This is the same lesson as `#percellconverge` and
+  `#ownershipverdictdiverges`: consolidating *wording* does not stop *predicates*
+  from diverging.
+
+  So the verdict now owns both halves.
+  `RetainedWriteVerdict::commit_is_the_named_recovery` is the single fact, and
+  `commit` derives its refusal from it: `Stranded` and `AwaitingTerminalCommit`
+  — the two verdicts whose remedy names `agent-doc commit` — reconcile, absorbing
+  the editor-authoritative document into the snapshot and committing it through
+  the normal path. `Deferred` still fails closed, because a durable holder does
+  commit that write itself and absorbing its in-flight components would race the
+  capture being awaited; that refusal now quotes the shared remedy instead of
+  re-authoring one, so it can never again name a command that refuses.
+
+  Two regressions pin the behavior, and a third pins the property: the
+  `#percellconverge` architecture guard gains `agent-doc-commit-io` as its
+  fourth refusal site, and `commit_accepts_exactly_the_verdicts_whose_remedy_names_it`
+  asserts the biconditional across every verdict, so the remedy and the
+  commit-side predicate cannot drift apart again.
+
 ## 0.35.196
 
 - **Fix (`#backlogeditcorruptsreview`): a scoped tracked-work edit could destroy

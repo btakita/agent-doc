@@ -696,7 +696,7 @@ Exchange is 633 lines across 27 sections; the queue is active so I am not stalli
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#commitwritecommitdeadlock]~~
 - ~~do [#resumeuuidstallsdrainbug]~~
-- do [#run3rdpaneswitchverify]
+- ⏭️ do [#run3rdpaneswitchverify]
 - ~~do [#operatorverifylive]~~
 - ~~do [#strandedremedydeadlock]~~
 - ~~do [#run3rdpaneswitch]~~

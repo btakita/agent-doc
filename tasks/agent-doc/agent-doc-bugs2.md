@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 3e6e1bc5-6af9-4c3c-8a8c-182173b86ad0
+resume: 1368ec0d-99ec-44d1-92ba-22b87f6a2325
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -331,16 +331,45 @@ The site at 2869 already *named* a recovery — hand-authored, not derived. I ro
 And I did not have to manufacture evidence that the guard has teeth: it went red three separate times while I was writing it, surfacing more sites at each pass. A guard I had never seen fail would be worth much less.
 
 `make check` green, 0.35.192 installed, pushed, tagged, recycled, submodule pointer pushed. CI observed, not awaited. Exchange at 279 lines / 11 sections — noted, still draining.
+
+### Re: do [#queuestallloopfalsepositive] — opus-5
+
+> **Queue prompt:**
+>
+> do [#queuestallloopfalsepositive]
+
+
+Fixed in **0.35.193** (`248df6a10`, tagged). The item guessed the detector was keying on wall-clock or a missing marker; it was neither.
+
+**The classifier was already right.** `classify_stall` takes a `loop_is_continuing` fact and handles it correctly. The defect was the *evidence* preflight fed it: `fresh_loop_drain_owner_lease` — the drain-owner **ownership** TTL, 90 seconds.
+
+Those windows answer different questions, and collapsing them is the whole bug:
+
+- **Ownership** must expire fast, so a stopped loop hands the queue back to the unattended drainer. That is correct, and I did not touch it.
+- **Continuation** asks whether a loop is still working the queue. A self-paced cycle legitimately spans minutes — full verification suite, build/install, then a scheduler wakeup with jitter — and nothing refreshes the lease mid-cycle.
+
+So by the time the next preflight ran, the lease had *always* expired, and every healthy continuation was reported as a stall.
+
+**I measured rather than reasoned about it.** From `ops.log`: `queue_drain_stall_continuation_recorded` → next `preflight_diff_start` gaps of **122s** and **187s**, against a 90s TTL. Three consecutive fires, each on a turn that was itself the continuation.
+
+Continuation now uses a separate `drain_stall_grace()` — default 600s, env-overridable, floored at the ownership TTL so a lease that still confers ownership always still counts as continuation.
+
+**The judgment call.** A genuinely stopped loop now takes up to 10 minutes to trip the diagnostic instead of 90 seconds. I think that trade is clearly right: firing late costs some detection latency, but firing on every healthy cycle costs the signal itself. A warning that is usually wrong teaches its reader to skip it — and then it fails at the one moment it matters. I would rather this be quiet and trusted than prompt and ignored.
+
+The test pins both halves deliberately: the grace exceeds the two measured gaps, **and** the ownership TTL is shorter than them. The second assertion isn't redundant — it records the precondition that caused the bug, so if someone later lengthens the TTL the test explains why this grace exists rather than silently passing.
+
+`make check` green, 0.35.193 installed, pushed, tagged, recycled, submodule pointer pushed. CI observed, not awaited. Exchange at 299 lines / 12 sections — noted, still draining.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#ownershipverdictdiverges]
 - ~~do [#retainedwriteremedy]~~
-- do [#queuestallloopfalsepositive]
+- ~~do [#queuestallloopfalsepositive]~~
 - ~~do [#idcollisionnamespace]~~
 - ~~do [#operatorverifylive]~~
-- ⏭️ do [#preflightprojpass]
+- do [#preflightprojpass]
 - ~~do [#loopcontractseal]~~
 - do [#respondbaselineflag]
 - do [#hookhashfalsepositive]
@@ -354,7 +383,7 @@ And I did not have to manufacture evidence that the guard has teeth: it went red
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#queuestallloopfalsepositive] #agent-doc-bug queue_stall_detected fires a false positive against a healthy /loop drain. Observed 2026-08-09 on tasks/agent-doc/agent-doc-bugs2.md: preflight warned 'queue_stall_detected reason=no_valid_stop_with_continuation_required (prior cycle committed with 3 drainable head(s) but the loop neither continued nor recorded a valid stop reason)' on a turn that WAS the continuation -- the Claude Code auto-loop had claimed the drain lease via `agent-doc drain-claim` and re-entered through a ScheduleWakeup-fired /loop, roughly 60-90s after the prior commit. The detector appears to key on wall-clock or on an in-turn continuation marker that the ScheduleWakeup path does not set, and does not consult the live drain-owner lease -- which is precisely the signal drain-claim (#kp5z/#qflood) exists to publish. Make the stall predicate treat a live claude_loop drain lease as continuation-in-progress, and add coverage for a committed cycle followed by a lease-held re-entry so a healthy self-paced drain never reports a stall.
+- [ ] [#ownershipverdictdiverges] #agent-doc-bug The retained-write OWNERSHIP VERDICT still contradicts session-check, even though 0.35.192 unified the wording. Observed 2026-08-09 on tasks/agent-doc/agent-doc-bugs2.md, three times in one session: `agent-doc respond` refused with the predicate-derived remedy 'The capture is already durable and the same intent commits itself once delivery converges - this is a deferral, not a lost response. Run agent-doc session-check once to observe the terminal state; do NOT re-send / force disk / admin recycle'. Following that instruction exactly, session-check then reported INTERRUPTED: cycle is still write_applied - response write landed but no terminal commit followed. The intent did NOT commit itself; a single `agent-doc commit <FILE>` was required each time and resolved it immediately. So RetainedWriteOwnership::verdict classifies this state as owned/self-committing when it is in fact awaiting a terminal commit, which is the exact predicate-level divergence #percellconverge exists to prevent - now relocated from the prose (fixed) to the verdict (not fixed). Two concrete defects: (1) the verdict must agree with session-check for the write_applied-without-terminal-commit state, and (2) even under the owned verdict the remedy names only session-check, an OBSERVATION command, and never names `agent-doc commit`, the command that actually recovers. Fix in agent-doc-turn/src/write_ownership.rs so the verdict distinguishes 'delivery pending, will self-commit' from 'write applied, terminal commit outstanding', and have the latter name `agent-doc commit <FILE>`. Add a regression asserting the verdict for a write_applied cycle matches what session-check reports for the same cycle state.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#hookhashfalsepositive] agent-doc's coined-id-pre-tool-use hook rejects C preprocessor directives as untracked backlog ids. Writing a file containing a line starting with a hash — pragma once, include <string> — is blocked with "would write coined id(s) #include, #pragma ... not tracked in agent:backlog". The same class of false positive already applies to CSS ids, shell comments, and agent-doc's own anchor tags quoted from SKILL.md. It is not a hard block (a bash heredoc bypasses the PreToolUse hook entirely, which is itself the interesting part — the guard is trivially avoidable while being obstructive to correct writes) but it forced a workaround into emitted C++: src/sdk-spike/ts/src/wire/code.ts assembles the directives via String.fromCharCode(35) with a comment explaining why. The guard should recognise language syntax — preprocessor directives, CSS selectors, shell/YAML comments, markdown headings — or scope itself to prose contexts. Fix belongs in agent-loop src/agent-doc, not here; remove the workaround in code.ts once it lands.
 - [ ] [#preflightprojpass] #agent-doc-bug Redundant full-document CRDT resolutions (~186ms each). NARROWED 2026-08-09 after measuring ops.log resolution sources: start_resume_id_capture 136, session 98, serialized_atomic_write 54, resume_id_owner 54, idle_watch_active_queue_head 50 -- the top consumer was resume-id handling, NOT the relay this item originally nominated. 0.35.191 fixed that one: resume_id_owner walked every canonical_path in state.db and materialized each document through the realtime authority to read two frontmatter fields; it now probes the cheap revision first and reads disk for Detached documents (a probe that ERRORS keeps the authoritative path -- a missed claim adopts someone else's conversation). REMAINING, both untouched: (a) RELAY HALF -- realtime_doc_resolve authority=editor_buffer reason=crdt_relay_current source=crdt_relay, measured at 170 resolutions in 8 minutes on a 22.8KB doc, up to 14 in a single second, every one returning identical len/hash; no preflight blocker gates this half, so it is still the next operator-visible latency win. (b) PREFLIGHT HALF -- still behind its recorded blocker: only agent-doc-commit-io/src/lib.rs:891 calls invalidate_current_document_projection, while preflight's seven mutating phases call it ZERO times (exact-replay converge run.rs:300, auto-repair base index 354, repair 479, run_pending_maintenance 537, commit ~709, run_queue_maintenance 858, baseline realign 936). Safe order: make each preflight mutator SELF-invalidate, THEN open the pass in run_with_options, THEN a regression test that a post-mutation read observes the new text. Do NOT write a new cache -- agent-doc-document-realtime-io/src/current_document_projection.rs already is the right one, keyed by live Yrs state vector or disk hash. Also worth measuring before assuming: session (98) and serialized_atomic_write (54) are the next-largest sources and neither has been investigated.

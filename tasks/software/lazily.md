@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: 8776bc3a-4690-43c8-bf79-5aba9759af50
+resume: c5159a60-a96b-4acf-8827-cbdd76c61df6
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -554,28 +554,51 @@ The audit this item existed to unblock has not been run. Five bindings can now b
 Exchange is at 503 lines across 24 sections; noting the size rather than stalling the queue for it.
 
 Queue: `#lzzigspecdiroption`.
+
+### Re: do [#lzcsregistersreplay] — the runner landed; the interesting part was where the fixture had to be re-filed — opus-5
+
+lazily-cs replays all nine LWW/MV/PnCounter scenarios. Both ledger entries are deleted, which was the stated definition of done: the `Unsupported` entry in `CollectionsConformanceTests` (now an empty dictionary) and the `KNOWN_UNCOVERED` line in `scripts/check-conformance-coverage.sh`. Commit `7cc4584`, CI `31339955662` green, superproject pointer `3a8d0aa9`.
+
+**Deleting the two entries alone would have broken the suite, and that is worth recording.** `CollectionsConformanceTests` *enumerates* the corpus directory rather than naming fixtures, so dropping the `Unsupported` entry hands a scenario-shaped fixture to a step/reconcile dispatch that cannot read it. That is the same enumerate-versus-declare split that made this fixture crash with a bare `KeyNotFoundException` in the first place. The fixture therefore moves to `HandledElsewhere` pointing at the new `RegistersConformanceTests`, which is the distinction that file's own doc-comments already draw: `Unsupported` is a ledger of gaps in the binding, and folding "another runner owns this" into it overstates what is missing. Two ledgers removed, one correct cross-reference added.
+
+**The runner is built so that the three obvious ways to fake it fail.** Stamps are constructed directly as `HlcStamp(wall, logical, peer)` from the fixture's numbers rather than driven through the `Hlc` clock, because a clock would invent its own ordering and the `(wall, logical, peer)` tiebreak would stop being pinned by the corpus. `changed` asserts the boolean `Set`/`MergeFrom` actually returned, and the runner fails loudly if a scenario asserts `changed` while no operation reported one. Per-kind replay floors (`lww=5, mv=2, pncounter=2`) are asserted, so a dispatch that handles `lww` and silently no-ops the other two kinds cannot pass. Unrecognised scenario ids, register kinds, ops and step shapes all throw rather than skip.
+
+All three types already expose `Copy()`, so `fork` uses it uniformly rather than synthesising a replica by merging into a fresh instance. That matters for `MvRegister`: a merge-built fork reproduces the entries and only *happens* to agree on the version-vector frontier because the entries are the frontier, which is a coincidence rather than a guarantee.
+
+**I probed it myself rather than trusting the green.** The agent flipped four keys across all three kinds plus a `changed` expectation. I independently flipped `mv_causal_write_supersedes_the_set` to `["A","C"]`, the answer a binding that only ever accumulates would give, against a scratch corpus the agent never touched. It reddens through `ReplayMv` at `RegistersConformanceTests.cs:201`, and is green on the canonical corpus. Stale build cache was ruled out by holding the assembly md5 constant across every flip under `--no-build`.
+
+Guard counts moved the right way and by the right amount: 144/150 fixtures OPENED to 145/150, `KNOWN_UNCOVERED` 6 to 5, scenarios 153 to 162. Floors were raised with the corpus (`MIN_FIXTURES` 140 to 141, `MIN_SCENARIOS` 139 to 148) rather than left behind, which is the failure mode where a binding replays the old half of a hardened fixture and reports the same green as before.
+
+**A tooling trap worth keeping.** The RTK wrapper rewrites `git status --porcelain` into a literal `ok`, so an empty-output cleanliness check on the shared `lazily-spec` checkout is not trustworthy as written; it has to go through `rtk proxy` or be measured by byte count. Verified that way, `lazily-spec/conformance` was clean before and after, and only the scratch copies were perturbed.
+
+Not done, deliberately: lazily-spec's `coverage.json` still marks the cs `Registers` row `~` at index 8 of the ten-binding `marks` array, and flipping it also requires re-running `scripts/sync-coverage.mjs` there. That file is shared and hot across concurrent sessions, so it wants its own lazily-spec write turn rather than a drive-by edit from this one. Filed as `#lzcsregisterscoveragerow`.
+
+Exchange is at 534 lines across 25 sections; noting the size rather than stalling the queue for it.
+
+Queue: `#lzktcorpusnotgradleinput`.
 <!-- agent:boundary:c6ef3fb1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzperturbaudit]
-- do [#lzspecschemasoverride]
+- do [#lzcsregisterscoveragerow]
+- ⏭️ 📌 do [#lzzigspecdiroption]
+- ~~📌 do [#lzcsregistersreplay]~~
 - ~~do [#lzzigcanonrunner]~~
 - ~~do [#lzoverrideallrunners]~~
-- ⏭️ do [#lzzigspecdiroption]
-- do [#lzcsregistersreplay]
-- do [#lzktcorpusnotgradleinput]
-- do [#lzledgeragreementaudit]
-- do [#lzzigdiffmutant]
+- 📌 do [#lzktcorpusnotgradleinput]
+- 📌 do [#lzledgeragreementaudit]
+- 📌 do [#lzzigdiffmutant]
+- do [#lzperturbaudit]
+- do [#lzspecschemasoverride]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzcsregisterscoveragerow] lazily-spec coverage.json still marks the C# 'Registers' row (id: registers, label 'Registers (LWW/MV) + PnCounter', fixtures ['collections/registers_convergence.json']) as '~' at index 8 of the ten-entry marks array ordered [Rust, Python, Kotlin, JS, Dart, Zig, Go, C++, C#, GDScript]. lazily-cs now replays all nine scenarios with BOTH ledger entries deleted (commit 7cc4584), so the mark is stale and check-coverage-claims can no longer justify it. Flip index 8 to the shipped mark and re-run 'node scripts/sync-coverage.mjs' in lazily-spec so all 12 generated targets regenerate. Deliberately NOT done from the lazily-cs turn: coverage.json is shared and hot across concurrent sessions (one commit per binding is the rule), so it needs its own lazily-spec write turn. While there, re-check whether the family roll-up for the Registers family also moves, since the roll-up regenerates from rows and a single-row family flips with its row.
 - [ ] [#lzzigspecdiroption] lazily-zig has NO corpus-dir override: SPEC_DIR in src/lazily/reactive_map.zig is a comptime const used as SPEC_DIR ++ '/x.json', so the #lzdefaultmodeuniform probe had to temporarily edit the constant and restore it. Every future corpus probe in this binding pays that cost, and a probe that edits the shared ../lazily-spec checkout instead reddens all nine bindings concurrently. Add a '-Dspec-dir' build option (or a runtime env read) threaded to every fixture path, and keep the default unchanged. Compounding trap to preserve: specFixturesPresent() makes the tests 'return error.SkipZigTest' when the path is unreadable, so a probe that changes the PATH silently converts red into skip — the option must change which bytes are read, never whether they exist.
-- [ ] [#lzcsregistersreplay] lazily-cs declares collections/registers_convergence.json in CollectionsConformanceTests.Unsupported (and in KNOWN_UNCOVERED) because it has no canonical registers replay: the scenario op vocabulary (set/merge/fork over LWW/MV/PnCounter, with the (wall_time, logical, peer) tiebreak) has no dispatch there. The register CRDTs themselves ARE implemented in this binding, so only the runner is missing. Follow lazily-rs's tests as the reference executor over the nine scenarios, then delete both ledger entries — removing them is the definition of done. Note the Registers coverage row stays '~' for cs until this lands.
 - [ ] [#lzktcorpusnotgradleinput] lazily-kt's conformance corpus is NOT a declared input of the gradle 'test' task, so editing a fixture leaves 'test' UP-TO-DATE and the run reports green having replayed nothing — a false green that defeats any corpus-perturbation probe. Compounding it, tasks.test wires no environment(...), so the test JVM inherits the DAEMON's environment and a daemon started before LAZILY_SPEC_DIR was set serves the stale path. Today the only defence is remembering '--no-daemon --rerun-tasks'. Declare the corpus directory as a task input so a fixture change invalidates the task, and pass the corpus-dir variable through environment(...) explicitly. Definition of done: flip one assertion key in a scratch corpus and prove a plain 'make check' (no flags, warm daemon) reddens.
 - [ ] [#lzledgeragreementaudit] A KNOWN_UNCOVERED entry in a binding's shell coverage guard does NOT stop a test host that DISCOVERS fixtures by enumerating the corpus directory from trying to replay them — the two ledgers describing the same absence can disagree silently. lazily-cs was red on HEAD for exactly this (CI 31298919123): collections/registers_convergence.json was declared uncovered in the script while CollectionsConformanceTests crashed on it with a bare KeyNotFoundException naming neither the fixture nor the reason. Fixed there in b8cdb7e by adding the Unsupported entry and making the shape dispatch fail closed. Audit the other eight bindings for the same split: for each, list the fixtures in KNOWN_UNCOVERED, check whether the runner enumerates or names fixtures, and confirm an enumerating runner has a matching in-host ledger entry plus a fail-closed default on an unrecognised fixture shape. All eight are currently green, so this is about the NEXT fixture added to the shared corpus.
 - [ ] [#lzzigdiffmutant] lazily-zig's lossless-tree replay does not pin the anti-entropy FILTER, only convergence: mutating LosslessTreeCrdt.diff to ignore the partner frontier (ship every op in the log) reddens NONE of the nine fixtures, including non_contiguous_anti_entropy.json whose subject is a replica with a gap. deliver.only indexes into the diff, so a diff whose contents change should select different ops and change what the gapped replica renders (hole_before_repair expects b='013') — it does not, and the reason is not yet established. Either the runner's deliver path is not exercising the frontier as intended, or applyUpdate's idempotence absorbs the difference; find out which, then make the fixture discriminating (or record honestly that convergence is all it can pin). Contrast the at_byte char-offset mutant, which reddens six of the nine.

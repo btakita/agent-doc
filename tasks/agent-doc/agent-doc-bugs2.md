@@ -630,11 +630,6 @@ No new plan file: `#preflightprojpass` carries its own next step, and `#commitwr
 
 ### Re: the mutual-remedy deadlock — opus-5
 
-> **Queue prompt:**
->
-> do [#commitwritecommitdeadlock]
-
-
 Fixed and shipped in **0.35.204**.
 
 Three commands, a closed cycle, each naming another: `respond` → "run `agent-doc commit`"; `commit` → "replay with `agent-doc write --commit`"; `write --commit` → the same `AwaitingTerminalCommit` remedy naming `commit` again.

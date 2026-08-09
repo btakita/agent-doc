@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 8bd8d65b-bb05-4208-9ebb-9884aabaf5b5
+resume: 87960267-ff0f-44d2-9d11-f9d8f65433a2
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -1017,25 +1017,87 @@ The ordering is guarded structurally, because a behavioural test that *succeeds*
 **The CI red.** `0.35.220` failed on a fail-fast test asserting a flat 1-second wall clock, while the same test runs in 0.02s locally and the change under test does not touch that path. That assertion is a proxy for "did not enter the bounded editor-delivery wait", and what it distinguishes against is a 5-second stall threshold — 5x headroom, which a loaded runner eats. The bound is now derived from that threshold rather than hardcoded, so a genuine stall still fails it. Not waived as flaky: the fragility is real, it lives in the proxy, and the proxy is what changed. Same class as `0.35.215`.
 
 **Verification.** `make check` green (8855 passed, 249 skipped); the intent path and the ordering guard are both mutation-checked. 0.35.222 and 0.35.223 installed, committed, tagged, pushed, superproject pointer pushed. CI: `0.35.216`–`0.35.219` green, `0.35.220` is the red run 0.35.223 repairs, `0.35.221`–`0.35.223` in progress at closeout.
+
+### Re: `do [#respondbaselineflag]` — opus-5
+
+Removed, not added. The binary had already decided: `agent-doc-workflow`, `agent-doc-turn`, `agent-doc-flow-io`, and `plan.rs` each assert that emitted commands contain **no** `--baseline-file`, `CycleState` has no `baseline_file` field, and `preflight`'s JSON does not emit one. `agent-doc respond --help` and `write --help` both show zero baseline flags. Only the instruction surfaces and three specs were stale.
+
+Fixed in 0.35.224 (installed, committed, tagged, pushed): `SKILL.md`, `runbooks/{commit,pending-ops,streaming-checkpoints,baseline-drift}.md`, and `specs/07-{closeout,core,orchestration}-commands.md`. The surfaces now state the prohibition explicitly rather than going quiet, so the next agent does not reinvent the flag. `pending-ops.md`'s example carried a second error — bare `agent-doc write ... --stream`, which is rejected for session responses — and is now `respond`.
+
+A new `skill.rs` guard fails the build if any bundled surface puts `--baseline-file <` back into a command template or reintroduces `baseline_file`. It bans the *usage* form, not the word: my first version banned the string outright and failed on my own prohibition sentence.
+
+### Re: `do [#planhead]` — opus-5
+
+Fixed in the same release, with a third live observation from this turn's own `agent-doc plan` (preflight selected `do [#respondbaselineflag]`; plan named `do [#planhead]`).
+
+`plan.rs` called `queue_heads::active_queue_prompt`, which returns the first head regardless of drainability, while preflight applies the in-session drainability filter. New `queue_continuation::dispatchable_head_prompt_text` is the single derivation: drain-active head first, and on a queue that is active but not in explicit go-mode (no auto-drain, so the head is a manual prompt) it falls back to the plain active head **still filtered by the scope's deferral set** — an `[operator-verify]` head is never selected either way. That fallback matters: `active_queue` requires explicit `go`, so a straight swap would have made plan report no work for every `auto` queue.
+
+The architecture-policy guard in `tests/test_cli.rs` now forbids `plan.rs` from reaching back for the raw head, and a new plan test pins the operator-verify skip.
+
+### Re: tracking the live agent-doc sessions — opus-5
+
+All five are running, and two were not discoverable the obvious way — `agent-doc start tasks/haiven-dev.md` and `tasks/sdk.md` are relative to the **supervisor's own cwd**, which is `src/haiven-dev`, not this repo root, so resolving them against the repo root finds nothing. `/proc/<pid>/cwd` is what makes them resolve.
+
+| document | project root | supervisor |
+|---|---|---|
+| `tasks/agent-doc/agent-doc-bugs2.md` | `agent-loop` | 336290 (5d) |
+| `tasks/software/lazily.md` | `agent-loop` | 3268523 (20h) |
+| `src/haiven-dev/tasks/haiven-dev.md` | `src/haiven-dev` | 3854486 (1d14h) |
+| `src/haiven-dev/tasks/sdk.md` | `src/haiven-dev` | 3956615 (3d) |
+| `src/boost-client/tasks/monsterrodholders.md` | `src/boost-client` | 4069526 (3d22h) |
+
+You wrote `lazily.py`; the live session is `tasks/software/lazily.md`. Matching is by filename stem, so either spelling is tracked. Four more sessions are live and left untracked by default (`octavian-gabriel-stan`, `equityfundingsource`, `haiven`, `tsift`) — `--all-sessions` includes them.
+
+### Re: a dogfooding script that files backlog + queue items from the logs — opus-5
+
+`bin/agent-doc-dogfood-watch`, runbook at `runbooks/dogfood-watch.md`. It is deliberately thin: all log classification is `agent-doc ops summary --json`, all document mutation is `agent-doc backlog <doc> add` + `agent-doc queue sync`. No document parsing or writing in the script, per the binary-owns-deterministic-logic rule.
+
+Three things it does that a naive version gets wrong:
+
+- **Aggregates by defect signature, not per project.** The live sessions share one binary, so the same family fires in three project roots at once; per-root filing would have produced three copies of one defect. It strips session/cycle/pid/hash noise from the example line, hashes family + normalized example into a stable `#dfw<hash>` id, and files one item naming every affected root and document.
+- **Defaults to `--min-severity high`.** At `medium` the classifier's loudest cluster is `commit_noop reason=already_current` — normal closeout traffic, 36 hits across 3 projects. Filing that buries real findings. `--exclude-family` is there for families you have already judged noise.
+- **Two idempotence guards.** `agent:done` is read alongside `agent:backlog`/`review`/`icebox`/`queue`, so a finding that was filed and *closed* is not re-filed while the same line sits in the log tail; and `.agent-doc/dogfood-watch-state.json` is keyed by target document, so filing into a scratch target cannot suppress the same finding in the real one.
+
+Verified end-to-end against a scratch document: item filed, `do [#dfwef5abcb]` mirrored into the go queue, second run a no-op. On the real target at the default threshold it currently files nothing, which is the correct answer — no high/critical cluster is live.
+
+Also covers `supervisor-stderr.log` (panic / runtime abort / OOM), which `ops summary` does not read.
+
+### Re: the haiven-dev Run Agent Doc failure — opus-5
+
+Filed at the top of the backlog as `#clearsubmitunobserved` with a root-cause hypothesis, since you scheduled it after this task.
+
+The short version: `context_clear_submit_poll_status` accepts a `/clear` only if it saw the command in the composer or saw the pane content change. A successful Claude Code `/clear` **wipes the pane**, so a clear that completes before the first poll can leave neither signal — and `Unobserved` is reported for a clear that actually ran. That matches your log exactly (`command_visible=false`, no evidence in either direction). The fix direction is a positive post-state predicate (a cleared pane has a recognisable fresh-session shape) rather than relying on change detection, plus confirming the delivery baseline is captured strictly before the send.
+
+I did not touch the live haiven-dev pane — whether that clear ran is genuinely unknown, and checking it is the operator step the error names.
+
+### Re: verification — opus-5
+
+> **Queue prompt:**
+>
+> do [#planhead]
+>
+> do [#respondbaselineflag]
+
+
+`make check` green: **8857 passed, 249 skipped**. 0.35.224 installed (`agent-doc --version` confirms), committed, tagged `v0.35.224`, pushed; superproject pointer pushed; `admin recycle` requested. CI: `0.35.222` and `0.35.223` green, `0.35.224` in progress at closeout — recorded, not waited on.
+
+Two things worth flagging:
+
+- The managed harness surfaces did **not** refresh on their own. `make release-version` stamps the new version into the installed skill copies, so the following `skill install --all` reported `already up to date` and never rewrote runbook content — 0.35.224 would have shipped with the retired flag still in `.claude/.codex/.opencode/.cursor` runbooks. I forced it by resetting the version markers and reinstalling. Separately, `runbooks/` and `.codex/runbooks/` are not written by `skill install` at all and had drifted several versions behind; hand-synced from the bundle. Filed as `#skillinstallstalemirror` — `audit-docs` reports "No blocking issues found" against all of it.
+- The superproject commit picked up one file that is not mine: `runbooks/code-navigation.md`, a one-line `tsift:code-navigation-runbook v=0.1.78 → v=0.1.80` marker bump written by tsift. `git commit --only -- runbooks` takes the whole directory, so unstaging it did not keep it out. Content is correct; I left it rather than rewriting the commit.
+
+`src/session-share` carries its own stale copies of these runbooks. Different repo, left alone.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#mutprovenancepreresponse]~~
-- ~~do [#hooktriggerunresolved]~~
-- ~~do [#resumeownerfmread]~~
-- ~~do [#queueblockquoteintent]~~
-- ~~do [#pullnoackdeadlock]~~
-- ~~do [#retainedmutdrop]~~
-- ~~do [#relayresolveblind]~~
-- do [#planhead]
-- ~~do [#projpassstart]~~
+- do [#clearsubmitunobserved]
+- do [#skillinstallstalemirror]
+- ~~do [#planhead]~~
 - do [#operatorverifylive]
-- ~~do [#prmergeguardpr]~~
 - do [#run3rdpaneswitchverify]
-- ~~do [#preflightprojpass]~~
-- do [#respondbaselineflag]
+- ~~do [#respondbaselineflag]~~
 - do [#hookhashfalsepositive]
 <!-- /agent:queue -->
 
@@ -1047,11 +1109,11 @@ The ordering is guarded structurally, because a behavioural test that *succeeds*
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#planhead] `agent-doc plan` reports a queue head the in-session loop is not allowed to drain (#agent-doc-bug). Observed twice this session: preflight's `selected_queue_prompts` correctly named the drainable head (`do [#prmergeguardpr]`, then `do [#preflightprojpass]`) while plan's `prompt_targets` / `repo_actions` / `required_commands` all named `do [#operatorverifylive]` — an [operator-verify] head that needs a human watching a real IDE + tmux session and that preflight had already deferred. SKILL.md step 0d says to treat plan's output as the execution contract, so an agent following it verbatim works the wrong item and would then --done an operator-gated one. Fix: drop plan's own head selection and defer to preflight.selected_queue_prompts. Two independent derivations of 'which head is next' is the defect class, not the specific filter.
+- [ ] [#clearsubmitunobserved] #agent-doc-bug Operator-reported 2026-08-09 on haiven-dev.md: Run Agent Doc escalated to a cold start (`supervisor for tasks/haiven-dev.md is dead or unreachable`), the replacement was proven live on pid 3854486, and then the `/clear` failed closed with `result=submission_unobserved command_visible=false ... unblocker=clear_submission_unobserved`. Root-cause hypothesis to verify first: `agent-doc-turn-executor-tmux/src/context_clear.rs::context_clear_submit_poll_status` only returns `Accepted` when it either saw the command text in the composer at some poll or saw `content_changed_since_delivery`. A Claude Code `/clear` that succeeds WIPES the pane, so a fast clear that completes before the first poll leaves no visible command AND (if the delivery baseline was captured after the wipe) no observed change -- success is then indistinguishable from never-submitted, which is exactly the `Unobserved` report. Fix direction: add a positive post-state predicate (a cleared Claude Code pane has a recognisable fresh-session shape) as acceptance evidence independent of change detection, and verify the delivery baseline is captured strictly before the send. Add SimWorld coverage for fast-clear-before-first-poll.
+- [ ] [#skillinstallstalemirror] #agent-doc-bug `agent-doc skill install` silently skips a content refresh, and two mirror directories are unmanaged. (a) `make release-version` stamps the new version into the INSTALLED skill copies, so the subsequent `skill install --all` sees a matching version and reports `already up to date` without rewriting runbook content -- 0.35.224 shipped with `.claude/.codex/.opencode/.cursor` runbooks still carrying the retired `--baseline-file` command until they were force-refreshed by hand (reset the version marker, reinstall). The version marker is the wrong freshness key; use a content hash, or have release-version stop touching installed copies. (b) The superproject `runbooks/` and `.codex/runbooks/` mirrors are not written by `skill install` at all and had drifted SEVERAL versions behind (they still described `agent-doc finalize` as the normal path and titled files `Pending ops` / `Streaming Checkpoints`); they were hand-synced from the bundle this cycle. Decide whether `.codex/runbooks/` is a retired surface `skill install` should migrate/remove, and make `runbooks/` a managed target. `audit-docs` reported `No blocking issues found` against all of this, so its staleness check does not compare runbook content to the bundle.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#hookhashfalsepositive] agent-doc's coined-id-pre-tool-use hook rejects C preprocessor directives as untracked backlog ids. Writing a file containing a line starting with a hash — pragma once, include <string> — is blocked with "would write coined id(s) #include, #pragma ... not tracked in agent:backlog". The same class of false positive already applies to CSS ids, shell comments, and agent-doc's own anchor tags quoted from SKILL.md. It is not a hard block (a bash heredoc bypasses the PreToolUse hook entirely, which is itself the interesting part — the guard is trivially avoidable while being obstructive to correct writes) but it forced a workaround into emitted C++: src/sdk-spike/ts/src/wire/code.ts assembles the directives via String.fromCharCode(35) with a comment explaining why. The guard should recognise language syntax — preprocessor directives, CSS selectors, shell/YAML comments, markdown headings — or scope itself to prose contexts. Fix belongs in agent-loop src/agent-doc, not here; remove the workaround in code.ts once it lands.
-- [ ] [#respondbaselineflag] #agent-doc-bug SKILL.md's MANDATORY persist step documents `agent-doc respond <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill`, but neither `respond` nor `write` accepts `--baseline-file` in 0.35.184 (`agent-doc respond --help` has no baseline/snapshot flag). An agent following the hot-path skill verbatim gets a clap parse error on the one step the skill calls mandatory, and the documented 'use preflight's baseline, do NOT save your own' contract has no way to be honoured. Decide one way: either add `--baseline-file` to respond/write and thread it into the diff baseline, or remove it from SKILL.md + every generated harness surface (.claude/.codex/.opencode/.cursor) and the runbooks. Reported by the operator 2026-08-08 while diagnosing the haiven-dev wedge.
 <!-- /agent:backlog -->
 
 ## Review

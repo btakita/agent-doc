@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: c5159a60-a96b-4acf-8827-cbdd76c61df6
+resume: 65fdcf58-0ff8-4ac5-9052-b95b5abe0bb8
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -576,13 +576,39 @@ Not done, deliberately: lazily-spec's `coverage.json` still marks the cs `Regist
 Exchange is at 534 lines across 25 sections; noting the size rather than stalling the queue for it.
 
 Queue: `#lzktcorpusnotgradleinput`.
+
+### Re: do [#lzcsregisterscoveragerow] — the row flip carried a family with it, and exposed what the claims checker cannot see — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzcsregisterscoveragerow]
+
+
+C# now reads shipped on the `registers` row. lazily-spec `8bb7994`, README regenerated and pushed across all 11 sibling bindings, 12 superproject pointers in `308d2337`.
+
+**I let the checker adjudicate rather than asserting the mark.** The rule is mechanical: `✅` requires every cited fixture be replayed, and a fixture counts as replayed when it is absent from that binding's `KNOWN_UNCOVERED`. lazily-cs satisfied that as of `7cc4584`, so I flipped the mark and ran `check-coverage-claims.mjs`, which re-verified 463 shipped marks across 57 fixture-bearing rows against all 10 binding ledgers and passed. That is the difference between a claim backed by a ledger read and a claim backed by my recollection of what an agent told me an hour ago.
+
+**The flip moved a family cell, not just a row, and that deserved checking before it shipped.** The regenerated README diff is a single line, but it is the `CRDT data types` *roll-up* going `~` to `✅` for C#, which is a materially larger statement than one row. It is correct: all five `crdt`-family rows for C# are shipped and `registers` was the last one holding the family partial. That is the roll-up rule working as designed rather than an over-claim, but a one-line diff that silently upgrades a family summary is exactly the shape that should be verified rather than eyeballed, so I enumerated the family before pushing.
+
+**The real finding is what the claims checker declines to check.** It reported "28 partial mark(s) left unverified by design". The guard is one-directional: it catches a binding claiming `✅` it has not earned, and is silent about a binding sitting at `~` it has outgrown. That is the entire reason this item existed. lazily-cs earned the row the moment `7cc4584` landed and the matrix would have kept reading `~` indefinitely, because nothing in `make check` compares a partial mark against the ledger that would now contradict it. It took a hand-written backlog note to catch one instance; there are 28 unverified partial marks right now and no mechanism says which are stale. Filed as `#lzcoverageunderclaim`, with the concrete rule: flag any `~` whose cited fixtures are all absent from that binding's `KNOWN_UNCOVERED`.
+
+**Two hazards handled rather than tripped.** `sync-coverage.mjs` writes into eleven sibling repositories, so a coverage edit is a twelve-repo change, not a one-file change; each sibling was committed with `--only -- README.md` and verified to contain exactly that path, leaving the pre-existing `AGENTS.md`/`runbooks/` noise and, in lazily-rs, another session's tracked `runbooks/code-navigation.md` edit untouched. And rewriting `coverage.json` through a JSON round-trip risked reformatting the whole file into an unreviewable diff; it came out at one changed line, which I checked before regenerating anything.
+
+`make check` green in lazily-spec, exit 0 with zero failure markers across all twelve gates.
+
+**The stale-install warning is not actionable from here, and acting on it would be worse than ignoring it.** Preflight reports the running binary is missing `20090f007` (0.35.224). But `src/agent-doc` carries 153 uncommitted tracked changes belonging to another session's in-flight release, so `make install` there would build their working state rather than HEAD. That is the same trap recorded two cycles ago. Leaving it to the supervisor's idle-boundary recycle, which is what the queue guidance prescribes for a stale binary. A second session committed 0.35.225 mid-cycle, so the tree is actively shared and this is not mine to resolve.
+
+Exchange is at 556 lines across 26 sections; noting the size rather than stalling the queue for it.
+
+Queue: `#lzktcorpusnotgradleinput`.
 <!-- agent:boundary:c6ef3fb1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzcsregisterscoveragerow]
+- do [#lzcoverageunderclaim]
+- ~~do [#lzcsregisterscoveragerow]~~
 - ⏭️ 📌 do [#lzzigspecdiroption]
 - ~~📌 do [#lzcsregistersreplay]~~
 - ~~do [#lzzigcanonrunner]~~
@@ -597,7 +623,7 @@ Queue: `#lzktcorpusnotgradleinput`.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcsregisterscoveragerow] lazily-spec coverage.json still marks the C# 'Registers' row (id: registers, label 'Registers (LWW/MV) + PnCounter', fixtures ['collections/registers_convergence.json']) as '~' at index 8 of the ten-entry marks array ordered [Rust, Python, Kotlin, JS, Dart, Zig, Go, C++, C#, GDScript]. lazily-cs now replays all nine scenarios with BOTH ledger entries deleted (commit 7cc4584), so the mark is stale and check-coverage-claims can no longer justify it. Flip index 8 to the shipped mark and re-run 'node scripts/sync-coverage.mjs' in lazily-spec so all 12 generated targets regenerate. Deliberately NOT done from the lazily-cs turn: coverage.json is shared and hot across concurrent sessions (one commit per binding is the rule), so it needs its own lazily-spec write turn. While there, re-check whether the family roll-up for the Registers family also moves, since the roll-up regenerates from rows and a single-row family flips with its row.
+- [ ] [#lzcoverageunderclaim] check-coverage-claims.mjs is ONE-DIRECTIONAL: it verifies every shipped mark is backed by a ledger read, and reports the rest as '28 partial mark(s) left unverified by design'. So it catches a binding claiming a row it has not earned, and is SILENT about a binding sitting at '~' it has outgrown. That is why #lzcsregisterscoveragerow had to exist: lazily-cs earned the registers row the moment 7cc4584 landed with an empty ledger, and coverage.json would have kept reading '~' forever because nothing in make check compares a PARTIAL mark against the ledger that now contradicts it. One instance was caught by a hand-written backlog note; there are 28 unverified partial marks today and no mechanism says which are stale. Add the reverse check: for every '~' mark, if ALL of that row's cited fixtures are absent from that binding's KNOWN_UNCOVERED (and inside its REQUIRED_AREAS), the mark is provably stale — report it. Expect true positives beyond cs; run it before believing the matrix. Keep it advisory-but-failing in CI the same way the shipped-mark check is, and remember a flip can cascade into a family roll-up cell, so re-run sync-coverage.mjs and re-check the family summary for every row it moves.
 - [ ] [#lzzigspecdiroption] lazily-zig has NO corpus-dir override: SPEC_DIR in src/lazily/reactive_map.zig is a comptime const used as SPEC_DIR ++ '/x.json', so the #lzdefaultmodeuniform probe had to temporarily edit the constant and restore it. Every future corpus probe in this binding pays that cost, and a probe that edits the shared ../lazily-spec checkout instead reddens all nine bindings concurrently. Add a '-Dspec-dir' build option (or a runtime env read) threaded to every fixture path, and keep the default unchanged. Compounding trap to preserve: specFixturesPresent() makes the tests 'return error.SkipZigTest' when the path is unreadable, so a probe that changes the PATH silently converts red into skip — the option must change which bytes are read, never whether they exist.
 - [ ] [#lzktcorpusnotgradleinput] lazily-kt's conformance corpus is NOT a declared input of the gradle 'test' task, so editing a fixture leaves 'test' UP-TO-DATE and the run reports green having replayed nothing — a false green that defeats any corpus-perturbation probe. Compounding it, tasks.test wires no environment(...), so the test JVM inherits the DAEMON's environment and a daemon started before LAZILY_SPEC_DIR was set serves the stale path. Today the only defence is remembering '--no-daemon --rerun-tasks'. Declare the corpus directory as a task input so a fixture change invalidates the task, and pass the corpus-dir variable through environment(...) explicitly. Definition of done: flip one assertion key in a scratch corpus and prove a plain 'make check' (no flags, warm daemon) reddens.
 - [ ] [#lzledgeragreementaudit] A KNOWN_UNCOVERED entry in a binding's shell coverage guard does NOT stop a test host that DISCOVERS fixtures by enumerating the corpus directory from trying to replay them — the two ledgers describing the same absence can disagree silently. lazily-cs was red on HEAD for exactly this (CI 31298919123): collections/registers_convergence.json was declared uncovered in the script while CollectionsConformanceTests crashed on it with a bare KeyNotFoundException naming neither the fixture nor the reason. Fixed there in b8cdb7e by adding the Unsupported entry and making the shape dispatch fail closed. Audit the other eight bindings for the same split: for each, list the fixtures in KNOWN_UNCOVERED, check whether the runner enumerates or names fixtures, and confirm an enumerating runner has a matching in-host ledger entry plus a fail-closed default on an unrecognised fixture shape. All eight are currently green, so this is about the NEXT fixture added to the shared corpus.

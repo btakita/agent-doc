@@ -220,6 +220,49 @@ pub fn pane_has_busy_cue(content: &str, harness: &HarnessConfig) -> bool {
     harness.has_busy_cue(content)
 }
 
+/// (`#unrenderedframestorm`) Whether a pane capture is a rendered harness frame
+/// at all, and may therefore be read as evidence about the composer.
+///
+/// The live failure, operator-reported 2026-08-09 on
+/// `src/haiven-dev/tasks/haiven-dev.md`: pane-layout churn moved pane `%20`
+/// between windows, and `capture-pane` sampled it mid-render. The entire capture
+/// was 22 bytes — `ESC[38;5;246m❯ ESC[39m` — a bare prompt glyph with no
+/// composer box, no footer, and no scrollback.
+///
+/// From those 22 bytes the idle-queue drain concluded THREE wrong things at
+/// once: the composer is empty (`payload_already_pending=false`), the prompt is
+/// dispatch-ready (`dispatch_ready=true`), and by omission that no turn was
+/// running. It injected, and 31s later sampled the same unrenderable frame and
+/// injected again — eleven times, stacking eleven identical triggers into a
+/// composer whose pane was in fact 19 minutes into an active turn.
+///
+/// A successful capture is not the same as an informative one. `capture-pane`
+/// returning `Ok` only proves tmux answered, and `#idlerevisionreactive` applies
+/// to a pane exactly as it does to a controller probe: "I looked and the
+/// composer is empty" and "the frame I got cannot contain a composer" must stay
+/// distinct.
+///
+/// The discriminator is the observed one and needs no chrome matching: a
+/// rendered harness surface always has something besides the prompt line — a
+/// composer border, a footer, a status line, or prior output. A frame whose only
+/// non-empty line IS the prompt candidate answers nothing. Deliberately not
+/// keyed on harness footer text, which varies per harness and per permission
+/// mode and is what `#panedraftunblocker` already had to repair twice.
+///
+/// Deferring costs one poll interval; injecting over an active turn costs the
+/// operator a wedged session, so an ambiguous frame defers.
+pub fn pane_frame_answers_composer_state(content: &str) -> bool {
+    content
+        .lines()
+        .filter(|line| {
+            !agent_doc_turn_executor_tmux::prompt::strip_ansi(line)
+                .trim()
+                .is_empty()
+        })
+        .nth(1)
+        .is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,6 +585,50 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 45% used
 
         assert!(pane_dispatch_ready(ready_output, &harness));
         assert!(!pane_dispatch_ready(busy_output, &harness));
+    }
+
+    /// `#unrenderedframestorm`: the EXACT 22 bytes tmux returned for pane `%20`
+    /// on 2026-08-09, preserved verbatim from
+    /// `route-submit/1786246751175-idle_queue_payload_observation-claude-_20-46843cd9ff07.txt`.
+    ///
+    /// This frame is why the storm happened, so it is pinned as bytes rather than
+    /// paraphrased: a rendered-frame check written against a paraphrase would not
+    /// have caught it.
+    const UNRENDERED_CLAUDE_FRAME: &str = "\u{1b}[38;5;246m❯\u{a0}\u{1b}[39m\n";
+
+    #[test]
+    fn an_unrendered_prompt_glyph_frame_answers_nothing_about_the_composer() {
+        assert_eq!(UNRENDERED_CLAUDE_FRAME.len(), 22, "the live capture was 22 bytes");
+        assert!(!pane_frame_answers_composer_state(UNRENDERED_CLAUDE_FRAME));
+
+        // And the two values the drain used to trust are both derivable from it,
+        // which is exactly why the frame check has to gate them.
+        let harness = agent_doc_harness::HarnessConfig::claude();
+        assert!(
+            pane_dispatch_ready_at_cursor(UNRENDERED_CLAUDE_FRAME, &harness, Some(0)),
+            "the bare glyph still reads as dispatch-ready -- the frame check is \
+             the only thing that can reject it"
+        );
+        assert!(
+            !pane_has_busy_cue(UNRENDERED_CLAUDE_FRAME, &harness),
+            "and the active turn is invisible in it"
+        );
+    }
+
+    #[test]
+    fn a_rendered_frame_still_answers_the_composer_question() {
+        // A real claude pane always renders something besides the prompt line.
+        let rendered = "\u{1b}[38;5;246m❯\u{a0}\u{1b}[39m\n  ⏵⏵ bypass permissions on · 2 shells\n";
+        assert!(pane_frame_answers_composer_state(rendered));
+        // Prior output above the prompt counts too.
+        assert!(pane_frame_answers_composer_state(
+            "completed response\n❯\n"
+        ));
+        // An ANSI-only second line is not content.
+        assert!(!pane_frame_answers_composer_state(
+            "\u{1b}[38;5;246m❯\u{1b}[39m\n\u{1b}[39m\n"
+        ));
+        assert!(!pane_frame_answers_composer_state(""));
     }
 
     #[test]

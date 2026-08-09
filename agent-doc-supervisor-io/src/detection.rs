@@ -196,6 +196,15 @@ pub struct SupervisorPanePayloadObservation {
     pub cursor_y: Option<usize>,
     pub payload_already_pending: bool,
     pub dispatch_ready: bool,
+    /// (`#unrenderedframestorm`) Whether the capture is a rendered harness frame
+    /// at all. When false, `payload_already_pending` and `dispatch_ready` are
+    /// both meaningless — a 22-byte prompt-glyph-only frame reports "composer
+    /// empty, prompt ready" for a pane that is mid-turn.
+    pub frame_rendered: bool,
+    /// (`#unrenderedframestorm`) Whether the harness shows a busy cue. The drain
+    /// used to have no busy input at all, so it could not defer a mid-turn pane
+    /// even from a fully rendered frame.
+    pub pane_busy: bool,
 }
 
 pub fn supervisor_pane_payload_observation<S>(
@@ -218,12 +227,16 @@ where
     );
     let dispatch_ready =
         supervisor_detection::pane_dispatch_ready_at_cursor(&content, harness, cursor_y);
+    let frame_rendered = supervisor_detection::pane_frame_answers_composer_state(&content);
+    let pane_busy = supervisor_detection::pane_has_busy_cue(&content, harness);
     Some(SupervisorPanePayloadObservation {
         pane_id,
         content,
         cursor_y,
         payload_already_pending,
         dispatch_ready,
+        frame_rendered,
+        pane_busy,
     })
 }
 

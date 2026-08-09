@@ -889,6 +889,16 @@ enum IdleQueuePendingPayloadAction {
     DispatchFresh,
     DeferUnobservable,
     DeferComposerOwned,
+    /// (`#unrenderedframestorm`) The capture succeeded but is not a rendered
+    /// harness frame, so it answers nothing about the composer.
+    DeferUnrenderedFrame,
+    /// (`#unrenderedframestorm`) The harness is mid-turn. The drain had no busy
+    /// input at all before this, so it could not defer an active turn.
+    DeferPaneBusy,
+    /// (`#unrenderedframestorm`) This exact payload has been injected without
+    /// proof up to its budget. Stop writing the same text into the pane and wait
+    /// for an observation or document edge to change.
+    DeferInjectionBudgetSpent,
 }
 
 impl IdleQueuePendingPayloadAction {
@@ -899,28 +909,86 @@ impl IdleQueuePendingPayloadAction {
             Self::DispatchFresh => "dispatch_fresh",
             Self::DeferUnobservable => "defer_unobservable",
             Self::DeferComposerOwned => "defer_composer_owned",
+            Self::DeferUnrenderedFrame => "defer_unrendered_frame",
+            Self::DeferPaneBusy => "defer_pane_busy",
+            Self::DeferInjectionBudgetSpent => "defer_injection_budget_spent",
         }
+    }
+
+    /// Every deferral ends the tick without touching the pane.
+    fn defers(self) -> bool {
+        matches!(
+            self,
+            Self::DeferUnobservable
+                | Self::DeferComposerOwned
+                | Self::DeferUnrenderedFrame
+                | Self::DeferPaneBusy
+                | Self::DeferInjectionBudgetSpent
+        )
     }
 }
 
-fn idle_queue_pending_payload_action(
-    harness_binary: &str,
+/// (`#unrenderedframestorm`) How many times the drain may inject one byte-
+/// identical payload without ever obtaining dispatch-start proof.
+///
+/// Eleven identical triggers reached a live composer before anything stopped.
+/// Two is enough to cover a genuinely dropped first send while making an
+/// unbounded storm impossible: after that, the payload is not the problem and
+/// re-typing it cannot become the fix. The budget is per (head, payload) and is
+/// reset by a new head or a proven dispatch.
+const IDLE_QUEUE_UNPROVEN_INJECTION_BUDGET: usize = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct IdleQueuePendingPayloadFacts<'a> {
+    harness_binary: &'a str,
     payload_already_pending: Option<bool>,
     dispatch_ready: Option<bool>,
     already_resubmitted: bool,
+    /// `None` when the pane could not be captured at all.
+    frame_rendered: Option<bool>,
+    pane_busy: Option<bool>,
+    /// Unproven injections of this exact payload so far.
+    unproven_injections: usize,
+    injection_budget: usize,
+}
+
+/// `#30p6`: policy for the only safe actions after one live pane sample.
+///
+/// `#unrenderedframestorm` adds the three preconditions the original policy was
+/// missing, in the order that matters. Nothing about the composer may be read
+/// from a frame that is not rendered; a mid-turn pane is never a dispatch
+/// target; and a payload that has been written without proof up to its budget
+/// stops being rewritten.
+fn idle_queue_pending_payload_action(
+    facts: IdleQueuePendingPayloadFacts<'_>,
 ) -> IdleQueuePendingPayloadAction {
-    match payload_already_pending {
+    // Order is load-bearing: an unrendered frame must be rejected BEFORE its
+    // `payload_already_pending` / `dispatch_ready` values are consulted, because
+    // both are computed from that same meaningless capture.
+    if facts.frame_rendered == Some(false) {
+        return IdleQueuePendingPayloadAction::DeferUnrenderedFrame;
+    }
+    if facts.pane_busy == Some(true) {
+        return IdleQueuePendingPayloadAction::DeferPaneBusy;
+    }
+    match facts.payload_already_pending {
         Some(true)
             if idle_queue_pending_payload_needs_enter_resubmit(
-                harness_binary,
+                facts.harness_binary,
                 Some(true),
-                already_resubmitted,
+                facts.already_resubmitted,
             ) =>
         {
             IdleQueuePendingPayloadAction::ResubmitEnter
         }
         Some(true) => IdleQueuePendingPayloadAction::SkipProvenPending,
-        Some(false) if dispatch_ready == Some(true) => IdleQueuePendingPayloadAction::DispatchFresh,
+        Some(false) if facts.dispatch_ready == Some(true) => {
+            if facts.unproven_injections >= facts.injection_budget {
+                IdleQueuePendingPayloadAction::DeferInjectionBudgetSpent
+            } else {
+                IdleQueuePendingPayloadAction::DispatchFresh
+            }
+        }
         Some(false) => IdleQueuePendingPayloadAction::DeferComposerOwned,
         None => IdleQueuePendingPayloadAction::DeferUnobservable,
     }
@@ -934,7 +1002,17 @@ fn record_idle_queue_payload_observation(
     observation: Option<&SupervisorPanePayloadObservation>,
     action: IdleQueuePendingPayloadAction,
 ) {
-    let (pane, cursor_y, pending, dispatch_ready, capture_len, capture_hash, snapshot_path) =
+    let (
+        pane,
+        cursor_y,
+        pending,
+        dispatch_ready,
+        capture_len,
+        capture_hash,
+        snapshot_path,
+        frame_rendered,
+        pane_busy,
+    ) =
         if let Some(observation) = observation {
             let outcome = agent_doc_controller_io::route_snapshot::preserve_route_pane_snapshot(
                 file,
@@ -959,6 +1037,8 @@ fn record_idle_queue_payload_observation(
                     .path
                     .map(|path| path.display().to_string())
                     .unwrap_or_else(|| "none".to_string()),
+                observation.frame_rendered.to_string(),
+                observation.pane_busy.to_string(),
             )
         } else {
             (
@@ -969,12 +1049,14 @@ fn record_idle_queue_payload_observation(
                 "unknown".to_string(),
                 "unknown".to_string(),
                 "none".to_string(),
+                "unknown".to_string(),
+                "unknown".to_string(),
             )
         };
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "idle_queue_payload_observation file={} harness={} pane={} head_bytes={} head_sha256={} payload_bytes={} payload_sha256={} cursor_y={} payload_already_pending={} dispatch_ready={} action={} capture_len={} capture_hash={} snapshot_path={}",
+            "idle_queue_payload_observation file={} harness={} pane={} head_bytes={} head_sha256={} payload_bytes={} payload_sha256={} cursor_y={} payload_already_pending={} dispatch_ready={} frame_rendered={} pane_busy={} action={} capture_len={} capture_hash={} snapshot_path={}",
             file.display(),
             harness.binary,
             pane,
@@ -985,6 +1067,8 @@ fn record_idle_queue_payload_observation(
             cursor_y,
             pending,
             dispatch_ready,
+            frame_rendered,
+            pane_busy,
             action.as_str(),
             capture_len,
             capture_hash,
@@ -1111,6 +1195,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut context_reset_in_flight = false;
             let mut last_pending_enter_resubmitted: Option<String> = None;
             let mut last_go_payload_observation_key: Option<String> = None;
+            // `#unrenderedframestorm`: per-(head, payload) unproven-injection
+            // budget, so a byte-identical trigger cannot be written into the
+            // pane without bound.
+            let mut unproven_injection_key: Option<String> = None;
+            let mut unproven_injections: usize = 0;
             let mut clear_cooldown_logged = false;
             let mut route_submit_in_flight_logged = false;
             let mut context_clear_route_wait_logged = false;
@@ -4037,13 +4126,34 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         .as_ref()
                         .map(|observation| observation.dispatch_ready);
                     let resubmit_key = format!("drain:{head}");
-                    let pending_action = idle_queue_pending_payload_action(
-                        &harness.binary,
-                        payload_already_pending,
-                        dispatch_ready,
-                        last_pending_enter_resubmitted.as_deref()
-                            == Some(resubmit_key.as_str()),
+                    // `#unrenderedframestorm`: the injection budget is keyed by
+                    // (head, payload) so a new head or an edited payload starts
+                    // fresh, and a byte-identical retry does not.
+                    let injection_key = format!(
+                        "{}:{}",
+                        agent_doc_hash::content_hash(&head),
+                        agent_doc_hash::content_hash(&drain_payload)
                     );
+                    if unproven_injection_key.as_deref() != Some(injection_key.as_str()) {
+                        unproven_injection_key = Some(injection_key.clone());
+                        unproven_injections = 0;
+                    }
+                    let pending_action =
+                        idle_queue_pending_payload_action(IdleQueuePendingPayloadFacts {
+                            harness_binary: &harness.binary,
+                            payload_already_pending,
+                            dispatch_ready,
+                            already_resubmitted: last_pending_enter_resubmitted.as_deref()
+                                == Some(resubmit_key.as_str()),
+                            frame_rendered: payload_observation
+                                .as_ref()
+                                .map(|observation| observation.frame_rendered),
+                            pane_busy: payload_observation
+                                .as_ref()
+                                .map(|observation| observation.pane_busy),
+                            unproven_injections,
+                            injection_budget: IDLE_QUEUE_UNPROVEN_INJECTION_BUDGET,
+                        });
                     let observation_key = format!(
                         "{}:{}:{}:{}:{}",
                         agent_doc_hash::content_hash(&head),
@@ -4158,11 +4268,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         );
                         continue;
                     }
-                    if matches!(
-                        pending_action,
-                        IdleQueuePendingPayloadAction::DeferUnobservable
-                            | IdleQueuePendingPayloadAction::DeferComposerOwned
-                    ) {
+                    if pending_action.defers() {
                         log_event(
                             &mut session_log,
                             &format!(
@@ -4172,6 +4278,29 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 payload_kind,
                             ),
                         );
+                        // `#unrenderedframestorm`: the three new deferrals are
+                        // the ones that used to be silent injections, so they
+                        // reach ops.log where the storm was diagnosed from.
+                        if matches!(
+                            pending_action,
+                            IdleQueuePendingPayloadAction::DeferUnrenderedFrame
+                                | IdleQueuePendingPayloadAction::DeferPaneBusy
+                                | IdleQueuePendingPayloadAction::DeferInjectionBudgetSpent
+                        ) {
+                            agent_doc_ops_log_io::log_op(
+                                &path,
+                                &format!(
+                                    "idle_queue_dispatch_deferred file={} harness={} reason={} payload_kind={} unproven_injections={} head_sha256={} payload_sha256={} (#unrenderedframestorm)",
+                                    path.display(),
+                                    harness.binary,
+                                    pending_action.as_str(),
+                                    payload_kind,
+                                    unproven_injections,
+                                    agent_doc_hash::content_hash(&head),
+                                    agent_doc_hash::content_hash(&drain_payload),
+                                ),
+                            );
+                        }
                         continue;
                     }
                     debug_assert_eq!(
@@ -4280,19 +4409,29 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                             .observe_effect_unobservable();
                                     }
                                 }
+                                // `#unrenderedframestorm`: an injection that
+                                // never proved a dispatch start spends budget.
+                                // This counts UNPROVEN and UNOBSERVABLE alike:
+                                // the pane got the text either way, and the
+                                // eleven-trigger storm was made entirely of
+                                // outcomes that were not proof.
+                                unproven_injections = unproven_injections.saturating_add(1);
                                 agent_doc_ops_log_io::log_op(
                                     &path,
                                     &format!(
-                                        "idle_queue_dispatch_not_consumed file={} harness={} reason=dispatch_start_{} head_sha256={} payload_sha256={}",
+                                        "idle_queue_dispatch_not_consumed file={} harness={} reason=dispatch_start_{} unproven_injections={} budget={} head_sha256={} payload_sha256={}",
                                         path.display(),
                                         harness.binary,
                                         dispatch_start_observation.as_str(),
+                                        unproven_injections,
+                                        IDLE_QUEUE_UNPROVEN_INJECTION_BUDGET,
                                         agent_doc_hash::content_hash(&head),
                                         agent_doc_hash::content_hash(&drain_payload),
                                     ),
                                 );
                                 continue;
                             }
+                            unproven_injections = 0;
                             // Consume the Lazily state edge at dispatch-start
                             // proof, never merely because text was written to
                             // tmux or an accepted-only receipt was returned.
@@ -4874,18 +5013,41 @@ mod tests {
         ));
     }
 
+    /// A rendered, idle frame -- the baseline every case below varies from.
+    fn rendered_idle_facts() -> IdleQueuePendingPayloadFacts<'static> {
+        IdleQueuePendingPayloadFacts {
+            harness_binary: "codex",
+            payload_already_pending: Some(false),
+            dispatch_ready: Some(true),
+            already_resubmitted: false,
+            frame_rendered: Some(true),
+            pane_busy: Some(false),
+            unproven_injections: 0,
+            injection_budget: IDLE_QUEUE_UNPROVEN_INJECTION_BUDGET,
+        }
+    }
+
     #[test]
     fn pending_payload_action_fails_closed_without_same_capture_readiness() {
         assert_eq!(
-            idle_queue_pending_payload_action("codex", None, None, false),
+            idle_queue_pending_payload_action(IdleQueuePendingPayloadFacts {
+                payload_already_pending: None,
+                dispatch_ready: None,
+                frame_rendered: None,
+                pane_busy: None,
+                ..rendered_idle_facts()
+            }),
             IdleQueuePendingPayloadAction::DeferUnobservable
         );
         assert_eq!(
-            idle_queue_pending_payload_action("codex", Some(false), Some(false), false),
+            idle_queue_pending_payload_action(IdleQueuePendingPayloadFacts {
+                dispatch_ready: Some(false),
+                ..rendered_idle_facts()
+            }),
             IdleQueuePendingPayloadAction::DeferComposerOwned
         );
         assert_eq!(
-            idle_queue_pending_payload_action("codex", Some(false), Some(true), false),
+            idle_queue_pending_payload_action(rendered_idle_facts()),
             IdleQueuePendingPayloadAction::DispatchFresh
         );
     }
@@ -4893,13 +5055,107 @@ mod tests {
     #[test]
     fn pending_payload_action_resubmits_once_then_keeps_proven_draft_owned() {
         assert_eq!(
-            idle_queue_pending_payload_action("codex", Some(true), Some(false), false),
+            idle_queue_pending_payload_action(IdleQueuePendingPayloadFacts {
+                payload_already_pending: Some(true),
+                dispatch_ready: Some(false),
+                ..rendered_idle_facts()
+            }),
             IdleQueuePendingPayloadAction::ResubmitEnter
         );
         assert_eq!(
-            idle_queue_pending_payload_action("codex", Some(true), Some(false), true),
+            idle_queue_pending_payload_action(IdleQueuePendingPayloadFacts {
+                payload_already_pending: Some(true),
+                dispatch_ready: Some(false),
+                already_resubmitted: true,
+                ..rendered_idle_facts()
+            }),
             IdleQueuePendingPayloadAction::SkipProvenPending
         );
+    }
+
+    /// `#unrenderedframestorm`: the live storm shape. A 22-byte prompt-glyph-only
+    /// capture reported `payload_already_pending=false dispatch_ready=true` for a
+    /// pane that was 19 minutes into a turn, and the drain injected 11 times.
+    ///
+    /// The unrendered-frame rejection MUST come before those two values are
+    /// consulted, because both are computed from that same meaningless capture --
+    /// so this asserts the deferral even while they still say "empty and ready".
+    #[test]
+    fn pending_payload_action_never_trusts_an_unrendered_frame() {
+        assert_eq!(
+            idle_queue_pending_payload_action(IdleQueuePendingPayloadFacts {
+                frame_rendered: Some(false),
+                ..rendered_idle_facts()
+            }),
+            IdleQueuePendingPayloadAction::DeferUnrenderedFrame
+        );
+        // Even a frame that claims a pending draft answers nothing, so it must
+        // not reach the Enter-resubmit path either.
+        assert_eq!(
+            idle_queue_pending_payload_action(IdleQueuePendingPayloadFacts {
+                frame_rendered: Some(false),
+                payload_already_pending: Some(true),
+                ..rendered_idle_facts()
+            }),
+            IdleQueuePendingPayloadAction::DeferUnrenderedFrame
+        );
+    }
+
+    /// `#unrenderedframestorm`: the drain had no busy input at all, so it could
+    /// not defer a mid-turn pane even from a fully rendered frame.
+    #[test]
+    fn pending_payload_action_never_dispatches_into_an_active_turn() {
+        assert_eq!(
+            idle_queue_pending_payload_action(IdleQueuePendingPayloadFacts {
+                pane_busy: Some(true),
+                ..rendered_idle_facts()
+            }),
+            IdleQueuePendingPayloadAction::DeferPaneBusy
+        );
+    }
+
+    /// `#unrenderedframestorm`: the backstop. Even if some other frame shape
+    /// slips past the two guards above, one payload cannot be written into the
+    /// pane without bound -- 11 identical triggers reached a live composer.
+    #[test]
+    fn pending_payload_action_stops_reinjecting_the_same_payload() {
+        for spent in 0..IDLE_QUEUE_UNPROVEN_INJECTION_BUDGET {
+            assert_eq!(
+                idle_queue_pending_payload_action(IdleQueuePendingPayloadFacts {
+                    unproven_injections: spent,
+                    ..rendered_idle_facts()
+                }),
+                IdleQueuePendingPayloadAction::DispatchFresh,
+                "an injection within budget still dispatches"
+            );
+        }
+        assert_eq!(
+            idle_queue_pending_payload_action(IdleQueuePendingPayloadFacts {
+                unproven_injections: IDLE_QUEUE_UNPROVEN_INJECTION_BUDGET,
+                ..rendered_idle_facts()
+            }),
+            IdleQueuePendingPayloadAction::DeferInjectionBudgetSpent
+        );
+    }
+
+    #[test]
+    fn every_deferral_ends_the_tick_without_touching_the_pane() {
+        for action in [
+            IdleQueuePendingPayloadAction::DeferUnobservable,
+            IdleQueuePendingPayloadAction::DeferComposerOwned,
+            IdleQueuePendingPayloadAction::DeferUnrenderedFrame,
+            IdleQueuePendingPayloadAction::DeferPaneBusy,
+            IdleQueuePendingPayloadAction::DeferInjectionBudgetSpent,
+        ] {
+            assert!(action.defers(), "{} must defer", action.as_str());
+        }
+        for action in [
+            IdleQueuePendingPayloadAction::ResubmitEnter,
+            IdleQueuePendingPayloadAction::SkipProvenPending,
+            IdleQueuePendingPayloadAction::DispatchFresh,
+        ] {
+            assert!(!action.defers(), "{} must not defer", action.as_str());
+        }
     }
 
     #[test]

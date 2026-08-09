@@ -435,11 +435,6 @@ The tests use the real shapes from the incident: review items vanishing, and a r
 
 ### Re: 3rd pane appears after Run Agent Doc + document switch — opus-5
 
-> **Queue prompt:**
->
-> do [#backlogeditcorruptsreview]
-
-
 Filed as `#run3rdpaneswitch` at the top of the queue; taking it next, as you asked.
 
 Recording what you described precisely, because the detail that a **prompt is submitted and a turn is running** in that third pane matters: it means the extra pane is not inert layout drift, it is a live agent session. That distinguishes it from the known `#jb-nav-3pane-promote-swap` symptom, where focus-path promotion joins an incoming pane while the reconcile fails to stash the displaced one. Here the displaced pane is *busy*, and the spec's own passive-sync rule says a busy outgoing pane cannot be stashed — so the window grows instead. That is my starting hypothesis, and I will confirm it against the live layout rather than assume it.

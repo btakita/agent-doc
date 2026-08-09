@@ -220,23 +220,54 @@ And a real gap I found while doing this, filed at the **bottom** of the backlog 
 Column churn hit 12 repos (the language axis is in every README roll-up). Each got a `git commit --only -- README.md`, so the concurrent session's uncommitted `AGENTS.md` edits are still uncommitted and still theirs in all ten siblings.
 
 Queue: `#lzgdvocab`, then `#lzcppwasm`.
+
+### Re: do [#lzcppwasm] — five phases landed; the target found three real defects — opus-5
+
+`lazily-cpp` builds and **replays the canonical corpus** on wasm32. `make check` green (57 tests), `make wasm` green on both tiers, **87 core + 44 threaded distinct fixtures** replayed under Node — 118 of the 135 the native suite replays. Committed `efa68fd` + `c3a85f8`, superproject bumped at `3bdb55b9f3`.
+
+**The header analysis in the plan was right but stale in one place, and I re-measured rather than trusted it.** `lazily.hpp`'s closure is 50 headers now, not 46. More usefully, the plan listed `<atomic>` among the wasm-hostile deps — it isn't. `<atomic>` compiles and works in single-threaded wasm; only `<thread>` and friends need `-pthread`. That distinction is why the core tier is much larger than the plan's four-header sketch implied.
+
+**Tier assignment is measured, not declared.** I compiled every conformance runner with `em++` in each tier and recorded which succeeded. That turned up something the plan didn't anticipate: **21 of 30 runners are core-tier**, including codec, command, coordination, CRDT, lossless-tree and message-passing — families well outside `core.hpp`'s closure that are wasm-clean anyway. Six of them only needed `#include <lazily/lazily.hpp>` replaced with what they actually use; they were reaching for the umbrella out of habit, and that alone made them native-only. `wasm-tiers.conf` is the single source of truth for that table, read by both `tests/wasm.cmake` and the matrix guard, so the build and the published matrix cannot drift apart.
+
+**The freestanding claim is compiled, not asserted.** `tests/wasm_core_include_check.cpp` includes `core.hpp` and nothing else, builds for wasm32 on every wasm run, and checks the include guards of the umbrella and native-only headers to prove they were *not* pulled in. A grep over include lines proves only what is written — the same trap as `ResourceLoader.get_dependencies()` in the GDScript cycle.
+
+**Three defects the target surfaced, each fixed at the cause:**
+
+- **emcc defaults to `-fignore-exceptions`.** It compiles `throw` into an abort and drops every `catch`. Four suites died with `Aborted(undefined)` on precisely their error-path fixtures. The dangerous version of this isn't the crash — it's that a suite whose error-path fixtures silently never ran would still have written a manifest and looked covered.
+- **CMake's `file(STRINGS)` splits on non-ASCII bytes** without `ENCODING UTF-8`, so an em dash in a *comment* arrived as a second row and parsed as a malformed entry. Caught by the malformed-row check I had added minutes earlier, which is the argument for writing the check before you think you need it.
+- **The bench harness printed nothing at all when a stage threw** — results accumulate and print at the end, so one exception took the whole report with it. Stages now name themselves on failure; that is how `bench_scale`'s `std::bad_alloc` on the 32-bit heap was identified rather than guessed.
+
+**The matrix is generated from the manifests, and I drove the guard in seven branches** — empty manifest, missing manifest, hand-edited table, stale excuse, phantom family, unexcused gap, restored. The stale-excuse and phantom-family arms are checked in both directions exactly as `KNOWN_UNCOVERED` is; and per `#lzgdcoveragecolumn`, `WASM_ABSENT_REASONS` is the *only* narrowing mechanism, said so in the comment, because an unread second ledger does not weaken an audit — it inverts it.
+
+**One of those seven branches caught something I would have shipped.** With an empty manifest the guard exited 1 *and printed nothing*: `grep` returns 1 on no matches, and under `set -euo pipefail` that aborted the script before the floor check could say why. It failed closed, which is right, and failed silently, which is useless — and the empty case is exactly the one that needs a diagnostic.
+
+**Then I perturbed the kernel, because a replay that survives perturbation is not replaying anything.** Making `KeyedOrder::insert` prepend reddens `CollectionsFamilyConformance`, and restoring returns green. Worth flagging what it also showed: the **core tier's 18 collections fixtures did not catch it** — only the threaded tier's runner did. The core-tier replay is real, but it does not assert insertion order. That is the same shape as `#lzcoveragerowfixtures`, the next queue item.
+
+**Two things I did not do, both deliberate.** I did not touch `coverage.json` — it tracks language bindings, not build targets of one binding. And I did not split the large headers; the plan's reasoning holds and nothing I measured contradicts it.
+
+**Honest gaps.** `transport`/`reliable_sync` are native-only and not coming — they are POSIX shared memory and file-backed storage, and a wasm equivalent would be a different implementation behind the `BlobBackend` seam. `test_ipc` drives `LazilyFfiChannel`, the native C-ABI seam with no wasm consumer. Every one of those carries its reason in the matrix; there are no blank cells. Wasm benchmarks live in their own `BENCHMARKS.md` section with their own environment line, the scale ladder stops at 2M and says so at run time, and `transport` reports itself skipped rather than vanishing from the output.
+
+**CI is still running** (`31290533974`) — the emsdk download is slow. Local evidence is green, but the wasm job has never been observed passing, and its `setup-emsdk@v14` pin at `6.0.6` is the one thing I could not verify locally. Filed as `#lzcppwasmci` rather than called proven.
+
+Queue: `#lzcoveragerowfixtures`.
 <!-- agent:boundary:139c989e:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- do [#lzcppwasmci]
 - ~~do [#lzgdcoveragecolumn]~~
-- do [#lzgdvocab]
-- do [#lzcppwasm]
+- ⏭️ do [#lzgdvocab]
+- ~~do [#lzcppwasm]~~
 - do [#lzcoveragerowfixtures]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzcppwasmci] Verify the first run of the new lazily-cpp wasm CI job (run 31290533974 onward). It was authored but never observed green: mymindstorm/setup-emsdk@v14 with the pin version 6.0.6 cannot be exercised locally, and that job is the only thing enforcing the WASM.md matrix. If setup-emsdk rejects the pin, read the action's supported version list rather than falling back to 'latest' — an unpinned toolchain turns 'the tiers built' into 'the tiers built on whatever shipped this morning'. Local evidence is already green: make wasm passes both tiers with 87 core + 44 threaded distinct fixtures replayed.
 - [ ] [#lzgdvocab] Extend the lazily-gd conformance runner to the 12 reactive-graph fixtures it cannot yet replay, one op family per step: merge_cell (5 fixtures, needs the multi-write ingress mechanism), signal/dispose_signal materialization (3), fanout/churn/dispose_fanout/dispose_stale_handle bulk ops plus real id recycling (2), fail_next injectable compute failure (1), and shape=scenarios support (1). Each is named in KNOWN_UNCOVERED with its reason. Removing an entry there is the definition of done for that group.
-- [ ] [#lzcppwasm] Give lazily-cpp an Emscripten/wasm32 target with a replayed feature-coverage matrix and benchmarks per tasks/software/plan-lazily-cpp-wasm.md. Measured: the reactive core is already wasm-clean (cell.hpp closure = 8 headers, zero POSIX and zero threads; same for collections/keyed_order/statechart), work_queue.hpp needs -pthread, and the lazily.hpp umbrella (46 headers) drags in shm_open/mmap via transport.hpp — so three explicitly-labeled build tiers (core / threaded / native-only-excluded), not one build that silently drops features. Add lazily/core.hpp first to name the narrow-include contract. The coverage matrix must be generated from the runtime fixture manifest, never hand-authored: lazily-cpp's own queue tests were previously hand-transcribed rather than replayed, which is exactly the drift to avoid repeating on a new target. Wasm benchmarks go in a SEPARATE BENCHMARKS.md section with their own environment line — native -O3 numbers are not comparable. Do NOT split the large headers (context.hpp 2117 lines etc.): header size costs compile time not runtime loading, the dependency hazard is already solved at file granularity, and it would churn a released library for no behavioral gain. Do NOT flip coverage.json — it tracks language bindings, not build targets of one binding.
 - [ ] [#lzcoveragerowfixtures] Only 11 of coverage.json's 70 rows carry a `fixtures` citation, so check-coverage-claims.mjs verifies 84 shipped marks and leaves every other mark structurally unverifiable — including row 0 (reactive-graph), the one row lazily-gd is scored on. The guard is sound; it just has almost nothing to read. Add `fixtures` to the reactive-graph, materialization, statechart, collections, queue, topic, work-queue, crdt, lossless-tree, egress, and stdlib rows, citing the canonical fixtures that actually back each row's normative prose. Expect this to redden bindings whose marks are currently unbacked — that is the point, and it is why this is its own cycle rather than a rider on the GDScript column. Do NOT weaken a mark to make the guard pass without first checking whether the binding replays the fixture.
 <!-- /agent:backlog -->
 

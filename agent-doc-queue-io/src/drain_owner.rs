@@ -75,6 +75,25 @@ pub fn fresh_loop_drain_owner_lease(file: &str, now: u64) -> Option<DrainOwnerLe
     fresh_drain_owner_lease(file, now).filter(|lease| lease.owner == DRAIN_OWNER_CLAUDE_LOOP)
 }
 
+/// A loop-owned lease still inside the STALL grace window.
+///
+/// `#queuestallloopfalsepositive`: use this — never [`fresh_loop_drain_owner_lease`]
+/// — to decide whether a loop is continuing. Ownership expires in 90s so a
+/// stopped loop hands the queue back promptly, but a healthy self-paced cycle
+/// (verification suite, build/install, wakeup jitter) spans minutes and nothing
+/// refreshes the lease in between. Judging continuation by the ownership TTL made
+/// `queue_stall_detected` fire on three consecutive healthy cycles.
+pub fn loop_drain_owner_lease_within_stall_grace(file: &str, now: u64) -> Option<DrainOwnerLease> {
+    let lease = read_drain_owner_lease(file)?;
+    (lease.owner == DRAIN_OWNER_CLAUDE_LOOP
+        && agent_doc_lease::timestamp_is_fresh(
+            lease.heartbeat_secs,
+            now,
+            agent_doc_lease::drain_stall_grace(),
+        ))
+    .then_some(lease)
+}
+
 pub fn clear_drain_owner_lease(file: &str) {
     let result = state_location(file).and_then(|(project_root, document_hash)| {
         agent_doc_controller_io::project_controller::clear_coordination_lease(

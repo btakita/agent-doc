@@ -2,6 +2,40 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.193
+
+- **Fix (`#queuestallloopfalsepositive`): `queue_stall_detected` fired on every
+  healthy self-paced drain cycle.**
+
+  The stall classifier is correct and already takes a `loop_is_continuing` fact.
+  The defect was the evidence fed to it: preflight answered that question with
+  `fresh_loop_drain_owner_lease`, i.e. the drain-owner **ownership** TTL of 90s.
+
+  Those windows answer different questions. Ownership must expire fast so a
+  stopped loop hands the queue back to the unattended drainer — that is correct
+  and unchanged. Continuation is about whether a loop is still working the queue,
+  and a self-paced cycle legitimately spans minutes: a full verification suite, a
+  build/install, then a scheduler wakeup with jitter. Nothing refreshes the lease
+  mid-cycle, so by the next preflight the lease had always expired.
+
+  Measured on `tasks/agent-doc/agent-doc-bugs2.md`, from `ops.log` rather than
+  inference: `queue_drain_stall_continuation_recorded` -> next
+  `preflight_diff_start` gaps of 122s and 187s against the 90s TTL. The warning
+  fired on three consecutive healthy cycles, each of which was in fact the
+  continuation.
+
+  Continuation now uses a separate `drain_stall_grace()` (default 600s,
+  `AGENT_DOC_DRAIN_STALL_GRACE_SECS`, floored at the ownership TTL so a lease that
+  still confers ownership always still counts as continuation). A genuinely
+  stopped loop still trips the diagnostic once that longer window lapses — firing
+  late is strictly better than firing every cycle, because a warning that is
+  usually wrong trains its reader to ignore it, which costs exactly the real stall
+  it exists to catch.
+
+  `drain_stall_grace_outlasts_ownership_and_a_healthy_cycle` pins both halves: the
+  grace exceeds the two measured healthy gaps, AND the ownership TTL is shorter
+  than them — so the test also records the precondition that caused the bug.
+
 ## 0.35.192
 
 - **Fix (`#retainedwriteremedy`): a retained-write refusal told the agent nothing

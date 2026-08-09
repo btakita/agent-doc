@@ -56,9 +56,68 @@ pub fn drain_owner_ttl() -> Duration {
     Duration::from_secs(secs.max(1))
 }
 
+/// Env override for the drain-stall grace window.
+pub const DRAIN_STALL_GRACE_SECS_ENV: &str = "AGENT_DOC_DRAIN_STALL_GRACE_SECS";
+
+const DEFAULT_DRAIN_STALL_GRACE_SECS: u64 = 600;
+
+/// How long a loop-owned drain lease still counts as evidence the loop is
+/// continuing, for the STALL DIAGNOSTIC only (`#queuestallloopfalsepositive`).
+///
+/// Deliberately NOT [`drain_owner_ttl`]. Those windows answer different
+/// questions, and reusing the ownership TTL for both made the diagnostic cry
+/// wolf on every healthy cycle:
+///
+/// - **Ownership** must expire fast (90s) so a stopped loop hands the queue back
+///   to the unattended drainer. That is correct and unchanged.
+/// - **Continuation** is about whether a loop is still working through the queue.
+///   A self-paced loop's cycle legitimately spans minutes — a full verification
+///   suite, a build/install, then a scheduler wakeup with jitter — and nothing
+///   refreshes the lease mid-cycle.
+///
+/// Measured on `tasks/agent-doc/agent-doc-bugs2.md` on 2026-08-09: successive
+/// continuation-recorded -> next-preflight gaps of 122s and 187s against a 90s
+/// TTL, so `queue_stall_detected` fired on three consecutive healthy cycles.
+///
+/// A genuinely stopped loop still trips the diagnostic once this longer window
+/// lapses. Firing late is strictly better than firing every cycle: a warning
+/// that is usually wrong trains its reader to ignore it, which costs exactly the
+/// real stall it exists to catch.
+pub fn drain_stall_grace() -> Duration {
+    let secs = std::env::var(DRAIN_STALL_GRACE_SECS_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_DRAIN_STALL_GRACE_SECS);
+    // Never shorter than ownership: a lease that still confers ownership must
+    // always still count as continuation.
+    Duration::from_secs(secs.max(1)).max(drain_owner_ttl())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#queuestallloopfalsepositive`: the stall grace must outlast a healthy
+    /// self-paced cycle, and can never be shorter than ownership itself.
+    #[test]
+    fn drain_stall_grace_outlasts_ownership_and_a_healthy_cycle() {
+        assert!(
+            drain_stall_grace() >= drain_owner_ttl(),
+            "a lease that still confers ownership must still count as continuation"
+        );
+        // The measured healthy gaps that produced the false positives.
+        for observed_gap_secs in [122, 187] {
+            assert!(
+                drain_stall_grace() > Duration::from_secs(observed_gap_secs),
+                "a {observed_gap_secs}s cycle gap is healthy, not a stall"
+            );
+            assert!(
+                drain_owner_ttl() < Duration::from_secs(observed_gap_secs),
+                "precondition: ownership TTL is shorter than the gap, which is why \
+                 reusing it as continuation evidence false-fired"
+            );
+        }
+    }
 
     #[test]
     fn timestamp_freshness_uses_ttl_window() {

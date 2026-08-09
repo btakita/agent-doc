@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 01b42785-1c63-4266-b2e2-737c27b2c758
+resume: 4ac07cb4-96aa-4d0b-9ed3-ffb51c6d1ff7
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -647,6 +647,24 @@ One nuance the regressions encode: the message may still *mention* `write --comm
 **Verification:** `make check` green — 8807 passed, 0 failed, exit 0 (checked explicitly; RTK masks the exit code). Installed 0.35.204, pushed, tagged, recycled, submodule pointer pushed. CI: 31311925390 and 31312585246 in progress — observed, not awaited.
 
 Exchange is 595 lines across 25 sections; the queue is active so I am not stalling to compact.
+
+### Re: duplicate heading investigation (0.35.205) — opus-5
+
+Closed with proofs rather than a change. The item asked me to confirm the reproduction before deciding, and confirming it changed the answer.
+
+**The reproduction holds, and it is lossless.** `duplicate_re_heading_keeps_both_bodies` drives the real `merge_by_component` path with two responses sharing `### Re: #resumeuuidstallsdrain — opus-5` and asserts both bodies *and* both headings survive. So nothing was ever at risk of being dropped — which is what makes the collision a closeout problem rather than a data problem.
+
+**The property that actually mattered was one the item did not name.** If the capture-materialization guard matched on the *heading*, it would believe the second response was already staged, allow the closeout, and the response would vanish from the commit with no error anywhere — silently, and far worse than a deadlock. `a_shared_heading_with_a_different_body_is_not_materialized` pins both directions: a second response sharing a heading reads as **not** materialized against a document holding only the first, and a genuinely present one still reads as materialized. It matches on body. Good.
+
+So the answer to "should response cells key on cycle id instead of heading text" is **no**. The text keying is sound, and changing it would put `#qdedup-directive-twin`'s intentional duplicate multiplicity at risk to fix nothing. Sub-item (c) — "make the snapshot path tolerate the duplicate ordinal" — is moot for the same reason: the guard's match is correct, and 0.35.204 already removed its ability to deadlock.
+
+The two tests stay as permanent regressions. They are the point of the cycle: they pin properties that a future keying change could otherwise break in silence, and one of them guards against data loss rather than an error message.
+
+Worth naming the pattern across today's items: `#strandedremedydeadlock`, `#commitwritecommitdeadlock`, `#resumeuuidstallsdrain`, and `#addvseditidsyntax` were all one predicate duplicated in two places, or one field that could not be parsed. This one is the opposite — a suspicious-looking mechanism that turned out correct — and the only way to tell the two apart was to measure instead of assume.
+
+**Verification:** `make check` green — 8809 passed, 0 failed, exit 0 (checked explicitly; RTK masks the exit code). Installed 0.35.205, pushed, tagged, recycled, submodule pointer pushed. CI: 0.35.203 completed green; 31312585246 and 31313221808 in progress — observed, not awaited.
+
+Exchange is 615 lines across 26 sections; the queue is active so I am not stalling to compact.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
@@ -673,7 +691,6 @@ Exchange is 595 lines across 25 sections; the queue is active so I am not stalli
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#dupreheadingcollide] #agent-doc-bug Two consecutive responses with an IDENTICAL '### Re: <topic> -- <model>' heading collide in the cell-merge keyer and can strand a snapshot. Observed 2026-08-09 on tasks/agent-doc/agent-doc-bugs2.md: I reused the heading '### Re: #resumeuuidstallsdrain -- opus-5' in back-to-back cycles; split_keyed_children keyed the second occurrence as <base>:duplicate:1 (ops shows 'cell_merge conflict kind=Content component=exchange occurrence=0 identity=exchange:0:### Re: #resumeuuidstallsdrain -- opus-5:duplicate:1 policy_chose_ours=true'), and the snapshot never took the new body while HEAD still had the old one. That set up #commitwritecommitdeadlock (fixed 0.35.204). NO data was lost -- the ordinal keying is deliberately lossless, both responses were complete in the worktree, and the next cycle's preflight committed both. So this is NOT a correctness bug in split_keyed_children; the question is whether an exchange RESPONSE cell should be keyed by heading text at all, given a response is uniquely identified by its cycle/capture id. Investigate: (a) confirm the reproduction by writing two cycles with the same heading in a test fixture; (b) decide whether response cells should key on cycle id or a heading+ordinal that the capture already knows, instead of raw heading text; (c) if keying stays text-based, make the snapshot path tolerate the duplicate ordinal so the capture-materialization guard cannot be reached this way. Do NOT change ordinal semantics for operator-authored duplicate prompts -- that multiplicity is intentional (#qdedup-directive-twin).
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#hookhashfalsepositive] agent-doc's coined-id-pre-tool-use hook rejects C preprocessor directives as untracked backlog ids. Writing a file containing a line starting with a hash — pragma once, include <string> — is blocked with "would write coined id(s) #include, #pragma ... not tracked in agent:backlog". The same class of false positive already applies to CSS ids, shell comments, and agent-doc's own anchor tags quoted from SKILL.md. It is not a hard block (a bash heredoc bypasses the PreToolUse hook entirely, which is itself the interesting part — the guard is trivially avoidable while being obstructive to correct writes) but it forced a workaround into emitted C++: src/sdk-spike/ts/src/wire/code.ts assembles the directives via String.fromCharCode(35) with a comment explaining why. The guard should recognise language syntax — preprocessor directives, CSS selectors, shell/YAML comments, markdown headings — or scope itself to prose contexts. Fix belongs in agent-loop src/agent-doc, not here; remove the workaround in code.ts once it lands.

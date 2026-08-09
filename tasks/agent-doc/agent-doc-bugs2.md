@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: f07ad4a4-091e-4f34-ba5a-7199984df746
+resume: 9094b3ea-3cb6-4a75-a8f9-215caeedb493
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -709,21 +709,60 @@ The SKILL.md line budget (152) rejected a new hot-path bullet, so the marker sem
 **On your two `haiven-dev.md` reports.** I verified them; both are accurate, and together they are a *different* defect, now at the top of the backlog. The response body is visible in the working tree ("`prmergeguardpr` — done") while that same closeout's backlog item is still `[ ]` and the queue still holds `do [#prmergeguardpr]`. HEAD has neither. So this is not merely an outstanding commit — the response half became authoritative and the mutation half did not, which is exactly what closeout atomicity forbids.
 
 The agent's refusal to force disk was **correct**: `admin inspect` shows a live owner (pane `%20`, gen 69, controller and supervisor both fresh), so `--force-disk` would have clobbered the editor. But stopping there leaves the turn half-applied, and the prescribed remedy — `agent-doc commit tasks/haiven-dev.md` **from pane `%20`** — has not been run. I did not run it from here: it would abort with `pane ownership mismatch`, and that document belongs to a live session I should not reach into.
+
+### Re: do [#backlogclosemarkeroffbyone] — opus-5
+
+Both defects are fixed and shipped as **0.35.208**; the `lazily.md` report you added mid-turn is fixed and shipped as **0.35.209**. Full suite green at 8822 passed, both installed, both pushed and tagged.
+
+**The guard was right; the target really was invalid.** `op_remove_matching_tracked_line` rebuilt the component body with `body.lines().join("\n")`, which drops the trailing newline. That body is spliced back *between* the component markers, so the closing marker was welded onto the surviving last item line and `persist_pending_write` refused. The line number looked off by one because it named the welded **item** line — and it tracked the document because it is a real line number, not an offset. Nothing was one short.
+
+That also explains why it looked unconditional: the join ran even when nothing matched, so `remove` failed on every target including ones that did not exist. `edit` escaped only because it passes through `canonicalize_tracked_work_body`, which restores the newline; that is why your report saw `edit` fail on the live document but it round-trips here.
+
+Reproduced from a clean three-item document before touching anything:
+
+```
+[backlog] no matching item found
+Error: pending_write: refusing structurally invalid canonical target
+  (non_standalone_component_marker:backlog:close:line17)
+```
+
+Line 17 was `- [ ] [#ccc] third item`; the marker was line 18.
+
+Removal now runs over parsed `PendingLayout` items rather than raw lines, so a multi-line item's continuation lines leave with it instead of being orphaned — the old line filter would have stranded them. `preserve_trailing_newline_shape` pins the invariant the join broke: the body ends with a newline afterwards exactly when it did before.
+
+**The second defect was the same call site.** `remove` matched only `trim_tracked_parent_prefix(line) == target`, so the identity `backlog list` renders matched nothing. Worse than the report: even a *copied list line* failed, because `list` prints the `- ` bullet that the comparison had already stripped. `remove` now resolves the hash id first (bare or `#`-prefixed), then the full item line in either bullet form, then the bare item text. A no-match skips the write instead of persisting an unchanged document, and says what it tried to match.
+
+Coverage is the shape you asked for: first-item and last-item removal round-tripping on a document whose backlog close marker is the final component line, plus every rendered identity, continuation lines leaving with their item, and a no-match leaving the body byte-identical.
+
+### Re: `/agent-doc tasks/software/lazily.md` — hook timed out after 30s — opus-5
+
+This is `#hookcontractlost` again, through a door 0.35.207 could not close. That release made preflight *name* its refusals on stdout — but a hook the harness **kills** emits nothing at all, so `output discarded` reproduced the original silence exactly: no contract, no reason, no way for the agent to tell a slow hook from an unwired one.
+
+**Measured before changing anything:** preflight on that document takes **23-34s at ~10% CPU**. That is 2.8s of CPU across the whole process tree and roughly 20s of pure blocking — controller round trips, not compute. The cost is spread evenly across phases (~3s each) rather than concentrated, which is `#preflightprojpass`'s redundancy showing up as wall time. Claude Code's default hook timeout is 30s, so admission sat directly on the cliff and failed intermittently.
+
+There are two bounds now, and the gap between them is the point.
+
+- **Outer:** the installed Claude hook entry carries an explicit `timeout` of 120s. It is written on a fresh install *and repaired onto an already-installed entry* — the checkouts that need this most are precisely the ones already wired without it. Verified on this repo: `agent-doc hook preflight-user-prompt-submit -> timeout= 120`, no duplicate entry.
+- **Inner:** the hook runs preflight against its own 90s budget (`AGENT_DOC_PREFLIGHT_HOOK_BUDGET_SECS`) and converts an overrun into the normal `ADMISSION_FAILURE_MARKER` refusal, naming the budget and where to look. `timeout > budget` is a **compile-time** assertion — if they ever crossed, the harness would kill the hook before it could name its overrun and the silence would come straight back.
+
+Ordering stays safe by construction: `CONTRACT_MARKER` is printed only after preflight returns, so a worker finishing mid-report can emit a truncated contract but never the seal, and the three-state read still lands on "admission failed". Verified end-to-end — with a 2s budget the hook emits the marker, the document, the reason and the remedy instead of hanging.
+
+**One finding worth recording.** While verifying the success path I ran the hook against a **brand-new empty document** in the session scratchpad, and it also blew the 90s budget. That rules out document size as the driver. The cause there is the known long-path trap: the scratchpad root plus `/.agent-doc/controller.sock` is 123 bytes against `sun_path`'s 108, so the controller can never bind — and preflight burns its entire budget waiting instead of failing immediately with "socket path too long". That fast-fail is now at the top of the backlog as `#ctrlsockpathtoolong`; the accidental proof is that the new budget turned an indefinite wait into a named 90s refusal.
+
+I did not touch `#preflightprojpass` — its own item already carries an ordered plan with a self-invalidation audit that must run before anything gets wrapped, and guessing at it here would have burned that analysis.
+
+**Verification.** `make check` green both times (8817 then 8822 passed, 249 skipped); `make install` on both; pushed to `main` with tags `v0.35.208` and `v0.35.209`; controllers recycled. Both CI runs were still `in_progress` at closeout, recorded rather than waited on.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#bugprojectcontroller]
 - 🚧 do [#hookcontractlost]
-- ~~do [#commitwritecommitdeadlock]~~
-- ~~do [#resumeuuidstallsdrainbug]~~
+- do [#prmergeguardpr]
+- ~~do [#backlogclosemarkeroffbyone]~~
 - do [#run3rdpaneswitchverify]
-- ~~do [#operatorverifylive]~~
-- ~~do [#strandedremedydeadlock]~~
-- ~~do [#run3rdpaneswitch]~~
 - do [#preflightprojpass]
-- ~~do [#projpassmeasurebugrun]~~
-- ~~do [#projpasspreflightbugdeci]~~
 - do [#respondbaselineflag]
 - do [#hookhashfalsepositive]
 <!-- /agent:queue -->
@@ -736,7 +775,7 @@ The agent's refusal to force disk was **correct**: `admin inspect` shows a live 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#backlogclosemarkeroffbyone] Backlog remove/edit are blocked by an off-by-one structural guard (#agent-doc-bug). Observed 2026-08-09 on tasks/agent-doc/agent-doc-bugs2.md with 0.35.207. `agent-doc backlog <FILE> remove <id>` and `edit` fail with: pending_write: refusing structurally invalid canonical target (non_standalone_component_marker:backlog:close:lineN). The document is structurally VALID -- the close marker sits alone on its own line, and lineN points at the LAST BACKLOG ITEM, one line above it. Proof the offset tracks the document rather than any real defect: before a reap the error said line745 while the close marker was line746; after the reap removed one item the error said line744 while the close marker was line745. So the guard reads the close marker's line number one short and then validates an item line as if it were the marker. Impact: the backlog cannot be repaired through the CLI once this fires -- add/done/reap still work, but remove and edit are wedged, so a mis-identified item cannot be withdrawn. Second, smaller defect found in the same pass: `backlog list` renders an item as `[#someid]` while `backlog remove someid` and `remove '#someid'` both answer 'no matching item found', so the displayed identity is not the one the mutation commands match. Fix both and add coverage that a remove/edit of the FIRST and LAST backlog item round-trips on a document whose backlog close marker is the final component line.
+- [ ] [#bugprojectcontroller] agent-doc-bug When the project controller socket path exceeds the AF_UNIX sun_path limit (108 bytes), preflight burns its entire admission budget waiting for a controller that can never bind, instead of failing immediately with a clear reason. Observed 2026-08-09 while verifying the 0.35.209 hook budget: a brand-new EMPTY document under a 96-char session-scratchpad root blew the full 90s budget; that root plus /.agent-doc/controller.sock is 123 bytes. Document size is not the driver -- an empty document is as slow as an 87KB one under a long root. Fix: check the resolved controller socket path length against sun_path BEFORE any bind/connect wait, and fail fast naming the path, its length, the 108-byte limit, and the remedy (shorter project root, or a socket path indirection such as a per-project directory under a short runtime dir). Add coverage that a too-long root fails in well under the admission budget with that reason, and confirm agent-doc start / sync / route take the same precondition rather than only preflight.
 - [ ] [#prmergeguardpr] Closeout atomicity is violated (#agent-doc-bug): a turn's response body can become visible while the SAME closeout's backlog/queue mutations never land. Observed 2026-08-09 twice. (a) src/haiven-dev/tasks/haiven-dev.md: working tree carries the response body (`prmergeguardpr` — done, line 54) while the backlog item is still `[ ]` (line 87) and the queue still holds `do ` (line 70); HEAD has neither. session-check reports the visible write retained by the lazy delivery projection, cycle INTERRUPTED at write_applied, remedy `agent-doc commit <FILE>` from the owning pane. A real owner exists (pane %20, gen 69, controller:fresh supervisor:fresh, supervisor_pid 3854486), so refusing --force-disk was correct — but stopping leaves a half-applied turn only a manual owning-pane commit can finish. (b) Reproduced in-session on this document: `respond --stream --done ... --backlog-add ...` added the response cell via realtime backbone (r:6d9396a0846e) and THEN failed the tracked-work mutations (#preset-item-id-collision-enforce rejected a leading `#agent-doc-bug` token as an explicit id), leaving cycle-1786292460900 at write_applied with the response on disk and neither the --done nor the --backlog-add applied. AGENTS.md requires response + queue-head consumption + backlog/done mutations + snapshot + commit to succeed as one transaction or none become authoritative; case (b) proves a mutation-validation error alone can split that transaction after the response is already durable. Fix: validate ALL tracked-work mutations BEFORE the response cell is published, so a rejectable id/preset collision fails the turn with nothing applied instead of stranding a half-applied cycle. Also determine whether the retained-write guidance should distinguish 'response landed, mutations pending' from 'whole write pending', since the operator currently reads a document whose response claims an item is done while the backlog still shows it open.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.

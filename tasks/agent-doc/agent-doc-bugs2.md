@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 12520dca-8624-437c-bfe9-881cdf0fc5f3
+resume: 1404a83c-1699-4652-90f6-8f94075cf8c0
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -526,16 +526,54 @@ Those three are the sources the item had queued up to check next. They were not 
 Exchange is 466 lines across 19 sections; the queue is active so I am not stalling to compact.
 
 No new plan file and no new actionable follow-up items: the remaining work is recorded in the narrowed `#preflightprojpass` item itself, which stays at the top of the queue.
+
+### Re: #projpassmeasure — opus-5
+
+The measurement ran, and it settles both child items in one pass. Shipped **0.35.201** along the way for a bug the measurement itself surfaced.
+
+**First real attribution data**, 112 resolutions since the 0.35.199 install:
+
+| caller | count |
+|---|---|
+| `session-check` | 17 |
+| `observe_live_queue_heads` | 10 |
+| `pre_write_guards`, `verify_pane_ownership`, `canonicalize_response_for_capture`, `resume_id_owner` | 8 each |
+| ~14 more callers | 1–6 each |
+| **any preflight phase** | **0** |
+
+`answered_by=crdt_relay` is 100% — as expected, since the relay is the transport, not a consumer. That is precisely the constant that made the old reading meaningless.
+
+**There is no hot consumer.** The cost is spread across ~20 callers, which is a different problem than the item assumed. And preflight contributes *nothing*, so `#projpasspreflightbugdeci` closes exactly as it specified — "if it does not: close this with the measurement as the reason." I did not add the seven self-invalidation calls; they would have been dead weight for an optimization the data rejects.
+
+`#preflightprojpass` is re-scoped to what is actually left: `session-check` is the fattest single consumer at roughly **8 full-document resolutions per closeout**, and it runs ~30 named guards, several of which resolve independently. Threading one resolved document through the guard sequence is a within-command change — no cache, no projection pass.
+
+### Re: #resumeuuidstallsdrain — opus-5
+
+**This cycle's own contract was the bug.** Preflight handed me `queue_active: true`, `queue_drainable_head_count: 5`, and `queue_continuation_required: false` — a stop signal with five drainable heads behind it. The sole `user_intent_prompt_changes` entry was `resume: 06ff3b9e-5d68-4b7f-a0df-b8b8dd702885`: a UUID **the binary rotates every cycle**.
+
+`line_is_managed_state_only` hand-listed the managed frontmatter keys — `queue_active:`, `agent_doc_pipeline:` and its children — and did not list `resume:`. So routine bookkeeping read as fresh user intent, `prompt_changes_preempt_queue` returned true, and the drain halted with work still queued. It is a nasty one because the symptom is indistinguishable from an operator interrupting on purpose.
+
+`agent-doc-frontmatter` already owns the authoritative set — `is_agent_managed_frontmatter_key`, used by the frontmatter three-way merge to decide which keys the agent may write. The classifier derives from it now rather than keeping a second list. Third duplicated predicate this session, after `#percellconverge` and `#strandedremedydeadlock`.
+
+The regression asserts both directions — managed keys are bookkeeping, `claude_model` / `agent` / `goal` still preempt — and is mutation-checked against the pre-fix list.
+
+**Verification:** `make check` green — 8801 passed, 0 failed, exit 0 (checked explicitly; RTK masks the exit code). Installed 0.35.201, pushed, tagged, recycled, submodule pointer pushed. CI runs 31307570034 / 31308083852 / 31308629542 in progress — observed, not awaited.
+
+Exchange is 494 lines across 20 sections; the queue is active so I am not stalling to compact.
+
+No new plan file and no new actionable follow-up items: both child items are done, and the narrowed `#preflightprojpass` carries the one remaining lead.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#run3rdpaneswitchverify]
+- ⏭️ do [#run3rdpaneswitchverify]
 - ~~do [#operatorverifylive]~~
 - ~~do [#strandedremedydeadlock]~~
 - ~~do [#run3rdpaneswitch]~~
 - 🚧 do [#preflightprojpass]
+- ~~do [#projpassmeasurebugrun]~~
+- ~~do [#projpasspreflightbugdeci]~~
 - do [#respondbaselineflag]
 - do [#hookhashfalsepositive]
 <!-- /agent:queue -->
@@ -551,7 +589,7 @@ No new plan file and no new actionable follow-up items: the remaining work is re
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#hookhashfalsepositive] agent-doc's coined-id-pre-tool-use hook rejects C preprocessor directives as untracked backlog ids. Writing a file containing a line starting with a hash — pragma once, include <string> — is blocked with "would write coined id(s) #include, #pragma ... not tracked in agent:backlog". The same class of false positive already applies to CSS ids, shell comments, and agent-doc's own anchor tags quoted from SKILL.md. It is not a hard block (a bash heredoc bypasses the PreToolUse hook entirely, which is itself the interesting part — the guard is trivially avoidable while being obstructive to correct writes) but it forced a workaround into emitted C++: src/sdk-spike/ts/src/wire/code.ts assembles the directives via String.fromCharCode(35) with a comment explaining why. The guard should recognise language syntax — preprocessor directives, CSS selectors, shell/YAML comments, markdown headings — or scope itself to prose contexts. Fix belongs in agent-loop src/agent-doc, not here; remove the workaround in code.ts once it lands.
-- [ ] 🚧 [#preflightprojpass] #agent-doc-bug Redundant full-document CRDT resolutions (~186ms each). RE-SCOPED 2026-08-09 after the 0.35.199 measurement. The instrument was broken, which is why this item was re-narrowed twice onto the same wrong answer: realtime_doc_resolve hardcoded source=crdt_relay at four emit sites and omitted source at two more, so 'crdt_relay is the largest source' was reading a constant, not a caller. 0.35.199 emits the real caller in source= and moves the relay/detached/disk-only fact to answered_by=. MEASUREMENT (post-0.35.195, before the instrument fix): 494 resolutions, 489 answered by the relay, and session / idle_watch_active_queue_head / serialized_atomic_write appeared ZERO times -- they were never absent, they were unreportable. resume_id_owner is 0 post-0.35.191 and the 0.35.195 canonical-key fix is holding. REMAINING, in order: (1) re-run the source distribution over a fresh window on 0.35.199+ ops.log, now grouping by the real source= caller, and identify the top callers -- this is the first real attribution data this item will ever have had; (2) only then decide the preflight half. Its premise is currently UNSUPPORTED by measurement: preflight's seven mutating phases (run.rs exact-replay converge 300, auto-repair base index 354, repair 479, run_pending_maintenance 537, commit ~709, run_queue_maintenance 858, baseline realign 936) call invalidate_current_document_projection zero times, but no projection pass is open during preflight, so there is no stale read today and no measured cost -- the self-invalidation work is a precondition for opening the pass, not a fix. Do NOT open the pass or write a new cache until (1) says preflight is worth it.
+- [ ] 🚧 [#preflightprojpass] #agent-doc-bug Redundant full-document CRDT resolutions (~186ms each). MEASURED 2026-08-09 on 0.35.199+ with real caller attribution (the two prior narrowings were reading a hardcoded constant, fixed in 0.35.199). Result: 112 resolutions in ~15 minutes across ~20 DISTINCT callers, answered_by=crdt_relay 100% (the relay is the transport, not a consumer). Top callers: session-check 17, observe_live_queue_heads 10, then pre_write_guards / verify_pane_ownership / canonicalize_response_for_capture / resume_id_owner at 8 each, long tail below. NO preflight phase appears at all, which closed the preflight half (#projpasspreflightbugdeci) -- its premise was never supported. There is no single hot consumer left to fix; the cost is spread. REMAINING, and much narrower than the original item: session-check is the fattest single consumer at ~8 full-document resolutions per closeout on one document (17 across ~2 cycles). Audit agent-doc-session-check-io's guard sequence -- it runs ~30 named guards per closeout and several call resolve_current_document_content independently -- and thread ONE resolved document through the guard sequence instead of re-resolving per guard. That is a within-command change with no cache and no new projection pass. Do NOT open a projection pass or write a new cache; the measurement says the win is in one command's internal fan-out, not in a shared cache.
 - [ ] [#respondbaselineflag] #agent-doc-bug SKILL.md's MANDATORY persist step documents `agent-doc respond <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill`, but neither `respond` nor `write` accepts `--baseline-file` in 0.35.184 (`agent-doc respond --help` has no baseline/snapshot flag). An agent following the hot-path skill verbatim gets a clap parse error on the one step the skill calls mandatory, and the documented 'use preflight's baseline, do NOT save your own' contract has no way to be honoured. Decide one way: either add `--baseline-file` to respond/write and thread it into the diff baseline, or remove it from SKILL.md + every generated harness surface (.claude/.codex/.opencode/.cursor) and the runbooks. Reported by the operator 2026-08-08 while diagnosing the haiven-dev wedge.
 <!-- /agent:backlog -->
 

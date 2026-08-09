@@ -154,16 +154,53 @@ A's rejection runs **before** `payload_already_pending` and `dispatch_ready` are
 One correction on my own diagnostics: I initially read a controller's `--handoff-state preparing` argv as a live wedge. That is launch argv, not live state — RPCs answered in 50ms. Disregard it.
 
 Thanks for the screenshot. The 31s cadence and the stacked-identical-payload shape are what made this findable at all.
+
+### Re: do [#unrenderedframestormlive] — opus-5
+
+> **Queue prompt:**
+>
+> do [#unrenderedframestormlive]
+
+
+Both automatic proofs pass. `#unrenderedframestorm` (61d47dd27) is live in production and its guard has fired.
+
+**Proof 1 — the new observation shape is running.** `frame_rendered=` now appears in `idle_queue_payload_observation`, first at `2026-08-09T03:59:07Z`, 13 seconds after the 03:58:54Z install:
+
+```
+[2026-08-09T03:59:07Z] idle_queue_payload_observation file=tasks/agent-doc/agent-doc-bugs2.md
+  harness=claude pane=%25 ... dispatch_ready=false frame_rendered=true pane_busy=true
+  action=defer_pane_busy
+```
+
+Four lines carry it: three in `agent-loop/.agent-doc/logs/ops.log` (03:59:07Z, 04:00:08Z, 04:00:59Z) and one in `src/haiven-dev/.agent-doc/logs/ops.log` for `tasks/sdk.md` at 04:06:47Z. Every `idle_queue_payload_observation` before the install lacks the field, so the split is exactly at the install boundary — this is the new image, not a coincidence of formatting.
+
+**Proof 2 — a guard actually fired, and it is a new one.** Three `idle_queue_dispatch_deferred` lines, each tagged with the fix id:
+
+```
+[2026-08-09T03:59:07Z] idle_queue_dispatch_deferred file=tasks/agent-doc/agent-doc-bugs2.md
+  harness=claude reason=defer_pane_busy payload_kind=trigger unproven_injections=0
+  ... (#unrenderedframestorm)
+```
+
+`git show 61d47dd27` confirms `defer_pane_busy` is not a pre-existing reason being re-observed — the commit introduces the `DeferUnrenderedFrame` / `DeferPaneBusy` / `DeferInjectionBudgetSpent` variants together. So these deferrals are the new code path, not old behavior with a new label.
+
+**The decisions are also correct, not merely logged.** Post-install idle-queue outcomes across every project: `defer=3, dispatch_fresh=0` in agent-loop, `defer=0, dispatch_fresh=1` in haiven-dev. The three deferrals all read `frame_rendered=true pane_busy=true` — a *rendered* frame that truthfully showed a busy pane, so the drain correctly declined. The single dispatch read `frame_rendered=true pane_busy=false`. Both directions are exercised, and no injection storm has recurred.
+
+**The supervisor concern in the item is resolved, but a different one replaced it.** PID 3854486 (`tasks/haiven-dev.md`, started Sat 08-08 03:42:57) was flagged as holding the pre-fix image. It does not: `readlink /proc/3854486/exe` returns the path with no `(deleted)` marker, and the resolved inode matches the installed binary. Since `cargo install` replaces by rename, a process still mapping the old image would necessarily show `(deleted)`. It re-exec'd at an idle boundary as designed — a re-exec preserves PID and start time, which is why the old start timestamp misled the original diagnosis.
+
+Surveying all eight live supervisors that way turned up one that genuinely has not: **PID 4069526** (`src/boost-client/tasks/monsterrodholders.md`, started Wed 08-05 19:12:50) still maps `(deleted)`, while logging normally at 03:59:58Z — a minute *after* the install. It is the only one launched without `--route-owned`, which points at the idle-boundary re-exec being gated on the route-owned lane. That is the separate stale-supervisor-reexec defect the item said to file rather than fold in; it is now `#stalesupervisorreexec` at the top of the backlog with the PID, start time, and the hypothesis to test first.
+
+No code changed this cycle — this was the verification the item asked for.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#unrenderedframestormlive]
-- ⏭️ do [#panewindowdrift]
-- do [#preflightprojpass]
+- ~~do [#unrenderedframestormlive]~~
+- do [#panewindowdrift]
+- ⏭️ do [#preflightprojpass]
 - do [#loopcontractseal]
-- ⏭️ do [#respondbaselineflag]
+- do [#respondbaselineflag]
 - do [#hookhashfalsepositive]
 <!-- /agent:queue -->
 
@@ -175,7 +212,7 @@ Thanks for the screenshot. The 31s cadence and the stacked-identical-payload sha
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#unrenderedframestormlive] #agent-doc-bug LIVE CONFIRMATION for #unrenderedframestorm (fix landed 61d47dd27, installed, controllers recycled): the new code path is UNEXERCISED in production -- zero idle_queue_payload_observation lines have run since the 03:58:54Z install, and the long-lived supervisor for src/haiven-dev/tasks/haiven-dev.md (PID 3854486, started 2026-08-08 03:42) still holds the pre-fix image until its next idle-boundary reexec. Automatically checkable, so do NOT file this as an operator-verify review item: grep any project ops.log for an idle_queue_payload_observation line containing frame_rendered= (proves the new observation shape is live) and for idle_queue_dispatch_deferred reason=defer_unrendered_frame / defer_pane_busy / defer_injection_budget_spent (proves a guard actually fired). If a supervisor never adopts the new image at an idle boundary, that is a separate stale-supervisor-reexec defect and needs its own item with the observed PID and start time.
+- [ ] [#stalesupervisorreexec] #agent-doc-bug STALE SUPERVISOR NEVER RE-EXECS: found while proving #unrenderedframestormlive. PID 4069526, started Wed 2026-08-05 19:12:50 EDT, command `agent-doc start --resume 019fd336-7ce8-7ed1-8141-d77021a00085 /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md` -- `readlink /proc/4069526/exe` returns `/home/brian/.cargo/bin/agent-doc (deleted)`, i.e. it still maps the pre-install inode after the 2026-08-08 23:58:54 EDT (03:58:54Z) cargo install replaced the binary by rename. It is NOT a dead process: src/boost-client/.agent-doc/logs/ops.log shows crdt_current_text / controller_crdt_replica_handled at 2026-08-09T03:59:58Z, one minute AFTER the install, so it reached activity boundaries and did not adopt the new image. All seven other live supervisors (336290, 523099, 577794, 837794, 3268523, 3854486, 3956615) resolve /proc/PID/exe with no (deleted) marker, so the idle-boundary re-exec path DOES work for them. The one structural difference: 4069526 is the only one launched WITHOUT `--route-owned` (plain `agent-doc start --resume <id> <FILE>`); every re-exec'd supervisor carries `--route-owned --route-owned-reap-policy keep-alive|auto`. HYPOTHESIS TO TEST FIRST: the idle-boundary reexec is gated on the route-owned lane, so a non-route-owned `agent-doc start` supervisor pins its image for its whole lifetime (here 4 days) and silently serves stale behavior -- every fix shipped since 08-05 is absent from that project's controller. Verify by launching a plain `agent-doc start <FILE>` supervisor, installing a new binary, driving an idle boundary, then re-checking /proc/PID/exe for the (deleted) marker. Fix so the re-exec check runs on the shared idle boundary regardless of route ownership, and add a startup/doctor receipt that reports a (deleted) exe target as an explicit stale_image finding instead of leaving it invisible. Detection is cheap and automatic (readlink /proc/PID/exe), so wire it into `agent-doc doctor` / `admin detect` rather than filing it as operator-verify.
 - [ ] [#hookhashfalsepositive] agent-doc's coined-id-pre-tool-use hook rejects C preprocessor directives as untracked backlog ids. Writing a file containing a line starting with a hash — pragma once, include <string> — is blocked with "would write coined id(s) #include, #pragma ... not tracked in agent:backlog". The same class of false positive already applies to CSS ids, shell comments, and agent-doc's own anchor tags quoted from SKILL.md. It is not a hard block (a bash heredoc bypasses the PreToolUse hook entirely, which is itself the interesting part — the guard is trivially avoidable while being obstructive to correct writes) but it forced a workaround into emitted C++: src/sdk-spike/ts/src/wire/code.ts assembles the directives via String.fromCharCode(35) with a comment explaining why. The guard should recognise language syntax — preprocessor directives, CSS selectors, shell/YAML comments, markdown headings — or scope itself to prose contexts. Fix belongs in agent-loop src/agent-doc, not here; remove the workaround in code.ts once it lands.
 - [ ] [#panewindowdrift] #agent-doc-bug REMAINING HALF (diagnosis landed 6f1af3f6b): the pane-layout survey still admits a stashed pane as a visible column, so editor auto-focus is still mirrored onto a pane the operator cannot see — session doctor now REPORTS the drift but nothing prevents it. apply_pane_layout_focus_effect (agent-doc-controller-io/src/project_controller/rpc.rs:18121) resolves the focus document to a pane from file_panes and calls select_pane with no notion of window; its call sites (18356, 18501) already hold a tmux handle (|pane| tmux.select_pane(pane)) so the guard is cheap to inject. BLOCKER — the projection model has no explicit 'visible window' concept to compare against, and picking the wrong reference (active window / first pane's window / majority window) would break legitimate multi-window layouts. Decide that reference first, then refuse focus for a non-co-visible pane with an explicit receipt reason, and stop counting it toward observation=synced. Reuse the landed pure predicate agent_doc_controller::pane_layout::pane_window_binding_drifted (unknown on either side is never drift). Add SimWorld coverage for a stashed-pane column.
 - [ ] [#preflightprojpass] #agent-doc-bug Preflight never opens the current-document projection pass, so one preflight makes ~49 redundant full-document CRDT resolutions (98 controller_crdt_current_text / crdt_current_text ops-log lines for a 13.8KB doc) at ~186ms each -- the entire 15-18s preflight wall time, and the cost auto-sync inherits. Measured: the process sits in unix_stream_read_generic for essentially the whole run; session-check alone accounts for 11 logical reads. NOT git (46 subprocesses = 0.05s), NOT tmux (24 = 0.03s), NOT controller serialization (admin detect answers in 0.06s even mid-preflight), NOT machine load (reaping 866 leaked controllers took load 18.59 to 2.08 and preflight stayed 20.84s). Do NOT write a new cache: agent-doc-document-realtime-io/src/current_document_projection.rs already is the right one, keyed by the live Yrs state vector (or disk hash when detached) and read via try_resolve_current_document_with_source then resolve_projection; its doc comment names the trap ('memoizing only by path can hide operator edits made during the pass'). commit-io, closeout-runtime-io and compact-io all open the pass and passes nest; agent-doc-preflight-command-io/src/run.rs run_with_options does not. BLOCKER (PREFLIGHT HALF ONLY) -- wrapping preflight is unsafe today: only agent-doc-commit-io/src/lib.rs:891 calls invalidate_current_document_projection (session-check calls its alias at 10+ sites), while preflight's own mutating phases call it ZERO times because with no pass open none is needed -- exact-replay converge (run.rs:300), auto-repair base index (354), repair (479), run_pending_maintenance (537), commit (~709), run_queue_maintenance (858), baseline realign (936). Safe order for that half: make each preflight mutator SELF-invalidate (the discipline session-check already follows), THEN open the pass in run_with_options, THEN a regression test that a post-mutation read observes the new text. RE-MEASURED 2026-08-09 03:20-03:28Z, operator reported auto-sync going from acceptable latency to extremely laggy: 170 resolutions on agent-doc-bugs2.md (22.8KB) in 8 minutes, up to 14 in a SINGLE second, and EVERY one returned the identical len=22846 hash=83f91d63 -- the redundancy is NOT preflight-scoped. The hot consumer is the realtime relay / auto-sync path (realtime_doc_resolve authority=editor_buffer reason=crdt_relay_current source=crdt_relay), and the preflight blocker above does NOT gate it: no preflight mutator has to self-invalidate first. DO THE RELAY CONSUMER FIRST for the operator-visible latency win, then the preflight half behind its stated safe order. Ruled out as causes of that lag: pane-layout survey (pane_layout_survey_timing elapsed_ms=5-29 across the whole window, so pane count is not the cost) and controller RPC health (admin detect 0.05s, session status 0.60s).

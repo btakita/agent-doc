@@ -115,8 +115,32 @@ fn run_preflight_for_prompt(prompt: &str, cwd: &Path) -> HookAdmission {
     let Some(target) = invoked_document(prompt) else {
         return HookAdmission::NotATrigger;
     };
+    // `#hooktriggerunresolved`: this used to collapse into `NotATrigger`, which
+    // is silence — and silence is what the whole `#hookcontractlost` design
+    // exists to prevent. `invoked_document` already matched, so the prompt IS an
+    // `agent-doc <FILE>` trigger; only the PATH failed to resolve. Reporting
+    // that as "not a trigger" makes a real admission failure indistinguishable
+    // from an unrelated prompt, and the agent is told to treat the missing
+    // contract as a harness defect it cannot diagnose.
+    //
+    // Observed 2026-08-09: a `/loop agent-doc tasks/agent-doc/agent-doc-bugs2.md`
+    // turn produced NO marker of either kind and no preflight activity at all.
+    // A repo-relative target resolves against the hook's cwd, so any cwd that is
+    // not the project root silently un-triggers the hook.
+    //
+    // The branch below already states the rule for the other failure path: "A
+    // trigger that reached preflight must never produce silence". The same is
+    // true one line earlier.
     let Some(file) = resolve_document(cwd, &target) else {
-        return HookAdmission::NotATrigger;
+        let err = anyhow::anyhow!(
+            "`{target}` did not resolve to a file from cwd `{}`. A relative document path \
+             resolves against the hook's working directory; re-run from the project root, or \
+             invoke the trigger with an absolute path.",
+            cwd.display()
+        );
+        eprintln!("[agent-doc] preflight hook failed: {err:#}");
+        emit_admission_failure(&target, &err);
+        return HookAdmission::Failed;
     };
 
     match run_preflight_within_budget(&file, hook_admission_budget()) {
@@ -292,6 +316,36 @@ pub fn handle_codex_user_prompt_submit() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    /// `#hooktriggerunresolved`: a trigger whose document path does not resolve
+    /// must FAIL LOUDLY, not read as an unrelated prompt.
+    ///
+    /// Both were `NotATrigger`, i.e. total silence — the exact state
+    /// `#hookcontractlost` exists to prevent, and the one the agent is told to
+    /// treat as an unfixable harness defect. Observed 2026-08-09: a
+    /// `/loop agent-doc tasks/agent-doc/agent-doc-bugs2.md` turn produced no
+    /// marker of either kind and no preflight activity at all.
+    #[test]
+    fn a_trigger_whose_path_does_not_resolve_fails_loudly() {
+        let dir = tempfile::tempdir().unwrap();
+        // The prompt IS a trigger; only the path is wrong for this cwd.
+        assert_eq!(
+            run_preflight_for_prompt("/loop agent-doc tasks/missing.md", dir.path()),
+            HookAdmission::Failed,
+            "an unresolvable trigger must be a named failure, never silence"
+        );
+
+        // A genuinely unrelated prompt is still a silent no-op — the hook must
+        // not start shouting about every prompt in the session.
+        assert_eq!(
+            run_preflight_for_prompt("what does this function do?", dir.path()),
+            HookAdmission::NotATrigger,
+        );
+        assert_eq!(
+            run_preflight_for_prompt("/loop check the deploy", dir.path()),
+            HookAdmission::NotATrigger,
+        );
+    }
     use super::*;
 
     /// `#hookcontractlost`: a preflight that outruns its budget must produce a

@@ -2,6 +2,35 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.219
+
+- **Fix (`#hooktriggerunresolved`): a trigger whose document path did not resolve
+  went completely silent, which is the one state the hook contract forbids.**
+
+  `run_preflight_for_prompt` had two silent exits that meant very different
+  things. `invoked_document` returning `None` is a genuine non-trigger and a
+  correct no-op. But `resolve_document` returning `None` means the prompt **was**
+  an `agent-doc <FILE>` trigger and only the PATH failed — and that also returned
+  `NotATrigger`, emitting neither the contract marker nor the admission-failure
+  marker.
+
+  That is exactly `#hookcontractlost`: the agent cannot distinguish an absent
+  hook from a refusing one, is told to treat it as a harness defect it cannot
+  diagnose, and stops. The branch immediately below already states the rule —
+  "A trigger that reached preflight must never produce silence" — but the
+  protection began one line too late.
+
+  Observed 2026-08-09 on `tasks/agent-doc/agent-doc-bugs2.md`: a
+  `/loop agent-doc tasks/agent-doc/agent-doc-bugs2.md` turn produced no marker of
+  either kind and no preflight activity at all. A repo-relative target resolves
+  against the hook's working directory, so any cwd that is not the project root
+  silently un-triggers the hook.
+
+  An unresolvable trigger now emits the admission-failure marker with the target,
+  the cwd it was resolved against, and the remedy. A genuinely unrelated prompt
+  is still a silent no-op — the hook must not start shouting about every prompt
+  in the session, and that case has its own assertions. Mutation-checked.
+
 ## 0.35.218
 
 - **Fix (`#queueblockquoteintent`): the binary's own queue-prompt echo stalled

@@ -2,6 +2,39 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.191
+
+- **Perf (`#preflightprojpass`, partial): the resume-claim scan materialized
+  EVERY document in `state.db` to read two frontmatter fields.**
+
+  `resume_id_owner` walks every `canonical_path` in `state.db` looking for a
+  document that claims the requested conversation id, and resolved each one
+  through the realtime authority — a full CRDT materialization (~186ms measured)
+  per document, O(documents) of them for a single claim check. The revision API's
+  own doc comment warns against exactly this ("reaching for the text entry point
+  and discarding the body").
+
+  Measured on this project's `ops.log`: `source=start_resume_id_capture` (136)
+  and `source=resume_id_owner` (54) were the two largest resolution sources,
+  ahead of `session` (98) and `idle_watch_active_queue_head` (50).
+
+  The scan now probes the cheap revision first. A `Detached` document — one no
+  live editor owns — has disk as its authority, so the expensive path would only
+  fall back to the same bytes; it now reads disk directly. Attached documents
+  keep the authoritative path.
+
+  Deliberately fail-safe: a document whose probe ERRORS also keeps the
+  authoritative path. A missed claim adopts someone else's conversation, so an
+  unclassifiable document is never downgraded to a possibly-stale disk read.
+  `only_a_detached_resume_claim_candidate_reads_disk` pins all four cases.
+
+  **Scope: this does not close `#preflightprojpass`.** The item's two named
+  halves are untouched — the preflight half is still behind its recorded blocker
+  (preflight's seven mutating phases must self-invalidate before the pass may
+  wrap `run_with_options`), and the relay-consumer half remains. This fixes a
+  THIRD consumer that the measurement surfaced as the largest one, and the item
+  stays open, narrowed with these numbers.
+
 ## 0.35.190
 
 - **Fix (`#idcollisionnamespace`): a derived item id could duplicate an id that

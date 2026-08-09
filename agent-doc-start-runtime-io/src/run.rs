@@ -185,12 +185,28 @@ fn resume_id_owner(canonical: &Path, request: &agent_doc_harness::ResumeRequest)
         }
         // Prefer realtime content (editor buffer is authoritative for open
         // documents); fall back to disk for closed ones.
-        let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
-            Path::new(&other),
-            "resume_id_owner",
-        )
-        .or_else(|_| std::fs::read_to_string(&other))
-        .ok();
+        //
+        // `#preflightprojpass`: probe the cheap revision FIRST. This loop runs
+        // over every document in `state.db`, and materializing each one through
+        // the realtime authority costs a full CRDT resolution (~186ms) just to
+        // read two frontmatter fields — O(documents) of them for a single
+        // resume-claim check. A `Detached` document has no live editor, so disk
+        // IS its authority and the expensive path would only fall back to the
+        // same bytes. Anything attached still resolves through the authority.
+        let other_path = Path::new(&other);
+        let detached = resume_claim_candidate_reads_disk(
+            agent_doc_crdt_relay_io::current_revision_for_file(other_path).as_ref(),
+        );
+        let content = if detached {
+            std::fs::read_to_string(other_path).ok()
+        } else {
+            agent_doc_document_realtime_io::try_resolve_current_document_content(
+                other_path,
+                "resume_id_owner",
+            )
+            .or_else(|_| std::fs::read_to_string(other_path))
+            .ok()
+        };
         let Some(content) = content else {
             continue;
         };
@@ -212,6 +228,22 @@ fn resume_id_owner(canonical: &Path, request: &agent_doc_harness::ResumeRequest)
         }
     }
     None
+}
+
+/// Whether a resume-claim candidate's frontmatter may be read straight from disk.
+///
+/// `#preflightprojpass`: only a `Detached` document — one no live editor owns —
+/// has disk as its authority. Everything else, INCLUDING a failed probe, keeps
+/// the realtime path: a document we cannot classify must not be silently
+/// downgraded to a possibly-stale disk read, because a missed claim adopts
+/// someone else's conversation.
+fn resume_claim_candidate_reads_disk(
+    revision: Result<&agent_doc_crdt_relay_io::CurrentRevision, &anyhow::Error>,
+) -> bool {
+    matches!(
+        revision,
+        Ok(agent_doc_crdt_relay_io::CurrentRevision::Detached)
+    )
 }
 
 /// Mint the conversation id for this launch, put it on the harness command line,
@@ -2427,6 +2459,35 @@ mod tests {
             Some(agent_doc_harness::ResumeRequest::Id(
                 "orchard-thread".into()
             ))
+        );
+    }
+
+    /// `#preflightprojpass`: the claim scan walks every document in `state.db`
+    /// and used to materialize each one through the realtime authority — a full
+    /// CRDT resolution (~186ms) to read two frontmatter fields. Only a detached
+    /// document may take the cheap disk read; an attached one, or one we failed
+    /// to classify, must keep the authoritative path so a claim is never missed.
+    #[test]
+    fn only_a_detached_resume_claim_candidate_reads_disk() {
+        use agent_doc_crdt_relay_io::CurrentRevision;
+
+        assert!(resume_claim_candidate_reads_disk(Ok(
+            &CurrentRevision::Detached
+        )));
+        assert!(!resume_claim_candidate_reads_disk(Ok(
+            &CurrentRevision::EditorAttachedMissingReplica
+        )));
+        assert!(!resume_claim_candidate_reads_disk(Ok(
+            &CurrentRevision::Current {
+                state_vector: Vec::new(),
+                live_editors: 1,
+                delivery_converged: true,
+            }
+        )));
+        let error = anyhow::anyhow!("probe failed");
+        assert!(
+            !resume_claim_candidate_reads_disk(Err(&error)),
+            "an unclassifiable document must not be downgraded to a stale disk read"
         );
     }
 

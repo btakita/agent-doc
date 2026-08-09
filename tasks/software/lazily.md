@@ -272,23 +272,48 @@ The audit is now stated against the **canonical corpus** instead of against nati
 Re-driven after the change: stale excuse and unexcused gap both still fail, and the guard passes with the native manifest absent — the exact CI condition that failed. `make check` green (57 tests), `make wasm` green on both tiers.
 
 Queue: `#lzcoveragerowfixtures`.
+
+### Re: do [#lzgdvocab] — 5 of 12 fixtures landed; two op families remain — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzgdvocab]
+
+The runner now replays **14 of 21** canonical reactive-graph fixtures, up from 9. `KNOWN_UNCOVERED` drops from 12 named excuses to **7**. Commits `2a13609` and `0254fa0`, superproject at `53a59648ad`; the first is CI-green and the second is running.
+
+Three op families landed, in the order the item itself prescribes.
+
+**`signal` / `dispose_signal` (3 fixtures).** A signal is `ctx.computed(fn).eager()` — an eager `Computed`, not a distinct kind. The only observable that can tell the two apart is `computes_of`: a lazy and an eager computed return identical *values* for every read sequence in these fixtures, so a values-only assertion passes against a binding whose eager construct never materializes.
+
+**`dispose_signal` needed real kernel work, not a runner alias.** It does not dispose anything — it de-eagers, and the backing value must stay readable *and* stay fresh. Routing it to `dispose()` makes the value unreadable; freezing it at the last eager materialization looks correct if you only check that the read succeeds. So `Computed.lazy()` clears the eager bit and deliberately leaves `_stale` alone. I also corrected a comment on `dispose()` that cited this fixture as its justification — that path is teardown, and the citation was wrong.
+
+**`fail_next` (1).** The failure is injected in the runner, not the kernel: the contract is that a failed compute is never cached, and that holds however the body failed. A kernel-side failure switch would test the switch.
+
+**`shape=scenarios` (1)**, plus `batch`.
+
+**Two gaps this turned up, both fixed rather than noted.** `cleanup_order` only observed *effects* — scope-owned computeds and explicitly disposed cells recorded nothing, so the fixture's entire claim (that scope teardown equals the fold of individual disposals) could not be evaluated, because one of the two routes was invisible. And a scenario the runner *skips* raises no failures of its own, so replaying 1 of 2 scenarios would have reported the fixture conformant; the suite now asserts replayed scenario ids against the declared ones.
+
+**The perturbation that matters most:** welding eagerness into invalidation — re-pulling per *write* instead of per batch — reddens **only** `signal_materializes_once_per_batch`. That is the clause-3 defect that ships unnoticed, since the final value is correct and only the work doubles. It is the known lazily-go failure, and no other fixture in the corpus can catch it. Separately, a no-op `lazy()` reddens only `dispose_signal_reverts_to_lazy`.
+
+**One perturbation did not redden, and that was worth knowing.** Deleting the per-scenario state reset left `scope_teardown_equals_fold_of_disposals` green — both of its scenarios define the same ids, so a leaking runner just overwrites the stale entries. The isolation was correct by construction and unproven by the corpus, so it now has its own test on a synthetic input. Synthetic input is right there and nowhere else in this suite: it tests the runner's bookkeeping, not a normative expectation.
+
+**What remains, and why it is not done.** Two families, 7 fixtures. `merge_cell` (5) is the only group needing **kernel** work — a folding `Source` with a merge policy, plus the `merges_of` observable — and `fanout`/`churn` (2) needs real id recycling, which Godot's monotonic instance ids do not provide. I narrowed `#lzgdvocab` to exactly those two rather than closing it, since the item's own framing is one op family per step and each group's definition of done is removing its `KNOWN_UNCOVERED` entries.
+
+`make check` green: 26 test cases, 0 orphans.
 <!-- agent:boundary:139c989e:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzcppwasmci]~~
-- ~~do [#lzgdcoveragecolumn]~~
-- ⏭️ do [#lzgdvocab]
-- ~~do [#lzcppwasm]~~
+- ~~⏭️ do [#lzgdvocab]~~
 - do [#lzcoveragerowfixtures]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzgdvocab] Extend the lazily-gd conformance runner to the 12 reactive-graph fixtures it cannot yet replay, one op family per step: merge_cell (5 fixtures, needs the multi-write ingress mechanism), signal/dispose_signal materialization (3), fanout/churn/dispose_fanout/dispose_stale_handle bulk ops plus real id recycling (2), fail_next injectable compute failure (1), and shape=scenarios support (1). Each is named in KNOWN_UNCOVERED with its reason. Removing an entry there is the definition of done for that group.
+- [ ] [#lzgdvocab] Finish the lazily-gd conformance runner: 7 of the 21 canonical reactive-graph fixtures remain, in two op families. (a) merge_cell (5 fixtures: exact_fold_paths_stay_exact, merge_cell_acquires_no_dependency_edge, merge_feed_through_a_formula_coalesces, merge_folds_synchronously_in_batch, merge_per_settled_cone_not_per_write) — this is the one group needing KERNEL work, a folding Source with a merge policy (source_with/merge), plus the merges_of observable. (b) fanout/churn/dispose_fanout/dispose_stale_handle bulk ops plus real id recycling (2 fixtures: churn_returns_to_baseline, recycled_id_inherits_nothing) — recycling needs explicit work beyond Godot instance ids, which are monotonic and never alias. Each is named in KNOWN_UNCOVERED with its reason; removing an entry there is the definition of done for that group. Landed already: signal/dispose_signal (3), fail_next (1), shape=scenarios (1) — 14/149 replayed, 7 named excuses.
 - [ ] [#lzcoveragerowfixtures] Only 11 of coverage.json's 70 rows carry a `fixtures` citation, so check-coverage-claims.mjs verifies 84 shipped marks and leaves every other mark structurally unverifiable — including row 0 (reactive-graph), the one row lazily-gd is scored on. The guard is sound; it just has almost nothing to read. Add `fixtures` to the reactive-graph, materialization, statechart, collections, queue, topic, work-queue, crdt, lossless-tree, egress, and stdlib rows, citing the canonical fixtures that actually back each row's normative prose. Expect this to redden bindings whose marks are currently unbacked — that is the point, and it is why this is its own cycle rather than a rider on the GDScript column. Do NOT weaken a mark to make the guard pass without first checking whether the binding replays the fixture.
 <!-- /agent:backlog -->
 

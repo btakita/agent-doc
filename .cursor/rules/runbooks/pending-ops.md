@@ -173,6 +173,29 @@ That keeps the ordered batch stable when Step 1 / Step 2 already exist and you
 are only promoting Step 3 in a later cycle. If the predecessor is not already in
 backlog, fall back to the normal front-insertion rule.
 
+### Queue mirror order (`#queuemirrororder`)
+
+The `agent:queue` mirror follows the backlog anchor, not the placement edge. An
+id filed with `--backlog-add-after <X>` lands directly after `#X`'s live queue
+head; only an id with no already-queued predecessor -- every plain
+`--backlog-add`, which prepends to the backlog head -- uses
+`--backlog-queue-placement` (default `prepend`, the `#queueatcreate` head
+default). Before this, an anchored item was prepended, landing *before* the very
+id it was filed after -- inverting the pair exactly when the anchor was chosen
+because order matters.
+
+To fix an order that is already in the queue, use `--backlog-reorder`: it
+cascades into the mirror, permuting only the named live heads among the slots
+they already occupy, so operator free-text lines, struck entries, and unnamed
+heads keep their exact positions (`#qauthorder`). `agent-doc queue sync` cannot
+do this -- it skips ids already present (`reason: already_in_queue`) and is
+therefore append-only. Do **not** reach for `--done` / `--backlog-gate` to move
+an item: both assert something false about its state.
+
+A write whose only mutation is an ordering or text/metadata edit is exempt from
+the imperative-directive evidence guard -- it has no command output or commit to
+cite, and the applied mutation is the evidence.
+
 ## Plan-backed backlog items
 
 If a backlog item points at a dedicated plan document, create the plan file
@@ -266,7 +289,7 @@ plan path into another `.md` file.
 Add one, mark two done, reword another:
 
 ```bash
-cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline> --stream --origin skill \
+cat <<'RESPONSE' | agent-doc respond <FILE> --stream --origin skill \
   --backlog-add "integration test for --backlog-reorder" \
   --done a3f2 --done b1c4 \
   --backlog-edit "c9e0=refactor preflight: use single exit point"

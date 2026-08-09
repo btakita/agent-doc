@@ -28924,8 +28924,19 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
             "plan.rs must not re-own active queue activation policy: {forbidden_snippet}"
         );
     }
+    // `#planhead`: plan must not derive its own "which head is next" either.
+    // `queue_heads::active_queue_prompt` returns the FIRST head regardless of
+    // drainability, so calling it here made plan name an `[operator-verify]` head
+    // that preflight had already deferred — and SKILL.md step 0d treats plan's
+    // output as the execution contract. The deferral-aware selector is the single
+    // source; reaching back for the raw head is the regression.
     assert!(
-        plan_source.contains("agent_doc_queue::queue_heads::active_queue_prompt")
+        !plan_source.contains("agent_doc_queue::queue_heads::active_queue_prompt"),
+        "plan.rs must not select the raw first queue head; use the deferral-aware selector (#planhead)"
+    );
+    assert!(
+        plan_source
+            .contains("agent_doc_queue::queue_continuation::dispatchable_head_prompt_text")
             && plan_source.contains("agent_doc_queue::queue_heads::queue_is_active_for_diff"),
         "plan.rs should call active queue activation policy through agent-doc-queue directly"
     );

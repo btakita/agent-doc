@@ -61,7 +61,7 @@ cycle-scoped salient node even when final closeout is replayed.
 2. Seal the response transaction through the binary-owned closeout boundary:
 
 ```bash
-agent-doc respond <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill
+agent-doc respond <FILE> --stream --origin skill
 ```
 
 3. Run `agent-doc session-check <FILE>`. A healthy turn must reach `committed`
@@ -81,8 +81,9 @@ including `write --stream`, remains rejected for session responses.
   transaction.
 - `AlreadyApplied` is acceptable only as proof that the same cumulative response
   cell is visible. A checkpoint is not proof that closeout mutations or commit ran.
-- Save and reuse the immutable preflight baseline. Never re-save the document as a
-  new baseline after checkpointing.
+- The immutable preflight baseline is binary-owned in `state.db` cycle state and is
+  reused for the whole cycle. There is no baseline flag to pass, and no write path
+  may re-save the document as a new baseline after checkpointing.
 - `compact`, `preflight`, and `session-check` must reject malformed component trees
   and inline exchange boundaries. Duplicate response-replay cells or standalone
   protocol boundaries are normalized through Lazily before that generic gate.

@@ -498,6 +498,45 @@ pub fn live_drainable_continuation_head(content: &str, scope: DrainScope) -> Opt
     Some(extract_head_id(&stripped).unwrap_or(stripped))
 }
 
+/// Live drainable active queue head **prompt text** for `scope` (`do [#id]`),
+/// where [`live_drainable_continuation_head`] returns only the bare id.
+///
+/// `#planhead`: this is the single derivation of "which head is next" for any
+/// caller that needs the dispatchable prompt. `queue_heads::active_queue_prompt`
+/// returns the first head regardless of drainability, so a second caller using it
+/// can name an `[operator-verify]` head that preflight already deferred.
+pub fn live_drainable_head_prompt_text(content: &str, scope: DrainScope) -> Option<String> {
+    let head = drainable_head_prompt_for_scope(content, scope)?;
+    Some(strip_in_progress_marker(&head.text))
+}
+
+/// The head prompt a dispatching caller should work, honouring the same deferral
+/// rules preflight applies when it fills `selected_queue_prompts`.
+///
+/// `#planhead`: `agent-doc plan` used to call
+/// [`crate::queue_heads::active_queue_prompt`] directly, which returns the first
+/// head regardless of drainability. On a go-mode queue whose head is
+/// `[operator-verify]`, plan therefore named a human-gated item as the execution
+/// contract while preflight had already deferred it — and SKILL.md step 0d tells
+/// the agent to treat plan's output as authoritative.
+///
+/// Prefers the drain-active head. A queue that is active but NOT in explicit
+/// go-mode has no auto-drain, so its head is a manual prompt rather than a drain
+/// item; that case falls back to the plain active head, still filtered by the
+/// scope's deferral set so an `[operator-verify]` item is never selected either
+/// way.
+pub fn dispatchable_head_prompt_text(content: &str, scope: DrainScope) -> Option<String> {
+    if let Some(text) = live_drainable_head_prompt_text(content, scope) {
+        return Some(text);
+    }
+    let head = crate::queue_heads::active_queue_prompt(content)?;
+    let deferred = deferred_backlog_ids_split(content, scope);
+    match extract_head_id(&head) {
+        Some(id) if deferred.defers(&id, false) => None,
+        _ => Some(head),
+    }
+}
+
 /// Count agent-drainable heads in the active queue for the in-session loop.
 pub fn drainable_head_count(content: &str) -> usize {
     let Some((queue_facts, activation)) = active_queue(content) else {
@@ -1860,7 +1899,7 @@ mod tests {
         let content = concat!(
             "---\nqueue_active: true\n---\n\n",
             "## Queue\n\n",
-            "<!-- agent:queue auto -->\n",
+            "<!-- agent:queue priority go -->\n",
             "- [route] target tmux session: 0\n",
             "console paste\n",
             "- do [#real]\n",

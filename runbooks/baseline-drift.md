@@ -29,7 +29,9 @@ agent-doc reset --from-current --preserve-session <FILE>
 
 1. Re-run `agent-doc preflight <FILE>`.
 2. If preflight auto-refreshes, continue the normal cycle and persist through
-   `agent-doc finalize <FILE> --baseline-file <preflight.baseline_file>`.
+   `agent-doc respond <FILE> --stream --origin skill` (`finalize` is its
+   compatibility alias). The refreshed baseline is binary-owned cycle state; no
+   baseline path is passed on the command line.
 3. If preflight refuses because drift overlaps owned response content, inspect
    the document, then run the printed `agent-doc reset --from-current
    --preserve-session <FILE>` command only when the current visible markdown is

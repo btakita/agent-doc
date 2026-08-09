@@ -2,7 +2,7 @@
 description: "Interactive markdown session for OpenCode. TRIGGER: user invokes /agent-doc <file> command. Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.35.141"
+agent-doc-version: "0.35.224"
 ---
 
 # agent-doc
@@ -35,7 +35,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 - **Harness-native `agent-doc` entrypoints start the binary-owned response cycle** — treat `/agent-doc <FILE>`, `agent-doc <FILE>`, or equivalent as executable workflow start, not a generic document-editing request. Do not manually patch the final assistant response into the document, and do not report success before the binary resolves and commits the turn through `agent-doc respond <FILE>` (`finalize` compatibility alias) or `agent-doc write --commit <FILE>`. A semantically complete response checkpoint may already exist in Lazily/the document, but it is not proof that queue/backlog closeout or commit ran. Codex/OpenCode paths operating through direct exec also run `agent-doc session-check <FILE>` as the explicit distrust guard. Connected clients consume the terminal `agent_doc_finalize` result, including its queue-continuation fields, and do not invoke a second session check; the next turn's admit/preflight re-evaluates the same document integrity guards.
 - **Imperative edits are executable directives** — `do #id`, `fix this`, `run tests`, `build + install`, `commit + push`, and similar edits authorize repo work. Do not require the same instruction to be repeated in chat.
 - **Project-scoped remote hosts** — globally approved SSH commands, ambient SSH config, and unrelated project history are not evidence that a named remote host belongs to the current document's project. Use a named remote host only when the current user prompt, this session document/frontmatter, project-local `.agent-doc/config.toml`, or project-local runbooks explicitly identify it; otherwise ask or record a follow-up to confirm the intended host.
-- **Preflight is binary-owned (`#preflightinbinary`)** — the turn must open with the `[agent-doc] cycle contract (preflight already ran in the binary; ...)` marker. Consume that contract; never shell back to `agent-doc preflight <FILE>` or poll authority from the model turn. If the marker is absent, stop as a harness-admission failure so the hook/controller can be repaired.
+- **Preflight is binary-owned (`#preflightinbinary`, `#hookcontractlost`)** — the turn context must contain the `[agent-doc] cycle contract (preflight already ran in the binary; ...)` success marker. Consume the contract sealed by that marker; never shell back to `agent-doc preflight <FILE>` or poll authority from the model turn. The hook always names its outcome on stdout, so read three states: that marker ⇒ admitted; `[agent-doc] cycle contract UNAVAILABLE (preflight admission failed; ...)` plus its `reason:`/`remedy:` lines ⇒ the hook ran and preflight refused, so report the reason and stop without recreating admission; neither ⇒ the hook never ran, a fail-closed harness-admission defect to repair.
 - **Missed response repair is not child-agent dispatch** — when preflight/commit says the prior response is already committed and no new assistant body exists, recover through `agent-doc write --commit <FILE>` instead of rerunning an empty response cycle.
 - **MCP auth / OAuth steps are sub-steps, not closeout boundaries** — after auth/browser approval, resume and still finish through the connected `agent_doc_finalize` boundary (or `finalize` / `write --commit` plus `session-check` on a direct-exec path).
 - **Manual repo commits keep the session document on the finalize path** — stage and commit only the intended non-session repo files first, stop on any stage failure, verify the staged diff still matches the intended path set, then let `finalize` / `write --commit` own the session document.
@@ -56,12 +56,12 @@ Detect subcommands before the normal workflow:
 
 **Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness opencode`; if it says already up to date, treat as stale instruction drift, continue this turn, and use the installed OpenCode skill. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).
 
-**Preflight runs in the binary (`#preflightinbinary`)** — the `UserPromptSubmit` hook runs it when the `agent-doc <FILE>` trigger arrives, so the contract is already in context behind the `[agent-doc] cycle contract ...` marker. Do **not** run `agent-doc preflight <FILE>` from the model turn. A missing marker is a fail-closed harness-admission defect, not a fallback path. Preflight owns recovery before diffing and prints the cycle contract: `baseline_file`, `no_changes`, `warnings`, `claims`, `slash_commands`, `builtin_commands`, `orchestration_request`, `prompt_presets_requested`, tier/model fields, `agent_model`, `diff_type`, and the diff contract.
+**Preflight runs in the binary (`#preflightinbinary`)** — the `UserPromptSubmit` hook runs it when the `agent-doc <FILE>` trigger arrives, so the contract is already in context and sealed by the trailing `[agent-doc] cycle contract ...` success marker. Do **not** run `agent-doc preflight <FILE>` from the model turn. A missing marker is a fail-closed harness-admission defect, not a fallback path. Preflight owns recovery before diffing and prints the cycle contract: `no_changes`, `warnings`, `claims`, `slash_commands`, `builtin_commands`, `orchestration_request`, `prompt_presets_requested`, tier/model fields, `agent_model`, `diff_type`, and the diff contract.
 
 - If `no_changes: true` → tell the user nothing changed and stop.
 - Surface any `warnings`; for `harness_mismatch`, note that the document-declared agent differs from the active harness and continue with the active harness attribution/closeout path.
 - Print any `claims` to the console as a record.
-- Use `baseline_file` as `--baseline-file` for every subsequent response-persistence command. Do NOT save your own baseline — preflight's copy is taken at a stable post-commit point.
+- The cycle baseline is binary-owned: preflight captures it into `state.db` cycle state at a stable post-commit point, and `respond` / `write --commit` read it from there. There is no `--baseline-file` flag on any response-persistence command — do NOT pass one, and do NOT save your own baseline.
 - First cycle only: if the document is not yet in context, run `agent-doc read <FILE>` to fetch HEAD content. Do NOT read the snapshot file directly.
 
 ### 0b. Slash Commands
@@ -93,7 +93,7 @@ Full detail (session-accretion anchors, streaming checkpoints, `#agent-doc-bug` 
 
 Mutate `<!-- agent:backlog -->` only through granular `agent-doc write` flags (`--backlog-add`, `--done <id>`, `--backlog-edit "id=text"`, `--backlog-gate`, `--backlog-ungate`, `--backlog-reorder`, `--review-add`/`--review-edit`, `--icebox-add*`); full-replace via `patch:backlog`/`patch:review` is rejected.
 
-**Backlog capture rule:** if the response creates concrete follow-up work, add it to `agent:backlog` in the same cycle. Put new items at the beginning of `agent:backlog`. When one `agent-doc write` carries several `--backlog-add` flags, they land in flag order top-down — the first flag is topmost ("what you read is what you get") — and the `agent:queue` backlog mirror matches that order; for a specific interleave with existing items use `--backlog-add-after`/`--backlog-add-before`. If you are extending an ordered batch already in backlog, insert the new item adjacent to its predecessor. If the item is only a recommendation, include `[recommended]`.
+**Backlog capture rule:** if the response creates concrete follow-up work, add it to `agent:backlog` in the same cycle. Put new items at the beginning of `agent:backlog`. When one `agent-doc write` carries several `--backlog-add` flags, they land in flag order top-down — the first flag is topmost ("what you read is what you get") — and the `agent:queue` backlog mirror matches that order; for a specific interleave with existing items use `--backlog-add-after`/`--backlog-add-before`, which the queue mirror honours too — an anchored item lands directly after its anchor's queue head rather than at the top (`#queuemirrororder`). If you are extending an ordered batch already in backlog, insert the new item adjacent to its predecessor. To fix an already-queued order, use `--backlog-reorder`: it cascades into the `agent:queue` mirror, permuting only the named live heads among the slots they already occupy (`agent-doc queue sync` cannot — it skips ids already present). If the item is only a recommendation, include `[recommended]`.
 
 **Plan-backed backlog items:** create the plan file first and include that exact plan file path in the backlog text. For multi-phase implementation work, prefer one backlog ID per actionable phase (for example `#crdtrespfx1`, `#crdtrespfx2`) instead of one parent ID that gets repeatedly `--backlog-gate`d after partial progress; keep the parent plan file as context, but queue and close out concrete phase IDs.
 
@@ -114,7 +114,7 @@ Complete requested implementation, verification, build/install, and local inspec
 The `respond` command is the binary-owned turn-resolution and final document-mutation boundary for the cycle (`finalize` is its compatibility alias). After `respond` / `write --commit`, do not start more long-running task work for that same turn. Codex hooks in `.codex/hooks.json` and `.codex/config.toml` are a fail-closed backstop, not a replacement for binary-owned closeout.
 
 ```bash
-cat <<'RESPONSE' | agent-doc respond <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill
+cat <<'RESPONSE' | agent-doc respond <FILE> --stream --origin skill
 <template mode: wrap response in `<!-- patch:exchange -->` … `<!-- /patch:exchange -->` (BOTH markers); inline mode: plain text, no markers>
 RESPONSE
 ```

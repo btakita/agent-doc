@@ -113,7 +113,7 @@ Sequential orchestration reuses the same document lifecycle once per task:
 2. Run `agent-doc preflight <FILE>`.
 3. Expand requested presets into the concrete task prompt.
 4. Send exactly one fresh backend request with no resume/fork carryover.
-5. Persist the final response through `agent-doc finalize <FILE> --baseline-file ...`.
+5. Persist the final response through `agent-doc respond <FILE> --stream --origin skill` (`finalize` compatibility alias).
 6. Consume the strict finalize result as the terminal closeout report; it already includes the binary-owned session check. Do not spawn a second `agent-doc session-check <FILE>` from managed orchestration.
 
 Additional rules:

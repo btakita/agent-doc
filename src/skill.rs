@@ -2713,6 +2713,41 @@ mod tests {
         assert!(!SKILL_TEMPLATE.contains("then retry the same closeout once"));
     }
 
+    /// `#respondbaselineflag`: no response-persistence command accepts a baseline
+    /// path, and preflight emits no `baseline_file` field. An instruction surface
+    /// that tells an agent to pass one produces a clap parse error on the single
+    /// step SKILL.md calls MANDATORY, so the bundled surfaces must never mention it.
+    #[test]
+    fn bundled_instruction_surfaces_never_document_a_baseline_flag() {
+        // Prescriptive use is what breaks an agent: `--baseline-file <...>` in a
+        // command template produces a clap parse error. Naming the flag to forbid
+        // it is the fix, so only the usage form and the retired preflight field
+        // are banned.
+        let banned_usage = "--baseline-file <";
+        assert!(
+            !SKILL_TEMPLATE.contains(banned_usage),
+            "SKILL.md must not put --baseline-file in a command template; no agent-doc command accepts it"
+        );
+        assert!(
+            !SKILL_TEMPLATE.contains("baseline_file"),
+            "SKILL.md must not reference a preflight baseline_file field; preflight emits none"
+        );
+        assert!(
+            SKILL_TEMPLATE.contains("There is no `--baseline-file` flag"),
+            "SKILL.md must state the prohibition explicitly so an agent does not reinvent the flag"
+        );
+        for (name, body) in BUNDLED_RUNBOOKS {
+            assert!(
+                !body.contains(banned_usage),
+                "bundled runbook {name} must not put --baseline-file in a command template"
+            );
+            assert!(
+                !body.contains("baseline_file"),
+                "bundled runbook {name} must not reference a preflight baseline_file field"
+            );
+        }
+    }
+
     #[test]
     fn development_claude_skill_version_matches_the_bundle() {
         let development_skill = include_str!("../.claude/skills/agent-doc/SKILL.md");

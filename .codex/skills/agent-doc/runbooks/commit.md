@@ -13,7 +13,7 @@ A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `ag
 ## Normal Happy Path
 
 - Finish the turn's requested implementation / verification / build-install work before the turn-resolution command. `response-checkpoint` may persist earlier complete sections; `respond` is the close-out boundary, not the first document write.
-- The default response-cycle command is `agent-doc respond <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill`.
+- The default response-cycle command is `agent-doc respond <FILE> --stream --origin skill`. The cycle baseline is binary-owned in `state.db`; there is no `--baseline-file` flag to pass.
 - `respond` is the binary-owned happy path: it resolves the response, runs commit, and fails closed unless the cycle reaches `committed`; `finalize` is the same command's compatibility alias.
 - If the turn also includes ordinary repo `commit + push`, keep the active session document out of that manual git commit. Resolve the exact intended non-session path set first, run stage commands only for that set, stop immediately if any stage step fails, verify `git diff --cached --name-only` (or a stricter submodule-pointer inspection) still matches the intended set, then commit only that validated non-session set before `respond` or `write --commit` creates the session-document closeout commit. Push only after the binary-owned closeout so the response commit is included.
 - Use `respond` for the normal preflight → respond → persist flow across Claude Code, Codex, OpenCode, Cursor, and generic harnesses. Harness-specific command dispatch lives in `harness-invocation.md`.

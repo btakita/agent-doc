@@ -2,6 +2,47 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.224
+
+- **Fix (`#respondbaselineflag`): the MANDATORY persist step documented a flag
+  that no command accepts.**
+
+  `SKILL.md`, `runbooks/commit.md`, `runbooks/pending-ops.md`,
+  `runbooks/streaming-checkpoints.md`, and `runbooks/baseline-drift.md` all told
+  the agent to run `agent-doc respond <FILE> --baseline-file
+  <preflight.baseline_file> --stream --origin skill`. Neither `respond` nor
+  `write` has a baseline flag, and `preflight` emits no `baseline_file` field —
+  `CycleState` retired it. An agent following the hot path verbatim got a clap
+  parse error on the one step the skill calls mandatory.
+
+  The binary had already made the decision: `agent-doc-workflow`,
+  `agent-doc-turn`, `agent-doc-flow-io`, and `plan.rs` each assert that emitted
+  commands contain **no** `--baseline-file`. Only the instruction surfaces and
+  `specs/07-{closeout,core,orchestration}-commands.md` were stale. The baseline is
+  binary-owned cycle state; the surfaces now say so explicitly, and a new
+  `skill.rs` guard fails the build if any bundled surface puts the flag back into
+  a command template or reintroduces the retired `baseline_file` field.
+
+- **Fix (`#planhead`): `agent-doc plan` derived its own "which head is next" and
+  disagreed with preflight.**
+
+  `plan` called `queue_heads::active_queue_prompt`, which returns the first head
+  regardless of drainability, while preflight's `selected_queue_prompts` applies
+  the in-session drainability filter. On a go-mode queue whose head is
+  `[operator-verify]`, plan named the human-gated item in `prompt_targets`,
+  `repo_actions`, and `required_commands` — and SKILL.md step 0d tells the agent
+  plan's output *is* the execution contract, so an agent following it works the
+  wrong item and then `--done`s an operator-gated one. Observed three times.
+
+  Two independent derivations is the defect, not the specific filter. New
+  `queue_continuation::dispatchable_head_prompt_text` is the single source: it
+  prefers the drain-active head and, on a queue that is active but not in
+  explicit go-mode (no auto-drain, so the head is a manual prompt), falls back to
+  the plain active head still filtered by the scope's deferral set — an
+  `[operator-verify]` head is never selected either way. The architecture-policy
+  guard in `tests/test_cli.rs` now forbids `plan.rs` from reaching back for the
+  raw head.
+
 ## 0.35.223
 
 - **Fix (`#failfastproxyload`): two fail-fast tests asserted a flat 1s wall clock

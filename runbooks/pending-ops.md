@@ -289,7 +289,7 @@ plan path into another `.md` file.
 Add one, mark two done, reword another:
 
 ```bash
-cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline> --stream --origin skill \
+cat <<'RESPONSE' | agent-doc respond <FILE> --stream --origin skill \
   --backlog-add "integration test for --backlog-reorder" \
   --done a3f2 --done b1c4 \
   --backlog-edit "c9e0=refactor preflight: use single exit point"

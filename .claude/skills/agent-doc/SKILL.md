@@ -2,7 +2,7 @@
 description: "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>. Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.35.223"
+agent-doc-version: "0.35.224"
 ---
 
 # agent-doc
@@ -56,12 +56,12 @@ Detect subcommands before the normal workflow:
 
 **Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness claude --reload restart` unless `agent_doc_auto_compact` is explicitly set in frontmatter or `.agent-doc/config.toml`. On `SKILL_RELOAD=restart`, ask the user to restart Claude Code and re-invoke `/agent-doc <FILE>`, then stop. Use `--reload compact` and ask for `/compact` only when that explicit opt-in exists. If already up to date, treat as stale instruction drift, continue this turn, and use the installed Claude skill. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).
 
-**Preflight runs in the binary (`#preflightinbinary`)** — the `UserPromptSubmit` hook runs it when the `agent-doc <FILE>` trigger arrives, so the contract is already in context and sealed by the trailing `[agent-doc] cycle contract ...` success marker. Do **not** run `agent-doc preflight <FILE>` from the model turn. A missing marker is a fail-closed harness-admission defect, not a fallback path. Preflight owns recovery before diffing and prints the cycle contract: `baseline_file`, `no_changes`, `warnings`, `claims`, `slash_commands`, `builtin_commands`, `orchestration_request`, `prompt_presets_requested`, tier/model fields, `agent_model`, `diff_type`, and the diff contract.
+**Preflight runs in the binary (`#preflightinbinary`)** — the `UserPromptSubmit` hook runs it when the `agent-doc <FILE>` trigger arrives, so the contract is already in context and sealed by the trailing `[agent-doc] cycle contract ...` success marker. Do **not** run `agent-doc preflight <FILE>` from the model turn. A missing marker is a fail-closed harness-admission defect, not a fallback path. Preflight owns recovery before diffing and prints the cycle contract: `no_changes`, `warnings`, `claims`, `slash_commands`, `builtin_commands`, `orchestration_request`, `prompt_presets_requested`, tier/model fields, `agent_model`, `diff_type`, and the diff contract.
 
 - If `no_changes: true` → tell the user nothing changed and stop.
 - Surface any `warnings`; for `harness_mismatch`, note that the document-declared agent differs from the active harness and continue with the active harness attribution/closeout path.
 - Print any `claims` to the console as a record.
-- Use `baseline_file` as `--baseline-file` for every subsequent response-persistence command. Do NOT save your own baseline — preflight's copy is taken at a stable post-commit point.
+- The cycle baseline is binary-owned: preflight captures it into `state.db` cycle state at a stable post-commit point, and `respond` / `write --commit` read it from there. There is no `--baseline-file` flag on any response-persistence command — do NOT pass one, and do NOT save your own baseline.
 - First cycle only: if the document is not yet in context, run `agent-doc read <FILE>` to fetch HEAD content. Do NOT read the snapshot file directly.
 
 ### 0b. Slash Commands
@@ -114,7 +114,7 @@ Complete requested implementation, verification, build/install, and local inspec
 The `respond` command is the binary-owned turn-resolution and final document-mutation boundary for the cycle (`finalize` is its compatibility alias). After `respond` / `write --commit`, do not start more long-running task work for that same turn. Codex hooks in `.codex/hooks.json` and `.codex/config.toml` are a fail-closed backstop, not a replacement for binary-owned closeout.
 
 ```bash
-cat <<'RESPONSE' | agent-doc respond <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill
+cat <<'RESPONSE' | agent-doc respond <FILE> --stream --origin skill
 <template mode: wrap response in `<!-- patch:exchange -->` … `<!-- /patch:exchange -->` (BOTH markers); inline mode: plain text, no markers>
 RESPONSE
 ```

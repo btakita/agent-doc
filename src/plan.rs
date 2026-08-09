@@ -178,8 +178,19 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     } else {
         None
     };
+    // `#planhead`: plan must NOT derive its own "which head is next". SKILL.md
+    // step 0d tells the agent plan's `prompt_targets` / `repo_actions` /
+    // `required_commands` ARE the execution contract, so a second derivation that
+    // disagrees with preflight's `selected_queue_prompts` makes the agent work the
+    // wrong item -- observed three times naming an `[operator-verify]` head that
+    // preflight had already deferred. Defer to the same in-session drainable-head
+    // selection preflight uses; when no head is drainable in this scope, plan
+    // reports no queue-driven work rather than inventing one.
     let queue_prompt = if doc_diff.is_none() && harness_diff.is_none() {
-        agent_doc_queue::queue_heads::active_queue_prompt(&content)
+        agent_doc_queue::queue_continuation::dispatchable_head_prompt_text(
+            &content,
+            agent_doc_queue::queue_continuation::DrainScope::InSessionLoop,
+        )
     } else {
         None
     };
@@ -1251,6 +1262,72 @@ Done.
                 .iter()
                 .any(|cmd| cmd.contains("--done oobpmt")),
             "queue do item should require closeout with --done oobpmt: {:?}",
+            plan.required_commands
+        );
+    }
+
+    /// `#planhead`: plan must select the same head preflight does. An
+    /// `[operator-verify]` head sits ahead of a drainable one here; plan naming it
+    /// would send the agent to work a human-gated item and then close it out.
+    #[test]
+    fn build_plan_skips_an_operator_verify_head_and_plans_the_drainable_one() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+queue_active: true
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+<!-- agent:queue priority go -->
+- do [#livecheck]
+- do [#realwork]
+<!-- /agent:queue -->
+
+<!-- agent:backlog -->
+- [ ] [#livecheck] [operator-verify] Watch a real IDE pane and confirm the layout.
+- [ ] [#realwork] Fix the actual defect.
+<!-- /agent:backlog -->
+"#;
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(
+            plan.repo_actions,
+            vec!["do [#realwork]"],
+            "plan must skip the operator-gated head preflight defers"
+        );
+        assert_eq!(plan.prompt_targets, vec!["do [#realwork]"]);
+        assert!(
+            plan.required_commands
+                .iter()
+                .any(|cmd| cmd.contains("--done realwork")),
+            "closeout must target the drainable head: {:?}",
+            plan.required_commands
+        );
+        assert!(
+            !plan
+                .required_commands
+                .iter()
+                .any(|cmd| cmd.contains("livecheck")),
+            "operator-verify head must never appear in plan's closeout contract: {:?}",
             plan.required_commands
         );
     }

@@ -1001,16 +1001,36 @@ fn run_with_options_inner(
         // with `component_divergence=queue:<a>-><b>`, HEAD holding the whole
         // committed response and the git tree clean.
         //
-        // The distinguishing fact is which components diverge. `exchange` is
-        // where a response lives, so an exchange-clean divergence in
-        // queue/backlog/status is by construction not this turn's write. Prove
-        // it and let the shared predicate resolve the verdict.
+        // `#retainedmutdrop`: the original distinguishing fact was WHICH
+        // components diverge — "`exchange` is where a response lives, so an
+        // exchange-clean divergence in queue/backlog/status is by construction
+        // not this turn's write". That premise is FALSE. A closeout's write
+        // produces `queue`, `backlog`, `status`, `review`, and `done` too (they
+        // are in the turn's own write_set), so a response that committed while
+        // its tracked-work half did not produces exactly this shape. Calling it
+        // an operator edit sent recovery to sweep it, losing the mutations while
+        // the response stayed committed — the delivery half of `#prmergeguardpr`.
+        //
+        // The real distinguishing fact is whether THIS cycle's own recorded
+        // mutations are visible on disk yet. When they are, a queue/backlog
+        // divergence really is a fresh edit and the refusal stays correct, which
+        // is what keeps `commit` from swallowing the operator's next prompt.
+        let recorded = agent_doc_cycle_state_io::load(file).ok().flatten();
+        let unlanded_own_mutations = recorded.as_ref().is_some_and(|state| {
+            agent_doc_turn::write_ownership::recorded_tracked_work_is_unlanded(
+                agent_doc_turn::write_ownership::RecordedTrackedWork {
+                    done_ids: &state.pending_done_ids,
+                    added_ids: &state.pending_added_ids,
+                },
+                &disk_content,
+            )
+        });
         let ownership = ownership.with_unanswered_edit(
             agent_doc_git::has_blocking_non_exchange_component_drift(
                 &disk_content,
                 &authority_content,
                 None,
-            ),
+            ) && !unlanded_own_mutations,
         );
         let divergence_owner_note = match ownership.verdict() {
             agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred => {

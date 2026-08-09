@@ -249,9 +249,163 @@ pub fn retained_write_remedy(ownership: RetainedWriteOwnership, file: &str) -> S
     }
 }
 
+/// The tracked-work mutations one closeout recorded, for provenance.
+///
+/// `#retainedmutdrop`: see [`recorded_tracked_work_is_unlanded`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RecordedTrackedWork<'a> {
+    /// Ids this cycle recorded a `--done` / reap for.
+    pub done_ids: &'a [String],
+    /// Ids this cycle recorded a `--backlog-add` / `--review-add` for.
+    pub added_ids: &'a [String],
+}
+
+/// Whether a recorded tracked-work mutation is still missing from `disk`.
+///
+/// `#retainedmutdrop`: session-check classified a queue/backlog divergence as an
+/// unanswered operator edit on the premise that "`exchange` is where a response
+/// lives, so an exchange-clean divergence in queue/backlog/status is by
+/// construction not this turn's write". **That premise is false.** A closeout's
+/// write produces `queue`, `backlog`, `status`, `review`, and `done` as well —
+/// they are in the turn's own `write_set` — so a response that committed while
+/// its tracked-work half did not produces exactly this shape. Calling it an
+/// operator edit sends recovery to sweep it, and the mutations are lost while
+/// the response stays committed: the delivery half of `#prmergeguardpr`.
+///
+/// Observed 2026-08-09 on `tasks/agent-doc/agent-doc-bugs2.md`: `respond`
+/// reported `completed and reaped 1 item(s) atomically: projpassstart`, the
+/// write was retained, `commit` landed the response, and the next preflight
+/// swept the mutations — `#projpassstart` was still open and still a queue head.
+///
+/// The distinguishing fact is not *which* components diverge but *whether this
+/// cycle's own recorded mutations are visible yet*:
+///
+/// - a recorded `--done` id that disk still renders as an **open** item, or
+/// - a recorded add id that disk does not contain at all
+///
+/// is this closeout's unlanded write, not a fresh edit. When every recorded
+/// mutation has landed, a queue/backlog divergence really is new, and the
+/// unanswered-edit refusal stays correct — which is what keeps `commit` from
+/// swallowing the operator's next prompt.
+pub fn recorded_tracked_work_is_unlanded(recorded: RecordedTrackedWork<'_>, disk: &str) -> bool {
+    let normalize = |id: &str| id.trim().trim_start_matches('#').to_string();
+    recorded
+        .done_ids
+        .iter()
+        .any(|id| disk.contains(&format!("- [ ] [#{}]", normalize(id))))
+        || recorded
+            .added_ids
+            .iter()
+            .any(|id| !disk.contains(&format!("[#{}]", normalize(id))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#retainedmutdrop`: the predicate is only worth having if both deciding
+    /// sites actually consult it.
+    ///
+    /// The pure predicate below is mutation-checked, but removing the *wiring*
+    /// at either call site reddened nothing — the whole defect was two sites
+    /// each deciding provenance on their own, so an untested wiring is the
+    /// exact regression shape to guard. Both sites are single and named; the
+    /// state that makes them fire (a retained write mid-closeout) is not
+    /// reachable from a unit test, so guard them structurally — the same reason
+    /// `#preflightprojpass` guards its entry points this way.
+    #[test]
+    fn both_provenance_sites_consult_the_shared_predicate() {
+        for (label, source) in [
+            (
+                "session-check",
+                include_str!("../../agent-doc-session-check-io/src/command.rs"),
+            ),
+            (
+                "commit",
+                include_str!("../../agent-doc-commit-io/src/lib.rs"),
+            ),
+        ] {
+            assert!(
+                source.contains("recorded_tracked_work_is_unlanded"),
+                "`{label}` must decide unanswered-edit provenance with the shared \
+                 predicate; deciding it locally is what let a closeout's mutations \
+                 be swept as an operator edit"
+            );
+            assert!(
+                !source.contains(".with_unanswered_edit(true)"),
+                "`{label}` must not assert an unanswered edit unconditionally — \
+                 that is the false premise this fix removed"
+            );
+        }
+    }
+
+    /// `#retainedmutdrop`: a `--done` whose item is still open on disk, or an
+    /// add that is not on disk at all, is this closeout's unlanded write — not
+    /// an operator edit for recovery to sweep.
+    #[test]
+    fn an_unlanded_recorded_mutation_is_not_an_operator_edit() {
+        let done = vec!["projpassstart".to_string()];
+        let added = vec!["relayresolveblind".to_string()];
+
+        // The exact shape observed: the --done item is still open and the added
+        // item never arrived.
+        let disk = "- [ ] [#projpassstart] measure the start resume path\n";
+        assert!(recorded_tracked_work_is_unlanded(
+            RecordedTrackedWork {
+                done_ids: &done,
+                added_ids: &added,
+            },
+            disk,
+        ));
+
+        // The `#id` spelling must not change the answer.
+        let hashed = vec!["#projpassstart".to_string()];
+        assert!(recorded_tracked_work_is_unlanded(
+            RecordedTrackedWork {
+                done_ids: &hashed,
+                added_ids: &[],
+            },
+            disk,
+        ));
+    }
+
+    /// The other half, and the one that keeps `commit` from swallowing the
+    /// operator's next prompt: once every recorded mutation is visible, a
+    /// queue/backlog divergence really is a fresh edit.
+    #[test]
+    fn a_fully_landed_closeout_leaves_divergence_to_the_operator() {
+        let done = vec!["projpassstart".to_string()];
+        let added = vec!["relayresolveblind".to_string()];
+        // The done item was reaped away; the added item is present.
+        let disk = "- [ ] [#relayresolveblind] attribute the crdt_relay resolves\n";
+        assert!(!recorded_tracked_work_is_unlanded(
+            RecordedTrackedWork {
+                done_ids: &done,
+                added_ids: &added,
+            },
+            disk,
+        ));
+
+        // A gated (not open) item also counts as landed — `--done` that became
+        // `[/]` is not the untouched `[ ]` this predicate looks for.
+        let gated = "- [/] [#projpassstart] x\n- [ ] [#relayresolveblind] y\n";
+        assert!(!recorded_tracked_work_is_unlanded(
+            RecordedTrackedWork {
+                done_ids: &done,
+                added_ids: &added,
+            },
+            gated,
+        ));
+    }
+
+    /// A closeout that recorded nothing can never claim the divergence.
+    #[test]
+    fn no_recorded_mutations_never_claims_the_divergence() {
+        assert!(!recorded_tracked_work_is_unlanded(
+            RecordedTrackedWork::default(),
+            "- [ ] [#anything] a live operator edit\n",
+        ));
+    }
 
     #[test]
     fn only_a_durable_holder_earns_the_deferral_claim() {

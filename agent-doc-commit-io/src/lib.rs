@@ -1142,6 +1142,27 @@ fn commit_atomic_write(file: &Path, content: &str) -> Result<()> {
     }
 }
 
+/// `#retainedmutdrop`: whether this cycle's own recorded tracked-work mutations
+/// are still missing from `disk_content`.
+///
+/// Shared with `session-check` through the one predicate in `agent-doc-turn`, so
+/// the two commands cannot drift back into contradicting each other the way
+/// `#strandedremedydeadlock` describes.
+fn unlanded_own_tracked_work(file: &Path, disk_content: &str) -> bool {
+    agent_doc_cycle_state_io::load(file)
+        .ok()
+        .flatten()
+        .is_some_and(|state| {
+            agent_doc_turn::write_ownership::recorded_tracked_work_is_unlanded(
+                agent_doc_turn::write_ownership::RecordedTrackedWork {
+                    done_ids: &state.pending_done_ids,
+                    added_ids: &state.pending_added_ids,
+                },
+                disk_content,
+            )
+        })
+}
+
 fn commit_detect_bypassed_response_write(file: &Path) -> Result<Option<String>> {
     agent_doc_session_check_io::detect_bypassed_response_write_with_force_disk(
         file,
@@ -1831,13 +1852,16 @@ where
             ports.live_buffer_guard,
             file,
         )
-        // Proven, not assumed: we are inside the branch that just compared the
-        // components, and the exchange — where a response would live — is
-        // converged. Whatever diverges is not this turn's write. It is NOT
-        // necessarily the operator's either — an earlier `agent-doc write`
-        // whose commit refused leaves the same shape — so the verdict names the
-        // edit, not an author it cannot prove.
-        .with_unanswered_edit(true);
+        // `#retainedmutdrop`: "the exchange is converged, so whatever diverges
+        // is not this turn's write" is FALSE — a closeout's write produces
+        // `queue`, `backlog`, `status`, `review`, and `done` as well. Ask the
+        // one fact that separates them: are this cycle's own recorded
+        // tracked-work mutations visible on disk yet? If not, the divergence is
+        // the binary's own unlanded write and `commit` must reconcile it rather
+        // than refuse and strand it. If they have all landed, the divergence is
+        // a fresh edit and the refusal stays correct — that is what stops
+        // `commit` swallowing the operator's next prompt.
+        .with_unanswered_edit(!unlanded_own_tracked_work(file, &file_content));
         let verdict = ownership.verdict();
         // The one verdict whose remedy names THIS command. `write_applied` means
         // the binary's own response write already landed and only the terminal

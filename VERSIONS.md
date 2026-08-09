@@ -2,6 +2,49 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.216
+
+- **Fix (`#retainedmutdrop`): a closeout's tracked-work mutations were
+  reclassified as an operator edit and swept, while its response stayed
+  committed.**
+
+  This is the delivery half of `#prmergeguardpr`. 0.35.212 fixed the validation
+  half — a rejectable flag can no longer split the transaction — but a *delivery*
+  failure still could, and did.
+
+  `session-check` and `commit` both decided "is this divergence the turn's own
+  write or a fresh edit?" from **which components diverge**, on the premise that
+  "`exchange` is where a response lives, so an exchange-clean divergence in
+  queue/backlog/status is by construction not this turn's write". That premise is
+  false: a closeout's write produces `queue`, `backlog`, `status`, `review`, and
+  `done` as well — they are in the turn's own `write_set`. A response that
+  committed while its tracked-work half did not produces exactly that shape, so
+  it was labelled `UnansweredEditPending`, `commit` refused it on purpose, and
+  the next cycle's recovery swept it.
+
+  Observed end-to-end on `tasks/agent-doc/agent-doc-bugs2.md`: `respond` reported
+  `completed and reaped 1 item(s) atomically: projpassstart`; the write was
+  retained; `agent-doc commit` (the remedy the refusal itself named) landed the
+  response into HEAD; `session-check` then declared `NO write is retained ... an
+  UNANSWERED DOCUMENT EDIT to typed components this turn's write never produced`
+  while its own `component_divergence` named `backlog`, `exchange`, and `queue`;
+  the next preflight reported `recovered: true` and the mutations were gone —
+  `#projpassstart` still open in backlog and still a queue head.
+
+  Both sites now ask the fact that actually separates the two cases: are **this
+  cycle's own recorded mutations visible on disk yet**? A recorded `--done` whose
+  item disk still renders as `- [ ] [#id]`, or a recorded add that disk does not
+  contain, is the binary's own unlanded write — `commit` reconciles it instead of
+  stranding it. Once every recorded mutation has landed, a queue/backlog
+  divergence really is a fresh edit and the refusal stays correct, which is what
+  keeps `commit` from swallowing the operator's next prompt.
+
+  The predicate is one shared function (`recorded_tracked_work_is_unlanded` in
+  `agent-doc-turn`), so the two commands cannot drift back into contradicting
+  each other the way `#strandedremedydeadlock` describes. Cycle state already
+  recorded everything it needs — `pending_done_ids` and `pending_added_ids` — so
+  no new state was introduced.
+
 ## 0.35.215
 
 - **Fix (`#compactclearidempotent`): a compact reported a failed editor-op clear

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: d48ccb7c-0f56-4602-b16e-1b8753d70666
+resume: 87f0ed02-8aed-43f5-8ada-15de8edb9bc2
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -224,18 +224,43 @@ The section sits beside **Commit & Push** — the decision it actually modifies 
 Worth keeping: this is the exact inverse of the shared-index rule I already follow (`--only` to avoid another pane's *pre-staged files*). Same tool, opposite failure. Saved as a memory.
 
 Queue note: exchange is at 175 lines / 5 sections (session-accretion `warn`), but the queue is active so I am not pausing to compact. Next head is `#lzspecgcreferencedtombstone` — and unlike the last two spec changes, that fixture is expected to redden bindings, so the corpus goes first per the rule just written.
+
+### Re: #lzspecgcreferencedtombstone — the GC blind spot is closed, and M6 now dies — opus-5
+
+`gc_collects_stable_leaf_keeps_referenced_tombstone` claimed both halves in its name and tested one. It deletes index 2 of `"abc"` — the **last** character — so nothing references that tombstone as a left origin, and a collector that ignored origins entirely collected the same single element and stayed green. That is why mutant M6 survived four cycles ago while five sibling probes each reddened.
+
+`gc_keeps_a_tombstone_that_is_still_a_left_origin` deletes an **interior** character instead, so the survivor `c` still names the tombstoned `b` as its origin and the collection must return 0.
+
+**M6 now dies.** Re-running the identical mutant against zig: `expected 0, found 1`. And every binding reproduced the same discriminating asymmetry — under the mutant the **old** scenario passes and only the **new** one fails:
+
+| | probe result |
+|---|---|
+| rs, js, py, go, kt, dart, cs, cpp, zig | old gc scenario PASS · new gc scenario FAIL |
+
+kt's evidence was the sharpest: its ledger from the *failing* run contains the old scenario, contains the new one where it died, and is **missing** the scenario after it — so the abort point is visible in the ledger itself.
+
+**Ordering, this time correctly.** I pushed `lazily-spec@34caf9c` first — and the advisory I wrote last cycle fired on its first real use, telling me to do exactly that before I touched a binding. No binding's CI ever saw a stale corpus. All six repos that changed are green in CI.
+
+**No library changed anywhere** — all nine already implemented the rule. What moved was bookkeeping: cs's exact census (`Expected: 10 / Actual: 11`, with its step and assertion floors recomputed to exact totals and *proved* exact by raising each one further and watching it fail), floors in rs/js/cpp, and dart's vendored mirror.
+
+**What I deliberately left unpinned.** Cascade depth splits the family roughly evenly — rs/js/dart/kt iterate to a fixpoint within one call; py/cs/cpp/zig run a single pass and leave the newly-unreferenced tombstone for the next. Both conform: "bottom-up" describes the order reclamation is safe in, not how much one call must do, and `#lzspecgcdefer` already places collection timing outside the contract. I wrote that into `cell-model.md` rather than leaving it implicit, because the next person reading "reclaimed bottom-up" would otherwise be entitled to "fix" four bindings toward fixpoint for no reason. The fixtures assert *which* tombstones survive, never how many passes it took.
+
+**One finding filed.** rs's floors have drifted far below reality — `MIN_SCENARIOS` 137 against 162 observed, `MIN_FIXTURES` 131 against 144. A 25-scenario gap means 25 scenarios could stop replaying with the guard still green, which is the failure these floors exist to prevent. js has the same shape (130 vs 153). The agent correctly declined to close the gap without knowing whether CI's replay set equals the local one. Filed as `#lzscenariofloordrift`.
+
+Commits: `lazily-spec@34caf9c`, `rs@01db593`, `js@9daf817`, `dart@0d040fe`, `cs@7b5ceb8`, `cpp@870a4a6`; superproject `9b190af`. Exchange is at 204 lines (session-accretion `warn`); queue is active so I am not compacting.
 <!-- agent:boundary:c6ef3fb1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- do [#lzscenariofloordrift]
 - ~~do [#lzspecagentsmdpointer]~~
 - ~~do [#lzspecpushbeforebindings]~~
 - ~~do [#lzspecforkclockfixture]~~
 - ~~do [#adjshashprivatefield]~~
 - ~~do [#lzzigforkhlcpeer]~~
-- do [#lzspecgcreferencedtombstone]
+- ~~do [#lzspecgcreferencedtombstone]~~
 - ~~do [#lzzigcanonrunner]~~
 - do [#lzpartialmarkadjudicate]
 - 📌 do [#lzzigspecdiroption]
@@ -249,7 +274,7 @@ Queue note: exchange is at 175 lines / 5 sections (session-accretion `warn`), bu
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzspecgcreferencedtombstone] collections/textcrdt_convergence.json's `gc_collects_stable_leaf_keeps_referenced_tombstone` does not pin the half its name claims. It deletes index 2 of "abc" (the LAST character), so nothing references the tombstone as a left origin, and a `gcWith` mutant that drops the `!referenced.contains(id)` conjunct entirely collects the same 1 element and stays GREEN in lazily-zig (mutant M6 of the #lzzigcanonrunner sweep; the other five mutants all redden). The conservative-GC rule is real and every binding implements it; no fixture in the corpus falsifies its absence, so nine bindings could each drop it and stay green. Add a scenario that deletes an INTERIOR character and asserts gc(stable=true) collects 0 while the tombstone count stays 1, then re-run that mutant against every binding. This is a lazily-spec fixture change, so it reddens whichever of the nine already got it wrong; that is the point.
+- [ ] [#lzscenariofloordrift] Several bindings' conformance floors have drifted far below what their suites actually replay, so the guard tolerates large silent detachment. Measured during #lzspecgcreferencedtombstone: lazily-rs MIN_SCENARIOS was 137 against 162 observed and MIN_FIXTURES 131 against 144 — a 25-scenario gap, meaning 25 scenarios could stop replaying and the floor would still pass. lazily-js is 130 against 153. Both scripts' own comments say to raise the floor when replays are added, and the convention followed so far moves the floor by the number of scenarios a change adds while leaving the pre-existing margin untouched, which is why the gap only ever widens. Contrast lazily-cpp (147 vs 147) and lazily-cs, whose census asserts EXACT counts and reddened correctly twice today — those caught real drift precisely because they carry no slack. The blocker on simply pinning to reality is that nobody has confirmed the local `make check` replay set equals CI's replay set; an over-raised floor reddens CI. Establish that equality per binding (compare the CI job's scenario ledger against a local run), then pin each floor to the CI-guaranteed number, and prove it by raising each one further and watching it fail. Do rs and js first since they carry the largest gaps.
 - [ ] [#lzpartialmarkadjudicate] check-coverage-claims.mjs (as of lazily-spec d1c1a82) reports three partial marks that are INDISTINGUISHABLE FROM SHIPPED on ledger evidence: GDScript on row reactive-graph (reactive-graph/{transitive_invalidation_reaches_depth,signal_materializes_without_a_read,signal_materializes_once_per_batch,dispose_signal_reverts_to_lazy}.json), Zig on reactivemap-core-single-threaded (collections/{cellmap_independence,cellmap_atomic_move}.json), and C# on reliable-sync (reliable-sync/{coalesce_bounds_outbox,liveness_lease_eviction}.json). None of the eight fixtures is in any KNOWN_UNCOVERED and no binding has a scenario- or block-level excuse. Adjudicate each ONE AT A TIME with binding-specific evidence the spec repo does not have: confirm from the binding's runtime manifest that it really replays each fixture, then decide whether the feature is complete or the shortfall is real but unpinned. Outcome per row is either (a) promote the mark and re-run sync-coverage.mjs — remember a row flip can carry its FAMILY roll-up cell with it and rewrites README.md in 11 sibling repos, so it is a 12-repo commit — or (b) cite a fixture that actually pins the gap, or add a scenario-level excuse, so the tilde becomes backed instead of merely unverified. Do NOT bulk-promote: tilde legitimately means 'implemented, but not this wire' and the guard deliberately cannot tell the two apart.
 - [ ] [#lzzigspecdiroption] lazily-zig has NO corpus-dir override: SPEC_DIR in src/lazily/reactive_map.zig is a comptime const used as SPEC_DIR ++ '/x.json', so the #lzdefaultmodeuniform probe had to temporarily edit the constant and restore it. Every future corpus probe in this binding pays that cost, and a probe that edits the shared ../lazily-spec checkout instead reddens all nine bindings concurrently. Add a '-Dspec-dir' build option (or a runtime env read) threaded to every fixture path, and keep the default unchanged. Compounding trap to preserve: specFixturesPresent() makes the tests 'return error.SkipZigTest' when the path is unreadable, so a probe that changes the PATH silently converts red into skip — the option must change which bytes are read, never whether they exist.
 - [ ] [#lzktcorpusnotgradleinput] lazily-kt's conformance corpus is NOT a declared input of the gradle 'test' task, so editing a fixture leaves 'test' UP-TO-DATE and the run reports green having replayed nothing — a false green that defeats any corpus-perturbation probe. Compounding it, tasks.test wires no environment(...), so the test JVM inherits the DAEMON's environment and a daemon started before LAZILY_SPEC_DIR was set serves the stale path. Today the only defence is remembering '--no-daemon --rerun-tasks'. Declare the corpus directory as a task input so a fixture change invalidates the task, and pass the corpus-dir variable through environment(...) explicitly. Definition of done: flip one assertion key in a scratch corpus and prove a plain 'make check' (no flags, warm daemon) reddens.

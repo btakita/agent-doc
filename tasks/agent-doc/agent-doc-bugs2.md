@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: a8dbb895-c0ae-452c-a0fb-2d2d7c31e271
+resume: df58fb94-aed7-41c0-b2ef-55bad5c5a9cd
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -213,6 +213,7 @@ That empties the agent-drainable queue. What remains is three `[operator-verify]
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#flakystatedbfixture]
 - ~~do [#anchorsubmodulesurfaces]~~
 - ~~do [#coinedguardledgerasymmetry]~~
 - ~~do [#hookhashcodetsworkaround]~~
@@ -221,7 +222,7 @@ That empties the agent-drainable queue. What remains is three `[operator-verify]
 - do [#operatorverifylive]
 - do [#run3rdpaneswitchverify]
 - ~~do [#hookhashfalsepositive]~~
-- 🚧 do [#caswriteracechurn]
+- ~~do [#caswriteracechurn]~~
 <!-- /agent:queue -->
 
 ## Notes
@@ -232,8 +233,8 @@ That empties the agent-drainable queue. What remains is three `[operator-verify]
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#flakystatedbfixture] #agent-doc-bug A parallel test run can corrupt a temp fixture state.db, reddening the suite non-deterministically. Observed 2026-08-10 during a make check on 0.35.233: session_check_codex_final_gate_blocks_on_active_auto_queue failed with "reliable-sync durable authority hydration failed for /tmp/.tmp43Aufu/session.md: file is not a database: Error code 26" and "authoritative state db /tmp/.tmp43Aufu/.agent-doc/state.db is unavailable; refusing automatic replacement". Re-running the same test in isolation passed, and a full re-run of make check was green, so it is not a code regression -- but flaky is not an acceptable end state and the next person will waive a real failure by pattern-matching on this one. Each test builds its own tempdir, so a cross-test collision is not the obvious explanation; suspect a shared path (AGENT_DOC_ env inheritance, /run/user/1000/agent-doc/ socket namespace, or a global that leaks the previous test|s db handle) or an unsynchronised writer racing fixture setup. Reproduce with a high --test-threads count rather than in isolation. The refusal itself is CORRECT behaviour (refusing to auto-replace a corrupt authoritative db); the defect is that a fixture reached that state at all.
 - [/] [#clearsubmitunobservedverify] [operator-verify] Live re-proof for #clearsubmitunobserved (0.35.225): reproduce the reported haiven-dev.md sequence — let the supervisor go dead (or `session restart-supervisor`), then Run Agent Doc so the flow cold-starts a replacement and immediately runs Clear Session Context on the fresh pane. Expect it to SUCCEED instead of failing with `result=submission_unobserved ... unblocker=clear_submission_unobserved`, and expect `session_clear_submit_cleared_state_probe ... result=cleared_state_proven retained_lines=<small>` in ops.log. Then the half that must not regress: on a pane holding a real conversation, break submission (e.g. leave the composer wedged) and confirm the clear still fails closed with `result=conversation_retained`. Unit tests pin the predicate against synthetic captures; only a live pane exercises the tmux scrollback capture and the real harness prompt shapes.
-- [ ] 🚧 [#caswriteracechurn] #agent-doc-bug The `compare_and_swap_raced` settle-wait is recurring across concurrent sessions, not a one-off. Operator-reported on sdk.md 2026-08-09 ("Same CAS-race path as last cycle — the write landed; finishing with commit"), and the SAME cycle on agent-doc-bugs2.md hit it twice in one closeout: `[write] Waiting for typing/CRDT versions to settle ... (reason=compare_and_swap_raced, elapsed=9945ms)` then again at 4694ms, inside a 32.7s closeout (commit_authority 14.9s, session_check 16.7s). Outcome is correct every time — the write lands and the cycle commits — so this is latency/churn, not loss. Worth measuring before fixing: instrument how often a closeout takes the CAS-race branch and what the contending writer is (concurrent supervisor idle-watch? replica propagation? another session on the same state.db?). If the contention is self-inflicted (agent-doc writing the same cell twice per closeout), the fix is to collapse the writes; if it is genuine cross-session contention on a shared project root, the settle wait is doing its job and the item is a metric, not a bug. Do not "fix" it by shortening the wait -- the wait is what makes the write land.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 <!-- /agent:backlog -->

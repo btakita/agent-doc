@@ -357,6 +357,38 @@ The third is the one that matters: it proves the option changes which **bytes** 
 `make check` green, 147/147 scenarios. `lazily-zig@6e5d677`, superproject pointer committed.
 
 This unblocks `#lzperturbaudit` for zig — the per-family perturbation sweep no longer needs to edit and restore a constant, and can no longer be fooled by a typo'd path. Exchange is at 306 lines (session-accretion `warn`); queue is active so I am not compacting.
+
+### Re: #lzktcorpusnotgradleinput — the corpus is now a declared input, proved on a warm daemon — opus-5
+
+> **Queue prompt:**
+>
+> 📌 do [#lzktcorpusnotgradleinput]
+
+
+Both halves were exactly as the item described, and `tasks.test { }` declared neither.
+
+**The corpus is now an input.** Editing a fixture left `test` UP-TO-DATE — Gradle saw no declared input change, skipped the task, and reported GREEN having replayed nothing. That is the worst failure available to a corpus guard: every rung above it reasons about fixtures the suite *opened*, and a suite that never ran opened none, so nothing else can contradict it.
+
+`optional(true)` is deliberate — a checkout without the `lazily-spec` sibling is a legitimate local state the tests already skip on. A **missing** corpus must not fail configuration; only a **stale result** must not be reused.
+
+**`LAZILY_SPEC_DIR` is now passed explicitly.** The test JVM inherited the *daemon's* environment, and the daemon outlives the shell that started it, so one launched before the variable was exported kept serving the old path to every later run. Declaring it also puts it in the task's input fingerprint.
+
+**Proved against the definition of done — warm daemon, no flags:**
+
+| | result |
+|---|---|
+| unchanged corpus | `Task :test UP-TO-DATE`, green |
+| one assertion key flipped in a scratch corpus | `Task :test FAILED`, naming the test |
+| `LAZILY_SPEC_DIR` switched back to canonical | **re-runs**, does not reuse the scratch result |
+| unchanged again | `UP-TO-DATE` |
+
+The first and last rows matter as much as the second. Making a task always dirty would also turn the fixture edit red, and would be the wrong fix — it would trade a false green for a permanently cold cache. Keeping UP-TO-DATE on an unchanged corpus is what shows the fingerprint is *correct* rather than merely always-invalid. The third row is the environment half: a different corpus produces a different fingerprint instead of a reused verdict.
+
+`make check` green. `lazily-kt@9fdcd9a`, superproject pointer committed.
+
+Third item in a row from the same family — a guard that answers "nothing was examined" with the same signal as "nothing was wrong". zig's skip trap, and before it the floors set below reality. Worth noticing the shape: in each case the mechanism that hid the gap was one someone had deliberately added for a good local reason (skip without a sibling, margin against churn, incremental build caching).
+
+Exchange is at 337 lines (session-accretion `warn`); queue is active so I am not compacting.
 <!-- agent:boundary:c6ef3fb1 -->
 <!-- /agent:exchange -->
 
@@ -374,7 +406,7 @@ This unblocks `#lzperturbaudit` for zig — the per-family perturbation sweep no
 - ~~do [#lzzigcanonrunner]~~
 - ~~do [#lzpartialmarkadjudicate]~~
 - ~~📌 do [#lzzigspecdiroption]~~
-- 📌 do [#lzktcorpusnotgradleinput]
+- ~~📌 do [#lzktcorpusnotgradleinput]~~
 - 📌 do [#lzledgeragreementaudit]
 - 📌 do [#lzzigdiffmutant]
 - do [#lzperturbaudit]
@@ -384,7 +416,6 @@ This unblocks `#lzperturbaudit` for zig — the per-family perturbation sweep no
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzktcorpusnotgradleinput] lazily-kt's conformance corpus is NOT a declared input of the gradle 'test' task, so editing a fixture leaves 'test' UP-TO-DATE and the run reports green having replayed nothing — a false green that defeats any corpus-perturbation probe. Compounding it, tasks.test wires no environment(...), so the test JVM inherits the DAEMON's environment and a daemon started before LAZILY_SPEC_DIR was set serves the stale path. Today the only defence is remembering '--no-daemon --rerun-tasks'. Declare the corpus directory as a task input so a fixture change invalidates the task, and pass the corpus-dir variable through environment(...) explicitly. Definition of done: flip one assertion key in a scratch corpus and prove a plain 'make check' (no flags, warm daemon) reddens.
 - [ ] [#lzledgeragreementaudit] A KNOWN_UNCOVERED entry in a binding's shell coverage guard does NOT stop a test host that DISCOVERS fixtures by enumerating the corpus directory from trying to replay them — the two ledgers describing the same absence can disagree silently. lazily-cs was red on HEAD for exactly this (CI 31298919123): collections/registers_convergence.json was declared uncovered in the script while CollectionsConformanceTests crashed on it with a bare KeyNotFoundException naming neither the fixture nor the reason. Fixed there in b8cdb7e by adding the Unsupported entry and making the shape dispatch fail closed. Audit the other eight bindings for the same split: for each, list the fixtures in KNOWN_UNCOVERED, check whether the runner enumerates or names fixtures, and confirm an enumerating runner has a matching in-host ledger entry plus a fail-closed default on an unrecognised fixture shape. All eight are currently green, so this is about the NEXT fixture added to the shared corpus.
 - [ ] [#lzzigdiffmutant] lazily-zig's lossless-tree replay does not pin the anti-entropy FILTER, only convergence: mutating LosslessTreeCrdt.diff to ignore the partner frontier (ship every op in the log) reddens NONE of the nine fixtures, including non_contiguous_anti_entropy.json whose subject is a replica with a gap. deliver.only indexes into the diff, so a diff whose contents change should select different ops and change what the gapped replica renders (hole_before_repair expects b='013') — it does not, and the reason is not yet established. Either the runner's deliver path is not exercising the frontier as intended, or applyUpdate's idempotence absorbs the difference; find out which, then make the fixture discriminating (or record honestly that convergence is all it can pin). Contrast the at_byte char-offset mutant, which reddens six of the nine.
 - [ ] [#lzperturbaudit] The corpus-perturbation audit that #lzoverrideallrunners existed to unblock has NOT been run. All five bindings (cs/go/dart/js/py) can now be pointed at a scratch corpus, but each has been probed with exactly ONE fixture, the one proving its seam. lazily-rs's AGENTS.md documents this audit as the pass a static detector cannot replace. For each of the five, walk the conformance families and perturb at least one fixture per family, recording which runners redden and which are convergence-only (a fixture that cannot be made to fail by flipping a declared expectation is pinning nothing). Expect finds of the #lzzigdiffmutant shape: an assertion that survives a mutation because an earlier assertion fires first, or because the runner never reaches it. Definition of done: a per-binding table of family -> perturbed key -> reddened runner, with every non-reddening cell explained rather than dropped.

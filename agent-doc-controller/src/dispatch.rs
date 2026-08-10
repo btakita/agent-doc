@@ -2075,13 +2075,50 @@ pub enum StartingPaneBlocker {
     Booting,
     /// The composer holds unsent operator input. Waiting never resolves it.
     OperatorDraft,
+    /// The composer holds agent-doc's OWN trigger, never submitted
+    /// (`#dispatchonlystrandedtrigger`). Not operator input, so telling the
+    /// operator to "submit or clear that draft" asks them to finish agent-doc's
+    /// job by hand.
+    StrandedTrigger,
 }
 
 impl StartingPaneBlocker {
     /// Classify from the pane's composer draft, if any.
+    ///
+    /// Kept for callers with no trigger to compare against; prefer
+    /// [`Self::from_composer_draft_for_trigger`], which can tell agent-doc's own
+    /// stranded injection from real operator input.
     pub fn from_composer_draft(draft: Option<&str>) -> Self {
+        Self::from_composer_draft_for_trigger(draft, None)
+    }
+
+    /// Classify a composer draft against the trigger this route would inject
+    /// (`#dispatchonlystrandedtrigger`).
+    ///
+    /// Operator-reported 2026-08-10 on `sdk.md`: a dispatch-only reopen refused
+    /// pane `%926` because the composer held
+    /// `/agent-doc .../tasks/sdk.md` — agent-doc's own trigger for the very
+    /// document being routed, injected by an earlier route and never submitted.
+    /// Classifying that as operator input produces
+    /// `unblocker=submit_or_clear_pane_draft`, which asks a human to press Enter
+    /// on agent-doc's behalf.
+    ///
+    /// `#jbtsiftnosub2` already established the right answer for the fresh-start
+    /// path — resubmit the stranded trigger once — using the
+    /// `pane_composer_has_pending_trigger` predicate right here in this module.
+    /// The dispatch-only reopen path simply never asked.
+    ///
+    /// A draft that merely CONTAINS the trigger alongside other text stays
+    /// `OperatorDraft`: the operator may have typed around it, and submitting
+    /// then sends their words too.
+    pub fn from_composer_draft_for_trigger(draft: Option<&str>, trigger: Option<&str>) -> Self {
         match draft {
-            Some(_) => Self::OperatorDraft,
+            Some(draft) => match trigger {
+                Some(trigger) if draft_is_exactly_the_trigger(draft, trigger) => {
+                    Self::StrandedTrigger
+                }
+                _ => Self::OperatorDraft,
+            },
             None => Self::Booting,
         }
     }
@@ -2089,9 +2126,29 @@ impl StartingPaneBlocker {
     pub fn unblocker(self) -> &'static str {
         match self {
             Self::OperatorDraft => "submit_or_clear_pane_draft",
+            Self::StrandedTrigger => "resubmit_stranded_trigger",
             Self::Booting => "wait_for_dispatch_ready_prompt",
         }
     }
+}
+
+/// Is this composer draft nothing but the trigger agent-doc would inject?
+///
+/// The captured line carries the harness prompt sigil and its padding, so the
+/// comparison strips leading sigils and whitespace — including the non-breaking
+/// space seen in the live report — before requiring an EXACT match on the
+/// remainder. Exact, not `contains`: extra operator text must keep the draft
+/// operator-owned.
+fn draft_is_exactly_the_trigger(draft: &str, trigger: &str) -> bool {
+    let strip = |text: &str| {
+        text.trim_matches(|ch: char| {
+            ch.is_whitespace() || ch == '\u{a0}' || ch == '❯' || ch == '>' || ch == '$'
+        })
+        .to_string()
+    };
+    let draft = strip(draft);
+    let trigger = strip(trigger);
+    !trigger.is_empty() && draft == trigger
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7106,5 +7163,84 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% used
             Some("review_queue".to_string())
         );
         assert_eq!(spent_preset_id_from_pause_reason("no preset here"), None);
+    }
+}
+
+#[cfg(test)]
+mod stranded_trigger_classification_tests {
+    use super::*;
+
+    const TRIGGER: &str = "/agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md";
+
+    /// The live 2026-08-10 report, verbatim: the composer held agent-doc's own
+    /// trigger for the document being routed, behind the harness sigil and a
+    /// NON-BREAKING space. Calling that "unsent operator input" asks a human to
+    /// press Enter on agent-doc's behalf.
+    #[test]
+    fn agent_docs_own_stranded_trigger_is_not_operator_input() {
+        let draft = "\u{276f}\u{a0}/agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md";
+        assert_eq!(
+            StartingPaneBlocker::from_composer_draft_for_trigger(Some(draft), Some(TRIGGER)),
+            StartingPaneBlocker::StrandedTrigger
+        );
+        assert_eq!(
+            StartingPaneBlocker::from_composer_draft_for_trigger(Some(draft), Some(TRIGGER))
+                .unblocker(),
+            "resubmit_stranded_trigger"
+        );
+    }
+
+    /// Real operator text stays operator-owned — this is the case the guard
+    /// exists for, and widening it would inject over someone's typing.
+    #[test]
+    fn genuine_operator_input_is_still_operator_input() {
+        for draft in ["\u{276f} keep the uv.lock", "\u{276f} why is this failing?"] {
+            assert_eq!(
+                StartingPaneBlocker::from_composer_draft_for_trigger(Some(draft), Some(TRIGGER)),
+                StartingPaneBlocker::OperatorDraft,
+                "{draft}"
+            );
+        }
+    }
+
+    /// A draft that CONTAINS the trigger plus operator words must stay
+    /// operator-owned: resubmitting would send their words too.
+    #[test]
+    fn a_trigger_with_operator_text_around_it_stays_operator_input() {
+        for draft in [
+            "\u{276f} /agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md and also check CI",
+            "\u{276f} wait: /agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md",
+        ] {
+            assert_eq!(
+                StartingPaneBlocker::from_composer_draft_for_trigger(Some(draft), Some(TRIGGER)),
+                StartingPaneBlocker::OperatorDraft,
+                "{draft}"
+            );
+        }
+    }
+
+    /// A trigger for a DIFFERENT document is not this route's stranded
+    /// injection, so it must not be resubmitted here.
+    #[test]
+    fn another_documents_trigger_is_not_this_routes_stranded_trigger() {
+        let draft = "\u{276f} /agent-doc /home/brian/work/btakita/agent-loop/tasks/other.md";
+        assert_eq!(
+            StartingPaneBlocker::from_composer_draft_for_trigger(Some(draft), Some(TRIGGER)),
+            StartingPaneBlocker::OperatorDraft
+        );
+    }
+
+    /// No draft is still a booting pane, and a caller with no trigger to compare
+    /// against keeps the old conservative answer.
+    #[test]
+    fn absent_draft_and_absent_trigger_keep_prior_behaviour() {
+        assert_eq!(
+            StartingPaneBlocker::from_composer_draft_for_trigger(None, Some(TRIGGER)),
+            StartingPaneBlocker::Booting
+        );
+        assert_eq!(
+            StartingPaneBlocker::from_composer_draft(Some("\u{276f} /agent-doc x.md")),
+            StartingPaneBlocker::OperatorDraft
+        );
     }
 }

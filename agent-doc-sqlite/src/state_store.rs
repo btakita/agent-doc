@@ -366,6 +366,81 @@ pub fn open_state_db_with_timeout(
     })
 }
 
+/// Header every real SQLite database starts with.
+const SQLITE_FILE_HEADER: &[u8] = b"SQLite format 3\0";
+
+/// Forensic description of the bytes SQLite refused to open
+/// (`#flakystatedbfixture`).
+///
+/// The refusal used to name the path and nothing else, which is why this failure
+/// has been unresolved through several sightings: by the time anyone looks, the
+/// offending file is gone (a test `TempDir`) or has been recovered by hand, and
+/// nothing recorded whether it was a torn page-1 of a real ledger or a file that
+/// was never a database at all. Those two have opposite causes and opposite
+/// remedies, so a refusal that cannot tell them apart restarts the diagnosis
+/// from zero every time.
+///
+/// **Measured while diagnosing that flake, because the obvious guess is wrong:**
+/// a `state.db` of exactly 0 or 1 bytes opens *cleanly* — SQLite initialises it
+/// as a new database. `NotADatabase` starts at **two** bytes of bad header. So
+/// "the writer created the file and exited before writing the header" cannot
+/// produce this failure, and "is the file empty?" is never the question worth
+/// asking. The question is what the first page actually holds, which is what
+/// this records.
+fn state_db_file_evidence(path: &Path) -> String {
+    format!(
+        "evidence: {}; wal={}; shm={}",
+        state_db_main_file_evidence(path),
+        state_db_sibling_evidence(path, "-wal"),
+        state_db_sibling_evidence(path, "-shm"),
+    )
+}
+
+fn state_db_main_file_evidence(path: &Path) -> String {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return "main=absent".to_string();
+    };
+    let mut head = [0u8; 16];
+    let read = std::fs::File::open(path)
+        .and_then(|mut file| {
+            use std::io::Read;
+            file.read(&mut head)
+        })
+        .unwrap_or(0);
+    let head = &head[..read];
+    let header = if head.starts_with(SQLITE_FILE_HEADER) {
+        // A real header with unreadable pages: a ledger that WAS a database.
+        "sqlite"
+    } else {
+        // Never a database, or a page-1 torn badly enough to lose the magic.
+        "foreign"
+    };
+    let hex: String = head.iter().map(|byte| format!("{byte:02x}")).collect();
+    let printable: String = head
+        .iter()
+        .map(|byte| {
+            if byte.is_ascii_graphic() || *byte == b' ' {
+                *byte as char
+            } else {
+                '.'
+            }
+        })
+        .collect();
+    format!(
+        "main={} bytes header={header} first16={hex} ({printable})",
+        metadata.len()
+    )
+}
+
+fn state_db_sibling_evidence(path: &Path, suffix: &str) -> String {
+    let mut sibling = path.as_os_str().to_os_string();
+    sibling.push(suffix);
+    match std::fs::metadata(PathBuf::from(sibling)) {
+        Ok(metadata) => format!("{} bytes", metadata.len()),
+        Err(_) => "absent".to_string(),
+    }
+}
+
 /// Paths whose schema this process has already converged (`#adopenfast`).
 ///
 /// Schema convergence is idempotent and declared entirely by this binary, so
@@ -448,7 +523,14 @@ fn open_and_init_state_db(path: &Path, busy_timeout: Duration) -> Result<Connect
             // malformed" with no way forward.
             Err(error) if is_state_db_corruption_error(&error) => {
                 let project_root = project_root_for_state_db_path(path);
-                return Err(error.context(state_db_corruption_guidance(&project_root)));
+                // Record what the bytes were BEFORE anything recovers or
+                // deletes them. The recovery steps below tell the operator to
+                // preserve the corrupt copy, but a test fixture's `TempDir` is
+                // gone before anyone can act on that, which is exactly why
+                // `#flakystatedbfixture` has stayed undiagnosed.
+                return Err(error
+                    .context(state_db_file_evidence(path))
+                    .context(state_db_corruption_guidance(&project_root)));
             }
             Err(error) => return Err(error),
         }
@@ -6732,5 +6814,148 @@ mod tests {
             "the claim becomes eligible exactly at the interval boundary"
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod state_db_corruption_evidence_tests {
+    use super::*;
+
+    fn write_state_db(dir: &Path, bytes: &[u8]) -> PathBuf {
+        let path = state_db_path(dir);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, bytes).unwrap();
+        reset_state_db_schema_convergence_memo();
+        path
+    }
+
+    /// The measured fact that falsified the previous `#flakystatedbfixture`
+    /// theory, pinned so it cannot be re-guessed.
+    ///
+    /// 0.35.235 shipped a branch that removed a zero-byte `state.db` and
+    /// reinitialised it, on the premise that a writer which created the file
+    /// and died before writing the header left a file SQLite would reject.
+    /// SQLite does no such thing: it initialises an empty file as a new
+    /// database. The branch was therefore unreachable through the failure it
+    /// claimed to fix, its four tests passed with the branch deleted, and —
+    /// worse — `open_and_init_state_db` can also fail on a *lock* error while a
+    /// concurrent process is still initialising the same 0-byte file, so the
+    /// branch would have unlinked a database another process was creating.
+    #[test]
+    fn a_zero_byte_state_db_opens_cleanly_and_is_never_corruption() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_state_db(dir.path(), b"");
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
+
+        let conn = open_state_db(dir.path()).expect("a zero-byte state db initialises normally");
+        drop(conn);
+
+        assert!(
+            std::fs::read(&path).unwrap().starts_with(SQLITE_FILE_HEADER),
+            "the empty file must have become a real database"
+        );
+    }
+
+    /// A file that was never a database must say so, and must carry its bytes
+    /// into the refusal. Without the evidence layer the operator sees only the
+    /// path, which is why every sighting so far restarted the diagnosis.
+    #[test]
+    fn a_foreign_state_db_refusal_carries_its_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let sentinel = b"not a database at all";
+        let path = write_state_db(dir.path(), sentinel);
+
+        let err = open_state_db(dir.path())
+            .expect_err("a non-empty invalid db must not be replaced automatically");
+        let rendered = format!("{err:#}");
+
+        assert!(
+            rendered.contains("refusing automatic replacement"),
+            "fail-closed refusal must survive: {rendered}"
+        );
+        assert!(
+            rendered.contains("header=foreign"),
+            "a file that was never a database must be classified: {rendered}"
+        );
+        assert!(
+            rendered.contains(&format!("main={} bytes", sentinel.len())),
+            "the refusal must record the length: {rendered}"
+        );
+        assert!(
+            rendered.contains("first16=6e6f7420612064617461626173652061"),
+            "the refusal must record the leading bytes: {rendered}"
+        );
+        assert!(
+            rendered.contains("(not a database a)"),
+            "printable rendering makes a text sentinel obvious: {rendered}"
+        );
+        assert!(
+            rendered.contains("wal=absent") && rendered.contains("shm=absent"),
+            "sibling WAL/SHM state distinguishes a torn ledger: {rendered}"
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            sentinel,
+            "the bytes must be preserved as evidence"
+        );
+    }
+
+    /// A torn page-1 of a *real* ledger is the other half of the diagnosis: the
+    /// header is gone, but live WAL/SHM siblings prove the file was a working
+    /// database moments earlier. The refusal must make that distinguishable
+    /// from the sentinel case above.
+    #[test]
+    fn a_torn_ledger_refusal_reports_its_live_siblings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = state_db_path(dir.path());
+        reset_state_db_schema_convergence_memo();
+        drop(open_state_db(dir.path()).expect("build a real ledger first"));
+        std::fs::write(path.with_extension("db-wal"), vec![0u8; 4096]).unwrap();
+        std::fs::write(&path, vec![0xAAu8; 8192]).unwrap();
+        reset_state_db_schema_convergence_memo();
+
+        let err = open_state_db(dir.path()).expect_err("a torn ledger must fail closed");
+        let rendered = format!("{err:#}");
+
+        assert!(rendered.contains("header=foreign"), "{rendered}");
+        assert!(rendered.contains("main=8192 bytes"), "{rendered}");
+        assert!(
+            rendered.contains("wal=4096 bytes"),
+            "a live WAL sibling is what separates a torn ledger from a sentinel: {rendered}"
+        );
+    }
+
+    /// A ledger whose header is intact but whose pages are damaged must still
+    /// be reported as `sqlite`, so the operator knows `.recover` is worth
+    /// running rather than assuming the file was junk.
+    #[test]
+    fn a_damaged_but_real_ledger_is_classified_as_sqlite() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = state_db_path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut bytes = SQLITE_FILE_HEADER.to_vec();
+        bytes.extend(std::iter::repeat_n(0xFFu8, 8192 - bytes.len()));
+        std::fs::write(&path, &bytes).unwrap();
+        reset_state_db_schema_convergence_memo();
+
+        let err = open_state_db(dir.path()).expect_err("a damaged ledger must fail closed");
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains("header=sqlite"),
+            "an intact magic must not be called foreign: {rendered}"
+        );
+    }
+
+    /// A missing file is the ordinary first open and must not go anywhere near
+    /// the corruption path.
+    #[test]
+    fn a_missing_state_db_is_created_normally() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = state_db_path(dir.path());
+        assert!(!path.exists());
+        reset_state_db_schema_convergence_memo();
+
+        open_state_db(dir.path()).expect("a fresh project must open");
+        assert!(path.exists());
     }
 }

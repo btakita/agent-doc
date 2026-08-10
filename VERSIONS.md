@@ -2,6 +2,64 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.235
+
+- **A corrupt `state.db` refusal now carries the offending bytes
+  (`#flakystatedbfixture`), and the empty-file theory is retracted.**
+
+  An earlier draft of this release removed a zero-byte `state.db` and
+  reinitialised it, on the premise that a writer which created the file and died
+  before writing the header left a file SQLite would reject. **That premise is
+  false and the change is reverted.** Measured directly: a `state.db` of exactly
+  0 or 1 bytes opens *cleanly* — SQLite initialises it as a new database.
+  `NotADatabase` starts at **two** bytes of bad header. The branch was therefore
+  unreachable through the failure it claimed to fix, all four of its tests
+  passed with the branch deleted, and it was actively unsafe:
+  `open_and_init_state_db` also fails on a *lock* error while a concurrent
+  process is still initialising the same 0-byte file, so the branch could unlink
+  a database another process was in the middle of creating — the exact
+  concurrency the item is about.
+
+  What actually shipped is the thing that makes the next sighting diagnosable.
+  The refusal named the path and nothing else, so every occurrence restarted the
+  diagnosis from zero — and for a test `TempDir` the evidence is gone before
+  anyone can act on the "preserve the corrupt copy" advice. `open_state_db` now
+  attaches the file's length, whether the SQLite magic is intact
+  (`header=sqlite` vs `header=foreign`), the first sixteen bytes in hex plus a
+  printable rendering, and the presence and size of the `-wal` / `-shm`
+  siblings. Those separate the two shapes with opposite causes: a file that was
+  never a database (foreign header, no siblings) versus a torn page-1 of a real
+  ledger (live WAL alongside a lost magic).
+
+  Fail-closed behaviour is unchanged — nothing is replaced or deleted, and the
+  bytes stay on disk. **`#flakystatedbfixture` stays open**: 600 concurrent
+  cross-process opens over 25 fresh project roots did not reproduce the
+  corruption, so the writer that produces those bytes is still unidentified.
+
+- **Fix (`#dispatchonlystrandedtrigger`): agent-doc's own unsubmitted trigger
+  was classified as operator input.**
+
+  Operator-reported 2026-08-10 on `sdk.md`: a dispatch-only reopen refused pane
+  `%926` because the composer held
+  `/agent-doc .../tasks/sdk.md` — agent-doc's own trigger for the very document
+  being routed, injected by an earlier route and never submitted. The refusal
+  emitted `unblocker=submit_or_clear_pane_draft`, asking a human to press Enter
+  on agent-doc's behalf.
+
+  `StartingPaneBlocker::from_composer_draft` classified ANY non-empty draft as
+  `OperatorDraft`, never comparing it against the trigger being injected —
+  even though `#jbtsiftnosub2` already established resubmit-once as the answer
+  for the fresh-start path, using `pane_composer_has_pending_trigger` in the same
+  module. New `StrandedTrigger` variant with
+  `unblocker=resubmit_stranded_trigger`, matched EXACTLY (after stripping the
+  harness sigil and padding, including the non-breaking space in the live
+  report). A draft containing the trigger plus operator words, or a trigger for
+  a different document, stays `OperatorDraft` — resubmitting either would send
+  text the operator did not mean to send.
+
+  Classification only. Wiring the dispatch-only route to actually resubmit is
+  `#dispatchonlyresubmitwiring`, which needs a live-pane proof.
+
 ## 0.35.234
 
 - **Fix (`#handoffdeadpredecessor`): a replacement still `Preparing` now reaps

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: a4bda939-980a-4e1b-9d3d-489a032ffdda
+resume: 5e568d29-8fc5-4a1f-821b-69bee78bb8be
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -124,13 +124,40 @@ Done. I filed this last cycle as blocked on a concurrent session, then checked i
 **Output equivalence checked, not assumed.** Assembling a string and writing it literally should produce identical bytes, but this file generates published headers, so I verified rather than reasoned: `make check-vocabulary` reports all 3 emitted files still matching the published vocabulary, `make check-contracts` reports all 24 still matching the published contracts, `ErrorCode.h`'s digest is unchanged, and `check-ts` / `check-codegen` are green (exit 0, zero failures) across TypeScript, C#, and g++.
 
 One correction to what I wrote last cycle: I said editing it "is the two-sessions-one-repo hazard, not a two-line change." The hazard was real but I scoped it too broadly — the right boundary was the shared index, not the file.
+
+### Re: do [#hookhashanchortags] — opus-5
+
+> **Queue prompt:**
+>
+> do [#hookhashanchortags]
+
+
+Released as **0.35.229**.
+
+**Decided the design question first, since the item asked me to.** Rejected the broader option — "treat any id already present in tracked repo content as vouched-for". It conflates *someone typed this before* with *this names tracked work*, which is precisely the distinction the guard exists to draw: a coined id written into a comment and then abandoned would vouch for itself forever, and `#orphandrain` (the original motivating case) would have passed. Took the narrower option: harvest anchors from the project's **agent instruction surfaces**, because an id defined there names a documented invariant. That is a curated namespace, not "any string anyone typed".
+
+**Surfaces harvested:** root `AGENTS.md` / `CLAUDE.md` / `SKILL.md` / `SPEC.md`, `runbooks/*.md`, `specs/*.md`, every installed harness skill plus its runbooks, and `.cursor/rules/*.md`.
+
+**Three things I did not want to get wrong.**
+
+*One definition.* The item only named the `PreToolUse` guard, but its own reproduction was a **session-check** warning — a different surface with its own known-id builder. Fixing one would have left the reported symptom alive. Both now read `agent_doc_fs::instruction_surface_anchors`, so the file set has one home. Two copies of "which files define anchors" is exactly the drift this codebase keeps paying for: `#percellconverge` records the same lesson, where consolidating the *wording* did not stop the *predicate* diverging.
+
+*Lazy.* `PreToolUse` fires on every `Edit`, and these surfaces are hundreds of kilobytes — AGENTS.md alone is 71KB, SPEC.md 158KB. So the harvest runs only once a tag is **already about to be reported**. The overwhelmingly common call carries no id at all, returns before the second pass, and never touches the disk. There is a test asserting that path specifically (a directory placed where AGENTS.md would go, which would fail to read if it were ever consulted).
+
+*Fails soft, on purpose.* An unreadable surface contributes nothing. That is the opposite of `known_ids_for_document`, which fails **closed** — and the asymmetry is deliberate: this set only ever *widens* what is allowed, so failing soft costs a false block at worst and can never open a hole. Failing closed here would have re-created the very bug.
+
+**Verification.** 4 tests in `agent-doc-fs` (every surface contributes; an unreadable surface degrades instead of erroring; empty project; only Markdown is read, so a stray script in `runbooks/` cannot inject an anchor) and 4 in the hook (anchors allowed with a root and blocked without one; an id in no surface still blocks and the reason names only it; empty project unchanged; the no-id path never reads the surfaces). `make check` green. Then live against the installed binary with the three anchors this session actually tripped on — `#ci-no-closeout-wait`, `#drain-no-defer`, `#preflightinbinary` — exit 0, and the same text plus one invented id exits 2 naming only the invented one.
+
+**One shape this does not cover, stated so it is not mistaken for fixed:** code identifiers quoted in a response, which is what produced the `#include` / `#hlc` / `#entries` warnings on my last two closeouts. Those are not instruction anchors and not tracked work; they are C and JS fragments cited in prose. I do not think that one is cleanly fixable — agent-doc's own convention writes tracked ids in backticks, so backtick context cannot distinguish them, and there is an existing test pinning that backticked tags must be caught. It is a warning rather than a block, so the cost is noise on a closeout, not lost work. Leaving it unfiled rather than opening an item I would not know how to close.
+
+Session note: exchange is at 92 lines / 4 response sections with the queue still active, so I kept draining rather than pausing to compact.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#hookhashcodetsworkaround]~~
-- do [#hookhashanchortags]
+- ~~do [#hookhashanchortags]~~
 - ~~do [#hookhashjsprivatefield]~~
 - do [#operatorverifylive]
 - do [#run3rdpaneswitchverify]
@@ -146,7 +173,6 @@ One correction to what I wrote last cycle: I said editing it "is the two-session
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#hookhashanchortags] agent-doc instruction-surface anchor tags quoted in prose are reported as coined ids. Named in the original #hookhashfalsepositive report and NOT fixed by 0.35.228 prose scoping, because these tags really are in prose -- it is a ledger-coverage problem, not a lexical one. known_ids_for_document (agent-doc-hooks-io/src/coined_id_pretooluse.rs) reads only the session document plus its .done.md archives, so an anchor defined in SKILL.md, AGENTS.md, or a runbook -- #preflightinbinary, #drain-no-defer, #ci-no-closeout-wait -- resolves to nothing. Reproduced 2026-08-09: a closeout warned about #ci-no-closeout-wait after the response quoted the AGENTS.md rule by name. Options: harvest anchors from the repo instruction surfaces into the known set, or treat an id already present in tracked repo content as vouched-for. Decide which before implementing -- the second is broader and could vouch for a stale id.
 - [/] [#clearsubmitunobservedverify] [operator-verify] Live re-proof for #clearsubmitunobserved (0.35.225): reproduce the reported haiven-dev.md sequence — let the supervisor go dead (or `session restart-supervisor`), then Run Agent Doc so the flow cold-starts a replacement and immediately runs Clear Session Context on the fresh pane. Expect it to SUCCEED instead of failing with `result=submission_unobserved ... unblocker=clear_submission_unobserved`, and expect `session_clear_submit_cleared_state_probe ... result=cleared_state_proven retained_lines=<small>` in ops.log. Then the half that must not regress: on a pane holding a real conversation, break submission (e.g. leave the composer wedged) and confirm the clear still fails closed with `result=conversation_retained`. Unit tests pin the predicate against synthetic captures; only a live pane exercises the tmux scrollback capture and the real harness prompt shapes.
 - [ ] [#caswriteracechurn] #agent-doc-bug The `compare_and_swap_raced` settle-wait is recurring across concurrent sessions, not a one-off. Operator-reported on sdk.md 2026-08-09 ("Same CAS-race path as last cycle — the write landed; finishing with commit"), and the SAME cycle on agent-doc-bugs2.md hit it twice in one closeout: `[write] Waiting for typing/CRDT versions to settle ... (reason=compare_and_swap_raced, elapsed=9945ms)` then again at 4694ms, inside a 32.7s closeout (commit_authority 14.9s, session_check 16.7s). Outcome is correct every time — the write lands and the cycle commits — so this is latency/churn, not loss. Worth measuring before fixing: instrument how often a closeout takes the CAS-race branch and what the contending writer is (concurrent supervisor idle-watch? replica propagation? another session on the same state.db?). If the contention is self-inflicted (agent-doc writing the same cell twice per closeout), the fix is to collapse the writes; if it is genuine cross-session contention on a shared project root, the settle wait is doing its job and the item is a metric, not a bug. Do not "fix" it by shortening the wait -- the wait is what makes the write land.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.

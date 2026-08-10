@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-state-scope"
-version = "0.35.231"
+version = "0.35.232"
 edition = "2024"
 description = "Lifetime-typed lazily scopes (#stategraphjoin) shared across agent-doc crates"
 license = "MIT"

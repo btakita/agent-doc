@@ -2,6 +2,41 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.232
+
+- **Instrumentation (`#caswriteracechurn`): `ops summary` buckets CRDT settle
+  waits by write site.**
+
+  The item asked to measure the compare-and-swap settle wait before fixing it,
+  and `ops summary` did not surface `*_crdt_convergence_wait` at all — the only
+  way to see how often a closeout took the CAS branch, and which writer it
+  contended with, was to grep the raw log by hand. The event name is dynamic
+  (`pending_write_...`, `serialized_atomic_write_...`), so it cannot be a fixed
+  `OpsLogEvent` token; `crdt_convergence_wait_site` recovers the site from the
+  name and the classifier buckets on it. A site names one write path, so the
+  bucket answers "what is the contending writer" directly.
+
+  First measurement off this repo's `ops.log`, 196 CAS lines / 97 waits:
+
+  - **100%** of convergence waits were `compare_and_swap_raced`. No other
+    contention state fired even once, so this is not one reason among many.
+  - 577.6s of settle wait total. `serialized_atomic_write` dominates (366.5s,
+    max 65.0s), then `pending_write` (102.0s) and `start_resume_id_capture`
+    (93.1s); `queue_sync`, `pending_maintenance`, and
+    `session_check_response_replay_dedup` raced once each.
+  - Of 34 contention windows, **12 are one session contending with itself across
+    several write sites** — self-inflicted, the branch the item said to fix by
+    collapsing writes. 15 have more than one session's lines interleaved, and 7
+    are a single site.
+  - The three sessions in the log write three DIFFERENT documents
+    (`agent-doc-bugs2.md`, `lazily.md`, `tsift.md`) in one project root.
+    Whether they actually contend or merely overlap in time is NOT established
+    by the log — that needs the compare-and-swap's scope, which this change does
+    not determine and which `#casselfinflictedcollapse` carries.
+
+  The wait itself is unchanged. Shortening it is explicitly not the fix; the
+  wait is what makes the write land.
+
 ## 0.35.231
 
 - **Fix (`#coinedguardledgerasymmetry`): the two coined-id guards disagreed

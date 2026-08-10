@@ -829,6 +829,9 @@ fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
         None if session_review_family_for_message(message).is_some() => {
             "session-review guardrail".to_string()
         }
+        None if let Some(site) = crdt_convergence_wait_site(event_name) => {
+            format!("crdt convergence wait {site}")
+        }
         _ => return None,
     };
 
@@ -1195,6 +1198,23 @@ fn session_review_family_for_message(message: &str) -> Option<&'static str> {
         return Some("noop_closeout");
     }
     None
+}
+
+/// Write site of a `<site>_crdt_convergence_wait` event, if that is what this is.
+///
+/// `#caswriteracechurn`: these events carry the settle wait that dominates
+/// closeout latency, and `ops summary` did not surface them at all — the only
+/// way to see how often a closeout took the compare-and-swap branch, and which
+/// writer it contended with, was to grep the raw log by hand. Bucketing by the
+/// event's own site prefix answers "what is the contending writer" directly,
+/// because a site names one write path.
+///
+/// The event name is dynamic (`pending_write_...`, `serialized_atomic_write_...`,
+/// `start_resume_id_capture_...`), so it cannot be a fixed token in
+/// `OpsLogEvent`.
+fn crdt_convergence_wait_site(event_name: &str) -> Option<&str> {
+    let site = event_name.strip_suffix("_crdt_convergence_wait")?;
+    (!site.is_empty()).then_some(site)
 }
 
 fn parse_log_line(line: &str) -> (Option<u64>, &str) {
@@ -1862,5 +1882,56 @@ mod submit_profile_tests {
         let claude = &report.harnesses[0];
         assert_eq!(claude.repairs, 2);
         assert_eq!(claude.resubmit_required, 1);
+    }
+}
+
+#[cfg(test)]
+mod crdt_convergence_wait_tests {
+    use super::*;
+
+    /// `#caswriteracechurn`: bucket by write site, because "which writer are we
+    /// contending with" is the question the settle wait cannot answer on its own.
+    #[test]
+    fn a_convergence_wait_is_classified_by_its_write_site() {
+        for (event, expected) in [
+            ("pending_write_crdt_convergence_wait", "pending_write"),
+            (
+                "serialized_atomic_write_crdt_convergence_wait",
+                "serialized_atomic_write",
+            ),
+            (
+                "start_resume_id_capture_crdt_convergence_wait",
+                "start_resume_id_capture",
+            ),
+        ] {
+            assert_eq!(crdt_convergence_wait_site(event), Some(expected));
+        }
+    }
+
+    /// A site-less or unrelated event must not be swept into the bucket.
+    #[test]
+    fn unrelated_events_are_not_convergence_waits() {
+        for event in [
+            "commit_success",
+            "_crdt_convergence_wait",
+            "crdt_convergence_wait_extra",
+            "pending_write_crdt_write_coalesced_retry",
+        ] {
+            assert_eq!(crdt_convergence_wait_site(event), None, "{event}");
+        }
+    }
+
+    /// End to end through the classifier, with the real line shape from ops.log.
+    #[test]
+    fn a_real_settle_wait_line_lands_in_the_bucket() {
+        let line = "[1786327775] serialized_atomic_write_crdt_convergence_wait \
+                    file=tasks/agent-doc/agent-doc-bugs2.md reason=compare_and_swap_raced \
+                    elapsed_ms=3215 backoff_ms=25";
+        let classified =
+            classify_line(line, Path::new("/repo")).expect("a settle wait must classify");
+        assert_eq!(
+            classified.category,
+            "crdt convergence wait serialized_atomic_write"
+        );
     }
 }

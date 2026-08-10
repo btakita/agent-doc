@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: f94c1988-4002-45a3-a1c5-8b19fc12e01d
+resume: a8dbb895-c0ae-452c-a0fb-2d2d7c31e271
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -188,6 +188,26 @@ Released as **0.35.231**. This is the root cause behind the false green earlier 
 **Behaviour change worth stating plainly:** in this repo, 258 tags that appear only in archive prose no longer vouch for themselves. That is the intended tightening, but it is not cosmetic — if one of them turns out to name work tracked in a *different* document, the guard will block on it, because it is pane-scoped to one document by design.
 
 Session note: exchange is at 135 lines / 6 response sections with the queue still active, so I kept draining.
+
+### Re: do [#caswriteracechurn] — opus-5
+
+Measured, as the item asked. Shipped the instrumentation as **0.35.232**; the answer to "self-inflicted or genuine?" is **both**, with numbers.
+
+**The measurement was not possible without a change**, which is itself a finding: `ops summary` did not surface `*_crdt_convergence_wait` at all, so the only way to answer "how often does a closeout take the CAS branch, and who is the contending writer" was to grep the raw log by hand. The event name is dynamic (`pending_write_...`, `serialized_atomic_write_...`), so it could not be a fixed `OpsLogEvent` token; `crdt_convergence_wait_site` recovers the site from the name and the classifier buckets on it. A site names one write path, so the bucket answers the item's question directly rather than requiring a follow-up query.
+
+**First measurement, from this repo's `ops.log` — 196 CAS lines, 97 waits:**
+
+- **100%** of convergence waits were `compare_and_swap_raced`. Not one wait in the entire log had any other reason. So this is not one contention mode among several; it is the only one that happens.
+- **577.6s** of settle wait in total. `serialized_atomic_write` dominates at 366.5s with a **65.0s** single wait, then `pending_write` (102.0s) and `start_resume_id_capture` (93.1s). Three more sites — `queue_sync`, `pending_maintenance`, `session_check_response_replay_dedup` — raced once each. **Six** distinct agent-doc write paths touch the same document around one closeout.
+- Of 34 contention windows, **12 are one session contending with itself across several write sites**. That is the self-inflicted branch the item predicted, and it is now quantified rather than hypothesised. 15 windows have more than one session interleaved; 7 are a single site.
+
+**One thing I will not claim.** The three sessions in the log write three *different* documents — `agent-doc-bugs2.md`, `lazily.md`, `tsift.md` — in one project root. That is suggestive of cross-document contention on shared project state, which would be a much more interesting defect than either branch the item anticipated. But time-overlap is not contention, and proving it needs the compare-and-swap's actual scope, which I did not establish. `serialized_atomic_write` is a write-source *label*, not evidence of project-wide serialization. Filed as `#casselfinflictedcollapse` with both the collapse work and that scope question, because guessing here is exactly the error I made earlier in this session.
+
+**What I deliberately did not do:** touch the wait. The item says shortening it is not the fix, and the data agrees — every one of those waits ended in a landed write. The latency is real but the outcome is correct every time.
+
+`make check` green, 0.35.232 installed, controller recycled, both repos pushed and tagged. Verified live: `agent-doc ops summary` now lists all six contending write sites off the real log.
+
+That empties the agent-drainable queue. What remains is three `[operator-verify]` items needing a human at a real IDE and tmux session, so the loop stops here rather than churning.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
@@ -201,7 +221,7 @@ Session note: exchange is at 135 lines / 6 response sections with the queue stil
 - do [#operatorverifylive]
 - do [#run3rdpaneswitchverify]
 - ~~do [#hookhashfalsepositive]~~
-- do [#caswriteracechurn]
+- 🚧 do [#caswriteracechurn]
 <!-- /agent:queue -->
 
 ## Notes
@@ -213,7 +233,7 @@ Session note: exchange is at 135 lines / 6 response sections with the queue stil
 
 <!-- agent:backlog priority queue -->
 - [/] [#clearsubmitunobservedverify] [operator-verify] Live re-proof for #clearsubmitunobserved (0.35.225): reproduce the reported haiven-dev.md sequence — let the supervisor go dead (or `session restart-supervisor`), then Run Agent Doc so the flow cold-starts a replacement and immediately runs Clear Session Context on the fresh pane. Expect it to SUCCEED instead of failing with `result=submission_unobserved ... unblocker=clear_submission_unobserved`, and expect `session_clear_submit_cleared_state_probe ... result=cleared_state_proven retained_lines=<small>` in ops.log. Then the half that must not regress: on a pane holding a real conversation, break submission (e.g. leave the composer wedged) and confirm the clear still fails closed with `result=conversation_retained`. Unit tests pin the predicate against synthetic captures; only a live pane exercises the tmux scrollback capture and the real harness prompt shapes.
-- [ ] [#caswriteracechurn] #agent-doc-bug The `compare_and_swap_raced` settle-wait is recurring across concurrent sessions, not a one-off. Operator-reported on sdk.md 2026-08-09 ("Same CAS-race path as last cycle — the write landed; finishing with commit"), and the SAME cycle on agent-doc-bugs2.md hit it twice in one closeout: `[write] Waiting for typing/CRDT versions to settle ... (reason=compare_and_swap_raced, elapsed=9945ms)` then again at 4694ms, inside a 32.7s closeout (commit_authority 14.9s, session_check 16.7s). Outcome is correct every time — the write lands and the cycle commits — so this is latency/churn, not loss. Worth measuring before fixing: instrument how often a closeout takes the CAS-race branch and what the contending writer is (concurrent supervisor idle-watch? replica propagation? another session on the same state.db?). If the contention is self-inflicted (agent-doc writing the same cell twice per closeout), the fix is to collapse the writes; if it is genuine cross-session contention on a shared project root, the settle wait is doing its job and the item is a metric, not a bug. Do not "fix" it by shortening the wait -- the wait is what makes the write land.
+- [ ] 🚧 [#caswriteracechurn] #agent-doc-bug The `compare_and_swap_raced` settle-wait is recurring across concurrent sessions, not a one-off. Operator-reported on sdk.md 2026-08-09 ("Same CAS-race path as last cycle — the write landed; finishing with commit"), and the SAME cycle on agent-doc-bugs2.md hit it twice in one closeout: `[write] Waiting for typing/CRDT versions to settle ... (reason=compare_and_swap_raced, elapsed=9945ms)` then again at 4694ms, inside a 32.7s closeout (commit_authority 14.9s, session_check 16.7s). Outcome is correct every time — the write lands and the cycle commits — so this is latency/churn, not loss. Worth measuring before fixing: instrument how often a closeout takes the CAS-race branch and what the contending writer is (concurrent supervisor idle-watch? replica propagation? another session on the same state.db?). If the contention is self-inflicted (agent-doc writing the same cell twice per closeout), the fix is to collapse the writes; if it is genuine cross-session contention on a shared project root, the settle wait is doing its job and the item is a metric, not a bug. Do not "fix" it by shortening the wait -- the wait is what makes the write land.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 <!-- /agent:backlog -->

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 689773f9-f4f9-4f01-9e40-63a7fb025c1f
+resume: f94c1988-4002-45a3-a1c5-8b19fc12e01d
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -167,13 +167,34 @@ Released as **0.35.230**.
 4 new tests in `agent-doc-fs`: declared submodule surfaces contribute; a submodule's runbooks and specs are NOT read; a path escaping the root is skipped; a project without `.gitmodules` is byte-for-byte unchanged. `make check` green, 0.35.230 installed, controller recycled, both repos pushed and tagged.
 
 `#coinedguardledgerasymmetry` — the other half of last cycle's finding — stays queued. It is the deeper of the two: the two guards still disagree about what a done archive vouches for, and that disagreement is what made the earlier probe a false green in the first place.
+
+### Re: do [#coinedguardledgerasymmetry] — opus-5
+
+> **Queue prompt:**
+>
+> do [#coinedguardledgerasymmetry]
+
+
+Released as **0.35.231**. This is the root cause behind the false green earlier in this series, so it was worth taking properly rather than patching the symptom.
+
+**Picked the narrow reading, as the item recommended, and the reason matters.** An archive entry is `- YYYY-MM-DD [#id] text`; only that leading id names tracked work. A tag merely *cited* in an entry's prose is a reference. Vouching for citations is the same rule `#hookhashanchortags` explicitly rejected — "someone typed this before" is not "this names tracked work" — and it launders a coined id into legitimacy permanently. Notably the narrow reading only became **safe** once the anchor work landed: the broad reading's real job was covering anchors quoted in archived prose, and `instruction_surface_anchors` now covers those by name rather than by proximity. Tightening this before 0.35.229/230 would have caused false blocks.
+
+**Resolution is the union, deliberately.** The two guards also resolved archives differently — one followed the declared `archive=` target, the other walked up for a sibling `<stem>.done.md`. Unifying only the extraction predicate would have silently dropped whichever route each guard uniquely used. `archived_tracked_ids` takes both, and `done_archive_candidates` moved out of `agent-doc-hooks-io` to sit beside the predicate it belongs to.
+
+**Pinned so it cannot drift again.** `tests/coined_guard_predicate.rs` asserts every guard calls the shared predicate and no guard resolves the archive itself. Two things I was careful about there: it is scoped to **archive** resolution, because both guards still call `extract_tags` on the live document's own components and that is correct — my first version banned `extract_tags` outright and failed on correct code, which is worse than no guard. And a third test asserts the retired call names still exist, so a rename cannot make the whole thing pass vacuously. Mutation-checked: pointing one guard back at its old reading reddens it.
+
+**Verified live on the installed binary, with probes chosen to be attributable this time.** A tag present only in archive prose (`#accessorymargin`) now blocks; a real archive entry id (`#stategraphjoin`) still passes, so the `#fr79` case the broad reading existed for is intact. I checked each probe's status in the archive, the live document, and the instruction surfaces *before* running it — the mistake two cycles ago was not checking that.
+
+**Behaviour change worth stating plainly:** in this repo, 258 tags that appear only in archive prose no longer vouch for themselves. That is the intended tightening, but it is not cosmetic — if one of them turns out to name work tracked in a *different* document, the guard will block on it, because it is pane-scoped to one document by design.
+
+Session note: exchange is at 135 lines / 6 response sections with the queue still active, so I kept draining.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#anchorsubmodulesurfaces]~~
-- do [#coinedguardledgerasymmetry]
+- ~~do [#coinedguardledgerasymmetry]~~
 - ~~do [#hookhashcodetsworkaround]~~
 - ~~do [#hookhashanchortags]~~
 - ~~do [#hookhashjsprivatefield]~~
@@ -191,7 +212,6 @@ Released as **0.35.230**.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#coinedguardledgerasymmetry] #agent-doc-bug The two coined-id guards disagree about what the done archive vouches for, and neither is documented as authoritative. The PreToolUse guard (known_ids_for_document, agent-doc-hooks-io) runs coined_ids::extract_tags over the WHOLE archive text, so any tag ever mentioned in archived prose is vouched-for. The post-commit session-check guard (known_ids_for_coined_guard -> external_done_archive_ids, agent-doc-element-backlog-io) runs extract_pending_ids_from_text, which only matches the leading id of an archive entry. Same document, same archive, different answers: this is why #ci-no-closeout-wait passed the hook while session-check reported it. The hook side is also too broad -- it is close to the vouch-for-anything-ever-typed rule #hookhashanchortags explicitly rejected, because a coined id abandoned in archived prose vouches for itself forever. Pick ONE predicate, put it in one place like instruction_surface_anchors, and make the narrow item-id reading the default. See #percellconverge: consolidating the wording while the predicate drifts is the failure mode.
 - [/] [#clearsubmitunobservedverify] [operator-verify] Live re-proof for #clearsubmitunobserved (0.35.225): reproduce the reported haiven-dev.md sequence — let the supervisor go dead (or `session restart-supervisor`), then Run Agent Doc so the flow cold-starts a replacement and immediately runs Clear Session Context on the fresh pane. Expect it to SUCCEED instead of failing with `result=submission_unobserved ... unblocker=clear_submission_unobserved`, and expect `session_clear_submit_cleared_state_probe ... result=cleared_state_proven retained_lines=<small>` in ops.log. Then the half that must not regress: on a pane holding a real conversation, break submission (e.g. leave the composer wedged) and confirm the clear still fails closed with `result=conversation_retained`. Unit tests pin the predicate against synthetic captures; only a live pane exercises the tmux scrollback capture and the real harness prompt shapes.
 - [ ] [#caswriteracechurn] #agent-doc-bug The `compare_and_swap_raced` settle-wait is recurring across concurrent sessions, not a one-off. Operator-reported on sdk.md 2026-08-09 ("Same CAS-race path as last cycle — the write landed; finishing with commit"), and the SAME cycle on agent-doc-bugs2.md hit it twice in one closeout: `[write] Waiting for typing/CRDT versions to settle ... (reason=compare_and_swap_raced, elapsed=9945ms)` then again at 4694ms, inside a 32.7s closeout (commit_authority 14.9s, session_check 16.7s). Outcome is correct every time — the write lands and the cycle commits — so this is latency/churn, not loss. Worth measuring before fixing: instrument how often a closeout takes the CAS-race branch and what the contending writer is (concurrent supervisor idle-watch? replica propagation? another session on the same state.db?). If the contention is self-inflicted (agent-doc writing the same cell twice per closeout), the fix is to collapse the writes; if it is genuine cross-session contention on a shared project root, the settle wait is doing its job and the item is a metric, not a bug. Do not "fix" it by shortening the wait -- the wait is what makes the write land.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.

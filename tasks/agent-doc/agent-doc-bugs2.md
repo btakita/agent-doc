@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: ac88e56e-1d2c-4e03-8c13-f2ed2a8850d1
+resume: 725ccc79-bbfb-4543-88c0-5b3366716afe
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -40,6 +40,29 @@ completed
 Compacted content:
 - Archived 53 response topic(s): file all 3 diagnosed defects into the backlog; start with #1; do [#strandeddraftresubmit]; 50 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): do [#hvw0publishgrep]; do [#dedupepresettle]; haiven-dev.md we...
+
+### Re: do [#skillinstallstalemirror] — opus-5
+
+Released as **0.35.226** (tagged, pushed; CI + Release + PyPI runs in progress).
+
+**What the report got wrong, and what the real hole was.** `skill install` does not key freshness on the version marker — `install_skill_for_env`, `install_runbooks_for`, and `install_okf_for` all compare full content, and `install_all` reconciles runbooks unconditionally. So the install path was never the thing that let stale runbooks ship. The actual hole: **`audit-docs` never compared runbook content to the bundle** (it checked the SKILL surfaces and the OKF bundle only), and **`make check` — what the release process actually runs — never called `audit-docs` at all**. `audit-docs` lived only in `precommit`. That is why it reported `No blocking issues found` against everything.
+
+**(a) Freshness key.** `audit_managed_runbook_bundles` now compares every installed runbook to the running binary, and `make check` runs `audit-docs`. Proven live against the exact 0.35.224 shape: writing `# stale --baseline-file` into `.claude/skills/agent-doc/runbooks/respond.md` makes `audit-docs` exit 1 naming the file; restoring it exits 0.
+
+`release-version` also stopped stamping installed skill copies — that was the part of the report that held up. Stamping a copy whose body was never regenerated makes a stale install look current to every version-marker reader. `SKILL_FILES` is now the bundle source only; the installer owns installed copies and `audit-docs` owns their freshness. `development_claude_skill_version_matches_the_bundle` became `..._matches_the_bundle` and asserts the **whole rendering**, not the marker.
+
+There was a second, quieter half: bare root resolution prefers the superproject, so `agent-doc skill install` run from `src/agent-doc` can never write `src/agent-doc/.claude/…`. Those copies were reachable *only* by `release-version`'s sed. Added `skill install --root <PATH>`, wired it into `make install` / `make install-full` / `make release-version`, and `audit-docs` now audits the submodule checkout alongside the superproject.
+
+**(b) The two unmanaged mirrors — decided.**
+
+- **`.codex/runbooks/` is retired.** It was 19 bundled-name files, no project content, missing `jb-cache-conflict.md`. `skill install` removes the bundled files it left behind and the directory once empty, keeping anything agent-doc never bundled; `audit-docs` blocks while a copy survives. The managed Codex location is `.codex/skills/agent-doc/runbooks/`. Ran live: all 19 removed, directory gone, committed as deletions/renames.
+- **`runbooks/` is NOT made a blanket managed target** — that would have been destructive. It holds 7 project-owned runbooks (`browser-automation.md`, `dogfood-watch.md`, `private-name-hygiene.md`, `architecture-first.md`, `findings-layer.md`, `lazily-benchmark.md`, `crates-io-trusted-publishing.md`) plus tsift's `code-navigation.md`, and `install_runbooks_for` reaps every `.md` not in the bundle. Instead: new project config `skill_runbook_mirrors`, default empty. A listed directory gets its bundled files refreshed and audited; the installer never creates the directory and never reaps a file agent-doc does not bundle. agent-loop opted in, which added the 7 missing bundled runbooks and now blocks on drift. A project with an unrelated `runbooks/commit.md` is untouched.
+
+**Bonus fix.** `admission_budget_honours_the_operator_override` read the real process environment, so the suite went red for anyone with `AGENT_DOC_PREFLIGHT_HOOK_BUDGET_SECS` exported — including agent-doc's own dogfooding supervisor, which sets it to 300. It failed the first `make check` of this cycle. The parse now lives in a pure `resolve_hook_admission_budget`; the test covers unset, blank, unparsable, zero, and a usable override.
+
+**Verification.** 11 new tests in `skill.rs` (managed-dir stale/missing/unbundled, surviving retired mirror, retirement keeping non-bundled files, mirror refresh only when configured, mirror never reaping project files, mirror drift blocking, mirror never creating the directory). `make check` green end to end (`EXIT=0`, zero `result: FAILED`) after every edit including the doc surfaces. `make install-full` exit 0, `agent-doc --version` → 0.35.226, controller recycled.
+
+One thing worth flagging: `.agent-doc/` is gitignored in agent-loop, so the `skill_runbook_mirrors` opt-in is local-only here. That is how this repo's project config already works, not something this change introduced.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: df58fb94-aed7-41c0-b2ef-55bad5c5a9cd
+resume: 11989875-a834-4d15-b879-e0742783728c
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -208,18 +208,39 @@ Measured, as the item asked. Shipped the instrumentation as **0.35.232**; the an
 `make check` green, 0.35.232 installed, controller recycled, both repos pushed and tagged. Verified live: `agent-doc ops summary` now lists all six contending write sites off the real log.
 
 That empties the agent-drainable queue. What remains is three `[operator-verify]` items needing a human at a real IDE and tmux session, so the loop stops here rather than churning.
+
+### Re: do [#handoffdeadpredecessor] — opus-5
+
+Released as **0.35.234**, closing the second root cause of the operator-reported `haiven-dev` wedge.
+
+**The gap was exactly as filed:** `controller serve` takes `--previous-controller-pid` and `status.rs` threads it through every projection, but nothing ever asked whether that process was still running. Both wedged controllers were `Preparing` against predecessors that had already exited (1329143 on dead 1323307; 1324731 on dead 574967), so their handoffs were unsatisfiable from the moment those processes died.
+
+**The reasoning that makes it safe.** `Preparing` means promotion has not happened yet, and promotion can *only* come from the predecessor — so a dead predecessor makes that handoff permanently unsatisfiable. That is what licenses reaping early rather than burning the 45s threshold 0.35.233 installed.
+
+The design care the item asked for turned out to be a clean state distinction rather than a heuristic:
+
+- **`Promoted` is excluded.** After promotion the predecessor exiting is the *normal* end of a healthy handoff. Reaping on a dead predecessor without that exclusion would kill working controllers — the obvious way to turn this fix into a worse bug.
+- **A 3s grace** covers a `promote_handoff` already in flight when the predecessor exits.
+- **`None` never counts as dead.** No predecessor, or liveness we could not determine, stays unknown. That is the same `#idlerevisionreactive` rule whose inversion caused the original wedge — I did not want to fix one direction of it while opening the other.
+
+Liveness enters as a fact from the IO shell through the existing `process_is_alive`, so the predicate stays pure and testable, matching how `ControllerWatchdogFacts` already works. No `kill(0)` inside `agent-doc-controller`.
+
+Five tests covering each arm: dead predecessor reaps early; a promoted replacement survives its predecessor exiting; the in-flight grace is respected; a live predecessor is never reaped; unknown liveness is never treated as dead. `make check` green, 0.35.234 installed, both repos pushed and tagged.
+
+The operator's environment is recovered independently of this: `haiven-dev` reports `health=healthy state=healthy actor_state=ready` on lease generation 70 with a live pid, up from a generation-69 lease that named a terminated supervisor and read `busy`.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- 🚧 do [#handoffdeadpredecessor]
 - do [#flakystatedbfixture]
 - ~~do [#anchorsubmodulesurfaces]~~
 - ~~do [#coinedguardledgerasymmetry]~~
 - ~~do [#hookhashcodetsworkaround]~~
 - ~~do [#hookhashanchortags]~~
 - ~~do [#hookhashjsprivatefield]~~
-- do [#operatorverifylive]
+- ⏭️ do [#operatorverifylive]
 - do [#run3rdpaneswitchverify]
 - ~~do [#hookhashfalsepositive]~~
 - ~~do [#caswriteracechurn]~~
@@ -233,6 +254,7 @@ That empties the agent-drainable queue. What remains is three `[operator-verify]
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] 🚧 [#handoffdeadpredecessor] #agent-doc-bug A controller handoff never checks whether its predecessor is alive, so it waits for a promotion that can never arrive. Second root cause found while fixing #preparingnoclockwedge (0.35.233) and NOT fixed there. controller serve takes --previous-controller-pid, and agent-doc-controller/src/status.rs carries previous_controller_pid through ControllerBootstrapStatusFacts into every status projection -- but nothing ever liveness-checks it. Observed 2026-08-10 on haiven-dev: controller 1329143 Preparing on dead pid 1323307, and 1324731 Preparing on dead pid 574967. Both handoffs were unsatisfiable from the moment their predecessor died. 0.35.233 now reaps them after the 45s threshold on process age, so the wedge self-heals -- this item is the sharper signal, not a re-fix. A dead predecessor is DECISIVE, not merely suggestive: the replacement could promote itself immediately instead of burning 45s. Design care needed: in a HEALTHY handoff the predecessor exits as part of promotion, so dead-predecessor is a normal transient near the end of the sequence -- do not treat it as terminal without distinguishing died-before-promotion from exited-after-promotion. Supply liveness as a fact to a pure predicate the way ControllerWatchdogFacts already does; do not put a kill(0) inside agent-doc-controller.
 - [ ] [#flakystatedbfixture] #agent-doc-bug A parallel test run can corrupt a temp fixture state.db, reddening the suite non-deterministically. Observed 2026-08-10 during a make check on 0.35.233: session_check_codex_final_gate_blocks_on_active_auto_queue failed with "reliable-sync durable authority hydration failed for /tmp/.tmp43Aufu/session.md: file is not a database: Error code 26" and "authoritative state db /tmp/.tmp43Aufu/.agent-doc/state.db is unavailable; refusing automatic replacement". Re-running the same test in isolation passed, and a full re-run of make check was green, so it is not a code regression -- but flaky is not an acceptable end state and the next person will waive a real failure by pattern-matching on this one. Each test builds its own tempdir, so a cross-test collision is not the obvious explanation; suspect a shared path (AGENT_DOC_ env inheritance, /run/user/1000/agent-doc/ socket namespace, or a global that leaks the previous test|s db handle) or an unsynchronised writer racing fixture setup. Reproduce with a high --test-threads count rather than in isolation. The refusal itself is CORRECT behaviour (refusing to auto-replace a corrupt authoritative db); the defect is that a fixture reached that state at all.
 - [/] [#clearsubmitunobservedverify] [operator-verify] Live re-proof for #clearsubmitunobserved (0.35.225): reproduce the reported haiven-dev.md sequence — let the supervisor go dead (or `session restart-supervisor`), then Run Agent Doc so the flow cold-starts a replacement and immediately runs Clear Session Context on the fresh pane. Expect it to SUCCEED instead of failing with `result=submission_unobserved ... unblocker=clear_submission_unobserved`, and expect `session_clear_submit_cleared_state_probe ... result=cleared_state_proven retained_lines=<small>` in ops.log. Then the half that must not regress: on a pane holding a real conversation, break submission (e.g. leave the composer wedged) and confirm the clear still fails closed with `result=conversation_retained`. Unit tests pin the predicate against synthetic captures; only a live pane exercises the tmux scrollback capture and the real harness prompt shapes.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: d509f78e-8765-4d20-bb70-cf6f2dd8ff7d
+resume: eb17ed84-0627-44e6-b123-53fb15886bd4
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -146,13 +146,40 @@ So it is not a fuzzy false positive — the two conditions compose exactly, and 
 **Why I did not fix it in this session.** `src/agent-doc` currently holds ~150 uncommitted files from another session's in-flight crate-split refactor (its own `session-check` has been warning about partial staging all evening). Editing the hook there would mean running `make check` against someone else's half-finished tree, where I could not tell my breakage from theirs — the exact "local check green while HEAD is broken" trap. The fix is small and belongs on the agent-doc bugs queue, where that session's coordination lives.
 
 Housekeeping: the exchange is large (109 lines, session-accretion `warn`) but the queue is active, so I am not pausing to compact.
+
+### Re: #lzspecforkclockfixture — the fork-clock rule is now pinned across all nine bindings — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzspecforkclockfixture]
+
+
+Landed: the normative statement in `cell-model.md`, two discriminating scenarios in `seqcrdt_convergence.json` (6 → 8), and per-binding proof that every runner actually replays them.
+
+**The scenarios.** Both use only vocabulary the fixture already had — `seed.inserts`, `fork`, `set_value`, `merge`, `get_on`, `len` — which is what made this free: no runner needed new dispatch.
+
+- `fork_carries_the_clock_so_a_backwards_skewed_write_survives` — insert at `now=100`, fork to peer 2, `set_value` at `now=50`. Under a reset clock the write is *rejected*, not overwritten.
+- `fork_stamps_with_its_own_peer_so_equal_wall_edits_converge` — both replicas write at the same `now`. Under a shared peer id the stamps tie and neither adopts.
+
+**Verified, not assumed.** Every one of the nine reported its own runtime scenario ledger naming both ids, and — because a ledger entry proves a payload was *read*, not that assertions *bite* — each also ran a mutation probe. Uniformly, resetting the clock reddens only the first scenario and carrying the peer reddens only the second, so each half of the rule is independently pinned. Probes ran against scratch corpus copies; the shared checkout was never perturbed.
+
+Two runners needed work, both in their **census** rather than their replay: `lazily-cs` asserted `scenarios.Count == 6` (it failed with `Expected: 6 / Actual: 8`, which is itself proof the loop visited all eight) and `lazily-cpp`'s `MIN_SCENARIOS` floor was stale. `lazily-rs` also corrected a comment I wrote this morning claiming the corpus could not reach these shapes — true when written, false the moment the fixture landed.
+
+**I got the publish order wrong, and CI said so.** I pushed the bindings before the corpus. Every binding's CI clones lazily-spec from *published main* while local verification uses the sibling working tree, so `lazily-cs` went red with the inverse assertion (`Expected: 8 / Actual: 6`) and `lazily-cpp` had to pin its floor to the published 144 instead of the local 146. Two agents diagnosed it independently, which is the tell that it is a process gap and not a one-off. Fixed by pushing `lazily-spec@f3246a1` first, then re-running: **cs, dart, cpp and zig CI are now green**, and cpp's floor is raised to 146 in a follow-up (`b9c1ed8`) now that the scenarios are genuinely published. `lazily-rs` CI is still running its long gate (loom + Lean + benchmark budgets) — recorded as pending, closing out on local evidence.
+
+Filed `#lzspecpushbeforebindings` so the ordering rule gets written down where it will be read, and ideally made mechanical.
+
+**Commits:** `lazily-spec@f3246a1`, `lazily-rs@45c855e`, `lazily-dart@f75994e`, `lazily-cs@2471eba`, `lazily-cpp@5d54573`+`b9c1ed8`; superproject `d2d84d4`, `cf1fac8`. js, go, kt, py and zig needed no change — reported as genuine no-ops with ledger evidence rather than dressed up as fixes.
+
+With this, the `#lzzigforkhlcpeer` thread is closed end to end: a defect found by opening a corpus, fixed in seven bindings, and now pinned by the corpus that could not previously see it. Exchange is large (session-accretion `warn`) but the queue is active, so I am not pausing to compact.
 <!-- agent:boundary:c6ef3fb1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ⏭️ do [#lzspecforkclockfixture]
+- do [#lzspecpushbeforebindings]
+- ~~do [#lzspecforkclockfixture]~~
 - ~~do [#adjshashprivatefield]~~
 - ~~do [#lzzigforkhlcpeer]~~
 - do [#lzspecgcreferencedtombstone]
@@ -169,7 +196,7 @@ Housekeeping: the exchange is large (109 lines, session-accretion `warn`) but th
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzspecforkclockfixture] All nine bindings now agree that a SeqCrdt fork carries the source's HLC position forward and stamps under its OWN peer (#lzzigforkhlcpeer, 7 repos fixed), but NOTHING cross-binding pins it: lazily-spec's cell-model.md says nothing normative about fork clock semantics, and seqcrdt_convergence.json structurally cannot reach either failure, because every fork in it is followed by an op whose `now` EXCEEDS the source's last_wall, so `send` takes the `now > last_wall` branch and the logical counter resets regardless of which clock the fork started from. Each binding now carries its own regression test; the family agreement is unpinned. Land it while it is free: (1) state the rule normatively in cell-model.md under "Move-aware sequence order" — a fork inherits the source's causal position, never its peer; (2) add TWO scenarios to seqcrdt_convergence.json using only existing vocabulary — a backwards-skew case (insert at now=100, fork peer 2, set_value at now=50, expect the fork's write survived and both converge) and an equal-wall case (fork then both replicas set_value at the same now, expect convergence, later peer wins). Both pass on all nine TODAY, so unlike the usual new-fixture change this reddens nobody — it only stops the next regression. Budget the 9-repo scenario-ledger/coverage refresh, and re-run each binding's conformance rather than assuming pickup.
+- [ ] [#lzspecpushbeforebindings] Publish ordering for shared-corpus changes is backwards in practice and it reddens CI family-wide. Every binding's CI clones lazily-spec from PUBLISHED main (for example lazily-cs .github/workflows/ci.yml:31 `git clone --depth 1 .../lazily-spec ../lazily-spec`), while local verification runs against the sibling WORKING TREE. So a corpus change verified green in nine local checkouts still fails CI in every binding that pins a scenario count, until the spec commit is pushed. Hit during #lzspecforkclockfixture: lazily-cs went red with `Expected: 8 / Actual: 6` and lazily-cpp had to pin its MIN_SCENARIOS floor to the published 144 rather than the local 146, then raise it in a second commit after the push. Two agents independently diagnosed it, which is the tell that it is a process gap rather than a one-off. Write the rule down where it will be read: push the lazily-spec corpus change FIRST, then verify and push the bindings. Candidate homes are lazily-spec/AGENTS.md and the per-binding conformance runbooks. Consider also making it mechanical — a spec-side pre-push check, or having sync-conformance-fixtures.mjs warn when the local corpus differs from origin/main while a binding is being verified.
 - [ ] [#lzspecgcreferencedtombstone] collections/textcrdt_convergence.json's `gc_collects_stable_leaf_keeps_referenced_tombstone` does not pin the half its name claims. It deletes index 2 of "abc" (the LAST character), so nothing references the tombstone as a left origin, and a `gcWith` mutant that drops the `!referenced.contains(id)` conjunct entirely collects the same 1 element and stays GREEN in lazily-zig (mutant M6 of the #lzzigcanonrunner sweep; the other five mutants all redden). The conservative-GC rule is real and every binding implements it; no fixture in the corpus falsifies its absence, so nine bindings could each drop it and stay green. Add a scenario that deletes an INTERIOR character and asserts gc(stable=true) collects 0 while the tombstone count stays 1, then re-run that mutant against every binding. This is a lazily-spec fixture change, so it reddens whichever of the nine already got it wrong; that is the point.
 - [ ] [#lzpartialmarkadjudicate] check-coverage-claims.mjs (as of lazily-spec d1c1a82) reports three partial marks that are INDISTINGUISHABLE FROM SHIPPED on ledger evidence: GDScript on row reactive-graph (reactive-graph/{transitive_invalidation_reaches_depth,signal_materializes_without_a_read,signal_materializes_once_per_batch,dispose_signal_reverts_to_lazy}.json), Zig on reactivemap-core-single-threaded (collections/{cellmap_independence,cellmap_atomic_move}.json), and C# on reliable-sync (reliable-sync/{coalesce_bounds_outbox,liveness_lease_eviction}.json). None of the eight fixtures is in any KNOWN_UNCOVERED and no binding has a scenario- or block-level excuse. Adjudicate each ONE AT A TIME with binding-specific evidence the spec repo does not have: confirm from the binding's runtime manifest that it really replays each fixture, then decide whether the feature is complete or the shortfall is real but unpinned. Outcome per row is either (a) promote the mark and re-run sync-coverage.mjs — remember a row flip can carry its FAMILY roll-up cell with it and rewrites README.md in 11 sibling repos, so it is a 12-repo commit — or (b) cite a fixture that actually pins the gap, or add a scenario-level excuse, so the tilde becomes backed instead of merely unverified. Do NOT bulk-promote: tilde legitimately means 'implemented, but not this wire' and the guard deliberately cannot tell the two apart.
 - [ ] [#lzzigspecdiroption] lazily-zig has NO corpus-dir override: SPEC_DIR in src/lazily/reactive_map.zig is a comptime const used as SPEC_DIR ++ '/x.json', so the #lzdefaultmodeuniform probe had to temporarily edit the constant and restore it. Every future corpus probe in this binding pays that cost, and a probe that edits the shared ../lazily-spec checkout instead reddens all nine bindings concurrently. Add a '-Dspec-dir' build option (or a runtime env read) threaded to every fixture path, and keep the default unchanged. Compounding trap to preserve: specFixturesPresent() makes the tests 'return error.SkipZigTest' when the path is unreadable, so a probe that changes the PATH silently converts red into skip — the option must change which bytes are read, never whether they exist.

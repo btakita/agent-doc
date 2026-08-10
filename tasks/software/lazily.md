@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: eb17ed84-0627-44e6-b123-53fb15886bd4
+resume: d48ccb7c-0f56-4602-b16e-1b8753d70666
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -195,13 +195,42 @@ It **advises rather than gates**, deliberately. A corpus ahead of `main` is the 
 **Also:** `lazily-rs` CI, the one item left pending last cycle, came back **green** — so every binding touched by the fork-clock work is now green on published `main`. `lazily-spec`'s own CI for this commit is pending at the time of writing.
 
 One thing I could not do: put a pointer in `AGENTS.md`, the file a harness auto-loads. It carries ~30 lines of uncommitted edits from the concurrent session rewriting the shared code-navigation block across every repo, and `git commit --only -- AGENTS.md` commits working-tree content, which would have swept their in-flight work into an unrelated commit. Filed as `#lzspecagentsmdpointer`. In practice the mechanical check is the stronger placement anyway — it prints on the exact action rather than waiting to be read.
+
+### Re: #lzspecagentsmdpointer — done, and the "blocked" framing was wrong — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzspecagentsmdpointer]
+
+
+I filed this last cycle as blocked: `AGENTS.md` carries ~30 lines of a concurrent session's uncommitted code-navigation rewrite, and `git commit --only -- AGENTS.md` commits the file's whole **working-tree** content, which would have swept their in-flight work into my commit.
+
+That was the right diagnosis and the wrong conclusion. `--only` protects you from other *staged paths*, not from other *edits inside the same file* — but the index entry can be built by hand:
+
+```
+head   = git show HEAD:AGENTS.md          # NOT the working tree
+staged = head with my section inserted
+blob   = git hash-object -w --stdin < staged
+git update-index --cacheinfo 100644,<blob>,AGENTS.md
+git commit          # no paths, no -a — both would re-read the working tree
+```
+
+Verified in both directions before pushing: `git diff --cached` showed only my 14 insertions, `git diff` showed only their 30-line edit. After the commit, `git show HEAD:AGENTS.md` still contains their **pre-edit** tsift block (`v=0.1.77`) while the working tree has their new one (`v=0.1.80`) plus my section. Their work is exactly where they left it, uncommitted.
+
+The section sits beside **Commit & Push** — the decision it actually modifies — and deliberately far from their hunk so the two never merge into one diff. It states the asymmetry in three sentences and points at `docs/conformance.md` for the worked example, since the auto-loaded file should name the rule, not restate it.
+
+`make check` green. `lazily-spec@ccf0160`, superproject `60d661803`.
+
+Worth keeping: this is the exact inverse of the shared-index rule I already follow (`--only` to avoid another pane's *pre-staged files*). Same tool, opposite failure. Saved as a memory.
+
+Queue note: exchange is at 175 lines / 5 sections (session-accretion `warn`), but the queue is active so I am not pausing to compact. Next head is `#lzspecgcreferencedtombstone` — and unlike the last two spec changes, that fixture is expected to redden bindings, so the corpus goes first per the rule just written.
 <!-- agent:boundary:c6ef3fb1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzspecagentsmdpointer]
+- ~~do [#lzspecagentsmdpointer]~~
 - ~~do [#lzspecpushbeforebindings]~~
 - ~~do [#lzspecforkclockfixture]~~
 - ~~do [#adjshashprivatefield]~~
@@ -220,7 +249,6 @@ One thing I could not do: put a pointer in `AGENTS.md`, the file a harness auto-
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzspecagentsmdpointer] lazily-spec/AGENTS.md has no pointer to the corpus-publication rule (#lzspecpushbeforebindings). The rule lives in docs/conformance.md and is printed mechanically by `make check` via scripts/check-corpus-published.mjs, which is arguably better placement — it fires on the exact action rather than sitting in prose. But AGENTS.md is the file a harness auto-loads, and the item that produced this rule named it as a candidate home, so a one-line cross-reference under a heading like "Publishing a corpus change" is still worth adding. NOT done in the originating cycle because AGENTS.md carried ~30 lines of UNCOMMITTED edits from a concurrent session (the shared code-navigation block being rewritten across every repo), and `git commit --only -- AGENTS.md` commits the file's working-tree content, which would have swept that session's in-flight work into an unrelated commit. Add the pointer once that session's AGENTS.md edits are committed. Trivial change; the value is purely that the auto-loaded file names the rule.
 - [ ] [#lzspecgcreferencedtombstone] collections/textcrdt_convergence.json's `gc_collects_stable_leaf_keeps_referenced_tombstone` does not pin the half its name claims. It deletes index 2 of "abc" (the LAST character), so nothing references the tombstone as a left origin, and a `gcWith` mutant that drops the `!referenced.contains(id)` conjunct entirely collects the same 1 element and stays GREEN in lazily-zig (mutant M6 of the #lzzigcanonrunner sweep; the other five mutants all redden). The conservative-GC rule is real and every binding implements it; no fixture in the corpus falsifies its absence, so nine bindings could each drop it and stay green. Add a scenario that deletes an INTERIOR character and asserts gc(stable=true) collects 0 while the tombstone count stays 1, then re-run that mutant against every binding. This is a lazily-spec fixture change, so it reddens whichever of the nine already got it wrong; that is the point.
 - [ ] [#lzpartialmarkadjudicate] check-coverage-claims.mjs (as of lazily-spec d1c1a82) reports three partial marks that are INDISTINGUISHABLE FROM SHIPPED on ledger evidence: GDScript on row reactive-graph (reactive-graph/{transitive_invalidation_reaches_depth,signal_materializes_without_a_read,signal_materializes_once_per_batch,dispose_signal_reverts_to_lazy}.json), Zig on reactivemap-core-single-threaded (collections/{cellmap_independence,cellmap_atomic_move}.json), and C# on reliable-sync (reliable-sync/{coalesce_bounds_outbox,liveness_lease_eviction}.json). None of the eight fixtures is in any KNOWN_UNCOVERED and no binding has a scenario- or block-level excuse. Adjudicate each ONE AT A TIME with binding-specific evidence the spec repo does not have: confirm from the binding's runtime manifest that it really replays each fixture, then decide whether the feature is complete or the shortfall is real but unpinned. Outcome per row is either (a) promote the mark and re-run sync-coverage.mjs — remember a row flip can carry its FAMILY roll-up cell with it and rewrites README.md in 11 sibling repos, so it is a 12-repo commit — or (b) cite a fixture that actually pins the gap, or add a scenario-level excuse, so the tilde becomes backed instead of merely unverified. Do NOT bulk-promote: tilde legitimately means 'implemented, but not this wire' and the guard deliberately cannot tell the two apart.
 - [ ] [#lzzigspecdiroption] lazily-zig has NO corpus-dir override: SPEC_DIR in src/lazily/reactive_map.zig is a comptime const used as SPEC_DIR ++ '/x.json', so the #lzdefaultmodeuniform probe had to temporarily edit the constant and restore it. Every future corpus probe in this binding pays that cost, and a probe that edits the shared ../lazily-spec checkout instead reddens all nine bindings concurrently. Add a '-Dspec-dir' build option (or a runtime env read) threaded to every fixture path, and keep the default unchanged. Compounding trap to preserve: specFixturesPresent() makes the tests 'return error.SkipZigTest' when the path is unreadable, so a probe that changes the PATH silently converts red into skip — the option must change which bytes are read, never whether they exist.

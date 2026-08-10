@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: 87f0ed02-8aed-43f5-8ada-15de8edb9bc2
+resume: 4e75e782-bbd0-4a3a-918f-1dc6def55d28
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -248,6 +248,38 @@ kt's evidence was the sharpest: its ledger from the *failing* run contains the o
 **One finding filed.** rs's floors have drifted far below reality — `MIN_SCENARIOS` 137 against 162 observed, `MIN_FIXTURES` 131 against 144. A 25-scenario gap means 25 scenarios could stop replaying with the guard still green, which is the failure these floors exist to prevent. js has the same shape (130 vs 153). The agent correctly declined to close the gap without knowing whether CI's replay set equals the local one. Filed as `#lzscenariofloordrift`.
 
 Commits: `lazily-spec@34caf9c`, `rs@01db593`, `js@9daf817`, `dart@0d040fe`, `cs@7b5ceb8`, `cpp@870a4a6`; superproject `9b190af`. Exchange is at 204 lines (session-accretion `warn`); queue is active so I am not compacting.
+
+### Re: #lzscenariofloordrift — every floor in the family is now exact — opus-5
+
+The blocker I filed this under ("nobody has confirmed the local replay set equals CI's") dissolved in one command: **CI prints its own count**. rs's job logs `scenario coverage OK: 162/162` and `conformance coverage OK: 144/150`, matching local exactly. Same for js, dart, cs, cpp. For zig/go/kt/py the last runs predated two corpus additions, so I re-triggered CI to re-clone the current published corpus rather than pin to numbers I had not seen CI confirm.
+
+**The drift was worse than the item said.** It named rs and js; zig was the worst in the family:
+
+| | scenarios | fixtures | blocks / other |
+|---|---|---|---|
+| zig | 91 → **147** | 111 → **132** | 25 → **31** |
+| rs | 138 → **162** | 131 → **144** | 20 → **30** |
+| js | 130 → **153** | 132 → **141** | 20 → **32**, plus 940 → **1006** and 130 → **206** |
+| dart | 131 → **149** | 130 → **138** | — |
+| cs | 148 → **165** | 141 → **145** | 25 → **33** |
+| go | 137 → **147** | 131 → **141** | — |
+| py | none | 132 → **139** | 20 → **31** |
+| kt | none | none | areas 22 → **26** |
+| cpp | 147 (already exact) | 127 → **137** | — |
+
+zig's floor tolerated **56** scenarios going dark silently.
+
+**The cause was a convention the comments themselves taught** — raise a floor by however many a change adds, keep the pre-existing margin — so every gap could only widen. cs's comment said it outright: keep the floor *"slightly below the real number so ordinary corpus churn does not trip it."* Every comment now states the replacement rule and names the old one as the bug.
+
+**Each floor was proved, not merely passed:** set to N+1, guard must fail naming that floor. All nine repos, every floor, with the message recorded. That discipline caught a mistake of **mine**: I told the js agent to pin `MIN_OBJECT_VALUED_KEYS` to 196, but the guard's subject is the *denominator* (206). A 196 pin would have passed its own +1 probe while bounding nothing — 206 could have fallen to 197 with the guard green. Real drift there was 76, not 66. The output line now names which number it bounds.
+
+**Two floors printed no number at all** — kt's area count and py's declared-block count — so they could not be re-pinned from CI by anyone. Both now print one; a floor whose value nobody can read drifts by construction.
+
+All nine repos green in CI on their pinned commits, each run re-reporting the pinned figures. Commits: `zig@10fef17`, `rs@fee1f45`, `js@ca0d25e`+`a72868a`, `dart@1d53716`, `cs@590139f`, `cpp@16f7d35`, `go@5b89511`, `kt@eff8c0d`, `py@c935ef7`; superproject `4f20d6e` plus the js follow-up.
+
+Also filed the cs `AGENTS.md` prose item — it documents stale floor values *and* still preaches "calibrated below the observed", the very convention this removed. Blocked the same way as before by the concurrent session's uncommitted edits, so the item carries the single-hunk staging recipe.
+
+Process note: the coined-id hook blocked my first attempt at this response because the new backlog id appeared in the text before the item existed. Correct catch — I filed the item, then responded. Exchange is at 228 lines (session-accretion `warn`); queue is active so I am not compacting.
 <!-- agent:boundary:c6ef3fb1 -->
 <!-- /agent:exchange -->
 
@@ -255,7 +287,7 @@ Commits: `lazily-spec@34caf9c`, `rs@01db593`, `js@9daf817`, `dart@0d040fe`, `cs@
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - do [#lzcsagentsmdfloorprose]
-- do [#lzscenariofloordrift]
+- ~~do [#lzscenariofloordrift]~~
 - ~~do [#lzspecagentsmdpointer]~~
 - ~~do [#lzspecpushbeforebindings]~~
 - ~~do [#lzspecforkclockfixture]~~
@@ -275,7 +307,7 @@ Commits: `lazily-spec@34caf9c`, `rs@01db593`, `js@9daf817`, `dart@0d040fe`, `cs@
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzscenariofloordrift] Several bindings' conformance floors have drifted far below what their suites actually replay, so the guard tolerates large silent detachment. Measured during #lzspecgcreferencedtombstone: lazily-rs MIN_SCENARIOS was 137 against 162 observed and MIN_FIXTURES 131 against 144 — a 25-scenario gap, meaning 25 scenarios could stop replaying and the floor would still pass. lazily-js is 130 against 153. Both scripts' own comments say to raise the floor when replays are added, and the convention followed so far moves the floor by the number of scenarios a change adds while leaving the pre-existing margin untouched, which is why the gap only ever widens. Contrast lazily-cpp (147 vs 147) and lazily-cs, whose census asserts EXACT counts and reddened correctly twice today — those caught real drift precisely because they carry no slack. The blocker on simply pinning to reality is that nobody has confirmed the local `make check` replay set equals CI's replay set; an over-raised floor reddens CI. Establish that equality per binding (compare the CI job's scenario ledger against a local run), then pin each floor to the CI-guaranteed number, and prove it by raising each one further and watching it fail. Do rs and js first since they carry the largest gaps.
+- [ ] [#lzcsagentsmdfloorprose] lazily-cs's AGENTS.md (CLAUDE.md is a symlink to it) documents the conformance floors in prose as "MIN_FIXTURES (139)" and "MIN_SCENARIOS (134, calibrated below the observed 139)". Both numbers were already stale before the floor-pinning work and are now stale by more — the script's real values are MIN_FIXTURES 145, MIN_SCENARIOS 165, MIN_BLOCKS 33. Worse than the numbers, the phrase "calibrated below the observed" preaches exactly the convention that work removed: a floor deliberately set under reality is a floor that has stopped guarding, and it is how cs accumulated 17 scenarios of slack. Update the prose to the real values and to the rule now written at each floor in scripts/check-conformance-coverage.sh — the floor equals what a completed CI run reports against the published corpus, exactly, proved by setting it to N+1 and watching the guard fail. NOT done in the originating cycle because AGENTS.md carried a concurrent session's uncommitted code-navigation rewrite; if that is still true, use the single-hunk staging technique (hash a blob of HEAD content plus your edit, git update-index --cacheinfo, then bare git commit) rather than --only, which commits the file's whole working-tree content.
 - [ ] [#lzpartialmarkadjudicate] check-coverage-claims.mjs (as of lazily-spec d1c1a82) reports three partial marks that are INDISTINGUISHABLE FROM SHIPPED on ledger evidence: GDScript on row reactive-graph (reactive-graph/{transitive_invalidation_reaches_depth,signal_materializes_without_a_read,signal_materializes_once_per_batch,dispose_signal_reverts_to_lazy}.json), Zig on reactivemap-core-single-threaded (collections/{cellmap_independence,cellmap_atomic_move}.json), and C# on reliable-sync (reliable-sync/{coalesce_bounds_outbox,liveness_lease_eviction}.json). None of the eight fixtures is in any KNOWN_UNCOVERED and no binding has a scenario- or block-level excuse. Adjudicate each ONE AT A TIME with binding-specific evidence the spec repo does not have: confirm from the binding's runtime manifest that it really replays each fixture, then decide whether the feature is complete or the shortfall is real but unpinned. Outcome per row is either (a) promote the mark and re-run sync-coverage.mjs — remember a row flip can carry its FAMILY roll-up cell with it and rewrites README.md in 11 sibling repos, so it is a 12-repo commit — or (b) cite a fixture that actually pins the gap, or add a scenario-level excuse, so the tilde becomes backed instead of merely unverified. Do NOT bulk-promote: tilde legitimately means 'implemented, but not this wire' and the guard deliberately cannot tell the two apart.
 - [ ] [#lzzigspecdiroption] lazily-zig has NO corpus-dir override: SPEC_DIR in src/lazily/reactive_map.zig is a comptime const used as SPEC_DIR ++ '/x.json', so the #lzdefaultmodeuniform probe had to temporarily edit the constant and restore it. Every future corpus probe in this binding pays that cost, and a probe that edits the shared ../lazily-spec checkout instead reddens all nine bindings concurrently. Add a '-Dspec-dir' build option (or a runtime env read) threaded to every fixture path, and keep the default unchanged. Compounding trap to preserve: specFixturesPresent() makes the tests 'return error.SkipZigTest' when the path is unreadable, so a probe that changes the PATH silently converts red into skip — the option must change which bytes are read, never whether they exist.
 - [ ] [#lzktcorpusnotgradleinput] lazily-kt's conformance corpus is NOT a declared input of the gradle 'test' task, so editing a fixture leaves 'test' UP-TO-DATE and the run reports green having replayed nothing — a false green that defeats any corpus-perturbation probe. Compounding it, tasks.test wires no environment(...), so the test JVM inherits the DAEMON's environment and a daemon started before LAZILY_SPEC_DIR was set serves the stale path. Today the only defence is remembering '--no-daemon --rerun-tasks'. Declare the corpus directory as a task input so a fixture change invalidates the task, and pass the corpus-dir variable through environment(...) explicitly. Definition of done: flip one assertion key in a scratch corpus and prove a plain 'make check' (no flags, warm daemon) reddens.

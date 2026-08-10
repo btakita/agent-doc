@@ -11,39 +11,24 @@
 //! name the file and the tag, and refuse the specific call. It also works when no
 //! supervisor exists, which is precisely when things are already going wrong.
 //!
-//! Scope is deliberately narrow. Only writes that PERSIST a tag are inspected:
-//! `Edit`/`Write` file content and `git commit` messages. Reads, searches, and
-//! ordinary shell commands are never blocked. Anything unrecognized is allowed —
-//! a hook that guesses wrong costs the operator a turn, so it fails open.
+//! Scope is deliberately narrow, in two directions. Only writes that PERSIST a
+//! tag are inspected: `Edit`/`Write` file content and `git commit` messages.
+//! Reads, searches, and ordinary shell commands are never blocked. Anything
+//! unrecognized is allowed — a hook that guesses wrong costs the operator a
+//! turn, so it fails open.
+//!
+//! And within a file write, only PROSE is inspected
+//! (`#hookhashfalsepositive`, `#hookhashjsprivatefield`). A commit message is
+//! prose end to end; a source file is prose only in its comments. Scanning code
+//! made every language that spells something `#word` a false block — C
+//! preprocessor directives, CSS id selectors, ES2022 private class fields — and
+//! patching each incident with another extension list did not converge.
+//! `agent_doc_turn::prose_scope::prose_only` blanks the code instead, and
+//! returns an unrecognized format untouched so narrowing can never open a hole.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-
-const C_FAMILY_EXTENSIONS: &[&str] = &[
-    "c", "cc", "cpp", "cu", "cuh", "cxx", "h", "hh", "hpp", "hxx", "inc", "inl", "ipp", "m", "mm",
-    "tpp",
-];
-const C_FAMILY_PREPROCESSOR_DIRECTIVES: &[&str] = &[
-    "define",
-    "elif",
-    "elifdef",
-    "elifndef",
-    "else",
-    "embed",
-    "endif",
-    "error",
-    "if",
-    "ifdef",
-    "ifndef",
-    "import",
-    "include",
-    "include_next",
-    "line",
-    "pragma",
-    "undef",
-    "warning",
-];
 
 /// How many times to re-read the ledger before concluding it is unreadable.
 ///
@@ -161,8 +146,9 @@ pub fn pretooluse_decision(
     // empty set is the honest comparison basis. It also keeps the fail-closed
     // blast radius exactly as small as it should be: text carrying no id-shaped
     // token is still allowed, because there is nothing a ledger could have said
-    // about it. C-family preprocessor directives were already sanitized above,
-    // so a header full of `#include` is not collateral either.
+    // about it. Code was already blanked above, so a header full of `#include`,
+    // a class body of `#private` fields, and a stylesheet of `#id` selectors
+    // are not collateral either.
     let empty = BTreeSet::new();
     let known = match ids {
         DocumentIds::Known(known) => known,
@@ -215,44 +201,23 @@ fn coined_id_scan_text<'a>(
     tool_input: &serde_json::Value,
     text: &'a str,
 ) -> Cow<'a, str> {
-    if tool_name == "Bash" || !is_c_family_target(tool_input) {
+    // A commit message is pure prose, so it is scanned whole. A file write is
+    // scanned only where the file carries prose (`#hookhashfalsepositive`,
+    // `#hookhashjsprivatefield`): comments, plus the entire text of formats
+    // whose comment syntax we do not claim to know.
+    if tool_name == "Bash" {
         return Cow::Borrowed(text);
     }
-
-    let mut sanitized = None;
-    let mut offset = 0usize;
-    for segment in text.split_inclusive('\n') {
-        let line = segment.strip_suffix('\n').unwrap_or(segment);
-        let trimmed = line.trim_start_matches([' ', '\t']);
-        let leading_len = line.len() - trimmed.len();
-        let Some(after_hash) = trimmed.strip_prefix('#') else {
-            offset += segment.len();
-            continue;
-        };
-        let directive = after_hash
-            .trim_start_matches([' ', '\t'])
-            .chars()
-            .take_while(|ch| ch.is_ascii_alphabetic() || *ch == '_')
-            .collect::<String>();
-        if C_FAMILY_PREPROCESSOR_DIRECTIVES.contains(&directive.as_str()) {
-            sanitized
-                .get_or_insert_with(|| text.to_string())
-                .replace_range(offset + leading_len..offset + leading_len + 1, " ");
-        }
-        offset += segment.len();
-    }
-
-    sanitized.map_or(Cow::Borrowed(text), Cow::Owned)
+    agent_doc_turn::prose_scope::prose_only(text, target_extension(tool_input).as_deref())
 }
 
-fn is_c_family_target(tool_input: &serde_json::Value) -> bool {
+fn target_extension(tool_input: &serde_json::Value) -> Option<String> {
     tool_input
         .get("file_path")
         .and_then(serde_json::Value::as_str)
         .and_then(|path| Path::new(path).extension())
         .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase)
-        .is_some_and(|extension| C_FAMILY_EXTENSIONS.contains(&extension.as_str()))
+        .map(str::to_string)
 }
 
 /// Tracked ids for a document: every component EXCEPT `exchange`.
@@ -526,6 +491,69 @@ mod tests {
                 other => panic!("expected deny, got {other:?}"),
             }
         }
+    }
+
+    /// `#hookhashjsprivatefield`: ES2022 private class fields. Both shapes
+    /// slip past `extract_tags`'s glued-to-a-word rule — `this.#entries` because
+    /// the preceding character is `.`, and an indented `#hlc;` because it is a
+    /// space — so only prose scoping keeps them out.
+    #[test]
+    fn javascript_private_class_fields_do_not_block_a_write() {
+        let input = json!({
+            "file_path": "/repo/src/seq-crdt.js",
+            "content": "export class SeqCrdt {\n  #hlc;\n  #peer;\n  #entries = new Map()\n  size() {\n    return this.#entries.size\n  }\n}\n"
+        });
+
+        assert_eq!(
+            pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[]))),
+            PreToolUseDecision::Allow
+        );
+    }
+
+    /// TypeScript is the same language family and must not need its own incident.
+    #[test]
+    fn typescript_private_class_fields_do_not_block_an_edit() {
+        let input = json!({
+            "file_path": "/repo/src/wire.ts",
+            "new_string": "  #hlc: Hlc\n  peer(): string {\n    return this.#peer\n  }\n"
+        });
+
+        assert_eq!(
+            pretooluse_decision("Edit", &input, &DocumentIds::Known(known(&[]))),
+            PreToolUseDecision::Allow
+        );
+    }
+
+    /// A coined id in a JS comment is exactly what the guard is for, so prose
+    /// scoping must not turn the whole file into a blind spot.
+    #[test]
+    fn a_coined_id_in_a_javascript_comment_still_blocks() {
+        let input = json!({
+            "file_path": "/repo/src/seq-crdt.js",
+            "content": "// tracked by #codecfix\nclass A {{ #x }}\n"
+        });
+
+        match pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[]))) {
+            PreToolUseDecision::Deny { reason } => {
+                assert!(reason.contains("#codecfix"), "{reason}");
+                assert!(!reason.contains("#x"), "{reason}");
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    /// CSS id selectors, named by `#hookhashfalsepositive` alongside the C case.
+    #[test]
+    fn css_id_selectors_do_not_block_a_write() {
+        let input = json!({
+            "file_path": "/repo/site/app.css",
+            "content": "#mainpanel .row {{ color: red }}\n#sidebar {{ width: 20rem }}\n"
+        });
+
+        assert_eq!(
+            pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[]))),
+            PreToolUseDecision::Allow
+        );
     }
 
     /// `old_string` is pre-existing content. Scanning it would block an edit that

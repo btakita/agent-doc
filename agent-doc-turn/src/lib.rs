@@ -22,6 +22,7 @@ pub mod no_change;
 pub mod op_log;
 pub mod owner_pane_recursion;
 pub mod prompt_bearing_route;
+pub mod prose_scope;
 pub mod repair;
 pub mod response_replay;
 pub mod response_text;

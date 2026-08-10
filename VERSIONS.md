@@ -2,6 +2,40 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.228
+
+- **Fix (`#hookhashjsprivatefield`, `#hookhashfalsepositive`): the coined-id
+  guard scanned code, so every language that spells something `#word` was a
+  false block.**
+
+  Third incident, third language. C preprocessor directives came first and were
+  patched with an extension list plus a directive keyword list. Then ES2022
+  private class fields: `coined_id_scan_text` returned the text unsanitized
+  unless the extension was C-family, and `extract_tags`'s only guard is "not
+  glued to a preceding word" — for `this.#entries` the preceding character is
+  `.` and for an indented `#hlc;` declaration it is a space, so both pass and
+  yield tags. Every `Edit` to a JS file with private fields was blocked.
+
+  Enumerating languages one incident at a time does not converge, so the scope
+  is inverted. A commit message is prose end to end and is still scanned whole.
+  A source file is prose only in its comments, so
+  `agent_doc_turn::prose_scope::prose_only` blanks everything outside them for a
+  language whose comment syntax is known, preserving character positions and
+  newlines. Code stops being scanned at all.
+
+  - Covers C/C++/ObjC, Rust, Go, Java, Kotlin, Swift, Scala, C#, Dart, PHP, Zig
+    and friends (`//`, `/* */`); the JS/TS family including template literals;
+    Python/shell/YAML/TOML/Ruby (`#`); CSS/SCSS/Less; SQL/Haskell/Lua (`--`);
+    HTML/XML/Vue/Svelte (`<!-- -->`).
+  - An unknown extension and every prose format (`.md`, `.txt`, extensionless)
+    are returned untouched and scanned whole, so widening the table can only
+    reduce false blocks and never opens a hole.
+  - Strings are skipped, so `"http://x/#frag"` does not read as a comment. An
+    unterminated single-line string stops at the newline rather than swallowing
+    the rest of the file.
+  - Replaces `C_FAMILY_EXTENSIONS` and `C_FAMILY_PREPROCESSOR_DIRECTIVES`
+    entirely, so a directive that was never on the keyword list is handled too.
+
 ## 0.35.227
 
 - **Fix (`#skillinstallconfigpath`): `skill install` wrote machine-local junk

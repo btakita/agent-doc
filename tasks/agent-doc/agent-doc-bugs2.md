@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 725ccc79-bbfb-4543-88c0-5b3366716afe
+resume: daf25691-2887-49cc-8513-40e9c4b9804a
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -68,13 +68,35 @@ There was a second, quieter half: bare root resolution prefers the superproject,
 **Verification.** 11 new tests in `skill.rs` (managed-dir stale/missing/unbundled, surviving retired mirror, retirement keeping non-bundled files, mirror refresh only when configured, mirror never reaping project files, mirror drift blocking, mirror never creating the directory). `make check` green end to end (`EXIT=0`, zero `result: FAILED`) after every edit including the doc surfaces. `make install-full` exit 0, `agent-doc --version` → 0.35.226, controller recycled.
 
 One thing worth flagging: `.agent-doc/` is gitignored in agent-loop, so the `skill_runbook_mirrors` opt-in is local-only here. That is how this repo's project config already works, not something this change introduced.
+
+### Re: do [#skillinstallconfigpath] — opus-5
+
+> **Queue prompt:**
+>
+> do [#skillinstallconfigpath]
+
+
+Released as **0.35.227** (tagged, pushed; CI/Release/PyPI queued). Both halves fixed, plus a third defect the first two exposed.
+
+**(a) The absolute `--project-root`.** `merge_codex_config` canonicalized the install root and wrote it into the MCP server args, so a project-local — and usually tracked — file carried the installing machine's path. Installed args are now just `["mcp", "serve"]`, and `mcp serve` walks up from its own working directory to the nearest project root when the flag is absent. Outside any project it stays put, which is exactly what an absent flag already did, so nothing that worked before stops working. Reinstalling replaces the whole server table, so a legacy absolute entry migrates away on the next install — proven live: `/tmp/agent-doc-v035139-final` is gone from `src/agent-doc/.codex/config.toml` and `/home/brian/...` is gone from the superproject's.
+
+Nothing reads `--project-root` back out of that config — `agent-doc-codex-stop-io` uses `project_root_for(cwd)`, and the config string only appeared in a test fixture — so dropping it has no consumer.
+
+**(b) The missing trailing newline.** `serde_json::to_string_pretty` omits it. All three JSON hook writers had the bug, not just `.codex/hooks.json`: Codex hooks, Codex turn-status, and Claude `settings.json`. All three now end with a newline, and the fix repaired files the old installer had already truncated (the `\ No newline at end of file` diff on `.claude/settings.json` in this cycle is that repair landing).
+
+**(c) Found while fixing the above:** every install rewrote these artifacts byte-identically. That is churn in a tracked file, and the mtime bump alone feeds `audit-docs` staleness advisories — which is noise in exactly the surface 0.35.226 just made release-blocking. The JSON writers and the TOML config writer now skip the write when the rendered content is unchanged, matching what `install_runbooks_for` / `install_okf_for` already do.
+
+**Verification.** Two new tests: `codex_install_migrates_a_legacy_absolute_project_root_away` (seeds the real `/tmp/agent-doc-v035139-final` value and asserts it is gone) and `codex_install_artifacts_end_with_a_newline_and_do_not_churn` (asserts both artifacts end with a newline and that a second install leaves content *and mtime* untouched). Updated the three places that asserted the old args — `src/skill.rs`'s `assert_codex_mcp_config`, `tests/test_cli.rs` (now also asserting no `--project-root` substring and a trailing newline), and the `agent-doc-codex-stop-io` fixture. `make check` green (`EXIT=0`, zero failures) before and after the version bump; `make install` exit 0; `agent-doc --version` → 0.35.227; controller recycled.
+
+For the record on the previous release: 0.35.226's Release run completed successfully; its CI and PyPI runs were still in progress when checked, and 0.35.227's are queued. Not awaited, per `#ci-no-closeout-wait`.
+
+One thing left deliberately uncommitted: the superproject `.claude/settings.json` also carries a pre-existing operator edit (an `env` block setting `AGENT_DOC_PREFLIGHT_HOOK_BUDGET_SECS=300` — the same variable whose ambient read broke the test suite last cycle). It was dirty before this session started, so committing it would sweep up someone else's work. The submodule copy was committed; the superproject one is still yours to land.
 <!-- agent:boundary:8c608826 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#skillinstallconfigpath]
-- ~~do [#skillinstallstalemirror]~~
+- ~~do [#skillinstallconfigpath]~~
 - do [#operatorverifylive]
 - do [#run3rdpaneswitchverify]
 - do [#hookhashfalsepositive]
@@ -89,7 +111,7 @@ One thing worth flagging: `.agent-doc/` is gitignored in agent-loop, so the `ski
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#skillinstallconfigpath] #agent-doc-bug `skill install` writes machine-local junk into two Codex artifacts. (a) `.codex/config.toml` gets an ABSOLUTE `--project-root` for whichever machine ran the install, so the tracked value churns per operator — src/agent-doc had `/tmp/agent-doc-v035139-final` committed from a temp-dir test install until this cycle, and installing here wanted to replace it with `/home/brian/work/...`. Neither belongs in a shipped repo file; the MCP server should resolve its project root at runtime (it already knows the cwd) or the path should be written relative. (b) `.codex/hooks.json` is written without a trailing newline, so every install dirties the file with a \ No newline at end of file diff. Both surfaced while assembling the 0.35.226 commit and were dropped from it deliberately.
+- [ ] [#hookhashjsprivatefield] The C-family fix for #hookhashfalsepositive left JavaScript/TypeScript open, and it is now a live block. `coined_id_scan_text` (agent-doc-hooks-io/src/coined_id_pretooluse.rs:213) returns the text UNSANITIZED unless `is_c_family_target` matches, and C_FAMILY_EXTENSIONS is c/cc/cpp/cu/cuh/cxx/h/hh/hpp/hxx/inc/inl/ipp/m/mm/tpp — no js/mjs/cjs/ts/tsx. So ES2022 private class fields are scanned as coined ids. Confirmed against extract_tags (agent-doc-turn/src/coined_ids.rs:28): its only guard is "not glued to a preceding word", which rejects `foo#bar` by testing whether the previous char is alphanumeric/_/- . For `this.#entries` the previous char is `.` and for an indented `  #hlc;` declaration it is a space, so BOTH pass the guard and yield the tags `entries`/`hlc`. Hit live while fixing lazily-js for #lzzigforkhlcpeer: every Edit to src/seq-crdt.js was blocked because the payload carried `#entries`, `#hlc`, `#peer`. Workaround used was an exact literal python3 replacement, since Bash payloads are only scanned for `git commit` — the same trivially-avoidable-but-obstructive shape #hookhashfalsepositive already notes. Narrow fix: extend the sanitizer to js/mjs/cjs/ts/tsx and blank `#` when it is in class-member position (`.#ident`, or `#ident` followed by `=`, `(`, `;`, or whitespace inside a class body). Broader fix per #hookhashfalsepositive: scope the guard to prose contexts instead of enumerating languages one incident at a time — this is the second language to hit it.
 - [/] [#clearsubmitunobservedverify] [operator-verify] Live re-proof for #clearsubmitunobserved (0.35.225): reproduce the reported haiven-dev.md sequence — let the supervisor go dead (or `session restart-supervisor`), then Run Agent Doc so the flow cold-starts a replacement and immediately runs Clear Session Context on the fresh pane. Expect it to SUCCEED instead of failing with `result=submission_unobserved ... unblocker=clear_submission_unobserved`, and expect `session_clear_submit_cleared_state_probe ... result=cleared_state_proven retained_lines=<small>` in ops.log. Then the half that must not regress: on a pane holding a real conversation, break submission (e.g. leave the composer wedged) and confirm the clear still fails closed with `result=conversation_retained`. Unit tests pin the predicate against synthetic captures; only a live pane exercises the tmux scrollback capture and the real harness prompt shapes.
 - [ ] [#caswriteracechurn] #agent-doc-bug The `compare_and_swap_raced` settle-wait is recurring across concurrent sessions, not a one-off. Operator-reported on sdk.md 2026-08-09 ("Same CAS-race path as last cycle — the write landed; finishing with commit"), and the SAME cycle on agent-doc-bugs2.md hit it twice in one closeout: `[write] Waiting for typing/CRDT versions to settle ... (reason=compare_and_swap_raced, elapsed=9945ms)` then again at 4694ms, inside a 32.7s closeout (commit_authority 14.9s, session_check 16.7s). Outcome is correct every time — the write lands and the cycle commits — so this is latency/churn, not loss. Worth measuring before fixing: instrument how often a closeout takes the CAS-race branch and what the contending writer is (concurrent supervisor idle-watch? replica propagation? another session on the same state.db?). If the contention is self-inflicted (agent-doc writing the same cell twice per closeout), the fix is to collapse the writes; if it is genuine cross-session contention on a shared project root, the settle wait is doing its job and the item is a metric, not a bug. Do not "fix" it by shortening the wait -- the wait is what makes the write land.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.

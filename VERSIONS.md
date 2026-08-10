@@ -2,6 +2,51 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.226
+
+- **Fix (`#skillinstallstalemirror`): nothing compared installed runbooks to the
+  bundle, so a release could ship harness runbooks several versions behind the
+  binary while every version marker matched.**
+
+  0.35.224 shipped with the `.claude` / `.codex` / `.opencode` / `.cursor`
+  runbooks still describing the retired `--baseline-file` command. `skill
+  install` does content-compare each runbook, so the copies it manages were
+  never the whole story — the hole was that `audit-docs` only checked the SKILL
+  surfaces and the OKF bundle, never the runbooks, and `make check` (what the
+  release process actually runs) did not call `audit-docs` at all.
+
+  - `audit_managed_runbook_bundles` compares every installed runbook to the
+    running binary: a stale file, a missing file, unbundled Markdown in a
+    harness runbook directory, and a surviving retired mirror all block.
+  - `make check` now runs `audit-docs`, so the release path exercises it.
+  - `.codex/runbooks/` is formally retired. `skill install` removes the bundled
+    files it left behind and the directory once empty, keeping anything
+    agent-doc never bundled; `audit-docs` blocks while a copy survives. The
+    managed Codex location is `.codex/skills/agent-doc/runbooks/`.
+  - New project config `skill_runbook_mirrors` opts a project-owned directory
+    (for example a superproject `runbooks/` that `CLAUDE.md` links to directly)
+    into carrying bundled copies. `skill install` refreshes the bundled files
+    there and `audit-docs` blocks on drift, but neither creates the directory
+    and neither reaps a file agent-doc does not bundle — these directories also
+    hold project-owned runbooks. Default empty, so an unrelated
+    `runbooks/commit.md` is never clobbered by accident.
+  - `release-version` no longer stamps the version into installed skill copies.
+    Stamping a copy whose body was never regenerated made a stale install look
+    current to every version-marker reader; the installer owns installed
+    surfaces and `audit-docs` owns their freshness.
+  - `skill install --root <PATH>` installs into an explicit root. Root
+    resolution prefers the superproject, so the submodule-local
+    `src/agent-doc/.claude/...` copies were previously unreachable; `make
+    install` / `make install-full` now refresh them, and `audit-docs` audits
+    that root alongside the superproject.
+
+- **Fix: `admission_budget_honours_the_operator_override` read the real process
+  environment**, so the suite went red for anyone with
+  `AGENT_DOC_PREFLIGHT_HOOK_BUDGET_SECS` exported — including agent-doc's own
+  dogfooding supervisor, which sets it. The parse now lives in a pure
+  `resolve_hook_admission_budget`, and the test covers unset, blank,
+  unparsable, zero, and a usable override.
+
 ## 0.35.225
 
 - **Fix (`#clearsubmitunobserved`): a `/clear` that succeeded was reported as an

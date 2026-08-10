@@ -10,12 +10,19 @@
 //!   running `agent-doc` crate checkout (for example `cargo run --manifest-path src/agent-doc/Cargo.toml -- audit-docs`
 //!   from the monorepo root), prefers the nested crate root over the outer repo root.
 //! - Also audits generated agent-doc instruction surfaces in the explicit root or resolved install
-//!   root. Without `--root`, submodule checkouts audit the superproject install root used by
-//!   release installs. With explicit `--root`, the given root is audited exactly, so
-//!   submodule-local managed artifacts can still be checked intentionally. Managed surfaces must
-//!   match the running binary's rendered content; custom root AGENTS.md files are ignored.
+//!   root. Without `--root`, submodule checkouts audit both the superproject install root used by
+//!   release installs and the submodule checkout itself — `skill install` resolves to the
+//!   superproject, so the submodule-local copies are only ever touched by `release-version`'s
+//!   version stamp and would otherwise never be content-checked. With explicit `--root`, the given
+//!   root is audited exactly. Managed surfaces must match the running binary's rendered content;
+//!   custom root AGENTS.md files are ignored.
 //! - Managed OKF bundles are checked against the running binary: stale files, missing files,
 //!   stale installed concept markdown, and unbundled OKF links are release-blocking.
+//! - Managed runbook bundles are checked the same way (`#skillinstallstalemirror`): a stale or
+//!   missing installed runbook, unbundled markdown in a harness runbook directory, a surviving
+//!   retired mirror, and drift in an opted-in project runbook mirror are all release-blocking.
+//!   Without this check a release could ship harness runbooks several versions behind the binary
+//!   while every version marker matched.
 //! - Filesystem mtime staleness is reported as advisory output only; managed instruction surfaces
 //!   are release-blocking through rendered-content comparison, not timestamp comparison.
 //!
@@ -32,7 +39,7 @@
 //! - nested_dev_crate_root_override: when current CWD contains the running crate under a nested
 //!   path, audit scopes to that crate root instead of the outer repo
 //! - managed_instruction_surface_roots: running from a submodule audits the superproject install
-//!   root instead of ignored submodule-local install artifacts
+//!   root and the submodule checkout, so a version-stamped but content-stale development copy fails
 //! - explicit_managed_instruction_surface_root: `--root` audits the requested root exactly,
 //!   including submodule-local managed instruction artifacts
 //! - mtime_staleness_advisory: source-newer-than-doc output is non-blocking when content checks pass
@@ -59,6 +66,7 @@ pub fn run(root_override: Option<&Path>) -> Result<()> {
         .or(fallback_root);
     for root in managed_instruction_surface_roots(root_override) {
         crate::skill::audit_managed_instruction_surfaces(Some(&root))?;
+        crate::skill::audit_managed_runbook_bundles(Some(&root))?;
         crate::skill::audit_managed_okf_bundles(Some(&root))?;
     }
     run_agent_doc_audit(&config, resolved_root.as_deref())
@@ -184,9 +192,14 @@ fn managed_instruction_surface_roots_from(
         push_unique_root(&mut roots, root);
         return roots;
     }
+    // `#skillinstallstalemirror`: audit the superproject install root *and* the
+    // submodule checkout. Root resolution prefers the superproject, so
+    // `skill install` never rewrites the submodule-local copies — only
+    // `release-version` touches them, and it stamps the version marker without
+    // refreshing the body. Auditing only the superproject let a stamped-but-stale
+    // development copy pass.
     if let Some(root) = superproject_root {
         push_unique_root(&mut roots, root);
-        return roots;
     }
     if let Some(cwd) = cwd {
         push_unique_root(&mut roots, cwd);
@@ -349,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_instruction_surface_roots_prefers_superproject_without_override() {
+    fn managed_instruction_surface_roots_covers_superproject_and_submodule() {
         let tmp = TempDir::new().unwrap();
         let superproject = tmp.path().join("workspace");
         let submodule = superproject.join("src/agent-doc");
@@ -358,7 +371,14 @@ mod tests {
         let roots =
             managed_instruction_surface_roots_from(None, Some(&superproject), Some(&submodule));
 
-        assert_eq!(roots, vec![superproject.canonicalize().unwrap()]);
+        assert_eq!(
+            roots,
+            vec![
+                superproject.canonicalize().unwrap(),
+                submodule.canonicalize().unwrap(),
+            ],
+            "the submodule-local install is only touched by release-version, so it needs auditing too"
+        );
     }
 
     #[test]

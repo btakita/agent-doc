@@ -29,10 +29,13 @@ INLINE_PATH_RE = re.compile(r'path\s*=\s*"([^"]+)"')
 INLINE_VERSION_RE = re.compile(r'(version\s*=\s*")([^"]+)(")')
 LOCK_NAME_RE = re.compile(r'(?m)^name = "([^"]+)"$')
 LOCK_VERSION_RE = re.compile(r'(?m)^(version = ")([^"]+)(")$')
-SKILL_FILES = (
-    Path("SKILL.md"),
-    Path(".claude/skills/agent-doc/SKILL.md"),
-)
+# `#skillinstallstalemirror`: only the bundle SOURCE is version-stamped here.
+# Installed skill copies are the installer's output, not a release projection
+# surface: stamping a new version into a copy whose body was never regenerated
+# made a stale install look current to every version-marker reader. `audit-docs`
+# owns installed-surface freshness by comparing rendered content, and it now
+# covers the submodule-local root that `skill install` cannot reach.
+SKILL_FILES = (Path("SKILL.md"),)
 REACTIVE_HARNESS_MARKER = "#lazily-reactive-first"
 REACTIVE_HARNESS_TERMS = (
     "`Source`",
@@ -475,17 +478,22 @@ def self_test() -> None:
         else:
             raise HarnessError("fixture closeout mutation-capture drift was not detected")
         runtime.write_text(runtime_contract)
-        skill = root / ".claude/skills/agent-doc/SKILL.md"
-        skill.write_text(skill.read_text().replace("2.4.6", "1.2.3"))
+        skill = root / "SKILL.md"
+        skill_contract = skill.read_text()
+        skill.write_text(skill_contract.replace("2.4.6", "1.2.3"))
         try:
             verify_release_version(root)
         except HarnessError as exc:
-            if ".claude/skills/agent-doc/SKILL.md" not in str(exc):
+            if "SKILL.md" not in str(exc):
                 raise HarnessError(
-                    "fixture drift did not identify the development skill"
+                    "fixture drift did not identify the bundled skill source"
                 ) from exc
         else:
             raise HarnessError("fixture skill drift was not detected")
+        skill.write_text(skill_contract)
+        installed = root / ".claude/skills/agent-doc/SKILL.md"
+        installed.write_text(installed.read_text().replace("2.4.6", "1.2.3"))
+        verify_release_version(root)
 
 
 def parse_args() -> argparse.Namespace:
@@ -524,14 +532,14 @@ def main() -> int:
             print(
                 f"projected agent-doc {args.version} across {manifests} manifests, "
                 f"{dependencies} internal constraints, Cargo.lock, pyproject.toml, "
-                f"and {len(SKILL_FILES)} skill copies"
+                f"and {len(SKILL_FILES)} bundled skill source(s)"
             )
         elif args.command == "verify-release-version":
             version, manifests, dependencies = verify_release_version(root)
             print(
                 f"agent-doc {version} release projection is synchronized "
                 f"({manifests} manifests, {dependencies} internal constraints, "
-                f"{len(SKILL_FILES)} skill copies)"
+                f"{len(SKILL_FILES)} bundled skill source(s))"
             )
         elif args.command == "self-test":
             self_test()

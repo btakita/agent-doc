@@ -242,10 +242,14 @@ Key differences from Claude Code:
 
 3. ✅ **Environment-aware runbook installation:**
    - `install_runbooks_for(env, root)` installs runbooks alongside the skill file
-   - Claude: `.claude/skills/agent-doc/runbooks/`, Codex: `.codex/runbooks/`, etc.
+   - Claude: `.claude/skills/agent-doc/runbooks/`, Codex: `.codex/skills/agent-doc/runbooks/`, etc.
    - `install_runbooks_all(root)` installs to all environments
    - `install_for` and `install_all` now use environment-aware runbook paths
    - Fixes: previously runbooks were hardcoded to `.claude/` only
+   - `#skillinstallstalemirror`: the original Codex target `.codex/runbooks/` is
+     retired. `skill install` removes the bundled files it left behind (and the
+     directory once empty), keeping anything agent-doc never bundled, and
+     `audit-docs` blocks while a copy survives.
 
 4. ✅ **7 new tests:** runbooks-per-environment (claude, codex, all), harness preamble presence, harness-invocation runbook bundled + content check
 

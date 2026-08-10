@@ -224,6 +224,11 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
     ),
 ];
 
+/// Runbook mirror directories that predate the managed harness skill directories
+/// (`#skillinstallstalemirror`). `skill install` migrates these away instead of
+/// leaving a copy nothing refreshes; `audit-docs` blocks while one survives.
+const RETIRED_RUNBOOK_MIRRORS: &[&str] = &[".codex/runbooks"];
+
 /// Bundled OKF concept files installed alongside the skill.
 const BUNDLED_OKF: &[(&str, &str)] = &[
     ("index.md", include_str!("../okf/index.md")),
@@ -882,6 +887,205 @@ fn install_runbooks_all(root: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+fn resolve_install_base(root: Option<&Path>) -> std::path::PathBuf {
+    let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
+    resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+}
+
+fn bundled_runbook_names() -> std::collections::HashSet<&'static str> {
+    BUNDLED_RUNBOOKS.iter().map(|(name, _)| *name).collect()
+}
+
+/// Project-owned runbook directories that opted into carrying bundled copies
+/// (`#skillinstallstalemirror`). Only directories that already exist are
+/// returned: the installer refreshes a mirror, it never creates one.
+fn configured_runbook_mirrors(base: &Path) -> Vec<std::path::PathBuf> {
+    let config_path = base.join(".agent-doc").join("config.toml");
+    let Ok(content) = std::fs::read_to_string(&config_path) else {
+        return Vec::new();
+    };
+    let config = match agent_doc_frontmatter::project_config::parse_project_toml(&content) {
+        Ok(config) => config,
+        Err(err) => {
+            eprintln!(
+                "warning: failed to parse {} while resolving runbook mirrors: {err}",
+                config_path.display()
+            );
+            return Vec::new();
+        }
+    };
+    let Some(mirrors) = config.agent_doc_skill_runbook_mirrors.as_ref() else {
+        return Vec::new();
+    };
+    mirrors
+        .iter()
+        .map(|rel| rel.trim())
+        .filter(|rel| !rel.is_empty())
+        .map(|rel| base.join(rel))
+        .filter(|dir| dir.is_dir())
+        .collect()
+}
+
+/// Refresh bundled runbooks inside opted-in project-owned mirror directories.
+///
+/// Writes every bundled runbook whose content differs, and never touches a file
+/// agent-doc does not bundle — these directories also hold project-owned
+/// runbooks, so reaping unknown Markdown here would delete project content.
+fn install_runbook_mirrors(root: Option<&Path>) -> Result<()> {
+    let base = resolve_install_base(root);
+    for dir in configured_runbook_mirrors(&base) {
+        for (name, content) in BUNDLED_RUNBOOKS {
+            let path = dir.join(name);
+            let needs_write = !path.exists()
+                || std::fs::read_to_string(&path)
+                    .map(|existing| existing != *content)
+                    .unwrap_or(true);
+            if needs_write {
+                std::fs::write(&path, content)
+                    .with_context(|| format!("write runbook mirror {}", path.display()))?;
+                eprintln!("[mirror] refreshed runbook → {}", path.display());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Remove retired runbook mirror directories that `skill install` no longer
+/// manages, so a stale copy cannot masquerade as current instructions.
+///
+/// Only bundled runbook filenames are removed; anything else in the directory
+/// is left in place (and keeps the directory alive) rather than silently
+/// deleting content agent-doc never wrote.
+fn retire_managed_runbook_mirrors(root: Option<&Path>) -> Result<()> {
+    let base = resolve_install_base(root);
+    let canonical_names = bundled_runbook_names();
+    for rel in RETIRED_RUNBOOK_MIRRORS {
+        let dir = base.join(rel);
+        if !dir.is_dir() {
+            continue;
+        }
+        for name in &canonical_names {
+            let path = dir.join(name);
+            if !path.is_file() {
+                continue;
+            }
+            std::fs::remove_file(&path)
+                .with_context(|| format!("retire runbook mirror {}", path.display()))?;
+            eprintln!("[retired] removed runbook mirror → {}", path.display());
+        }
+        let still_populated = std::fs::read_dir(&dir)
+            .with_context(|| format!("read retired runbook mirror {}", dir.display()))?
+            .next()
+            .is_some();
+        if !still_populated {
+            std::fs::remove_dir(&dir)
+                .with_context(|| format!("remove retired runbook mirror {}", dir.display()))?;
+            eprintln!("[retired] removed runbook mirror dir → {}", dir.display());
+        }
+    }
+    Ok(())
+}
+
+/// Audit installed runbook bundles against the running binary.
+///
+/// Managed harness directories must match the bundle exactly (missing, stale,
+/// and unbundled Markdown all block). Opted-in project mirrors are checked for
+/// missing and stale bundled files only, because they also hold project-owned
+/// runbooks. A surviving retired mirror blocks outright.
+pub(crate) fn audit_managed_runbook_bundles(root: Option<&Path>) -> Result<()> {
+    let base = resolve_install_base(root);
+    let canonical_names = bundled_runbook_names();
+
+    for rel in RETIRED_RUNBOOK_MIRRORS {
+        let dir = base.join(rel);
+        if !dir.is_dir() {
+            continue;
+        }
+        if canonical_names
+            .iter()
+            .any(|name| dir.join(name).is_file())
+        {
+            anyhow::bail!(
+                "retired agent-doc runbook mirror is still present: {}. Run `agent-doc skill install --all` to migrate it out.",
+                dir.display()
+            );
+        }
+    }
+
+    for (env, _) in agent_kit::detect::Environment::all_skill_rel_paths("agent-doc") {
+        let runbooks_dir = base.join(runbooks_rel_path(&env));
+        if !runbooks_dir.is_dir() {
+            continue;
+        }
+        audit_runbook_dir(&format!("{env}"), &runbooks_dir, true)?;
+    }
+
+    for dir in configured_runbook_mirrors(&base) {
+        let label = format!("project mirror {}", dir.display());
+        audit_runbook_dir(&label, &dir, false)?;
+    }
+
+    Ok(())
+}
+
+/// Compare one runbook directory to the bundle.
+///
+/// `exclusive` marks a directory agent-doc fully owns, where unbundled Markdown
+/// is itself a finding. Project mirrors are shared, so they only fail on missing
+/// or stale bundled files.
+fn audit_runbook_dir(label: &str, runbooks_dir: &Path, exclusive: bool) -> Result<()> {
+    for (name, expected) in BUNDLED_RUNBOOKS {
+        let path = runbooks_dir.join(name);
+        if !path.exists() {
+            anyhow::bail!(
+                "agent-doc runbook bundle for {label} is missing {}. Run `agent-doc skill install --all`.",
+                path.display()
+            );
+        }
+        let existing =
+            std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        if existing != *expected {
+            anyhow::bail!(
+                "agent-doc runbook bundle for {label} is stale: {}. Run `agent-doc skill install --all`.",
+                path.display()
+            );
+        }
+    }
+
+    if !exclusive {
+        return Ok(());
+    }
+
+    let canonical_names = bundled_runbook_names();
+    let entries = std::fs::read_dir(runbooks_dir)
+        .with_context(|| format!("read runbooks dir {}", runbooks_dir.display()))?;
+    for entry in entries {
+        let entry = entry
+            .with_context(|| format!("read runbooks dir entry under {}", runbooks_dir.display()))?;
+        if !entry
+            .file_type()
+            .with_context(|| format!("inspect runbook entry {}", entry.path().display()))?
+            .is_file()
+        {
+            continue;
+        }
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("md") {
+            continue;
+        }
+        let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if !canonical_names.contains(file_name) {
+            anyhow::bail!(
+                "agent-doc runbook bundle for {label} contains stale runbook markdown: {}. Run `agent-doc skill install --all`.",
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Install bundled OKF concept files alongside the skill for the detected environment.
 fn install_okf(root: Option<&Path>) -> Result<()> {
     let env = detect_install_env();
@@ -1433,6 +1637,8 @@ pub fn install_at(root: Option<&Path>) -> Result<()> {
     let env = detect_install_env();
     install_skill_for_env(env, resolved.as_deref())?;
     install_runbooks(resolved.as_deref())?;
+    install_runbook_mirrors(resolved.as_deref())?;
+    retire_managed_runbook_mirrors(resolved.as_deref())?;
     install_okf(resolved.as_deref())?;
     install_env_artifacts(env, resolved.as_deref())?;
     retire_managed_always_on_agents(resolved.as_deref())
@@ -1454,29 +1660,43 @@ pub fn install_and_check_updated() -> Result<bool> {
 
     install_skill_for_env(env, resolved.as_deref())?;
     install_runbooks(resolved.as_deref())?;
+    install_runbook_mirrors(resolved.as_deref())?;
+    retire_managed_runbook_mirrors(resolved.as_deref())?;
     install_okf(resolved.as_deref())?;
     install_env_artifacts(env, resolved.as_deref())?;
     retire_managed_always_on_agents(resolved.as_deref())?;
     Ok(!was_current)
 }
 
-/// Install the skill for a specific harness environment.
-pub fn install_for(env: agent_kit::detect::Environment) -> Result<()> {
-    let resolved = resolve_root();
+/// Install the skill for a specific harness environment under an explicit root.
+///
+/// An explicit root is how a submodule-local install gets refreshed: bare root
+/// resolution prefers the superproject, so `src/agent-doc/.claude/...` is
+/// otherwise unreachable from inside the submodule (`#skillinstallstalemirror`).
+pub fn install_for_at(
+    env: agent_kit::detect::Environment,
+    root: Option<&Path>,
+) -> Result<()> {
+    let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
     install_skill_for_env(env, resolved.as_deref())?;
     install_runbooks_for(env, resolved.as_deref())?;
+    install_runbook_mirrors(resolved.as_deref())?;
+    retire_managed_runbook_mirrors(resolved.as_deref())?;
     install_okf_for(env, resolved.as_deref())?;
     install_env_artifacts(env, resolved.as_deref())?;
     retire_managed_always_on_agents(resolved.as_deref())
 }
 
-/// Install the skill for all supported harnesses.
-pub fn install_all() -> Result<()> {
-    let resolved = resolve_root();
+/// Install the skill for all supported harnesses under an explicit root.
+/// A `None` root resolves to the superproject (or git toplevel) install root.
+pub fn install_all_at(root: Option<&Path>) -> Result<()> {
+    let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
     for (env, _) in agent_kit::detect::Environment::all_skill_rel_paths("agent-doc") {
         install_skill_for_env(env, resolved.as_deref())?;
     }
     install_runbooks_all(resolved.as_deref())?;
+    install_runbook_mirrors(resolved.as_deref())?;
+    retire_managed_runbook_mirrors(resolved.as_deref())?;
     install_okf_all(resolved.as_deref())?;
     install_env_artifacts_all(resolved.as_deref())?;
     retire_managed_always_on_agents(resolved.as_deref())
@@ -2058,6 +2278,166 @@ mod tests {
         let err = super::audit_managed_okf_bundles(Some(dir.path())).unwrap_err();
         assert!(err.to_string().contains("unbundled OKF file"));
         assert!(err.to_string().contains("missing.md"));
+    }
+
+    fn write_runbook_mirror_config(root: &std::path::Path, mirrors: &str) {
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            format!("skill_runbook_mirrors = [{mirrors}]\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn audit_managed_runbook_bundles_accepts_current_install() {
+        let dir = tempfile::tempdir().unwrap();
+        super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
+
+        super::audit_managed_runbook_bundles(Some(dir.path())).unwrap();
+    }
+
+    #[test]
+    fn audit_managed_runbook_bundles_rejects_stale_runbook() {
+        let dir = tempfile::tempdir().unwrap();
+        super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
+        std::fs::write(
+            dir.path().join(".codex/skills/agent-doc/runbooks/commit.md"),
+            "# stale\n",
+        )
+        .unwrap();
+
+        let err = super::audit_managed_runbook_bundles(Some(dir.path())).unwrap_err();
+        assert!(err.to_string().contains("stale"));
+        assert!(err.to_string().contains("commit.md"));
+    }
+
+    #[test]
+    fn audit_managed_runbook_bundles_rejects_missing_runbook() {
+        let dir = tempfile::tempdir().unwrap();
+        super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
+        std::fs::remove_file(dir.path().join(".codex/skills/agent-doc/runbooks/respond.md"))
+            .unwrap();
+
+        let err = super::audit_managed_runbook_bundles(Some(dir.path())).unwrap_err();
+        assert!(err.to_string().contains("missing"));
+        assert!(err.to_string().contains("respond.md"));
+    }
+
+    #[test]
+    fn audit_managed_runbook_bundles_rejects_unbundled_markdown() {
+        let dir = tempfile::tempdir().unwrap();
+        super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
+        std::fs::write(
+            dir.path().join(".codex/skills/agent-doc/runbooks/legacy.md"),
+            "# stale\n",
+        )
+        .unwrap();
+
+        let err = super::audit_managed_runbook_bundles(Some(dir.path())).unwrap_err();
+        assert!(err.to_string().contains("stale runbook markdown"));
+        assert!(err.to_string().contains("legacy.md"));
+    }
+
+    #[test]
+    fn audit_managed_runbook_bundles_rejects_surviving_retired_mirror() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex/runbooks")).unwrap();
+        std::fs::write(dir.path().join(".codex/runbooks/commit.md"), "# stale\n").unwrap();
+
+        let err = super::audit_managed_runbook_bundles(Some(dir.path())).unwrap_err();
+        assert!(err.to_string().contains("retired"));
+        assert!(err.to_string().contains(".codex/runbooks"));
+    }
+
+    #[test]
+    fn install_retires_the_legacy_codex_runbook_mirror() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex/runbooks")).unwrap();
+        std::fs::write(dir.path().join(".codex/runbooks/commit.md"), "# stale\n").unwrap();
+
+        super::retire_managed_runbook_mirrors(Some(dir.path())).unwrap();
+
+        assert!(!dir.path().join(".codex/runbooks").exists());
+    }
+
+    #[test]
+    fn retiring_the_legacy_mirror_keeps_files_agent_doc_never_bundled() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codex/runbooks")).unwrap();
+        std::fs::write(dir.path().join(".codex/runbooks/commit.md"), "# stale\n").unwrap();
+        std::fs::write(dir.path().join(".codex/runbooks/local-notes.md"), "# mine\n").unwrap();
+
+        super::retire_managed_runbook_mirrors(Some(dir.path())).unwrap();
+
+        assert!(!dir.path().join(".codex/runbooks/commit.md").exists());
+        assert!(dir.path().join(".codex/runbooks/local-notes.md").exists());
+    }
+
+    #[test]
+    fn project_runbook_mirrors_refresh_only_when_configured() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("runbooks")).unwrap();
+        std::fs::write(dir.path().join("runbooks/commit.md"), "# stale\n").unwrap();
+
+        super::install_runbook_mirrors(Some(dir.path())).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("runbooks/commit.md")).unwrap(),
+            "# stale\n",
+            "an unconfigured directory must never be written"
+        );
+
+        write_runbook_mirror_config(dir.path(), "\"runbooks\"");
+        super::install_runbook_mirrors(Some(dir.path())).unwrap();
+
+        let expected = BUNDLED_RUNBOOKS
+            .iter()
+            .find(|(name, _)| *name == "commit.md")
+            .map(|(_, content)| *content)
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("runbooks/commit.md")).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn project_runbook_mirrors_never_reap_project_owned_runbooks() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("runbooks")).unwrap();
+        std::fs::write(dir.path().join("runbooks/browser-automation.md"), "# mine\n").unwrap();
+        write_runbook_mirror_config(dir.path(), "\"runbooks\"");
+
+        super::install_runbook_mirrors(Some(dir.path())).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("runbooks/browser-automation.md")).unwrap(),
+            "# mine\n"
+        );
+        super::audit_managed_runbook_bundles(Some(dir.path())).unwrap();
+    }
+
+    #[test]
+    fn audit_blocks_a_stale_configured_project_runbook_mirror() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("runbooks")).unwrap();
+        write_runbook_mirror_config(dir.path(), "\"runbooks\"");
+        super::install_runbook_mirrors(Some(dir.path())).unwrap();
+        std::fs::write(dir.path().join("runbooks/commit.md"), "# stale\n").unwrap();
+
+        let err = super::audit_managed_runbook_bundles(Some(dir.path())).unwrap_err();
+        assert!(err.to_string().contains("project mirror"));
+        assert!(err.to_string().contains("commit.md"));
+    }
+
+    #[test]
+    fn install_runbook_mirrors_does_not_create_the_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        write_runbook_mirror_config(dir.path(), "\"runbooks\"");
+
+        super::install_runbook_mirrors(Some(dir.path())).unwrap();
+
+        assert!(!dir.path().join("runbooks").exists());
     }
 
     #[test]
@@ -2749,13 +3129,17 @@ mod tests {
     }
 
     #[test]
-    fn development_claude_skill_version_matches_the_bundle() {
+    fn development_claude_skill_matches_the_bundle() {
         let development_skill = include_str!("../.claude/skills/agent-doc/SKILL.md");
         let expected = format!("agent-doc-version: \"{VERSION}\"");
         assert!(SKILL_TEMPLATE.contains(&expected));
-        assert!(
-            development_skill.contains(&expected),
-            "development Claude skill must track the bundled release version {VERSION}"
+        // `#skillinstallstalemirror`: compare the whole rendering, not just the
+        // version marker. A marker-only assertion passed for a copy whose body
+        // was several versions stale, which is exactly how 0.35.224 shipped.
+        assert_eq!(
+            development_skill,
+            content_for_env(Environment::ClaudeCode),
+            "development Claude skill is stale — run `agent-doc skill install --root . --all`"
         );
     }
 

@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-version test sim-medium cross-editor-simworld tmux-ci clippy check precommit timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
+.PHONY: build build-release release release-version audit-docs test sim-medium cross-editor-simworld tmux-ci clippy check precommit timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -39,6 +39,11 @@ release: check
 release-version:
 	@test -n "$(VERSION)" || (echo "ERROR: VERSION is required (for example, make release-version VERSION=0.35.89)" && exit 1)
 	@python3 scripts/agent-doc-dev release-version "$(VERSION)"
+	@# `#skillinstallstalemirror`: installed copies are the installer's output,
+	@# not a sed target. `--root .` reaches the submodule-local install that bare
+	@# root resolution skips in favour of the superproject.
+	@$(LOCAL_CARGO_ENV) cargo run --quiet --bin agent-doc -- skill install --root . --all
+	@$(LOCAL_CARGO_ENV) cargo run --quiet --bin agent-doc -- skill install --all
 
 # Run tests (unset git hook env vars so temp-repo tests are not confused by GIT_DIR).
 # Prefer cargo-nextest when installed; it runs test binaries concurrently while
@@ -157,7 +162,16 @@ lean:
 	fi
 
 # clippy + tests + deterministic simulator corpus + release harness + formal checks
-check: clippy test sim-medium version-sync dev-harness-test lean tla
+#
+# `audit-docs` belongs here, not only in `precommit` (#skillinstallstalemirror):
+# the release process runs `make check`, so leaving the installed-surface audit
+# out of it let 0.35.224 ship with harness runbooks several versions behind the
+# binary while every version marker matched.
+check: clippy test sim-medium version-sync audit-docs dev-harness-test lean tla
+
+# Audit generated instruction surfaces (skill, runbooks, OKF) against the binary.
+audit-docs:
+	@cargo run --quiet -- audit-docs
 
 # Translate the PlusCal concurrency model and check its TLA+ safety/liveness properties.
 tla:
@@ -180,6 +194,7 @@ install:
 	$(LOCAL_CARGO_ENV) cargo build --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --bin agent-doc
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" binary-install --source "$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc"
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill install --all
+	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" skill install --root . --all
 	@$(LOCAL_CARGO_ENV) cargo build --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --lib
 	@CARGO_TARGET_DIR="$(LOCAL_INSTALL_TARGET_DIR)" agent-doc lib-install --profile "$(LOCAL_INSTALL_PROFILE)"
 	@$(MAKE) install-editor-plugins
@@ -200,6 +215,7 @@ install-full:
 	cargo build --release --bin agent-doc
 	@target/release/agent-doc binary-install --source target/release/agent-doc
 	@target/release/agent-doc skill install --all
+	@target/release/agent-doc skill install --root . --all
 	@cargo build --release --lib
 	@agent-doc lib-install
 	@$(MAKE) install-editor-plugins

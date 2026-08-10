@@ -3947,6 +3947,11 @@ enum SkillCommands {
         /// Install for all supported harnesses
         #[arg(long)]
         all: bool,
+        /// Install into this root instead of the resolved superproject root.
+        /// Needed to refresh a submodule-local install (`#skillinstallstalemirror`),
+        /// which root resolution otherwise skips in favour of the superproject.
+        #[arg(long)]
+        root: Option<std::path::PathBuf>,
     },
     /// Check if the installed skill matches the binary version
     Check,
@@ -4496,15 +4501,18 @@ fn try_main() -> anyhow::Result<()> {
                     reload,
                     harness,
                     all,
+                    root,
                 } => {
                     if all {
-                        skill::install_all()?;
+                        skill::install_all_at(root.as_deref())?;
                     } else if let Some(ref h) = harness {
                         let env = agent_kit::detect::Environment::from_name(h)
                         .ok_or_else(|| anyhow::anyhow!(
                             "unknown harness '{}'. Valid: claude, opencode, codex, cursor, generic", h
                         ))?;
-                        skill::install_for(env)?;
+                        skill::install_for_at(env, root.as_deref())?;
+                    } else if let Some(root) = root.as_deref() {
+                        skill::install_at(Some(root))?;
                     } else {
                         let updated = skill::install_and_check_updated()?;
                         if updated && let Some(ref mode) = reload {

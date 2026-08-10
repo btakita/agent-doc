@@ -43,6 +43,7 @@
         "hooks": [
           {
             "command": "agent-doc hook preflight-user-prompt-submit",
+            "timeout": 120,
             "type": "command"
           }
         ]

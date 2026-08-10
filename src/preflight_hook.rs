@@ -62,8 +62,18 @@ pub const HOOK_ADMISSION_BUDGET_SECS: u64 = 90;
 const HOOK_ADMISSION_BUDGET_ENV: &str = "AGENT_DOC_PREFLIGHT_HOOK_BUDGET_SECS";
 
 fn hook_admission_budget() -> std::time::Duration {
-    let secs = std::env::var(HOOK_ADMISSION_BUDGET_ENV)
-        .ok()
+    resolve_hook_admission_budget(std::env::var(HOOK_ADMISSION_BUDGET_ENV).ok().as_deref())
+}
+
+/// Pure half of [`hook_admission_budget`]: an unset, unparsable, or zero
+/// override falls back to the default budget.
+///
+/// The parse lives apart from the ambient read so tests never depend on the
+/// process environment. agent-doc's own dogfooding supervisor exports
+/// `AGENT_DOC_PREFLIGHT_HOOK_BUDGET_SECS`, so a test that read the real env
+/// went red for the operators most likely to run the suite.
+fn resolve_hook_admission_budget(raw: Option<&str>) -> std::time::Duration {
+    let secs = raw
         .and_then(|raw| raw.trim().parse::<u64>().ok())
         .filter(|secs| *secs > 0)
         .unwrap_or(HOOK_ADMISSION_BUDGET_SECS);
@@ -416,12 +426,21 @@ mod tests {
 
     #[test]
     fn admission_budget_honours_the_operator_override() {
-        // Only the parse/validate half is exercised here; setting a process-wide
-        // env var would race the rest of the suite.
+        // The parse half is exercised through the pure resolver: setting a
+        // process-wide env var would race the rest of the suite, and reading
+        // the real one made this test fail whenever the operator (or agent-doc's
+        // own supervisor) had the override exported.
+        for unusable in [None, Some(""), Some("  "), Some("not-a-number"), Some("0")] {
+            assert_eq!(
+                resolve_hook_admission_budget(unusable),
+                std::time::Duration::from_secs(HOOK_ADMISSION_BUDGET_SECS),
+                "the default budget applies when the override is unset, unparsable, or zero: {unusable:?}"
+            );
+        }
         assert_eq!(
-            hook_admission_budget(),
-            std::time::Duration::from_secs(HOOK_ADMISSION_BUDGET_SECS),
-            "the default budget applies when the override is unset or unparsable"
+            resolve_hook_admission_budget(Some(" 300 ")),
+            std::time::Duration::from_secs(300),
+            "a usable override replaces the default budget"
         );
     }
 

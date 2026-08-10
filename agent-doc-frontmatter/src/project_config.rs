@@ -384,6 +384,18 @@ pub struct ProjectConfig {
         alias = "agent_doc_bug_backlog_document"
     )]
     pub agent_doc_bug_target_document: Option<String>,
+    /// `#skillinstallstalemirror`: project-owned directories that also carry
+    /// copies of the bundled agent-doc runbooks (for example a superproject
+    /// `runbooks/` that a project `CLAUDE.md` links to directly). `skill install`
+    /// refreshes every bundled runbook into each listed directory and
+    /// `audit-docs` blocks when one drifts from the running binary. Neither ever
+    /// creates the directory and neither ever reaps a file agent-doc does not
+    /// bundle, because these directories also hold project-owned runbooks.
+    /// Paths are relative to the project root. Default empty — an unlisted
+    /// directory is never written, so an unrelated `runbooks/commit.md` cannot
+    /// be clobbered by opting in accidentally.
+    #[serde(default, alias = "skill_runbook_mirrors")]
+    pub agent_doc_skill_runbook_mirrors: Option<Vec<String>>,
     /// Guard behavior overrides (for example pending-capture enforcement).
     #[serde(default)]
     pub guards: GuardConfig,

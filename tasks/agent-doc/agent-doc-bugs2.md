@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 11989875-a834-4d15-b879-e0742783728c
+resume: ae16c416-6580-4f11-b327-eeda04c9b7de
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -228,22 +228,43 @@ Liveness enters as a fact from the IO shell through the existing `process_is_ali
 Five tests covering each arm: dead predecessor reaps early; a promoted replacement survives its predecessor exiting; the in-flight grace is respected; a live predecessor is never reaped; unknown liveness is never treated as dead. `make check` green, 0.35.234 installed, both repos pushed and tagged.
 
 The operator's environment is recovered independently of this: `haiven-dev` reports `health=healthy state=healthy actor_state=ready` on lease generation 70 with a live pid, up from a generation-69 lease that named a terminated supervisor and read `busy`.
-<!-- agent:boundary:8c608826 -->
+
+### Re: do [#flakystatedbfixture] — opus-5
+
+> **Queue prompt:**
+>
+> do [#flakystatedbfixture]
+
+
+I found a finished fix for this sitting uncommitted in the tree as 0.35.235, checked it before shipping it, and it does not hold up. The premise is measurably false, its four regression tests prove nothing, and the branch is unsafe under exactly the concurrency this item is about. I reverted it and shipped the thing that actually moves the item.
+
+**The empty-file theory is wrong.** The draft claimed a writer creates `state.db`, dies before SQLite writes the header, and leaves zero bytes that the next open reports as `NotADatabase`. Measured directly: a `state.db` of **0 or 1 bytes opens cleanly** — SQLite initialises it as a new database. `NotADatabase` starts at **two** bytes of bad header. The failure the branch existed to fix cannot happen.
+
+**Its tests were vacuous, and I checked that before trusting them.** I neutered the fix and reran the four new tests: all four passed. A test that passes against the pre-fix source is not coverage.
+
+**And the branch was actively dangerous.** It fired on `opened.is_err() && len == 0`, but `open_and_init_state_db` also fails on a *lock* error — which is precisely what happens while a concurrent process is still initialising that same 0-byte file. The branch would then `remove_file` a database another process was in the middle of creating. It would have introduced a real corruption path into the code meant to prevent one.
+
+**Three more theories, all dead:** a stale `-wal`/`-shm` beside a 0-byte main db opens cleanly; `/tmp` is a 94G tmpfs at 1% so ENOSPC is out; and 600 concurrent `agent-doc session-check` invocations across 25 fresh project roots produced zero corruption, so plain cross-process contention is not it either.
+
+**What shipped instead.** The `state.db` corruption refusal named the path and nothing else. That is why this failure has survived several sightings including the 2026-07-19 field corruption whose `UNRESOLVED` note is still in `state_store.rs`: by the time anyone looks, a test `TempDir` is gone and the "preserve the corrupt copy" advice is unactionable. The refusal now carries the file's length, whether the SQLite magic is intact (`header=sqlite` vs `header=foreign`), the first sixteen bytes in hex plus a printable rendering, and the `-wal`/`-shm` sibling sizes. Those separate the two shapes with opposite causes and opposite remedies: a file that was never a database (foreign header, no siblings) versus a torn page-1 of a real ledger (live WAL, lost magic). Fail-closed behaviour is unchanged — nothing is replaced or deleted.
+
+I verified the new tests are not vacuous the same way I caught the old ones: with the evidence layer neutered, three of the five fail. The other two are deliberate characterization tests pinning the 0-byte and missing-file facts so the falsified theory cannot quietly return.
+
+**The item stays open, and I want to be plain about why.** I did not make the suite non-flaky. I removed a wrong fix and made the next occurrence readable; the writer that puts two or more bytes of non-database content into a fresh fixture root is still unidentified, and I will not invent a mechanism to close the item — inventing one is what produced the change I just reverted. I rewrote the backlog entry to carry the four falsified hypotheses and the concrete next step (loop `make check` until it reddens, then read the evidence line) so the next cycle does not redo this work.
+
+`#dispatchonlystrandedtrigger` was also sitting uncommitted in the same version and is included: agent-doc's own unsubmitted trigger is no longer classified as operator input.
+
+`make check` green — 8932 tests, up one from 8931 (five new, four vacuous ones removed). 0.35.235 installed, controller recycled, both repos pushed, `v0.35.235` tagged. CI is in progress on `d18d9d4b7`; not waiting on it.
+
+One housekeeping note: preflight reports `legacy_gated_in_backlog` — `#clearsubmitunobservedverify` is a gated `[/]` item still living in `agent:backlog`. `agent-doc migrate <FILE>` moves it into `agent:review`; I left it rather than mutate the document outside this cycle's write boundary.
+<!-- agent:boundary:030b3258:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#handoffdeadpredecessor]~~
-- 🚧 do [#flakystatedbfixture]
-- ~~do [#anchorsubmodulesurfaces]~~
-- ~~do [#coinedguardledgerasymmetry]~~
-- ~~do [#hookhashcodetsworkaround]~~
-- ~~do [#hookhashanchortags]~~
-- ~~do [#hookhashjsprivatefield]~~
+- ~~do [#flakystatedbfixture]~~
 - ⏭️ do [#operatorverifylive]
 - do [#run3rdpaneswitchverify]
-- ~~do [#hookhashfalsepositive]~~
-- ~~do [#caswriteracechurn]~~
 <!-- /agent:queue -->
 
 ## Notes
@@ -254,7 +275,7 @@ The operator's environment is recovered independently of this: `haiven-dev` repo
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#flakystatedbfixture] #agent-doc-bug A parallel test run can corrupt a temp fixture state.db, reddening the suite non-deterministically. Observed 2026-08-10 during a make check on 0.35.233: session_check_codex_final_gate_blocks_on_active_auto_queue failed with "reliable-sync durable authority hydration failed for /tmp/.tmp43Aufu/session.md: file is not a database: Error code 26" and "authoritative state db /tmp/.tmp43Aufu/.agent-doc/state.db is unavailable; refusing automatic replacement". Re-running the same test in isolation passed, and a full re-run of make check was green, so it is not a code regression -- but flaky is not an acceptable end state and the next person will waive a real failure by pattern-matching on this one. Each test builds its own tempdir, so a cross-test collision is not the obvious explanation; suspect a shared path (AGENT_DOC_ env inheritance, /run/user/1000/agent-doc/ socket namespace, or a global that leaks the previous test|s db handle) or an unsynchronised writer racing fixture setup. Reproduce with a high --test-threads count rather than in isolation. The refusal itself is CORRECT behaviour (refusing to auto-replace a corrupt authoritative db); the defect is that a fixture reached that state at all.
+- [ ] 🚧 [#flakystatedbfixture] #agent-doc-bug A parallel test run can corrupt a temp fixture state.db, reddening the suite non-deterministically. Observed 2026-08-10 on 0.35.233: session_check_codex_final_gate_blocks_on_active_auto_queue failed with reliable-sync durable authority hydration failed for /tmp/.tmp43Aufu/session.md: file is not a database: Error code 26, plus authoritative state db /tmp/.tmp43Aufu/.agent-doc/state.db is unavailable; refusing automatic replacement. FALSIFIED 2026-08-10 in 0.35.235 -- do NOT retry these four: (1) the empty-file theory. A 0-byte or 1-byte state.db opens CLEANLY; SQLite initialises it as a new database, and NotADatabase starts at TWO bytes of bad header. So a writer that created the file and died before writing the header cannot produce this failure. The 0.35.235 draft branch that deleted empty files was reverted: unreachable through the stated path, all four of its tests passed with it removed, and it was unsafe because open_and_init_state_db also fails on a lock error while a concurrent process is still initialising the same 0-byte file, so it could unlink a db another process was creating. (2) A stale -wal or -shm beside a 0-byte main db: opens cleanly. (3) tmpfs exhaustion: /tmp is a 94G tmpfs at 1 percent used. (4) Plain cross-process contention: 600 concurrent agent-doc session-check invocations across 25 fresh project roots produced zero corruption. STILL UNKNOWN: which writer leaves 2 or more bytes of non-database content in a fresh fixture root. 0.35.235 makes the next sighting diagnosable instead of another guessing round -- the refusal now reports main length, header=sqlite vs header=foreign, the first 16 bytes as hex plus a printable rendering, and the -wal/-shm sibling sizes, which separates never was a database from torn page-1 of a real ledger. NEXT STEP: run make check in a loop until it reddens and read that evidence line; do not theorise further without it.
 - [/] [#clearsubmitunobservedverify] [operator-verify] Live re-proof for #clearsubmitunobserved (0.35.225): reproduce the reported haiven-dev.md sequence — let the supervisor go dead (or `session restart-supervisor`), then Run Agent Doc so the flow cold-starts a replacement and immediately runs Clear Session Context on the fresh pane. Expect it to SUCCEED instead of failing with `result=submission_unobserved ... unblocker=clear_submission_unobserved`, and expect `session_clear_submit_cleared_state_probe ... result=cleared_state_proven retained_lines=<small>` in ops.log. Then the half that must not regress: on a pane holding a real conversation, break submission (e.g. leave the composer wedged) and confirm the clear still fails closed with `result=conversation_retained`. Unit tests pin the predicate against synthetic captures; only a live pane exercises the tmux scrollback capture and the real harness prompt shapes.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.

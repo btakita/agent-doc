@@ -523,6 +523,10 @@ pub struct ControllerWatchdogFacts {
     pub stale_after: Duration,
     pub is_handoff_replacement: bool,
     pub handoff_replacement_socket_exists: bool,
+    /// Whether the controller this one is replacing is still running.
+    /// `None` when there is no predecessor or liveness could not be determined —
+    /// unknown must never read as dead (`#handoffdeadpredecessor`).
+    pub previous_controller_alive: Option<bool>,
     pub launched_elapsed: Duration,
 }
 
@@ -538,6 +542,11 @@ pub fn controller_watchdog_should_suicide(facts: ControllerWatchdogFacts) -> boo
         facts.handoff_started_at,
         facts.now,
         facts.stale_after,
+    ) || preparing_with_a_dead_predecessor(
+        facts.handoff_state,
+        facts.previous_controller_alive,
+        facts.launched_elapsed,
+        HANDOFF_PROMOTION_IN_FLIGHT_GRACE,
     ) || preparing_without_a_handoff_clock(
         facts.handoff_state,
         facts.handoff_started_at,
@@ -549,6 +558,41 @@ pub fn controller_watchdog_should_suicide(facts: ControllerWatchdogFacts) -> boo
         facts.launched_elapsed,
         facts.stale_after,
     )
+}
+
+/// Grace for a promotion that may already be in flight.
+///
+/// The predecessor sends `promote_handoff` and then exits, so there is a window
+/// where it is dead but its message has not been processed yet. Short, because
+/// the message is local and the alternative is spinning until the 45s threshold.
+const HANDOFF_PROMOTION_IN_FLIGHT_GRACE: Duration = Duration::from_secs(3);
+
+/// A replacement still `Preparing` whose predecessor has died
+/// (`#handoffdeadpredecessor`).
+///
+/// `Preparing` means promotion has NOT happened yet, and promotion can only come
+/// from the predecessor — so a dead predecessor makes this handoff
+/// unsatisfiable, permanently. `#preparingnoclockwedge` already reaps it after
+/// the 45s staleness threshold, but a dead predecessor is *decisive* rather than
+/// merely suggestive, so there is no reason to burn the full threshold.
+///
+/// The state check is load-bearing and deliberately excludes `Promoted`: after
+/// promotion the predecessor exiting is the NORMAL end of a healthy handoff, and
+/// treating that as a wedge would reap working controllers. Only the
+/// pre-promotion state can be starved this way.
+///
+/// `None` means "no predecessor, or liveness unknown" and never counts as dead —
+/// the same `#idlerevisionreactive` rule that made this bug possible in the
+/// first place, applied in the other direction.
+pub fn preparing_with_a_dead_predecessor(
+    handoff_state: ControllerHandoffState,
+    previous_controller_alive: Option<bool>,
+    launched_elapsed: Duration,
+    grace: Duration,
+) -> bool {
+    matches!(handoff_state, ControllerHandoffState::Preparing)
+        && previous_controller_alive == Some(false)
+        && launched_elapsed > grace
 }
 
 /// A controller stuck in a handoff that never recorded when the handoff began
@@ -1390,6 +1434,7 @@ mod tests {
             stale_after,
             is_handoff_replacement: false,
             handoff_replacement_socket_exists: false,
+            previous_controller_alive: None,
             launched_elapsed: Duration::from_secs(0),
         };
 
@@ -1405,6 +1450,7 @@ mod tests {
             ControllerWatchdogFacts {
                 is_handoff_replacement: true,
                 handoff_replacement_socket_exists: true,
+                previous_controller_alive: None,
                 launched_elapsed: Duration::from_secs(46),
                 ..base
             }
@@ -1476,6 +1522,7 @@ mod preparing_without_a_handoff_clock_tests {
             // The wedge that motivated this: the temporary socket is GONE, so
             // `handoff_replacement_is_stranded` cannot fire either.
             handoff_replacement_socket_exists: false,
+            previous_controller_alive: None,
             launched_elapsed,
         }
     }
@@ -1542,5 +1589,83 @@ mod preparing_without_a_handoff_clock_tests {
             Duration::from_secs(100_000),
             Duration::from_secs(45),
         ));
+    }
+}
+
+#[cfg(test)]
+mod preparing_with_a_dead_predecessor_tests {
+    use super::*;
+
+    fn facts(
+        handoff_state: ControllerHandoffState,
+        previous_controller_alive: Option<bool>,
+        launched_elapsed: Duration,
+    ) -> ControllerWatchdogFacts {
+        ControllerWatchdogFacts {
+            handoff_state,
+            // A recorded clock, so the age fallback cannot be what fires.
+            handoff_started_at: Some(990),
+            now: 1_000,
+            stale_after: Duration::from_secs(45),
+            is_handoff_replacement: true,
+            handoff_replacement_socket_exists: true,
+            previous_controller_alive,
+            launched_elapsed,
+        }
+    }
+
+    /// The live 2026-08-10 shape: `Preparing` against a predecessor that died
+    /// before promoting. Promotion can only come from the predecessor, so this
+    /// handoff is unsatisfiable and should not wait out the 45s threshold.
+    #[test]
+    fn a_dead_predecessor_reaps_a_preparing_replacement_early() {
+        assert!(controller_watchdog_should_suicide(facts(
+            ControllerHandoffState::Preparing,
+            Some(false),
+            Duration::from_secs(10),
+        )));
+    }
+
+    /// The distinction that keeps this from reaping healthy controllers: after
+    /// promotion the predecessor exiting is the NORMAL end of a handoff.
+    #[test]
+    fn a_promoted_replacement_is_not_reaped_when_its_predecessor_exits() {
+        assert!(!controller_watchdog_should_suicide(facts(
+            ControllerHandoffState::Promoted,
+            Some(false),
+            Duration::from_secs(10),
+        )));
+    }
+
+    /// A promotion may already be in flight when the predecessor exits, so the
+    /// grace window must be respected.
+    #[test]
+    fn an_in_flight_promotion_is_given_its_grace() {
+        assert!(!controller_watchdog_should_suicide(facts(
+            ControllerHandoffState::Preparing,
+            Some(false),
+            Duration::from_secs(1),
+        )));
+    }
+
+    /// A live predecessor is a healthy handoff in progress.
+    #[test]
+    fn a_live_predecessor_is_never_reaped() {
+        assert!(!controller_watchdog_should_suicide(facts(
+            ControllerHandoffState::Preparing,
+            Some(true),
+            Duration::from_secs(10),
+        )));
+    }
+
+    /// Unknown liveness must never read as dead — the same rule whose inversion
+    /// caused the original wedge, applied in the other direction.
+    #[test]
+    fn unknown_predecessor_liveness_never_counts_as_dead() {
+        assert!(!controller_watchdog_should_suicide(facts(
+            ControllerHandoffState::Preparing,
+            None,
+            Duration::from_secs(10),
+        )));
     }
 }

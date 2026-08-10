@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-reliable-sync-io"
-version = "0.35.233"
+version = "0.35.234"
 edition = "2024"
 description = "Unix-domain-socket carrier for Lazily reliable-sync intent and visibility receipts"
 license = "MIT"
@@ -18,9 +18,9 @@ name = "agent_doc_reliable_sync_io"
 # every later read fall back to "no editor" -- silently flipping every document
 # in that process to disk authority.
 parking_lot = "0.12"
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.233" }
-agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.233" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.233" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.234" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.234" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.234" }
 anyhow = "1"
 base64 = "0.22"
 lazily = { version = "0.56.0", features = ["ipc", "ipc-msgpack", "serde"] }

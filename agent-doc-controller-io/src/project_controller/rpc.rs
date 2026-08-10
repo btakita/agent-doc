@@ -11512,6 +11512,11 @@ pub(crate) fn controller_self_watchdog_should_suicide(
         stale_after: threshold,
         is_handoff_replacement: handoff_temp_socket.is_some(),
         handoff_replacement_socket_exists: handoff_temp_socket.is_some_and(|temp| temp.exists()),
+        // `#handoffdeadpredecessor`: only a recorded predecessor can be dead.
+        // No predecessor stays `None`, which never reads as dead.
+        previous_controller_alive: bootstrap
+            .previous_controller_pid
+            .map(crate::process::process_is_alive),
         launched_elapsed,
     })
 }

@@ -2,6 +2,37 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.234
+
+- **Fix (`#handoffdeadpredecessor`): a replacement still `Preparing` now reaps
+  itself once its predecessor is known dead, instead of waiting out the 45s
+  staleness threshold.**
+
+  Second root cause of the 2026-08-10 `haiven-dev` wedge. `controller serve`
+  takes `--previous-controller-pid` and carries it through every status
+  projection, but nothing ever liveness-checked it. Both wedged controllers were
+  `Preparing` against predecessors that were already dead (1329143 on dead
+  1323307; 1324731 on dead 574967), so their handoffs were unsatisfiable from
+  the moment those processes exited.
+
+  `Preparing` means promotion has not happened yet, and promotion can only come
+  from the predecessor — so a dead predecessor makes the handoff permanently
+  unsatisfiable. `#preparingnoclockwedge` (0.35.233) already reaps that state on
+  process age, so this is the sharper signal rather than a re-fix.
+
+  Two things keep it from reaping healthy controllers:
+
+  - The state check excludes `Promoted`. After promotion the predecessor exiting
+    is the NORMAL end of a healthy handoff; only the pre-promotion state can be
+    starved this way.
+  - A 3s grace covers a `promote_handoff` still in flight when the predecessor
+    exits.
+
+  Unknown liveness (`None`) never counts as dead — the same
+  `#idlerevisionreactive` rule whose inversion caused the original wedge,
+  applied in the other direction. Liveness enters as a fact from the IO shell
+  via the existing `process_is_alive`; the predicate stays pure.
+
 ## 0.35.233
 
 - **Fix (`#preparingnoclockwedge`): a controller stuck in a handoff with no

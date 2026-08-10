@@ -2,6 +2,38 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.233
+
+- **Fix (`#preparingnoclockwedge`): a controller stuck in a handoff with no
+  recorded handoff clock could never be reaped, and spun forever.**
+
+  Operator-reported 2026-08-10: `agent-doc start` on `haiven-dev` failed
+  repeatedly with `timed out after 5.0s waiting for project controller
+  response`. Two controllers were `Preparing` against DEAD predecessor PIDs,
+  their temporary handoff sockets absent from disk, `controller.sock` present
+  but with no listener, and one burning **95.2% CPU** for minutes. The
+  controller lease still named the terminated supervisor and read
+  `runtime_state=busy`, so every client blocked on a dead owner, and
+  `session doctor --repair` timed out on the Lazily actor too.
+
+  The 45s self-reap has two escapes and BOTH were gated on evidence that is
+  absent exactly when the wedge is worst: `preparing_controller_is_stale`
+  returns `false` without a `handoff_started_at`, and
+  `handoff_replacement_is_stranded` requires the temporary socket to still
+  exist. Neither could fire, so nothing reaped the process. This is the
+  `#idlerevisionreactive` inversion again — "I never looked" and "there is
+  nothing wrong" must not collapse to the same answer.
+
+  `preparing_without_a_handoff_clock` adds the honest fallback: the process's
+  own age, which is always known. A handoff that never recorded its clock and
+  has outlived the staleness threshold is reaped on age alone. Terminal states
+  (`Stable`, `Retiring`, `Failed`) are never reaped this way however old they
+  are, young handoffs are left alone, and a recorded clock still leaves the
+  decision to the existing predicate.
+
+  The same shape was recorded earlier as a wedge that survived three hours on a
+  current binary with no explanation. This explains it.
+
 ## 0.35.232
 
 - **Instrumentation (`#caswriteracechurn`): `ops summary` buckets CRDT settle

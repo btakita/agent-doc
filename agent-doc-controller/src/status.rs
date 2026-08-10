@@ -538,12 +538,48 @@ pub fn controller_watchdog_should_suicide(facts: ControllerWatchdogFacts) -> boo
         facts.handoff_started_at,
         facts.now,
         facts.stale_after,
+    ) || preparing_without_a_handoff_clock(
+        facts.handoff_state,
+        facts.handoff_started_at,
+        facts.launched_elapsed,
+        facts.stale_after,
     ) || handoff_replacement_is_stranded(
         facts.is_handoff_replacement,
         facts.handoff_replacement_socket_exists,
         facts.launched_elapsed,
         facts.stale_after,
     )
+}
+
+/// A controller stuck in a handoff that never recorded when the handoff began
+/// (`#preparingnoclockwedge`).
+///
+/// `preparing_controller_is_stale` needs `handoff_started_at` and returns
+/// `false` without it; `handoff_replacement_is_stranded` needs the temporary
+/// socket to still exist. A controller whose handoff clock was never written
+/// and whose socket is gone satisfies neither, so nothing could ever reap it —
+/// and both facts are missing exactly when the wedge is worst. Observed live on
+/// 2026-08-10: two controllers `Preparing` against DEAD predecessors, sockets
+/// absent, one burning 95% CPU for minutes, while the 45s self-reap never fired.
+/// The same shape was recorded earlier as a wedge that survived three hours on a
+/// current binary with no explanation.
+///
+/// This is the `#idlerevisionreactive` inversion again: "I never looked" and
+/// "there is nothing wrong" must not collapse into the same answer. The process
+/// age is the one clock that is ALWAYS known, so it is the honest fallback — no
+/// handoff can legitimately be preparing for longer than the staleness threshold
+/// regardless of what got recorded.
+pub fn preparing_without_a_handoff_clock(
+    handoff_state: ControllerHandoffState,
+    handoff_started_at: Option<u64>,
+    launched_elapsed: Duration,
+    stale_after: Duration,
+) -> bool {
+    matches!(
+        handoff_state,
+        ControllerHandoffState::Preparing | ControllerHandoffState::Promoted
+    ) && handoff_started_at.is_none()
+        && launched_elapsed > stale_after
 }
 
 /// Pure structural predicate for a promoted-but-stranded handoff replacement.
@@ -1419,5 +1455,92 @@ mod tests {
         assert!(supervisor_lease_pid_is_foreign(Some(42), 7));
         assert!(!supervisor_lease_pid_is_foreign(Some(7), 7));
         assert!(!supervisor_lease_pid_is_foreign(None, 7));
+    }
+}
+
+#[cfg(test)]
+mod preparing_without_a_handoff_clock_tests {
+    use super::*;
+
+    fn facts(
+        handoff_state: ControllerHandoffState,
+        handoff_started_at: Option<u64>,
+        launched_elapsed: Duration,
+    ) -> ControllerWatchdogFacts {
+        ControllerWatchdogFacts {
+            handoff_state,
+            handoff_started_at,
+            now: 1_000,
+            stale_after: Duration::from_secs(45),
+            is_handoff_replacement: true,
+            // The wedge that motivated this: the temporary socket is GONE, so
+            // `handoff_replacement_is_stranded` cannot fire either.
+            handoff_replacement_socket_exists: false,
+            launched_elapsed,
+        }
+    }
+
+    /// The live 2026-08-10 wedge: `Preparing`, no recorded handoff clock, socket
+    /// absent, minutes of wall time, 95% CPU. Neither existing escape could fire.
+    #[test]
+    fn a_preparing_controller_with_no_clock_reaps_on_process_age() {
+        assert!(controller_watchdog_should_suicide(facts(
+            ControllerHandoffState::Preparing,
+            None,
+            Duration::from_secs(200),
+        )));
+    }
+
+    /// Promoted-but-unfinalized has the same hole.
+    #[test]
+    fn a_promoted_controller_with_no_clock_reaps_on_process_age() {
+        assert!(controller_watchdog_should_suicide(facts(
+            ControllerHandoffState::Promoted,
+            None,
+            Duration::from_secs(200),
+        )));
+    }
+
+    /// Young processes are left alone: a handoff legitimately takes time, and
+    /// reaping inside the threshold would kill healthy startups.
+    #[test]
+    fn a_young_handoff_without_a_clock_is_left_alone() {
+        assert!(!controller_watchdog_should_suicide(facts(
+            ControllerHandoffState::Preparing,
+            None,
+            Duration::from_secs(10),
+        )));
+    }
+
+    /// A terminal state is never reaped by this rule, however old the process is.
+    /// A long-lived healthy controller is exactly what `Stable` means.
+    #[test]
+    fn a_stable_controller_is_never_reaped_by_process_age() {
+        for state in [
+            ControllerHandoffState::Stable,
+            ControllerHandoffState::Retiring,
+            ControllerHandoffState::Failed,
+        ] {
+            assert!(
+                !controller_watchdog_should_suicide(facts(
+                    state,
+                    None,
+                    Duration::from_secs(100_000),
+                )),
+                "{state:?} must not be reaped on age"
+            );
+        }
+    }
+
+    /// When the handoff clock IS recorded, the existing predicate owns the
+    /// decision and this fallback must not widen it.
+    #[test]
+    fn a_recorded_clock_leaves_the_decision_to_the_existing_predicate() {
+        assert!(!preparing_without_a_handoff_clock(
+            ControllerHandoffState::Preparing,
+            Some(500),
+            Duration::from_secs(100_000),
+            Duration::from_secs(45),
+        ));
     }
 }

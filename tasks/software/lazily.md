@@ -303,13 +303,36 @@ The review list is now **empty** (was 3); the guard reports 2 declared partials 
 Worth stating plainly: this row had been carried as a review item for a long time on the assumption it was mostly promotions waiting to happen. It was the opposite — the marks were right and the *vocabulary* was missing.
 
 `lazily-spec@7005876`, superproject pointer committed. `make check` green. Exchange is at 260 lines (session-accretion `warn`); queue is active so I am not compacting.
+
+### Re: #lzcsagentsmdfloorprose — the prose now matches the scripts, and the bad advice is gone — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzcsagentsmdfloorprose]
+
+
+Two problems, and the second mattered more than the numbers.
+
+**Stale values:** the paragraph documented `MIN_FIXTURES` (139) and `MIN_SCENARIOS` (134) against real values of 145 and 165. Now correct, and `MIN_BLOCKS` (33) named too — it existed in the script but appeared nowhere in the prose.
+
+**Bad advice:** it described the scenario floor as *"calibrated below the observed 139"* — precisely the convention `#lzscenariofloordrift` removed. That sentence is the mechanism, not a symptom: a floor deliberately set under reality has stopped guarding, because the drop it exists to catch fits inside its own margin. 17 scenarios of slack had accumulated here. The paragraph now says a floor is the exact count a completed CI run reports, never old-value-plus-your-delta, and to prove it by setting it to N+1 and watching the guard fail. It also names its own former advice as the bug, so the next reader sees the correction rather than silently re-deriving the same convention.
+
+**Unblocked with the single-hunk technique**, second use. `AGENTS.md` still carries the concurrent session's uncommitted code-navigation rewrite at lines 239-268; my hunk is at 50-66, well clear of it. Staged a blob of HEAD content plus my change, committed the index with no paths — verified before pushing that `git diff --cached` held only my 10 lines and `git diff` only their 30, and after committing that their edits are still dirty and untouched.
+
+One correction I caught myself: the first splice left a stray three-space indent on a continuation line. Re-derived the staged blob from an explicit old→new replacement instead of index arithmetic, and confirmed the line is gone from the working tree.
+
+`make check` green. `lazily-cs@0e603c0`, superproject pointer committed.
+
+Process note: preflight raised `queue_stall_detected` — "prior cycle committed with 7 drainable heads but the loop neither continued nor recorded a valid stop reason". That is an artifact of how I am pacing this drain: each cycle ends its turn and re-enters through a scheduled wakeup, so from the binary's view the turn stopped without continuing in-turn. The queue has in fact drained 8 items in a row. Worth knowing the signal cannot distinguish "paused between cycles by design" from "stalled", but nothing is stuck.
+
+Exchange is at 283 lines (session-accretion `warn`); queue is active so I am not compacting.
 <!-- agent:boundary:c6ef3fb1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ⏭️ do [#lzcsagentsmdfloorprose]
+- ~~do [#lzcsagentsmdfloorprose]~~
 - ~~do [#lzscenariofloordrift]~~
 - ~~do [#lzspecagentsmdpointer]~~
 - ~~do [#lzspecpushbeforebindings]~~
@@ -330,7 +353,6 @@ Worth stating plainly: this row had been carried as a review item for a long tim
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcsagentsmdfloorprose] lazily-cs's AGENTS.md (CLAUDE.md is a symlink to it) documents the conformance floors in prose as "MIN_FIXTURES (139)" and "MIN_SCENARIOS (134, calibrated below the observed 139)". Both numbers were already stale before the floor-pinning work and are now stale by more — the script's real values are MIN_FIXTURES 145, MIN_SCENARIOS 165, MIN_BLOCKS 33. Worse than the numbers, the phrase "calibrated below the observed" preaches exactly the convention that work removed: a floor deliberately set under reality is a floor that has stopped guarding, and it is how cs accumulated 17 scenarios of slack. Update the prose to the real values and to the rule now written at each floor in scripts/check-conformance-coverage.sh — the floor equals what a completed CI run reports against the published corpus, exactly, proved by setting it to N+1 and watching the guard fail. NOT done in the originating cycle because AGENTS.md carried a concurrent session's uncommitted code-navigation rewrite; if that is still true, use the single-hunk staging technique (hash a blob of HEAD content plus your edit, git update-index --cacheinfo, then bare git commit) rather than --only, which commits the file's whole working-tree content.
 - [ ] [#lzzigspecdiroption] lazily-zig has NO corpus-dir override: SPEC_DIR in src/lazily/reactive_map.zig is a comptime const used as SPEC_DIR ++ '/x.json', so the #lzdefaultmodeuniform probe had to temporarily edit the constant and restore it. Every future corpus probe in this binding pays that cost, and a probe that edits the shared ../lazily-spec checkout instead reddens all nine bindings concurrently. Add a '-Dspec-dir' build option (or a runtime env read) threaded to every fixture path, and keep the default unchanged. Compounding trap to preserve: specFixturesPresent() makes the tests 'return error.SkipZigTest' when the path is unreadable, so a probe that changes the PATH silently converts red into skip — the option must change which bytes are read, never whether they exist.
 - [ ] [#lzktcorpusnotgradleinput] lazily-kt's conformance corpus is NOT a declared input of the gradle 'test' task, so editing a fixture leaves 'test' UP-TO-DATE and the run reports green having replayed nothing — a false green that defeats any corpus-perturbation probe. Compounding it, tasks.test wires no environment(...), so the test JVM inherits the DAEMON's environment and a daemon started before LAZILY_SPEC_DIR was set serves the stale path. Today the only defence is remembering '--no-daemon --rerun-tasks'. Declare the corpus directory as a task input so a fixture change invalidates the task, and pass the corpus-dir variable through environment(...) explicitly. Definition of done: flip one assertion key in a scratch corpus and prove a plain 'make check' (no flags, warm daemon) reddens.
 - [ ] [#lzledgeragreementaudit] A KNOWN_UNCOVERED entry in a binding's shell coverage guard does NOT stop a test host that DISCOVERS fixtures by enumerating the corpus directory from trying to replay them — the two ledgers describing the same absence can disagree silently. lazily-cs was red on HEAD for exactly this (CI 31298919123): collections/registers_convergence.json was declared uncovered in the script while CollectionsConformanceTests crashed on it with a bare KeyNotFoundException naming neither the fixture nor the reason. Fixed there in b8cdb7e by adding the Unsupported entry and making the shape dispatch fail closed. Audit the other eight bindings for the same split: for each, list the fixtures in KNOWN_UNCOVERED, check whether the runner enumerates or names fixtures, and confirm an enumerating runner has a matching in-host ledger entry plus a fail-closed default on an unrecognised fixture shape. All eight are currently green, so this is about the NEXT fixture added to the shared corpus.

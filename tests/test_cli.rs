@@ -31811,14 +31811,19 @@ fn test_codex_skill_install_writes_hook_artifacts() {
         .iter()
         .map(|arg| arg.as_str().unwrap())
         .collect();
-    assert_eq!(
-        mcp_args,
-        vec![
-            "mcp",
-            "serve",
-            "--project-root",
-            std::fs::canonicalize(tmp.path()).unwrap().to_str().unwrap()
-        ]
+    // `#skillinstallconfigpath`: the installed args must stay machine-agnostic,
+    // because this file is project-local and usually tracked. `mcp serve`
+    // resolves the project root from its own working directory instead.
+    assert_eq!(mcp_args, vec!["mcp", "serve"]);
+    assert!(
+        !std::fs::read_to_string(&config_path)
+            .unwrap()
+            .contains("--project-root"),
+        "no absolute install-machine path may be written into .codex/config.toml"
+    );
+    assert!(
+        std::fs::read_to_string(&hooks_path).unwrap().ends_with('\n'),
+        "installed .codex/hooks.json must end with a newline"
     );
 }
 

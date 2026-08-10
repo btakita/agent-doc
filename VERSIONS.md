@@ -2,6 +2,31 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.227
+
+- **Fix (`#skillinstallconfigpath`): `skill install` wrote machine-local junk
+  into two Codex artifacts.**
+
+  `.codex/config.toml` is project-local and usually tracked, but the installer
+  baked the installing machine's ABSOLUTE path into the agent-doc MCP server
+  args (`args = ["mcp", "serve", "--project-root", "/home/you/..."]`). The value
+  churned per operator, and a temp-dir test install left
+  `/tmp/agent-doc-v035139-final` committed in this repo until this cycle.
+
+  - The installed args are now just `["mcp", "serve"]`. With no
+    `--project-root`, `agent-doc mcp serve` walks up from its own working
+    directory to the nearest project root; outside any project it stays put,
+    which is what an absent flag already did. Reinstalling replaces the whole
+    server table, so a legacy absolute entry is migrated away.
+  - `.codex/hooks.json` was serialized without a trailing newline, so every
+    install dirtied the file with a `\ No newline at end of file` diff. All
+    three JSON hook writers (Codex hooks, Codex turn-status, Claude
+    `settings.json`) now end with a newline.
+  - Those writers and the TOML config writer skip the write entirely when the
+    rendered content is unchanged. A byte-identical rewrite was churn in a
+    tracked file and its mtime bump alone produced `audit-docs` staleness
+    advisories.
+
 ## 0.35.226
 
 - **Fix (`#skillinstallstalemirror`): nothing compared installed runbooks to the

@@ -9,9 +9,26 @@ const MCP_REPLAY_REQUEST_ENV: &str = "AGENT_DOC_MCP_REPLAY_REQUEST";
 const MCP_REPLAY_REQUEST_MAX_BYTES: usize = 96 * 1024;
 
 pub fn serve(project_root: Option<&Path>) -> Result<()> {
-    if let Some(root) = project_root {
-        std::env::set_current_dir(root)
-            .with_context(|| format!("failed to enter MCP project root {}", root.display()))?;
+    match project_root {
+        Some(root) => std::env::set_current_dir(root)
+            .with_context(|| format!("failed to enter MCP project root {}", root.display()))?,
+        // `#skillinstallconfigpath`: with no explicit root, walk up from the
+        // working directory to the nearest project. The installed Codex config
+        // no longer carries an absolute `--project-root`, because baking the
+        // installing machine's path into a tracked project file made it churn
+        // per operator. A harness that spawns the server anywhere inside the
+        // project still lands on the right root; outside any project we simply
+        // stay put, which is what an absent flag already did.
+        None => {
+            if let Some(root) = agent_doc_fs::find_project_root(Path::new("."))
+                && let Err(err) = std::env::set_current_dir(&root)
+            {
+                eprintln!(
+                    "warning: failed to enter resolved MCP project root {}: {err}",
+                    root.display()
+                );
+            }
+        }
     }
 
     let stdin = io::stdin();

@@ -1199,7 +1199,7 @@ fn install_codex_hook_artifacts(root: Option<&Path>) -> Result<()> {
     let codex_dir = base.join(".codex");
     std::fs::create_dir_all(&codex_dir)?;
     merge_codex_hooks_json(&codex_dir.join("hooks.json"))?;
-    merge_codex_config(&codex_dir.join("config.toml"), &base)?;
+    merge_codex_config(&codex_dir.join("config.toml"))?;
     Ok(())
 }
 
@@ -1262,9 +1262,8 @@ fn merge_codex_hooks_json(path: &Path) -> Result<()> {
         None,
     );
 
-    let rendered = serde_json::to_string_pretty(&root)?;
-    std::fs::write(path, rendered).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
+    let rendered = ensure_trailing_newline(&serde_json::to_string_pretty(&root)?);
+    write_if_changed(path, &rendered)
 }
 
 /// `#coinedid` mid-turn guard. `PreToolUse` fires before the tool runs, so a
@@ -1449,9 +1448,8 @@ fn merge_codex_turn_status_hooks(path: &Path) -> Result<()> {
         None,
     );
     ensure_codex_hook_command(hooks_map, "Stop", TURN_STATUS_IDLE_COMMAND, None, None);
-    let rendered = serde_json::to_string_pretty(&root)?;
-    std::fs::write(path, rendered).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
+    let rendered = ensure_trailing_newline(&serde_json::to_string_pretty(&root)?);
+    write_if_changed(path, &rendered)
 }
 
 /// Merge the turn-status hooks into a Claude `settings.json`. Claude's hook shape
@@ -1509,9 +1507,8 @@ fn merge_claude_turn_status_hooks(path: &Path) -> Result<()> {
         Some(PREFLIGHT_HOOK_TIMEOUT_SECS),
     );
 
-    let rendered = serde_json::to_string_pretty(&root)?;
-    std::fs::write(path, rendered).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
+    let rendered = ensure_trailing_newline(&serde_json::to_string_pretty(&root)?);
+    write_if_changed(path, &rendered)
 }
 
 fn ensure_codex_hook_command(
@@ -1569,7 +1566,7 @@ fn ensure_codex_hook_command(
     entry_array.push(serde_json::json!({ "hooks": [hook] }));
 }
 
-fn merge_codex_config(path: &Path, project_root: &Path) -> Result<()> {
+fn merge_codex_config(path: &Path) -> Result<()> {
     let mut root = if path.exists() {
         let content =
             std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
@@ -1578,8 +1575,6 @@ fn merge_codex_config(path: &Path, project_root: &Path) -> Result<()> {
     } else {
         toml::Value::Table(toml::map::Map::new())
     };
-
-    let project_root = std::fs::canonicalize(project_root).unwrap_or_else(|_| project_root.into());
 
     if !root.is_table() {
         anyhow::bail!("Codex config at {} must be a TOML table", path.display());
@@ -1610,13 +1605,17 @@ fn merge_codex_config(path: &Path, project_root: &Path) -> Result<()> {
         "default_tools_approval_mode".to_string(),
         toml::Value::String(CODEX_MCP_APPROVAL_MODE.to_string()),
     );
+    // `#skillinstallconfigpath`: no `--project-root`. This file is project-local
+    // and usually tracked, so baking in the installing machine's absolute path
+    // made it churn per operator — and a temp-dir test install once committed
+    // `/tmp/agent-doc-v035139-final` here. `mcp serve` resolves the project root
+    // from its own working directory instead. Reinstalling migrates an existing
+    // entry because the whole server table is replaced.
     server.insert(
         "args".to_string(),
         toml::Value::Array(vec![
             toml::Value::String("mcp".to_string()),
             toml::Value::String("serve".to_string()),
-            toml::Value::String("--project-root".to_string()),
-            toml::Value::String(project_root.display().to_string()),
         ]),
     );
     mcp_servers_table.insert(
@@ -1624,9 +1623,28 @@ fn merge_codex_config(path: &Path, project_root: &Path) -> Result<()> {
         toml::Value::Table(server),
     );
 
-    std::fs::write(path, toml::to_string_pretty(&root)?)
-        .with_context(|| format!("write {}", path.display()))?;
-    Ok(())
+    write_if_changed(path, &ensure_trailing_newline(&toml::to_string_pretty(&root)?))
+}
+
+/// Installed config artifacts are usually tracked, so a byte-identical rewrite
+/// is churn in someone's `git status`. Write only on a real change, and always
+/// end with a newline — a serializer that omits it leaves every install showing
+/// a `\ No newline at end of file` diff (`#skillinstallconfigpath`).
+fn write_if_changed(path: &Path, content: &str) -> Result<()> {
+    if let Ok(existing) = std::fs::read_to_string(path)
+        && existing == content
+    {
+        return Ok(());
+    }
+    std::fs::write(path, content).with_context(|| format!("write {}", path.display()))
+}
+
+fn ensure_trailing_newline(content: &str) -> String {
+    if content.ends_with('\n') {
+        content.to_string()
+    } else {
+        format!("{content}\n")
+    }
 }
 
 /// Install the bundled SKILL.md to the project.
@@ -1976,7 +1994,7 @@ mod tests {
         content.lines().count()
     }
 
-    fn assert_codex_mcp_config(config: &toml::Value, root: &std::path::Path) {
+    fn assert_codex_mcp_config(config: &toml::Value, _root: &std::path::Path) {
         let server = &config["mcp_servers"][CODEX_MCP_SERVER_NAME];
         assert_eq!(server["command"].as_str(), Some(CODEX_MCP_COMMAND));
         assert_eq!(
@@ -1989,14 +2007,13 @@ mod tests {
             .iter()
             .map(|arg| arg.as_str().unwrap())
             .collect();
-        let canonical_root = std::fs::canonicalize(root).unwrap();
+        // `#skillinstallconfigpath`: no machine-local absolute path in a
+        // project-local, usually-tracked config file.
         assert_eq!(
             args,
             vec![
                 "mcp",
                 "serve",
-                "--project-root",
-                canonical_root.to_str().unwrap()
             ]
         );
     }
@@ -2770,6 +2787,66 @@ mod tests {
             "Codex workflow should be installed as a skill, not .codex/AGENTS.md"
         );
         assert!(!dir.path().join(".codex/AGENTS.md").exists());
+    }
+
+    #[test]
+    fn codex_install_migrates_a_legacy_absolute_project_root_away() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join(".codex/config.toml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &config_path,
+            "[mcp_servers.agent-doc]\ncommand = \"agent-doc\"\nargs = [\"mcp\", \"serve\", \"--project-root\", \"/tmp/agent-doc-v035139-final\"]\n",
+        )
+        .unwrap();
+
+        super::install_codex_hook_artifacts(Some(dir.path())).unwrap();
+
+        let written = std::fs::read_to_string(&config_path).unwrap();
+        assert!(
+            !written.contains("--project-root"),
+            "a stale install-machine path must be migrated away, got:\n{written}"
+        );
+        assert_codex_mcp_config(&toml::from_str(&written).unwrap(), dir.path());
+    }
+
+    #[test]
+    fn codex_install_artifacts_end_with_a_newline_and_do_not_churn() {
+        let dir = tempfile::tempdir().unwrap();
+        super::install_codex_hook_artifacts(Some(dir.path())).unwrap();
+
+        let hooks_path = dir.path().join(".codex/hooks.json");
+        let config_path = dir.path().join(".codex/config.toml");
+        for path in [&hooks_path, &config_path] {
+            let content = std::fs::read_to_string(path).unwrap();
+            assert!(
+                content.ends_with('\n'),
+                "{} must end with a newline",
+                path.display()
+            );
+        }
+
+        // A byte-identical rewrite shows up as churn in a tracked file, and the
+        // mtime bump alone triggers audit-docs staleness advisories.
+        let hooks_mtime = std::fs::metadata(&hooks_path).unwrap().modified().unwrap();
+        let config_mtime = std::fs::metadata(&config_path).unwrap().modified().unwrap();
+        let hooks_before = std::fs::read_to_string(&hooks_path).unwrap();
+        let config_before = std::fs::read_to_string(&config_path).unwrap();
+
+        super::install_codex_hook_artifacts(Some(dir.path())).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&hooks_path).unwrap(), hooks_before);
+        assert_eq!(std::fs::read_to_string(&config_path).unwrap(), config_before);
+        assert_eq!(
+            std::fs::metadata(&hooks_path).unwrap().modified().unwrap(),
+            hooks_mtime,
+            "an unchanged hooks.json must not be rewritten"
+        );
+        assert_eq!(
+            std::fs::metadata(&config_path).unwrap().modified().unwrap(),
+            config_mtime,
+            "an unchanged config.toml must not be rewritten"
+        );
     }
 
     #[test]

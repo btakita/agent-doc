@@ -39,7 +39,7 @@ Cross-session event coordination via `agent-kit` hooks (v0.3).
 {"hooks":{"PostToolUse":[{"matcher":"Write|Edit","command":"agent-doc hook fire post_write \"$TOOL_INPUT_FILE\""}]}}
 ```
 
-**Codex bridge:** `agent-doc skill install` now also writes repo-local `.codex/hooks.json` plus `.codex/config.toml` (`[features] hooks = true` and `[mcp_servers.agent-doc] command = "agent-doc"`, `default_tools_approval_mode = "approve"`, `args = ["mcp", "serve", "--project-root", "<root>"]`). The approval mode must be server-level so newly installed agent-doc binaries and newly exposed MCP tools do not stall active Codex turns for repeated agent-doc MCP permission prompts. That bridge routes:
+**Codex bridge:** `agent-doc skill install` now also writes repo-local `.codex/hooks.json` plus `.codex/config.toml` (`[features] hooks = true` and `[mcp_servers.agent-doc] command = "agent-doc"`, `default_tools_approval_mode = "approve"`, `args = ["mcp", "serve"]`). The args carry **no** `--project-root` (`#skillinstallconfigpath`): this file is project-local and usually tracked, so an absolute install-machine path made it churn per operator, and `agent-doc mcp serve` walks up from its own working directory to the nearest project instead. Reinstalling migrates a legacy absolute entry away. Both installed artifacts end with a newline and are rewritten only on a real content change. The approval mode must be server-level so newly installed agent-doc binaries and newly exposed MCP tools do not stall active Codex turns for repeated agent-doc MCP permission prompts. That bridge routes:
 
 - `UserPromptSubmit` → `agent-doc hook codex-user-prompt-submit`
 - `Stop` → `agent-doc hook codex-stop`

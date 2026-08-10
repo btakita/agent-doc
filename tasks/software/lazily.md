@@ -78,6 +78,57 @@ Pushed: `lazily-zig@43c5d00`, `lazily-spec@f2d395d`, superproject pointer `2d477
 - `#lzzigforkhlcpeer` — `SeqCrdt.fork` copies the source's whole `Hlc`, keeping the source's `peer`; rs forks with a fresh `Hlc::new(peer)`. Two separable questions ride on that line and the corpus pins neither, and on the second one (carry the causal position forward, or reset it) zig looks more correct than the reference. That needs a spec decision plus a discriminating scenario before either binding moves.
 
 I left `AGENTS.md` in both repos alone — another session has it uncommitted, so the new modules are not documented there yet.
+
+### Re: #lzzigforkhlcpeer — the fork clock question, decided and fixed across seven bindings — opus-5
+
+The item asked me to decide (a) and (b) before touching anything. Both turned out to be decidable on evidence, and (b) was a live data-loss bug in six bindings rather than a matter of taste.
+
+**The audit — a three-way split, not two.**
+
+| binding | fork clock | stamp peer |
+|---|---|---|
+| rs (reference), js, kt, py, cs, cpp | **RESET** | new |
+| go, dart | CARRY | new |
+| zig | CARRY | **source's** |
+
+**(a) zig's peer, fixed first.** Carrying the source's whole HLC carried its *peer*, and the peer is the stamp's final tiebreaker. Two replicas stamping under one peer id can mint the identical `(wall, logical, peer)`; LWW adopts only on `.gt`, so neither adopts and they diverge **permanently**. The regression test failed on the *convergence* assertion (a=55, b=99) before the fix — not on which value won. `lazily-zig@c7cfa5a`.
+
+**(b) RESET is a bug, and I proved it rather than argued it.** A fork has observed everything the source holds, so a fresh clock lets its next local op — with any backwards-skewed `now`, which is the entire reason HLCs exist — mint a stamp *behind* state it already holds. LWW then rejects the fork's own write. Reproduced live against `lazily-js`:
+
+```
+a.insertBack('x', 1, 100)   // stamp (100, 0, 1)
+b = a.fork(2)               // RESET -> clock (0,0)
+b.setValue('x', 99, 50)     // mints (50,0,2), not > (100,0,1)
+b.get('x') === 1            // the fork's own write silently vanished
+```
+
+`cell-model.md` says nothing normative about fork clock semantics, so there was no authority to appeal to — which is why the split survived nine bindings.
+
+**Fixed everywhere.** Six agents, one per repo, each writing the test first and confirming it red before fixing. All seven gates exit 0:
+
+| repo | commit | gate |
+|---|---|---|
+| rs | `c678ff1` | `make check` 0 (841 ok, incl. loom + Lean + benchmark budgets) |
+| js | `2291748` | `make check` 0 |
+| kt | `a63356c` | `make check` 0 (+ `--no-daemon --rerun-tasks`: 447 tests really ran) |
+| py | `4e0b04d` | `make check` 0, 759 passed, CI green |
+| cs | `a8b05e7` | `make check` 0, CI green |
+| cpp | `6b414b9`, `ee5f665` | `make check` 0, CI green |
+| zig | `c7cfa5a` | `make check` 0 |
+
+Superproject pointer `9a2a9c4`. go and dart needed no change.
+
+**Three things the fan-out turned up that I did not brief for:**
+
+- **lazily-py had no HLC at all.** Its module docstring claims "each stamped by an HLC"; the stamps were bare `int`s with no peer, local writes adopted on `>=`, and `SeqCrdt` had no `fork` — the conformance runner synthesized one with `clone()` then `.peer = 2`. So py had *both* failure shapes, the second reachable without even sharing a peer id, since a bare int has no peer to differ on. Now a real `SeqStamp`/`_SeqClock`.
+- **cpp's `make wasm` was already red on `main`** — the corpus gained a Registers fixture and `WASM.md`'s count was stale (CI 31340403147 failed on it *before* this work). Regenerated properly with `make wasm-matrix`, not by hand.
+- **rs's test-only `clone_state`/`clone_state_as` helpers carried the same defect** and now delegate to `Clone`/`fork`.
+
+**What I did not do, and why.** The cross-binding pin. All nine now agree, but nothing in the corpus enforces it: every fork in `seqcrdt_convergence.json` is followed by an op whose `now` exceeds the source's `last_wall`, so `send` resets the logical counter regardless of which clock the fork started from. Each binding carries its own regression test; the *family* agreement is unpinned. Filed as `#lzspecforkclockfixture` with the two scenarios to add — and worth doing soon, because it is uniquely free right now: both cases pass on all nine today, so unlike the usual new-fixture change it reddens nobody.
+
+Also filed `#adjshashprivatefield` — agent-doc's `coined-id-pre-tool-use` hook blocks edits containing JS private class fields (`#entries`, `#hlc`) as coined ids; only C-family files are sanitized. It belongs in `tasks/agent-doc/agent-doc-bugs2.md`, so it is recorded here only to be moved, not worked.
+
+One standing caveat: the running `agent-doc` binary is stale (missing `bdee55ba4`), and `src/agent-doc` has ~150 uncommitted files from another session, so I did not run `make install` — building another session's half-finished refactor into the live binary is not mine to do.
 <!-- agent:boundary:c6ef3fb1 -->
 <!-- /agent:exchange -->
 

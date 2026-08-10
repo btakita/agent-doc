@@ -1020,6 +1020,54 @@ pub fn instruction_surface_files(root: &Path) -> Vec<PathBuf> {
         }
     }
     markdown_in(&mut files, root.join(".cursor/rules"));
+    files.extend(submodule_instruction_files(root));
+    files
+}
+
+/// Root instruction files of the git submodules this project declares.
+///
+/// A superproject's own surfaces do not define the anchors its submodules
+/// document. In this repo `#ci-no-closeout-wait` and `#deploy-just-do-it` are
+/// agent-doc *development* rules that live only in `src/agent-doc/AGENTS.md` and
+/// never ship in the installed SKILL, so a response citing one was reported as
+/// coining an id even after `#hookhashanchortags` landed.
+///
+/// Deliberately bounded on two axes, because this feeds a `PreToolUse` hook and
+/// this superproject declares 70 submodules:
+///
+/// - only paths declared in `.gitmodules`, never a directory walk;
+/// - only each submodule's ROOT instruction files, never its runbooks or specs,
+///   which is where the bulk of the bytes live.
+///
+/// A path that is absolute or escapes the root is skipped: `.gitmodules` is
+/// tracked content, and a surface set is not the place to follow it outward.
+fn submodule_instruction_files(root: &Path) -> Vec<PathBuf> {
+    let Ok(config) = std::fs::read_to_string(root.join(".gitmodules")) else {
+        return Vec::new();
+    };
+    let mut files = Vec::new();
+    for line in config.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() != "path" {
+            continue;
+        }
+        let relative = Path::new(value.trim());
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            continue;
+        }
+        let submodule = root.join(relative);
+        files.extend(
+            ["AGENTS.md", "CLAUDE.md", "SKILL.md"]
+                .iter()
+                .map(|name| submodule.join(name)),
+        );
+    }
     files
 }
 
@@ -1093,6 +1141,87 @@ mod instruction_surface_tests {
 
         let anchors = instruction_surface_anchors(dir.path());
         assert!(anchors.contains("stillfound"), "{anchors:?}");
+    }
+
+    /// `#anchorsubmodulesurfaces`: a superproject does not define the anchors its
+    /// submodules document. Confirmed live — `#ci-no-closeout-wait` is an
+    /// agent-doc development rule that exists only in `src/agent-doc/AGENTS.md`
+    /// and nowhere under the agent-loop root.
+    #[test]
+    fn anchors_include_declared_submodule_instruction_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("AGENTS.md"), "`#fromsuperproject`\n").unwrap();
+        std::fs::write(
+            root.join(".gitmodules"),
+            "[submodule \"src/agent-doc\"]\n\tpath = src/agent-doc\n\turl = git@example.test:a.git\n\
+             [submodule \"src/other\"]\n\tpath = src/other\n\turl = git@example.test:b.git\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("src/agent-doc")).unwrap();
+        std::fs::write(
+            root.join("src/agent-doc/AGENTS.md"),
+            "External CI is observed (`#cinocloseoutwait`)\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("src/other")).unwrap();
+        std::fs::write(root.join("src/other/SKILL.md"), "`#fromothersub`\n").unwrap();
+
+        let anchors = instruction_surface_anchors(root);
+        assert!(anchors.contains("fromsuperproject"), "{anchors:?}");
+        assert!(anchors.contains("cinocloseoutwait"), "{anchors:?}");
+        assert!(anchors.contains("fromothersub"), "{anchors:?}");
+    }
+
+    /// Only the submodule's ROOT instruction files are read. Its runbooks and
+    /// specs are where the bytes are, and this feeds a hook that runs on every
+    /// Edit.
+    #[test]
+    fn submodule_runbooks_and_specs_are_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join(".gitmodules"), "\tpath = sub\n").unwrap();
+        std::fs::create_dir_all(root.join("sub/runbooks")).unwrap();
+        std::fs::create_dir_all(root.join("sub/specs")).unwrap();
+        std::fs::write(root.join("sub/AGENTS.md"), "`#subroot`\n").unwrap();
+        std::fs::write(root.join("sub/runbooks/commit.md"), "`#subrunbook`\n").unwrap();
+        std::fs::write(root.join("sub/specs/07.md"), "`#subspec`\n").unwrap();
+
+        let anchors = instruction_surface_anchors(root);
+        assert!(anchors.contains("subroot"), "{anchors:?}");
+        assert!(!anchors.contains("subrunbook"), "{anchors:?}");
+        assert!(!anchors.contains("subspec"), "{anchors:?}");
+    }
+
+    /// `.gitmodules` is tracked content; a surface set must not follow it out of
+    /// the project.
+    #[test]
+    fn a_submodule_path_escaping_the_root_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "`#outsidetheroot`\n").unwrap();
+        std::fs::write(
+            root.join(".gitmodules"),
+            "\tpath = ../\n\tpath = /etc\n\tpath = sub\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub/AGENTS.md"), "`#insidetheroot`\n").unwrap();
+
+        let anchors = instruction_surface_anchors(&root);
+        assert!(anchors.contains("insidetheroot"), "{anchors:?}");
+        assert!(!anchors.contains("outsidetheroot"), "{anchors:?}");
+    }
+
+    /// A project with no `.gitmodules` behaves exactly as before.
+    #[test]
+    fn a_project_without_submodules_is_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("AGENTS.md"), "`#onlysurface`\n").unwrap();
+        let anchors = instruction_surface_anchors(dir.path());
+        assert_eq!(anchors.len(), 1, "{anchors:?}");
+        assert!(anchors.contains("onlysurface"));
     }
 
     #[test]

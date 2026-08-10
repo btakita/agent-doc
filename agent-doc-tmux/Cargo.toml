@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-tmux"
-version = "0.35.229"
+version = "0.35.230"
 edition = "2024"
 description = "Pure tmux realtime model state for agent-doc"
 license = "MIT"
@@ -11,7 +11,7 @@ publish = false
 name = "agent_doc_tmux"
 
 [dependencies]
-agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.229" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.230" }
 lazily = { version = "0.56.0", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }
 

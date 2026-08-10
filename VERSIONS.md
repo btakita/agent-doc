@@ -2,6 +2,28 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.230
+
+- **Fix (`#anchorsubmodulesurfaces`): 0.35.229's anchor harvest did not reach
+  the submodule that DEFINES the anchors, so the reproduction it was meant to
+  fix still fired.**
+
+  `instruction_surface_anchors` read surfaces under the *document's* project
+  root. For `tasks/agent-doc/agent-doc-bugs2.md` that root is the agent-loop
+  superproject — but agent-doc's own development rules live one submodule down
+  in `src/agent-doc/AGENTS.md` and never ship in the installed SKILL. So
+  `#drain-no-defer` and `#preflightinbinary` resolved (they are in the shipped
+  SKILL) while `#ci-no-closeout-wait` and `#deploy-just-do-it` did not.
+
+  `submodule_instruction_files` now adds the root instruction files of every
+  submodule declared in `.gitmodules`. Bounded on two axes, because this feeds a
+  `PreToolUse` hook and this superproject declares 70 submodules: only declared
+  paths (never a directory walk), and only each submodule's ROOT
+  `AGENTS.md`/`CLAUDE.md`/`SKILL.md` — not its runbooks or specs, which is where
+  the bulk of the bytes are. A path that is absolute or escapes the root is
+  skipped. Measured on agent-loop: 212 files, 1.37 MB, 9 ms — and still only on
+  the path where a tag is already about to be reported.
+
 ## 0.35.229
 
 - **Fix (`#hookhashanchortags`): quoting an agent-doc instruction anchor by

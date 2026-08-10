@@ -267,40 +267,19 @@ pub fn known_ids_for_document(file: &Path) -> Result<BTreeSet<String>, String> {
     // Completed work is archived OUT of the live document into a `.done.md`
     // sibling, so without it the guard blocks the most common legitimate use of
     // an id in a code comment: citing work that already shipped. Observed live —
-    // a real `#fr79` was blocked because it had been archived. The whole archive
-    // counts; every id in it is tracked history by definition.
-    for archive in done_archive_candidates(file) {
-        if let Ok(archived) = std::fs::read_to_string(&archive) {
-            known.extend(agent_doc_turn::coined_ids::extract_tags(&archived));
-        }
-    }
+    // a real `#fr79` was blocked because it had been archived.
+    //
+    // `#coinedguardledgerasymmetry`: this used to run a whole-text tag scan over
+    // the archive, which vouched for anything ever *cited* in archived prose and
+    // disagreed with `session-check`'s entry-id reading on the same archive. Both
+    // now read one predicate. Anchors quoted in archived prose stay allowed via
+    // `instruction_surface_anchors`, which covers them by name instead of by
+    // proximity.
+    known.extend(
+        agent_doc_element_backlog_io::done_archive::archived_tracked_ids(file, &content)
+            .map_err(|err| format!("reading the done archive: {err}"))?,
+    );
     Ok(known)
-}
-
-/// Candidate `<stem>.done.md` archives for a document.
-///
-/// The archive is not always a directory sibling — `tasks/agent-doc/x.md` is
-/// archived to `tasks/x.done.md` — so walk up to the project root. Bounded by
-/// the root, and every candidate is optional.
-pub fn done_archive_candidates(file: &Path) -> Vec<PathBuf> {
-    let Some(stem) = file.file_stem().and_then(|stem| stem.to_str()) else {
-        return Vec::new();
-    };
-    let archive_name = format!("{stem}.done.md");
-    let root = file
-        .parent()
-        .and_then(agent_doc_fs::find_project_root)
-        .unwrap_or_default();
-    let mut out = Vec::new();
-    let mut dir = file.parent().map(Path::to_path_buf);
-    while let Some(current) = dir {
-        out.push(current.join(&archive_name));
-        if current == root {
-            break;
-        }
-        dir = current.parent().map(Path::to_path_buf);
-    }
-    out
 }
 
 /// Resolve the session document THIS pane owns.
@@ -827,7 +806,7 @@ mod tests {
         let doc = nested.join("bugs.md");
         std::fs::write(&doc, "body").unwrap();
 
-        let candidates = done_archive_candidates(&doc);
+        let candidates = agent_doc_element_backlog_io::done_archive::done_archive_candidates(&doc);
         assert!(candidates.contains(&nested.join("bugs.done.md")));
         assert!(
             candidates.contains(&dir.path().join("tasks").join("bugs.done.md")),

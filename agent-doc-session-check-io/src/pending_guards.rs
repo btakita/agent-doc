@@ -138,9 +138,12 @@ fn known_ids_for_coined_guard(file: &Path, content: &str) -> Result<BTreeSet<Str
             component.content(content),
         ));
     }
-    known.extend(
-        agent_doc_element_backlog_io::done_archive::external_done_archive_ids(file, content)?,
-    );
+    // `#coinedguardledgerasymmetry`: one predicate, shared with the `PreToolUse`
+    // guard, so the same archive cannot answer "tracked" on one path and
+    // "invented" on the other.
+    known.extend(agent_doc_element_backlog_io::done_archive::archived_tracked_ids(
+        file, content,
+    )?);
     Ok(known)
 }
 

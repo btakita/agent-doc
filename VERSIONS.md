@@ -2,6 +2,35 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.231
+
+- **Fix (`#coinedguardledgerasymmetry`): the two coined-id guards disagreed
+  about what a done archive vouches for.**
+
+  The `PreToolUse` guard ran a whole-text tag scan over the archive; the
+  post-commit `session-check` guard read only the leading id of an archive
+  entry. Same document, same archive, different answers — nothing failed, the
+  guards simply diverged. That divergence is also what made a verification probe
+  in this series pass for a reason its author did not intend.
+
+  - `done_archive::archived_tracked_ids` is now the single predicate both guards
+    read. The **narrow** reading wins: an entry has the binary-owned shape
+    `- YYYY-MM-DD [#id] text`, and only that leading id names tracked work. A tag
+    merely cited in an entry's prose is a reference, and vouching for it
+    launders a coined id into legitimacy forever — the rule
+    `#hookhashanchortags` rejected. Anchors quoted in archived prose stay
+    allowed because `instruction_surface_anchors` covers them by name.
+  - Resolution is the UNION of both strategies the guards previously used —
+    declared `archive=` targets and sibling `<stem>.done.md` files walking up —
+    so unifying the predicate cannot lose an archive either guard used to find.
+    `done_archive_candidates` moved out of `agent-doc-hooks-io` to sit beside it.
+  - `agent-doc-element-backlog-io/tests/coined_guard_predicate.rs` pins the
+    invariant: every guard calls the shared predicate, and no guard resolves the
+    archive itself. Scoped to archive resolution — both guards still call
+    `extract_tags` on the live document's own components, which is correct and
+    was never the drift. A third test asserts the retired call names still exist,
+    so a rename cannot make the guard pass vacuously.
+
 ## 0.35.230
 
 - **Fix (`#anchorsubmodulesurfaces`): 0.35.229's anchor harvest did not reach

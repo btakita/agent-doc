@@ -68,6 +68,65 @@ pub fn archive_pending_done(
     ))
 }
 
+/// Candidate `<stem>.done.md` archives for a document, walking up to the
+/// project root.
+///
+/// Complements the `agent:done archive=` attribute rather than replacing it: a
+/// document may declare an archive, sit beside one, or both. Callers take the
+/// union, because missing an archive means reporting completed work as invented.
+pub fn done_archive_candidates(file: &Path) -> Vec<PathBuf> {
+    let Some(stem) = file.file_stem().and_then(|stem| stem.to_str()) else {
+        return Vec::new();
+    };
+    let archive_name = format!("{stem}.done.md");
+    let root = file
+        .parent()
+        .and_then(agent_doc_fs::find_project_root)
+        .unwrap_or_default();
+    let mut out = Vec::new();
+    let mut dir = file.parent().map(Path::to_path_buf);
+    while let Some(current) = dir {
+        out.push(current.join(&archive_name));
+        if current == root {
+            break;
+        }
+        dir = current.parent().map(Path::to_path_buf);
+    }
+    out
+}
+
+/// Tracked-work ids recorded in this document's done archives.
+///
+/// `#coinedguardledgerasymmetry`: the single predicate both coined-id guards
+/// read. They used to disagree — the `PreToolUse` guard ran a whole-text tag
+/// scan over the archive while `session-check` read only entry ids — so the same
+/// tag, the same document and the same archive produced "tracked" on one path
+/// and "invented" on the other. That is how a verification probe passed for a
+/// reason its author did not intend.
+///
+/// The narrow reading wins. An archive entry has the binary-owned shape
+/// `- YYYY-MM-DD [#id] text`, and only that leading id names tracked work; a tag
+/// merely *cited* in an entry's prose is a reference, not an item. Vouching for
+/// citations launders a coined id into legitimacy forever, which is exactly the
+/// rule `#hookhashanchortags` rejected when it chose curated instruction anchors
+/// over "any id anyone typed". Anchors quoted in archived prose stay allowed
+/// because `agent_doc_fs::instruction_surface_anchors` covers them by name.
+///
+/// Resolution is the UNION of both strategies the guards previously used —
+/// declared `archive=` targets and sibling `<stem>.done.md` files walking up —
+/// so unifying the predicate cannot lose an archive either guard used to find.
+pub fn archived_tracked_ids(file: &Path, content: &str) -> Result<HashSet<String>> {
+    let mut ids = external_done_archive_ids(file, content)?;
+    for archive in done_archive_candidates(file) {
+        if let Ok(archived) = std::fs::read_to_string(&archive) {
+            ids.extend(
+                agent_doc_element_backlog::backlog::extract_pending_ids_from_text(&archived),
+            );
+        }
+    }
+    Ok(ids)
+}
+
 pub fn external_done_archive_ids(file: &Path, content: &str) -> Result<HashSet<String>> {
     let mut ids = HashSet::new();
     let components = agent_doc_element::element::parse(content)?;
@@ -415,5 +474,76 @@ mod tests {
                 "{attr} must still be rejected: only .done.md is a valid archive"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod archived_tracked_ids_tests {
+    use super::*;
+
+    fn project(archive_body: &str, doc_body: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/bugs.md");
+        std::fs::write(&doc, doc_body).unwrap();
+        std::fs::write(dir.path().join("tasks/bugs.done.md"), archive_body).unwrap();
+        (dir, doc)
+    }
+
+    /// The leading id of an archive entry names completed tracked work, so
+    /// citing it must stay allowed. This is the `#fr79` case: a real id blocked
+    /// because it had been archived out of the live document.
+    #[test]
+    fn an_archived_entry_id_is_tracked() {
+        let (_dir, doc) = project("- 2026-08-09 [#fr79] Shipped the thing.\n", "body\n");
+        let ids = archived_tracked_ids(&doc, "body\n").unwrap();
+        assert!(ids.contains("fr79"), "{ids:?}");
+    }
+
+    /// `#coinedguardledgerasymmetry`: a tag merely CITED inside an entry's prose
+    /// is a reference, not an item. Vouching for it launders a coined id into
+    /// legitimacy forever — the rule `#hookhashanchortags` rejected.
+    #[test]
+    fn a_tag_only_cited_in_archived_prose_is_not_tracked() {
+        let (_dir, doc) = project(
+            "- 2026-08-09 [#fr79] Shipped the thing, related to #neverwasanitem.\n",
+            "body\n",
+        );
+        let ids = archived_tracked_ids(&doc, "body\n").unwrap();
+        assert!(ids.contains("fr79"), "{ids:?}");
+        assert!(
+            !ids.contains("neverwasanitem"),
+            "a citation must not vouch for itself: {ids:?}"
+        );
+    }
+
+    /// Resolution is the union of both strategies the two guards used, so
+    /// unifying the predicate cannot lose an archive either one used to find.
+    /// Here the declared `archive=` target is the ONLY route to the file.
+    #[test]
+    fn a_declared_archive_target_is_read_even_without_a_sibling() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks/nested")).unwrap();
+        let doc = dir.path().join("tasks/nested/bugs.md");
+        let body = "<!-- agent:done archive=tasks/elsewhere.done.md -->\n<!-- /agent:done -->\n";
+        std::fs::write(&doc, body).unwrap();
+        std::fs::write(
+            dir.path().join("tasks/elsewhere.done.md"),
+            "- 2026-08-09 [#declaredonly] Shipped.\n",
+        )
+        .unwrap();
+
+        let ids = archived_tracked_ids(&doc, body).unwrap();
+        assert!(ids.contains("declaredonly"), "{ids:?}");
+    }
+
+    /// And the sibling walk is the ONLY route here, with no `archive=` declared.
+    #[test]
+    fn a_sibling_archive_is_read_without_a_declared_target() {
+        let (_dir, doc) = project("- 2026-08-09 [#siblingonly] Shipped.\n", "body\n");
+        let ids = archived_tracked_ids(&doc, "body\n").unwrap();
+        assert!(ids.contains("siblingonly"), "{ids:?}");
     }
 }

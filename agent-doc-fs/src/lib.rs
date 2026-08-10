@@ -967,3 +967,151 @@ mod tests {
         );
     }
 }
+
+use std::collections::BTreeSet;
+
+// ---------------------------------------------------------------------------
+// Agent instruction surfaces (`#hookhashanchortags`)
+//
+// Lives here, once, because two consumers need the same answer: the
+// `PreToolUse` coined-id guard and the post-commit `session-check` guard. Two
+// copies of "which files define anchors" is exactly the drift this codebase
+// keeps paying for -- the wording gets consolidated while the predicate quietly
+// diverges -- so the file set has one home and both callers read it.
+// ---------------------------------------------------------------------------
+
+/// Glob-free list of the project's agent instruction surfaces.
+///
+/// Root instruction files, the runbook and spec directories, and every
+/// installed harness skill directory. These are where agent-doc-style anchors
+/// are DEFINED, so an id found here names a documented rule rather than
+/// invented work.
+pub fn instruction_surface_files(root: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = ["AGENTS.md", "CLAUDE.md", "SKILL.md", "SPEC.md"]
+        .iter()
+        .map(|name| root.join(name))
+        .collect();
+
+    fn markdown_in(files: &mut Vec<PathBuf>, dir: PathBuf) {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|extension| extension.to_str()) == Some("md") {
+                files.push(path);
+            }
+        }
+    }
+
+    markdown_in(&mut files, root.join("runbooks"));
+    markdown_in(&mut files, root.join("specs"));
+    for skills_dir in [
+        root.join(".claude/skills"),
+        root.join(".codex/skills"),
+        root.join(".opencode/skills"),
+    ] {
+        let Ok(entries) = std::fs::read_dir(&skills_dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            files.push(entry.path().join("SKILL.md"));
+            markdown_in(&mut files, entry.path().join("runbooks"));
+        }
+    }
+    markdown_in(&mut files, root.join(".cursor/rules"));
+    files
+}
+
+/// Anchors defined by the project's agent instruction surfaces.
+///
+/// Best-effort by construction: a file that will not read contributes nothing.
+/// That is the right failure direction here — this set only ever *widens* what
+/// is allowed, so an unreadable instruction file costs a false block at worst,
+/// never a missed one. It is the mirror image of `known_ids_for_document`,
+/// which fails closed because it is the primary ledger.
+pub fn instruction_surface_anchors(root: &Path) -> BTreeSet<String> {
+    let mut anchors = BTreeSet::new();
+    for file in instruction_surface_files(root) {
+        if let Ok(content) = std::fs::read_to_string(&file) {
+            anchors.extend(agent_doc_turn::coined_ids::extract_tags(&content));
+        }
+    }
+    anchors
+}
+#[cfg(test)]
+mod instruction_surface_tests {
+    use super::*;
+
+    #[test]
+    fn anchors_come_from_every_instruction_surface() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("AGENTS.md"), "rule (`#fromagents`)\n").unwrap();
+        std::fs::write(root.join("CLAUDE.md"), "rule (`#fromclaude`)\n").unwrap();
+        std::fs::create_dir_all(root.join("runbooks")).unwrap();
+        std::fs::write(root.join("runbooks/commit.md"), "`#fromrunbook`\n").unwrap();
+        std::fs::create_dir_all(root.join("specs")).unwrap();
+        std::fs::write(root.join("specs/07-commands.md"), "`#fromspec`\n").unwrap();
+        std::fs::create_dir_all(root.join(".claude/skills/agent-doc/runbooks")).unwrap();
+        std::fs::write(
+            root.join(".claude/skills/agent-doc/SKILL.md"),
+            "`#fromskill`\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".claude/skills/agent-doc/runbooks/respond.md"),
+            "`#fromskillrunbook`\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".cursor/rules")).unwrap();
+        std::fs::write(root.join(".cursor/rules/agent-doc.md"), "`#fromcursor`\n").unwrap();
+
+        let anchors = instruction_surface_anchors(root);
+        for expected in [
+            "fromagents",
+            "fromclaude",
+            "fromrunbook",
+            "fromspec",
+            "fromskill",
+            "fromskillrunbook",
+            "fromcursor",
+        ] {
+            assert!(anchors.contains(expected), "missing {expected}: {anchors:?}");
+        }
+    }
+
+    /// Best-effort by construction: this set only ever WIDENS what a guard
+    /// allows, so an unreadable or absent surface must degrade to "no anchors"
+    /// rather than erroring. A directory where a file belongs is the nastiest
+    /// version of that.
+    #[test]
+    fn an_unreadable_surface_contributes_nothing_instead_of_failing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("AGENTS.md")).unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "`#stillfound`\n").unwrap();
+
+        let anchors = instruction_surface_anchors(dir.path());
+        assert!(anchors.contains("stillfound"), "{anchors:?}");
+    }
+
+    #[test]
+    fn an_empty_project_yields_no_anchors() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(instruction_surface_anchors(dir.path()).is_empty());
+    }
+
+    /// Only Markdown is read from the surface directories, so a stray script or
+    /// binary in `runbooks/` cannot inject an anchor.
+    #[test]
+    fn only_markdown_is_read_from_surface_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("runbooks")).unwrap();
+        std::fs::write(dir.path().join("runbooks/notes.txt"), "`#notmarkdown`\n").unwrap();
+        std::fs::write(dir.path().join("runbooks/real.md"), "`#ismarkdown`\n").unwrap();
+
+        let anchors = instruction_surface_anchors(dir.path());
+        assert!(anchors.contains("ismarkdown"), "{anchors:?}");
+        assert!(!anchors.contains("notmarkdown"), "{anchors:?}");
+    }
+}

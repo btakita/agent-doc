@@ -130,10 +130,15 @@ pub fn is_commit_command(command: &str) -> bool {
 /// `known_ids` is the tracked-id universe for the active document. Empty means
 /// unknown (no active document resolved) — in that case nothing is blocked,
 /// because a guard that cannot see the document cannot tell coined from tracked.
+///
+/// `project_root`, when given, widens that universe with the project's agent
+/// instruction anchors on the deny path only (`#hookhashanchortags`). `None`
+/// skips it entirely, which is what the pure unit tests use.
 pub fn pretooluse_decision(
     tool_name: &str,
     tool_input: &serde_json::Value,
     ids: &DocumentIds,
+    project_root: Option<&Path>,
 ) -> PreToolUseDecision {
     if matches!(ids, DocumentIds::Ungoverned) {
         return PreToolUseDecision::Allow;
@@ -155,6 +160,27 @@ pub fn pretooluse_decision(
         _ => &empty,
     };
     let coined = agent_doc_turn::coined_ids::coined_ids(&scan_text, known);
+    if coined.is_empty() {
+        return PreToolUseDecision::Allow;
+    }
+    // Second pass, deliberately lazy (`#hookhashanchortags`). An anchor like
+    // `#preflightinbinary` or `#drain-no-defer` names a documented invariant in
+    // AGENTS.md, a SKILL, a runbook, or a spec — that is tracked work, and
+    // quoting it by name is the correct thing to do, so blocking it is pure
+    // noise. But those files are hundreds of kilobytes and this runs on every
+    // Edit, so they are read ONLY once something is already about to be
+    // blocked. The overwhelmingly common call carries no id at all and returned
+    // above without touching the disk.
+    let coined = match project_root {
+        Some(root) => {
+            let anchors = agent_doc_fs::instruction_surface_anchors(root);
+            coined
+                .into_iter()
+                .filter(|tag| !anchors.contains(tag))
+                .collect::<Vec<_>>()
+        }
+        None => coined,
+    };
     if coined.is_empty() {
         return PreToolUseDecision::Allow;
     }
@@ -389,7 +415,8 @@ pub fn handle_pretooluse() -> anyhow::Result<()> {
 
     let pane = std::env::var("TMUX_PANE").ok();
     let ids = document_ids(&cwd, pane.as_deref());
-    let decision = pretooluse_decision(tool_name, tool_input, &ids);
+    let root = agent_doc_fs::find_project_root(&cwd);
+    let decision = pretooluse_decision(tool_name, tool_input, &ids, root.as_deref());
     if let PreToolUseDecision::Deny { reason } = decision {
         eprintln!("{reason}");
         std::process::exit(2);
@@ -413,7 +440,7 @@ mod tests {
             "file_path": "/repo/src/rpc.rs",
             "new_string": "// `#orphandrain` — controller-side drain\nfn tick() {}"
         });
-        let decision = pretooluse_decision("Edit", &input, &DocumentIds::Known(known(&["fr79"])));
+        let decision = pretooluse_decision("Edit", &input, &DocumentIds::Known(known(&["fr79"])), None);
         match decision {
             PreToolUseDecision::Deny { reason } => {
                 assert!(reason.contains("#orphandrain"), "{reason}");
@@ -431,7 +458,7 @@ mod tests {
             "new_string": "// `#fr79` — orphan strike is wired"
         });
         assert_eq!(
-            pretooluse_decision("Edit", &input, &DocumentIds::Known(known(&["fr79"]))),
+            pretooluse_decision("Edit", &input, &DocumentIds::Known(known(&["fr79"])), None),
             PreToolUseDecision::Allow
         );
     }
@@ -451,7 +478,7 @@ mod tests {
         });
 
         assert_eq!(
-            pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[]))),
+            pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[])), None),
             PreToolUseDecision::Allow
         );
     }
@@ -463,7 +490,7 @@ mod tests {
             "content": "#include <cstdint>\n// #codecfix is not tracked\n"
         });
 
-        match pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[]))) {
+        match pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[])), None) {
             PreToolUseDecision::Deny { reason } => {
                 assert!(reason.contains("#codecfix"), "{reason}");
                 assert!(!reason.contains("#include,"), "{reason}");
@@ -484,7 +511,7 @@ mod tests {
                 "content": "// #include is a tracked-work tag here"
             }),
         ] {
-            match pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[]))) {
+            match pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[])), None) {
                 PreToolUseDecision::Deny { reason } => {
                     assert!(reason.contains("#include"), "{reason}");
                 }
@@ -505,7 +532,7 @@ mod tests {
         });
 
         assert_eq!(
-            pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[]))),
+            pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[])), None),
             PreToolUseDecision::Allow
         );
     }
@@ -519,7 +546,7 @@ mod tests {
         });
 
         assert_eq!(
-            pretooluse_decision("Edit", &input, &DocumentIds::Known(known(&[]))),
+            pretooluse_decision("Edit", &input, &DocumentIds::Known(known(&[])), None),
             PreToolUseDecision::Allow
         );
     }
@@ -533,7 +560,7 @@ mod tests {
             "content": "// tracked by #codecfix\nclass A {{ #x }}\n"
         });
 
-        match pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[]))) {
+        match pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[])), None) {
             PreToolUseDecision::Deny { reason } => {
                 assert!(reason.contains("#codecfix"), "{reason}");
                 assert!(!reason.contains("#x"), "{reason}");
@@ -551,7 +578,134 @@ mod tests {
         });
 
         assert_eq!(
-            pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[]))),
+            pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[])), None),
+            PreToolUseDecision::Allow
+        );
+    }
+
+    /// `#hookhashanchortags`: an anchor defined in an instruction surface names
+    /// a documented invariant, so quoting it is correct and must not block.
+    /// Reproduced live 2026-08-09 — a closeout warned about `#ci-no-closeout-wait`
+    /// after the response cited the AGENTS.md rule by name.
+    #[test]
+    fn instruction_surface_anchors_are_tracked_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("AGENTS.md"),
+            "- **External CI is observed, never awaited (`#ci-no-closeout-wait`)**\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("runbooks")).unwrap();
+        std::fs::write(
+            dir.path().join("runbooks/commit.md"),
+            "Preflight is binary-owned (`#preflightinbinary`).\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join(".claude/skills/agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".claude/skills/agent-doc/SKILL.md"),
+            "Do not defer a drainable item (`#drain-no-defer`).\n",
+        )
+        .unwrap();
+
+        let input = json!({
+            "file_path": "/repo/src/notes.md",
+            "content": "Followed #ci-no-closeout-wait, #preflightinbinary and #drain-no-defer.\n"
+        });
+
+        // Without the project root the anchors are invisible and every one blocks.
+        match pretooluse_decision("Write", &input, &DocumentIds::Known(known(&[])), None) {
+            PreToolUseDecision::Deny { reason } => {
+                assert!(reason.contains("#ci-no-closeout-wait"), "{reason}");
+            }
+            other => panic!("expected deny without a root, got {other:?}"),
+        }
+
+        assert_eq!(
+            pretooluse_decision(
+                "Write",
+                &input,
+                &DocumentIds::Known(known(&[])),
+                Some(dir.path())
+            ),
+            PreToolUseDecision::Allow
+        );
+    }
+
+    /// Widening the universe must not blunt the guard: an id that appears in no
+    /// instruction surface still blocks, and the reason names only that id.
+    #[test]
+    fn an_id_absent_from_every_instruction_surface_still_blocks() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("AGENTS.md"),
+            "Anchored on `#preflightinbinary`.\n",
+        )
+        .unwrap();
+
+        let input = json!({
+            "file_path": "/repo/src/notes.md",
+            "content": "Per #preflightinbinary, and also #inventedrightnow.\n"
+        });
+
+        match pretooluse_decision(
+            "Write",
+            &input,
+            &DocumentIds::Known(known(&[])),
+            Some(dir.path()),
+        ) {
+            PreToolUseDecision::Deny { reason } => {
+                assert!(reason.contains("#inventedrightnow"), "{reason}");
+                assert!(!reason.contains("#preflightinbinary"), "{reason}");
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    /// A project with no instruction surfaces at all must not panic, and must
+    /// keep behaving exactly as it did before anchors existed.
+    #[test]
+    fn a_project_without_instruction_surfaces_is_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = json!({
+            "file_path": "/repo/src/notes.md",
+            "content": "Coined #inventedrightnow here.\n"
+        });
+
+        match pretooluse_decision(
+            "Write",
+            &input,
+            &DocumentIds::Known(known(&[])),
+            Some(dir.path()),
+        ) {
+            PreToolUseDecision::Deny { reason } => {
+                assert!(reason.contains("#inventedrightnow"), "{reason}");
+            }
+            other => panic!("expected deny, got {other:?}"),
+        }
+    }
+
+    /// The harvest is on the deny path only. Text carrying no id must never
+    /// touch the instruction surfaces, because this runs on every Edit.
+    #[test]
+    fn text_without_an_id_never_reads_the_instruction_surfaces() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory where AGENTS.md would go: reading it would fail, and the
+        // decision must not depend on that either way.
+        std::fs::create_dir_all(dir.path().join("AGENTS.md")).unwrap();
+
+        let input = json!({
+            "file_path": "/repo/src/notes.md",
+            "content": "No tags at all in this sentence.\n"
+        });
+
+        assert_eq!(
+            pretooluse_decision(
+                "Write",
+                &input,
+                &DocumentIds::Known(known(&[])),
+                Some(dir.path())
+            ),
             PreToolUseDecision::Allow
         );
     }
@@ -566,7 +720,7 @@ mod tests {
             "new_string": "// rewritten line"
         });
         assert_eq!(
-            pretooluse_decision("Edit", &input, &DocumentIds::Known(known(&[]))),
+            pretooluse_decision("Edit", &input, &DocumentIds::Known(known(&[])), None),
             PreToolUseDecision::Allow
         );
     }
@@ -575,7 +729,7 @@ mod tests {
     #[test]
     fn a_git_commit_carrying_a_coined_id_is_blocked() {
         let input = json!({"command": "git commit -q -m 'fix(queue): #madeup thing'"});
-        match pretooluse_decision("Bash", &input, &DocumentIds::Known(known(&[]))) {
+        match pretooluse_decision("Bash", &input, &DocumentIds::Known(known(&[])), None) {
             PreToolUseDecision::Deny { reason } => {
                 assert!(reason.contains("#madeup"), "{reason}");
                 assert!(reason.contains("commit message"), "{reason}");
@@ -597,7 +751,8 @@ mod tests {
                 pretooluse_decision(
                     "Bash",
                     &json!({ "command": command }),
-                    &DocumentIds::Known(known(&[]))
+                    &DocumentIds::Known(known(&[])),
+                None
                 ),
                 PreToolUseDecision::Allow,
                 "must not block: {command}"
@@ -622,7 +777,8 @@ mod tests {
                 pretooluse_decision(
                     tool,
                     &json!({"pattern": "#madeup"}),
-                    &DocumentIds::Known(known(&[]))
+                    &DocumentIds::Known(known(&[])),
+                    None
                 ),
                 PreToolUseDecision::Allow
             );
@@ -685,7 +841,7 @@ mod tests {
     fn an_ungoverned_call_never_blocks() {
         let input = json!({"file_path": "/x.rs", "new_string": "// #madeup"});
         assert_eq!(
-            pretooluse_decision("Edit", &input, &DocumentIds::Ungoverned),
+            pretooluse_decision("Edit", &input, &DocumentIds::Ungoverned, None),
             PreToolUseDecision::Allow
         );
     }
@@ -707,7 +863,7 @@ mod tests {
             "file_path": "/repo/src/rpc.rs",
             "new_string": "// #madeup — coined while the ledger was unreadable"
         });
-        match pretooluse_decision("Edit", &input, &unavailable()) {
+        match pretooluse_decision("Edit", &input, &unavailable(), None) {
             PreToolUseDecision::Deny { reason } => {
                 assert!(reason.contains("#madeup"), "{reason}");
                 assert!(reason.contains("/repo/plan.md"), "{reason}");
@@ -732,7 +888,7 @@ mod tests {
             "new_string": "fn tick() { drain(); }"
         });
         assert_eq!(
-            pretooluse_decision("Edit", &input, &unavailable()),
+            pretooluse_decision("Edit", &input, &unavailable(), None),
             PreToolUseDecision::Allow
         );
     }
@@ -746,7 +902,7 @@ mod tests {
             "content": "#ifndef WIRE_HPP\n#define WIRE_HPP\n#include <cstdint>\n#endif\n"
         });
         assert_eq!(
-            pretooluse_decision("Write", &input, &unavailable()),
+            pretooluse_decision("Write", &input, &unavailable(), None),
             PreToolUseDecision::Allow
         );
     }
@@ -756,7 +912,7 @@ mod tests {
     #[test]
     fn an_unreadable_ledger_still_allows_read_only_tools() {
         assert_eq!(
-            pretooluse_decision("Grep", &json!({"pattern": "#madeup"}), &unavailable()),
+            pretooluse_decision("Grep", &json!({"pattern": "#madeup"}), &unavailable(), None),
             PreToolUseDecision::Allow
         );
     }

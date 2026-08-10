@@ -2,6 +2,43 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.229
+
+- **Fix (`#hookhashanchortags`): quoting an agent-doc instruction anchor by
+  name was reported as coining an id.**
+
+  `#preflightinbinary`, `#drain-no-defer`, `#ci-no-closeout-wait` and the rest
+  are DEFINED in AGENTS.md, the SKILLs, the runbooks, and the specs — they name
+  documented invariants, so citing one is the correct thing to do. But the
+  known-id universe was only the session document plus its `.done.md` archives,
+  so every such citation resolved to nothing and was flagged. Reproduced twice
+  in one session on 2026-08-09.
+
+  This is the half that 0.35.228's prose scoping deliberately did NOT fix:
+  these tags really are in prose, so it was never a lexical problem. It is
+  ledger coverage.
+
+  - `agent_doc_fs::instruction_surface_anchors` harvests anchors from the
+    project's instruction surfaces: root `AGENTS.md` / `CLAUDE.md` / `SKILL.md` /
+    `SPEC.md`, `runbooks/*.md`, `specs/*.md`, every installed harness skill plus
+    its runbooks, and `.cursor/rules/*.md`.
+  - Both guards use it — the `PreToolUse` coined-id block and the post-commit
+    `session-check` warning — from one definition, so the file set cannot drift
+    between them.
+  - The harvest is **lazy**: it runs only once a tag is already about to be
+    reported. The overwhelmingly common call carries no id at all and never
+    touches those files, which matters because `PreToolUse` fires on every Edit
+    and these surfaces are hundreds of kilobytes.
+  - Best-effort by construction: an unreadable surface contributes nothing.
+    That set only ever widens what is allowed, so failing soft costs a false
+    block at worst, never a missed one — the mirror image of
+    `known_ids_for_document`, which fails closed because it is the primary
+    ledger.
+  - Rejected the broader alternative the item recorded (treat any id present in
+    tracked repo content as vouched-for): it conflates "someone typed this
+    before" with "this names tracked work", and would let a stale id in an old
+    comment vouch for itself forever.
+
 ## 0.35.228
 
 - **Fix (`#hookhashjsprivatefield`, `#hookhashfalsepositive`): the coined-id

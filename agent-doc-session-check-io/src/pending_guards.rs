@@ -177,6 +177,23 @@ pub fn check_coined_ids_guard(file: &Path, _rc: &CycleContext) -> Result<GuardRe
         return Ok(GuardResult::None);
     };
     let coined = agent_doc_turn::coined_ids::coined_ids(&response_text, &known);
+    // Second pass, lazy on purpose (`#hookhashanchortags`). An anchor such as
+    // `#ci-no-closeout-wait` names a documented invariant in AGENTS.md, a SKILL,
+    // a runbook, or a spec; a response that cites the rule by name is doing the
+    // right thing, and warning about it trains the reader to ignore this guard.
+    // Reading those files costs hundreds of kilobytes, so it happens only when
+    // something is already about to be reported. Same file set as the
+    // `PreToolUse` guard, from the same place, so the two cannot drift.
+    let coined = match agent_doc_fs::find_project_root(file) {
+        Some(root) if !coined.is_empty() => {
+            let anchors = agent_doc_fs::instruction_surface_anchors(&root);
+            coined
+                .into_iter()
+                .filter(|tag| !anchors.contains(tag))
+                .collect::<Vec<_>>()
+        }
+        _ => coined,
+    };
     Ok(agent_doc_workflow::session_check::coined_ids_guard_result(
         &coined,
     ))

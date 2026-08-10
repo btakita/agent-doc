@@ -280,13 +280,36 @@ All nine repos green in CI on their pinned commits, each run re-reporting the pi
 Also filed the cs `AGENTS.md` prose item — it documents stale floor values *and* still preaches "calibrated below the observed", the very convention this removed. Blocked the same way as before by the concurrent session's uncommitted edits, so the item carries the single-hunk staging recipe.
 
 Process note: the coined-id hook blocked my first attempt at this response because the new backlog id appeared in the text before the item existed. Correct catch — I filed the item, then responded. Exchange is at 228 lines (session-accretion `warn`); queue is active so I am not compacting.
+
+### Re: #lzpartialmarkadjudicate — three marks adjudicated, zero promoted — opus-5
+
+The item warned against bulk-promotion. Adjudicated one at a time on binding-specific evidence, **none of the three was promotable** — every one turned out to mean exactly what a tilde is supposed to mean.
+
+**GDScript on reactive-graph → the gap IS pinned, by fixtures the row did not cite.** lazily-gd's own guard lists `churn_returns_to_baseline` and `recycled_id_inherits_nothing` as uncovered — its runner lacks the bulk fanout/churn/dispose ops and real id recycling (`#lzgdvocab`). I checked all nine other bindings: **only** gd lists them. So the row now cites both, which makes gd's mark *verifiable* rather than merely unverified, and no other binding's mark moves.
+
+**Zig on reactivemap-core → the gap is real and no fixture can pin it.** The binding had already written the answer in the header of `collections_family_conformance.zig`: its map is not graph-backed, so entries are cached values rather than reactive nodes, and `invalidates` is asserted against three **version counters** instead of live graph edges. That satisfies every assertion the corpus can express while being strictly weaker than lazily-rs's graph-edge check. It just had nowhere machine-readable to say so.
+
+**C# on reliable-sync → not a C# fact at all.** The row is `~` for **all nine** bindings. The cited fixtures pin the coalescing/outbox and lease-eviction half; the resync coordinator plus OR-set/LWW liveness has no canonical fixture, so no ledger can separate a binding that finished it from one that did not. C# was flagged only because it happens to replay both cited fixtures cleanly.
+
+**The third case had nowhere to live**, which is why it kept resurfacing as a review nag every run. Rows now carry `partial_reasons`, keyed by language, and the guard enforces them **in both directions**:
+
+- an indistinguishable `~` with **no** reason now **FAILS** (it was previously a printed suggestion)
+- a reason attached to a mark that is no longer `~` **FAILS as stale**
+
+Both probes run, both fail with the intended message. A reason that could only be printed and never falsified would be the same folklore this guard exists to replace — the same discipline as `excuseKey` and the prose-key discharge.
+
+The review list is now **empty** (was 3); the guard reports 2 declared partials instead, and prints them on every run so the claim stays in front of whoever next touches the row.
+
+Worth stating plainly: this row had been carried as a review item for a long time on the assumption it was mostly promotions waiting to happen. It was the opposite — the marks were right and the *vocabulary* was missing.
+
+`lazily-spec@7005876`, superproject pointer committed. `make check` green. Exchange is at 260 lines (session-accretion `warn`); queue is active so I am not compacting.
 <!-- agent:boundary:c6ef3fb1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzcsagentsmdfloorprose]
+- ⏭️ do [#lzcsagentsmdfloorprose]
 - ~~do [#lzscenariofloordrift]~~
 - ~~do [#lzspecagentsmdpointer]~~
 - ~~do [#lzspecpushbeforebindings]~~
@@ -295,7 +318,7 @@ Process note: the coined-id hook blocked my first attempt at this response becau
 - ~~do [#lzzigforkhlcpeer]~~
 - ~~do [#lzspecgcreferencedtombstone]~~
 - ~~do [#lzzigcanonrunner]~~
-- do [#lzpartialmarkadjudicate]
+- ~~do [#lzpartialmarkadjudicate]~~
 - 📌 do [#lzzigspecdiroption]
 - 📌 do [#lzktcorpusnotgradleinput]
 - 📌 do [#lzledgeragreementaudit]
@@ -308,7 +331,6 @@ Process note: the coined-id hook blocked my first attempt at this response becau
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzcsagentsmdfloorprose] lazily-cs's AGENTS.md (CLAUDE.md is a symlink to it) documents the conformance floors in prose as "MIN_FIXTURES (139)" and "MIN_SCENARIOS (134, calibrated below the observed 139)". Both numbers were already stale before the floor-pinning work and are now stale by more — the script's real values are MIN_FIXTURES 145, MIN_SCENARIOS 165, MIN_BLOCKS 33. Worse than the numbers, the phrase "calibrated below the observed" preaches exactly the convention that work removed: a floor deliberately set under reality is a floor that has stopped guarding, and it is how cs accumulated 17 scenarios of slack. Update the prose to the real values and to the rule now written at each floor in scripts/check-conformance-coverage.sh — the floor equals what a completed CI run reports against the published corpus, exactly, proved by setting it to N+1 and watching the guard fail. NOT done in the originating cycle because AGENTS.md carried a concurrent session's uncommitted code-navigation rewrite; if that is still true, use the single-hunk staging technique (hash a blob of HEAD content plus your edit, git update-index --cacheinfo, then bare git commit) rather than --only, which commits the file's whole working-tree content.
-- [ ] [#lzpartialmarkadjudicate] check-coverage-claims.mjs (as of lazily-spec d1c1a82) reports three partial marks that are INDISTINGUISHABLE FROM SHIPPED on ledger evidence: GDScript on row reactive-graph (reactive-graph/{transitive_invalidation_reaches_depth,signal_materializes_without_a_read,signal_materializes_once_per_batch,dispose_signal_reverts_to_lazy}.json), Zig on reactivemap-core-single-threaded (collections/{cellmap_independence,cellmap_atomic_move}.json), and C# on reliable-sync (reliable-sync/{coalesce_bounds_outbox,liveness_lease_eviction}.json). None of the eight fixtures is in any KNOWN_UNCOVERED and no binding has a scenario- or block-level excuse. Adjudicate each ONE AT A TIME with binding-specific evidence the spec repo does not have: confirm from the binding's runtime manifest that it really replays each fixture, then decide whether the feature is complete or the shortfall is real but unpinned. Outcome per row is either (a) promote the mark and re-run sync-coverage.mjs — remember a row flip can carry its FAMILY roll-up cell with it and rewrites README.md in 11 sibling repos, so it is a 12-repo commit — or (b) cite a fixture that actually pins the gap, or add a scenario-level excuse, so the tilde becomes backed instead of merely unverified. Do NOT bulk-promote: tilde legitimately means 'implemented, but not this wire' and the guard deliberately cannot tell the two apart.
 - [ ] [#lzzigspecdiroption] lazily-zig has NO corpus-dir override: SPEC_DIR in src/lazily/reactive_map.zig is a comptime const used as SPEC_DIR ++ '/x.json', so the #lzdefaultmodeuniform probe had to temporarily edit the constant and restore it. Every future corpus probe in this binding pays that cost, and a probe that edits the shared ../lazily-spec checkout instead reddens all nine bindings concurrently. Add a '-Dspec-dir' build option (or a runtime env read) threaded to every fixture path, and keep the default unchanged. Compounding trap to preserve: specFixturesPresent() makes the tests 'return error.SkipZigTest' when the path is unreadable, so a probe that changes the PATH silently converts red into skip — the option must change which bytes are read, never whether they exist.
 - [ ] [#lzktcorpusnotgradleinput] lazily-kt's conformance corpus is NOT a declared input of the gradle 'test' task, so editing a fixture leaves 'test' UP-TO-DATE and the run reports green having replayed nothing — a false green that defeats any corpus-perturbation probe. Compounding it, tasks.test wires no environment(...), so the test JVM inherits the DAEMON's environment and a daemon started before LAZILY_SPEC_DIR was set serves the stale path. Today the only defence is remembering '--no-daemon --rerun-tasks'. Declare the corpus directory as a task input so a fixture change invalidates the task, and pass the corpus-dir variable through environment(...) explicitly. Definition of done: flip one assertion key in a scratch corpus and prove a plain 'make check' (no flags, warm daemon) reddens.
 - [ ] [#lzledgeragreementaudit] A KNOWN_UNCOVERED entry in a binding's shell coverage guard does NOT stop a test host that DISCOVERS fixtures by enumerating the corpus directory from trying to replay them — the two ledgers describing the same absence can disagree silently. lazily-cs was red on HEAD for exactly this (CI 31298919123): collections/registers_convergence.json was declared uncovered in the script while CollectionsConformanceTests crashed on it with a bare KeyNotFoundException naming neither the fixture nor the reason. Fixed there in b8cdb7e by adding the Unsupported entry and making the shape dispatch fail closed. Audit the other eight bindings for the same split: for each, list the fixtures in KNOWN_UNCOVERED, check whether the runner enumerates or names fixtures, and confirm an enumerating runner has a matching in-host ledger entry plus a fail-closed default on an unrecognised fixture shape. All eight are currently green, so this is about the NEXT fixture added to the shared corpus.

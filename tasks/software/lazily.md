@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: 4e75e782-bbd0-4a3a-918f-1dc6def55d28
+resume: 2ac78f82-e8c4-4d01-a842-aad8af805ab1
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -326,6 +326,37 @@ One correction I caught myself: the first splice left a stray three-space indent
 Process note: preflight raised `queue_stall_detected` — "prior cycle committed with 7 drainable heads but the loop neither continued nor recorded a valid stop reason". That is an artifact of how I am pacing this drain: each cycle ends its turn and re-enters through a scheduled wakeup, so from the binary's view the turn stopped without continuing in-turn. The queue has in fact drained 8 items in a row. Worth knowing the signal cannot distinguish "paused between cycles by design" from "stalled", but nothing is stuck.
 
 Exchange is at 283 lines (session-accretion `warn`); queue is active so I am not compacting.
+
+### Re: #lzzigspecdiroption — runtime corpus root, and the skip trap closed structurally — opus-5
+
+Both roots were comptime constants — `CONFORMANCE_ROOT` in `conformance_json.zig` and `SPEC_DIR` in `reactive_map.zig`, the latter `++`-concatenated at four sites. Both now resolve through `LAZILY_SPEC_CONFORMANCE_DIR`, the variable the sibling bindings and this repo's own coverage guard already use. Default unchanged; `SPEC_DIR` is gone.
+
+**The compounding trap was wider than the item predicted.** It flagged `specFixturesPresent()` in one file. There are **eleven** presence probes in this repo with the same shape:
+
+```zig
+fn specFixturesPresent() bool { _ = read(...) catch return false; }
+```
+
+Every one converts *any* error — including "the corpus you named is not there" — into `error.SkipZigTest`. So returning an error from the read is not enough: the error is swallowed by exactly the code the fail-closed rule exists to protect. I found this because my first implementation *did* return an error, and the nonexistent-directory probe still produced **11 skips** instead of failing.
+
+So the check sits in `specReadFile`, the one point every corpus read funnels through, and **panics**. A panic cannot be caught into a skip, so the guarantee is structural rather than something eleven call sites must each remember. That also let me simplify the per-site handling back to plain `catch return null` / `catch return false`, with a comment saying why that is safe *here*.
+
+**Verified in four states rather than argued:**
+
+| | result |
+|---|---|
+| default, no override | 523 pass |
+| override → byte-identical copy | 523 pass |
+| override → copy with one perturbed expectation | **1 failed** |
+| override → nonexistent directory | **panics, 0 skips** |
+
+The third is the one that matters: it proves the option changes which **bytes** are read, not merely which path gets printed. The fourth is the trap, now closed.
+
+**The self-test gained the sibling it never had.** The existing `an absent corpus loads as null` test reads a deliberately-missing path, so it now opts out via `absence_probe_mode` — otherwise the whole suite aborts under an override, which is precisely when a probe needs it. But asserting *only* the null branch is how the trap survived in the first place: absence has two provenances and the suite pinned one. There is now a test for the fatal branch too.
+
+`make check` green, 147/147 scenarios. `lazily-zig@6e5d677`, superproject pointer committed.
+
+This unblocks `#lzperturbaudit` for zig — the per-family perturbation sweep no longer needs to edit and restore a constant, and can no longer be fooled by a typo'd path. Exchange is at 306 lines (session-accretion `warn`); queue is active so I am not compacting.
 <!-- agent:boundary:c6ef3fb1 -->
 <!-- /agent:exchange -->
 
@@ -342,7 +373,7 @@ Exchange is at 283 lines (session-accretion `warn`); queue is active so I am not
 - ~~do [#lzspecgcreferencedtombstone]~~
 - ~~do [#lzzigcanonrunner]~~
 - ~~do [#lzpartialmarkadjudicate]~~
-- 📌 do [#lzzigspecdiroption]
+- ~~📌 do [#lzzigspecdiroption]~~
 - 📌 do [#lzktcorpusnotgradleinput]
 - 📌 do [#lzledgeragreementaudit]
 - 📌 do [#lzzigdiffmutant]
@@ -353,7 +384,6 @@ Exchange is at 283 lines (session-accretion `warn`); queue is active so I am not
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzzigspecdiroption] lazily-zig has NO corpus-dir override: SPEC_DIR in src/lazily/reactive_map.zig is a comptime const used as SPEC_DIR ++ '/x.json', so the #lzdefaultmodeuniform probe had to temporarily edit the constant and restore it. Every future corpus probe in this binding pays that cost, and a probe that edits the shared ../lazily-spec checkout instead reddens all nine bindings concurrently. Add a '-Dspec-dir' build option (or a runtime env read) threaded to every fixture path, and keep the default unchanged. Compounding trap to preserve: specFixturesPresent() makes the tests 'return error.SkipZigTest' when the path is unreadable, so a probe that changes the PATH silently converts red into skip — the option must change which bytes are read, never whether they exist.
 - [ ] [#lzktcorpusnotgradleinput] lazily-kt's conformance corpus is NOT a declared input of the gradle 'test' task, so editing a fixture leaves 'test' UP-TO-DATE and the run reports green having replayed nothing — a false green that defeats any corpus-perturbation probe. Compounding it, tasks.test wires no environment(...), so the test JVM inherits the DAEMON's environment and a daemon started before LAZILY_SPEC_DIR was set serves the stale path. Today the only defence is remembering '--no-daemon --rerun-tasks'. Declare the corpus directory as a task input so a fixture change invalidates the task, and pass the corpus-dir variable through environment(...) explicitly. Definition of done: flip one assertion key in a scratch corpus and prove a plain 'make check' (no flags, warm daemon) reddens.
 - [ ] [#lzledgeragreementaudit] A KNOWN_UNCOVERED entry in a binding's shell coverage guard does NOT stop a test host that DISCOVERS fixtures by enumerating the corpus directory from trying to replay them — the two ledgers describing the same absence can disagree silently. lazily-cs was red on HEAD for exactly this (CI 31298919123): collections/registers_convergence.json was declared uncovered in the script while CollectionsConformanceTests crashed on it with a bare KeyNotFoundException naming neither the fixture nor the reason. Fixed there in b8cdb7e by adding the Unsupported entry and making the shape dispatch fail closed. Audit the other eight bindings for the same split: for each, list the fixtures in KNOWN_UNCOVERED, check whether the runner enumerates or names fixtures, and confirm an enumerating runner has a matching in-host ledger entry plus a fail-closed default on an unrecognised fixture shape. All eight are currently green, so this is about the NEXT fixture added to the shared corpus.
 - [ ] [#lzzigdiffmutant] lazily-zig's lossless-tree replay does not pin the anti-entropy FILTER, only convergence: mutating LosslessTreeCrdt.diff to ignore the partner frontier (ship every op in the log) reddens NONE of the nine fixtures, including non_contiguous_anti_entropy.json whose subject is a replica with a gap. deliver.only indexes into the diff, so a diff whose contents change should select different ops and change what the gapped replica renders (hole_before_repair expects b='013') — it does not, and the reason is not yet established. Either the runner's deliver path is not exercising the frontier as intended, or applyUpdate's idempotence absorbs the difference; find out which, then make the fixture discriminating (or record honestly that convergence is all it can pin). Contrast the at_byte char-offset mutant, which reddens six of the nine.

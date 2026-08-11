@@ -416,6 +416,12 @@ fn repair_response_heading_after_body(exchange: &str, response: &str) -> Option<
         return None;
     }
 
+    if let Some(repaired) =
+        repair_response_body_split_around_heading(exchange, expected_heading, expected_body)
+    {
+        return Some(repaired);
+    }
+
     let body_start = exchange.rfind(expected_body)?;
     let body_end = body_start + expected_body.len();
     let mut cursor = body_end;
@@ -454,6 +460,122 @@ fn repair_response_heading_after_body(exchange: &str, response: &str) -> Option<
     repaired.push_str(&exchange[body_start..heading_start]);
     repaired.push_str(after_heading.strip_prefix('\n').unwrap_or(after_heading));
     Some(repaired)
+}
+
+#[derive(Debug)]
+struct ResponseFragmentLine {
+    start: usize,
+    end: usize,
+    normalized: String,
+}
+
+fn response_fragment_lines(content: &str) -> Vec<ResponseFragmentLine> {
+    let mut offset = 0;
+    let mut lines = Vec::new();
+    for line in content.split_inclusive('\n') {
+        let start = offset;
+        offset += line.len();
+        let trimmed = line.trim();
+        if trimmed.is_empty() || (trimmed.starts_with("<!--") && trimmed.ends_with("-->")) {
+            continue;
+        }
+        lines.push(ResponseFragmentLine {
+            start,
+            end: offset,
+            normalized: strip_exchange_prompt_prefix(trimmed.to_string())
+                .trim()
+                .to_string(),
+        });
+    }
+    lines
+}
+
+fn response_fragment_gap_is_transient(gap: &str) -> bool {
+    gap.lines().all(|line| {
+        let trimmed = line.trim();
+        trimmed.is_empty() || (trimmed.starts_with("<!--") && trimmed.ends_with("-->"))
+    })
+}
+
+/// Repair a streamed response whose retained prefix remained after the heading
+/// while its later segments were projected immediately before that heading.
+///
+/// The repair is intentionally exact and fail-closed: the non-empty,
+/// non-transient lines on both sides must jointly equal the captured response
+/// body (after stripping the editor's one prompt prefix), and everything
+/// between those fragments and the exchange tail must be transient markup.
+fn repair_response_body_split_around_heading(
+    exchange: &str,
+    expected_heading: &str,
+    expected_body: &str,
+) -> Option<String> {
+    let expected_topic = normalize_replay_topic(expected_heading);
+    let mut offset = 0;
+    let mut matching_heading = None;
+    for line in exchange.split_inclusive('\n') {
+        let start = offset;
+        offset += line.len();
+        let actual_heading = line.trim();
+        if actual_heading.starts_with("### Re:")
+            && normalize_replay_topic(actual_heading) == expected_topic
+        {
+            matching_heading = Some((start, offset, actual_heading.to_string()));
+        }
+    }
+    let (heading_start, heading_end, actual_heading) = matching_heading?;
+
+    let before = &exchange[..heading_start];
+    let after = &exchange[heading_end..];
+    let expected_lines = response_fragment_lines(expected_body);
+    let before_lines = response_fragment_lines(before);
+    let after_lines = response_fragment_lines(after);
+    if expected_lines.len() < 2 {
+        return None;
+    }
+
+    for split in 1..expected_lines.len() {
+        let expected_prefix = &expected_lines[..split];
+        let expected_suffix = &expected_lines[split..];
+        if before_lines.len() < expected_suffix.len() || after_lines.len() < expected_prefix.len() {
+            continue;
+        }
+        let actual_suffix = &before_lines[before_lines.len() - expected_suffix.len()..];
+        let actual_prefix = &after_lines[..expected_prefix.len()];
+        if !actual_suffix
+            .iter()
+            .zip(expected_suffix)
+            .all(|(actual, expected)| actual.normalized == expected.normalized)
+            || !actual_prefix
+                .iter()
+                .zip(expected_prefix)
+                .all(|(actual, expected)| actual.normalized == expected.normalized)
+        {
+            continue;
+        }
+
+        let suffix_start = actual_suffix.first()?.start;
+        let suffix_end = actual_suffix.last()?.end;
+        let prefix_end = actual_prefix.last()?.end;
+        let before_gap = &before[suffix_end..];
+        let after_tail = &after[prefix_end..];
+        if !response_fragment_gap_is_transient(before_gap)
+            || !response_fragment_gap_is_transient(after_tail)
+        {
+            continue;
+        }
+
+        let mut repaired = String::with_capacity(exchange.len() + expected_body.len());
+        repaired.push_str(&exchange[..suffix_start]);
+        repaired.push_str(actual_heading.trim_end());
+        repaired.push_str("\n\n");
+        repaired.push_str(expected_body);
+        repaired.push('\n');
+        repaired.push_str(before_gap);
+        repaired.push_str(after_tail);
+        return Some(repaired);
+    }
+
+    None
 }
 
 /// Remove consecutive duplicate `### Re:` blocks from document content.
@@ -1121,6 +1243,48 @@ mod tests {
             repaired.find("Done once.").unwrap()
                 < repaired.find("<!-- no-pending-capture -->").unwrap()
         );
+    }
+
+    #[test]
+    fn materialize_response_repairs_body_split_around_matching_tail_heading() {
+        let current = concat!(
+            "<!-- agent:exchange -->\n",
+            "Earlier response.\n\n",
+            "Second paragraph.\n\n",
+            "Third paragraph.\n\n",
+            "### Re: do [#ship] — gpt-5 (HEAD)\n\n",
+            "❯ > **Queue prompt:**\n",
+            "❯ >\n",
+            "❯ > do [#ship]\n\n",
+            "Done first.\n",
+            "<!-- agent:boundary:live -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: do [#ship] — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> do [#ship]\n\n",
+            "Done first.\n\n",
+            "Second paragraph.\n\n",
+            "Third paragraph.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        let repaired = materialize_response_in_current_exchange(current, response)
+            .expect("split response cell should be repairable");
+
+        assert!(response_materialized_in_content(response, &repaired));
+        assert_eq!(repaired.matches("### Re: do [#ship]").count(), 1);
+        assert_eq!(repaired.matches("Done first.").count(), 1);
+        assert_eq!(repaired.matches("Second paragraph.").count(), 1);
+        assert_eq!(repaired.matches("Third paragraph.").count(), 1);
+        assert!(
+            repaired.find("### Re: do [#ship]").unwrap()
+                < repaired.find("> **Queue prompt:**").unwrap()
+        );
+        assert!(repaired.find("Done first.").unwrap() < repaired.find("Second paragraph.").unwrap());
     }
 
     #[test]

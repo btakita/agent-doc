@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.238
+
+- **Fix: retained streaming closeout no longer strands a response heading after
+  splitting its body around that heading.**
+
+An editor projection could preserve the first streamed response segment after
+its transient `(HEAD)` heading while later response segments landed immediately
+before the heading. The retained-response materializer only repaired the
+all-body-before-heading shape, so retry appended instead of reassembling the
+cell and the integrity gate correctly stopped on the apparent bodyless heading.
+
+Recovery now recognizes the exact split retained cell, including the one
+editor-added `❯` prefix that prompt normalization may have placed on quoted
+queue context. It reconstructs one contiguous heading and captured body while
+preserving transient guard markers. The classifier fails closed unless the
+non-transient lines on both sides jointly equal the captured response, so it
+cannot reorder operator text or an unrelated response.
+
 ## 0.35.237
 
 - **Fix (`#dispatchonlyresubmitwiring`): dispatch-only reopen now submits its

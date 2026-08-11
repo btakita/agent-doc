@@ -273,20 +273,6 @@ Verification passed: focused tests, `make check`, staged plugin-version and diff
 
 Restart the JetBrains IDE once to load the updated Kotlin plugin. The route supervisor replacement is already accepted and will activate at this turn boundary.
 
-The dispatch-only starting-pane route now passes the document's exact trigger into the controller classifier. When the composer contains only agent-doc's own stranded trigger, the route releases its guard, registers the authoritative pane, sends one bare harness submit key, and requires a new controller turn-admission projection before returning success. A missing projection fails closed without a second Enter. Operator words, a different document's trigger, and every other draft remain operator-owned.
-
-The live proof found and fixed the remaining reported-shape defect: the normalizer handled `❯` but not Codex's actual `›` prompt sigil. Both sigils and NBSP padding are now covered. The public classifier fixtures were also scrubbed to neutral `/repo/tasks/...` paths.
-
-Proof:
-
-- Changed paths: `agent-doc-controller/src/dispatch.rs`, `agent-doc-route-io/src/dispatch_only.rs`, `agent-doc-route-io/tests/route/pane_resolution.rs`, `specs/08a-session-actor-contract.md`, `VERSIONS.md`, plus the release-version manifests and bundled skill copies.
-- Test-first evidence: the new isolated live tmux test initially failed on `› agent-doc …/sdk.md` as `OperatorDraft`; after controller normalization was corrected, the same real-pane test passed.
-- Focused verification: controller stranded-trigger classifier tests passed (5/5); dispatch-only policy/effect tests passed; the isolated live `sdk.md` tmux test passed and observed exactly one empty-line submission before its admission projection.
-- Full verification: `make tmux-ci`, exact-candidate `make check`, `make plugin-version-check`, `git diff --check`, and the added-lines private-name denylist all passed.
-- Installation: `make install` and the one-time `make install-full` passed; the installed CLI reports `agent-doc 0.35.237`; workspace and subrepo controllers recycled gracefully. JetBrains stayed at plugin 0.2.351 because no Kotlin source changed.
-- Publication: main and `v0.35.237` are pushed. CI, Release, PyPI, Book, and Pages workflows are running; the release page was not yet created at closeout time.
-
-Confidence: high. Escalation: none.
 ### Re: #dispatchonlyresubmitwiring — gpt-5
 
 > **Queue prompt:**
@@ -310,9 +296,6 @@ Proof:
 - Publication: main and `v0.35.237` are pushed. CI, Release, PyPI, Book, and Pages workflows are running; the release page was not yet created at closeout time.
 
 Confidence: high. Escalation: none.
-### Re: #dispatchonlyresubmitwiring — gpt-5
-
-Implemented and released as agent-doc 0.35.237 (commit `2d1195064`, tag `v0.35.237`).
 <!-- agent:boundary:d961d64a:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue

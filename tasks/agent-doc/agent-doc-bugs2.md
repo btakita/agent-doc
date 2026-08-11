@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -349,11 +349,24 @@ Confidence: high. No source-code work remains; only the restart-dependent live e
 The implementation is complete and the retained live-proof item is now explicitly gated in Review as #run3rdpaneswitchverify. The active queue was drained and stopped instead of repeatedly redispatching an operator-only check.
 
 v0.35.241 remains installed and released. IntelliJ must be restarted when safe before the new Kotlin focus listener can provide the final physical editor-switch observation; no additional source-code work is pending.
-<!-- agent:boundary:32273d89:agent-doc-bugs2 -->
+
+### Re: Response
+
+Fixed and shipped as `agent-doc v0.35.242` (`91951a7af`).
+
+- The Codex hook emitted multiple JSON values on stdout. It now emits exactly one valid `UserPromptSubmit` envelope, including failure cases. Updated [preflight_hook.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/src/preflight_hook.rs) and added integration coverage in [codex_hook_integration.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/tests/codex_hook_integration.rs).
+- The `sdk.md` auto-sync miss was caused by IntelliJ still running the older plugin generation. The apparent recovery came from explicit Sync Layout at 14:55:40 and Submit routing at 14:55:43, not passive editor synchronization.
+- The backend correctly converged to two panes—`agent-doc-bugs2.md` and `sdk.md`—once that explicit event arrived.
+
+Verification passed: 8,942 tests, all tmux regression tests, version checks, formatting, and installed-binary JSON smoke testing.
+
+Restart IntelliJ once to activate the already-installed passive auto-sync fix. The release is pushed and its [CI run](https://github.com/btakita/agent-doc/actions/runs/31526875146) and [release run](https://github.com/btakita/agent-doc/actions/runs/31526876317) are currently in progress.
+<!-- agent:boundary:e55e7af9:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- 🚧 do [#flakystatedbfixture]
 <!-- /agent:queue -->
 
 ## Notes
@@ -364,7 +377,7 @@ v0.35.241 remains installed and released. IntelliJ must be restarted when safe b
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#flakystatedbfixture] #agent-doc-bug A parallel test run can corrupt a temp fixture state.db, reddening the suite non-deterministically. Observed 2026-08-10 on 0.35.233: session_check_codex_final_gate_blocks_on_active_auto_queue failed with reliable-sync durable authority hydration failed for /tmp/.tmp43Aufu/session.md: file is not a database: Error code 26, plus authoritative state db /tmp/.tmp43Aufu/.agent-doc/state.db is unavailable; refusing automatic replacement. FALSIFIED 2026-08-10 in 0.35.235 -- do NOT retry these four: (1) the empty-file theory. A 0-byte or 1-byte state.db opens CLEANLY; SQLite initialises it as a new database, and NotADatabase starts at TWO bytes of bad header. So a writer that created the file and died before writing the header cannot produce this failure. The 0.35.235 draft branch that deleted empty files was reverted: unreachable through the stated path, all four of its tests passed with it removed, and it was unsafe because open_and_init_state_db also fails on a lock error while a concurrent process is still initialising the same 0-byte file, so it could unlink a db another process was creating. (2) A stale -wal or -shm beside a 0-byte main db: opens cleanly. (3) tmpfs exhaustion: /tmp is a 94G tmpfs at 1 percent used. (4) Plain cross-process contention: 600 concurrent agent-doc session-check invocations across 25 fresh project roots produced zero corruption. STILL UNKNOWN: which writer leaves 2 or more bytes of non-database content in a fresh fixture root. 0.35.235 makes the next sighting diagnosable instead of another guessing round -- the refusal now reports main length, header=sqlite vs header=foreign, the first 16 bytes as hex plus a printable rendering, and the -wal/-shm sibling sizes, which separates never was a database from torn page-1 of a real ledger. NEXT STEP: run make check in a loop until it reddens and read that evidence line; do not theorise further without it.
+- [ ] 🚧 [#flakystatedbfixture] #agent-doc-bug A parallel test run can corrupt a temp fixture state.db, reddening the suite non-deterministically. Observed 2026-08-10 on 0.35.233: session_check_codex_final_gate_blocks_on_active_auto_queue failed with reliable-sync durable authority hydration failed for /tmp/.tmp43Aufu/session.md: file is not a database: Error code 26, plus authoritative state db /tmp/.tmp43Aufu/.agent-doc/state.db is unavailable; refusing automatic replacement. FALSIFIED 2026-08-10 in 0.35.235 -- do NOT retry these four: (1) the empty-file theory. A 0-byte or 1-byte state.db opens CLEANLY; SQLite initialises it as a new database, and NotADatabase starts at TWO bytes of bad header. So a writer that created the file and died before writing the header cannot produce this failure. The 0.35.235 draft branch that deleted empty files was reverted: unreachable through the stated path, all four of its tests passed with it removed, and it was unsafe because open_and_init_state_db also fails on a lock error while a concurrent process is still initialising the same 0-byte file, so it could unlink a db another process was creating. (2) A stale -wal or -shm beside a 0-byte main db: opens cleanly. (3) tmpfs exhaustion: /tmp is a 94G tmpfs at 1 percent used. (4) Plain cross-process contention: 600 concurrent agent-doc session-check invocations across 25 fresh project roots produced zero corruption. STILL UNKNOWN: which writer leaves 2 or more bytes of non-database content in a fresh fixture root. 0.35.235 makes the next sighting diagnosable instead of another guessing round -- the refusal now reports main length, header=sqlite vs header=foreign, the first 16 bytes as hex plus a printable rendering, and the -wal/-shm sibling sizes, which separates never was a database from torn page-1 of a real ledger. NEXT STEP: run make check in a loop until it reddens and read that evidence line; do not theorise further without it.
 - [/] [#clearsubmitunobservedverify] [operator-verify] Live re-proof for #clearsubmitunobserved (0.35.225): reproduce the reported haiven-dev.md sequence — let the supervisor go dead (or `session restart-supervisor`), then Run Agent Doc so the flow cold-starts a replacement and immediately runs Clear Session Context on the fresh pane. Expect it to SUCCEED instead of failing with `result=submission_unobserved ... unblocker=clear_submission_unobserved`, and expect `session_clear_submit_cleared_state_probe ... result=cleared_state_proven retained_lines=<small>` in ops.log. Then the half that must not regress: on a pane holding a real conversation, break submission (e.g. leave the composer wedged) and confirm the clear still fails closed with `result=conversation_retained`. Unit tests pin the predicate against synthetic captures; only a live pane exercises the tmux scrollback capture and the real harness prompt shapes.
 <!-- /agent:backlog -->
 

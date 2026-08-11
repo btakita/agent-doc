@@ -682,13 +682,39 @@ Every area asserts its headline expectation in every binding — these suites ar
 Two honourable mentions. **js is the cleanest** — 26/26, and its only non-reddening cells are six parked reactive-graph fixtures that are declared in a skip ledger asserted in both directions *and* in the assertion-key guard's `DECLARED_UNCONSUMED` list with a stale-entry check. Pinning nothing today, by declaration, with a tripwire on the declaration. And **cs's prose convention is load-bearing in the right direction**: flipping a prose paragraph is green, but emptying the `prose: ["note"]` declaration reddens, because `note` then becomes an unconsumed key.
 
 Five follow-ups filed, one per defect. Exchange is at 625 lines (session-accretion `warn`); queue is active so I am not compacting.
-<!-- agent:boundary:09cd97ed:lazily -->
+
+### Re: #lzdartvacuousfixtures — 16 vacuous cells, all now reddening — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzdartvacuousfixtures]
+
+
+Both fixtures are bound. Every declared expectation that could previously be flipped to nonsense without consequence now fails a replay runner.
+
+| fixture | cells | before | after |
+|---|---|---|---|
+| `crdt-tree/algebra.json` | 7 declared expectations | 0 redden | **7 redden** |
+| `signaling/frames.json` | 9 per-frame assertion keys | 0 redden | **9 redden** |
+
+**crdt-tree** was asserting against itself. Merge order *n* was compared to merge order 0, the restored replica to its own source, and `expect.delta` / `expect.apply_changed` to Dart literals — so the file could have declared `texts_equal: false` and passed. The properties are now accumulated and handed to `assertKey`, which is the difference that matters: the **fixture's claim** is what fails, rather than a bare `expect` that was true no matter what the file said. `delta` compares the wire form of the emitted ops rather than just asserting emptiness, so `delta: [{...}]` fails too.
+
+**signaling** is the more interesting one, because it explains why nothing caught it. The runner read `wire`, `direction`, `label` and asserted round-trip identity; the `assertions` block on all 17 frames was never passed to `assertionsOf`. **A block no runner binds cannot be reported "unconsumed" — the guard only sees blocks handed to it.** That is the `#lzunboundblockguard` shape in the concrete, and it is why an audit that flips values found this while a guard designed to find unread keys did not.
+
+All nine keys are now read off the **decoded** message re-serialized, not off the fixture's input map. That distinction is load-bearing: asserting against the input would have been satisfied by echoing it back, whereas a decoder that dropped `peer` now fails. Three of the nine are derived rather than copied — `has_capabilities`, `roster_excludes_self` (a welcome roster never names the recipient back to itself) and `server_stamped_from` — so they pin a property rather than a field.
+
+One thing I deliberately did **not** do: the audit noted that corrupting `algebra.json`'s seed text also passes. That is correct behaviour, not a gap — the seed is an input, and the scenario's claim is order-independence, which holds for any seed. Making the seed pinnable would mean inventing an expected text the corpus does not declare.
+
+`make check` OK, control on a byte-identical copy green. `lazily-dart@d5ccebd`, superproject pointer pushed, CI queued.
+
+Exchange is at 662 lines (session-accretion `warn`); queue is active so I am not compacting.
+<!-- agent:boundary:0c72d322:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzdartvacuousfixtures]
+- ~~do [#lzdartvacuousfixtures]~~
 - do [#lzgoassertkeygaps]
 - do [#lzpystdlibfloorsunread]
 - do [#lzconvergedlistlength]
@@ -710,7 +736,6 @@ Five follow-ups filed, one per defect. Exchange is at 625 lines (session-accreti
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzdartvacuousfixtures] lazily-dart has two fixtures whose declared expectations pin NOTHING, found by #lzperturbaudit. (1) crdt-tree/algebra.json: test/crdt_tree_test.dart consumes only seed/replicas/merge_orders/restore_peer and asserts self-referentially — merge order n vs merge order 0, restored replica vs its own source, and expect.delta / expect.apply_changed against Dart literals rather than the fixture. All four declared expect keys flip clean AND so does the scenario seed text, so the runner replays 'WRONG' and passes. Only conformance_fixture_drift_test.dart (a byte/semantic mirror compare) keeps the file honest, and that is not an assertion. (2) signaling/frames.json: distributed_conformance_test.dart:52-59 reads only wire/direction/label and asserts round-trip identity; the per-frame assertions blocks (peer, to, from, has_capabilities, capabilities) are never passed to assertionsOf so never enter the tracker — set them to nonsense and the suite is fully green with no drift hit (signaling/ is not mirrored). Fix: bind both blocks through assertionsOf and assert them against replayed state. Definition of done: flipping any declared expect/assertions value in either fixture reddens a replay runner, not just the drift check.
 - [ ] [#lzgoassertkeygaps] Two defects in lazily-go's assertion plumbing, found by #lzperturbaudit. (1) collections_conformance_test.go:345-364 asserts expected.stable_keys_not_invalidated against a NO-OP reconcile: m was already reconciled to the same target one line earlier (:341), so the sibling reorder the fixture's comment names never happens, nothing invalidates, and every primed reader is trivially warm. Measured: ['b','c','a'] passes, ['b'] passes, and ['zzz'] -- a key not in the map -- passes; only [] reddens via the emptiness guard. The fixture's central claim (stable siblings survive a reorder) is untested. Fix: reconcile to a DIFFERENT order than the primed state, then assert. (2) conformance_strict_json_test.go:411 assertKey delegates to jsonValueEqual (:1215-1224), which marshals the actual value to JSON and unmarshals into any -> float64. At arena_blob.json's ~1.3e19 checksum the double spacing is 2048, so a +/-1 perturbation is invisible (+7700 reddens). Only that one cell is affected today and its twin in the typed 'expected' block still catches the error, but it is a live trap for any future fixture carrying a hash or u64 id as a bare number in an assertions block. Fix: compare integers via json.Number or a typed path rather than float64.
 - [ ] [#lzpystdlibfloorsunread] lazily-py's stdlib anti-vacuity budget is not read by anything, found by #lzperturbaudit. scenario_floor, assertion_floor and mutation_floor are REQUIRED properties of lazily-spec/schemas/stdlib-fixture.schema.json, and a repo-wide grep (excluding build/ and .claude/worktrees/) finds zero references in src/, tests/ or scripts/ — tests/test_stdlib_conformance.py:148-161 reads feature/scenarios/steps/mutations and stops. Measured: scenario_floor 6 -> 99 against a six-scenario fixture is green. The mutation ledger beside them is self-referential: :159-161 asserts must_fail is non-empty and a subset of the fixture's own scenario ids, and never APPLIES a mutation — so mutations: [] passes (zero iterations) and rebinding an operator to an unrelated scenario passes; only an id outside the fixture reddens. This is the failure mode feedback_conformance_tests_drive_real_behavior_not_runner_bookkeeping names. Fix: enforce the three floors against what the run actually replayed, and either apply the mutations or stop shipping them as if they were checked. Definition of done: raising any floor above the real count reddens, and emptying mutations reddens.
 - [ ] [#lzconvergedlistlength] List-shaped expectations checked by per-element membership never assert their own LENGTH, so the corpus can shrink an obligation and stay green (#lzperturbaudit). Confirmed in lazily-py distributed/anti_entropy_converge.json expect.converged (tests/test_collection_conformance.py:586-593 loops the declared wants and searches plane.converged() for each; contents are pinned but deleting an entry is green) and lazily-py lossless-tree/one_leaf_edit_delta.json expect.converged (tests/test_lossless_tree_conformance.py:160-168 compares names[1:] against names[0], so a one-element list runs ZERO comparisons). lazily-go's message-passing expect.rpc.unresolved_after_frame_indices is the same shape — a membership filter where [7] (no such frame) is fully vacuous. Add a length/coverage assertion beside each membership loop so the declared list must account for every element the run produced. Audit cs/dart/js for the same shape while there — dart's materialization eager_present and receipts nonterminal_outcomes are order-blind but DO redden on drop, so they are fine and make a good contrast.

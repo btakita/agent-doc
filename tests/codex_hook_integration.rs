@@ -204,15 +204,30 @@ fn codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit() {
         "prompt": format!("agent-doc {}", doc.display()),
     });
 
-    agent_doc()
+    let submit = agent_doc()
         .current_dir(tmp.path())
         .args(["hook", "codex-user-prompt-submit"])
         .write_stdin(submit_payload.to_string())
         .assert()
-        .success()
-        .stdout(predicate::str::contains(
-            "[agent-doc] cycle contract (preflight already ran in the binary;",
-        ));
+        .success();
+    let hook_output: serde_json::Value = serde_json::from_slice(&submit.get_output().stdout)
+        .expect("UserPromptSubmit stdout must be exactly one valid JSON document");
+    assert_eq!(
+        hook_output["hookSpecificOutput"]["hookEventName"],
+        "UserPromptSubmit"
+    );
+    let additional_context = hook_output["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .expect("hook response must carry additionalContext");
+    assert!(
+        additional_context
+            .contains("[agent-doc] cycle contract (preflight already ran in the binary;")
+    );
+    let contract_end = additional_context
+        .find("\n[agent-doc] cycle contract")
+        .expect("contract marker must seal the captured preflight JSON");
+    serde_json::from_str::<serde_json::Value>(&additional_context[..contract_end])
+        .expect("captured preflight contract must remain valid JSON");
 
     // The same hook invocation must also have opened the cycle. This proves
     // Codex admission is not merely an injected marker or tracking-only state.
@@ -270,6 +285,40 @@ fn codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit() {
             "session hook state should be cleared after successful stop auto-close"
         );
     }
+}
+
+#[test]
+fn codex_hook_cli_wraps_admission_failure_in_one_json_document() {
+    let tmp = TempDir::new().unwrap();
+    let missing = tmp.path().join("missing.md");
+    let submit_payload = json!({
+        "session_id": "codex-session-failure",
+        "turn_id": "turn-1",
+        "cwd": tmp.path().display().to_string(),
+        "prompt": format!("agent-doc {}", missing.display()),
+    });
+
+    let submit = agent_doc()
+        .current_dir(tmp.path())
+        .args(["hook", "codex-user-prompt-submit"])
+        .write_stdin(submit_payload.to_string())
+        .assert()
+        .success();
+    let hook_output: serde_json::Value = serde_json::from_slice(&submit.get_output().stdout)
+        .expect("admission-failure stdout must be exactly one valid JSON document");
+    assert_eq!(
+        hook_output["hookSpecificOutput"]["hookEventName"],
+        "UserPromptSubmit"
+    );
+    let additional_context = hook_output["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .expect("admission failure must carry additionalContext");
+    assert!(additional_context.contains("[agent-doc] cycle contract UNAVAILABLE"));
+    assert!(additional_context.contains("did not resolve to a file"));
+    assert!(
+        String::from_utf8_lossy(&submit.get_output().stderr)
+            .contains("[agent-doc] preflight hook failed")
+    );
 }
 
 #[test]

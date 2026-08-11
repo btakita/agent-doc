@@ -87,20 +87,39 @@ fn read_stdin_payload() -> anyhow::Result<String> {
     Ok(payload)
 }
 
+/// Emit one harness-valid UserPromptSubmit JSON response.
+///
+/// Codex parses stdout as JSON whenever its first non-whitespace byte is `[` or
+/// `{`. Both agent-doc outcome markers begin with `[agent-doc]`, and successful
+/// admission also starts with the preflight JSON object, so printing the context
+/// directly makes Codex parse either one marker-shaped pseudo-array or two
+/// concatenated JSON documents. Always serialize the context inside the
+/// supported hook envelope instead (`#codex-hook-json-boundary`). Claude Code
+/// accepts the same envelope.
+fn emit_user_prompt_submit_context(context: &str) {
+    let output = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": context,
+        }
+    });
+    println!("{output}");
+}
+
 /// Emit a machine-readable admission failure as injected turn context.
 ///
 /// stdout only, on purpose — see [`ADMISSION_FAILURE_MARKER`]. Callers log their
 /// own stderr diagnostic for the operator's hook log, because the stderr copy is
 /// wanted even for prompts that never reach this function.
 fn emit_admission_failure(target: &str, err: &anyhow::Error) {
-    println!("{ADMISSION_FAILURE_MARKER}");
-    println!("document: {target}");
-    println!("reason: {err:#}");
-    println!(
-        "remedy: preflight refused to admit this turn, so no cycle contract exists. \
+    emit_user_prompt_submit_context(&format!(
+        "{ADMISSION_FAILURE_MARKER}\n\
+         document: {target}\n\
+         reason: {err:#}\n\
+         remedy: preflight refused to admit this turn, so no cycle contract exists. \
          Do NOT shell `agent-doc preflight` to recreate admission. Report this failure \
          and its reason to the operator, and stop."
-    );
+    ));
 }
 
 /// Outcome of a hook admission attempt.
@@ -153,11 +172,11 @@ fn run_preflight_for_prompt(prompt: &str, cwd: &Path) -> HookAdmission {
     };
 
     match run_preflight_within_budget(&file, hook_admission_budget()) {
-        Ok(()) => {
+        Ok(contract) => {
             // The marker seals a successfully produced contract. It must not
             // appear on any error path because the skill treats its absence as
             // failed admission.
-            println!("{CONTRACT_MARKER}");
+            emit_user_prompt_submit_context(&format!("{}\n{CONTRACT_MARKER}", contract.trim_end()));
             HookAdmission::Admitted
         }
         Err(err) => {
@@ -185,13 +204,16 @@ fn run_preflight_for_prompt(prompt: &str, cwd: &Path) -> HookAdmission {
 /// only after preflight returns, so a worker that finishes mid-report can emit a
 /// truncated contract but never the seal, and the agent's three-state read still
 /// lands on "admission failed".
-fn run_preflight_within_budget(file: &Path, budget: std::time::Duration) -> anyhow::Result<()> {
+fn run_preflight_within_budget(file: &Path, budget: std::time::Duration) -> anyhow::Result<String> {
     let preflight_file = file.to_path_buf();
     run_within_budget(file, budget, move || {
-        agent_doc_preflight_command_io::run_with_options(
+        let mut output = Vec::new();
+        agent_doc_preflight_command_io::run_with_options_to_writer(
             &preflight_file,
             agent_doc_preflight_command_io::PreflightOptions { probe: false },
-        )
+            &mut output,
+        )?;
+        String::from_utf8(output).map_err(anyhow::Error::from)
     })
 }
 
@@ -201,9 +223,10 @@ fn run_preflight_within_budget(file: &Path, budget: std::time::Duration) -> anyh
 /// provably does not finish. Driving it with a tiny budget and real preflight
 /// instead is a race — a fast-failing preflight wins and the test asserts the
 /// wrong branch (CI caught exactly that).
-fn run_within_budget<F>(file: &Path, budget: std::time::Duration, work: F) -> anyhow::Result<()>
+fn run_within_budget<T, F>(file: &Path, budget: std::time::Duration, work: F) -> anyhow::Result<T>
 where
-    F: FnOnce() -> anyhow::Result<()> + Send + 'static,
+    T: Send + 'static,
+    F: FnOnce() -> anyhow::Result<T> + Send + 'static,
 {
     let (tx, rx) = std::sync::mpsc::channel();
     let worker = std::thread::Builder::new()
@@ -216,11 +239,11 @@ where
         })?;
 
     match rx.recv_timeout(budget) {
-        Ok(Ok(())) => {
+        Ok(Ok(value)) => {
             // Join only on the path where the worker already finished, so a
             // slow preflight can never block past the budget.
             worker.join().ok();
-            Ok(())
+            Ok(value)
         }
         Ok(Err(message)) => {
             worker.join().ok();
@@ -411,7 +434,7 @@ mod tests {
         let err = run_within_budget(
             Path::new("/nonexistent/agent-doc-budget-probe.md"),
             std::time::Duration::from_secs(30),
-            || Err(anyhow::anyhow!("preflight refused for its own reason")),
+            || Err::<(), _>(anyhow::anyhow!("preflight refused for its own reason")),
         )
         .expect_err("a failing worker must fail the admission");
 

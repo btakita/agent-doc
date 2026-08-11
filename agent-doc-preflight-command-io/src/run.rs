@@ -32,6 +32,7 @@ use agent_doc_turn::drain_stall::{StallFacts, StallVerdict, classify_stall};
 use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_workflow::session_cycle::{compute_user_intent_prompt_changes, derive_turn_scope};
 use anyhow::Context;
+use std::io::Write;
 
 /// Injects the lazily reactive CRDT model as the diff's `current` source
 /// (#preflight-lazily-diff-feed). Lives here (not in `agent-doc-diff-io`)
@@ -139,6 +140,22 @@ fn maybe_record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool)
 }
 
 pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
+    let stdout = std::io::stdout();
+    let mut stdout = stdout.lock();
+    run_with_options_to_writer(file, options, &mut stdout)
+}
+
+/// Run preflight while directing its single JSON result to `output`.
+///
+/// Hook adapters use this boundary to wrap the preflight contract in their
+/// harness-specific JSON envelope without ever writing a partial or second JSON
+/// document to process stdout. The ordinary CLI path above still writes the
+/// exact same preflight JSON directly to stdout.
+pub fn run_with_options_to_writer(
+    file: &Path,
+    options: PreflightOptions,
+    writer: &mut dyn Write,
+) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
@@ -1913,7 +1930,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
 
     let json =
         serde_json::to_string_pretty(&output).context("failed to serialize preflight output")?;
-    println!("{}", json);
+    writeln!(writer, "{}", json)?;
 
     Ok(())
 }

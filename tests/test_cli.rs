@@ -3412,8 +3412,9 @@ fn test_agent_doc_codex_hook_io_owns_blocked_stop_payload_sidecar() {
 /// log and never the agent. A refusing hook then looks exactly like a hook that
 /// never ran, and the agent has no reason and no remedy.
 ///
-/// The hook must therefore always name its outcome on stdout: the contract
-/// marker on success, or an explicit machine-readable admission-failure marker.
+/// The hook must therefore always name its outcome inside one valid
+/// UserPromptSubmit JSON envelope: the contract marker on success, or an
+/// explicit machine-readable admission-failure marker.
 #[test]
 fn test_preflight_hook_never_emits_silence_on_admission_failure() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -3422,9 +3423,12 @@ fn test_preflight_hook_never_emits_silence_on_admission_failure() {
 
     for required in [
         "pub const ADMISSION_FAILURE_MARKER",
+        "fn emit_user_prompt_submit_context(",
+        "\"hookEventName\": \"UserPromptSubmit\"",
+        "\"additionalContext\": context",
         "fn emit_admission_failure(",
-        "println!(\"{ADMISSION_FAILURE_MARKER}\")",
-        "println!(\"reason: {err:#}\")",
+        "emit_user_prompt_submit_context(&format!(",
+        "reason: {err:#}",
         "emit_admission_failure(&file.display().to_string(), &err)",
     ] {
         assert!(
@@ -3433,11 +3437,13 @@ fn test_preflight_hook_never_emits_silence_on_admission_failure() {
         );
     }
 
-    // The failure marker is injected context, so it must go to stdout — the
-    // whole defect was a diagnostic that only ever reached stderr.
+    // The failure marker is injected context, so it must stay in the stdout
+    // response envelope — the whole defect was a diagnostic that only ever
+    // reached stderr.
     assert!(
-        !preflight_hook_source.contains("eprintln!(\"{ADMISSION_FAILURE_MARKER}\")"),
-        "the admission-failure marker must reach the agent on stdout, not stderr"
+        !preflight_hook_source.contains("eprintln!(\"{ADMISSION_FAILURE_MARKER}\")")
+            && preflight_hook_source.contains("println!(\"{output}\")"),
+        "the admission-failure marker must reach the agent through valid hook JSON on stdout"
     );
 
     // Admission still failed, so the failure marker must stay distinct from the

@@ -2,6 +2,25 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.242
+
+- **Fix: Codex UserPromptSubmit admission now emits exactly one valid hook JSON
+response.**
+
+The combined Codex admission hook wrote the pretty-printed preflight contract
+and then a `[agent-doc]` success marker directly to stdout. Codex treats stdout
+starting with `{` or `[` as structured hook output, so this became either two
+concatenated JSON documents or a marker-shaped invalid JSON array and Codex
+reported `hook returned invalid user prompt submit JSON output`. The same defect
+also hid agent-doc's explicit admission-failure context.
+
+Preflight now supports a caller-owned output writer. The hook captures the
+contract in memory and emits one `UserPromptSubmit` `hookSpecificOutput` object,
+with the complete contract and final outcome marker in `additionalContext`.
+Ordinary `agent-doc preflight` output remains unchanged. The integration test
+now parses the actual CLI stdout as one JSON document and separately validates
+the embedded preflight contract.
+
 ## 0.35.241
 
 - **Fix: validated stream pre-capture preserves the established empty-response

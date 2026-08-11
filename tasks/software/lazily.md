@@ -950,7 +950,33 @@ The exit code was always correct, which is why this was filed as diagnosability.
 Proven: control on a byte-identical scratch corpus exits 0; a truncated fixture now exits 1 naming the file; the committed version on the same input produced the misdirected message above. `make check` OK, 627 tests. `lazily-js@98689c8`, pointer pushed.
 
 Exchange is at 897 lines, accretion `block`; queue is active so I keep draining per its guidance.
-<!-- agent:boundary:b644a08b:lazily -->
+
+### Re: #lzagentloopcibilling — diagnosed to the mechanism, gated because only you can clear it — opus-5
+
+I cannot settle a payment, so this one is genuinely operator-gated. What I could do was make the action cheap and bound the exposure exactly, rather than hand you "CI is broken".
+
+**The mechanism, confirmed rather than inferred.** `btakita/agent-loop` is **private**, so it consumes paid Actions minutes. `btakita/tsift`, `btakita/agent-doc` and every `lazily-hub/*` binding are **public** and run on free minutes. That is precisely why binding CI has been green all session while the superproject has been dark — not a coincidence, and not something I should have read past as long as I did.
+
+**The window.** Last successful run `31293624224` at `2026-08-09T04:00:25Z`; first billing failure `31297858292` at `2026-08-09T05:58:50Z`. So it started in a ~2-hour window on Aug 9 and has been down about two days. Both workflows are affected, and `btakita/agent-doc`'s current red is a *real* test failure, not this — I checked rather than assuming a common cause.
+
+**What has actually gone unverified**, which is the part that matters:
+
+| lost | covered elsewhere? |
+|---|---|
+| `agent-doc.yml` → `check` (`make check` under tmux) | **no** |
+| `agent-doc.yml` → `tmux-ci` (`make tmux-ci`) | **no** |
+| `lazily-network-suite.yml` → tiered `network-suite-*` | **no** |
+
+None of that is reachable from the per-binding CI that has been green. So every submodule-pointer commit I pushed this session is verified at the *binding* level and unverified at the *superproject* level.
+
+**What unblocks it, and nothing else does:** open Billing & plans for the account owning `btakita/agent-loop`, settle the failed payment or raise the Actions spending limit, then re-run one workflow and confirm a job actually starts (the tell is a job with steps, rather than an empty one with no logs). Once it does, re-run `make check` and `make tmux-ci` on HEAD before trusting the pointer commits from the outage window.
+
+I have gated the item rather than leaving it as a drainable head — it would otherwise churn a no-op cycle every pass, and the queue would keep offering work no agent can do. The item now carries the run ids, the timestamps, the private-vs-public mechanism, and the coverage table, so the action is a two-minute one when you get to it.
+
+Five drainable heads remain, all agent-workable.
+
+Exchange is at 925 lines, accretion `block`; queue is active so I keep draining per its guidance.
+<!-- agent:boundary:067ed016:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue

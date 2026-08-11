@@ -296,7 +296,19 @@ Proof:
 - Publication: main and `v0.35.237` are pushed. CI, Release, PyPI, Book, and Pages workflows are running; the release page was not yet created at closeout time.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:d961d64a:agent-doc-bugs2 -->
+
+### Re: Response
+
+Operator verification remains gated; no completion claim was made.
+
+The required proof needs a human watching a real JetBrains IDE and tmux session with a two-column agent-doc layout. Move the focused document pane into the stash window, then change editor tab/focus for that document. The passing observation is: no direct `select-pane` targets the stashed pane; `ops.log` records `pane_layout_projection ... focus=focus_pane_not_co_visible:...`; structural reconciliation surfaces the pane; and the retry focuses it in the agent-doc window.
+
+- Changed paths: only the session document state is updated through the agent-doc binary; no source paths changed.
+- Commands: inspected `#operatorverifylive`, ran `agent-doc plan`, and persisted this gate with `agent-doc write --stream --origin skill --backlog-gate operatorverifylive --commit`.
+- Verification: the item explicitly says it unblocks only on a human watching a real IDE and tmux session, so it was transitioned to `[/]` rather than falsely marked complete.
+
+Confidence: high. Escalation: operator visual proof is required.
+<!-- agent:boundary:1bd1b5e2:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -1096,7 +1096,35 @@ So pointing `LAZILY_SPEC_CONFORMANCE_DIR` at a scratch copy previously **skipped
 `make check` exit 0 with tests **executed** (`11 actionable tasks: 11 executed`), 448 tests, CI green. `lazily-kt@b5be698`, pointer pushed.
 
 Two drainable heads remain. Exchange is at 1050 lines, accretion `block`; queue is active so I keep draining per its guidance.
-<!-- agent:boundary:3dfeab14:lazily -->
+
+### Re: #lzcppapplyupdatelamport — two divergences, and a third the fix exposed — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzcppapplyupdatelamport]
+
+
+**All five reference bindings agree byte-for-byte on the shape**, so there was no spec question to escalate: advance `counter = max(counter, op.id.counter)` **unconditionally, before** the idempotence skip; buffer unheld ops; drain with a retry loop until a full pass applies nothing. `lazily-spec/docs/lossless-tree-crdt.md` states both halves in prose. cpp did neither.
+
+**The pre-fix behaviour, measured rather than described:**
+
+| | before | after |
+|---|---|---|
+| local edit after a higher-counter remote op | `a=xy b=yx` **permanently diverged** | converged |
+| batch delivered in reverse dependency order | `a=deepX b=deep`, **loss permanent** | converged |
+
+The counter case is the sharper one. `a` mints `(4,1)` after having already observed `(9,2)`; `b`'s `apply_op` accepts a `Reorder` only when `op.id > sort_stamp`, so it discards it — and because both frontiers already hold every op, `diff` returns nothing in either direction. **Anti-entropy cannot repair it.** Same for the dropped `LeafEdit`: `apply_op`'s existence guard drops it while `record` observes it into the frontier in the same breath, so no later sync ever offers it again.
+
+**The third divergence is the one worth reporting.** Making the buffer real exposed `split_leaf` minting **two** ids — one for the tail node, one for the op — leaving the first attached to no op, i.e. a permanent hole in the replica's *own* frontier. An edit to that tail then carried a `prev` no partner could ever hold and buffered forever. Verified empirically before fixing: `a=[hello! world] b=[hello world]`, permanently. It had been invisible because without buffering the edit was simply dropped instead of parked — one defect was masking another.
+
+Also worth keeping: a create-before-parent alone would **not** discriminate here, because `apply_op` pushes into `children_[parent]` whether the parent exists yet or not, so the create is accidentally recovered when the parent lands. The `LeafEdit` is the op genuinely destroyed — which is why the buffering test carries all three ops rather than the obvious two.
+
+**On scope, deliberately narrowed and said so.** The item asked for canonical fixtures too. I held those back: a new canonical fixture reddens all ten bindings at once and needs a runner or an excuse in each. More to the point, the agent established that **both scenarios need schema capability the corpus does not have** — scenario A needs a mutation step *after* a sync into that replica (every existing lossless-tree fixture is fork → concurrent edits → sync), and scenario B needs an explicit delivery **order** (`deliver.order: [2,1,0]`) where today `deliver.only` selects a subset in canonical order. So the corpus phase is schema work first, and both scenarios are now specified down to the ops and expectations. Filed.
+
+`make check` OK, 61 tests, corpus green under both mutations, CI green. `lazily-cpp@fb9fc80`, pointer pushed.
+
+One head remains. Exchange is at 1076 lines, accretion `block`; queue is active so I keep draining per its guidance.
+<!-- agent:boundary:1d147fae:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -1123,16 +1151,17 @@ Two drainable heads remain. Exchange is at 1050 lines, accretion `block`; queue 
 - ~~do [#lzjsblocknamemasking]~~
 - ~~do [#lzcsuncomparedvalues]~~
 - ~~do [#lzktgradleinputfingerprint]~~
-- do [#lzcppapplyupdatelamport]
+- ~~do [#lzcppapplyupdatelamport]~~
 - do [#lzstdlibmutantsallbindings]
+- do [#lzspecoutoforderfixtures]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzgdvocab] lazily-gd's reactive-graph runner is missing the fanout/churn/dispose_fanout/dispose_stale_handle bulk ops AND real id recycling, so 2 canonical fixtures remain: churn_returns_to_baseline.json and recycled_id_inherits_nothing.json. Recycling is the hard half and is a DESIGN decision, not runner vocabulary: Godot instance ids are monotonic and never alias, so 'a recycled id inherits nothing' has no natural referent — the binding needs an explicit id layer (a free-list over slot indices with a generation tag, the shape lazily-rs's SlotId uses) before the fixture means anything. Removing both entries from KNOWN_UNCOVERED in scripts/check-conformance-coverage.sh is the definition of done. DONE already: the merge_cell group (5 fixtures) landed with LazilyMergePolicy + Source.merge + ctx.source_with, and GDScript is now ~ on merge-algebra.
-- [ ] [#lzcppapplyupdatelamport] lazily-cpp's LosslessTreeCrdt::apply_update diverges from every other binding in two ways, found while pinning the diff order (#lzdifforderallbindings) and deliberately left unfixed there. (1) It never advances the Lamport counter: rs, go, py and zig all do counter = max(counter, op.id.counter) when applying a remote op, so a subsequent local op is guaranteed a counter above everything it has seen. cpp does not, so a replica that receives a higher-counter remote op and then makes a local edit can mint an id that collides with or sorts before an op it already holds. (2) It declares a buffered_ member that apply_update never uses, so cpp has NO dependency-buffering retry for an op whose parent has not arrived — the other bindings buffer and retry, which is what makes delivery order-tolerant. Neither is exercised by the current corpus, which is why both survived: non_contiguous_anti_entropy.json delivers a gap but never an op whose parent is missing, and no fixture makes a local edit after receiving a higher-counter remote op. Establish the intended semantics from lazily-spec, fix cpp, and add a canonical fixture that discriminates BOTH — a scenario where a replica edits after receiving a higher-counter remote op, and one delivering a child before its parent. Definition of done: the new fixtures redden pre-fix cpp and stay green in the other nine bindings, and cpp's apply_update matches the reference semantics.
 - [ ] [#lzstdlibmutantsallbindings] Four bindings ship a stdlib mutation ledger that nothing applies, and one ships it to nobody. Audited read-only during #lzpystdlibmutants: lazily-go (stdlib_conformance_test.go:100-120) checks must_fail is non-empty and its ids resolve to replayed scenarios, then counts entries against mutation_floor — better than pure self-reference, but no operator is ever applied; lazily-cs (tests/Lazily.Tests/PortableStdlibConformanceTests.cs:187-200) reads all three floors then asserts NotEmpty + Contains, no application; lazily-js (test/stdlib-conformance.test.js:138-141) is weakest of the three — length > 0 and id membership, no floor, no application; lazily-dart (test/stdlib_conformance_test.dart:172-220) does not read the mutations array AT ALL, and a repo-wide search for must_fail returns zero files. Port the shape lazily-py landed in ed812ab and lazily-rs has in tests/stdlib_conformance.rs: an INDEPENDENT interpreter for timer/timeout/revision_barrier, parameterised by operator, perturbing the model rather than the shipped implementation. Two design points proven in py and worth keeping: the set of implemented operators must be DERIVED from the branches the replay actually consulted, never a hand-maintained registry (that registry is the same bookkeeping-drift defect one level up), and an operator the corpus names with no interpreter arm must fail loudly rather than skip. Do NOT assert the complement — must_fail is a lower bound, not a partition (4 of 13 entries break scenarios they do not name); record that as a test so the decision is deliberate if the corpus ever changes. Definition of done: per binding, rebinding a must_fail entry to a scenario the operator does not break reddens, an unimplemented operator reddens naming itself, and every declared pair passes without the operator and fails with it.
+- [ ] [#lzspecoutoforderfixtures] Two canonical lossless-tree scenarios are specified but unlandable until the fixture schema gains two capabilities — established while fixing #lzcppapplyupdatelamport, where cpp diverged on BOTH and no existing fixture could discriminate either. (A) apply_update_advances_counter: seed peer 1 with a para holding leaves x and y (renders 'xy'); fork b at peer 2; six reorders on b so its top counter reaches (9,2) and the last restamps y; sync b->a; THEN a reorder ON A; sync a->b; expect render_on {a: 'xy', b: 'xy'} and converged [a,b]. The blocking capability is step 4: a mutation step on a replica AFTER a sync into that replica. Every existing lossless-tree fixture is fork -> concurrent edits -> sync, so the schema has never needed sync -> edit. (B) out_of_order_delivery_buffers: seed peer 1 with an empty para; fork b (holds only the shell); on a create element 'wrap' under para, create raw leaf 'deep' under wrap, then edit_leaf at_byte 4 inserting 'X'; deliver a->b with order [2,1,0] as ONE apply_update batch; expect render_on {a:'deepX', b:'deepX'}, converged [a,b], live_nodes 3. The blocking capability is deliver.ORDER — an explicit delivery sequence, where today deliver.only selects a subset in canonical order. Note a create-before-parent alone does NOT discriminate in at least one binding (apply_op pushes into children_[parent] whether or not the parent exists, so the create is accidentally recovered); the LeafEdit is the op genuinely destroyed, which is why B carries all three ops. Consider also a second sync step in B asserting converged, to prove the loss is permanent rather than eventually repaired. Landing either fixture reddens all ten bindings until each replays or excuses it — budget the corpus change accordingly (see reference_lazily_spec_new_canonical_fixture_reddens_all_nine).
 <!-- /agent:backlog -->
 
 ## Review

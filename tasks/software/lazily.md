@@ -951,8 +951,6 @@ Proven: control on a byte-identical scratch corpus exits 0; a truncated fixture 
 
 Exchange is at 897 lines, accretion `block`; queue is active so I keep draining per its guidance.
 
-### Re: #lzagentloopcibilling — diagnosed to the mechanism, gated because only you can clear it — opus-5
-
 I cannot settle a payment, so this one is genuinely operator-gated. What I could do was make the action cheap and bound the exposure exactly, rather than hand you "CI is broken".
 
 **The mechanism, confirmed rather than inferred.** `btakita/agent-loop` is **private**, so it consumes paid Actions minutes. `btakita/tsift`, `btakita/agent-doc` and every `lazily-hub/*` binding are **public** and run on free minutes. That is precisely why binding CI has been green all session while the superproject has been dark — not a coincidence, and not something I should have read past as long as I did.
@@ -976,6 +974,7 @@ I have gated the item rather than leaving it as a drainable head — it would ot
 Five drainable heads remain, all agent-workable.
 
 Exchange is at 925 lines, accretion `block`; queue is active so I keep draining per its guidance.
+### Re: #lzagentloopcibilling — diagnosed to the mechanism, gated because only you can clear it — opus-5
 <!-- agent:boundary:067ed016:lazily -->
 <!-- /agent:exchange -->
 

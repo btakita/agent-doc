@@ -47,7 +47,7 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 
 ## Project Controller Event Compatibility
 
-- VS Code CRDT replica IPC must use `.agent-doc/controller.sock` with the controller `crdt_replica` envelope. It must not connect to `.agent-doc/supervisor/*.sock`.
+- VS Code CRDT replica IPC must use `.agent-doc/controller.sock` with the controller `crdt_replica` envelope and include `process.pid` as `editor_pid`. That process-scoped proof lets a detached agent-doc registration establish editor authority through the relay; the controller must not require authority to pre-exist registration. It must not connect to `.agent-doc/supervisor/*.sock`.
 - VS Code drains named-document CRDT deliveries from targeted `EditorIntent` events and the Lazily-backed controller subscription. It must not watch a filesystem event directory or use a fixed interval remote-update pull loop.
 - A successful `replica_pull` envelope with `refused=true, reason=missing_replica` invalidates the cached pre-recycle client. VS Code must atomically re-register the stable visible cut before resuming pull/projection; it must not interpret the refusal as an idle empty delta batch. This matches JetBrains.
 - VS Code reads turn-state refreshes from the Project Controller `state_subscribe` Lazily projection and mirrors the returned snapshot/delta locally. It does not read filesystem state for ordinary turn-state UI. If the Project Controller request fails, the status bar shows `agent-doc: Project Controller disconnected`; there is no compatibility fallback. Native-library reload arrives as the targeted `reload_library` editor intent. Turn-state refreshes are coalesced and use a minimum refresh interval; active-editor changes may force one immediate Project Controller refresh.

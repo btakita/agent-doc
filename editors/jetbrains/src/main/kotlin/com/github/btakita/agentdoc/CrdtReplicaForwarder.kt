@@ -465,6 +465,21 @@ data class ReplicaRegisterAck(
     val canonicalContentHash: String? = null,
 )
 
+/** Build the typed controller payload for one process-scoped editor replica. */
+internal fun controllerReplicaPayload(
+    method: String,
+    identity: String,
+    editorPid: Long,
+    payloadFields: (JsonObject) -> Unit = {},
+): JsonObject = JsonObject().apply {
+    addProperty("method", method)
+    addProperty("identity", identity)
+    addProperty("source", "jetbrains_plugin")
+    payloadFields(this)
+    // Keep the liveness proof after extension fields so callers cannot replace it.
+    addProperty("editor_pid", editorPid)
+}
+
 /** One queued CP-to-editor CRDT update owned by this replica. */
 data class ReplicaRemoteUpdate(
     val patchId: String,
@@ -753,11 +768,12 @@ class CpSocketReplicaTransport(
         identity: String,
         payloadFields: (JsonObject) -> Unit = {},
     ): JsonObject {
-        val payload = JsonObject()
-        payload.addProperty("method", method)
-        payload.addProperty("identity", identity)
-        payload.addProperty("source", "jetbrains_plugin")
-        payloadFields(payload)
+        val payload = controllerReplicaPayload(
+            method,
+            identity,
+            ProcessHandle.current().pid(),
+            payloadFields,
+        )
 
         val obj = JsonObject()
         obj.addProperty("command", "crdt_replica")

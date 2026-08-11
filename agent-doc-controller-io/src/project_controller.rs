@@ -8158,6 +8158,36 @@ mod tests {
         assert_eq!(emitted, 4, "throttled storm must stay bounded");
     }
 
+    #[test]
+    fn detached_replica_admission_delegates_only_live_editor_registration_ingress() {
+        use super::rpc::{
+            ControllerCrdtReplicaMethod, DetachedReplicaAdmission, detached_replica_admission,
+        };
+
+        assert_eq!(
+            detached_replica_admission(ControllerCrdtReplicaMethod::Register, true),
+            DetachedReplicaAdmission::DelegateRegistration,
+            "registration must reach the relay that owns the PID/liveness proof"
+        );
+        assert_eq!(
+            detached_replica_admission(ControllerCrdtReplicaMethod::Register, false),
+            DetachedReplicaAdmission::RefuseNotAgentDocDocument,
+        );
+        for method in [
+            ControllerCrdtReplicaMethod::Deregister,
+            ControllerCrdtReplicaMethod::Update,
+            ControllerCrdtReplicaMethod::Projection,
+            ControllerCrdtReplicaMethod::Pull,
+            ControllerCrdtReplicaMethod::Awareness,
+        ] {
+            assert_eq!(
+                detached_replica_admission(method, true),
+                DetachedReplicaAdmission::RefuseDetachedAuthority,
+                "{method:?} must not bootstrap detached authority"
+            );
+        }
+    }
+
     fn seed_reliable_sync_editor_open(doc: &std::path::Path, tag: &str) {
         let document_hash = agent_doc_hash::document_id_for_path(doc);
         agent_doc_reliable_sync_io::global_liveness_plane()

@@ -1,9 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import {
-  CrdtReplicaForwarder,
-  CrdtReplicaManager,
-  coalescedReplicaTextChange,
+CrdtReplicaForwarder,
+CrdtReplicaManager,
+ControllerSocketReplicaTransport,
+coalescedReplicaTextChange,
+controllerReplicaPayload,
   localReplicaBaselineDecision,
     parsePullDelivery,
     parsePullResponse,
@@ -20,6 +22,25 @@ import {
     type ReplicaTransport,
     utf16RangeToCodePoints,
 } from './crdtReplica.js';
+
+describe('ControllerSocketReplicaTransport', () => {
+    it('carries the process-scoped editor PID in every replica payload', () => {
+        const payload = controllerReplicaPayload(
+            'replica_register',
+            'vscode-4242-test',
+            4242,
+            { editor_pid: 7, state_vector_b64: 'AA==' },
+        );
+
+        assert.equal(payload.method, 'replica_register');
+        assert.equal(payload.source, 'vscode_plugin');
+        assert.equal(payload.editor_pid, 4242);
+        assert.equal(payload.state_vector_b64, 'AA==');
+
+        // The production constructor still defaults to the real process PID.
+        assert.ok(new ControllerSocketReplicaTransport('/tmp'));
+    });
+});
 
 class FakeNode implements ReplicaNode {
     opened: number | null = null;

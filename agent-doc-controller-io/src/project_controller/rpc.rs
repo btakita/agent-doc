@@ -7218,7 +7218,7 @@ fn log_controller_current_text_result(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-enum ControllerCrdtReplicaMethod {
+pub(super) enum ControllerCrdtReplicaMethod {
     #[serde(rename = "replica_register")]
     Register,
     #[serde(rename = "replica_deregister")]
@@ -7718,6 +7718,33 @@ fn is_agent_doc_document(file: &Path) -> bool {
     result
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DetachedReplicaAdmission {
+    DelegateRegistration,
+    RefuseNotAgentDocDocument,
+    RefuseDetachedAuthority,
+}
+
+/// Decide whether a detached replica request may reach the relay authority.
+///
+/// A process-scoped editor `replica_register` is the ingress that establishes
+/// editor authority, so refusing it merely because authority is not established
+/// creates a circular dependency. The relay remains the policy owner for the
+/// registration's PID/liveness proof; every other detached operation stays
+/// fail-closed at this controller boundary.
+pub(super) fn detached_replica_admission(
+    method: ControllerCrdtReplicaMethod,
+    is_agent_doc_document: bool,
+) -> DetachedReplicaAdmission {
+    if !is_agent_doc_document {
+        DetachedReplicaAdmission::RefuseNotAgentDocDocument
+    } else if method == ControllerCrdtReplicaMethod::Register {
+        DetachedReplicaAdmission::DelegateRegistration
+    } else {
+        DetachedReplicaAdmission::RefuseDetachedAuthority
+    }
+}
+
 fn handle_crdt_replica_rpc(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
@@ -7749,41 +7776,49 @@ fn handle_crdt_replica_rpc(
     // `log_op`. The durable stop is the editor only registering agent-doc
     // documents (the JB half); this keeps the controller off the contended disk
     // path for the files that slip through.
-    if !authority.editor_attached() && !is_agent_doc_document(&canonical) {
-        return Ok(crdt_replica_refused_data("not_agent_doc_document"));
-    }
     if !authority.editor_attached() {
-        // `#replicarefusalstorm`: the editor retries a refused registration
-        // forever, so log the first few, then throttle, and raise one advisory
-        // naming the usual cause.
-        let (decision, count) = note_replica_refusal(&canonical);
-        if decision != RefusalLogDecision::Suppress {
-            agent_doc_ops_log_io::log_op(
-                &canonical,
-                &format!(
-                    "controller_crdt_replica_refused file={} method={} source={} reason=detached_authority refusals={}",
-                    canonical.display(),
-                    method_name,
-                    source,
-                    count,
-                ),
-            );
-        }
-        if decision == RefusalLogDecision::EmitStormAdvisory {
-            agent_doc_ops_log_io::log_op(
-                &canonical,
-                &format!(
-                    "controller_crdt_replica_refusal_storm file={} source={} refusals={} \
+        match detached_replica_admission(method, is_agent_doc_document(&canonical)) {
+            DetachedReplicaAdmission::DelegateRegistration => {
+                // The relay validates the process-scoped editor PID and either
+                // bootstraps the routed hub or returns detached_authority.
+            }
+            DetachedReplicaAdmission::RefuseNotAgentDocDocument => {
+                return Ok(crdt_replica_refused_data("not_agent_doc_document"));
+            }
+            DetachedReplicaAdmission::RefuseDetachedAuthority => {
+                    // `#replicarefusalstorm`: stale editors may retry a refused detached
+                    // operation forever, so log the first few, then throttle, and raise
+                    // one advisory naming the usual cause.
+                let (decision, count) = note_replica_refusal(&canonical);
+                if decision != RefusalLogDecision::Suppress {
+                    agent_doc_ops_log_io::log_op(
+                        &canonical,
+                        &format!(
+                            "controller_crdt_replica_refused file={} method={} source={} reason=detached_authority refusals={}",
+                            canonical.display(),
+                            method_name,
+                            source,
+                            count,
+                        ),
+                    );
+                }
+                if decision == RefusalLogDecision::EmitStormAdvisory {
+                    agent_doc_ops_log_io::log_op(
+                        &canonical,
+                        &format!(
+                            "controller_crdt_replica_refusal_storm file={} source={} refusals={} \
                      likely_cause=stale_editor_plugin_generation \
                      remedy=restart_the_editor_ide \
                      note=reload-lib_and_recycle_cannot_fix_a_kotlin_plugin_generation_mismatch",
-                    canonical.display(),
-                    source,
-                    count,
-                ),
-            );
+                            canonical.display(),
+                            source,
+                            count,
+                        ),
+                    );
+                }
+                return Ok(crdt_replica_refused_data("detached_authority"));
+            }
         }
-        return Ok(crdt_replica_refused_data("detached_authority"));
     }
     clear_replica_refusals(&canonical);
 
@@ -10194,7 +10229,6 @@ pub(crate) fn wait_for_controller_path_with_timeout(
         std::thread::sleep(CONNECT_POLL);
     }
 }
-
 
 #[allow(dead_code)]
 pub fn serve(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
@@ -20025,7 +20059,10 @@ mod pane_layout_projection_dispatch_tests {
             "a stashed pane must never reach tmux select-pane"
         );
         assert!(receipt.required);
-        assert!(!receipt.applied, "a refused focus must not count as applied");
+        assert!(
+            !receipt.applied,
+            "a refused focus must not count as applied"
+        );
         assert_eq!(
             receipt.reason,
             "focus_pane_not_co_visible:/tasks/new-left.md:%76:live_window=@904:layout_window=@894"
@@ -21760,19 +21797,31 @@ mod tests {
     #[test]
     fn the_controller_answers_a_resume_claim_for_every_candidate_at_once() {
         // Exercises the SHIPPED predicate, not a copy of it in the test.
-        assert!(document_claims_resume_id("---\nresume: conv-1\n---\n", "conv-1"));
+        assert!(document_claims_resume_id(
+            "---\nresume: conv-1\n---\n",
+            "conv-1"
+        ));
         // The half a resume-only check would miss.
         assert!(document_claims_resume_id(
             "---\nagent_doc_session: conv-2\n---\n",
             "conv-2"
         ));
         // Whitespace around the recorded id must not change the answer.
-        assert!(document_claims_resume_id("---\nresume: \"  conv-3  \"\n---\n", "conv-3"));
+        assert!(document_claims_resume_id(
+            "---\nresume: \"  conv-3  \"\n---\n",
+            "conv-3"
+        ));
 
         // A different id does not claim.
-        assert!(!document_claims_resume_id("---\nresume: other\n---\n", "conv-1"));
+        assert!(!document_claims_resume_id(
+            "---\nresume: other\n---\n",
+            "conv-1"
+        ));
         // Neither does a document with no ids at all.
-        assert!(!document_claims_resume_id("---\nagent: claude\n---\n", "conv-1"));
+        assert!(!document_claims_resume_id(
+            "---\nagent: claude\n---\n",
+            "conv-1"
+        ));
         // An empty query claims nothing — otherwise a blank id would match any
         // document whose own field happened to be blank.
         assert!(!document_claims_resume_id("---\nresume: \"\"\n---\n", ""));

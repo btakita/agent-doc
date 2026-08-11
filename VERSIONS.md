@@ -2,6 +2,33 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.236
+
+- **Fix (`#editorregisterbootstrap`): an open editor can now establish CRDT
+  authority instead of being refused until authority already exists.**
+
+Operator-reported 2026-08-10 on `tasks/agent-doc/agent-doc-bugs2.md`: JetBrains
+showed a File Cache Conflict while the controller logged 6,677 consecutive
+`replica_register ... reason=detached_authority` refusals. With no accepted
+replica, preflight/session-check resolved the document from disk even though the
+editor still had it open—the exact disk-behind-editor race the CRDT plane is
+supposed to prevent.
+
+Two independently incomplete seams formed the cycle. JetBrains and VS Code did
+not include the already-defined `editor_pid` liveness proof in `crdt_replica`
+payloads, and `handle_crdt_replica_rpc` refused every request while detached,
+including the registration event that establishes editor authority. Both
+plugins now attach their real process PID to every replica payload, and the
+controller delegates a detached agent-doc `replica_register` to the relay. The
+relay remains the sole liveness-policy owner: a live process-scoped editor may
+allocate the routed hub; a generic or dead registration is still refused, as
+are every non-registration operation and every non-agent-doc markdown file.
+
+Regression coverage exercises the controller's complete detached-admission
+table plus the JetBrains and VS Code payload builders. The existing relay tests
+continue to prove that live PID registrations bootstrap authority while generic
+and dead registrations cannot.
+
 ## 0.35.235
 
 - **A corrupt `state.db` refusal now carries the offending bytes

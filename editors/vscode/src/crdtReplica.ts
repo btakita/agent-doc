@@ -367,10 +367,27 @@ export function parsePullDelivery(response: ControllerResponse): ReplicaPullDeli
     return { kind: 'deltas', updates: parsePullResponse(response) };
 }
 
+export function controllerReplicaPayload(
+    method: string,
+    identity: string,
+    editorPid: number,
+    fields: Record<string, unknown> = {},
+): Record<string, unknown> {
+    return {
+        method,
+        identity,
+        source: 'vscode_plugin',
+        ...fields,
+        // Keep the liveness proof after extension fields so callers cannot replace it.
+        editor_pid: editorPid,
+    };
+}
+
 export class ControllerSocketReplicaTransport implements ReplicaTransport {
     constructor(
         private readonly projectRoot: string,
         private readonly logger: ReplicaLogger = noopLogger,
+        private readonly editorPid: number = process.pid,
     ) {}
 
     async register(
@@ -445,12 +462,9 @@ export class ControllerSocketReplicaTransport implements ReplicaTransport {
         return {
             command: 'crdt_replica',
             file: filePath,
-            diagnostic_payload: JSON.stringify({
-                method,
-                identity,
-                source: 'vscode_plugin',
-                ...fields,
-            }),
+            diagnostic_payload: JSON.stringify(
+                controllerReplicaPayload(method, identity, this.editorPid, fields),
+            ),
         };
     }
 

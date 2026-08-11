@@ -20,6 +20,19 @@ import org.junit.Test
  */
 class CrdtReplicaForwarderTest {
 
+    @Test
+    fun `controller replica payload carries process liveness proof`() {
+        val payload = controllerReplicaPayload(
+            method = "replica_register",
+            identity = "jetbrains-4242:test",
+            editorPid = 4242L,
+        )
+
+        assertEquals("replica_register", payload.get("method").asString)
+        assertEquals("jetbrains_plugin", payload.get("source").asString)
+        assertEquals(4242L, payload.get("editor_pid").asLong)
+    }
+
     /**
      * Deterministic in-memory stand-in for the FFI yrs replica. It is NOT a CRDT
      * (the real one lives in Rust) — it just accumulates inserts so the seam's

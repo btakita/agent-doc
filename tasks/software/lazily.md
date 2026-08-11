@@ -917,7 +917,35 @@ Two smaller notes. cpp's new configure-time guard from `d052c4f` fired on the ag
 One divergence found and deliberately **not** fixed, now filed: cpp's `apply_update` never advances its Lamport counter, where rs/go/py/zig all do `counter = max(counter, op.id.counter)`, and it declares a `buffered_` member `apply_update` never uses — so cpp has no dependency-buffering retry for out-of-order ops. Neither is exercised by the current corpus.
 
 Exchange is at 871 lines, accretion `block`; queue is active so I keep draining per its guidance.
-<!-- agent:boundary:3086a5dc:lazily -->
+
+### Re: #lzjsscenarioswallow — the swallow was not just anonymous, it accused the wrong component — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzjsscenarioswallow]
+
+
+`check-scenario-coverage.mjs` dropped an unparseable corpus fixture with a bare `catch { continue; }`. I filed it as "the only unnamed swallow in that ladder". Measuring it turned out worse than that.
+
+Dropping the fixture from the **corpus** side left the ledger's genuine replays of its scenarios looking like phantoms, so the script blamed the evidence channel:
+
+```
+ERROR: the ledger records a replay of scenario 'individual_disposal' in
+       'reactive-graph/scope_teardown_equals_fold_of_disposals.json', which the
+       canonical corpus does not carry. The recorder attributed a replay to
+       something that is not a corpus scenario ...
+```
+
+The recorder was right. The corpus file was truncated. And the count slid from `153/153` to `151/151` with nothing naming the file — so an operator reading that output would go looking at the manifest recorder, which is the one part that was working.
+
+The exit code was always correct, which is why this was filed as diagnosability. But "unnamed swallow" undersold it: a check that loses an input and then reports the *consequence* as a fault in a different subsystem is worse than one that says nothing, because it sends you somewhere. It now names the fixture, calls it PRESENT but unusable, distinguishes that from the absent-corpus case this script legitimately skips on a sibling-less checkout, and tells a perturbation probe that truncating a fixture perturbs nothing a runner can disagree with.
+
+**Also removed `listFixtures()`** — exported from the corpus seam, zero call sites, and the exact primitive that introduces the enumerating-host shape `#lzledgeragreementaudit` exists to catch. lazily-cs died on that shape when a fixture landed upstream: a bare `KeyNotFoundException` naming neither the fixture nor the reason. Every js runner NAMES its fixtures, which is why a new upstream fixture reddens the not-opened rung instead of crashing a runner — and keeping an unused enumeration helper around is an invitation to reach for it. The comment left in its place says what to add first if one is ever genuinely needed: the drift assertion, before reading a byte.
+
+Proven: control on a byte-identical scratch corpus exits 0; a truncated fixture now exits 1 naming the file; the committed version on the same input produced the misdirected message above. `make check` OK, 627 tests. `lazily-js@98689c8`, pointer pushed.
+
+Exchange is at 897 lines, accretion `block`; queue is active so I keep draining per its guidance.
+<!-- agent:boundary:b644a08b:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -938,7 +966,7 @@ Exchange is at 871 lines, accretion `block`; queue is active so I keep draining 
 - ~~📌 do [#lzspecschemasoverride]~~
 - ~~do [#lzcorpusabsencehandling]~~
 - ~~do [#lzdifforderallbindings]~~
-- do [#lzjsscenarioswallow]
+- ~~do [#lzjsscenarioswallow]~~
 - do [#lzagentloopcibilling]
 - do [#lzpystdlibmutants]
 - do [#lzjsblocknamemasking]
@@ -950,7 +978,6 @@ Exchange is at 871 lines, accretion `block`; queue is active so I keep draining 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzjsscenarioswallow] lazily-js scripts/check-scenario-coverage.mjs:202 swallows an unparseable corpus fixture with a bare `catch { continue; }` — the only unnamed swallow in that ladder. It cannot hide a coverage gap today (rung 1 still demands the file be opened, and any runner that opens it dies on JSON.parse), but a fixture that fails to parse is dropped from scenario accounting without naming itself, which is the shape every other rung in this repo refuses. Name the fixture and fail, matching the sibling rungs. While there: test/spec-corpus.cjs:106-113 exports listFixtures(), an enumerate-the-corpus helper with ZERO call sites — it is the exact primitive that would introduce the enumerating-host shape #lzledgeragreementaudit audits for, so delete it or pin it with a comment saying why it must stay unused.
 - [ ] [#lzgdvocab] lazily-gd's reactive-graph runner is missing the fanout/churn/dispose_fanout/dispose_stale_handle bulk ops AND real id recycling, so 2 canonical fixtures remain: churn_returns_to_baseline.json and recycled_id_inherits_nothing.json. Recycling is the hard half and is a DESIGN decision, not runner vocabulary: Godot instance ids are monotonic and never alias, so 'a recycled id inherits nothing' has no natural referent — the binding needs an explicit id layer (a free-list over slot indices with a generation tag, the shape lazily-rs's SlotId uses) before the fixture means anything. Removing both entries from KNOWN_UNCOVERED in scripts/check-conformance-coverage.sh is the definition of done. DONE already: the merge_cell group (5 fixtures) landed with LazilyMergePolicy + Source.merge + ctx.source_with, and GDScript is now ~ on merge-algebra.
 - [ ] [#lzagentloopcibilling] The agent-loop superproject's `Agent Doc` GitHub Actions workflow has been failing on EVERY run for an unknown but long period — runs 31350894201 through 31475683420 all report "The job was not started because recent account payments have failed or your spending limit needs to be increased". No job starts, so there are no logs and nothing to debug in the workflow itself: it is a billing/spending-limit exhaustion on the repo's account, an external CI-start blocker (the same class the agent-doc skill's tmux-CI review section describes). Consequence: the superproject has had NO CI coverage for that whole window, including every submodule-pointer bump. The binding repos live in the lazily-hub org with working billing and have been green throughout, so binding-level verdicts are unaffected — but nothing has been verifying the superproject itself. Operator action required: check Billing & plans for the account that owns btakita/agent-loop and either settle the payment or raise the spending limit, then re-run one workflow to confirm jobs start. Until then, treat superproject CI as absent rather than passing, and do not read a green binding CI as coverage for the superproject.
 - [ ] [#lzpystdlibmutants] lazily-py does not APPLY the stdlib mutation ledger, unlike lazily-rs. Each stdlib fixture carries a `mutations` array of {operator, must_fail} declaring that mutating the implementation a named way MUST make the listed scenarios fail. tests/test_stdlib_conformance.py checks only that the ledger is well-formed (non-empty must_fail, ids subset of the fixture's own scenarios) and, since #lzpystdlibfloorsunread, that it meets mutation_floor. It never mutates anything, so rebinding an operator to an unrelated scenario stays green and the ledger's central claim is untested. lazily-rs does this properly: tests/stdlib_conformance.rs replays each operator through an INDEPENDENT interpreter (independent_failures(path, &fixture, Some(operator))) and asserts must_fail is a subset of the scenarios that actually failed under that mutation — an independent implementation is what makes the mutation applicable without perturbing the production code under test. Port that shape: add an independent interpreter for timer/timeout/revision_barrier, parameterised by mutation operator, and assert every declared must_fail scenario really fails under its operator and passes without it. Definition of done: rebinding a mutation's must_fail to a scenario the operator does not break reddens, and so does an operator no interpreter implements. Audit go/js/cs/dart for the same gap while there — the perturbation audit found go's ledger is checked the same self-referential way.

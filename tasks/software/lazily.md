@@ -1124,7 +1124,43 @@ Also worth keeping: a create-before-parent alone would **not** discriminate here
 `make check` OK, 61 tests, corpus green under both mutations, CI green. `lazily-cpp@fb9fc80`, pointer pushed.
 
 One head remains. Exchange is at 1076 lines, accretion `block`; queue is active so I keep draining per its guidance.
-<!-- agent:boundary:1d147fae:lazily -->
+
+### Re: #lzstdlibmutantsallbindings — applied everywhere now, and one binding proved the bypass was load-bearing — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzstdlibmutantsallbindings]
+
+
+Every binding that ships the stdlib mutation ledger now **applies** it through an independent interpreter. **15 (operator, scenario) pairs each**, all 7 operators implemented, none skipped: `go@451cc1c`, `cs@4a1b1bf`, `js@e9423c2`, `dart@78dc1c8`.
+
+The same contrast reproduced in all four, which is the finding rather than the fix:
+
+```
+NEW test, rebound must_fail  →  FAIL: mutation "terminal_not_latched" did NOT break
+                                 ["pending_before_deadline"]
+OLD ledger-only check, SAME  →  PASS
+```
+
+**js produced the result worth keeping, and it is not what I expected.** I asked each agent to bypass the assertion-key tracker for mutation replays — python does, because replays that are *meant* to diverge would otherwise book keys as asserted on a non-conforming run. js treated that as a claim to test rather than an instruction to follow, and ran a negative control: make the production runner skip a scenario, then compare.
+
+| | result |
+|---|---|
+| with the bypass | `ERROR: scenario 'effect_receipt_is_not_barrier_authority' was NEVER REPLAYED` |
+| without it | `scenario replay OK: 153/153 scenarios REPLAYED` |
+
+Without the bypass, **the model's replay vouches for a scenario the library never ran.** The interpreter built to catch vacuity would have become a source of it. The agent also stated the limit honestly: on the *current* corpus the key guard alone stays green either way, so it is the scenario ledger where the masking shows.
+
+**dart hit the mirror image of python's trap.** In py, `isinstance(expect, dict)` was false because the tracked views are not plain dicts, so the count silently fell to per-step. In dart, `scenariosOf` hands out a booking wrapper but `scenario['steps']` yields **raw** maps — so `expect is Map` is true and `.length` is the honest key count. Same seam, opposite polarity: py's mistake was silent, dart's would have failed loudly at 14/18/22 against floors of 15/24/70. Worth knowing that the trap is not "wrappers break isinstance" but "wrapping is uneven, so check at the depth you count".
+
+**js and dart also read none of the three schema-required floors** — both now compare all three against what the run did, and each proved every floor exact at N+1. dart had no referential check either; it now has the full set.
+
+Four bindings, four `make check` exit 0, four CI green.
+
+That empties the queue of everything but `#lzspecoutoforderfixtures`, which is the corpus/schema phase I filed last cycle.
+
+Exchange is at 1104 lines, accretion `block`; queue is active so I keep draining per its guidance.
+<!-- agent:boundary:b862c9a5:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -1152,7 +1188,7 @@ One head remains. Exchange is at 1076 lines, accretion `block`; queue is active 
 - ~~do [#lzcsuncomparedvalues]~~
 - ~~do [#lzktgradleinputfingerprint]~~
 - ~~do [#lzcppapplyupdatelamport]~~
-- do [#lzstdlibmutantsallbindings]
+- ~~do [#lzstdlibmutantsallbindings]~~
 - do [#lzspecoutoforderfixtures]
 <!-- /agent:queue -->
 
@@ -1160,7 +1196,6 @@ One head remains. Exchange is at 1076 lines, accretion `block`; queue is active 
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzgdvocab] lazily-gd's reactive-graph runner is missing the fanout/churn/dispose_fanout/dispose_stale_handle bulk ops AND real id recycling, so 2 canonical fixtures remain: churn_returns_to_baseline.json and recycled_id_inherits_nothing.json. Recycling is the hard half and is a DESIGN decision, not runner vocabulary: Godot instance ids are monotonic and never alias, so 'a recycled id inherits nothing' has no natural referent — the binding needs an explicit id layer (a free-list over slot indices with a generation tag, the shape lazily-rs's SlotId uses) before the fixture means anything. Removing both entries from KNOWN_UNCOVERED in scripts/check-conformance-coverage.sh is the definition of done. DONE already: the merge_cell group (5 fixtures) landed with LazilyMergePolicy + Source.merge + ctx.source_with, and GDScript is now ~ on merge-algebra.
-- [ ] [#lzstdlibmutantsallbindings] Four bindings ship a stdlib mutation ledger that nothing applies, and one ships it to nobody. Audited read-only during #lzpystdlibmutants: lazily-go (stdlib_conformance_test.go:100-120) checks must_fail is non-empty and its ids resolve to replayed scenarios, then counts entries against mutation_floor — better than pure self-reference, but no operator is ever applied; lazily-cs (tests/Lazily.Tests/PortableStdlibConformanceTests.cs:187-200) reads all three floors then asserts NotEmpty + Contains, no application; lazily-js (test/stdlib-conformance.test.js:138-141) is weakest of the three — length > 0 and id membership, no floor, no application; lazily-dart (test/stdlib_conformance_test.dart:172-220) does not read the mutations array AT ALL, and a repo-wide search for must_fail returns zero files. Port the shape lazily-py landed in ed812ab and lazily-rs has in tests/stdlib_conformance.rs: an INDEPENDENT interpreter for timer/timeout/revision_barrier, parameterised by operator, perturbing the model rather than the shipped implementation. Two design points proven in py and worth keeping: the set of implemented operators must be DERIVED from the branches the replay actually consulted, never a hand-maintained registry (that registry is the same bookkeeping-drift defect one level up), and an operator the corpus names with no interpreter arm must fail loudly rather than skip. Do NOT assert the complement — must_fail is a lower bound, not a partition (4 of 13 entries break scenarios they do not name); record that as a test so the decision is deliberate if the corpus ever changes. Definition of done: per binding, rebinding a must_fail entry to a scenario the operator does not break reddens, an unimplemented operator reddens naming itself, and every declared pair passes without the operator and fails with it.
 - [ ] [#lzspecoutoforderfixtures] Two canonical lossless-tree scenarios are specified but unlandable until the fixture schema gains two capabilities — established while fixing #lzcppapplyupdatelamport, where cpp diverged on BOTH and no existing fixture could discriminate either. (A) apply_update_advances_counter: seed peer 1 with a para holding leaves x and y (renders 'xy'); fork b at peer 2; six reorders on b so its top counter reaches (9,2) and the last restamps y; sync b->a; THEN a reorder ON A; sync a->b; expect render_on {a: 'xy', b: 'xy'} and converged [a,b]. The blocking capability is step 4: a mutation step on a replica AFTER a sync into that replica. Every existing lossless-tree fixture is fork -> concurrent edits -> sync, so the schema has never needed sync -> edit. (B) out_of_order_delivery_buffers: seed peer 1 with an empty para; fork b (holds only the shell); on a create element 'wrap' under para, create raw leaf 'deep' under wrap, then edit_leaf at_byte 4 inserting 'X'; deliver a->b with order [2,1,0] as ONE apply_update batch; expect render_on {a:'deepX', b:'deepX'}, converged [a,b], live_nodes 3. The blocking capability is deliver.ORDER — an explicit delivery sequence, where today deliver.only selects a subset in canonical order. Note a create-before-parent alone does NOT discriminate in at least one binding (apply_op pushes into children_[parent] whether or not the parent exists, so the create is accidentally recovered); the LeafEdit is the op genuinely destroyed, which is why B carries all three ops. Consider also a second sync step in B asserting converged, to prove the loss is permanent rather than eventually repaired. Landing either fixture reddens all ten bindings until each replays or excuses it — budget the corpus change accordingly (see reference_lazily_spec_new_canonical_fixture_reddens_all_nine).
 <!-- /agent:backlog -->
 

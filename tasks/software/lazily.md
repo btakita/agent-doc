@@ -739,7 +739,37 @@ Worth naming the shared shape, since it is the third instance this session: **an
 `make check` OK. `lazily-go@c5cce05`, superproject pointer pushed. Last cycle's `lazily-dart` CI came back green.
 
 Exchange is at 688 lines (session-accretion `warn`); queue is active so I am not compacting.
-<!-- agent:boundary:9be09ba5:lazily -->
+
+### Re: #lzpystdlibfloorsunread — the anti-vacuity budget nothing was reading — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzpystdlibfloorsunread]
+
+
+Three floors — `scenario_floor`, `assertion_floor`, `mutation_floor` — are **required** by `schemas/stdlib-fixture.schema.json`, and lazily-py referenced none of them. `scenario_floor: 99` against a six-scenario fixture was green. The one conformance area whose fixtures carry an explicit *"prove you did N things"* contract was the one area where nothing checked it.
+
+| probe | before | after |
+|---|---|---|
+| `scenario_floor` 6 → 99 (timer) | green | **red** |
+| `assertion_floor` 15 → 9999 (timer) | green | **red** |
+| `mutation_floor` 3 → 999 (timer) | green | **red** |
+| `mutations: []` | green | **red** |
+| `scenario_floor` 8 → 99 (timeout) | green | **red** |
+| `assertion_floor` 70 → 9999 (revision_barrier) | green | **red** |
+
+Each floor compares against what the **run** did, never the file: `replayed` counts scenarios the ledger actually yielded, and the assertion count increments inside `_assert_expect`, at the comparison itself. A floor computed from the fixture would be a tautology — which is precisely the failure being fixed.
+
+**Writing that counter reproduced the same shape one level down, which is the part worth keeping.** My first version used `isinstance(expect, dict)` — and that is **false** here, because `scenarios()` hands out tracked views rather than plain dicts. So it counted 1 per step instead of per key: 14 for `timer.json` where the real figure is 29. The floor is 15, so it failed loudly and I found it. Had the floor been 12, it would have passed — a check measuring the wrong thing, satisfied by an accident of type. That is the third variant of this session's recurring shape, and I only caught it because the corpus had set its floor high enough to notice.
+
+**One thing I did not fix, stated plainly rather than implied.** This binding still does **not** apply the mutations. It checks the ledger is well-formed, references real scenario ids, and now meets its floor — but it never mutates anything, so rebinding an operator to an unrelated scenario stays green. lazily-rs does this properly: it replays each operator through an *independent interpreter* and asserts the named scenarios fail. Porting that is real work with a real design (you need a second implementation to mutate, or you are perturbing the code under test), so it is filed as `#lzpystdlibmutants` rather than half-done here. `mutation_floor` currently bounds the ledger's size and nothing more, and the code says so.
+
+Also worth noting: the coined-id hook blocked my commit because the message referenced `#lzpystdlibmutants` before the item existed. Correct catch — I filed it, then committed.
+
+`make check` OK, 781 passed. `lazily-py@c0cb635`, pointer pushed. `lazily-go` CI from last cycle came back green.
+
+Exchange is at 719 lines (session-accretion `warn`); queue is active so I am not compacting.
+<!-- agent:boundary:65da5881:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -747,7 +777,7 @@ Exchange is at 688 lines (session-accretion `warn`); queue is active so I am not
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzdartvacuousfixtures]~~
 - ~~do [#lzgoassertkeygaps]~~
-- 🚧 do [#lzpystdlibfloorsunread]
+- ~~do [#lzpystdlibfloorsunread]~~
 - do [#lzconvergedlistlength]
 - do [#lzunboundblockguard]
 - ~~do [#lzcorpusrootguards]~~
@@ -768,7 +798,6 @@ Exchange is at 688 lines (session-accretion `warn`); queue is active so I am not
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzpystdlibfloorsunread] lazily-py's stdlib anti-vacuity budget is not read by anything, found by #lzperturbaudit. scenario_floor, assertion_floor and mutation_floor are REQUIRED properties of lazily-spec/schemas/stdlib-fixture.schema.json, and a repo-wide grep (excluding build/ and .claude/worktrees/) finds zero references in src/, tests/ or scripts/ — tests/test_stdlib_conformance.py:148-161 reads feature/scenarios/steps/mutations and stops. Measured: scenario_floor 6 -> 99 against a six-scenario fixture is green. The mutation ledger beside them is self-referential: :159-161 asserts must_fail is non-empty and a subset of the fixture's own scenario ids, and never APPLIES a mutation — so mutations: [] passes (zero iterations) and rebinding an operator to an unrelated scenario passes; only an id outside the fixture reddens. This is the failure mode feedback_conformance_tests_drive_real_behavior_not_runner_bookkeeping names. Fix: enforce the three floors against what the run actually replayed, and either apply the mutations or stop shipping them as if they were checked. Definition of done: raising any floor above the real count reddens, and emptying mutations reddens.
 - [ ] [#lzconvergedlistlength] List-shaped expectations checked by per-element membership never assert their own LENGTH, so the corpus can shrink an obligation and stay green (#lzperturbaudit). Confirmed in lazily-py distributed/anti_entropy_converge.json expect.converged (tests/test_collection_conformance.py:586-593 loops the declared wants and searches plane.converged() for each; contents are pinned but deleting an entry is green) and lazily-py lossless-tree/one_leaf_edit_delta.json expect.converged (tests/test_lossless_tree_conformance.py:160-168 compares names[1:] against names[0], so a one-element list runs ZERO comparisons). lazily-go's message-passing expect.rpc.unresolved_after_frame_indices is the same shape — a membership filter where [7] (no such frame) is fully vacuous. Add a length/coverage assertion beside each membership loop so the declared list must account for every element the run produced. Audit cs/dart/js for the same shape while there — dart's materialization eager_present and receipts nonterminal_outcomes are order-blind but DO redden on drop, so they are fine and make a good contrast.
 - [ ] [#lzunboundblockguard] The unconsumed-assertion-key guards in every binding share a blind spot, which is why several #lzperturbaudit findings survived them. They prove that keys inside blocks a runner REACHED were read; they say nothing about (a) blocks no runner ever binds, or (b) callbacks that receive a key and never compare it. Concretely: lazily-dart's tracker only registers a block passed to assertionsOf (test/conformance_assertions.dart:239,254), so signaling/frames.json's per-frame assertions blocks are invisible rather than unconsumed; lazily-go's assertKeyWith marks a key asserted when the callback RETURNS (conformance_strict_json_test.go:438), so a callback ignoring its argument satisfies it; lazily-cs's AssertKeyWith has the same property, which is how an Assert.All over an empty array counts as asserted (CausalReceiptConformanceTests.cs:44-48). Strengthen the guards in both directions: enumerate every assertions/expect block the CORPUS carries for an opened fixture and fail on blocks no runner bound, and make an assertion count as satisfied only when it actually consumed the fixture value (e.g. require the callback to return a compared value, or record a read of the want). Definition of done: per binding, a probe that adds an unbound assertions block to an opened fixture fails the guard, and a callback that ignores its argument fails it.
 - [ ] [#lzspecschemasoverride] LAZILY_SPEC_CONFORMANCE_DIR redirects the conformance CORPUS only; lazily-spec/schemas always resolves to the canonical sibling in go (specSchemasDir, 2 sites in ipc_conformance_test.go), js (schemasRoot/schemaPath, used by schema-conformance + lossless-tree-crdt + ipc) and cs (5 schema roots derived from SpecCorpus.Root via '..'). This is deliberate today because a corpus scratch copy carries no schemas/ sibling, but it means a probe that needs to perturb a SCHEMA has nowhere to point except the shared ../lazily-spec checkout, which reddens all nine bindings at once. That is the exact defect #lzoverrideallrunners just fixed, one level up. Add a spec-ROOT override (or a second LAZILY_SPEC_SCHEMAS_DIR) threaded through the same seams, default unchanged, fail-closed on an unreadable explicit value. Audit dart/py/kt/rs/cpp/zig/gd for the same split while there. Definition of done: flip one field in a scratch schemas copy and prove a schema-validating runner reddens without touching the canonical checkout.

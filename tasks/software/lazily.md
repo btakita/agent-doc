@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -1160,43 +1160,72 @@ Four bindings, four `make check` exit 0, four CI green.
 That empties the queue of everything but `#lzspecoutoforderfixtures`, which is the corpus/schema phase I filed last cycle.
 
 Exchange is at 1104 lines, accretion `block`; queue is active so I keep draining per its guidance.
-<!-- agent:boundary:b862c9a5:lazily -->
+
+
+### Re: #lzspecoutoforderfixtures — all nine bindings replay the out-of-order fixtures — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzspecoutoforderfixtures]
+
+
+Done. The corpus gained two fixtures and every binding that implements lossless-tree now replays them.
+
+**Phase 1** — `lazily-spec@39df4b3`: `schemas/lossless-tree-fixture.json` plus `conformance/lossless-tree/apply_update_advances_counter.json` (scenario `post_sync_write_outranks_ingested_stamp`) and `out_of_order_delivery_buffers.json` (scenario `reversed_batch_drains_through_buffer`). They discriminate two `apply_update` behaviours no previous fixture could reach: the Lamport counter must advance unconditionally *before* the idempotence skip, and an op whose parent or `prev` has not arrived must be buffered and retried rather than dropped. Verified against a throwaway probe crate before publishing, with orthogonal discrimination proved — a counter-drop kills fixture A only, a buffer-drop kills fixture B only. `0b01333` fixed an unrelated pre-existing red in `coverage-claims-check`.
+
+**Phase 2** — nine bindings, nine commits, all CI-green:
+
+| | commit | CI |
+|---|---|---|
+| rs | `ff69f47` | 31499917614 ✅ |
+| py | `add1f38` | 31499559461 ✅ |
+| js | `b404f80` | 31499577994 ✅ |
+| go | `428ca4e` | 31499528260 ✅ |
+| cs | `7ef7ce7` | 31499840798 ✅ |
+| kt | `86a2f4b` | 31500877479 ✅ |
+| dart | `0837633` | 31500689984 ✅ |
+| zig | `cc9e705` | 31501539114 ✅ |
+| cpp | `cbeedc6` | 31502420022 ✅ |
+
+Superproject pointers bumped in `9e7485be0` and `61c6681f4`. GDScript needs no work — family-excused.
+
+#### The finding: a re-sorting runner turns the fixture into decoration
+
+Both fixtures need a `deliver` step that hands a runner-chosen *sequence* to one `apply_update` call, so every binding gained `deliver.order` beside the existing `only`. The contract is exact — indexes into the same canonical `(counter, peer)`-sorted diff that `sync` computes, delivered in the listed sequence, as one call, never re-sorted, never split, an out-of-range index failing rather than clamping.
+
+Four bindings independently tested what happens when a runner *does* re-sort: with the library's dependency buffer removed **and** the runner re-sorting `order`, the corpus fixture goes **green**. kt, dart, zig and cpp each measured this on their own. A fixture cannot assert on how its own step was interpreted, so a re-sorting runner silently converts the entire fixture into decoration while reporting a pass — the same shape as the vacuity classes we have been clearing all session, arriving one level up in the runner rather than in an assertion.
+
+Every binding therefore also pins the unsorted single-call delivery with a **direct** test against a recording target. That test, not the fixture, is what stands between the corpus and a vacuous pass. cpp went further and mutated its own interpreter four ways (re-sort, clamp, prefer-one-selector, split into three calls); each arm reddens its own pin.
+
+#### Corrections worth recording
+
+- **cpp's counter-drop divergence is asymmetric**, not symmetric as the fixture prose predicts: `a` renders `xy`, `b` renders `yx`, because a local `reorder_child` applies without the LWW guard. Same defect, different symptom — do not read the fixture description as a specification of the rendering.
+- **dart has no `_converged` helper.** I told that agent it did; it checked instead of inventing one to match my brief. `converged` is handled inline through `assertKeyIfPresent`.
+- **kt renders `<>` where the fixture prose says `deep`** under the buffer-drop mutation, because its `apply_op` will not push a child under an absent parent. The loss is the same and equally permanent.
+
+#### cpp was red on CI while green locally
+
+`9b0ff08` passed `make check` and both native CI jobs, and failed the `wasm` job: `WASM.md` is *generated* from the wasm runtime manifests, and the two new fixtures moved `lossless-tree` 9→11 and the total 150→152. That guard runs only in the wasm job, so local verification could not see it.
+
+Fixed in `cbeedc6` by regenerating from real manifests (`make wasm-core`, `make wasm-threaded`, `make wasm-matrix` against the local emsdk) — not by editing the two numbers, which would have satisfied the diff and proved nothing. The agent also confirmed the core tier's replay is non-vacuous by re-running the buffer-drop mutation under Node: it fails and exits nonzero, because the runner aborts through `REQUIRE` rather than throwing, so emscripten's `-fignore-exceptions` has nothing to swallow. The threaded tier's `—` is legitimate; `wasm-tiers.conf` assigns that suite to core only.
+
+Two follow-ups filed: `#lzcppwasmguardlocal` (give `make check` local reach into that generated table) and `#lzzigfmttoolchains` (zig's three pinned formatters disagree per-construct, and the Makefile claims otherwise).
+<!-- agent:boundary:cb1dca30:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzdartvacuousfixtures]~~
-- ~~do [#lzgoassertkeygaps]~~
-- ~~do [#lzpystdlibfloorsunread]~~
-- ~~do [#lzconvergedlistlength]~~
-- ~~do [#lzunboundblockguard]~~
-- ~~do [#lzcorpusrootguards]~~
-- ~~do [#lzrsspecdirconsts]~~
-- ~~📌 do [#lzperturbaudit]~~
-- ~~do [#lzoverrideallrunnersaudit]~~
-- ~~📌 do [#lzzigdiffmutant]~~
-- ~~📌 do [#lzledgeragreementaudit]~~
-- ~~📌 do [#lzzigingressspecdir]~~
-- ~~📌 do [#lzspecschemasoverride]~~
-- ~~do [#lzcorpusabsencehandling]~~
-- ~~do [#lzdifforderallbindings]~~
-- ~~do [#lzjsscenarioswallow]~~
-- ~~do [#lzagentloopcibilling]~~
-- ~~do [#lzpystdlibmutants]~~
-- ~~do [#lzjsblocknamemasking]~~
-- ~~do [#lzcsuncomparedvalues]~~
-- ~~do [#lzktgradleinputfingerprint]~~
-- ~~do [#lzcppapplyupdatelamport]~~
-- ~~do [#lzstdlibmutantsallbindings]~~
-- do [#lzspecoutoforderfixtures]
+- do [#lzcppwasmguardlocal]
+- do [#lzzigfmttoolchains]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzcppwasmguardlocal] lazily-cpp's WASM.md capability-matrix guard runs ONLY in the wasm CI job, so a corpus change that moves its counts passes local make check and lands red (proved this cycle: 9b0ff08 green locally, red on CI). The corpus column is derivable without emscripten -- give make check a rung that audits at least that column, so the failure is local.
+- [ ] [#lzzigfmttoolchains] lazily-zig's Makefile claims its three pinned toolchains agree on formatting; they agree per-construct, not universally. zig fmt 0.15.2 and 0.16.0 disagree about a multiline string spliced inline with ++ inside a return (CI failed the 0.15.2 gate only, 5bea17c). Run all three formatters in make check, or drop the claim.
 - [ ] [#lzgdvocab] lazily-gd's reactive-graph runner is missing the fanout/churn/dispose_fanout/dispose_stale_handle bulk ops AND real id recycling, so 2 canonical fixtures remain: churn_returns_to_baseline.json and recycled_id_inherits_nothing.json. Recycling is the hard half and is a DESIGN decision, not runner vocabulary: Godot instance ids are monotonic and never alias, so 'a recycled id inherits nothing' has no natural referent — the binding needs an explicit id layer (a free-list over slot indices with a generation tag, the shape lazily-rs's SlotId uses) before the fixture means anything. Removing both entries from KNOWN_UNCOVERED in scripts/check-conformance-coverage.sh is the definition of done. DONE already: the merge_cell group (5 fixtures) landed with LazilyMergePolicy + Source.merge + ctx.source_with, and GDScript is now ~ on merge-algebra.
-- [ ] [#lzspecoutoforderfixtures] Two canonical lossless-tree scenarios are specified but unlandable until the fixture schema gains two capabilities — established while fixing #lzcppapplyupdatelamport, where cpp diverged on BOTH and no existing fixture could discriminate either. (A) apply_update_advances_counter: seed peer 1 with a para holding leaves x and y (renders 'xy'); fork b at peer 2; six reorders on b so its top counter reaches (9,2) and the last restamps y; sync b->a; THEN a reorder ON A; sync a->b; expect render_on {a: 'xy', b: 'xy'} and converged [a,b]. The blocking capability is step 4: a mutation step on a replica AFTER a sync into that replica. Every existing lossless-tree fixture is fork -> concurrent edits -> sync, so the schema has never needed sync -> edit. (B) out_of_order_delivery_buffers: seed peer 1 with an empty para; fork b (holds only the shell); on a create element 'wrap' under para, create raw leaf 'deep' under wrap, then edit_leaf at_byte 4 inserting 'X'; deliver a->b with order [2,1,0] as ONE apply_update batch; expect render_on {a:'deepX', b:'deepX'}, converged [a,b], live_nodes 3. The blocking capability is deliver.ORDER — an explicit delivery sequence, where today deliver.only selects a subset in canonical order. Note a create-before-parent alone does NOT discriminate in at least one binding (apply_op pushes into children_[parent] whether or not the parent exists, so the create is accidentally recovered); the LeafEdit is the op genuinely destroyed, which is why B carries all three ops. Consider also a second sync step in B asserting converged, to prove the loss is permanent rather than eventually repaired. Landing either fixture reddens all ten bindings until each replays or excuses it — budget the corpus change accordingly (see reference_lazily_spec_new_canonical_fixture_reddens_all_nine).
 <!-- /agent:backlog -->
 
 ## Review

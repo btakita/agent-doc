@@ -838,7 +838,39 @@ Three residues are documented in code rather than implied: scalars can't be prox
 `make check` green and CI green on all five: `dart@034c6cf`, `go@7c49128`, `cs@167c8ca`, `py@3b8463d`, `js@2d0bfbd`. Two follow-ups filed.
 
 Exchange is at 782 lines (session-accretion `warn`); queue is active so I am not compacting.
-<!-- agent:boundary:bb02850a:lazily -->
+
+### Re: #lzspecschemasoverride — schemas redirect independently now, in all six bindings that validate against one — opus-5
+
+> **Queue prompt:**
+>
+> 📌 do [#lzspecschemasoverride]
+
+
+| binding | sites | commit |
+|---|---|---|
+| rs | 10 (2 files) | `2266baa` |
+| py | 11 (3 modules) | `097662c` |
+| cs | 5 | `7594757` |
+| go | 3 + a second in-repo root | `aa0bd4e` |
+| js | 2 | `c0a6ebd` |
+| kt | 1 | `d8b6c08` |
+
+dart, cpp, zig and gd resolve no schemas at all — nothing to do, and I checked rather than assumed (dart's only hit is a comment in a shell script).
+
+Every one proves the same four states, and the third is the one that matters: **override → a copy with one field flipped → RED**, naming the failing test. That is what shows the override changes which *bytes* are validated against rather than which path gets printed. `snapshot.json`'s `epoch.type` `integer`→`string` reddens rs; `defs.json`'s `wall_time.type` reddens py; `ffi.json`'s enum reddens js. A nonexistent directory fails loudly in all six — never a skip, never a silent fall back to the canonical tree.
+
+**cs had a second consequence that made the coupling actively harmful.** Its schemas path was `Root/../schemas`, so pointing `LAZILY_SPEC_CONFORMANCE_DIR` at a corpus-only scratch copy *broke the run* — 10 `DirectoryNotFoundException`s, which an earlier audit this session had to work around by copying sibling directories. Decoupling fixes that: the same invocation is now green, and the agent proved it by re-running the pre-fix code against the identical scratch corpus and getting the old 10 failures back.
+
+**go found a root nothing could ever have reached.** Both schema consumers spelled an in-repo `filepath.Join("schemas")` *ahead* of the sibling — a second location no override, old or new, could redirect. Found by AST scan rather than grep.
+
+**kt produced the finding worth carrying forward, and it is about the test harness, not the schemas.** With `inputs.dir` + `PathSensitivity.RELATIVE` alone, the byte-identical-copy proof came back `11 actionable tasks: 11 up-to-date` — Gradle fingerprinted the scratch copy identically to the default and **never started a JVM**. The row meant to prove the override took effect had proved nothing. It needed `inputs.property` as well. That means the corpus comment added earlier this session, claiming that forwarding the env var *"makes the variable part of the task's input fingerprint"*, is **false as written**: it holds only when the content differs. The agent fixed the schemas input and deliberately left the corpus input alone as out of scope; I have filed it.
+
+Four of the six also widened their corpus-root source guard to cover the schemas root, on the reasoning that a respelled default schemas path opts back out of the new override exactly as a respelled corpus path opts out of the old one. Each proved it with an injected violation.
+
+All six `make check` exit 0 and CI green; `../lazily-spec` was never written to by any agent — every perturbation lived in a scratch copy.
+
+Exchange is at 818 lines and session-accretion has crossed to `block`; the queue is active, so per its own guidance I am continuing to drain rather than compacting, and noting the size here.
+<!-- agent:boundary:594e2056:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -856,7 +888,7 @@ Exchange is at 782 lines (session-accretion `warn`); queue is active so I am not
 - ~~📌 do [#lzzigdiffmutant]~~
 - ~~📌 do [#lzledgeragreementaudit]~~
 - ~~📌 do [#lzzigingressspecdir]~~
-- 📌 do [#lzspecschemasoverride]
+- ~~📌 do [#lzspecschemasoverride]~~
 - do [#lzcorpusabsencehandling]
 - do [#lzdifforderallbindings]
 - do [#lzjsscenarioswallow]
@@ -864,12 +896,12 @@ Exchange is at 782 lines (session-accretion `warn`); queue is active so I am not
 - do [#lzpystdlibmutants]
 - do [#lzjsblocknamemasking]
 - do [#lzcsuncomparedvalues]
+- do [#lzktgradleinputfingerprint]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzspecschemasoverride] LAZILY_SPEC_CONFORMANCE_DIR redirects the conformance CORPUS only; lazily-spec/schemas always resolves to the canonical sibling in go (specSchemasDir, 2 sites in ipc_conformance_test.go), js (schemasRoot/schemaPath, used by schema-conformance + lossless-tree-crdt + ipc) and cs (5 schema roots derived from SpecCorpus.Root via '..'). This is deliberate today because a corpus scratch copy carries no schemas/ sibling, but it means a probe that needs to perturb a SCHEMA has nowhere to point except the shared ../lazily-spec checkout, which reddens all nine bindings at once. That is the exact defect #lzoverrideallrunners just fixed, one level up. Add a spec-ROOT override (or a second LAZILY_SPEC_SCHEMAS_DIR) threaded through the same seams, default unchanged, fail-closed on an unreadable explicit value. Audit dart/py/kt/rs/cpp/zig/gd for the same split while there. Definition of done: flip one field in a scratch schemas copy and prove a schema-validating runner reddens without touching the canonical checkout.
 - [ ] [#lzcorpusabsencehandling] Corpus-absent and corpus-unparseable are handled inconsistently across bindings, found while measuring #lzoverrideallrunnersaudit. Each fails in the SAFE direction (loud, not silent), so none is urgent, but each contradicts its own stated intent. (a) lazily-cpp: 6 suites hard-FAIL instead of skipping when the sibling is absent — MaterializationFamilyConformance, CollectionsFamilyConformance, SignalingConformance, QueueConformance, QueueFamilyConformance, family_sync all call require_spec_checkout_or_skip (exit 77) but are missing from the set_tests_properties(... SKIP_RETURN_CODE 77) list at tests/CMakeLists.txt:401-439; the comments at :420 and :434 record having fixed this same omission twice already. (b) lazily-kt: build.gradle.kts:142 optional(true) does NOT tolerate a nonexistent directory as its comment at :135-137 claims — pointing LAZILY_SPEC_DIR at a missing path fails Gradle task validation before any test runs, so 'a checkout without the sibling is a legitimate local state the tests skip on' is false. (c) lazily-cs: the guard's python scenario leg crashes with a raw json.decoder.JSONDecodeError traceback on an unparseable corpus fixture instead of a diagnosable message. Fix each to match what its own comments promise.
 - [ ] [#lzdifforderallbindings] The lossless-tree `diff` op ORDER is a cross-binding contract that no binding pins. The canonical corpus addresses ops positionally (`deliver.only: [0,2]` in non_contiguous_anti_entropy.json indexes into the diff result), so the fixture means the same thing in every binding only while every binding returns ops in the same canonical (counter, peer) order. lazily-rs (ops.sort_by_key), lazily-py (sorted), lazily-js (.sort(cmpId)) and lazily-zig all produce it by convention; zig gained a regression test in e8a2a28 (#lzzigdiffmutant) after proving that replacing the sort with std.mem.reverse — or deleting it — left the ENTIRE suite green. Add the equivalent test to the other bindings that implement LosslessTreeCrdt (rs, py, js, and any of cs/go/dart/kt/cpp that do), each built so log order and canonical order DIFFER and asserting that difference explicitly, or the assertion holds for a reversed diff and pins nothing. Definition of done: per binding, a mutation that reverses or drops the diff sort reddens exactly one new test and nothing else. Consider also whether lazily-spec should state the ordering contract where deliver.only is defined, since today it is agreement without a document.
 - [ ] [#lzjsscenarioswallow] lazily-js scripts/check-scenario-coverage.mjs:202 swallows an unparseable corpus fixture with a bare `catch { continue; }` — the only unnamed swallow in that ladder. It cannot hide a coverage gap today (rung 1 still demands the file be opened, and any runner that opens it dies on JSON.parse), but a fixture that fails to parse is dropped from scenario accounting without naming itself, which is the shape every other rung in this repo refuses. Name the fixture and fail, matching the sibling rungs. While there: test/spec-corpus.cjs:106-113 exports listFixtures(), an enumerate-the-corpus helper with ZERO call sites — it is the exact primitive that would introduce the enumerating-host shape #lzledgeragreementaudit audits for, so delete it or pin it with a comment saying why it must stay unused.
@@ -878,6 +910,7 @@ Exchange is at 782 lines (session-accretion `warn`); queue is active so I am not
 - [ ] [#lzpystdlibmutants] lazily-py does not APPLY the stdlib mutation ledger, unlike lazily-rs. Each stdlib fixture carries a `mutations` array of {operator, must_fail} declaring that mutating the implementation a named way MUST make the listed scenarios fail. tests/test_stdlib_conformance.py checks only that the ledger is well-formed (non-empty must_fail, ids subset of the fixture's own scenarios) and, since #lzpystdlibfloorsunread, that it meets mutation_floor. It never mutates anything, so rebinding an operator to an unrelated scenario stays green and the ledger's central claim is untested. lazily-rs does this properly: tests/stdlib_conformance.rs replays each operator through an INDEPENDENT interpreter (independent_failures(path, &fixture, Some(operator))) and asserts must_fail is a subset of the scenarios that actually failed under that mutation — an independent implementation is what makes the mutation applicable without perturbing the production code under test. Port that shape: add an independent interpreter for timer/timeout/revision_barrier, parameterised by mutation operator, and assert every declared must_fail scenario really fails under its operator and passes without it. Definition of done: rebinding a mutation's must_fail to a scenario the operator does not break reddens, and so does an operator no interpreter implements. Audit go/js/cs/dart for the same gap while there — the perturbation audit found go's ledger is checked the same self-referential way.
 - [ ] [#lzjsblocknamemasking] lazily-js records assertion keys as fixture+block+key with BARE block names, so sibling blocks mask each other: frames[3].assertions and frames[0].assertions collapse to the same record, and a key asserted in one marks the other satisfied. Measured during #lzunboundblockguard: path-qualifying the block names de-masks 42 further findings — 20 keys never consumed by any runner, 16 read but never asserted against the fixture's own value, and 12 object-valued keys with no key-set check. The bind-ledger walk added in 2d0bfbd is already path-qualified; it is the KEY records (scripts/check-assertion-keys.mjs and test/support/conformance-manifest.cjs) that still collapse. Path-qualify them, re-pin the floors, then work the 42. Definition of done: two sibling blocks carrying the same key name report independently, and each of the 42 is either fixed or carries a declared reason.
 - [ ] [#lzcsuncomparedvalues] lazily-cs cannot yet detect an assertion callback that receives the fixture value and never COMPARES it — direction (b) of #lzunboundblockguard, deliberately not built there. The live example was AssertKeyWith("nonterminal_outcomes", want => Assert.All(want.EnumerateArray(), item => !ParseOutcome(item).IsTerminal())): it READ every element, so a recording wrapper would not have caught it; it simply never compared them to the projection, and Assert.All over an empty sequence is vacuously true. Two mechanisms were spiked and measured. A recording wrapper misses this exact case and needs ~186 call-site edits. Differential re-execution (perturb the value, require the callback to fail) needs zero call-site changes and DOES catch it, but fails structurally here: this repo's runners record divergences into a ledger via Check(...) rather than throwing, so a perturbed re-run signals nothing and appends phantom divergences — measured 8 broken tests and 288 false 'insensitive' keys. The real fix is to give the divergence-recording runners a comparison seam the tracker owns, so a comparison is observable rather than inferred. That is a runner change, not a guard change. Definition of done: a callback that reads the fixture value without comparing it to replayed state fails, and the existing divergence-recording runners keep working.
+- [ ] [#lzktgradleinputfingerprint] lazily-kt's Gradle test-task input wiring does not do what its own comment claims. build.gradle.kts declares the corpus via inputs.dir(...).withPathSensitivity(RELATIVE) and forwards LAZILY_SPEC_CONFORMANCE_DIR / LAZILY_SPEC_DIR with environment(...), and the comment added in ba7f41d says that forwarding 'makes the variable part of the task's input fingerprint'. It does not: a Test task's environment is UNTRACKED, and RELATIVE path sensitivity means a byte-identical corpus at a different path fingerprints the SAME. Measured during #lzspecschemasoverride on the schemas input: pointing at a byte-identical scratch copy produced '11 actionable tasks: 11 up-to-date, BUILD SUCCESSFUL in 314ms' — the run meant to prove the override took effect never started a JVM, so the proof row was vacuous. Same hole means a missing directory under an explicit override fingerprints identically to 'no lazily-spec sibling at all'. Fixed for the SCHEMAS input in d8b6c08 by adding inputs.property("specSchemasDir", ...); the CORPUS input still has it. Add the equivalent inputs.property for the corpus dir, correct the comment so it states what is actually tracked, and re-prove: a byte-identical corpus copy under LAZILY_SPEC_CONFORMANCE_DIR must RE-RUN the tests, not report UP-TO-DATE. This matters beyond bookkeeping — any measurement of kt that redirects to an identical-content copy is meaningless while the task can skip.
 <!-- /agent:backlog -->
 
 ## Review

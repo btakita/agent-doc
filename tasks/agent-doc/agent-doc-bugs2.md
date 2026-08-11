@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -343,13 +343,17 @@ Live state repaired and verified:
 Verification passed: 8,941/8,941 Rust tests, make check, make tmux-ci, full JetBrains test/buildPlugin, the isolated live third-pane tmux regression, release/version/privacy/diff checks, hosted GitHub CI, and the cross-platform Release workflow. Commit f8ced56d3 and tag v0.35.241 are pushed. The separate PyPI workflow validated every wheel but remains blocked by the known external 10 GB project-size quota.
 
 Confidence: high. No source-code work remains; only the restart-dependent live editor switch observation remains under operator verification.
-<!-- agent:boundary:793d9c21:agent-doc-bugs2 -->
+
+### Re: tmux editor-switch verification gate — gpt-5
+
+The implementation is complete and the retained live-proof item is now explicitly gated in Review as #run3rdpaneswitchverify. The active queue was drained and stopped instead of repeatedly redispatching an operator-only check.
+
+v0.35.241 remains installed and released. IntelliJ must be restarted when safe before the new Kotlin focus listener can provide the final physical editor-switch observation; no additional source-code work is pending.
+<!-- agent:boundary:32273d89:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#flakystatedbfixture]~~
-- ⏭️ do [#run3rdpaneswitchverify]
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Notes

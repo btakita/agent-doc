@@ -324,15 +324,32 @@ The live `agent-doc-bugs2.md` cycle was recovered through the retained orphan-re
 - Publication: main and tag `v0.35.240` are pushed. CI, Release, and PyPI workflows were still running when this response crossed the document boundary.
 
 Confidence: high. Escalation: restart running JetBrains IDEs; the separate `#operatorverifylive` visual proof remains operator-gated.
-<!-- agent:boundary:d6db9281:agent-doc-bugs2 -->
+
+### Re: File Cache Conflict and tmux editor auto-sync — gpt-5
+
+Fixed and released in agent-doc v0.35.241.
+
+- File Cache Conflict: detached JetBrains editor PID registration now bootstraps against the project controller, removing the stale or detached editor-authority condition that caused cache-conflict and IPC-drift handling.
+- Third-pane creation: after a route provisions a missing target pane, it now performs one exact-visible, layout-only reconciliation with the freshly registered actor. The incoming pane replaces the outgoing editor column, and a live outgoing turn is moved intact to stash.
+- Existing-editor switching: JetBrains component-focus events now republish the generation-guarded spanning editor surface in addition to focused-document state. A pending document-selection observation retains priority, preventing focus races while allowing agent-doc-bugs2.md and lazily.md to swap in place.
+
+Live state repaired and verified:
+
+- Visible window @6 contains only lazily.md pane %13 and haiven-dev.md pane %7.
+- The still-running agent-doc-bugs2.md pane %8 is preserved in window stash.
+- The installed CLI and fresh project controller both report 0.35.241.
+- The JetBrains 0.2.351 package containing the listener fix is installed for IntelliJ IDEA 2026.1. The running IDE reports that a restart is required to activate the Kotlin plugin generation, so the final physical editor-switch proof remains operator-gated until that safe restart.
+
+Verification passed: 8,941/8,941 Rust tests, make check, make tmux-ci, full JetBrains test/buildPlugin, the isolated live third-pane tmux regression, release/version/privacy/diff checks, hosted GitHub CI, and the cross-platform Release workflow. Commit f8ced56d3 and tag v0.35.241 are pushed. The separate PyPI workflow validated every wheel but remains blocked by the known external 10 GB project-size quota.
+
+Confidence: high. No source-code work remains; only the restart-dependent live editor switch observation remains under operator verification.
+<!-- agent:boundary:793d9c21:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#dispatchonlyresubmitwiring]~~
 - ~~do [#flakystatedbfixture]~~
-- ~~do [#operatorverifylive]~~
-- do [#run3rdpaneswitchverify]
+- ⏭️ do [#run3rdpaneswitchverify]
 <!-- /agent:queue -->
 
 ## Notes

@@ -522,7 +522,7 @@ fn find_response_precedes_prompt_candidate(
         let prompt_lines = normalized_non_boundary_exchange_lines(&segments[idx..prompt_end]);
         if evidence.permits_repair(&prompt_lines, saw_boundary_after_heading)
             && line_looks_like_prompt_prefix_repair_start(trimmed, is_target)
-            && response_policy.matches_order_block(
+            && response_policy.matches_identity_block(
                 segments[heading_idx..idx]
                     .iter()
                     .map(|segment| segment.line.as_str()),
@@ -2408,6 +2408,46 @@ ship it
             Some("### Re: do #next\n\nDone."),
             None
         ));
+    }
+
+    #[test]
+    fn response_prompt_order_repair_preserves_captured_response_suffix_after_boundary() {
+        let response = concat!(
+            "### Re: do [#flakystatedbfixture] — gpt-5\n",
+            "\n",
+            "The item is now evidence-gated.\n",
+            "\n",
+            "The requested reproduction loop completed without another corrupt ledger.\n",
+            "\n",
+            "No source files changed.\n",
+            "\n",
+            "Verification passed.\n",
+        );
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: do [#flakystatedbfixture] — gpt-5 (HEAD)\n",
+            "\n",
+            "The item is now evidence-gated.\n",
+            "<!-- agent:boundary:b0 -->\n",
+            "\n",
+            "The requested reproduction loop completed without another corrupt ledger.\n",
+            "\n",
+            "No source files changed.\n",
+            "\n",
+            "Verification passed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(!response_precedes_prompt_in_exchange(
+            doc,
+            Some(response),
+            None
+        ));
+        assert!(
+            repair_response_precedes_prompt_in_exchange(doc, Some(response), None)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

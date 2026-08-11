@@ -2,6 +2,25 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.243
+
+- **Fix: closeout order repair preserves boundary-split multi-paragraph responses.**
+
+A retained closeout can transiently place an exchange boundary inside the
+captured response cell. The response-before-prompt repair previously accepted
+one matching response signature line as proof that the response was complete,
+then misclassified the captured suffix after the boundary as a user prompt and
+moved it ahead of its own heading. The commit materialization guard correctly
+refused to commit that reordered cell, leaving the cycle at `write_applied`.
+
+Order repair now requires the full captured response-cell identity before it
+moves content across a boundary. `(HEAD)` and boundary framing remain transient
+for identity, but missing response paragraphs do not. Regression coverage uses
+the observed four-paragraph split and proves both that the destructive repair
+is rejected and that legitimate prompt-after-response repair still succeeds.
+The existing exact retained-fragment replay then remains able to resume and
+reassemble an already interrupted cycle without duplicating the response.
+
 ## 0.35.242
 
 - **Fix: Codex UserPromptSubmit admission now emits exactly one valid hook JSON

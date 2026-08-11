@@ -246,6 +246,19 @@ impl ResponseTurnCellPolicy {
         !self.node_ids.is_empty() && lines.into_iter().any(|line| self.matches_order_line(line))
     }
 
+    /// Return true only when `lines` contain the complete captured response cell.
+    /// Order repair needs this stronger proof before moving anything across a
+    /// boundary: a boundary can transiently bisect a multi-paragraph response,
+    /// and one matching signature line is not proof that the remaining suffix is
+    /// a user prompt.
+    pub fn matches_identity_block<'a>(&self, lines: impl IntoIterator<Item = &'a str>) -> bool {
+        if self.node_ids.is_empty() {
+            return false;
+        }
+        let candidate = lines.into_iter().collect::<Vec<_>>().join("\n");
+        Self::from_response(Some(&candidate)).cell_id == self.cell_id
+    }
+
     /// Bind to the newest response heading matching this captured cell. A prior
     /// response with the same generic heading must never claim a later prompt.
     pub fn newest_matching_index<'a>(
@@ -659,6 +672,13 @@ mod tests {
             Some(7),
         );
         assert!(plain.matches_order_block(["unrelated", "Body."]));
+        assert!(plain.matches_identity_block([
+            "### Re: Topic — opus-4-8 (HEAD)",
+            "",
+            "Body.",
+            "<!-- agent:boundary:b0 -->",
+        ]));
+        assert!(!plain.matches_identity_block(["### Re: Topic — opus-4-8", "", "Bod"]));
     }
 
     #[test]

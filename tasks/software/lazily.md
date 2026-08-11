@@ -1210,21 +1210,50 @@ Every binding therefore also pins the unsorted single-call delivery with a **dir
 Fixed in `cbeedc6` by regenerating from real manifests (`make wasm-core`, `make wasm-threaded`, `make wasm-matrix` against the local emsdk) — not by editing the two numbers, which would have satisfied the diff and proved nothing. The agent also confirmed the core tier's replay is non-vacuous by re-running the buffer-drop mutation under Node: it fails and exits nonzero, because the runner aborts through `REQUIRE` rather than throwing, so emscripten's `-fignore-exceptions` has nothing to swallow. The threaded tier's `—` is legitimate; `wasm-tiers.conf` assigns that suite to core only.
 
 Two follow-ups filed: `#lzcppwasmguardlocal` (give `make check` local reach into that generated table) and `#lzzigfmttoolchains` (zig's three pinned formatters disagree per-construct, and the Makefile claims otherwise).
-<!-- agent:boundary:cb1dca30:lazily -->
+
+### Re: #lzcppwasmguardlocal, #lzzigfmttoolchains — both CI-only gates now run locally — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzcppwasmguardlocal]
+>
+> do [#lzzigfmttoolchains]
+
+
+Both drained. These were the two follow-ups the fixture work exposed, and each turned out to be worse than the one-line symptom that filed it.
+
+**`#lzcppwasmguardlocal`** — `lazily-cpp@a8c486d`, CI `31504003268` green on all three jobs.
+
+The corpus column *is* locally derivable, so the audit split cleanly: `scripts/lib/wasm-matrix.sh` now holds the single definition of the corpus-derivable facts, and both the CI guard and the new `check-wasm-corpus-column.sh` source it. That matters more than the rung itself — two independent implementations of "count the fixtures" would have been the same bug one level up. The local rung compares against the bytes the CI generator emits, so the two cannot disagree about a cell, and the regenerated table came out byte-identical after the refactor.
+
+It reddens on the real historical failure — restoring `9b0ff08`'s `WASM.md` against today's corpus produces `family 'lossless-tree' has 9 canonical fixture(s); the corpus has 11`, exactly the failure that cost a red main this morning. It also catches a corpus family missing from the table in **both** directions, and fails closed on five separate degenerate inputs including an empty corpus and a stripped table body. Its OK verdict names what it did not audit rather than implying a full matrix check.
+
+**`#lzzigfmttoolchains`** — `lazily-zig@0cb7c8d`, CI `31504166350` green across every job.
+
+The disagreement reproduces, and it is sharper than I described when filing it. On the pre-`5bea17c` construct, 0.15.2 emits `    return ` with a trailing space and 0.16.0 emits `    return` — but the important part is that **neither output is a fixed point of the other**: each toolchain's `fmt --check` rejects the other's output. There is no formatting of that construct both accept, so no `fmt-fix` run could ever have resolved it. The source had to be restructured, which is what `5bea17c` did without anyone establishing why.
+
+Outcome (A), with one qualification the measurement forced: the repo pins three toolchains but only **two are gateable**. `master` is a moving nightly — `setup-zig` resolves it to today's build, mise to whatever was last pulled — so it is now reported advisory and never affects exit status. `make fmt` gates 0.15.2 and 0.16.0, version-verifies every resolved binary (a 0.16.0 binary behind a `ZIG_FMT_0_15_2` override is caught and refused), and never prints OK on a partial run. The Makefile now states what is actually guaranteed instead of a three-way agreement nothing verified. The current tree is clean under all three.
+
+Superproject pointers bumped in `a4285b9ea`.
+
+#### One consequence to weigh
+
+`lazily-cpp`'s new rung fails closed on an absent corpus, so `make check` there now **requires** the sibling `../lazily-spec` checkout — while `check-conformance-coverage.sh` in the same repo still *skips* with exit 0 in that situation. CI is unaffected (every job clones the sibling), but a bare public clone that used to pass `make check` with skips will now fail. Fail-closed is the right instinct and it is the pattern this whole run has been enforcing; the problem is that the repo now answers "sibling missing" two different ways depending on which guard you reach first. Filed as `#lzcppsiblingskipvsfail` [recommended] — the decision is which policy the repo wants, not whether this particular rung is correct.
+
+Exchange is at ~1200 lines / 36 sections, past the clear threshold, but the queue was active so I kept draining rather than stalling to ask.
+<!-- agent:boundary:1955b55d:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzcppwasmguardlocal]
-- do [#lzzigfmttoolchains]
+- do [#lzcppsiblingskipvsfail]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcppwasmguardlocal] lazily-cpp's WASM.md capability-matrix guard runs ONLY in the wasm CI job, so a corpus change that moves its counts passes local make check and lands red (proved this cycle: 9b0ff08 green locally, red on CI). The corpus column is derivable without emscripten -- give make check a rung that audits at least that column, so the failure is local.
-- [ ] [#lzzigfmttoolchains] lazily-zig's Makefile claims its three pinned toolchains agree on formatting; they agree per-construct, not universally. zig fmt 0.15.2 and 0.16.0 disagree about a multiline string spliced inline with ++ inside a return (CI failed the 0.15.2 gate only, 5bea17c). Run all three formatters in make check, or drop the claim.
+- [ ] [#lzcppsiblingskipvsfail] [recommended] lazily-cpp now has two guards disagreeing about the same missing sibling: check-wasm-corpus-column.sh FAILS make check without ../lazily-spec, while check-conformance-coverage.sh SKIPs (exit 0). A bare clone therefore can no longer run make check. Pick one policy for the repo -- fail-closed everywhere, or skip-plus-CI-assert everywhere -- rather than leaving the behaviour depend on which guard you hit first.
 - [ ] [#lzgdvocab] lazily-gd's reactive-graph runner is missing the fanout/churn/dispose_fanout/dispose_stale_handle bulk ops AND real id recycling, so 2 canonical fixtures remain: churn_returns_to_baseline.json and recycled_id_inherits_nothing.json. Recycling is the hard half and is a DESIGN decision, not runner vocabulary: Godot instance ids are monotonic and never alias, so 'a recycled id inherits nothing' has no natural referent — the binding needs an explicit id layer (a free-list over slot indices with a generation tag, the shape lazily-rs's SlotId uses) before the fixture means anything. Removing both entries from KNOWN_UNCOVERED in scripts/check-conformance-coverage.sh is the definition of done. DONE already: the merge_cell group (5 fixtures) landed with LazilyMergePolicy + Source.merge + ctx.source_with, and GDScript is now ~ on merge-algebra.
 <!-- /agent:backlog -->
 

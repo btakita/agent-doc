@@ -12,6 +12,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use tmux_router::Tmux;
 
+use crate::admission_projection::wait_for_start_projection;
 use crate::authoritative_actor::{
     ManagedCapabilityProofStatus, authoritative_actor_ready_facts_from_target,
     current_generation_ready_prompt_proven, load_authoritative_actor_binding,
@@ -46,6 +47,7 @@ use agent_doc_controller::dispatch::{
     dispatch_only_route_superseded_by_new_cycle, dispatch_only_should_print_unproven_progress,
     dispatch_only_starting_pane_actor_settled, dispatch_only_starting_pane_draft_message,
     dispatch_only_starting_pane_not_ready_message, prompt_ready_barrier_failed_event,
+    routed_admission_timeout_with_client_deadline,
 };
 use agent_doc_harness::HarnessConfig;
 use agent_doc_supervisor::route_runtime::authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible;
@@ -72,6 +74,100 @@ pub struct DispatchOnlyRouteEffects {
 
 fn remaining_ready_wait(deadline: Instant, now: Instant) -> Duration {
     deadline.saturating_duration_since(now)
+}
+
+fn dispatch_only_starting_pane_blocker(draft: Option<&str>, trigger: &str) -> StartingPaneBlocker {
+    StartingPaneBlocker::from_composer_draft_for_trigger(draft, Some(trigger))
+}
+
+/// Run the one-shot recovery effect in causal order: submit the already-typed
+/// trigger once, then observe the reactive admission projection.
+fn submit_stranded_trigger_then_await_projection(
+    submit: impl FnOnce() -> Result<()>,
+    await_projection: impl FnOnce() -> bool,
+) -> Result<bool> {
+    submit()?;
+    Ok(await_projection())
+}
+
+fn resubmit_stranded_dispatch_only_trigger(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+    baseline: Option<&agent_doc_cycle_state_io::CycleState>,
+) -> Result<()> {
+    let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(&harness.binary);
+    let admission_timeout = routed_admission_timeout_with_client_deadline(
+        true,
+        cfg!(test),
+        crate::invocation::wait_for_ready_override(),
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_dispatch_only_stranded_trigger_resubmit file={} pane={} harness={} submit_key={} timeout_secs={} note=exact agent-doc trigger remained unsubmitted; resending bare submit once",
+            file.display(),
+            pane,
+            harness.binary,
+            submit_key,
+            admission_timeout.as_secs(),
+        ),
+    );
+    eprintln!(
+        "[route] dispatch-only {} reopen for {} found agent-doc's exact trigger stranded in pane {}; resending {} once and awaiting admission",
+        harness.binary,
+        file.display(),
+        pane,
+        submit_key,
+    );
+
+    let projected = submit_stranded_trigger_then_await_projection(
+        || {
+            Ok(agent_doc_tmux_io::send_key_logged(
+                tmux,
+                pane,
+                submit_key,
+                agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                    Some(file),
+                    agent_doc_ops_log_io::log_op,
+                ),
+                "route.dispatch_only_stranded_trigger_resubmit",
+            )?)
+        },
+        || wait_for_start_projection(file, baseline, admission_timeout).is_some(),
+    )?;
+    if !projected {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_stranded_trigger_resubmit_missing file={} pane={} harness={} timeout_secs={}",
+                file.display(),
+                pane,
+                harness.binary,
+                admission_timeout.as_secs(),
+            ),
+        );
+        anyhow::bail!(
+            "dispatch-only {} reopen resubmitted the stranded agent-doc trigger once in pane {} for {}, but no new document cycle reached the admission projection after {}s",
+            harness.binary,
+            pane,
+            file.display(),
+            admission_timeout.as_secs(),
+        );
+    }
+
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_dispatch_only_stranded_trigger_projected file={} pane={} harness={} timeout_secs={}",
+            file.display(),
+            pane,
+            harness.binary,
+            admission_timeout.as_secs(),
+        ),
+    );
+    Ok(())
 }
 
 fn dispatch_only_starting_pane_ready_via_authoritative_actor(
@@ -258,17 +354,18 @@ pub fn dispatch_only_send_reopen(
         )?,
     );
     if requires_ready_probe {
+        let route_start_cycle = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
         // `--wait-for-ready` is one request budget, not a fresh allowance for
         // every same-pane/handoff recovery attempt. Resetting it here made the
         // async controller publish a useful terminal refusal after the editor
         // had already stopped polling (#jbroutasync-starting).
         let ready_timeout = (options.effects.dispatch_only_starting_pane_ready_timeout)(harness);
         let ready_deadline = Instant::now() + ready_timeout;
+        let route_trigger = harness.trigger_command(file_path);
         loop {
-            // A visible operator draft is a terminal blocker, not a readiness
-            // state that can improve with time. Refuse before spending the
-            // editor's route budget so the async command plane can publish the
-            // exact unblocker while its client is still polling.
+            // A visible draft is classified before spending the editor's route
+            // budget. Operator text is a terminal blocker; agent-doc's exact
+            // stranded trigger is the one safe submit-once recovery.
             // Capture WITH escapes: the draft/ghost discriminator is the composer
             // body's *styling* (dim/faint SGR 2 = placeholder, normal intensity =
             // real keystrokes), so a plain `capture-pane -p` throws away the only
@@ -282,27 +379,50 @@ pub fn dispatch_only_send_reopen(
                         pane_composer_draft(tmux, &dispatch_pane, &content, harness)
                     })
             {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "route_dispatch_only_starting_pane_not_ready file={} pane={} harness={} outcome=operator_draft composer_draft=true",
-                        file.display(),
-                        dispatch_pane,
-                        harness.binary,
-                    ),
-                );
-                let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
-                    StartingPaneBlocker::OperatorDraft.unblocker(),
-                );
-                anyhow::bail!(dispatch_only_starting_pane_draft_message(
-                    DispatchOnlyStartingPaneDraftMessageFacts {
-                        harness_binary: &harness.binary,
-                        pane: &dispatch_pane,
-                        file_display: &file.display().to_string(),
-                        draft_preview: &draft_preview,
-                        outcome_fields: &outcome_fields,
-                    },
-                ));
+                match dispatch_only_starting_pane_blocker(
+                    Some(draft_preview.as_str()),
+                    &route_trigger,
+                ) {
+                    StartingPaneBlocker::StrandedTrigger => {
+                        drop(pre_dispatch_route_guard.take());
+                        register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
+                        resubmit_stranded_dispatch_only_trigger(
+                            tmux,
+                            file,
+                            &dispatch_pane,
+                            harness,
+                            route_start_cycle.as_ref(),
+                        )?;
+                        return Ok(dispatch_pane);
+                    }
+                    StartingPaneBlocker::OperatorDraft => {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "route_dispatch_only_starting_pane_not_ready file={} pane={} harness={} outcome=operator_draft composer_draft=true",
+                                file.display(),
+                                dispatch_pane,
+                                harness.binary,
+                            ),
+                        );
+                        let outcome_fields =
+                            agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
+                                StartingPaneBlocker::OperatorDraft.unblocker(),
+                            );
+                        anyhow::bail!(dispatch_only_starting_pane_draft_message(
+                            DispatchOnlyStartingPaneDraftMessageFacts {
+                                harness_binary: &harness.binary,
+                                pane: &dispatch_pane,
+                                file_display: &file.display().to_string(),
+                                draft_preview: &draft_preview,
+                                outcome_fields: &outcome_fields,
+                            },
+                        ));
+                    }
+                    StartingPaneBlocker::Booting => {
+                        unreachable!("a captured composer draft cannot classify as a booting pane")
+                    }
+                }
             }
             if dispatch_only_starting_pane_ready_via_authoritative_actor(
                 tmux,
@@ -416,10 +536,22 @@ pub fn dispatch_only_send_reopen(
                 ),
             );
             let file_display = file.display().to_string();
-            let blocker = StartingPaneBlocker::from_composer_draft(draft.as_deref());
+            let blocker = dispatch_only_starting_pane_blocker(draft.as_deref(), &route_trigger);
             let outcome_fields =
                 agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(blocker.unblocker());
             match (blocker, draft.as_deref()) {
+                (StartingPaneBlocker::StrandedTrigger, Some(_)) => {
+                    drop(pre_dispatch_route_guard.take());
+                    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
+                    resubmit_stranded_dispatch_only_trigger(
+                        tmux,
+                        file,
+                        &dispatch_pane,
+                        harness,
+                        route_start_cycle.as_ref(),
+                    )?;
+                    return Ok(dispatch_pane);
+                }
                 (StartingPaneBlocker::OperatorDraft, Some(draft_preview)) => {
                     anyhow::bail!(dispatch_only_starting_pane_draft_message(
                         DispatchOnlyStartingPaneDraftMessageFacts {
@@ -1163,6 +1295,48 @@ mod tests {
             ),
             DispatchOnlyBlockerAction::Refuse,
         );
+    }
+
+    #[test]
+    fn starting_pane_draft_effect_resubmits_only_the_exact_route_trigger() {
+        let trigger = "agent-doc tasks/sample.md";
+
+        assert_eq!(
+            dispatch_only_starting_pane_blocker(Some("›\u{a0}agent-doc tasks/sample.md"), trigger,),
+            StartingPaneBlocker::StrandedTrigger,
+        );
+        assert_eq!(
+            dispatch_only_starting_pane_blocker(
+                Some("❯ agent-doc tasks/sample.md please continue"),
+                trigger,
+            ),
+            StartingPaneBlocker::OperatorDraft,
+        );
+        assert_eq!(
+            dispatch_only_starting_pane_blocker(Some("❯ agent-doc tasks/other.md"), trigger,),
+            StartingPaneBlocker::OperatorDraft,
+        );
+    }
+
+    #[test]
+    fn stranded_trigger_effect_submits_once_before_reawaiting_projection() {
+        let events = std::cell::RefCell::new(Vec::new());
+
+        let projected = submit_stranded_trigger_then_await_projection(
+            || {
+                events.borrow_mut().push("submit");
+                Ok(())
+            },
+            || {
+                assert_eq!(events.borrow().as_slice(), ["submit"]);
+                events.borrow_mut().push("await_projection");
+                true
+            },
+        )
+        .unwrap();
+
+        assert!(projected);
+        assert_eq!(events.into_inner(), ["submit", "await_projection"]);
     }
 
     #[test]

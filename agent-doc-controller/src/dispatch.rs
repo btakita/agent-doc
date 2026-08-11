@@ -2142,7 +2142,7 @@ impl StartingPaneBlocker {
 fn draft_is_exactly_the_trigger(draft: &str, trigger: &str) -> bool {
     let strip = |text: &str| {
         text.trim_matches(|ch: char| {
-            ch.is_whitespace() || ch == '\u{a0}' || ch == '❯' || ch == '>' || ch == '$'
+            ch.is_whitespace() || ch == '\u{a0}' || ch == '❯' || ch == '›' || ch == '>' || ch == '$'
         })
         .to_string()
     };
@@ -7170,7 +7170,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% used
 mod stranded_trigger_classification_tests {
     use super::*;
 
-    const TRIGGER: &str = "/agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md";
+    const TRIGGER: &str = "/agent-doc /repo/tasks/sdk.md";
 
     /// The live 2026-08-10 report, verbatim: the composer held agent-doc's own
     /// trigger for the document being routed, behind the harness sigil and a
@@ -7178,16 +7178,20 @@ mod stranded_trigger_classification_tests {
     /// press Enter on agent-doc's behalf.
     #[test]
     fn agent_docs_own_stranded_trigger_is_not_operator_input() {
-        let draft = "\u{276f}\u{a0}/agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md";
-        assert_eq!(
-            StartingPaneBlocker::from_composer_draft_for_trigger(Some(draft), Some(TRIGGER)),
-            StartingPaneBlocker::StrandedTrigger
-        );
-        assert_eq!(
-            StartingPaneBlocker::from_composer_draft_for_trigger(Some(draft), Some(TRIGGER))
-                .unblocker(),
-            "resubmit_stranded_trigger"
-        );
+        for draft in [
+            "\u{276f}\u{a0}/agent-doc /repo/tasks/sdk.md",
+            "›\u{a0}/agent-doc /repo/tasks/sdk.md",
+        ] {
+            assert_eq!(
+                StartingPaneBlocker::from_composer_draft_for_trigger(Some(draft), Some(TRIGGER)),
+                StartingPaneBlocker::StrandedTrigger
+            );
+            assert_eq!(
+                StartingPaneBlocker::from_composer_draft_for_trigger(Some(draft), Some(TRIGGER))
+                    .unblocker(),
+                "resubmit_stranded_trigger"
+            );
+        }
     }
 
     /// Real operator text stays operator-owned — this is the case the guard
@@ -7208,8 +7212,8 @@ mod stranded_trigger_classification_tests {
     #[test]
     fn a_trigger_with_operator_text_around_it_stays_operator_input() {
         for draft in [
-            "\u{276f} /agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md and also check CI",
-            "\u{276f} wait: /agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md",
+            "\u{276f} /agent-doc /repo/tasks/sdk.md and also check CI",
+            "\u{276f} wait: /agent-doc /repo/tasks/sdk.md",
         ] {
             assert_eq!(
                 StartingPaneBlocker::from_composer_draft_for_trigger(Some(draft), Some(TRIGGER)),
@@ -7223,7 +7227,7 @@ mod stranded_trigger_classification_tests {
     /// injection, so it must not be resubmitted here.
     #[test]
     fn another_documents_trigger_is_not_this_routes_stranded_trigger() {
-        let draft = "\u{276f} /agent-doc /home/brian/work/btakita/agent-loop/tasks/other.md";
+        let draft = "\u{276f} /agent-doc /repo/tasks/other.md";
         assert_eq!(
             StartingPaneBlocker::from_composer_draft_for_trigger(Some(draft), Some(TRIGGER)),
             StartingPaneBlocker::OperatorDraft

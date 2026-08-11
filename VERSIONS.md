@@ -2,6 +2,31 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.237
+
+- **Fix (`#dispatchonlyresubmitwiring`): dispatch-only reopen now submits its
+own stranded trigger instead of only naming the recovery.**
+
+0.35.235 added the safe classifier for the operator-reported `sdk.md` / pane
+`%926` shape, but the route consumer still used the trigger-blind classifier and
+always ended in a refusal. The new `StrandedTrigger` outcome and
+`unblocker=resubmit_stranded_trigger` therefore described an action that no
+production branch performed.
+
+The starting-pane dispatch-only path now compares a visible composer draft with
+the exact trigger for the document being routed. Only an exact match releases
+the pending route guard, sends one bare harness submit key, and then awaits the
+controller turn-admission projection. Missing admission fails closed without a
+second submit. A trigger plus operator words, a trigger for another document,
+or any other draft remains `OperatorDraft` and is never submitted by this
+recovery.
+
+Regression coverage pins both boundaries and both prompt sigils (`❯` and
+Codex's `›`). An isolated live tmux test renders the reported `sdk.md` composer
+shape with NBSP padding, makes controller admission conditional on the pane
+receiving Enter, and proves the one-shot effect submits exactly once before the
+reactive admission observation.
+
 ## 0.35.236
 
 - **Fix (`#editorregisterbootstrap`): an open editor can now establish CRDT

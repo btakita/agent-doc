@@ -178,6 +178,12 @@ No legacy layout file is imported or emitted.
   a busy actor can receive real-time steering. It never pane-polls, waits for
   dispatch-start proof, or re-sends the submit key. This exception does not apply
   to prompt-aware reruns, fresh-start recovery, or queued document work.
+- A prompt-aware dispatch-only reopen whose starting pane contains exactly the
+  route's own unsubmitted agent-doc trigger may send one bare harness submit key,
+  then must await the controller turn-admission projection. Missing projection
+  fails closed without another submit. A trigger plus operator text, a trigger for
+  another document, or any other composer draft remains operator-owned and must
+  not be submitted by this recovery (`#dispatchonlyresubmitwiring`).
 - Direct-pane submit profiles get bounded bare submit-key re-submits
 (`#jbcodexsubmit` / `#jbclaudesubmit`). Codex, Claude, OpenCode, and default
 tmux submits send normalized text plus a named `Enter` key in one

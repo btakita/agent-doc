@@ -2281,6 +2281,139 @@ mod tests {
 
         ipc.stop();
     }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_or_create_pane_dispatch_only_resubmits_exact_stranded_trigger_once() {
+        let _tmux_guard = tmux_start_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-dispatch-only-stranded-trigger");
+        let session = "codex";
+        let pane = iso.auto_start(session, dir.path()).unwrap();
+
+        let doc = dir.path().join("sdk.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
+
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let trigger = HarnessConfig::codex().trigger_command(&file_path);
+        let session_id = "route-dispatch-only-stranded-trigger";
+        sessions::register(session_id, &pane, &file_path).unwrap();
+        agent_doc_supervisor_io::startup_miss::append_session_log_event(
+            &doc,
+            session_id,
+            &format!(
+                "session_start file={} pane={} session={}",
+                doc.display(),
+                pane,
+                session_id
+            ),
+        )
+        .unwrap();
+        agent_doc_supervisor_io::startup_miss::append_session_log_event(
+            &doc,
+            session_id,
+            "codex_start mode=fresh restart_count=0",
+        )
+        .unwrap();
+
+        let submit_marker = dir.path().join("stranded-trigger-submitted");
+        let prompt_script = dir.path().join("codex-stranded-trigger.sh");
+        let prompt_script_contents = r#"#!/bin/sh
+printf '\033[2J\033[HSTRANDEDMARK\ngpt-5 high · ~/repo · Context 0%% used\n›\302\240%s\n' "$1"
+while IFS= read -r CMD; do
+  printf 'RESUBMITTED:%s\n' "$CMD"
+  : > "$2"
+done
+"#;
+        std::fs::write(&prompt_script, prompt_script_contents).unwrap();
+        send_keys_with_retry(
+            &iso,
+            &pane,
+            &format!(
+                "exec /bin/sh {} \"{}\" {}",
+                prompt_script.display(),
+                trigger,
+                submit_marker.display()
+            ),
+        );
+        let stranded = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "STRANDEDMARK",
+            std::time::Duration::from_secs(3),
+        );
+        let displayed_draft = format!("›\u{a0}{trigger}");
+        assert_eq!(
+            agent_doc_harness::pane_composer_draft(&HarnessConfig::codex(), &stranded).as_deref(),
+            Some(displayed_draft.as_str()),
+            "fixture must expose the exact route trigger as a real Codex composer draft: {stranded}"
+        );
+
+        let doc_for_projection = doc.clone();
+        let marker_for_projection = submit_marker.clone();
+        let projection = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while !marker_for_projection.exists() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            assert!(
+                marker_for_projection.exists(),
+                "the controller projection must remain conditional on live Enter delivery"
+            );
+            agent_doc_cycle_state_io::start_preflight(&doc_for_projection, None, Some(snapshot))
+                .unwrap();
+        });
+
+        let resolved = resolve_or_create_pane_dispatch_only(
+            &iso,
+            &doc,
+            None,
+            &[],
+            session_id,
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        )
+        .expect("dispatch-only route should resubmit its exact stranded trigger");
+        projection.join().unwrap();
+        assert_eq!(resolved, pane);
+
+        let after = wait_for_pane_contains(
+            &iso,
+            &pane,
+            "RESUBMITTED:",
+            std::time::Duration::from_secs(3),
+        );
+        assert_eq!(
+            after.matches("RESUBMITTED:").count(),
+            1,
+            "dispatch-only recovery must send exactly one bare Enter: {after}"
+        );
+        assert!(
+            !after.contains(&format!("RESUBMITTED:{trigger}")),
+            "recovery must submit the existing composer draft, not type a second trigger: {after}"
+        );
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn auto_start_reuses_other_file_pane_only_as_split_anchor() {

@@ -2,8 +2,11 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-tools_version="1.8.0"
-tools_sha256="e22f8ffb4bacdea0a871f444dd94fe5fb0d8013b3388ae39e82e26f852c735d5"
+# v1.8.0 is the upstream rolling prerelease: its tag and release asset are
+# replaced by CI, so a pinned checksum eventually rejects a different binary at
+# the same URL. Use the immutable stable release for reproducible model checks.
+tools_version="1.7.4"
+tools_sha256="936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88"
 tools_url="https://github.com/tlaplus/tlaplus/releases/download/v${tools_version}/tla2tools.jar"
 tools_jar="${TLA_TOOLS_JAR:-${repo_root}/target/tla/tla2tools-${tools_version}.jar}"
 

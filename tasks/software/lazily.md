@@ -492,15 +492,59 @@ Worth stating plainly, since the item was filed as a suspected vacuous fixture: 
 `make check` OK. `lazily-zig@e8a2a28`, superproject pointer committed and pushed. Filed the follow-up for the other eight bindings, which have the same unpinned order.
 
 Last cycle's CI landed green: `lazily-cpp` ✅ (3m42s) and `lazily-gd` ✅ (28s) both passed on the `#lzledgeragreementaudit` commits. zig's run for this commit is queued — recorded, not waited on. Exchange is at 435 lines (session-accretion `warn`); queue is active so I am not compacting.
-<!-- agent:boundary:36c3fb81:lazily -->
+
+### Re: #lzzigingressspecdir — one site turned out to be fourteen, and the override was half-working in silence — opus-5
+
+> **Queue prompt:**
+>
+> 📌 do [#lzzigingressspecdir]
+
+
+The item named `ingress_family_conformance.zig:82`. Auditing the rest, as it asked, found **fourteen sites across twelve areas**: nine runners each carrying their own `const SPEC_DIR = "../lazily-spec/conformance/<area>"`, plus ingress, `receipt` (×2), `ipc` (×3), `crdt_plane`, and `dependency_availability`. `#lzzigspecdiroption` moved `conformance_json.zig` and `reactive_map.zig`; everything else kept comptime-concatenating the default.
+
+**So the override was half-working, and half-working is worse here than not working.** A run that reads the default corpus while believing it was redirected is green either way. There is no signal — not a warning, not a skip, not a differing path in the output. The binding advertised `LAZILY_SPEC_CONFORMANCE_DIR` support and delivered it for two runners out of fourteen.
+
+I measured it rather than reasoning about it. Truncate fourteen fixtures across twelve areas in a scratch corpus, point the suite at it with the override:
+
+| | tests reddened |
+|---|---|
+| before this change | **0** — `make test` exit 0, fully green |
+| after | **26**, covering all twelve areas |
+
+Zero. The same perturbed corpus that now reddens collections, coordination, crdt_plane, dependency-availability, ingress, ipc, membership, presence, rateshape, receipts, resilience, service, temporal and windowing produced a clean green run before.
+
+That number is the whole point, and it lands directly on the item two heads down. `#lzperturbaudit`'s deliverable is a table of *family → perturbed key → reddened runner*, with every non-reddening cell explained. Run against the previous commit, **twelve of those areas would have filled in as "perturbation did not redden" — and the explanation would have been wrong in the most expensive way**: it reads as "this fixture pins nothing", a finding about the corpus, when the truth is that the runner never opened the perturbed bytes at all. That is exactly the false negative `#lzzigdiffmutant` turned out to be a report of, one cycle ago, from a different cause.
+
+Four states, the same proof `#lzzigspecdiroption` used:
+
+| | result |
+|---|---|
+| default, no override | green |
+| override → byte-identical copy | green |
+| override → perturbed copy | **26 red across 12 areas** |
+| override → nonexistent directory | **panics, 0 skips** |
+
+The third is the one that matters: it proves the override changes which *bytes* are read, not merely which path gets printed.
+
+`specPath` / `specAreaPath` / `specAreaDir` in `conformance_manifest.zig` are now the only way to build a corpus path, and the `SPEC_DIR` constants are gone — an area is named as a bare subdirectory, so there is nothing left to concatenate a root onto. Fail-closed behaviour is unchanged: these reads already went through `specReadFile`, which panics on an explicit root that is not there.
+
+**And a guard, because the fifteenth site would arrive just as quietly.** It scans `src/**.zig` for the default root and fails naming each offender; `conformance_manifest.zig` is the one legitimate mention. Line and doc comments are skipped deliberately — several runners quote the old path while explaining the corpus, and making them stop describing it would trade a real explanation for a lint. Proven both directions: reintroducing a `const SPEC_DIR` in `service.zig` fails naming that file, and pointing the scan at an empty tree fails as a pass over nothing rather than reporting OK, the same positive-evidence rule the fixture and scenario rungs already carry.
+
+It lives in `check-conformance-coverage.sh` rather than a zig test because this toolchain's `std.fs` has no `cwd` — the same gutting this module's own header documents — and there it is already inside `make check` and reached by CI. lazily-go carries the equivalent guard as an AST test, which it can afford in-language.
+
+`make check` OK, 147/147 scenarios. `lazily-zig@07b1605` + `ec8e65e`, superproject pointer pushed. Filed the follow-up: `#lzoverrideallrunners` declared five other bindings redirectable after probing each with **one** fixture, and one fixture is precisely what would have passed here while twelve areas stayed pinned to the default.
+
+Last cycle's CI: `lazily-zig` ✅ green on the `#lzzigdiffmutant` commit. The two runs for this change are in flight. Exchange is at 472 lines (session-accretion `warn`); queue is active so I am not compacting.
+<!-- agent:boundary:6c5823c4:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- do [#lzoverrideallrunnersaudit]
 - ~~📌 do [#lzzigdiffmutant]~~
 - ~~📌 do [#lzledgeragreementaudit]~~
-- 📌 do [#lzzigingressspecdir]
+- ~~📌 do [#lzzigingressspecdir]~~
 - 📌 do [#lzperturbaudit]
 - 📌 do [#lzspecschemasoverride]
 - do [#lzdifforderallbindings]
@@ -510,7 +554,7 @@ Last cycle's CI landed green: `lazily-cpp` ✅ (3m42s) and `lazily-gd` ✅ (28s)
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzzigingressspecdir] lazily-zig's ingress_family_conformance.zig:82 still hardcodes `const SPEC_DIR = "../lazily-spec/conformance/ingress/"` instead of routing through conformance_manifest.conformanceRoot(), so LAZILY_SPEC_CONFORMANCE_DIR does not move that runner. #lzzigspecdiroption fixed conformance_json.zig and reactive_map.zig but this seam was missed. Consequence for #lzperturbaudit: a perturbation probe that points zig at a scratch corpus gets a redirected reactive-graph/collections replay and a NON-redirected ingress replay in the same run, so an ingress fixture perturbed in the scratch copy cannot redden and the cell reads as convergence-only for the wrong reason. Route it through conformanceRoot(), then prove it the way #lzzigspecdiroption was proven: override to a byte-identical copy (green), to a copy with one perturbed ingress expectation (red), and to a nonexistent directory (panics, 0 skips). Audit the remaining zig runners for the same hardcoded-root split while there.
+- [ ] [#lzoverrideallrunnersaudit] #lzoverrideallrunners declared cs/go/dart/js/py redirectable via LAZILY_SPEC_CONFORMANCE_DIR, but its own note says each was probed with EXACTLY ONE fixture — the one proving its seam. lazily-zig was in that same state and it was wrong by 12 areas: the override moved 2 of 14 corpus-path sites, and truncating 14 fixtures in a scratch corpus reddened ZERO tests while the binding advertised full override support (#lzzigingressspecdir, fixed in 07b1605). One fixture is exactly the probe that passes in that state. For each of cs/go/dart/js/py (and rs/kt/cpp/gd, which were never in the original five): grep for the hardcoded corpus root in every source file, then MEASURE — perturb one fixture per conformance area in a scratch corpus, point the suite at it, and record how many areas redden versus how many exist. A binding is redirectable only when every area reddens. Then add the regression guard: lazily-zig's lives in scripts/check-conformance-coverage.sh (comment lines skipped, plus a positive-evidence floor so an empty scan fails rather than passing); lazily-go has the AST equivalent in conformance_corpus_test.go (TestNoTestFileSpellsTheCorpusPathItself). Definition of done: per binding, a per-area reddened/total count and a guard that fails when a source spells the default root. This BLOCKS trusting any #lzperturbaudit cell for those bindings — a non-reddening cell is uninterpretable until the runner is proven to read the overridden bytes.
 - [ ] [#lzperturbaudit] The corpus-perturbation audit that #lzoverrideallrunners existed to unblock has NOT been run. All five bindings (cs/go/dart/js/py) can now be pointed at a scratch corpus, but each has been probed with exactly ONE fixture, the one proving its seam. lazily-rs's AGENTS.md documents this audit as the pass a static detector cannot replace. For each of the five, walk the conformance families and perturb at least one fixture per family, recording which runners redden and which are convergence-only (a fixture that cannot be made to fail by flipping a declared expectation is pinning nothing). Expect finds of the #lzzigdiffmutant shape: an assertion that survives a mutation because an earlier assertion fires first, or because the runner never reaches it. Definition of done: a per-binding table of family -> perturbed key -> reddened runner, with every non-reddening cell explained rather than dropped.
 - [ ] [#lzspecschemasoverride] LAZILY_SPEC_CONFORMANCE_DIR redirects the conformance CORPUS only; lazily-spec/schemas always resolves to the canonical sibling in go (specSchemasDir, 2 sites in ipc_conformance_test.go), js (schemasRoot/schemaPath, used by schema-conformance + lossless-tree-crdt + ipc) and cs (5 schema roots derived from SpecCorpus.Root via '..'). This is deliberate today because a corpus scratch copy carries no schemas/ sibling, but it means a probe that needs to perturb a SCHEMA has nowhere to point except the shared ../lazily-spec checkout, which reddens all nine bindings at once. That is the exact defect #lzoverrideallrunners just fixed, one level up. Add a spec-ROOT override (or a second LAZILY_SPEC_SCHEMAS_DIR) threaded through the same seams, default unchanged, fail-closed on an unreadable explicit value. Audit dart/py/kt/rs/cpp/zig/gd for the same split while there. Definition of done: flip one field in a scratch schemas copy and prove a schema-validating runner reddens without touching the canonical checkout.
 - [ ] [#lzdifforderallbindings] The lossless-tree `diff` op ORDER is a cross-binding contract that no binding pins. The canonical corpus addresses ops positionally (`deliver.only: [0,2]` in non_contiguous_anti_entropy.json indexes into the diff result), so the fixture means the same thing in every binding only while every binding returns ops in the same canonical (counter, peer) order. lazily-rs (ops.sort_by_key), lazily-py (sorted), lazily-js (.sort(cmpId)) and lazily-zig all produce it by convention; zig gained a regression test in e8a2a28 (#lzzigdiffmutant) after proving that replacing the sort with std.mem.reverse — or deleting it — left the ENTIRE suite green. Add the equivalent test to the other bindings that implement LosslessTreeCrdt (rs, py, js, and any of cs/go/dart/kt/cpp that do), each built so log order and canonical order DIFFER and asserting that difference explicitly, or the assertion holds for a reversed diff and pins nothing. Definition of done: per binding, a mutation that reverses or drops the diff sort reddens exactly one new test and nothing else. Consider also whether lazily-spec should state the ordering contract where deliver.only is defined, since today it is agreement without a document.

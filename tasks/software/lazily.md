@@ -1241,19 +1241,45 @@ Superproject pointers bumped in `a4285b9ea`.
 `lazily-cpp`'s new rung fails closed on an absent corpus, so `make check` there now **requires** the sibling `../lazily-spec` checkout — while `check-conformance-coverage.sh` in the same repo still *skips* with exit 0 in that situation. CI is unaffected (every job clones the sibling), but a bare public clone that used to pass `make check` with skips will now fail. Fail-closed is the right instinct and it is the pattern this whole run has been enforcing; the problem is that the repo now answers "sibling missing" two different ways depending on which guard you reach first. Filed as `#lzcppsiblingskipvsfail` [recommended] — the decision is which policy the repo wants, not whether this particular rung is correct.
 
 Exchange is at ~1200 lines / 36 sections, past the clear threshold, but the queue was active so I kept draining rather than stalling to ask.
-<!-- agent:boundary:1955b55d:lazily -->
+
+### Re: #lzcppsiblingskipvsfail — the premise was wrong; fail closed everywhere — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzcppsiblingskipvsfail]
+
+
+`lazily-cpp@0736598`, CI `31506311491` green on all three jobs. Pointer bumped in `107bfe6ec`. Queue empty.
+
+I filed this as a coin-flip between two defensible policies. The measurement removed the flip.
+
+**A sibling-free `make check` is 42% of targets and 0% of the point.** With the corpus absent: 26 of 62 ctest targets run, 273 of 927 assertion sites execute (29%), and the entire cross-binding conformance layer contributes nothing — 0 fixtures replayed, 0 of 149 scenarios, no coverage manifest written at all.
+
+**And the cost side of the other option turned out to be empty.** I had asserted that a bare clone "used to pass `make check` with skips" and that today's guard broke it. That was false, and the agent checked instead of accepting it: a sibling-less clone at `cbeedc6` — the commit *before* the guard that raised this question — already exits 2 at `assertion-ordering-check`, whose checker lives in `../lazily-spec/scripts/` and never had absence handling. No green sibling-free `make check` has existed since `bd2380a`. So policy (2) would not have preserved a working contributor path; it would have *built* a green that reports OK over an unreplayed corpus, in the exact gate whose false green let `9b0ff08` pass locally and land red on CI two hours ago.
+
+So: fail closed everywhere. Five sibling-touching guards were answering in three different dialects — ctest `SKIP` via exit 77, shell `SKIP:` with exit 0, and hard failure — and all five now refuse. The inventory was built by grepping for the corpus root and the skip seam rather than assuming the two named in the item, which is how the `assertion-ordering-check` case surfaced: it was fail-closed only *by accident*, via python3's errno, and now has an explicit precondition.
+
+Two details worth keeping:
+
+- The CI step that used to `grep '^SKIP:'` could no longer fire once nothing emits `SKIP:`. It was replaced with a live proof that runs each guard against an absent corpus and asserts it refuses **for the corpus reason**, not merely with a nonzero exit. Verified by a negative control: reintroducing a skipping branch makes that step redden.
+- `test_formal` still skips, and correctly — different sibling (`lazily-formal`), gated on a Lean toolchain, out of scope. Called out rather than swept in.
+
+Coverage with the corpus present is unchanged: 62/62 pass, 139 fixtures, 149/149 scenarios, byte-identical to baseline.
+
+One observation I am *not* filing, so it stays your call: `tests/test_reactive_graph_conformance.cpp` still uses `cell` and `slot` around line 1338 and the compiler deprecates both in favour of `source` and `computed` — leftover from the v2 kernel rename. Harmless today, but it is test code teaching the old vocabulary.
+
+Queue is drained. Exchange is at ~1250 lines / 38 sections, well past the clear threshold — worth a `compact` before the next substantial run.
+<!-- agent:boundary:e27f184a:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzcppsiblingskipvsfail]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcppsiblingskipvsfail] [recommended] lazily-cpp now has two guards disagreeing about the same missing sibling: check-wasm-corpus-column.sh FAILS make check without ../lazily-spec, while check-conformance-coverage.sh SKIPs (exit 0). A bare clone therefore can no longer run make check. Pick one policy for the repo -- fail-closed everywhere, or skip-plus-CI-assert everywhere -- rather than leaving the behaviour depend on which guard you hit first.
 - [ ] [#lzgdvocab] lazily-gd's reactive-graph runner is missing the fanout/churn/dispose_fanout/dispose_stale_handle bulk ops AND real id recycling, so 2 canonical fixtures remain: churn_returns_to_baseline.json and recycled_id_inherits_nothing.json. Recycling is the hard half and is a DESIGN decision, not runner vocabulary: Godot instance ids are monotonic and never alias, so 'a recycled id inherits nothing' has no natural referent — the binding needs an explicit id layer (a free-list over slot indices with a generation tag, the shape lazily-rs's SlotId uses) before the fixture means anything. Removing both entries from KNOWN_UNCOVERED in scripts/check-conformance-coverage.sh is the definition of done. DONE already: the merge_cell group (5 fixtures) landed with LazilyMergePolicy + Source.merge + ctx.source_with, and GDScript is now ~ on merge-algebra.
 <!-- /agent:backlog -->
 

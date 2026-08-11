@@ -1203,6 +1203,49 @@ impl TrackedWorkMutationMode {
     }
 }
 
+/// Replay a captured backlog-edit + gate pair from either side of the gate.
+///
+/// A retained closeout may have published the tracked-work transaction before
+/// the response commit was interrupted. On resume, `gate` is already
+/// idempotent when the item is in Review, but a normal backlog edit deliberately
+/// searches only Backlog. For captured-finalize replay, apply the gate first and
+/// edit the resulting Review item so the original and partially applied states
+/// converge to the same document. Foreground writes retain their ordinary
+/// backlog-only edit semantics.
+fn apply_pending_edits(
+    file: &Path,
+    pending_edit: &[String],
+    pending_gate: &[String],
+    origin: Option<&str>,
+) -> Result<()> {
+    if pending_edit.is_empty() {
+        return Ok(());
+    }
+    let edits = parse_tracked_work_edits(pending_edit, "--backlog-edit")?;
+    if origin != Some("captured_finalize_resume") || pending_gate.is_empty() {
+        return backlog_cmd::edit_many(file, &edits);
+    }
+
+    let gated_ids: std::collections::HashSet<String> = pending_gate
+        .iter()
+        .map(|id| agent_doc_element_backlog::backlog::normalize_pending_id(id))
+        .collect();
+    let (gated_edits, backlog_edits): (Vec<_>, Vec<_>) = edits.into_iter().partition(|(id, _)| {
+        gated_ids.contains(&agent_doc_element_backlog::backlog::normalize_pending_id(
+            id,
+        ))
+    });
+
+    if !backlog_edits.is_empty() {
+        backlog_cmd::edit_many(file, &backlog_edits)?;
+    }
+    for (id, text) in gated_edits {
+        backlog_cmd::gate(file, &id)?;
+        backlog_cmd::review_edit(file, &id, &text)?;
+    }
+    Ok(())
+}
+
 fn apply_pending_and_status_mutations(
     file: &Path,
     options: &CommandOptions,
@@ -1418,11 +1461,12 @@ fn apply_pending_and_status_mutations_with_mode(
                         for text in &options.icebox_add_back {
                             same_cycle_added_ids.push(backlog_cmd::icebox_add_back(file, text)?);
                         }
-                        if !options.pending_edit.is_empty() {
-                            let edits =
-                                parse_tracked_work_edits(&options.pending_edit, "--backlog-edit")?;
-                            backlog_cmd::edit_many(file, &edits)?;
-                        }
+                        apply_pending_edits(
+                            file,
+                            &options.pending_edit,
+                            &options.pending_gate,
+                            options.origin.as_deref(),
+                        )?;
                         if !options.icebox_edit.is_empty() {
                             let edits =
                                 parse_tracked_work_edits(&options.icebox_edit, "--icebox-edit")?;
@@ -3278,6 +3322,46 @@ mod tests {
             WriteCloseoutOwnerRole::from_origin(Some("captured_finalize_resume")),
             WriteCloseoutOwnerRole::CapturedFinalizeResume,
         );
+    }
+
+    /// `#flakystatedbfixture`: the live interrupted cycle had already moved the
+    /// item to Review before captured-finalize replay retried its edit + gate
+    /// mutation plan. Replay must converge instead of looking only in Backlog.
+    #[test]
+    fn captured_finalize_replay_edits_an_already_gated_review_item() {
+        let tmp = TempDir::new().unwrap();
+        let doc = tmp.path().join("doc.md");
+        fs::write(
+            &doc,
+            concat!(
+                "---\nagent_doc_session: test\n---\n\n",
+                "<!-- agent:pending -->\n\n<!-- /agent:pending -->\n\n",
+                "<!-- agent:review -->\n",
+                "- [/] [#flakystatedbfixture] stale text\n",
+                "<!-- /agent:review -->\n",
+            ),
+        )
+        .unwrap();
+        let edits = vec![
+            "#FLAKYSTATEDBfixture=evidence-gated text after repeated verification".to_string(),
+        ];
+        let gates = vec!["flakystatedbfixture".to_string()];
+
+        with_backlog_effects(|| {
+            backlog_cmd::with_force_disk_pending_writes(true, || {
+                backlog_cmd::with_pending_write_transaction(&doc, || {
+                    apply_pending_edits(&doc, &edits, &gates, Some("captured_finalize_resume"))
+                })
+            })
+        })
+        .unwrap();
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert_eq!(content.matches("[#flakystatedbfixture]").count(), 1);
+        assert!(content.contains(
+            "- [/] [#flakystatedbfixture] evidence-gated text after repeated verification"
+        ));
+        assert!(!content.contains("stale text"));
     }
 
     #[test]

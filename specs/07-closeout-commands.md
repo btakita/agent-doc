@@ -121,6 +121,13 @@ retained for reconnect recovery. Likewise, a failed tmux liveness query is an
 unknown observation, not evidence that every actor pane died, so registry prune
 must preserve its records and retry later.
 
+Captured-finalize mutation replay must converge from every prefix already
+published by the interrupted closeout. In particular, a captured backlog edit
+paired with a gate accepts the item either in Backlog before the gate or in
+Review after the gate, and produces the same gated, edited Review item. This
+commutative recovery behavior is scoped to captured-finalize replay; ordinary
+backlog edits continue to reject Review-only targets.
+
 ## commit
 
 `agent-doc commit <FILE>`

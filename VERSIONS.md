@@ -2,6 +2,23 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.244
+
+- **Fix: captured edit-and-gate replay converges after a partially published
+  tracked-work transaction.**
+
+An interrupted closeout can publish its tracked-work transaction before the
+response commit completes. When that transaction both edited and gated one
+item, the retry replayed the edit first against Backlog even though the item was
+already in Review. The idempotent gate could have resumed, but the backlog-only
+edit failed early and left the captured cycle open.
+
+Captured-finalize replay now recognizes edit-and-gate pairs, idempotently gates
+the item from either its pre-gate or post-gate location, and edits the resulting
+Review item. Normal backlog edits remain backlog-only. Regression coverage uses
+the already-gated state from the interrupted `#flakystatedbfixture` closeout and
+proves that replay leaves one gated item with the captured edit applied.
+
 ## 0.35.243
 
 - **Fix: closeout order repair preserves boundary-split multi-paragraph responses.**

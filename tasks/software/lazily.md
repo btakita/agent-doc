@@ -1001,7 +1001,46 @@ Proofs: sibling independence demonstrated on a scratch corpus where the pre-chan
 `make check` OK, CI green. `lazily-js@c808cfa`, pointer pushed.
 
 Exchange is at 956 lines, accretion `block`; queue is active so I keep draining per its guidance.
-<!-- agent:boundary:a1e60573:lazily -->
+
+### Re: #lzpystdlibmutants — the ledger is applied now, and the old check passed the exact rebinding that proves it wasn't — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzpystdlibmutants]
+
+
+lazily-py now replays each declared mutation operator through an **independent interpreter** it can perturb, rather than checking the ledger against itself. All **7** operators the corpus names are implemented, **15 (operator, scenario) pairs** exercised across 13 ledger entries.
+
+**The proof that matters is the pair, not the fix.** Rebinding `timer.json`'s `terminal_not_latched` to a scenario that operator does not break:
+
+```
+AssertionError: stdlib/timer.json: mutation 'terminal_not_latched' did NOT break
+  ['pending_before_deadline'] — the ledger claims those scenarios detect it
+```
+
+…while `test_stdlib_canonical_corpus`, the check that was already there, **passed under that same rebinding**. Both ran against identical bytes. That is the gap made visible rather than asserted.
+
+Two design calls worth recording, both of which I'd have got wrong by default:
+
+**An unimplemented operator fails loudly, and the list of what's implemented is derived, not declared.** The agent rejected a `KNOWN_OPERATORS` registry because that is one more piece of bookkeeping that drifts — precisely the defect being removed. Instead `consulted` is produced by the branches the replay actually evaluated, so an operator with no arm ends the run naming itself and listing what *was* consulted.
+
+**The complement is deliberately not asserted.** `must_fail` is a lower bound on detection, not a partition — 4 of 13 entries break scenarios they do not name (`fixture_bookkeeping` on `timeout.json` breaks all eight). Asserting "scenarios not named must survive" would invent a claim the corpus does not make; lazily-rs makes the same call. But that reasoning is now a *test* rather than a comment, so if the corpus ever becomes a partition it breaks and someone decides deliberately.
+
+**The audit says the gap is universal, and dart is a rung below the rest:**
+
+| binding | verdict |
+|---|---|
+| go | ledger only — ids resolve, floor counted, **no operator applied** |
+| cs | ledger only — floors read, non-empty + ids checked, no application |
+| js | ledger only, weakest — length > 0 and id membership, no floor |
+| **dart** | **`mutations` is not read at all** — zero files mention `must_fail` |
+
+So four bindings ship a mutation ledger that nothing applies, and one ships it to nobody. Filed.
+
+`make check` OK, 820 passed, CI green. `lazily-py@ed812ab`, pointer pushed.
+
+Exchange is at 981 lines, accretion `block`; queue is active so I keep draining per its guidance.
+<!-- agent:boundary:40dab997:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -1024,21 +1063,22 @@ Exchange is at 956 lines, accretion `block`; queue is active so I keep draining 
 - ~~do [#lzdifforderallbindings]~~
 - ~~do [#lzjsscenarioswallow]~~
 - ~~do [#lzagentloopcibilling]~~
-- ⏭️ do [#lzpystdlibmutants]
+- ~~do [#lzpystdlibmutants]~~
 - ~~do [#lzjsblocknamemasking]~~
 - do [#lzcsuncomparedvalues]
 - do [#lzktgradleinputfingerprint]
 - do [#lzcppapplyupdatelamport]
+- do [#lzstdlibmutantsallbindings]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzgdvocab] lazily-gd's reactive-graph runner is missing the fanout/churn/dispose_fanout/dispose_stale_handle bulk ops AND real id recycling, so 2 canonical fixtures remain: churn_returns_to_baseline.json and recycled_id_inherits_nothing.json. Recycling is the hard half and is a DESIGN decision, not runner vocabulary: Godot instance ids are monotonic and never alias, so 'a recycled id inherits nothing' has no natural referent — the binding needs an explicit id layer (a free-list over slot indices with a generation tag, the shape lazily-rs's SlotId uses) before the fixture means anything. Removing both entries from KNOWN_UNCOVERED in scripts/check-conformance-coverage.sh is the definition of done. DONE already: the merge_cell group (5 fixtures) landed with LazilyMergePolicy + Source.merge + ctx.source_with, and GDScript is now ~ on merge-algebra.
-- [ ] [#lzpystdlibmutants] lazily-py does not APPLY the stdlib mutation ledger, unlike lazily-rs. Each stdlib fixture carries a `mutations` array of {operator, must_fail} declaring that mutating the implementation a named way MUST make the listed scenarios fail. tests/test_stdlib_conformance.py checks only that the ledger is well-formed (non-empty must_fail, ids subset of the fixture's own scenarios) and, since #lzpystdlibfloorsunread, that it meets mutation_floor. It never mutates anything, so rebinding an operator to an unrelated scenario stays green and the ledger's central claim is untested. lazily-rs does this properly: tests/stdlib_conformance.rs replays each operator through an INDEPENDENT interpreter (independent_failures(path, &fixture, Some(operator))) and asserts must_fail is a subset of the scenarios that actually failed under that mutation — an independent implementation is what makes the mutation applicable without perturbing the production code under test. Port that shape: add an independent interpreter for timer/timeout/revision_barrier, parameterised by mutation operator, and assert every declared must_fail scenario really fails under its operator and passes without it. Definition of done: rebinding a mutation's must_fail to a scenario the operator does not break reddens, and so does an operator no interpreter implements. Audit go/js/cs/dart for the same gap while there — the perturbation audit found go's ledger is checked the same self-referential way.
 - [ ] [#lzcsuncomparedvalues] lazily-cs cannot yet detect an assertion callback that receives the fixture value and never COMPARES it — direction (b) of #lzunboundblockguard, deliberately not built there. The live example was AssertKeyWith("nonterminal_outcomes", want => Assert.All(want.EnumerateArray(), item => !ParseOutcome(item).IsTerminal())): it READ every element, so a recording wrapper would not have caught it; it simply never compared them to the projection, and Assert.All over an empty sequence is vacuously true. Two mechanisms were spiked and measured. A recording wrapper misses this exact case and needs ~186 call-site edits. Differential re-execution (perturb the value, require the callback to fail) needs zero call-site changes and DOES catch it, but fails structurally here: this repo's runners record divergences into a ledger via Check(...) rather than throwing, so a perturbed re-run signals nothing and appends phantom divergences — measured 8 broken tests and 288 false 'insensitive' keys. The real fix is to give the divergence-recording runners a comparison seam the tracker owns, so a comparison is observable rather than inferred. That is a runner change, not a guard change. Definition of done: a callback that reads the fixture value without comparing it to replayed state fails, and the existing divergence-recording runners keep working.
 - [ ] [#lzktgradleinputfingerprint] lazily-kt's Gradle test-task input wiring does not do what its comments claim, in two places. (1) A Test task's `environment` is UNTRACKED and PathSensitivity.RELATIVE means a byte-identical corpus at a different path fingerprints the SAME, so the comment added in ba7f41d claiming that forwarding the env var 'makes the variable part of the task's input fingerprint' is false as written — it holds only when content differs. Measured on the schemas input during #lzspecschemasoverride: pointing at a byte-identical scratch copy produced '11 actionable tasks: 11 up-to-date, BUILD SUCCESSFUL in 314ms', so the run meant to prove the override took effect never started a JVM. Fixed for SCHEMAS in d8b6c08 via inputs.property; the CORPUS input still has it. (2) CORRECTION, measured in 22e75e0 (#lzcorpusabsencehandling): d8b6c08's own rationale ALSO claims a missing directory under an explicit override 'fingerprints the same as no sibling at all (both absent, because the input is optional), so a probe pointed at a nonexistent tree could be answered from a cached GREEN'. That case cannot occur — a missing input directory fails Gradle task validation outright, before any test runs, and `optional(true)` does not change it (optional excuses an absent PROVIDER VALUE, not a nonexistent directory; the provider always has one via orElse). The inputs.property is still justified by the byte-identical-copy half of its argument, so nothing is broken — but the missing-directory half of that comment must be deleted rather than left as folklore. Do both: add inputs.property for the corpus dir and re-prove that a byte-identical corpus copy RE-RUNS rather than reporting UP-TO-DATE, and correct both comments to state only what is actually tracked. The specSchemas input also still carries an inert optional(true) worth removing for the same reason 22e75e0 removed the corpus one.
 - [ ] [#lzcppapplyupdatelamport] lazily-cpp's LosslessTreeCrdt::apply_update diverges from every other binding in two ways, found while pinning the diff order (#lzdifforderallbindings) and deliberately left unfixed there. (1) It never advances the Lamport counter: rs, go, py and zig all do counter = max(counter, op.id.counter) when applying a remote op, so a subsequent local op is guaranteed a counter above everything it has seen. cpp does not, so a replica that receives a higher-counter remote op and then makes a local edit can mint an id that collides with or sorts before an op it already holds. (2) It declares a buffered_ member that apply_update never uses, so cpp has NO dependency-buffering retry for an op whose parent has not arrived — the other bindings buffer and retry, which is what makes delivery order-tolerant. Neither is exercised by the current corpus, which is why both survived: non_contiguous_anti_entropy.json delivers a gap but never an op whose parent is missing, and no fixture makes a local edit after receiving a higher-counter remote op. Establish the intended semantics from lazily-spec, fix cpp, and add a canonical fixture that discriminates BOTH — a scenario where a replica edits after receiving a higher-counter remote op, and one delivering a child before its parent. Definition of done: the new fixtures redden pre-fix cpp and stay green in the other nine bindings, and cpp's apply_update matches the reference semantics.
+- [ ] [#lzstdlibmutantsallbindings] Four bindings ship a stdlib mutation ledger that nothing applies, and one ships it to nobody. Audited read-only during #lzpystdlibmutants: lazily-go (stdlib_conformance_test.go:100-120) checks must_fail is non-empty and its ids resolve to replayed scenarios, then counts entries against mutation_floor — better than pure self-reference, but no operator is ever applied; lazily-cs (tests/Lazily.Tests/PortableStdlibConformanceTests.cs:187-200) reads all three floors then asserts NotEmpty + Contains, no application; lazily-js (test/stdlib-conformance.test.js:138-141) is weakest of the three — length > 0 and id membership, no floor, no application; lazily-dart (test/stdlib_conformance_test.dart:172-220) does not read the mutations array AT ALL, and a repo-wide search for must_fail returns zero files. Port the shape lazily-py landed in ed812ab and lazily-rs has in tests/stdlib_conformance.rs: an INDEPENDENT interpreter for timer/timeout/revision_barrier, parameterised by operator, perturbing the model rather than the shipped implementation. Two design points proven in py and worth keeping: the set of implemented operators must be DERIVED from the branches the replay actually consulted, never a hand-maintained registry (that registry is the same bookkeeping-drift defect one level up), and an operator the corpus names with no interpreter arm must fail loudly rather than skip. Do NOT assert the complement — must_fail is a lower bound, not a partition (4 of 13 entries break scenarios they do not name); record that as a test so the decision is deliberate if the corpus ever changes. Definition of done: per binding, rebinding a must_fail entry to a scenario the operator does not break reddens, an unimplemented operator reddens naming itself, and every declared pair passes without the operator and fails with it.
 <!-- /agent:backlog -->
 
 ## Review

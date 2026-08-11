@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -361,12 +361,21 @@ Fixed and shipped as `agent-doc v0.35.242` (`91951a7af`).
 Verification passed: 8,942 tests, all tmux regression tests, version checks, formatting, and installed-binary JSON smoke testing.
 
 Restart IntelliJ once to activate the already-installed passive auto-sync fix. The release is pushed and its [CI run](https://github.com/btakita/agent-doc/actions/runs/31526875146) and [release run](https://github.com/btakita/agent-doc/actions/runs/31526876317) are currently in progress.
-<!-- agent:boundary:e55e7af9:agent-doc-bugs2 -->
+
+### Re: do [#flakystatedbfixture] — gpt-5
+
+`#flakystatedbfixture` is now evidence-gated rather than falsely marked fixed.
+
+The requested reproduction loop completed without another corrupt ledger: one full `make check` and ten additional full nextest passes ran 98,362 Rust test executions, including `session_check_codex_final_gate_blocks_on_active_auto_queue`, with zero failures and zero `state.db` corruption diagnostics. The tagged v0.35.233 hosted CI run was also green. A source audit found no production path that directly writes arbitrary bytes to `.agent-doc/state.db`; the only intentional foreign-byte writers are isolated corruption-boundary tests under their own temporary roots.
+
+No source files changed. Shipping database deletion, replacement, or retry behavior without the offending bytes would weaken the fail-closed concurrency guarantee and repeat the already-falsified 0.35.235 draft. The existing diagnostic is sufficient for the next occurrence: implementation resumes only when a failure reports `main=<bytes> header=<sqlite|foreign> first16=<hex> (<printable>) wal=<size|absent> shm=<size|absent>`. The same tracked item now carries that unblocker, so no additional backlog item is needed.
+
+Verification: `make check` passed locally; ten repeated `make test` runs each passed 8,942/8,942; `make tmux-ci` passed. The latest hosted CI passed its Rust tests but failed later in the TLA step, before tmux-ci, with no state-database evidence. Confidence is high that ordinary nextest parallelism is not a reproducible cause; root-cause confidence remains intentionally unset until the byte signature exists.
+<!-- agent:boundary:601f3f5d:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 🚧 do [#flakystatedbfixture]
 <!-- /agent:queue -->
 
 ## Notes
@@ -377,13 +386,13 @@ Restart IntelliJ once to activate the already-installed passive auto-sync fix. T
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#flakystatedbfixture] #agent-doc-bug A parallel test run can corrupt a temp fixture state.db, reddening the suite non-deterministically. Observed 2026-08-10 on 0.35.233: session_check_codex_final_gate_blocks_on_active_auto_queue failed with reliable-sync durable authority hydration failed for /tmp/.tmp43Aufu/session.md: file is not a database: Error code 26, plus authoritative state db /tmp/.tmp43Aufu/.agent-doc/state.db is unavailable; refusing automatic replacement. FALSIFIED 2026-08-10 in 0.35.235 -- do NOT retry these four: (1) the empty-file theory. A 0-byte or 1-byte state.db opens CLEANLY; SQLite initialises it as a new database, and NotADatabase starts at TWO bytes of bad header. So a writer that created the file and died before writing the header cannot produce this failure. The 0.35.235 draft branch that deleted empty files was reverted: unreachable through the stated path, all four of its tests passed with it removed, and it was unsafe because open_and_init_state_db also fails on a lock error while a concurrent process is still initialising the same 0-byte file, so it could unlink a db another process was creating. (2) A stale -wal or -shm beside a 0-byte main db: opens cleanly. (3) tmpfs exhaustion: /tmp is a 94G tmpfs at 1 percent used. (4) Plain cross-process contention: 600 concurrent agent-doc session-check invocations across 25 fresh project roots produced zero corruption. STILL UNKNOWN: which writer leaves 2 or more bytes of non-database content in a fresh fixture root. 0.35.235 makes the next sighting diagnosable instead of another guessing round -- the refusal now reports main length, header=sqlite vs header=foreign, the first 16 bytes as hex plus a printable rendering, and the -wal/-shm sibling sizes, which separates never was a database from torn page-1 of a real ledger. NEXT STEP: run make check in a loop until it reddens and read that evidence line; do not theorise further without it.
 - [/] [#clearsubmitunobservedverify] [operator-verify] Live re-proof for #clearsubmitunobserved (0.35.225): reproduce the reported haiven-dev.md sequence — let the supervisor go dead (or `session restart-supervisor`), then Run Agent Doc so the flow cold-starts a replacement and immediately runs Clear Session Context on the fresh pane. Expect it to SUCCEED instead of failing with `result=submission_unobserved ... unblocker=clear_submission_unobserved`, and expect `session_clear_submit_cleared_state_probe ... result=cleared_state_proven retained_lines=<small>` in ops.log. Then the half that must not regress: on a pane holding a real conversation, break submission (e.g. leave the composer wedged) and confirm the clear still fails closed with `result=conversation_retained`. Unit tests pin the predicate against synthetic captures; only a live pane exercises the tmux scrollback capture and the real harness prompt shapes.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] 🚧 [#flakystatedbfixture] #agent-doc-bug [evidence-gated] One 0.35.233 local make-check run reported a foreign or damaged temporary .agent-doc/state.db during session_check_codex_final_gate_blocks_on_active_auto_queue. The failure has not recurred: v0.35.233 hosted CI was green, and the 0.35.242 investigation completed one full make check plus ten repeated 8,942-test nextest passes (98,362 test executions total) with zero corrupt-ledger diagnostics. Plain contention, empty-file, stale WAL/SHM, and tmpfs-exhaustion theories remain falsified; no production arbitrary-byte writer was found. UNBLOCKER: the next recurrence must preserve the 0.35.235 diagnostic line containing main=<bytes> header=<sqlite|foreign> first16=<hex> (<printable>) wal=<size|absent> shm=<size|absent>; identify and fix the writer only from that evidence. Do not add automatic deletion, replacement, or retry behavior without it.
 - [/] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [/] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 - [/] [#operatorverifyrestart] [operator-verify] Restart a running JetBrains IDE (installed plugin is 0.2.350; this item originally named 0.2.340, long superseded — the single restart in #stickymdpaneverify covers it), then move from fpe-service-topology.md in a one-pane surface to agent-doc-bugs2.md in its two-column surface and confirm the first selection restores two tmux panes without a second navigation.

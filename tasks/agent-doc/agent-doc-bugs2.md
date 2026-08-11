@@ -272,12 +272,53 @@ The File Cache Conflict came from a detached-authority bootstrap deadlock: JetBr
 Verification passed: focused tests, `make check`, staged plugin-version and diff guards, fast local install/recycle, and the one-shot fat-LTO `make install-full`. The installed binary reports 0.35.236, and signed JetBrains plugin 0.2.351 was installed to all four detected IDE installations. The new CI, Release, and PyPI workflows are queued after pushing `main` and tag `v0.35.236`.
 
 Restart the JetBrains IDE once to load the updated Kotlin plugin. The route supervisor replacement is already accepted and will activate at this turn boundary.
-<!-- agent:boundary:869cdb9b:agent-doc-bugs2 -->
+
+The dispatch-only starting-pane route now passes the document's exact trigger into the controller classifier. When the composer contains only agent-doc's own stranded trigger, the route releases its guard, registers the authoritative pane, sends one bare harness submit key, and requires a new controller turn-admission projection before returning success. A missing projection fails closed without a second Enter. Operator words, a different document's trigger, and every other draft remain operator-owned.
+
+The live proof found and fixed the remaining reported-shape defect: the normalizer handled `❯` but not Codex's actual `›` prompt sigil. Both sigils and NBSP padding are now covered. The public classifier fixtures were also scrubbed to neutral `/repo/tasks/...` paths.
+
+Proof:
+
+- Changed paths: `agent-doc-controller/src/dispatch.rs`, `agent-doc-route-io/src/dispatch_only.rs`, `agent-doc-route-io/tests/route/pane_resolution.rs`, `specs/08a-session-actor-contract.md`, `VERSIONS.md`, plus the release-version manifests and bundled skill copies.
+- Test-first evidence: the new isolated live tmux test initially failed on `› agent-doc …/sdk.md` as `OperatorDraft`; after controller normalization was corrected, the same real-pane test passed.
+- Focused verification: controller stranded-trigger classifier tests passed (5/5); dispatch-only policy/effect tests passed; the isolated live `sdk.md` tmux test passed and observed exactly one empty-line submission before its admission projection.
+- Full verification: `make tmux-ci`, exact-candidate `make check`, `make plugin-version-check`, `git diff --check`, and the added-lines private-name denylist all passed.
+- Installation: `make install` and the one-time `make install-full` passed; the installed CLI reports `agent-doc 0.35.237`; workspace and subrepo controllers recycled gracefully. JetBrains stayed at plugin 0.2.351 because no Kotlin source changed.
+- Publication: main and `v0.35.237` are pushed. CI, Release, PyPI, Book, and Pages workflows are running; the release page was not yet created at closeout time.
+
+Confidence: high. Escalation: none.
+### Re: #dispatchonlyresubmitwiring — gpt-5
+
+> **Queue prompt:**
+>
+> do [#dispatchonlyresubmitwiring]
+
+
+Implemented and released as agent-doc 0.35.237 (commit `2d1195064`, tag `v0.35.237`).
+
+The dispatch-only starting-pane route now passes the document's exact trigger into the controller classifier. When the composer contains only agent-doc's own stranded trigger, the route releases its guard, registers the authoritative pane, sends one bare harness submit key, and requires a new controller turn-admission projection before returning success. A missing projection fails closed without a second Enter. Operator words, a different document's trigger, and every other draft remain operator-owned.
+
+The live proof found and fixed the remaining reported-shape defect: the normalizer handled `❯` but not Codex's actual `›` prompt sigil. Both sigils and NBSP padding are now covered. The public classifier fixtures were also scrubbed to neutral `/repo/tasks/...` paths.
+
+Proof:
+
+- Changed paths: `agent-doc-controller/src/dispatch.rs`, `agent-doc-route-io/src/dispatch_only.rs`, `agent-doc-route-io/tests/route/pane_resolution.rs`, `specs/08a-session-actor-contract.md`, `VERSIONS.md`, plus the release-version manifests and bundled skill copies.
+- Test-first evidence: the new isolated live tmux test initially failed on `› agent-doc …/sdk.md` as `OperatorDraft`; after controller normalization was corrected, the same real-pane test passed.
+- Focused verification: controller stranded-trigger classifier tests passed (5/5); dispatch-only policy/effect tests passed; the isolated live `sdk.md` tmux test passed and observed exactly one empty-line submission before its admission projection.
+- Full verification: `make tmux-ci`, exact-candidate `make check`, `make plugin-version-check`, `git diff --check`, and the added-lines private-name denylist all passed.
+- Installation: `make install` and the one-time `make install-full` passed; the installed CLI reports `agent-doc 0.35.237`; workspace and subrepo controllers recycled gracefully. JetBrains stayed at plugin 0.2.351 because no Kotlin source changed.
+- Publication: main and `v0.35.237` are pushed. CI, Release, PyPI, Book, and Pages workflows are running; the release page was not yet created at closeout time.
+
+Confidence: high. Escalation: none.
+### Re: #dispatchonlyresubmitwiring — gpt-5
+
+Implemented and released as agent-doc 0.35.237 (commit `2d1195064`, tag `v0.35.237`).
+<!-- agent:boundary:d961d64a:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#dispatchonlyresubmitwiring]
+- ~~do [#dispatchonlyresubmitwiring]~~
 - ~~do [#flakystatedbfixture]~~
 - do [#operatorverifylive]
 - do [#run3rdpaneswitchverify]
@@ -291,7 +332,6 @@ Restart the JetBrains IDE once to load the updated Kotlin plugin. The route supe
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#dispatchonlyresubmitwiring] [operator-verify] Wire the dispatch-only route to actually resubmit a StrandedTrigger draft. 0.35.235 shipped the classification only: StartingPaneBlocker::from_composer_draft now returns StrandedTrigger with unblocker=resubmit_stranded_trigger when the composer holds agent-doc own unsubmitted trigger for the document being routed (exact match after stripping the harness sigil and padding, including the non-breaking space). A draft carrying the trigger plus operator words, or a trigger for a different document, stays OperatorDraft. What remains is the consumer: the dispatch-only reopen path must send a bare harness Enter once and re-await the controller turn-admission projection, mirroring what #jbtsiftnosub2 already does for the fresh-start path. Needs a live-pane proof on the reported shape (sdk.md, pane %926) because unit tests pin the classifier but cannot exercise the real composer.
 - [ ] [#flakystatedbfixture] #agent-doc-bug A parallel test run can corrupt a temp fixture state.db, reddening the suite non-deterministically. Observed 2026-08-10 on 0.35.233: session_check_codex_final_gate_blocks_on_active_auto_queue failed with reliable-sync durable authority hydration failed for /tmp/.tmp43Aufu/session.md: file is not a database: Error code 26, plus authoritative state db /tmp/.tmp43Aufu/.agent-doc/state.db is unavailable; refusing automatic replacement. FALSIFIED 2026-08-10 in 0.35.235 -- do NOT retry these four: (1) the empty-file theory. A 0-byte or 1-byte state.db opens CLEANLY; SQLite initialises it as a new database, and NotADatabase starts at TWO bytes of bad header. So a writer that created the file and died before writing the header cannot produce this failure. The 0.35.235 draft branch that deleted empty files was reverted: unreachable through the stated path, all four of its tests passed with it removed, and it was unsafe because open_and_init_state_db also fails on a lock error while a concurrent process is still initialising the same 0-byte file, so it could unlink a db another process was creating. (2) A stale -wal or -shm beside a 0-byte main db: opens cleanly. (3) tmpfs exhaustion: /tmp is a 94G tmpfs at 1 percent used. (4) Plain cross-process contention: 600 concurrent agent-doc session-check invocations across 25 fresh project roots produced zero corruption. STILL UNKNOWN: which writer leaves 2 or more bytes of non-database content in a fresh fixture root. 0.35.235 makes the next sighting diagnosable instead of another guessing round -- the refusal now reports main length, header=sqlite vs header=foreign, the first 16 bytes as hex plus a printable rendering, and the -wal/-shm sibling sizes, which separates never was a database from torn page-1 of a real ledger. NEXT STEP: run make check in a loop until it reddens and read that evidence line; do not theorise further without it.
 - [/] [#clearsubmitunobservedverify] [operator-verify] Live re-proof for #clearsubmitunobserved (0.35.225): reproduce the reported haiven-dev.md sequence — let the supervisor go dead (or `session restart-supervisor`), then Run Agent Doc so the flow cold-starts a replacement and immediately runs Clear Session Context on the fresh pane. Expect it to SUCCEED instead of failing with `result=submission_unobserved ... unblocker=clear_submission_unobserved`, and expect `session_clear_submit_cleared_state_probe ... result=cleared_state_proven retained_lines=<small>` in ops.log. Then the half that must not regress: on a pane holding a real conversation, break submission (e.g. leave the composer wedged) and confirm the clear still fails closed with `result=conversation_retained`. Unit tests pin the predicate against synthetic captures; only a live pane exercises the tmux scrollback capture and the real harness prompt shapes.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.

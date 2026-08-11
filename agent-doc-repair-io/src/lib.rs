@@ -778,6 +778,37 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         doc_content = reconciliation.content;
     }
 
+    if let Some(reassembled) =
+        agent_doc_turn::response_replay::repair_retained_response_replay_fragments(
+            &doc_content,
+            &response,
+        )
+    {
+        doc_content = RepairIoEffects::atomic_write_if_current(
+            effects.repair_io_effects,
+            &canonical,
+            &reassembled,
+            &doc_content,
+            "repair_retained_response_replay_fragments",
+        )?;
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &canonical,
+            &doc_content,
+            agent_doc_ops_log_io::log_op,
+        )?;
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "repair_retained_response_replay_fragments file={} recovery=exact_fragment_shell",
+                canonical.display()
+            ),
+        );
+        eprintln!(
+            "[repair] reassembled exact retained-response replay fragments in {}",
+            canonical.display()
+        );
+    }
+
     // Dedup guard: check if the response content is already present in the document.
     // This prevents double-apply when retained intent outlived a successful
     // IPC write (e.g., IPC timeout path exits with code 75 without calling clear_pending,
@@ -2077,10 +2108,18 @@ fn historical_committed_capture_replay_candidate(
     doc_content: &str,
     capture: HistoricalCommittedCapture,
 ) -> Result<Option<HistoricalCommittedCapture>> {
-    if agent_doc_turn::response_replay::response_materialized_in_content(
-        &capture.response_body,
-        doc_content,
-    ) {
+    let has_exact_fragment_shell =
+        agent_doc_turn::response_replay::repair_retained_response_replay_fragments(
+            doc_content,
+            &capture.response_body,
+        )
+        .is_some();
+    if !has_exact_fragment_shell
+        && agent_doc_turn::response_replay::response_materialized_in_content(
+            &capture.response_body,
+            doc_content,
+        )
+    {
         return Ok(None);
     }
     let Some(response_heading) =
@@ -2095,7 +2134,7 @@ fn historical_committed_capture_replay_candidate(
         );
     let has_partial_response_proof =
         historical_capture_has_partial_response_proof(file, doc_content, &capture)?;
-    if !has_matching_prompt && !has_partial_response_proof {
+    if !has_exact_fragment_shell && !has_matching_prompt && !has_partial_response_proof {
         return Ok(None);
     }
     agent_doc_ops_log_io::log_op(
@@ -2105,7 +2144,9 @@ fn historical_committed_capture_replay_candidate(
             file.display(),
             capture.capture_id,
             capture.response_sha256,
-            if has_partial_response_proof {
+            if has_exact_fragment_shell {
+                "exact_fragment_shell"
+            } else if has_partial_response_proof {
                 "partial_response_proof"
             } else {
                 "matching_orphan_prompt"
@@ -3372,6 +3413,52 @@ mod tests {
             )
             .unwrap()
             .is_none()
+        );
+    }
+
+    #[test]
+    fn historical_capture_routes_exact_split_replay_shell_to_repair() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: topic — gpt-5\n\n",
+            "Line one.\n\n",
+            "Line two.\n\n",
+            "Line three.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Earlier response.\n\n",
+            "Line two.\n\n",
+            "Line three.\n\n",
+            "### Re: topic — gpt-5\n\n",
+            "Line one.\n\n",
+            "Line two.\n\n",
+            "Line three.\n\n",
+            "### Re: topic — gpt-5\n\n",
+            "Line one.\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let capture = HistoricalCommittedCapture {
+            cycle_id: "cycle-test".to_string(),
+            capture_id: "capture-test".to_string(),
+            response_sha256: agent_doc_hash::content_hash(response),
+            response_body: response.to_string(),
+            file_hash: None,
+            baseline_content: None,
+        };
+
+        assert!(
+            historical_committed_capture_replay_candidate(
+                Path::new("unused.md"),
+                current,
+                capture,
+            )
+            .unwrap()
+            .is_some()
         );
     }
 

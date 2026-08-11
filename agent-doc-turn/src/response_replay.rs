@@ -292,6 +292,9 @@ pub fn materialize_response_in_current_exchange(
     expected_response: &str,
 ) -> Option<String> {
     let repaired_current = repair_stranded_duplicate_response_headings(current);
+    let repaired_current =
+        repair_retained_response_replay_fragments(&repaired_current, expected_response)
+            .unwrap_or(repaired_current);
     let current = repaired_current.as_str();
     if !expected_response.trim().is_empty() && current.contains(expected_response.trim()) {
         return Some(current.to_string());
@@ -316,6 +319,37 @@ pub fn materialize_response_in_current_exchange(
         &response,
     );
     Some(exchange.replace_content(current, &exchange_body))
+}
+
+/// Reassemble or collapse an exact retained-response replay fragment shell.
+///
+/// This is narrower than response materialization: it never appends a wholly
+/// missing response. It repairs only captured body fragments around a matching
+/// heading, or a complementary suffix/prefix pair around one complete captured
+/// response cell. Any unrelated non-transient line makes the repair fail closed.
+pub fn repair_retained_response_replay_fragments(
+    current: &str,
+    expected_response: &str,
+) -> Option<String> {
+    let response =
+        agent_doc_template::response_materialization::response_materialization_probe_from_response(
+            expected_response,
+        );
+    if response.trim().is_empty() {
+        return None;
+    }
+    let components = agent_doc_element::element::parse(current).ok()?;
+    let exchange = components
+        .iter()
+        .find(|component| component.name == "exchange")?;
+    let exchange_body = exchange.content(current);
+    let repaired_exchange = collapse_retained_response_fragment_shell(exchange_body, &response)
+        .or_else(|| {
+            (!response_materialized_in_content(&response, current))
+                .then(|| repair_response_heading_after_body(exchange_body, &response))
+                .flatten()
+        })?;
+    Some(exchange.replace_content(current, &repaired_exchange))
 }
 
 /// Remove empty replay heading shells when an earlier response with the same
@@ -495,6 +529,103 @@ fn response_fragment_gap_is_transient(gap: &str) -> bool {
         let trimmed = line.trim();
         trimmed.is_empty() || (trimmed.starts_with("<!--") && trimmed.ends_with("-->"))
     })
+}
+
+fn collapse_retained_response_fragment_shell(exchange: &str, response: &str) -> Option<String> {
+    let expected_heading = first_response_heading_line(response)?;
+    let heading_offset = response.find(expected_heading)?;
+    let expected_body = response[heading_offset + expected_heading.len()..]
+        .trim_matches('\n')
+        .trim_end();
+    let expected_lines = response_fragment_lines(expected_body);
+    if expected_lines.len() < 2 {
+        return None;
+    }
+
+    let body_matches = exchange.match_indices(expected_body).collect::<Vec<_>>();
+    let [(body_start, _)] = body_matches.as_slice() else {
+        return None;
+    };
+    let body_end = body_start + expected_body.len();
+    let expected_topic = normalize_replay_topic(expected_heading);
+
+    let mut offset = 0;
+    let mut matching_headings = Vec::new();
+    for line in exchange.split_inclusive('\n') {
+        let start = offset;
+        offset += line.len();
+        let heading = line.trim();
+        if heading.starts_with("### Re:") && normalize_replay_topic(heading) == expected_topic {
+            matching_headings.push((start, offset));
+        }
+    }
+    let full_heading = matching_headings
+        .iter()
+        .copied()
+        .rfind(|(_, end)| *end <= *body_start)?;
+    let trailing_headings = matching_headings
+        .iter()
+        .copied()
+        .filter(|(start, _)| *start >= body_end)
+        .collect::<Vec<_>>();
+    let [trailing_heading] = trailing_headings.as_slice() else {
+        return None;
+    };
+
+    let between_heading_and_body = &exchange[full_heading.1..*body_start];
+    if !between_heading_and_body.lines().all(|line| {
+        let trimmed = strip_exchange_prompt_prefix(line.trim().to_string());
+        let trimmed = trimmed.trim();
+        trimmed.is_empty()
+            || (trimmed.starts_with("<!--") && trimmed.ends_with("-->"))
+            || trimmed.starts_with('>')
+    }) {
+        return None;
+    }
+
+    let after_trailing_heading = &exchange[trailing_heading.1..];
+    let actual_prefix = response_fragment_lines(after_trailing_heading);
+    let prefix_len = actual_prefix.len();
+    if prefix_len == 0 || prefix_len >= expected_lines.len() {
+        return None;
+    }
+    if !actual_prefix
+        .iter()
+        .zip(&expected_lines[..prefix_len])
+        .all(|(actual, expected)| actual.normalized == expected.normalized)
+    {
+        return None;
+    }
+    let prefix_end = actual_prefix.last()?.end;
+    if !response_fragment_gap_is_transient(&after_trailing_heading[prefix_end..]) {
+        return None;
+    }
+
+    let before_full_heading = &exchange[..full_heading.0];
+    let before_lines = response_fragment_lines(before_full_heading);
+    let expected_suffix = &expected_lines[prefix_len..];
+    if before_lines.len() < expected_suffix.len() {
+        return None;
+    }
+    let actual_suffix = &before_lines[before_lines.len() - expected_suffix.len()..];
+    if !actual_suffix
+        .iter()
+        .zip(expected_suffix)
+        .all(|(actual, expected)| actual.normalized == expected.normalized)
+    {
+        return None;
+    }
+    let suffix_start = actual_suffix.first()?.start;
+    let suffix_end = actual_suffix.last()?.end;
+    if !response_fragment_gap_is_transient(&before_full_heading[suffix_end..]) {
+        return None;
+    }
+
+    let mut repaired = String::with_capacity(exchange.len());
+    repaired.push_str(&exchange[..suffix_start]);
+    repaired.push_str(&exchange[suffix_end..trailing_heading.0]);
+    repaired.push_str(&after_trailing_heading[prefix_end..]);
+    Some(repaired)
 }
 
 /// Repair a streamed response whose retained prefix remained after the heading
@@ -1284,7 +1415,72 @@ mod tests {
             repaired.find("### Re: do [#ship]").unwrap()
                 < repaired.find("> **Queue prompt:**").unwrap()
         );
-        assert!(repaired.find("Done first.").unwrap() < repaired.find("Second paragraph.").unwrap());
+        assert!(
+            repaired.find("Done first.").unwrap() < repaired.find("Second paragraph.").unwrap()
+        );
+    }
+
+    #[test]
+    fn retained_replay_fragment_repair_collapses_split_shell_around_complete_cell() {
+        let current = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: earlier — gpt-5\n\n",
+            "Earlier response must survive.\n\n",
+            "Second paragraph.\n\n",
+            "Third paragraph.\n\n",
+            "### Re: do [#ship] — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> do [#ship]\n\n",
+            "Done first.\n\n",
+            "Second paragraph.\n\n",
+            "Third paragraph.\n\n",
+            "### Re: do [#ship] — gpt-5\n\n",
+            "Done first.\n",
+            "<!-- agent:boundary:live -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: do [#ship] — gpt-5\n\n",
+            "Done first.\n\n",
+            "Second paragraph.\n\n",
+            "Third paragraph.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        let repaired = repair_retained_response_replay_fragments(current, response)
+            .expect("exact split replay shell should be repairable");
+
+        assert_eq!(repaired.matches("### Re: do [#ship]").count(), 1);
+        assert_eq!(repaired.matches("Done first.").count(), 1);
+        assert_eq!(repaired.matches("Second paragraph.").count(), 1);
+        assert_eq!(repaired.matches("Third paragraph.").count(), 1);
+        assert!(repaired.contains("Earlier response must survive."));
+        assert!(repaired.contains("<!-- agent:boundary:live -->"));
+        assert!(response_materialized_in_content(response, &repaired));
+    }
+
+    #[test]
+    fn retained_replay_fragment_repair_rejects_novel_trailing_content() {
+        let current = concat!(
+            "<!-- agent:exchange -->\n",
+            "Second paragraph.\n",
+            "### Re: do [#ship] — gpt-5\n\n",
+            "Done first.\n\n",
+            "Second paragraph.\n",
+            "### Re: do [#ship] — gpt-5\n\n",
+            "Done first.\n",
+            "Operator note must survive.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "### Re: do [#ship] — gpt-5\n\n",
+            "Done first.\n\n",
+            "Second paragraph.\n",
+        );
+
+        assert!(repair_retained_response_replay_fragments(current, response).is_none());
     }
 
     #[test]

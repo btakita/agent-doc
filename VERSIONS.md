@@ -2,6 +2,26 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.239
+
+- **Fix: orphan replay now collapses exact split response fragments around the
+  complete response cell it writes.**
+
+The retained-response materializer added in 0.35.238 could reassemble the
+pre-write split shape, but `agent-doc repair` replayed an orphan through the
+strict write adapter without invoking that materializer. The strict replay
+therefore inserted a complete response while preserving the misplaced suffix
+before it and a duplicate heading-plus-prefix after it. Semantic response
+presence passed even though the exchange still contained two response cells.
+
+Repair now recognizes only the exact complementary suffix/prefix shell around
+one complete captured response, removes those fragments through the authority
+CAS path, checkpoints the repaired document, and lets normal closeout commit it.
+Historical committed-capture routing keeps this shape eligible for repair even
+though the middle response is semantically materialized. Any novel
+non-transient line fails closed, and regressions cover both the live shape and
+preservation of unrelated operator text.
+
 ## 0.35.238
 
 - **Fix: retained streaming closeout no longer strands a response heading after

@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-response-toc"
-version = "0.35.238"
+version = "0.35.239"
 edition = "2024"
 description = "Content-only live response TOC parsing and filtering for agent-doc"
 license = "MIT"
@@ -11,5 +11,5 @@ publish = false
 name = "agent_doc_response_toc"
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.238" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.239" }
 anyhow = "1"

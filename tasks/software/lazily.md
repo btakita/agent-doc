@@ -1070,7 +1070,33 @@ And the original defect is now caught by the guard rather than by value-flipping
 `make check` OK, 306 + 7 passed, CI green. `lazily-cs@2074712`, pointer pushed.
 
 Three drainable heads remain. Exchange is at 1020 lines, accretion `block`; queue is active so I keep draining per its guidance.
-<!-- agent:boundary:6cec2afe:lazily -->
+
+### Re: #lzktgradleinputfingerprint — the byte-identical copy never started a JVM, and the tool hid that — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzktgradleinputfingerprint]
+
+
+All three premises measured true before anything was touched.
+
+**The load-bearing measurement**, before and after, on a `diff -r`-clean copy of the corpus:
+
+| | result |
+|---|---|
+| committed build file | `> Task :test UP-TO-DATE` — `11 actionable tasks: 11 up-to-date` |
+| with `inputs.property` | `> Task :test` — `1 executed, 10 up-to-date`, 448 tests |
+
+So pointing `LAZILY_SPEC_CONFORMANCE_DIR` at a scratch copy previously **skipped the test task entirely** and reported success. Any measurement of the form "redirect kt at a copy and see whether it reacts" was answerable from cache. Path identity confirmed the other way too: deleting a fixture from the copy produced `missing canonical conformance fixture ... (looked in /tmp/.../conformance-copy/...)`, so the JVM really reads the tree the fingerprint names.
+
+**The folklore is gone.** The claim I had written into `d8b6c08` — that a missing directory under an override "fingerprints the same as no sibling at all, so a probe could be answered from a cached GREEN" — is false, and the agent verified it rather than taking my word: a nonexistent directory fails **task validation**, before the task action, with `optional(true)` present *and* removed. Identical output either way, which is simultaneously the proof that the claim was folklore and that the `optional(true)` on `specSchemas` was inert. Both deleted.
+
+**And the reason this was hard to see is worth more than the fix.** RTK's shell hook strips Gradle's per-task lines, leaving only `BUILD SUCCESSFUL`. So `> Task :test UP-TO-DATE` is invisible under the normal shell, and **a run that skipped the tests looks exactly like one that passed them**. The agent only saw it after re-running through `rtk proxy`. That is the third instance this session's family of tools has hidden evidence by filtering — after masked `make check` exit codes and the `diff`-says-identical case — and it is the nastiest of the three, because here the *absence* of a line is the finding. I have written it to memory rather than leaving it as a war story.
+
+`make check` exit 0 with tests **executed** (`11 actionable tasks: 11 executed`), 448 tests, CI green. `lazily-kt@b5be698`, pointer pushed.
+
+Two drainable heads remain. Exchange is at 1050 lines, accretion `block`; queue is active so I keep draining per its guidance.
+<!-- agent:boundary:3dfeab14:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -1096,7 +1122,7 @@ Three drainable heads remain. Exchange is at 1020 lines, accretion `block`; queu
 - ~~do [#lzpystdlibmutants]~~
 - ~~do [#lzjsblocknamemasking]~~
 - ~~do [#lzcsuncomparedvalues]~~
-- do [#lzktgradleinputfingerprint]
+- ~~do [#lzktgradleinputfingerprint]~~
 - do [#lzcppapplyupdatelamport]
 - do [#lzstdlibmutantsallbindings]
 <!-- /agent:queue -->
@@ -1105,7 +1131,6 @@ Three drainable heads remain. Exchange is at 1020 lines, accretion `block`; queu
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzgdvocab] lazily-gd's reactive-graph runner is missing the fanout/churn/dispose_fanout/dispose_stale_handle bulk ops AND real id recycling, so 2 canonical fixtures remain: churn_returns_to_baseline.json and recycled_id_inherits_nothing.json. Recycling is the hard half and is a DESIGN decision, not runner vocabulary: Godot instance ids are monotonic and never alias, so 'a recycled id inherits nothing' has no natural referent — the binding needs an explicit id layer (a free-list over slot indices with a generation tag, the shape lazily-rs's SlotId uses) before the fixture means anything. Removing both entries from KNOWN_UNCOVERED in scripts/check-conformance-coverage.sh is the definition of done. DONE already: the merge_cell group (5 fixtures) landed with LazilyMergePolicy + Source.merge + ctx.source_with, and GDScript is now ~ on merge-algebra.
-- [ ] [#lzktgradleinputfingerprint] lazily-kt's Gradle test-task input wiring does not do what its comments claim, in two places. (1) A Test task's `environment` is UNTRACKED and PathSensitivity.RELATIVE means a byte-identical corpus at a different path fingerprints the SAME, so the comment added in ba7f41d claiming that forwarding the env var 'makes the variable part of the task's input fingerprint' is false as written — it holds only when content differs. Measured on the schemas input during #lzspecschemasoverride: pointing at a byte-identical scratch copy produced '11 actionable tasks: 11 up-to-date, BUILD SUCCESSFUL in 314ms', so the run meant to prove the override took effect never started a JVM. Fixed for SCHEMAS in d8b6c08 via inputs.property; the CORPUS input still has it. (2) CORRECTION, measured in 22e75e0 (#lzcorpusabsencehandling): d8b6c08's own rationale ALSO claims a missing directory under an explicit override 'fingerprints the same as no sibling at all (both absent, because the input is optional), so a probe pointed at a nonexistent tree could be answered from a cached GREEN'. That case cannot occur — a missing input directory fails Gradle task validation outright, before any test runs, and `optional(true)` does not change it (optional excuses an absent PROVIDER VALUE, not a nonexistent directory; the provider always has one via orElse). The inputs.property is still justified by the byte-identical-copy half of its argument, so nothing is broken — but the missing-directory half of that comment must be deleted rather than left as folklore. Do both: add inputs.property for the corpus dir and re-prove that a byte-identical corpus copy RE-RUNS rather than reporting UP-TO-DATE, and correct both comments to state only what is actually tracked. The specSchemas input also still carries an inert optional(true) worth removing for the same reason 22e75e0 removed the corpus one.
 - [ ] [#lzcppapplyupdatelamport] lazily-cpp's LosslessTreeCrdt::apply_update diverges from every other binding in two ways, found while pinning the diff order (#lzdifforderallbindings) and deliberately left unfixed there. (1) It never advances the Lamport counter: rs, go, py and zig all do counter = max(counter, op.id.counter) when applying a remote op, so a subsequent local op is guaranteed a counter above everything it has seen. cpp does not, so a replica that receives a higher-counter remote op and then makes a local edit can mint an id that collides with or sorts before an op it already holds. (2) It declares a buffered_ member that apply_update never uses, so cpp has NO dependency-buffering retry for an op whose parent has not arrived — the other bindings buffer and retry, which is what makes delivery order-tolerant. Neither is exercised by the current corpus, which is why both survived: non_contiguous_anti_entropy.json delivers a gap but never an op whose parent is missing, and no fixture makes a local edit after receiving a higher-counter remote op. Establish the intended semantics from lazily-spec, fix cpp, and add a canonical fixture that discriminates BOTH — a scenario where a replica edits after receiving a higher-counter remote op, and one delivering a child before its parent. Definition of done: the new fixtures redden pre-fix cpp and stay green in the other nine bindings, and cpp's apply_update matches the reference semantics.
 - [ ] [#lzstdlibmutantsallbindings] Four bindings ship a stdlib mutation ledger that nothing applies, and one ships it to nobody. Audited read-only during #lzpystdlibmutants: lazily-go (stdlib_conformance_test.go:100-120) checks must_fail is non-empty and its ids resolve to replayed scenarios, then counts entries against mutation_floor — better than pure self-reference, but no operator is ever applied; lazily-cs (tests/Lazily.Tests/PortableStdlibConformanceTests.cs:187-200) reads all three floors then asserts NotEmpty + Contains, no application; lazily-js (test/stdlib-conformance.test.js:138-141) is weakest of the three — length > 0 and id membership, no floor, no application; lazily-dart (test/stdlib_conformance_test.dart:172-220) does not read the mutations array AT ALL, and a repo-wide search for must_fail returns zero files. Port the shape lazily-py landed in ed812ab and lazily-rs has in tests/stdlib_conformance.rs: an INDEPENDENT interpreter for timer/timeout/revision_barrier, parameterised by operator, perturbing the model rather than the shipped implementation. Two design points proven in py and worth keeping: the set of implemented operators must be DERIVED from the branches the replay actually consulted, never a hand-maintained registry (that registry is the same bookkeeping-drift defect one level up), and an operator the corpus names with no interpreter arm must fail loudly rather than skip. Do NOT assert the complement — must_fail is a lower bound, not a partition (4 of 13 entries break scenarios they do not name); record that as a test so the decision is deliberate if the corpus ever changes. Definition of done: per binding, rebinding a must_fail entry to a scenario the operator does not break reddens, an unimplemented operator reddens naming itself, and every declared pair passes without the operator and fails with it.
 <!-- /agent:backlog -->

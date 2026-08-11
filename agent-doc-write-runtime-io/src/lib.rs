@@ -1986,9 +1986,7 @@ fn run_command_inner_within_pass(
             .iter()
             .chain(options.pending_add_gated.iter())
             .chain(options.pending_add_back.iter())
-            .filter_map(|text| {
-                agent_doc_element_backlog::backlog::explicit_custom_id(text)
-            })
+            .filter_map(|text| agent_doc_element_backlog::backlog::explicit_custom_id(text))
             .collect();
         if let Err(err) = agent_doc_cycle_state_io::record_requested_tracked_work(
             file,

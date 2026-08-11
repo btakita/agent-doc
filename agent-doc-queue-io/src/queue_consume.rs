@@ -2144,15 +2144,10 @@ mod core_tests {
 
         // A caller that DOES carry free-text proof (the response path) still
         // consumes it — the budget, not the head shape, is what changed.
-        let planned = plan_queue_prompt_consumption_with_snapshot_and_count(
-            &doc,
-            content,
-            None,
-            &[],
-            1,
-        )
-        .unwrap()
-        .expect("a proof-bearing free-text budget still consumes the head");
+        let planned =
+            plan_queue_prompt_consumption_with_snapshot_and_count(&doc, content, None, &[], 1)
+                .unwrap()
+                .expect("a proof-bearing free-text budget still consumes the head");
         assert!(planned.consumed_text.starts_with("tmux pane auto-sync"));
 
         // And the id-backed head a `--done` really did resolve is still consumed,
@@ -2167,16 +2162,15 @@ mod core_tests {
             "- tmux pane auto-sync is still extremely slow when switching documents. Fix it.\n",
             "<!-- /agent:queue -->\n",
         );
-        let planned =
-            plan_queue_prompt_consumption_with_snapshot_and_count(
-                &doc,
-                mixed,
-                None,
-                &["foo".to_string()],
-                0,
-            )
-            .unwrap()
-            .expect("the matching id-backed head is still consumed");
+        let planned = plan_queue_prompt_consumption_with_snapshot_and_count(
+            &doc,
+            mixed,
+            None,
+            &["foo".to_string()],
+            0,
+        )
+        .unwrap()
+        .expect("the matching id-backed head is still consumed");
         assert_eq!(planned.consumed_texts, vec!["do [#foo]".to_string()]);
         assert_eq!(planned.remaining, 1, "the free-text head must survive");
     }

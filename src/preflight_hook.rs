@@ -38,8 +38,7 @@ pub const CONTRACT_MARKER: &str = "[agent-doc] cycle contract (preflight already
 ///
 /// It is deliberately NOT the contract marker: admission still failed, so the
 /// agent must not proceed as though a cycle were opened.
-pub const ADMISSION_FAILURE_MARKER: &str =
-    "[agent-doc] cycle contract UNAVAILABLE (preflight admission failed; do NOT run `agent-doc preflight` for this turn)";
+pub const ADMISSION_FAILURE_MARKER: &str = "[agent-doc] cycle contract UNAVAILABLE (preflight admission failed; do NOT run `agent-doc preflight` for this turn)";
 
 /// Wall-clock budget for one in-binary preflight admission.
 ///
@@ -417,7 +416,10 @@ mod tests {
         .expect_err("a failing worker must fail the admission");
 
         let message = format!("{err:#}");
-        assert!(message.contains("preflight refused for its own reason"), "{message}");
+        assert!(
+            message.contains("preflight refused for its own reason"),
+            "{message}"
+        );
         assert!(
             !message.contains("admission budget"),
             "a real refusal must not be relabelled as an overrun: {message}"

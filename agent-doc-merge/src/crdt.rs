@@ -4354,9 +4354,8 @@ Second answer line three.
         // problem — and it is why `#qdedup-directive-twin`'s intentional
         // duplicate multiplicity must not be "fixed" here.
         let heading = "### Re: #resumeuuidstallsdrain — opus-5";
-        let base = format!(
-            "<!-- agent:exchange -->\n{heading}\n\nfirst body\n<!-- /agent:exchange -->\n"
-        );
+        let base =
+            format!("<!-- agent:exchange -->\n{heading}\n\nfirst body\n<!-- /agent:exchange -->\n");
         // Ours: the agent appended a SECOND response reusing the same heading.
         let ours = format!(
             "<!-- agent:exchange -->\n{heading}\n\nfirst body\n\n{heading}\n\nsecond body\n<!-- /agent:exchange -->\n"

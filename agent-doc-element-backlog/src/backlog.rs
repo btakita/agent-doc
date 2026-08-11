@@ -1365,10 +1365,7 @@ pub fn op_remove_matching_tracked_line(body: &str, target: &str, contains: bool)
                 Some(item.clone())
             }
         });
-        return (
-            preserve_trailing_newline_shape(body, next.render()),
-            true,
-        );
+        return (preserve_trailing_newline_shape(body, next.render()), true);
     }
 
     let mut out = String::with_capacity(body.len());
@@ -1830,7 +1827,9 @@ fn reject_edit_shaped_id_prefix(trimmed: &str) -> Result<()> {
     // the `=` disqualifies promotion and the full text is preserved. The
     // mistake this guard catches has no `#` — it is an id typed as if for
     // `--backlog-edit`.
-    if candidate_id.starts_with('#') || candidate_id.is_empty() || !is_valid_pending_id(candidate_id)
+    if candidate_id.starts_with('#')
+        || candidate_id.is_empty()
+        || !is_valid_pending_id(candidate_id)
     {
         return Ok(());
     }
@@ -1872,7 +1871,6 @@ pub fn explicit_custom_id(item: &str) -> Option<String> {
         Err(_) => None,
     }
 }
-
 
 #[test]
 fn add_rejects_edit_shaped_id_prefix_instead_of_swallowing_it() {
@@ -3656,8 +3654,8 @@ pub fn op_add_at_with_outcome_reserved(
         // id that is already taken means "this was a classification tag, not an
         // id" — keep it as body text and take a generated id. Failing the add
         // here made a document-wide tag like `#agent-doc-bug` single-use.
-        if let Some((tag_id, cleaned)) =
-            leading_bare_tag_id(&text).filter(|(id, _)| !reserved.contains(&normalize_pending_id(id)))
+        if let Some((tag_id, cleaned)) = leading_bare_tag_id(&text)
+            .filter(|(id, _)| !reserved.contains(&normalize_pending_id(id)))
         {
             inline_custom_id = Some(tag_id);
             text = cleaned;
@@ -6126,7 +6124,10 @@ mod tests {
     /// bracketed prose, and must leave non-tag text alone.
     #[test]
     fn state_tag_split_is_narrow() {
-        assert_eq!(split_leading_state_tags("[#customid] text"), ("", "[#customid] text"));
+        assert_eq!(
+            split_leading_state_tags("[#customid] text"),
+            ("", "[#customid] text")
+        );
         assert_eq!(split_leading_state_tags("plain text"), ("", "plain text"));
         assert_eq!(
             split_leading_state_tags("[not closed text"),
@@ -6194,8 +6195,7 @@ mod tests {
         );
         let reserved = document_reserved_identity_ids(doc_with_item);
         let body = "- [ ] [#agent-doc-bug] the first tagged item\n";
-        let outcome =
-            op_add_with_outcome_reserved(body, text, DOC_ID, false, &reserved).unwrap();
+        let outcome = op_add_with_outcome_reserved(body, text, DOC_ID, false, &reserved).unwrap();
         assert_ne!(outcome.id, "agent-doc-bug");
     }
 
@@ -6249,7 +6249,10 @@ mod tests {
         );
         let reserved = document_reserved_identity_ids(doc);
         assert!(reserved.contains("livepaneproof"));
-        assert!(reserved.contains("next-steps"), "presets are identities too");
+        assert!(
+            reserved.contains("next-steps"),
+            "presets are identities too"
+        );
 
         let text = "Live-pane proof for stashed columns";
         assert_eq!(
@@ -6258,13 +6261,15 @@ mod tests {
             "precondition: this text derives the id already held by review"
         );
 
-        let outcome =
-            op_add_with_outcome_reserved("", text, DOC_ID, false, &reserved).unwrap();
+        let outcome = op_add_with_outcome_reserved("", text, DOC_ID, false, &reserved).unwrap();
         assert_ne!(
             outcome.id, "livepaneproof",
             "a derived id must not duplicate an id active in another source"
         );
-        assert!(outcome.id.starts_with("livepaneproof"), "readability is kept");
+        assert!(
+            outcome.id.starts_with("livepaneproof"),
+            "readability is kept"
+        );
     }
 
     /// Without the reserved set the old behavior is reproduced exactly — the
@@ -7271,7 +7276,13 @@ mod tests {
         let body = "- [ ] [#one] First\n- [ ] [#two] Second\n";
 
         // The identity `backlog list` renders, bare and hash-prefixed.
-        for target in ["two", "#two", "- [ ] [#two] Second", "[ ] [#two] Second", "Second"] {
+        for target in [
+            "two",
+            "#two",
+            "- [ ] [#two] Second",
+            "[ ] [#two] Second",
+            "Second",
+        ] {
             let (updated, removed) = op_remove_matching_tracked_line(body, target, false);
             assert!(removed, "expected {target:?} to match");
             assert_eq!(updated, "- [ ] [#one] First\n", "target {target:?}");

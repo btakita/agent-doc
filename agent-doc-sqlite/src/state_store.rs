@@ -6851,7 +6851,9 @@ mod state_db_corruption_evidence_tests {
         drop(conn);
 
         assert!(
-            std::fs::read(&path).unwrap().starts_with(SQLITE_FILE_HEADER),
+            std::fs::read(&path)
+                .unwrap()
+                .starts_with(SQLITE_FILE_HEADER),
             "the empty file must have become a real database"
         );
     }

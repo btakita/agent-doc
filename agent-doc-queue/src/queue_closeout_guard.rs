@@ -106,10 +106,11 @@ pub fn no_response_live_queue_head_ids(
         .collect();
     // `#opverifyanswered`: once the operator answers an `[operator-verify]` head
     // inline, it is live unresponded work again rather than a deferred head.
-    let operator_answered: HashSet<String> = queue_continuation::operator_answered_head_ids(content)
-        .into_iter()
-        .map(|id| normalize_id(&id))
-        .collect();
+    let operator_answered: HashSet<String> =
+        queue_continuation::operator_answered_head_ids(content)
+            .into_iter()
+            .map(|id| normalize_id(&id))
+            .collect();
 
     let mut live = Vec::new();
     for id in recorded_ids {

@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.240
+
+- **Fix: strict stream closeout validates template patch shape before durable
+response capture.**
+
+Stream mode preserved the response and tracked-work mutation plan before
+resolving editor authority so an authority failure could resume losslessly. Its
+strict template-shape validation ran later, however, so an unwrapped response
+was first recorded as `response_captured` and then rejected. The cycle became
+unrecoverable: doctor correctly prohibited resubmitting the durable payload,
+while `session-check` could not apply the invalid patchback.
+
+Strict stream closeout now parses and validates the response against the cycle
+baseline before creating the early capture. Invalid template input fails without
+opening a captured cycle and can be corrected immediately. Valid payloads still
+retain their complete response and mutation plan before authority resolution,
+preserving the existing lossless-retry guarantee.
+
 ## 0.35.239
 
 - **Fix: orphan replay now collapses exact split response fragments around the

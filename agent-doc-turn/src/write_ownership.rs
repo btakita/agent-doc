@@ -312,9 +312,8 @@ pub fn recorded_tracked_work_is_unlanded(recorded: RecordedTrackedWork<'_>, disk
         // closeout asked for a mutation that is not visible yet".
         || done_unlanded(recorded.requested_done_ids)
         || add_unlanded(recorded.requested_added_ids)
-        // Intent counts the same as the post-hoc record: both mean "this
-        // closeout asked for a mutation that is not visible yet".
-
+    // Intent counts the same as the post-hoc record: both mean "this
+    // closeout asked for a mutation that is not visible yet".
 }
 
 #[cfg(test)]
@@ -602,7 +601,10 @@ mod tests {
         // Re-sending is still forbidden: the body is durable, so a re-send
         // duplicates rather than recovers.
         for invented in ["re-send", "force disk", "admin recycle", "admin reload-lib"] {
-            assert!(remedy.contains(invented), "must rule out `{invented}`: {remedy}");
+            assert!(
+                remedy.contains(invented),
+                "must rule out `{invented}`: {remedy}"
+            );
         }
     }
 

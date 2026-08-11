@@ -235,7 +235,8 @@ mod tests {
     /// that list is handled too.
     #[test]
     fn c_preprocessor_directives_are_code_not_prose() {
-        let source = "#pragma once\n#include <string>\n#embed \"data.bin\"\n#some_future_directive\n";
+        let source =
+            "#pragma once\n#include <string>\n#embed \"data.bin\"\n#some_future_directive\n";
         let scanned = prose_only(source, Some("h"));
         assert_eq!(scanned.trim(), "", "no directive line is prose: {scanned}");
     }

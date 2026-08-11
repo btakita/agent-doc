@@ -3531,7 +3531,10 @@ mod terminal_convergence_tests {
                 TestEffects.recover_missing_commit_boundary(file, event)
             }
 
-            fn resume_captured_finalize(&self, file: &Path) -> Result<CapturedFinalizeResumeOutcome> {
+            fn resume_captured_finalize(
+                &self,
+                file: &Path,
+            ) -> Result<CapturedFinalizeResumeOutcome> {
                 TestEffects.resume_captured_finalize(file)
             }
         }

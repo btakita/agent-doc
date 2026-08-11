@@ -112,8 +112,11 @@ pub fn context_clear_history_proves_cleared_state(
     max_history_lines: usize,
     is_dispatch_ready_prompt_line: impl Fn(&str) -> bool + Copy,
 ) -> bool {
-    if context_clear_command_visible_in_active_input(history, command, is_dispatch_ready_prompt_line)
-    {
+    if context_clear_command_visible_in_active_input(
+        history,
+        command,
+        is_dispatch_ready_prompt_line,
+    ) {
         return false;
     }
     let retained: Vec<String> = history
@@ -957,7 +960,10 @@ Welcome to Claude Code
             &still_visible,
             true
         ));
-        assert!(!context_clear_submit_needs_enter_resubmit(&unobserved, true));
+        assert!(!context_clear_submit_needs_enter_resubmit(
+            &unobserved,
+            true
+        ));
     }
 
     #[test]

@@ -424,7 +424,10 @@ mod tests {
             );
         }
 
-        assert_eq!(auto_trigger_blocking_gate(true, true, Some(true)), "none_coalescing");
+        assert_eq!(
+            auto_trigger_blocking_gate(true, true, Some(true)),
+            "none_coalescing"
+        );
         assert_eq!(
             auto_trigger_prompt_decision(false, true, true, Some(true), 1, 2, false),
             AutoTriggerPromptDecision::Dispatch(AutoTriggerPromptSource::StableOwnedPane)
@@ -598,7 +601,11 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 45% used
 
     #[test]
     fn an_unrendered_prompt_glyph_frame_answers_nothing_about_the_composer() {
-        assert_eq!(UNRENDERED_CLAUDE_FRAME.len(), 22, "the live capture was 22 bytes");
+        assert_eq!(
+            UNRENDERED_CLAUDE_FRAME.len(),
+            22,
+            "the live capture was 22 bytes"
+        );
         assert!(!pane_frame_answers_composer_state(UNRENDERED_CLAUDE_FRAME));
 
         // And the two values the drain used to trust are both derivable from it,
@@ -621,9 +628,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 45% used
         let rendered = "\u{1b}[38;5;246m❯\u{a0}\u{1b}[39m\n  ⏵⏵ bypass permissions on · 2 shells\n";
         assert!(pane_frame_answers_composer_state(rendered));
         // Prior output above the prompt counts too.
-        assert!(pane_frame_answers_composer_state(
-            "completed response\n❯\n"
-        ));
+        assert!(pane_frame_answers_composer_state("completed response\n❯\n"));
         // An ANSI-only second line is not content.
         assert!(!pane_frame_answers_composer_state(
             "\u{1b}[38;5;246m❯\u{1b}[39m\n\u{1b}[39m\n"

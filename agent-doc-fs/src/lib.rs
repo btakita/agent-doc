@@ -1125,7 +1125,10 @@ mod instruction_surface_tests {
             "fromskillrunbook",
             "fromcursor",
         ] {
-            assert!(anchors.contains(expected), "missing {expected}: {anchors:?}");
+            assert!(
+                anchors.contains(expected),
+                "missing {expected}: {anchors:?}"
+            );
         }
     }
 

@@ -145,7 +145,6 @@ pub fn effective_continuation_output_with_preemption(
 /// (`#queueblockquoteintent`).
 pub const EXCHANGE_PROMPT_PREEMPTION_GUIDANCE: &str = "queue continuation suppressed — drainable heads remain, but this cycle's diff carries a fresh exchange prompt that preempts the drain (`user_intent_prompt_changes` is non-empty). Answer that prompt this turn; the queue resumes on the next cycle. This is NOT a drained queue: if you cannot find an operator prompt in the exchange tail, inspect `user_intent_prompt_changes` — binary-authored bookkeeping misclassified as user intent is a defect, not a stop reason.";
 
-
 /// A required queue continuation: the document closed cleanly, explicit `go`
 /// mode is active, and a ready queue head remains, so an in-session loop must
 /// continue draining instead of sending a final answer.
@@ -357,9 +356,7 @@ pub fn deferred_backlog_ids_split(content: &str, scope: DrainScope) -> DeferredB
             }
             let key = id.to_ascii_lowercase();
             let immune = match scope {
-                DrainScope::InSessionLoop => {
-                    ctx.loop_undrainable_with_operator_verdict(true)
-                }
+                DrainScope::InSessionLoop => ctx.loop_undrainable_with_operator_verdict(true),
                 DrainScope::Supervisor => ctx.supervisor_undrainable_with_operator_verdict(true),
             };
             if immune {
@@ -1181,7 +1178,9 @@ mod tests {
     fn a_preempted_drain_names_its_reason_instead_of_going_silent() {
         let out = effective_continuation_output_with_preemption(true, true, false, None);
         assert!(!out.required, "a fresh exchange prompt still preempts");
-        let guidance = out.guidance.expect("a suppressed drain must name its reason");
+        let guidance = out
+            .guidance
+            .expect("a suppressed drain must name its reason");
         assert!(
             guidance.contains("preempts") && guidance.contains("user_intent_prompt_changes"),
             "the reason must be actionable and point at the field that proves it: {guidance}"

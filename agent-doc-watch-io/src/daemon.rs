@@ -883,10 +883,7 @@ pub fn status() -> Result<()> {
                 println!("Watch daemon running (PID {})", pid);
             } else {
                 crate::remove_pid()?;
-                println!(
-                    "Watch daemon not running (cleared stale PID file: {})",
-                    pid
-                );
+                println!("Watch daemon not running (cleared stale PID file: {})", pid);
             }
         }
         None => {

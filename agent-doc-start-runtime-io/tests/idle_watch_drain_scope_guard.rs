@@ -27,17 +27,19 @@ const SOURCE: &str = include_str!("../src/idle_watch.rs");
 /// Byte offsets of the drain block: the `'drain: {` label through the
 /// `drain_completed = true;` statement that closes it.
 fn drain_block_span() -> (usize, usize) {
-    let start = SOURCE
-        .find("'drain: {")
-        .expect("idle_watch.rs must wrap the queue drain in a `'drain:` labeled block so a \
+    let start = SOURCE.find("'drain: {").expect(
+        "idle_watch.rs must wrap the queue drain in a `'drain:` labeled block so a \
                  drain-scoped early exit cannot skip the stale-binary recycle decision \
-                 (#stalereexecstarve)");
+                 (#stalereexecstarve)",
+    );
     let end = SOURCE[start..]
         .find("drain_completed = true;")
         .map(|offset| start + offset)
-        .expect("the `'drain:` block must close by setting `drain_completed = true;` — that \
+        .expect(
+            "the `'drain:` block must close by setting `drain_completed = true;` — that \
                  marker is both the block terminator and the signal the recycle fallthrough \
-                 reads (#stalereexecstarve)");
+                 reads (#stalereexecstarve)",
+        );
     (start, end)
 }
 

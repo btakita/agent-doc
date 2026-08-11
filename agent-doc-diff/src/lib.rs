@@ -5181,7 +5181,12 @@ Done.\n\
     /// `resume: 06ff3b9e-5d68-4b7f-a0df-b8b8dd702885`.
     #[test]
     fn managed_state_covers_every_binary_owned_frontmatter_key() {
-        for key in ["resume", "agent_doc_session", "session", "agent_doc_pipeline"] {
+        for key in [
+            "resume",
+            "agent_doc_session",
+            "session",
+            "agent_doc_pipeline",
+        ] {
             assert!(
                 agent_doc_frontmatter::frontmatter::is_agent_managed_frontmatter_key(key),
                 "{key} must be in the canonical agent-managed set this classifier derives from"

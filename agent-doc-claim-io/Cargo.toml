@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-claim-io"
-version = "0.35.239"
+version = "0.35.240"
 edition = "2024"
 description = "Claim command binding I/O for agent-doc"
 license = "MIT"
@@ -11,22 +11,22 @@ publish = false
 name = "agent_doc_claim_io"
 
 [dependencies]
-agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.239" }
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.239" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.239" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.239" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.239" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.239" }
-agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.239" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.239" }
-agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.239" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.239" }
-agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.239" }
-agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.35.239" }
-agent-doc-sync-io = { path = "../agent-doc-sync-io", version = "0.35.239" }
-agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.239" }
-agent-doc-watch-io = { path = "../agent-doc-watch-io", version = "0.35.239" }
-agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.35.239" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.240" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.240" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.240" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.240" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.240" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.240" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.240" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.240" }
+agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.240" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.240" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.240" }
+agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.35.240" }
+agent-doc-sync-io = { path = "../agent-doc-sync-io", version = "0.35.240" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.240" }
+agent-doc-watch-io = { path = "../agent-doc-watch-io", version = "0.35.240" }
+agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.35.240" }
 anyhow = "1"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }
 uuid = { version = "1", features = ["v4"] }

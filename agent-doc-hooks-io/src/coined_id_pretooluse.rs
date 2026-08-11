@@ -419,7 +419,8 @@ mod tests {
             "file_path": "/repo/src/rpc.rs",
             "new_string": "// `#orphandrain` — controller-side drain\nfn tick() {}"
         });
-        let decision = pretooluse_decision("Edit", &input, &DocumentIds::Known(known(&["fr79"])), None);
+        let decision =
+            pretooluse_decision("Edit", &input, &DocumentIds::Known(known(&["fr79"])), None);
         match decision {
             PreToolUseDecision::Deny { reason } => {
                 assert!(reason.contains("#orphandrain"), "{reason}");
@@ -731,7 +732,7 @@ mod tests {
                     "Bash",
                     &json!({ "command": command }),
                     &DocumentIds::Known(known(&[])),
-                None
+                    None
                 ),
                 PreToolUseDecision::Allow,
                 "must not block: {command}"

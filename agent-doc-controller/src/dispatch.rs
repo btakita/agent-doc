@@ -6260,7 +6260,10 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 _ => unreachable!("non-terminal actions are settle and resubmit"),
             }
         }
-        panic!("repair never reached a terminal action over {} observations", pane.len());
+        panic!(
+            "repair never reached a terminal action over {} observations",
+            pane.len()
+        );
     }
 
     #[test]
@@ -6384,7 +6387,11 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             replay_pass_through_repair(&[(true, false), (true, false), (true, true)], 3);
         assert_eq!(
             actions,
-            vec!["settle_and_reobserve", "enter_resubmit", "deferred_pane_busy"]
+            vec![
+                "settle_and_reobserve",
+                "enter_resubmit",
+                "deferred_pane_busy"
+            ]
         );
         assert_eq!(enters, 1);
     }

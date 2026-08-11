@@ -1853,20 +1853,21 @@ where
         && let Some(head) = head_doc.as_deref()
         && has_blocking_non_exchange_component_drift(head, &file_content, None)
     {
-        let ownership = agent_doc_git_io::live_buffer_guard::LiveBufferGuardEffects::retained_write_ownership(
-            ports.live_buffer_guard,
-            file,
-        )
-        // `#retainedmutdrop`: "the exchange is converged, so whatever diverges
-        // is not this turn's write" is FALSE — a closeout's write produces
-        // `queue`, `backlog`, `status`, `review`, and `done` as well. Ask the
-        // one fact that separates them: are this cycle's own recorded
-        // tracked-work mutations visible on disk yet? If not, the divergence is
-        // the binary's own unlanded write and `commit` must reconcile it rather
-        // than refuse and strand it. If they have all landed, the divergence is
-        // a fresh edit and the refusal stays correct — that is what stops
-        // `commit` swallowing the operator's next prompt.
-        .with_unanswered_edit(!unlanded_own_tracked_work(file, &file_content));
+        let ownership =
+            agent_doc_git_io::live_buffer_guard::LiveBufferGuardEffects::retained_write_ownership(
+                ports.live_buffer_guard,
+                file,
+            )
+            // `#retainedmutdrop`: "the exchange is converged, so whatever diverges
+            // is not this turn's write" is FALSE — a closeout's write produces
+            // `queue`, `backlog`, `status`, `review`, and `done` as well. Ask the
+            // one fact that separates them: are this cycle's own recorded
+            // tracked-work mutations visible on disk yet? If not, the divergence is
+            // the binary's own unlanded write and `commit` must reconcile it rather
+            // than refuse and strand it. If they have all landed, the divergence is
+            // a fresh edit and the refusal stays correct — that is what stops
+            // `commit` swallowing the operator's next prompt.
+            .with_unanswered_edit(!unlanded_own_tracked_work(file, &file_content));
         let verdict = ownership.verdict();
         // The one verdict whose remedy names THIS command. `write_applied` means
         // the binary's own response write already landed and only the terminal
@@ -1898,22 +1899,22 @@ where
             snapshot_matches_head = false;
         }
         if snapshot_matches_head {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "commit_blocked_unproved_head_current_component_drift file={} basis=head verdict={}",
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "commit_blocked_unproved_head_current_component_drift file={} basis=head verdict={}",
+                    file.display(),
+                    verdict.as_str()
+                ),
+            );
+            anyhow::bail!(
+                "refusing to close {} as already committed: the staged snapshot matches HEAD, but the editor-authoritative document has uncommitted queue, backlog, status, or other typed-component drift without an exact binary-owned retained-target proof. {}",
                 file.display(),
-                verdict.as_str()
-            ),
-        );
-        anyhow::bail!(
-            "refusing to close {} as already committed: the staged snapshot matches HEAD, but the editor-authoritative document has uncommitted queue, backlog, status, or other typed-component drift without an exact binary-owned retained-target proof. {}",
-            file.display(),
-            agent_doc_turn::write_ownership::retained_write_remedy(
-                ownership,
-                &file.display().to_string()
-            )
-        );
+                agent_doc_turn::write_ownership::retained_write_remedy(
+                    ownership,
+                    &file.display().to_string()
+                )
+            );
         }
     }
     if snapshot_matches_head && binary_owned_side_effects.is_empty() {

@@ -1690,9 +1690,8 @@ mod tests {
     #[test]
     fn remove_keeps_the_closing_marker_on_its_own_line() {
         for target in ["one", "three"] {
-            let (_tmp, doc) = doc_with_pending(
-                "- [ ] [#one] First\n- [ ] [#two] Second\n- [ ] [#three] Third",
-            );
+            let (_tmp, doc) =
+                doc_with_pending("- [ ] [#one] First\n- [ ] [#two] Second\n- [ ] [#three] Third");
 
             force_pending(|| remove(&doc, target, false));
 
@@ -1718,8 +1717,7 @@ mod tests {
     #[test]
     fn remove_matches_the_identity_backlog_list_renders() {
         for target in ["two", "#two", "- [ ] [#two] Second", "Second"] {
-            let (_tmp, doc) =
-                doc_with_pending("- [ ] [#one] First\n- [ ] [#two] Second");
+            let (_tmp, doc) = doc_with_pending("- [ ] [#one] First\n- [ ] [#two] Second");
 
             force_pending(|| remove(&doc, target, false));
 

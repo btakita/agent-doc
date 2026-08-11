@@ -931,10 +931,7 @@ mod tests {
         let doc = Path::new("/repo/tasks/sampleorders.md");
 
         assert_eq!(
-            owned_pane_queue_continuation_prompt(
-                doc,
-                &agent_doc_harness::HarnessConfig::claude()
-            ),
+            owned_pane_queue_continuation_prompt(doc, &agent_doc_harness::HarnessConfig::claude()),
             "/agent-doc /repo/tasks/sampleorders.md",
             "Claude Code takes the slash-command reopen so a cleared pane loads the skill"
         );
@@ -947,10 +944,7 @@ mod tests {
             "OpenCode takes the slash-command reopen too"
         );
         assert_eq!(
-            owned_pane_queue_continuation_prompt(
-                doc,
-                &agent_doc_harness::HarnessConfig::codex()
-            ),
+            owned_pane_queue_continuation_prompt(doc, &agent_doc_harness::HarnessConfig::codex()),
             "agent-doc /repo/tasks/sampleorders.md",
             "Codex's harness-native entrypoint IS the bare trigger"
         );

@@ -3490,7 +3490,10 @@ mod tests {
         );
         let elapsed = started.elapsed();
 
-        assert!(accepted, "busy pane proof must accept the submitted trigger");
+        assert!(
+            accepted,
+            "busy pane proof must accept the submitted trigger"
+        );
         assert!(
             accepted_from_pane,
             "the accept must be attributed to the pane so it is logged as such"

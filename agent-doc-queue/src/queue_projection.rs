@@ -66,18 +66,17 @@ pub fn queue_prompt_projection_rows(content: &str, entries: &[QueueEntry]) -> Ve
             QueueEntry::Prompt(prompt) => {
                 let text = strip_in_progress_marker(&prompt.text);
                 let id = crate::queue_response::queue_prompt_done_id(&text);
-                let projectable_default =
-                    !crate::queue_continuation::is_noise_queue_head(
-                        &text,
-                        preset_supplies_directive,
-                    ) && !id.as_ref().is_some_and(|id| {
-                        // `#opverifyanswered`: an answered operator-verify head is
-                        // live work again, so it stays projectable.
-                        deferred_ids.defers(
-                            id,
-                            crate::queue_continuation::head_carries_operator_verdict(&text),
-                        )
-                    });
+                let projectable_default = !crate::queue_continuation::is_noise_queue_head(
+                    &text,
+                    preset_supplies_directive,
+                ) && !id.as_ref().is_some_and(|id| {
+                    // `#opverifyanswered`: an answered operator-verify head is
+                    // live work again, so it stays projectable.
+                    deferred_ids.defers(
+                        id,
+                        crate::queue_continuation::head_carries_operator_verdict(&text),
+                    )
+                });
                 Some(QueuePromptRow::new(
                     prompt.text.clone(),
                     id,

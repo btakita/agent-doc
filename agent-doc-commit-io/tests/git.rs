@@ -2467,7 +2467,10 @@ Duplicate replay should stay live.
         );
 
         let did_commit = commit(&doc).expect("the named recovery must run, not refuse");
-        assert!(did_commit, "the drift must reach HEAD, not close as a no-op");
+        assert!(
+            did_commit,
+            "the drift must reach HEAD, not close as a no-op"
+        );
 
         let head = Command::new("git")
             .current_dir(root)

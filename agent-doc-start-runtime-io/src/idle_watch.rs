@@ -1012,47 +1012,46 @@ fn record_idle_queue_payload_observation(
         snapshot_path,
         frame_rendered,
         pane_busy,
-    ) =
-        if let Some(observation) = observation {
-            let outcome = agent_doc_controller_io::route_snapshot::preserve_route_pane_snapshot(
-                file,
-                &observation.pane_id,
-                &harness.binary,
-                "idle_queue_payload_observation",
-                &observation.content,
-                agent_doc_ops_log_io::log_op,
-            );
-            (
-                observation.pane_id.as_str(),
-                observation
-                    .cursor_y
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| "unknown".to_string()),
-                observation.payload_already_pending.to_string(),
-                observation.dispatch_ready.to_string(),
-                outcome.snapshot.len.to_string(),
-                outcome.snapshot.hash,
-                outcome
-                    .snapshot
-                    .path
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(|| "none".to_string()),
-                observation.frame_rendered.to_string(),
-                observation.pane_busy.to_string(),
-            )
-        } else {
-            (
-                "unknown",
-                "unknown".to_string(),
-                "unknown".to_string(),
-                "unknown".to_string(),
-                "unknown".to_string(),
-                "unknown".to_string(),
-                "none".to_string(),
-                "unknown".to_string(),
-                "unknown".to_string(),
-            )
-        };
+    ) = if let Some(observation) = observation {
+        let outcome = agent_doc_controller_io::route_snapshot::preserve_route_pane_snapshot(
+            file,
+            &observation.pane_id,
+            &harness.binary,
+            "idle_queue_payload_observation",
+            &observation.content,
+            agent_doc_ops_log_io::log_op,
+        );
+        (
+            observation.pane_id.as_str(),
+            observation
+                .cursor_y
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            observation.payload_already_pending.to_string(),
+            observation.dispatch_ready.to_string(),
+            outcome.snapshot.len.to_string(),
+            outcome.snapshot.hash,
+            outcome
+                .snapshot
+                .path
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            observation.frame_rendered.to_string(),
+            observation.pane_busy.to_string(),
+        )
+    } else {
+        (
+            "unknown",
+            "unknown".to_string(),
+            "unknown".to_string(),
+            "unknown".to_string(),
+            "unknown".to_string(),
+            "unknown".to_string(),
+            "none".to_string(),
+            "unknown".to_string(),
+            "unknown".to_string(),
+        )
+    };
     agent_doc_ops_log_io::log_op(
         file,
         &format!(

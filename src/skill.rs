@@ -1001,10 +1001,7 @@ pub(crate) fn audit_managed_runbook_bundles(root: Option<&Path>) -> Result<()> {
         if !dir.is_dir() {
             continue;
         }
-        if canonical_names
-            .iter()
-            .any(|name| dir.join(name).is_file())
-        {
+        if canonical_names.iter().any(|name| dir.join(name).is_file()) {
             anyhow::bail!(
                 "retired agent-doc runbook mirror is still present: {}. Run `agent-doc skill install --all` to migrate it out.",
                 dir.display()
@@ -1487,7 +1484,13 @@ fn merge_claude_turn_status_hooks(path: &Path) -> Result<()> {
         None,
     );
     ensure_codex_hook_command(hooks_map, "Stop", TURN_STATUS_IDLE_COMMAND, None, None);
-    ensure_codex_hook_command(hooks_map, "SessionStart", TURN_STATUS_IDLE_COMMAND, None, None);
+    ensure_codex_hook_command(
+        hooks_map,
+        "SessionStart",
+        TURN_STATUS_IDLE_COMMAND,
+        None,
+        None,
+    );
     // No matcher: the handler filters by tool name itself and allows everything
     // it does not recognize, so the guard cannot wedge a turn on an unknown tool.
     ensure_codex_hook_command(
@@ -1623,7 +1626,10 @@ fn merge_codex_config(path: &Path) -> Result<()> {
         toml::Value::Table(server),
     );
 
-    write_if_changed(path, &ensure_trailing_newline(&toml::to_string_pretty(&root)?))
+    write_if_changed(
+        path,
+        &ensure_trailing_newline(&toml::to_string_pretty(&root)?),
+    )
 }
 
 /// Installed config artifacts are usually tracked, so a byte-identical rewrite
@@ -1691,10 +1697,7 @@ pub fn install_and_check_updated() -> Result<bool> {
 /// An explicit root is how a submodule-local install gets refreshed: bare root
 /// resolution prefers the superproject, so `src/agent-doc/.claude/...` is
 /// otherwise unreachable from inside the submodule (`#skillinstallstalemirror`).
-pub fn install_for_at(
-    env: agent_kit::detect::Environment,
-    root: Option<&Path>,
-) -> Result<()> {
+pub fn install_for_at(env: agent_kit::detect::Environment, root: Option<&Path>) -> Result<()> {
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
     install_skill_for_env(env, resolved.as_deref())?;
     install_runbooks_for(env, resolved.as_deref())?;
@@ -1810,7 +1813,6 @@ mod tests {
             "repairing the timeout must not duplicate the entry"
         );
     }
-
 
     struct EnvVarGuard {
         key: &'static str,
@@ -2009,13 +2011,7 @@ mod tests {
             .collect();
         // `#skillinstallconfigpath`: no machine-local absolute path in a
         // project-local, usually-tracked config file.
-        assert_eq!(
-            args,
-            vec![
-                "mcp",
-                "serve",
-            ]
-        );
+        assert_eq!(args, vec!["mcp", "serve",]);
     }
 
     #[test]
@@ -2319,7 +2315,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
         std::fs::write(
-            dir.path().join(".codex/skills/agent-doc/runbooks/commit.md"),
+            dir.path()
+                .join(".codex/skills/agent-doc/runbooks/commit.md"),
             "# stale\n",
         )
         .unwrap();
@@ -2333,8 +2330,11 @@ mod tests {
     fn audit_managed_runbook_bundles_rejects_missing_runbook() {
         let dir = tempfile::tempdir().unwrap();
         super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
-        std::fs::remove_file(dir.path().join(".codex/skills/agent-doc/runbooks/respond.md"))
-            .unwrap();
+        std::fs::remove_file(
+            dir.path()
+                .join(".codex/skills/agent-doc/runbooks/respond.md"),
+        )
+        .unwrap();
 
         let err = super::audit_managed_runbook_bundles(Some(dir.path())).unwrap_err();
         assert!(err.to_string().contains("missing"));
@@ -2346,7 +2346,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
         std::fs::write(
-            dir.path().join(".codex/skills/agent-doc/runbooks/legacy.md"),
+            dir.path()
+                .join(".codex/skills/agent-doc/runbooks/legacy.md"),
             "# stale\n",
         )
         .unwrap();
@@ -2383,7 +2384,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codex/runbooks")).unwrap();
         std::fs::write(dir.path().join(".codex/runbooks/commit.md"), "# stale\n").unwrap();
-        std::fs::write(dir.path().join(".codex/runbooks/local-notes.md"), "# mine\n").unwrap();
+        std::fs::write(
+            dir.path().join(".codex/runbooks/local-notes.md"),
+            "# mine\n",
+        )
+        .unwrap();
 
         super::retire_managed_runbook_mirrors(Some(dir.path())).unwrap();
 
@@ -2422,7 +2427,11 @@ mod tests {
     fn project_runbook_mirrors_never_reap_project_owned_runbooks() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("runbooks")).unwrap();
-        std::fs::write(dir.path().join("runbooks/browser-automation.md"), "# mine\n").unwrap();
+        std::fs::write(
+            dir.path().join("runbooks/browser-automation.md"),
+            "# mine\n",
+        )
+        .unwrap();
         write_runbook_mirror_config(dir.path(), "\"runbooks\"");
 
         super::install_runbook_mirrors(Some(dir.path())).unwrap();
@@ -2836,7 +2845,10 @@ mod tests {
         super::install_codex_hook_artifacts(Some(dir.path())).unwrap();
 
         assert_eq!(std::fs::read_to_string(&hooks_path).unwrap(), hooks_before);
-        assert_eq!(std::fs::read_to_string(&config_path).unwrap(), config_before);
+        assert_eq!(
+            std::fs::read_to_string(&config_path).unwrap(),
+            config_before
+        );
         assert_eq!(
             std::fs::metadata(&hooks_path).unwrap().modified().unwrap(),
             hooks_mtime,

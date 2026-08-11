@@ -7786,9 +7786,9 @@ fn handle_crdt_replica_rpc(
                 return Ok(crdt_replica_refused_data("not_agent_doc_document"));
             }
             DetachedReplicaAdmission::RefuseDetachedAuthority => {
-                    // `#replicarefusalstorm`: stale editors may retry a refused detached
-                    // operation forever, so log the first few, then throttle, and raise
-                    // one advisory naming the usual cause.
+                // `#replicarefusalstorm`: stale editors may retry a refused detached
+                // operation forever, so log the first few, then throttle, and raise
+                // one advisory naming the usual cause.
                 let (decision, count) = note_replica_refusal(&canonical);
                 if decision != RefusalLogDecision::Suppress {
                     agent_doc_ops_log_io::log_op(

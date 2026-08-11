@@ -714,7 +714,10 @@ pub fn enqueue_actionable_ids_in_content_with_anchors(
 ///
 /// Returns `None` when there is no queue component, fewer than two of `ids` are
 /// live heads, or the order is already correct.
-pub fn reorder_queue_mirror_in_content(content: &str, ids: &[String]) -> anyhow::Result<Option<String>> {
+pub fn reorder_queue_mirror_in_content(
+    content: &str,
+    ids: &[String],
+) -> anyhow::Result<Option<String>> {
     let wanted: Vec<String> = ids
         .iter()
         .map(|id| id.trim().trim_start_matches('#').to_ascii_lowercase())
@@ -749,7 +752,12 @@ pub fn reorder_queue_mirror_in_content(content: &str, ids: &[String]) -> anyhow:
         return Ok(None);
     }
 
-    let rank = |id: &str| wanted.iter().position(|want| want == id).unwrap_or(usize::MAX);
+    let rank = |id: &str| {
+        wanted
+            .iter()
+            .position(|want| want == id)
+            .unwrap_or(usize::MAX)
+    };
     let mut reordered: Vec<&(std::ops::Range<usize>, String)> = slots.iter().collect();
     // Stable sort: a duplicate id keeps its relative document order.
     reordered.sort_by_key(|(_, id)| rank(id));
@@ -1602,10 +1610,9 @@ priority= rank and the filed order:\n{updated}"
             "<!-- /agent:backlog -->\n",
         );
 
-        let updated =
-            reorder_queue_mirror_in_content(content, &["registry".into(), "enum".into()])
-                .unwrap()
-                .expect("the mirror order changed");
+        let updated = reorder_queue_mirror_in_content(content, &["registry".into(), "enum".into()])
+            .unwrap()
+            .expect("the mirror order changed");
 
         let registry = updated.find("- do [#registry]").unwrap();
         let enum_head = updated.find("- do [#enum]").unwrap();
@@ -1678,4 +1685,3 @@ priority= rank and the filed order:\n{updated}"
         );
     }
 }
-

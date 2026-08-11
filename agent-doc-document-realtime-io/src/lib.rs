@@ -200,10 +200,7 @@ fn retained_write_remedy_for(file: &Path) -> String {
 /// Routing construction through one function makes the remedy structural instead
 /// of remembered.
 fn retained_refusal(file: &Path, message: String) -> anyhow::Error {
-    await_editor_replica_no_disk_write(format!(
-        "{message} {}",
-        retained_write_remedy_for(file)
-    ))
+    await_editor_replica_no_disk_write(format!("{message} {}", retained_write_remedy_for(file)))
 }
 
 #[derive(Debug)]
@@ -1036,11 +1033,14 @@ fn atomic_write_rebased_through_authority_body(
             };
 
             if !relay_write.delivery_converged {
-                return Err(retained_refusal(path, format!(
-                    "serialized_atomic_write: binary-owned write for {} remains retained while the editor projection converges (content_hash={}); the same intent resumes when the controller derives settlement and closeout continuation from the live projection. Do not recapture or rerun finalize/write --commit, and do not force disk",
-                    path.display(),
-                    relay_write.content_hash,
-                )));
+                return Err(retained_refusal(
+                    path,
+                    format!(
+                        "serialized_atomic_write: binary-owned write for {} remains retained while the editor projection converges (content_hash={}); the same intent resumes when the controller derives settlement and closeout continuation from the live projection. Do not recapture or rerun finalize/write --commit, and do not force disk",
+                        path.display(),
+                        relay_write.content_hash,
+                    ),
+                ));
             }
 
             let current = observe_live_editor_authority_after_model_ensure(
@@ -1065,12 +1065,15 @@ fn atomic_write_rebased_through_authority_body(
                             "serialized_atomic_write_editor_save_pending",
                             DocumentWriteDeferredReason::EditorProjectionPending,
                         )?;
-                        return Err(retained_refusal(path, format!(
-                            "serialized_atomic_write: editor acknowledged the canonical target for {} (content_hash={}) but its native save has not projected that exact editor version to disk; retained intent {} will resume without a behind-the-editor disk write",
-                            path.display(),
-                            relay_write.content_hash,
-                            intent_id,
-                        )));
+                        return Err(retained_refusal(
+                            path,
+                            format!(
+                                "serialized_atomic_write: editor acknowledged the canonical target for {} (content_hash={}) but its native save has not projected that exact editor version to disk; retained intent {} will resume without a behind-the-editor disk write",
+                                path.display(),
+                                relay_write.content_hash,
+                                intent_id,
+                            ),
+                        ));
                     }
                     clear_deferred_document_write_intent(
                         path,
@@ -1142,10 +1145,13 @@ fn atomic_write_rebased_through_authority_body(
                     if retry_same_intent {
                         continue;
                     }
-                    return Err(retained_refusal(path, format!(
-                        "serialized_atomic_write: editor authority for {} kept advancing after delivery proof; binary-owned intent {intent_id} remains retained and will merge the unsaved editor cut before commit. Do not recapture or rerun finalize/write --commit, and do not force disk; session-check/supervisor recovery resumes this same intent",
-                        path.display(),
-                    )));
+                    return Err(retained_refusal(
+                        path,
+                        format!(
+                            "serialized_atomic_write: editor authority for {} kept advancing after delivery proof; binary-owned intent {intent_id} remains retained and will merge the unsaved editor cut before commit. Do not recapture or rerun finalize/write --commit, and do not force disk; session-check/supervisor recovery resumes this same intent",
+                            path.display(),
+                        ),
+                    ));
                 }
             }
         }
@@ -2153,14 +2159,8 @@ pub fn atomic_repair_write_if_current_through_authority(
     atomic_write_if_current_through_authority(path, content, expected_current, source)?;
     let canonical = try_resolve_current_document_content(path, source)?;
     let disk = resolve_disk_current_document_content(path, source)?;
-    let (canonical, disk) = await_atomic_repair_projection(
-        path,
-        content,
-        expected_current,
-        source,
-        canonical,
-        disk,
-    )?;
+    let (canonical, disk) =
+        await_atomic_repair_projection(path, content, expected_current, source, canonical, disk)?;
     settle_atomic_repair_projection(path, content, expected_current, source, canonical, disk)
 }
 
@@ -2327,18 +2327,21 @@ fn settle_atomic_repair_projection(
                 agent_doc_hash::content_hash(&disk),
             ),
         );
-        return Err(retained_refusal(path, format!(
-            "{source}: repair projection for {} is retained by the controller's reactive \
+        return Err(retained_refusal(
+            path,
+            format!(
+                "{source}: repair projection for {} is retained by the controller's reactive \
              document graph (intent_id={}, target_hash={}, canonical_hash={}, disk_hash={}); \
              foreground acceptance is not terminal disk equality, and the subscribed \
              projection effect owns convergence. Do not resubmit, republish, force disk, or \
              recycle the controller",
-            path.display(),
-            pending.intent_id,
-            target_hash,
-            agent_doc_hash::content_hash(&canonical),
-            agent_doc_hash::content_hash(&disk),
-        )));
+                path.display(),
+                pending.intent_id,
+                target_hash,
+                agent_doc_hash::content_hash(&canonical),
+                agent_doc_hash::content_hash(&disk),
+            ),
+        ));
     }
 
     if classify_atomic_repair_projection(content, expected_current, &canonical, &disk)
@@ -2363,10 +2366,13 @@ fn settle_atomic_repair_projection(
                 agent_doc_hash::content_hash(&disk),
             ),
         );
-        return Err(retained_refusal(path, format!(
-            "{source}: repair target for {} reached disk while the document was detached, then the editor registered with the exact pre-repair authority (intent_id={intent_id}, target_hash={target_hash}); the original compare-and-swap lineage is retained for reactive editor delivery. Run only agent-doc session-check for the existing binary-owned repair; do not resubmit, force disk, or recycle the controller; {RETAINED_FOR_RETRY_MARKER}",
-            path.display(),
-        )));
+        return Err(retained_refusal(
+            path,
+            format!(
+                "{source}: repair target for {} reached disk while the document was detached, then the editor registered with the exact pre-repair authority (intent_id={intent_id}, target_hash={target_hash}); the original compare-and-swap lineage is retained for reactive editor delivery. Run only agent-doc session-check for the existing binary-owned repair; do not resubmit, force disk, or recycle the controller; {RETAINED_FOR_RETRY_MARKER}",
+                path.display(),
+            ),
+        ));
     }
 
     anyhow::ensure!(
@@ -2556,11 +2562,14 @@ pub fn apply_canonical_replace_if_attached(
                                     .expect("pending CRDT target must retain its write receipt");
                                 let recycle_status = agent_doc_controller_io::project_controller::
                                         schedule_stale_editor_replica_cp_recycle(file, source);
-                                return Err(retained_refusal(file, format!(
-                                    "{source}: retained canonical target for {} after its editor replica disappeared (content_hash={}): zero-member delivery convergence is not visible-write proof; disk was not written; recycle_status={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; {RETAINED_FOR_RETRY_MARKER}",
-                                    file.display(),
-                                    relay_write.content_hash,
-                                )));
+                                return Err(retained_refusal(
+                                    file,
+                                    format!(
+                                        "{source}: retained canonical target for {} after its editor replica disappeared (content_hash={}): zero-member delivery convergence is not visible-write proof; disk was not written; recycle_status={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; {RETAINED_FOR_RETRY_MARKER}",
+                                        file.display(),
+                                        relay_write.content_hash,
+                                    ),
+                                ));
                             }
                             let mut relay_write = pending_write
                                 .take()
@@ -2773,10 +2782,13 @@ pub fn apply_canonical_replace_if_attached(
                                     agent_doc_hash::content_hash(&effective_target),
                                 ),
                             );
-                            return Err(retained_refusal(file, format!(
-                                "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={intent_id}), but the live editor delivery worker heartbeat is stale; disk was not written; recycle_status={recycle_status}",
-                                file.display(),
-                            )));
+                            return Err(retained_refusal(
+                                file,
+                                format!(
+                                    "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={intent_id}), but the live editor delivery worker heartbeat is stale; disk was not written; recycle_status={recycle_status}",
+                                    file.display(),
+                                ),
+                            ));
                         }
 
                         let zero_replica_visible_write_proven = live_editors == 0
@@ -2811,10 +2823,13 @@ pub fn apply_canonical_replace_if_attached(
                 )?;
                                 let recycle_status = agent_doc_controller_io::project_controller::
                     schedule_stale_editor_replica_cp_recycle(file, source);
-                                return Err(retained_refusal(file, format!(
-                                    "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor is the current authority, but no editor replica was registered with the relay; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk; {RETAINED_FOR_RETRY_MARKER}",
-                                    file.display(),
-                                )));
+                                return Err(retained_refusal(
+                                    file,
+                                    format!(
+                                        "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor is the current authority, but no editor replica was registered with the relay; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk; {RETAINED_FOR_RETRY_MARKER}",
+                                        file.display(),
+                                    ),
+                                ));
                             }
                         }
 
@@ -6421,7 +6436,12 @@ fn try_resolve_current_doc_with_disk_inner(
                         delivery_converged,
                     ),
                 );
-                return Ok(resolve_disk_only_current_doc(file, &disk, "editor_absent", source));
+                return Ok(resolve_disk_only_current_doc(
+                    file,
+                    &disk,
+                    "editor_absent",
+                    source,
+                ));
             }
             record_editor_relay_authority(file, source, &text);
             let reconciliation = Reconciliation {
@@ -12433,7 +12453,8 @@ mod tests {
     /// appear at all.
     #[test]
     fn every_resolve_names_the_caller_not_just_what_answered_it() {
-        let (dir, file, _canonical) = temp_doc("<!-- agent:exchange -->\nbody\n<!-- /agent:exchange -->\n");
+        let (dir, file, _canonical) =
+            temp_doc("<!-- agent:exchange -->\nbody\n<!-- /agent:exchange -->\n");
         let owner = "test-resolve-attribution";
         seed_reliable_sync_open(&file, owner);
         test_support_register_replica_for_file(&file, owner)

@@ -1049,7 +1049,9 @@ pub(crate) fn run_stream(
     }
     sanitize_template_patchback_response(&mut response)?;
 
-    capture_closeout_mutation_plan_before_authority_resolution(file, &response, &flags)?;
+    capture_validated_stream_closeout_before_authority_resolution(
+        file, baseline, &response, &flags,
+    )?;
 
     let current_content = resolve_document_content_for_write_mode(
         file,
@@ -1887,6 +1889,39 @@ pub(crate) fn run_stream(
 /// The response body is still recoverable from the capture ledger, so its
 /// backlog/status mutation plan must already be attached to the same capture or
 /// binary-owned recovery could later commit only the response.
+fn capture_validated_stream_closeout_before_authority_resolution(
+    file: &Path,
+    baseline: Option<&str>,
+    response: &str,
+    flags: &WriteFlags,
+) -> Result<()> {
+    if flags.strict_closeout {
+        let disk_content;
+        let pre_capture_content = if let Some(baseline) = baseline {
+            baseline
+        } else {
+            disk_content = std::fs::read_to_string(file)
+                .with_context(|| format!("failed to read {}", file.display()))?;
+            &disk_content
+        };
+        let parsed = agent_doc_template_io::parse_template_patchback(
+            file,
+            response,
+            "run_stream_pre_capture",
+            agent_doc_ops_log_io::log_op,
+        )?;
+        enforce_strict_template_closeout_contract(
+            pre_capture_content,
+            parsed.marker_count,
+            &parsed.patches,
+            &parsed.unmatched,
+            true,
+        )?;
+    }
+
+    capture_closeout_mutation_plan_before_authority_resolution(file, response, flags)
+}
+
 fn capture_closeout_mutation_plan_before_authority_resolution(
     file: &Path,
     response: &str,
@@ -2715,7 +2750,13 @@ mod tests {
             rerun_command_base: None,
         };
 
-        capture_closeout_mutation_plan_before_authority_resolution(&doc, response, &flags).unwrap();
+        capture_validated_stream_closeout_before_authority_resolution(
+            &doc,
+            Some(baseline),
+            response,
+            &flags,
+        )
+        .unwrap();
 
         let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
             .unwrap()
@@ -2738,6 +2779,57 @@ mod tests {
         assert!(
             state.had_pending_mutations,
             "recovery must fail closed until the retained mutation envelope lands"
+        );
+    }
+
+    #[test]
+    fn invalid_strict_stream_closeout_does_not_create_captured_cycle() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("invalid-pre-barrier-response.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: invalid-pre-barrier-response\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### User Prompt\n\n",
+            "Keep malformed closeout input retryable.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, baseline).unwrap();
+        let flags = WriteFlags {
+            allow_replace_pending: false,
+            has_pending_add: false,
+            has_pending_done: false,
+            has_pending_mutation: false,
+            has_metadata_only_mutation: false,
+            pending_done_ids: Vec::new(),
+            queue_completion_ids: Vec::new(),
+            pending_kept_open_ids: Vec::new(),
+            strict_closeout: true,
+            force_disk: false,
+            no_pending_capture: false,
+            mutation_plan_json: None,
+            empty_response_recovery: None,
+            rerun_command_base: None,
+        };
+
+        let err = capture_validated_stream_closeout_before_authority_resolution(
+            &doc,
+            Some(baseline),
+            "### Re: malformed — gpt-5\n\nNo patch markers.\n",
+            &flags,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("<!-- patch:exchange -->"));
+        assert!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .is_none(),
+            "shape validation must fail before a durable response_captured cycle exists"
         );
     }
 

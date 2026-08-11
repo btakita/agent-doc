@@ -3450,7 +3450,9 @@ fn test_preflight_hook_never_emits_silence_on_admission_failure() {
             + anchor.len();
         let rest = &preflight_hook_source[start..];
         let open = rest.find('"').expect("marker literal must be a string");
-        let close = rest[open + 1..].find('"').expect("marker literal unterminated");
+        let close = rest[open + 1..]
+            .find('"')
+            .expect("marker literal unterminated");
         rest[open + 1..open + 1 + close].to_string()
     };
     let contract = marker_literal("CONTRACT_MARKER");
@@ -28935,8 +28937,7 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
         "plan.rs must not select the raw first queue head; use the deferral-aware selector (#planhead)"
     );
     assert!(
-        plan_source
-            .contains("agent_doc_queue::queue_continuation::dispatchable_head_prompt_text")
+        plan_source.contains("agent_doc_queue::queue_continuation::dispatchable_head_prompt_text")
             && plan_source.contains("agent_doc_queue::queue_heads::queue_is_active_for_diff"),
         "plan.rs should call active queue activation policy through agent-doc-queue directly"
     );
@@ -31822,7 +31823,9 @@ fn test_codex_skill_install_writes_hook_artifacts() {
         "no absolute install-machine path may be written into .codex/config.toml"
     );
     assert!(
-        std::fs::read_to_string(&hooks_path).unwrap().ends_with('\n'),
+        std::fs::read_to_string(&hooks_path)
+            .unwrap()
+            .ends_with('\n'),
         "installed .codex/hooks.json must end with a newline"
     );
 }

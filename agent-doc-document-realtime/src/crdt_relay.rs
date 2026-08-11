@@ -2568,7 +2568,10 @@ mod tests {
             hub.ack_delivery(3, &pending[0].patch_id, pending[0].generation)
                 .unwrap()
         );
-        assert!(hub.nonconverging_replicas().is_empty(), "the ACK rehabilitates it");
+        assert!(
+            hub.nonconverging_replicas().is_empty(),
+            "the ACK rehabilitates it"
+        );
 
         // A NEW delivery to the rehabilitated replica blocks convergence again.
         editor2.apply_local_edit(0, 0, "second");

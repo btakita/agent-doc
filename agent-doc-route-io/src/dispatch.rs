@@ -17,11 +17,11 @@ use crate::dispatch_start::{
 };
 use crate::supervisor_runtime::supervisor_socket_path;
 use agent_doc_controller::dispatch::{
-    DirectPaneDispatchStartProofFacts, DirectPaneSubmitPolicy,
-    PASS_THROUGH_STRANDED_DRAFT_SETTLE, PassThroughStrandedDraftAction,
-    PassThroughStrandedDraftFacts, PassThroughStrandedDraftLogFacts,
-    PreDispatchStrandedDraftAction, PreDispatchStrandedDraftFacts, RouteSubmitObservation,
-    RoutedDispatchStartProof, RoutedTriggerPayloadFacts, busy_dispatch_start_outcome,
+    DirectPaneDispatchStartProofFacts, DirectPaneSubmitPolicy, PASS_THROUGH_STRANDED_DRAFT_SETTLE,
+    PassThroughStrandedDraftAction, PassThroughStrandedDraftFacts,
+    PassThroughStrandedDraftLogFacts, PreDispatchStrandedDraftAction,
+    PreDispatchStrandedDraftFacts, RouteSubmitObservation, RoutedDispatchStartProof,
+    RoutedTriggerPayloadFacts, busy_dispatch_start_outcome,
     classify_pass_through_stranded_draft_action, classify_pre_dispatch_stranded_draft_action,
     direct_pane_should_await_dispatch_start_proof, direct_pane_submit_acceptance_budget,
     direct_pane_submit_outcome, dispatch_start_busy_probe_timeout,
@@ -558,16 +558,15 @@ fn repair_pass_through_stranded_draft(
                 (false, false)
             }
         };
-        let action =
-            classify_pass_through_stranded_draft_action(PassThroughStrandedDraftFacts {
-                draft_visible,
-                pane_busy,
-                settled,
-                enters_sent,
-                max_enters,
-                clear_observations,
-                required_clear_observations,
-            });
+        let action = classify_pass_through_stranded_draft_action(PassThroughStrandedDraftFacts {
+            draft_visible,
+            pane_busy,
+            settled,
+            enters_sent,
+            max_enters,
+            clear_observations,
+            required_clear_observations,
+        });
         match action {
             PassThroughStrandedDraftAction::SettleAndReobserve => {
                 // Only a SETTLED idle-and-empty look counts toward the

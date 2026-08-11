@@ -51,7 +51,7 @@ MUTATION_CAPTURE_RUNTIME = Path(
     "agent-doc-write-runtime-io/src/run_entry.rs"
 )
 MUTATION_CAPTURE_CALL = (
-    "capture_closeout_mutation_plan_before_authority_resolution(file, &response, &flags)?;"
+    "capture_validated_stream_closeout_before_authority_resolution("
 )
 AUTHORITY_RESOLUTION_CALL = (
     "let current_content = resolve_document_content_for_write_mode("
@@ -265,8 +265,9 @@ def verify_dev_harness_contract(root: Path) -> list[str]:
     authority = runtime_text.find(AUTHORITY_RESOLUTION_CALL, run_stream)
     if run_stream < 0 or capture < 0 or authority < 0 or capture > authority:
         return [
-            "run_stream must durably capture the closeout mutation plan before "
-            "its first editor-authority resolution (#bugbacklogdropped)"
+            "run_stream must validate and durably capture the closeout mutation "
+            "plan before its first editor-authority resolution "
+            "(#bugbacklogdropped/#strictstreamcapturevalidate)"
         ]
     return []
 
@@ -401,7 +402,7 @@ install-full:
     )
     (root / MUTATION_CAPTURE_RUNTIME).write_text(
         """pub(crate) fn run_stream() {
-    capture_closeout_mutation_plan_before_authority_resolution(file, &response, &flags)?;
+    capture_validated_stream_closeout_before_authority_resolution(
     let current_content = resolve_document_content_for_write_mode(
 }
 """

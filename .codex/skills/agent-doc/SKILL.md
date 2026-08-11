@@ -2,7 +2,7 @@
 description: "Interactive markdown session for Codex. TRIGGER: user writes agent-doc <file> as a normal Codex message. Requires a markdown session document, installed CLI, and write+commit every cycle. Do not use slash commands; Codex rejects project-defined /agent-doc."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.35.239"
+agent-doc-version: "0.35.240"
 ---
 
 # agent-doc

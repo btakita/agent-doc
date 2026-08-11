@@ -171,7 +171,8 @@ mod imperative_contract_tests {
     fn imperative_contract_defers_to_applied_metadata_mutation() {
         let file = Path::new("session.md");
         let diff = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+do [#typeroutersponses]\n";
-        let response = "### Re: typeroutersponses — gpt-5\nReordered the backlog so the registry runs first.";
+        let response =
+            "### Re: typeroutersponses — gpt-5\nReordered the backlog so the registry runs first.";
         enforce_imperative_response_contract_with_mutation_evidence(
             file,
             Some("ctx\n"),

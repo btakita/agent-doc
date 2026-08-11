@@ -556,7 +556,9 @@ fn hub_handle_or_insert_with(document_hash: &str, make: impl FnOnce() -> RelayHu
 /// at all — `#lazily-hot-path`: ask the actor once instead of polling it N
 /// times. Paths whose hub is not allocated return `None`; they are detached, so
 /// the caller reads their disk bytes, which is already the authority for them.
-pub fn allocated_canonical_texts(paths: &[std::path::PathBuf]) -> Vec<(std::path::PathBuf, Option<String>)> {
+pub fn allocated_canonical_texts(
+    paths: &[std::path::PathBuf],
+) -> Vec<(std::path::PathBuf, Option<String>)> {
     paths
         .iter()
         .map(|path| {
@@ -2611,7 +2613,8 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
     let wedged = !delivery.holds_delivery_barrier && !updates.is_empty();
     let crossed_now =
         wedged && delivery.redeliveries_without_ack == MAX_LOGGED_REDELIVERY_TRANSITION;
-    if (!wedged && (!updates.is_empty() || delivery.current_generation != delivery.last_ack_generation))
+    if (!wedged
+        && (!updates.is_empty() || delivery.current_generation != delivery.last_ack_generation))
         || crossed_now
     {
         agent_doc_ops_log_io::log_op(

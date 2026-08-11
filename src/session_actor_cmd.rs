@@ -17,14 +17,13 @@ use agent_doc_supervisor::startup_miss::{SessionLogStatus, StartupMiss, format_t
 use agent_doc_tmux_commands::tmux_submit_mode_for_harness;
 use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_turn_executor_tmux::context_clear::{
-    ContextClearSubmitObservation, ContextClearSubmitPollState, ContextClearSubmitRetryFacts,
-    ContextClearSubmitStatus, InterruptClearTimeoutFacts, busy_clear_already_deferred_message,
-    busy_clear_deferred_message, busy_clear_refusal_message,
-    context_clear_command_visible_in_active_input, context_clear_submit_blocked_line,
+    CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES, ContextClearSubmitObservation,
+    ContextClearSubmitPollState, ContextClearSubmitRetryFacts, ContextClearSubmitStatus,
+    InterruptClearTimeoutFacts, busy_clear_already_deferred_message, busy_clear_deferred_message,
+    busy_clear_refusal_message, context_clear_command_visible_in_active_input,
+    context_clear_history_proves_cleared_state, context_clear_submit_blocked_line,
     context_clear_submit_blocked_message, context_clear_submit_can_enter_resubmit,
-    CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
-    context_clear_history_proves_cleared_state, context_clear_submit_observation_line,
-    context_clear_submit_poll_status,
+    context_clear_submit_observation_line, context_clear_submit_poll_status,
     context_clear_submit_resubmit_proof_line, interrupt_clear_timeout_message,
     operator_interrupt_key_plan, operator_interrupt_step_delay, protected_clear_refusal_message,
     terminal_editor_command,
@@ -2254,13 +2253,20 @@ fn upgrade_unobserved_clear_from_pane_history(
         CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
         |line| harness_config.is_dispatch_ready_prompt_line(line),
     );
-    let retained_lines = history.lines().filter(|line| !line.trim().is_empty()).count();
+    let retained_lines = history
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "session_clear_submit_cleared_state_probe file={} pane={pane} harness={harness} phase={phase} result={} retained_lines={retained_lines} max_lines={}",
             file.display(),
-            if proven { "cleared_state_proven" } else { "conversation_retained" },
+            if proven {
+                "cleared_state_proven"
+            } else {
+                "conversation_retained"
+            },
             CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES
         ),
     );

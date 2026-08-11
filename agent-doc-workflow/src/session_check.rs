@@ -917,8 +917,7 @@ mod tests {
         // response says what is happening to it. Reconciling and naming queue
         // prompts is what SKILL.md asks for; it must not read as the agent
         // having enqueued its own prose. Live false positive, 2026-08-08.
-        let operator_line =
-            "tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it.";
+        let operator_line = "tmux pane auto-sync is still extremely slow when switching from lazily.md to agent-doc-bugs2.md. Fix it.";
         let queue = format!("- do [#runfilesubmit]\n- {operator_line}\n");
         let exchange = concat!(
             "### Re: shipping\n",

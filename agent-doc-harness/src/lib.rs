@@ -3920,7 +3920,10 @@ Working (21s - esc to interrupt)
         );
 
         assert!(h.dispatch_blocker_reason(busy).is_some());
-        assert_eq!(project_pane_composer(busy, &h), PaneComposerProjection::Busy);
+        assert_eq!(
+            project_pane_composer(busy, &h),
+            PaneComposerProjection::Busy
+        );
     }
 
     #[test]

@@ -1692,8 +1692,10 @@ pub fn summarize_submit_profile(
             continue;
         }
         scanned += 1;
-        let harness = submit_profile_field(line, "harness").unwrap_or_else(|| "unknown".to_string());
-        let outcome = submit_profile_field(line, "outcome").unwrap_or_else(|| "unknown".to_string());
+        let harness =
+            submit_profile_field(line, "harness").unwrap_or_else(|| "unknown".to_string());
+        let outcome =
+            submit_profile_field(line, "outcome").unwrap_or_else(|| "unknown".to_string());
         let enters = submit_profile_field(line, "enters_sent")
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(0);
@@ -1705,14 +1707,9 @@ pub fn summarize_submit_profile(
             }
         };
 
-        let entry = per_harness.entry(harness).or_insert_with(|| {
-            (
-                0,
-                0,
-                BTreeMap::new(),
-                0,
-            )
-        });
+        let entry = per_harness
+            .entry(harness)
+            .or_insert_with(|| (0, 0, BTreeMap::new(), 0));
         entry.0 += 1;
         if required {
             entry.1 += 1;
@@ -1786,7 +1783,10 @@ pub fn run_submit_profile(
         return Ok(());
     }
 
-    println!("pass-through submit repairs — {}", report.log_path.display());
+    println!(
+        "pass-through submit repairs — {}",
+        report.log_path.display()
+    );
     if let Some(since) = report.since.as_deref() {
         println!("  since: {since}");
     }
@@ -1834,7 +1834,10 @@ mod submit_profile_tests {
         );
 
         let report = summarize_submit_profile(log, PathBuf::from("ops.log"), None);
-        assert_eq!(report.scanned_lines, 4, "the non-repair line must not count");
+        assert_eq!(
+            report.scanned_lines, 4,
+            "the non-repair line must not count"
+        );
         assert_eq!(report.legacy_lines_without_field, 0);
 
         let claude = report

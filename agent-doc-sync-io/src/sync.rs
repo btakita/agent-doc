@@ -206,10 +206,9 @@ use agent_doc_supervisor::startup_miss::unresolved_startup_miss_blocks_autostart
 use agent_doc_sync::{
     AutoStartMode, RENAME_DEBOUNCE_TTL_SECS, SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
     SYNC_DOCTOR_REPAIR_BUDGET, SYNC_LOCK_WAIT_BUDGET, SYNC_LOCK_WAIT_LATENCY_BUDGET,
-    SYNC_OWNERSHIP_PROOF_BUDGET,
-    SYNC_PROJECTION_REFRESH_BUDGET, SYNC_PRUNE_BUDGET, SYNC_PRUNE_SUBPHASE_BUDGET,
-    SYNC_ROUTER_BUDGET, SYNC_SAFE_PASSIVE_TOTAL_BUDGET, SYNC_WINDOW_RESOLUTION_BUDGET,
-    WindowIndexNormalizationPlan, auto_started_panes_summary,
+    SYNC_OWNERSHIP_PROOF_BUDGET, SYNC_PROJECTION_REFRESH_BUDGET, SYNC_PRUNE_BUDGET,
+    SYNC_PRUNE_SUBPHASE_BUDGET, SYNC_ROUTER_BUDGET, SYNC_SAFE_PASSIVE_TOTAL_BUDGET,
+    SYNC_WINDOW_RESOLUTION_BUDGET, WindowIndexNormalizationPlan, auto_started_panes_summary,
     destructive_repair_throttle_state_key, effective_sync_columns, epoch_millis_now,
     is_file_rename, last_visible_excerpt, latency_budget_status, plan_window_index_normalization,
     planned_stash_window_indices, registry_relative_file_path, rename_debounce_expired,
@@ -6059,7 +6058,11 @@ mod tests {
         .unwrap();
 
         let doc = root.join("tasks/binding-first.md");
-        std::fs::write(&doc, "---\nagent_doc_session: bound-session\n---\n\n# Doc\n").unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: bound-session\n---\n\n# Doc\n",
+        )
+        .unwrap();
 
         let iso = IsolatedTmux::new("sync-ownership-binding-first");
         let anchor_pane = iso.new_session("test", &root).unwrap();

@@ -769,7 +769,40 @@ Also worth noting: the coined-id hook blocked my commit because the message refe
 `make check` OK, 781 passed. `lazily-py@c0cb635`, pointer pushed. `lazily-go` CI from last cycle came back green.
 
 Exchange is at 719 lines (session-accretion `warn`); queue is active so I am not compacting.
-<!-- agent:boundary:65da5881:lazily -->
+
+### Re: #lzconvergedlistlength — four lists that could shrink without failing — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzconvergedlistlength]
+
+
+A per-element membership check only ever *adds* obligations. It never counts them, so a declared list can lose an entry — or name something that does not exist — and the loop simply has less to do.
+
+| binding | expectation | before | after |
+|---|---|---|---|
+| py | `distributed.expect.converged` drop an entry / `[]` | green | **red** |
+| py | `lossless-tree.expect.converged` `["a","b"]→["a"]` / `[]` | green | **red** |
+| go | `rpc.unresolved_after_frame_indices` `[7]` / `[0]` / `[]` | green | **red** |
+| cs | `receipts.assertions.nonterminal_outcomes` `[]` / drop / reorder | green | **red** |
+
+Each fix asserts the declared list against **what the run produced**, not against itself:
+
+- **py distributed** — the declared count must equal the number of entries the plane converged.
+- **py lossless-tree** — the worst of the four. It compares `names[1:]` against `names[0]`, so a one-element list runs **zero comparisons**. The declared set must now cover every replica the scenario built, and carry at least two.
+- **go** — the run records every frame the call really was pending after, and the declared list is compared against that set. `[7]` named no frame at all, so it asserted nothing.
+- **cs** — `Assert.All(want, item => !ParseOutcome(item).IsTerminal())` was a property of the **enum**, not of the replay: the callback never touched the projection. `Assert.All` over an empty sequence is vacuously true. It now compares against the outcomes the projection actually recorded as non-terminal.
+
+The cs one is worth dwelling on, because it explains why the existing guards were blind to all four: **the key was still marked SATISFIED.** An assertion that receives its argument and never compares it is indistinguishable, to a guard that only checks whether the callback ran, from one that does the work. That is `#lzunboundblockguard` — the next item — seen from the other side.
+
+Permutations stay green in py and go, deliberately: converged replicas and pending frame indices are sets, so I compare sorted. In cs the receipts are a sequence, so order is pinned there. Both choices are stated in the code rather than left to inference.
+
+dart needed nothing: the audit showed its `eager_present` and `nonterminal_outcomes` are order-blind but **do** redden on drop, which is the correct shape and a useful contrast.
+
+`make check` green in all three. `py@e94dd61`, `go@53cf20d`, `cs@1df7e7e`, pointers pushed. py CI from last cycle came back green.
+
+Exchange is at 749 lines (session-accretion `warn`); queue is active so I am not compacting.
+<!-- agent:boundary:8e858d74:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -778,7 +811,7 @@ Exchange is at 719 lines (session-accretion `warn`); queue is active so I am not
 - ~~do [#lzdartvacuousfixtures]~~
 - ~~do [#lzgoassertkeygaps]~~
 - ~~do [#lzpystdlibfloorsunread]~~
-- do [#lzconvergedlistlength]
+- ~~do [#lzconvergedlistlength]~~
 - do [#lzunboundblockguard]
 - ~~do [#lzcorpusrootguards]~~
 - ~~do [#lzrsspecdirconsts]~~
@@ -798,7 +831,6 @@ Exchange is at 719 lines (session-accretion `warn`); queue is active so I am not
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzconvergedlistlength] List-shaped expectations checked by per-element membership never assert their own LENGTH, so the corpus can shrink an obligation and stay green (#lzperturbaudit). Confirmed in lazily-py distributed/anti_entropy_converge.json expect.converged (tests/test_collection_conformance.py:586-593 loops the declared wants and searches plane.converged() for each; contents are pinned but deleting an entry is green) and lazily-py lossless-tree/one_leaf_edit_delta.json expect.converged (tests/test_lossless_tree_conformance.py:160-168 compares names[1:] against names[0], so a one-element list runs ZERO comparisons). lazily-go's message-passing expect.rpc.unresolved_after_frame_indices is the same shape — a membership filter where [7] (no such frame) is fully vacuous. Add a length/coverage assertion beside each membership loop so the declared list must account for every element the run produced. Audit cs/dart/js for the same shape while there — dart's materialization eager_present and receipts nonterminal_outcomes are order-blind but DO redden on drop, so they are fine and make a good contrast.
 - [ ] [#lzunboundblockguard] The unconsumed-assertion-key guards in every binding share a blind spot, which is why several #lzperturbaudit findings survived them. They prove that keys inside blocks a runner REACHED were read; they say nothing about (a) blocks no runner ever binds, or (b) callbacks that receive a key and never compare it. Concretely: lazily-dart's tracker only registers a block passed to assertionsOf (test/conformance_assertions.dart:239,254), so signaling/frames.json's per-frame assertions blocks are invisible rather than unconsumed; lazily-go's assertKeyWith marks a key asserted when the callback RETURNS (conformance_strict_json_test.go:438), so a callback ignoring its argument satisfies it; lazily-cs's AssertKeyWith has the same property, which is how an Assert.All over an empty array counts as asserted (CausalReceiptConformanceTests.cs:44-48). Strengthen the guards in both directions: enumerate every assertions/expect block the CORPUS carries for an opened fixture and fail on blocks no runner bound, and make an assertion count as satisfied only when it actually consumed the fixture value (e.g. require the callback to return a compared value, or record a read of the want). Definition of done: per binding, a probe that adds an unbound assertions block to an opened fixture fails the guard, and a callback that ignores its argument fails it.
 - [ ] [#lzspecschemasoverride] LAZILY_SPEC_CONFORMANCE_DIR redirects the conformance CORPUS only; lazily-spec/schemas always resolves to the canonical sibling in go (specSchemasDir, 2 sites in ipc_conformance_test.go), js (schemasRoot/schemaPath, used by schema-conformance + lossless-tree-crdt + ipc) and cs (5 schema roots derived from SpecCorpus.Root via '..'). This is deliberate today because a corpus scratch copy carries no schemas/ sibling, but it means a probe that needs to perturb a SCHEMA has nowhere to point except the shared ../lazily-spec checkout, which reddens all nine bindings at once. That is the exact defect #lzoverrideallrunners just fixed, one level up. Add a spec-ROOT override (or a second LAZILY_SPEC_SCHEMAS_DIR) threaded through the same seams, default unchanged, fail-closed on an unreadable explicit value. Audit dart/py/kt/rs/cpp/zig/gd for the same split while there. Definition of done: flip one field in a scratch schemas copy and prove a schema-validating runner reddens without touching the canonical checkout.
 - [ ] [#lzcorpusabsencehandling] Corpus-absent and corpus-unparseable are handled inconsistently across bindings, found while measuring #lzoverrideallrunnersaudit. Each fails in the SAFE direction (loud, not silent), so none is urgent, but each contradicts its own stated intent. (a) lazily-cpp: 6 suites hard-FAIL instead of skipping when the sibling is absent — MaterializationFamilyConformance, CollectionsFamilyConformance, SignalingConformance, QueueConformance, QueueFamilyConformance, family_sync all call require_spec_checkout_or_skip (exit 77) but are missing from the set_tests_properties(... SKIP_RETURN_CODE 77) list at tests/CMakeLists.txt:401-439; the comments at :420 and :434 record having fixed this same omission twice already. (b) lazily-kt: build.gradle.kts:142 optional(true) does NOT tolerate a nonexistent directory as its comment at :135-137 claims — pointing LAZILY_SPEC_DIR at a missing path fails Gradle task validation before any test runs, so 'a checkout without the sibling is a legitimate local state the tests skip on' is false. (c) lazily-cs: the guard's python scenario leg crashes with a raw json.decoder.JSONDecodeError traceback on an unparseable corpus fixture instead of a diagnosable message. Fix each to match what its own comments promise.

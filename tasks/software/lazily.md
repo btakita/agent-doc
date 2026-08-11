@@ -455,27 +455,65 @@ Mutation-proven rather than asserted: with the dispatch reverted to HEAD, the ne
 Two follow-ups filed. The zig one matters for the item queued two heads down: `ingress_family_conformance.zig` still hardcodes its corpus path, so `#lzperturbaudit` would silently read the canonical corpus there while believing it had redirected — the exact failure `#lzzigspecdiroption` closed for the other zig runners last cycle. Filed before `#lzperturbaudit` in the queue for that reason.
 
 Superproject pointers committed and pushed. CI is in flight on both repos (`cpp 31465829128`, `gd 31465830097`) — recorded pending, not waited on; the verdict here rests on local `make check` plus the probe table above. Exchange is at 369 lines (session-accretion `warn`); queue is active so I am not compacting.
-<!-- agent:boundary:91e66a40:lazily -->
+
+### Re: #lzzigdiffmutant — the premise does not reproduce; the real gap is one step sideways — opus-5
+
+> **Queue prompt:**
+>
+> 📌 do [#lzzigdiffmutant]
+
+
+**The fixture pins the filter. It always did.** Two independent mutations of the anti-entropy filter redden `non_contiguous_anti_entropy`:
+
+| mutation | result |
+|---|---|
+| `diff` ignores the partner frontier (ship every logged op) | **red** — b renders `01`, fixture expects `013` |
+| `DotRange.contains` degraded to per-peer-max version-vector semantics | **red** |
+
+The second is the one that settles it. That is the *exact* failure the fixture's own description names — "a per-peer-max version vector would record the highest delivered dot and wrongly believe the hole was already filled, so it could never converge here" — and the corpus catches it. The fixture is not convergence-only.
+
+I also chased the obvious explanation for the original observation and it does not hold. `#lzzigspecdiroption` had just closed a skip trap in this binding, so "the test never ran" was the natural suspect — but running the same ignore-the-frontier mutation on `10fef17`, the commit *before* that fix, reddens exactly the same two tests. Whatever produced the earlier "reddens NONE" reading, it was not the skip trap and it is not reproducible at either commit.
+
+**What is genuinely unpinned is the thing that made the suspicion worth chasing.** `deliver.only: [0, 2]` indexes **positionally** into whatever `diff` returns. So I mutated the order rather than the contents:
+
+| mutation | result |
+|---|---|
+| `std.mem.sort(...)` → `std.mem.reverse(...)` | **green — whole suite** |
+| delete the sort entirely (log-order passthrough) | **green — whole suite** |
+
+Both survived because the two indices select the same *set* either way, and rendering is order-independent — `applyUpdate` is order-tolerant by design, buffering an op whose parent has not arrived. So the fixture pins *which ops* cross the wire and says nothing about the order they arrive in.
+
+That order is not a local implementation detail. It is a **cross-binding contract**, because `only` is positional: the canonical fixture means the same thing in every binding only while every binding returns the same order. lazily-rs (`sort_by_key(|op| (op.id.counter, op.id.peer))`), lazily-py (`sorted(...)`) and lazily-js (`.sort(cmpId)`) all produce it — so it is a real convention, held by agreement and pinned by nobody. A binding that dropped the sort as a redundant step would keep replaying the corpus green while `only` silently selected different ops than the fixture names.
+
+The new test asserts it, and is built so it cannot pass by accident: a remote op with a lower counter than this replica's latest lands **last** in the log, so log order and canonical order differ — and the test asserts that difference explicitly before checking the sort. Without that, the assertion would hold for a reversed diff too and pin nothing. Both ordering mutants now redden it, and only it: 1074/1075.
+
+Worth stating plainly, since the item was filed as a suspected vacuous fixture: **the fixture was doing its job; the gap was in the runner's addressing scheme.** `deliver.only` buys precise partial-delivery control at the cost of a hidden dependency on diff order, and that dependency had no test anywhere in the family. The contrast the item drew with the `at_byte` mutant (six of nine red) pointed at the right kind of question and the wrong subject.
+
+`make check` OK. `lazily-zig@e8a2a28`, superproject pointer committed and pushed. Filed the follow-up for the other eight bindings, which have the same unpinned order.
+
+Last cycle's CI landed green: `lazily-cpp` ✅ (3m42s) and `lazily-gd` ✅ (28s) both passed on the `#lzledgeragreementaudit` commits. zig's run for this commit is queued — recorded, not waited on. Exchange is at 435 lines (session-accretion `warn`); queue is active so I am not compacting.
+<!-- agent:boundary:36c3fb81:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzjsscenarioswallow]
+- ~~📌 do [#lzzigdiffmutant]~~
 - ~~📌 do [#lzledgeragreementaudit]~~
-- 📌 do [#lzzigdiffmutant]
-- do [#lzzigingressspecdir]
-- do [#lzperturbaudit]
-- do [#lzspecschemasoverride]
+- 📌 do [#lzzigingressspecdir]
+- 📌 do [#lzperturbaudit]
+- 📌 do [#lzspecschemasoverride]
+- do [#lzdifforderallbindings]
+- do [#lzjsscenarioswallow]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzzigdiffmutant] lazily-zig's lossless-tree replay does not pin the anti-entropy FILTER, only convergence: mutating LosslessTreeCrdt.diff to ignore the partner frontier (ship every op in the log) reddens NONE of the nine fixtures, including non_contiguous_anti_entropy.json whose subject is a replica with a gap. deliver.only indexes into the diff, so a diff whose contents change should select different ops and change what the gapped replica renders (hole_before_repair expects b='013') — it does not, and the reason is not yet established. Either the runner's deliver path is not exercising the frontier as intended, or applyUpdate's idempotence absorbs the difference; find out which, then make the fixture discriminating (or record honestly that convergence is all it can pin). Contrast the at_byte char-offset mutant, which reddens six of the nine.
 - [ ] [#lzzigingressspecdir] lazily-zig's ingress_family_conformance.zig:82 still hardcodes `const SPEC_DIR = "../lazily-spec/conformance/ingress/"` instead of routing through conformance_manifest.conformanceRoot(), so LAZILY_SPEC_CONFORMANCE_DIR does not move that runner. #lzzigspecdiroption fixed conformance_json.zig and reactive_map.zig but this seam was missed. Consequence for #lzperturbaudit: a perturbation probe that points zig at a scratch corpus gets a redirected reactive-graph/collections replay and a NON-redirected ingress replay in the same run, so an ingress fixture perturbed in the scratch copy cannot redden and the cell reads as convergence-only for the wrong reason. Route it through conformanceRoot(), then prove it the way #lzzigspecdiroption was proven: override to a byte-identical copy (green), to a copy with one perturbed ingress expectation (red), and to a nonexistent directory (panics, 0 skips). Audit the remaining zig runners for the same hardcoded-root split while there.
 - [ ] [#lzperturbaudit] The corpus-perturbation audit that #lzoverrideallrunners existed to unblock has NOT been run. All five bindings (cs/go/dart/js/py) can now be pointed at a scratch corpus, but each has been probed with exactly ONE fixture, the one proving its seam. lazily-rs's AGENTS.md documents this audit as the pass a static detector cannot replace. For each of the five, walk the conformance families and perturb at least one fixture per family, recording which runners redden and which are convergence-only (a fixture that cannot be made to fail by flipping a declared expectation is pinning nothing). Expect finds of the #lzzigdiffmutant shape: an assertion that survives a mutation because an earlier assertion fires first, or because the runner never reaches it. Definition of done: a per-binding table of family -> perturbed key -> reddened runner, with every non-reddening cell explained rather than dropped.
 - [ ] [#lzspecschemasoverride] LAZILY_SPEC_CONFORMANCE_DIR redirects the conformance CORPUS only; lazily-spec/schemas always resolves to the canonical sibling in go (specSchemasDir, 2 sites in ipc_conformance_test.go), js (schemasRoot/schemaPath, used by schema-conformance + lossless-tree-crdt + ipc) and cs (5 schema roots derived from SpecCorpus.Root via '..'). This is deliberate today because a corpus scratch copy carries no schemas/ sibling, but it means a probe that needs to perturb a SCHEMA has nowhere to point except the shared ../lazily-spec checkout, which reddens all nine bindings at once. That is the exact defect #lzoverrideallrunners just fixed, one level up. Add a spec-ROOT override (or a second LAZILY_SPEC_SCHEMAS_DIR) threaded through the same seams, default unchanged, fail-closed on an unreadable explicit value. Audit dart/py/kt/rs/cpp/zig/gd for the same split while there. Definition of done: flip one field in a scratch schemas copy and prove a schema-validating runner reddens without touching the canonical checkout.
+- [ ] [#lzdifforderallbindings] The lossless-tree `diff` op ORDER is a cross-binding contract that no binding pins. The canonical corpus addresses ops positionally (`deliver.only: [0,2]` in non_contiguous_anti_entropy.json indexes into the diff result), so the fixture means the same thing in every binding only while every binding returns ops in the same canonical (counter, peer) order. lazily-rs (ops.sort_by_key), lazily-py (sorted), lazily-js (.sort(cmpId)) and lazily-zig all produce it by convention; zig gained a regression test in e8a2a28 (#lzzigdiffmutant) after proving that replacing the sort with std.mem.reverse — or deleting it — left the ENTIRE suite green. Add the equivalent test to the other bindings that implement LosslessTreeCrdt (rs, py, js, and any of cs/go/dart/kt/cpp that do), each built so log order and canonical order DIFFER and asserting that difference explicitly, or the assertion holds for a reversed diff and pins nothing. Definition of done: per binding, a mutation that reverses or drops the diff sort reddens exactly one new test and nothing else. Consider also whether lazily-spec should state the ordering contract where deliver.only is defined, since today it is agreement without a document.
 - [ ] [#lzjsscenarioswallow] lazily-js scripts/check-scenario-coverage.mjs:202 swallows an unparseable corpus fixture with a bare `catch { continue; }` — the only unnamed swallow in that ladder. It cannot hide a coverage gap today (rung 1 still demands the file be opened, and any runner that opens it dies on JSON.parse), but a fixture that fails to parse is dropped from scenario accounting without naming itself, which is the shape every other rung in this repo refuses. Name the fixture and fail, matching the sibling rungs. While there: test/spec-corpus.cjs:106-113 exports listFixtures(), an enumerate-the-corpus helper with ZERO call sites — it is the exact primitive that would introduce the enumerating-host shape #lzledgeragreementaudit audits for, so delete it or pin it with a comment saying why it must stay unused.
 - [ ] [#lzgdvocab] lazily-gd's reactive-graph runner is missing the fanout/churn/dispose_fanout/dispose_stale_handle bulk ops AND real id recycling, so 2 canonical fixtures remain: churn_returns_to_baseline.json and recycled_id_inherits_nothing.json. Recycling is the hard half and is a DESIGN decision, not runner vocabulary: Godot instance ids are monotonic and never alias, so 'a recycled id inherits nothing' has no natural referent — the binding needs an explicit id layer (a free-list over slot indices with a generation tag, the shape lazily-rs's SlotId uses) before the fixture means anything. Removing both entries from KNOWN_UNCOVERED in scripts/check-conformance-coverage.sh is the definition of done. DONE already: the merge_cell group (5 fixtures) landed with LazilyMergePolicy + Source.merge + ctx.source_with, and GDScript is now ~ on merge-algebra.
 <!-- /agent:backlog -->

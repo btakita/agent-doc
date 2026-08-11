@@ -1,7 +1,7 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: ae16c416-6580-4f11-b327-eeda04c9b7de
-agent: claude
+resume: 019fee96-fc00-7053-ad11-b20c53388296
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -257,13 +257,29 @@ I verified the new tests are not vacuous the same way I caught the old ones: wit
 `make check` green — 8932 tests, up one from 8931 (five new, four vacuous ones removed). 0.35.235 installed, controller recycled, both repos pushed, `v0.35.235` tagged. CI is in progress on `d18d9d4b7`; not waiting on it.
 
 One housekeeping note: preflight reports `legacy_gated_in_backlog` — `#clearsubmitunobservedverify` is a gated `[/]` item still living in `agent:backlog`. `agent-doc migrate <FILE>` moves it into `agent:review`; I left it rather than mutate the document outside this cycle's write boundary.
-<!-- agent:boundary:030b3258:agent-doc-bugs2 -->
+
+### Re: Agent response
+
+Fixed and released in agent-doc v0.35.236 (commit `1e52c281e`).
+
+The File Cache Conflict came from a detached-authority bootstrap deadlock: JetBrains and VS Code replica registrations omitted the editor PID, while the controller rejected registration before the CRDT relay could validate a live editor and establish authority.
+
+- Both editor transports now send their real process PID on every replica request.
+- Detached `replica_register` for an agent-doc document now reaches the relay, which remains the single owner of PID/liveness validation and authority bootstrap.
+- Generic/dead registrations, non-agent-doc documents, and every other detached replica operation remain fail-closed.
+- Rust, JetBrains, and VS Code regressions cover the admission matrix and PID payload.
+
+Verification passed: focused tests, `make check`, staged plugin-version and diff guards, fast local install/recycle, and the one-shot fat-LTO `make install-full`. The installed binary reports 0.35.236, and signed JetBrains plugin 0.2.351 was installed to all four detected IDE installations. The new CI, Release, and PyPI workflows are queued after pushing `main` and tag `v0.35.236`.
+
+Restart the JetBrains IDE once to load the updated Kotlin plugin. The route supervisor replacement is already accepted and will activate at this turn boundary.
+<!-- agent:boundary:869cdb9b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#dispatchonlyresubmitwiring]
 - ~~do [#flakystatedbfixture]~~
-- ⏭️ do [#operatorverifylive]
+- do [#operatorverifylive]
 - do [#run3rdpaneswitchverify]
 <!-- /agent:queue -->
 
@@ -276,7 +292,7 @@ One housekeeping note: preflight reports `legacy_gated_in_backlog` — `#clearsu
 
 <!-- agent:backlog priority queue -->
 - [ ] [#dispatchonlyresubmitwiring] [operator-verify] Wire the dispatch-only route to actually resubmit a StrandedTrigger draft. 0.35.235 shipped the classification only: StartingPaneBlocker::from_composer_draft now returns StrandedTrigger with unblocker=resubmit_stranded_trigger when the composer holds agent-doc own unsubmitted trigger for the document being routed (exact match after stripping the harness sigil and padding, including the non-breaking space). A draft carrying the trigger plus operator words, or a trigger for a different document, stays OperatorDraft. What remains is the consumer: the dispatch-only reopen path must send a bare harness Enter once and re-await the controller turn-admission projection, mirroring what #jbtsiftnosub2 already does for the fresh-start path. Needs a live-pane proof on the reported shape (sdk.md, pane %926) because unit tests pin the classifier but cannot exercise the real composer.
-- [ ] 🚧 [#flakystatedbfixture] #agent-doc-bug A parallel test run can corrupt a temp fixture state.db, reddening the suite non-deterministically. Observed 2026-08-10 on 0.35.233: session_check_codex_final_gate_blocks_on_active_auto_queue failed with reliable-sync durable authority hydration failed for /tmp/.tmp43Aufu/session.md: file is not a database: Error code 26, plus authoritative state db /tmp/.tmp43Aufu/.agent-doc/state.db is unavailable; refusing automatic replacement. FALSIFIED 2026-08-10 in 0.35.235 -- do NOT retry these four: (1) the empty-file theory. A 0-byte or 1-byte state.db opens CLEANLY; SQLite initialises it as a new database, and NotADatabase starts at TWO bytes of bad header. So a writer that created the file and died before writing the header cannot produce this failure. The 0.35.235 draft branch that deleted empty files was reverted: unreachable through the stated path, all four of its tests passed with it removed, and it was unsafe because open_and_init_state_db also fails on a lock error while a concurrent process is still initialising the same 0-byte file, so it could unlink a db another process was creating. (2) A stale -wal or -shm beside a 0-byte main db: opens cleanly. (3) tmpfs exhaustion: /tmp is a 94G tmpfs at 1 percent used. (4) Plain cross-process contention: 600 concurrent agent-doc session-check invocations across 25 fresh project roots produced zero corruption. STILL UNKNOWN: which writer leaves 2 or more bytes of non-database content in a fresh fixture root. 0.35.235 makes the next sighting diagnosable instead of another guessing round -- the refusal now reports main length, header=sqlite vs header=foreign, the first 16 bytes as hex plus a printable rendering, and the -wal/-shm sibling sizes, which separates never was a database from torn page-1 of a real ledger. NEXT STEP: run make check in a loop until it reddens and read that evidence line; do not theorise further without it.
+- [ ] [#flakystatedbfixture] #agent-doc-bug A parallel test run can corrupt a temp fixture state.db, reddening the suite non-deterministically. Observed 2026-08-10 on 0.35.233: session_check_codex_final_gate_blocks_on_active_auto_queue failed with reliable-sync durable authority hydration failed for /tmp/.tmp43Aufu/session.md: file is not a database: Error code 26, plus authoritative state db /tmp/.tmp43Aufu/.agent-doc/state.db is unavailable; refusing automatic replacement. FALSIFIED 2026-08-10 in 0.35.235 -- do NOT retry these four: (1) the empty-file theory. A 0-byte or 1-byte state.db opens CLEANLY; SQLite initialises it as a new database, and NotADatabase starts at TWO bytes of bad header. So a writer that created the file and died before writing the header cannot produce this failure. The 0.35.235 draft branch that deleted empty files was reverted: unreachable through the stated path, all four of its tests passed with it removed, and it was unsafe because open_and_init_state_db also fails on a lock error while a concurrent process is still initialising the same 0-byte file, so it could unlink a db another process was creating. (2) A stale -wal or -shm beside a 0-byte main db: opens cleanly. (3) tmpfs exhaustion: /tmp is a 94G tmpfs at 1 percent used. (4) Plain cross-process contention: 600 concurrent agent-doc session-check invocations across 25 fresh project roots produced zero corruption. STILL UNKNOWN: which writer leaves 2 or more bytes of non-database content in a fresh fixture root. 0.35.235 makes the next sighting diagnosable instead of another guessing round -- the refusal now reports main length, header=sqlite vs header=foreign, the first 16 bytes as hex plus a printable rendering, and the -wal/-shm sibling sizes, which separates never was a database from torn page-1 of a real ledger. NEXT STEP: run make check in a loop until it reddens and read that evidence line; do not theorise further without it.
 - [/] [#clearsubmitunobservedverify] [operator-verify] Live re-proof for #clearsubmitunobserved (0.35.225): reproduce the reported haiven-dev.md sequence — let the supervisor go dead (or `session restart-supervisor`), then Run Agent Doc so the flow cold-starts a replacement and immediately runs Clear Session Context on the fresh pane. Expect it to SUCCEED instead of failing with `result=submission_unobserved ... unblocker=clear_submission_unobserved`, and expect `session_clear_submit_cleared_state_probe ... result=cleared_state_proven retained_lines=<small>` in ops.log. Then the half that must not regress: on a pane holding a real conversation, break submission (e.g. leave the composer wedged) and confirm the clear still fails closed with `result=conversation_retained`. Unit tests pin the predicate against synthetic captures; only a live pane exercises the tmux scrollback capture and the real harness prompt shapes.
 - [ ] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [ ] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.

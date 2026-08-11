@@ -582,21 +582,54 @@ CI green on both, and on the two zig commits from last cycle.
 **What the audit found that the item did not ask for.** Seven of nine bindings have **no** guard against a source spelling the default corpus root — and the two that do were both proven evadable by synthetic violation: go's scans only root-package `_test.go` files and misses a joined `"../lazily-spec"` prefix; js's misses joined strings and walks `test/` only. So the property currently holding in eight bindings is convention, not enforcement, in every one of them. Filed. Also filed: rs's 47 constants and its presence probes still name the default root, and a cluster of corpus-absence inconsistencies (cpp fails 6 suites that should SKIP, kt's `.optional(true)` does not tolerate a nonexistent dir as its comment claims, cs's guard emits a raw Python traceback on an unparseable fixture, and js's hand-maintained `AREAS` list has drifted to omit 8 areas it replays).
 
 `#lzperturbaudit` is now unblocked for all nine — and its cells are interpretable, which before this they were not for rs. Exchange is at 515 lines (session-accretion `warn`); queue is active so I am not compacting.
-<!-- agent:boundary:3849c5c8:lazily -->
+
+### Re: #lzcorpusrootguards — all nine guarded, and the evasion I warned them about was real in every one — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzcorpusrootguards]
+
+
+| binding | guard | commit |
+|---|---|---|
+| cs | new rung, C# string-literal lexer | `c91d3dc` |
+| py | new AST meta-test | `96c76e9` |
+| dart | new Dart meta-test | `aba0edd` |
+| gd | new rung, GDScript folder | `8ee88b5` |
+| go | **hardened** (AST, 3 holes closed) | `d605e46` |
+| rs | new rung, enumerated baseline | `b5efc9b` |
+| kt | new rung, Kotlin lexer | `8e0f8ec` |
+| cpp | new rung, C++/CMake tokenizer | `511d572` |
+| js | **hardened** (tokenizer, 2 holes closed) + AREAS derived | `5e4b766` |
+
+All ten CI green (zig landed `ec8e65e` last cycle). Every guard proved four things by running them, not by asserting them: passes clean; fails on a single-literal violation naming the file; fails on the joined-segment form; and **fails when the scan examines nothing**, because a walk that reaches zero files and reports OK is the same vacuous green the fixture and scenario rungs already refuse.
+
+**The joined-segment hole was not a go/js quirk — it is what this shape of guard does by default.** lazily-dart's agent wrote its guard, then proved its *own first draft* evadable by `p.join('..', 'laz' 'ily' '-sp' 'ec', 'conformance')`, and hardened it. That is the third independent implementation to fail the same way before being fixed. Every guard here now folds concatenation before matching rather than grepping for a needle, and several are real lexers because comments have to stay legal — roughly twenty runners per binding legitimately quote the corpus path while explaining what they replay, and a guard that outlawed that would trade a real explanation for a lint.
+
+**rs needed a different shape and got one.** It still spells the default root in 45 references across 41 files; those are not a correctness bug since `c6c50b7` redirects at the seam, so a guard failing on all of them would be unlandable — and one that skipped files containing the literal would be a guard that passes by looking away. So the baseline is enumerated and checked in **both** directions, like this family's `KNOWN_UNCOVERED` ledgers: a new site fails, and a listed site that disappears fails as stale. The debt is now countable and cannot grow, and `#lzrsspecdirconsts` retires it.
+
+**Two corrections from the agents, both of which I'd rather have than not.** js measured **25** replayed areas plus `egress` excused, not the 26 I put in the brief — the corpus root's 8 top-level fixtures are not an area. And cpp's allowlist entry for its seam header is a declaration of entitlement, not a necessity: that file does not currently spell the fragment at all, and the agent said so rather than implying the entry was load-bearing.
+
+Two things worth carrying forward. cpp already had the strongest guard of the family and it is not a text scan at all — an `#error` when the corpus macro is undefined, so a runner that forgets to register cannot compile; the new rung exists only to cover translation units that never include the seam. And every agent independently flagged the same residual limit: a root assembled at runtime from computed pieces escapes any source-level scan. Each said so in its own comment instead of implying total reach, which is the right disposition — nobody writes that by accident, and doing it deliberately is no longer deniable as an oversight.
+
+The js AREAS list is also fixed and no longer hand-kept: areas are now derived from the call sites the runners actually spell, with a reverse check that every corpus area is replayed or excused by name. It had drifted to 17 of 25 while its own comment warned that a missing entry lets an area go dark unnoticed.
+
+Superproject pointers bumped in one commit. Exchange is at 562 lines (session-accretion `warn`); queue is active so I am not compacting.
+<!-- agent:boundary:8f8bc9d2:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzcorpusrootguards]
+- ~~do [#lzcorpusrootguards]~~
 - do [#lzrsspecdirconsts]
-- do [#lzcorpusabsencehandling]
+- 📌 do [#lzperturbaudit]
 - ~~do [#lzoverrideallrunnersaudit]~~
 - ~~📌 do [#lzzigdiffmutant]~~
 - ~~📌 do [#lzledgeragreementaudit]~~
 - ~~📌 do [#lzzigingressspecdir]~~
-- 📌 do [#lzperturbaudit]
 - 📌 do [#lzspecschemasoverride]
+- do [#lzcorpusabsencehandling]
 - do [#lzdifforderallbindings]
 - do [#lzjsscenarioswallow]
 <!-- /agent:queue -->
@@ -604,7 +637,6 @@ CI green on both, and on the two zig commits from last cycle.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcorpusrootguards] Seven of nine lazily bindings have NO guard against a source spelling the default corpus root ('../lazily-spec/conformance'), and the two that DO were both proven evadable by synthetic violation during #lzoverrideallrunnersaudit. lazily-go's TestNoTestFileSpellsTheCorpusPathItself scans only root-package *_test.go files (misses non-test files, subdirectories, and a joined '../lazily-spec' + 'conformance' literal pair — all three verified to pass). lazily-js's test/conformance-guard.test.js:127 misses joined strings and template literals and walks test/ only. Missing entirely in cs, py, dart, rs, kt, cpp, gd. lazily-zig gained one in ec8e65e (a rung in scripts/check-conformance-coverage.sh, comment lines skipped, plus a positive-evidence floor so an empty scan fails rather than passing); lazily-cpp has a stronger COMPILE-TIME variant (#error when LAZILY_SPEC_CONFORMANCE_DIR is undefined) that covers only TUs including the seam header. Add a guard per binding in that repo's idiom, and harden go's and js's. Definition of done: per binding, a synthetic violation (both the single-literal and joined-segment forms) fails the guard, and an empty/zero-file scan fails as a pass over nothing. Also fold in lazily-js's hand-maintained AREAS list at test/conformance-guard.test.js:38-60, which has drifted to omit 8 areas the suite actually replays — its own comment says a missing entry lets an area go dark unnoticed.
 - [ ] [#lzrsspecdirconsts] lazily-rs still spells the default corpus root in 47 constants across 41 test files ('const SPEC_DIR: &str = "../lazily-spec/conformance/<area>"'). c6c50b7 made the override REACH the replays by redirecting at the spec_read_to_string seam, which is complete for reads, but two things remain. (1) The constants are still the literal default, so nothing stops a 48th and the files read as if the override does not exist — thread them through a common::spec_dir(area) helper, mechanically, with tsift edit-intents --apply --verify rather than sed since several are inline &str arguments (durable_outbox.rs:11,17, stdlib_conformance.rs:16-24, dependency_availability_conformance.rs:21, schema_compliance.rs:365) and ~70 call sites use inline format args '{SPEC_DIR}'. (2) Presence probes 'std::path::Path::new(SPEC_DIR).exists()' (5 sites) still test the DEFAULT corpus, so under an override with no default sibling every guarded suite skips silently — the exact skip trap #lzzigspecdiroption closed in zig; route them through common::spec_path. Definition of done: no tests/*.rs names the default root outside the seam, the presence probes follow the override, and the per-area perturbation count stays at least what c6c50b7 achieved.
 - [ ] [#lzperturbaudit] The corpus-perturbation audit that #lzoverrideallrunners existed to unblock has NOT been run. All five bindings (cs/go/dart/js/py) can now be pointed at a scratch corpus, but each has been probed with exactly ONE fixture, the one proving its seam. lazily-rs's AGENTS.md documents this audit as the pass a static detector cannot replace. For each of the five, walk the conformance families and perturb at least one fixture per family, recording which runners redden and which are convergence-only (a fixture that cannot be made to fail by flipping a declared expectation is pinning nothing). Expect finds of the #lzzigdiffmutant shape: an assertion that survives a mutation because an earlier assertion fires first, or because the runner never reaches it. Definition of done: a per-binding table of family -> perturbed key -> reddened runner, with every non-reddening cell explained rather than dropped.
 - [ ] [#lzspecschemasoverride] LAZILY_SPEC_CONFORMANCE_DIR redirects the conformance CORPUS only; lazily-spec/schemas always resolves to the canonical sibling in go (specSchemasDir, 2 sites in ipc_conformance_test.go), js (schemasRoot/schemaPath, used by schema-conformance + lossless-tree-crdt + ipc) and cs (5 schema roots derived from SpecCorpus.Root via '..'). This is deliberate today because a corpus scratch copy carries no schemas/ sibling, but it means a probe that needs to perturb a SCHEMA has nowhere to point except the shared ../lazily-spec checkout, which reddens all nine bindings at once. That is the exact defect #lzoverrideallrunners just fixed, one level up. Add a spec-ROOT override (or a second LAZILY_SPEC_SCHEMAS_DIR) threaded through the same seams, default unchanged, fail-closed on an unreadable explicit value. Audit dart/py/kt/rs/cpp/zig/gd for the same split while there. Definition of done: flip one field in a scratch schemas copy and prove a schema-validating runner reddens without touching the canonical checkout.

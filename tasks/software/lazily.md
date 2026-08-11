@@ -1,6 +1,6 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: 2ac78f82-e8c4-4d01-a842-aad8af805ab1
+resume: d6379dbb-42f5-4658-8da6-e0251c5eaa18
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -389,26 +389,82 @@ The first and last rows matter as much as the second. Making a task always dirty
 Third item in a row from the same family — a guard that answers "nothing was examined" with the same signal as "nothing was wrong". zig's skip trap, and before it the floors set below reality. Worth noticing the shape: in each case the mechanism that hid the gap was one someone had deliberately added for a good local reason (skip without a sibling, margin against churn, incremental build caching).
 
 Exchange is at 337 lines (session-accretion `warn`); queue is active so I am not compacting.
-<!-- agent:boundary:c6ef3fb1 -->
+
+### Re: #lzledgeragreementaudit — nine bindings audited, two real splits found, both closed — opus-5
+
+> **Queue prompt:**
+>
+> 📌 do [#lzledgeragreementaudit]
+
+
+Audited all nine non-cs bindings for the split lazily-cs died of: a `KNOWN_UNCOVERED` entry in the shell guard that a fixture-**enumerating** test host knows nothing about.
+
+**Five of the nine already carried a remediation commit for this item** — `rs@390ffa1`, `dart`, `kt@2ed176d`, `cpp@d93789a`, `zig@17db407`. That is why the item was `🚧`. The audit's job was the remaining question: is the class actually closed everywhere, or did the earlier sweep fix the instances it happened to look at?
+
+| binding | enumerating host? | verdict |
+|---|---|---|
+| rs | `schema_compliance.rs` (corpus root, name-filtered) | SAFE — in-host ledger + fail-closed |
+| go | reactive-graph glob, **drift assertion only** | SAFE |
+| js | none — three readdirs are drift/count checks | SAFE |
+| py | reactive-graph glob, drift assertion only | SAFE |
+| dart | reactive-graph `listSync`, pinned before any read | SAFE |
+| kt | `Files.list(reactive-graph)`, pinned before any read | SAFE |
+| cpp | reactive-graph + statechart, cross-check only | SAFE for shapes — **but see below** |
+| zig | reactive-graph `iterate`, drift detector only | SAFE |
+| gd | none — `REPLAYED` names 19 ids | SAFE for discovery — **but see below** |
+
+The pattern that makes eight of them safe is the same one, and it is worth naming: **the enumeration is a tripwire, not a drive list.** Every binding that lists a directory asserts set-equality against a hardcoded fixture set *before reading a byte*, then replays from the hardcoded set. So a new upstream fixture reddens the listing check rather than reaching a dispatch that has never been taught it. Nobody has to remember to handle the unknown shape, because the unknown fixture never gets that far.
+
+Both remaining gaps were **the same defect at a rung the earlier sweep did not look at**, so this was not a formality.
+
+---
+
+**cpp — an entire area was invisible to every rung at once.**
+
+`egress/` ships four fixtures. It was absent from `REQUIRED_AREAS`, absent from `KNOWN_UNCOVERED`, and absent even from the prose comment that lists the other deliberate omissions. The completeness loop iterates `REQUIRED_AREAS`, so those four fixtures were never demanded, never excused, never counted — and the guard printed `OK`. Every sibling binding names them in `KNOWN_UNCOVERED`; cpp alone had no ledger entry that could go stale, which is precisely why nothing reported it.
+
+This is the audited defect one level up: not two ledgers disagreeing, but **one ledger with no counterpart at all**. What stood in for the counterpart was a comment — and a comment cannot be falsified by a run. Three areas were being carried that way.
+
+The complement of `REQUIRED_AREAS` is now an array, `EXCUSED_AREAS`, and the two must **partition** the corpus. Four rungs, each driven against a scratch corpus rather than argued:
+
+| probe | result |
+|---|---|
+| new upstream area (`telemetry/`) appears | `ERROR: conformance area 'telemetry' is in neither REQUIRED_AREAS nor EXCUSED_AREAS` |
+| egress fixtures removed from `KNOWN_UNCOVERED` | 4 × `exists on disk but is never replayed` |
+| an excused area the suite DID replay from | `ERROR: EXCUSED_AREAS lists 'egress', but the suite DID replay from it` |
+| a listed area deleted upstream | `ERROR: area 'egress' is listed here but is not in the canonical corpus` |
+
+And the control that makes those numbers mean something — **the pre-fix guard, same corpus, same manifest: exit 0, `egress` mentioned zero times. Exit 0 again with the brand-new area present.** The rung did not get stricter; it did not exist.
+
+`agent-doc` (2), `egress` (4), and `signaling/frames.json` moved out of prose into `KNOWN_UNCOVERED` with their reasons; `signaling` joins `REQUIRED_AREAS` because `anti_spoof_session.json` is replayed. `make check` OK — 137 fixtures across 24 areas, 147/147 scenarios. `lazily-cpp@b575c3a`.
+
+---
+
+**gd — the shape dispatch failed open, reachable by an upstream edit.**
+
+`run()` read `shape` with a `"steps"` default and fell through to the steps arm for anything else. A fixture whose steps moved under a different key replayed an empty list: zero ops, zero failures, **green** — with both ledgers still in agreement, since the fixture is named in `REPLAYED` and absent from `KNOWN_UNCOVERED`.
+
+This is the honest version of why it survived the earlier sweep: gd's discovery is by explicit name, so *adding* a fixture cannot reach it, and the audit brief's SAFE/SPLIT test passes. The hole opens on an upstream **edit** to any of the 19 fixtures this binding claims. Two ledgers agreeing about a run that proved nothing is the same vacuous green the manifest guard exists to prevent — it just arrives by a different door.
+
+Now an unmodelled shape fails naming the shape and both ledgers, a missing `shape` is drift rather than a default (all 21 canonical fixtures declare one), and `shape=steps` with no steps gets the twin of the existing scenarios rung.
+
+Mutation-proven rather than asserted: with the dispatch reverted to HEAD, the new test fails with `an unmodelled shape replayed as 'steps' instead of failing: []` — and that empty failure array **is** the silent green, printed. `make check` OK, 27 test cases. `lazily-gd@fccdd12`.
+
+---
+
+Two follow-ups filed. The zig one matters for the item queued two heads down: `ingress_family_conformance.zig` still hardcodes its corpus path, so `#lzperturbaudit` would silently read the canonical corpus there while believing it had redirected — the exact failure `#lzzigspecdiroption` closed for the other zig runners last cycle. Filed before `#lzperturbaudit` in the queue for that reason.
+
+Superproject pointers committed and pushed. CI is in flight on both repos (`cpp 31465829128`, `gd 31465830097`) — recorded pending, not waited on; the verdict here rests on local `make check` plus the probe table above. Exchange is at 369 lines (session-accretion `warn`); queue is active so I am not compacting.
+<!-- agent:boundary:91e66a40:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzcsagentsmdfloorprose]~~
-- ~~do [#lzscenariofloordrift]~~
-- ~~do [#lzspecagentsmdpointer]~~
-- ~~do [#lzspecpushbeforebindings]~~
-- ~~do [#lzspecforkclockfixture]~~
-- ~~do [#adjshashprivatefield]~~
-- ~~do [#lzzigforkhlcpeer]~~
-- ~~do [#lzspecgcreferencedtombstone]~~
-- ~~do [#lzzigcanonrunner]~~
-- ~~do [#lzpartialmarkadjudicate]~~
-- ~~📌 do [#lzzigspecdiroption]~~
-- ~~📌 do [#lzktcorpusnotgradleinput]~~
-- 🚧 📌 do [#lzledgeragreementaudit]
+- do [#lzjsscenarioswallow]
+- ~~📌 do [#lzledgeragreementaudit]~~
 - 📌 do [#lzzigdiffmutant]
+- do [#lzzigingressspecdir]
 - do [#lzperturbaudit]
 - do [#lzspecschemasoverride]
 <!-- /agent:queue -->
@@ -416,11 +472,12 @@ Exchange is at 337 lines (session-accretion `warn`); queue is active so I am not
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzledgeragreementaudit] A KNOWN_UNCOVERED entry in a binding's shell coverage guard does NOT stop a test host that DISCOVERS fixtures by enumerating the corpus directory from trying to replay them — the two ledgers describing the same absence can disagree silently. lazily-cs was red on HEAD for exactly this (CI 31298919123): collections/registers_convergence.json was declared uncovered in the script while CollectionsConformanceTests crashed on it with a bare KeyNotFoundException naming neither the fixture nor the reason. Fixed there in b8cdb7e by adding the Unsupported entry and making the shape dispatch fail closed. Audit the other eight bindings for the same split: for each, list the fixtures in KNOWN_UNCOVERED, check whether the runner enumerates or names fixtures, and confirm an enumerating runner has a matching in-host ledger entry plus a fail-closed default on an unrecognised fixture shape. All eight are currently green, so this is about the NEXT fixture added to the shared corpus.
 - [ ] [#lzzigdiffmutant] lazily-zig's lossless-tree replay does not pin the anti-entropy FILTER, only convergence: mutating LosslessTreeCrdt.diff to ignore the partner frontier (ship every op in the log) reddens NONE of the nine fixtures, including non_contiguous_anti_entropy.json whose subject is a replica with a gap. deliver.only indexes into the diff, so a diff whose contents change should select different ops and change what the gapped replica renders (hole_before_repair expects b='013') — it does not, and the reason is not yet established. Either the runner's deliver path is not exercising the frontier as intended, or applyUpdate's idempotence absorbs the difference; find out which, then make the fixture discriminating (or record honestly that convergence is all it can pin). Contrast the at_byte char-offset mutant, which reddens six of the nine.
+- [ ] [#lzzigingressspecdir] lazily-zig's ingress_family_conformance.zig:82 still hardcodes `const SPEC_DIR = "../lazily-spec/conformance/ingress/"` instead of routing through conformance_manifest.conformanceRoot(), so LAZILY_SPEC_CONFORMANCE_DIR does not move that runner. #lzzigspecdiroption fixed conformance_json.zig and reactive_map.zig but this seam was missed. Consequence for #lzperturbaudit: a perturbation probe that points zig at a scratch corpus gets a redirected reactive-graph/collections replay and a NON-redirected ingress replay in the same run, so an ingress fixture perturbed in the scratch copy cannot redden and the cell reads as convergence-only for the wrong reason. Route it through conformanceRoot(), then prove it the way #lzzigspecdiroption was proven: override to a byte-identical copy (green), to a copy with one perturbed ingress expectation (red), and to a nonexistent directory (panics, 0 skips). Audit the remaining zig runners for the same hardcoded-root split while there.
 - [ ] [#lzperturbaudit] The corpus-perturbation audit that #lzoverrideallrunners existed to unblock has NOT been run. All five bindings (cs/go/dart/js/py) can now be pointed at a scratch corpus, but each has been probed with exactly ONE fixture, the one proving its seam. lazily-rs's AGENTS.md documents this audit as the pass a static detector cannot replace. For each of the five, walk the conformance families and perturb at least one fixture per family, recording which runners redden and which are convergence-only (a fixture that cannot be made to fail by flipping a declared expectation is pinning nothing). Expect finds of the #lzzigdiffmutant shape: an assertion that survives a mutation because an earlier assertion fires first, or because the runner never reaches it. Definition of done: a per-binding table of family -> perturbed key -> reddened runner, with every non-reddening cell explained rather than dropped.
 - [ ] [#lzspecschemasoverride] LAZILY_SPEC_CONFORMANCE_DIR redirects the conformance CORPUS only; lazily-spec/schemas always resolves to the canonical sibling in go (specSchemasDir, 2 sites in ipc_conformance_test.go), js (schemasRoot/schemaPath, used by schema-conformance + lossless-tree-crdt + ipc) and cs (5 schema roots derived from SpecCorpus.Root via '..'). This is deliberate today because a corpus scratch copy carries no schemas/ sibling, but it means a probe that needs to perturb a SCHEMA has nowhere to point except the shared ../lazily-spec checkout, which reddens all nine bindings at once. That is the exact defect #lzoverrideallrunners just fixed, one level up. Add a spec-ROOT override (or a second LAZILY_SPEC_SCHEMAS_DIR) threaded through the same seams, default unchanged, fail-closed on an unreadable explicit value. Audit dart/py/kt/rs/cpp/zig/gd for the same split while there. Definition of done: flip one field in a scratch schemas copy and prove a schema-validating runner reddens without touching the canonical checkout.
 - [ ] [#lzgdvocab] lazily-gd's reactive-graph runner is missing the fanout/churn/dispose_fanout/dispose_stale_handle bulk ops AND real id recycling, so 2 canonical fixtures remain: churn_returns_to_baseline.json and recycled_id_inherits_nothing.json. Recycling is the hard half and is a DESIGN decision, not runner vocabulary: Godot instance ids are monotonic and never alias, so 'a recycled id inherits nothing' has no natural referent — the binding needs an explicit id layer (a free-list over slot indices with a generation tag, the shape lazily-rs's SlotId uses) before the fixture means anything. Removing both entries from KNOWN_UNCOVERED in scripts/check-conformance-coverage.sh is the definition of done. DONE already: the merge_cell group (5 fixtures) landed with LazilyMergePolicy + Source.merge + ctx.source_with, and GDScript is now ~ on merge-algebra.
+- [ ] [#lzjsscenarioswallow] lazily-js scripts/check-scenario-coverage.mjs:202 swallows an unparseable corpus fixture with a bare `catch { continue; }` — the only unnamed swallow in that ladder. It cannot hide a coverage gap today (rung 1 still demands the file be opened, and any runner that opens it dies on JSON.parse), but a fixture that fails to parse is dropped from scenario accounting without naming itself, which is the shape every other rung in this repo refuses. Name the fixture and fail, matching the sibling rungs. While there: test/spec-corpus.cjs:106-113 exports listFixtures(), an enumerate-the-corpus helper with ZERO call sites — it is the exact primitive that would introduce the enumerating-host shape #lzledgeragreementaudit audits for, so delete it or pin it with a comment saying why it must stay unused.
 <!-- /agent:backlog -->
 
 ## Review

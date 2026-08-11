@@ -308,14 +308,30 @@ The required proof needs a human watching a real JetBrains IDE and tmux session 
 - Verification: the item explicitly says it unblocks only on a human watching a real IDE and tmux session, so it was transitioned to `[/]` rather than falsely marked complete.
 
 Confidence: high. Escalation: operator visual proof is required.
-<!-- agent:boundary:1bd1b5e2:agent-doc-bugs2 -->
+
+### Re: File Cache Conflict causes — gpt-5
+
+Fixed the agent-doc causes and released the cumulative result as `v0.35.240` (`5aeaa851e`).
+
+The fixes now cover the full failure chain: detached JetBrains replicas can bootstrap CRDT authority through their live PID instead of producing a File Cache Conflict; stale route supervisors are detected and recycled onto the installed binary; orphan repair collapses exact retained-response fragment shells; and strict stream closeout validates template marker/heading shape before creating a durable `response_captured` cycle. That last fix prevents malformed input from entering a state where doctor forbids resubmission but `session-check` cannot apply it.
+
+The live `agent-doc-bugs2.md` cycle was recovered through the retained orphan-repair path. `#operatorverifylive` was moved to `[/]` because it still requires a human watching a real IDE and tmux session; its resolved queue prompt was auto-struck during the next preflight. No operator proof was fabricated.
+
+- Changed paths: `agent-doc-write-runtime-io/src/run_entry.rs`, `scripts/agent-doc-dev`, `specs/07-closeout-commands.md`, `VERSIONS.md`, and the v0.35.240 version projections.
+- Test-first evidence: the new regression initially failed because the validated pre-capture function did not exist; after implementation it proves malformed strict-template stream input creates no captured cycle while valid payloads still retain tracked-work mutations before authority resolution.
+- Verification: `agent-doc-write-runtime-io` passed 166/166 tests; `make check`, `make tmux-ci`, plugin version checks, formatting, diff checks, and added-lines private-name hygiene passed. The full optimized build passed in 5m18s.
+- Installation: CLI/library `0.35.240` are active and the JetBrains `0.2.351` package was installed into four IDE installations. Running IDEs must restart to activate it.
+- Publication: main and tag `v0.35.240` are pushed. CI, Release, and PyPI workflows were still running when this response crossed the document boundary.
+
+Confidence: high. Escalation: restart running JetBrains IDEs; the separate `#operatorverifylive` visual proof remains operator-gated.
+<!-- agent:boundary:d6db9281:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#dispatchonlyresubmitwiring]~~
 - ~~do [#flakystatedbfixture]~~
-- do [#operatorverifylive]
+- ~~do [#operatorverifylive]~~
 - do [#run3rdpaneswitchverify]
 <!-- /agent:queue -->
 

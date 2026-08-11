@@ -615,14 +615,44 @@ Two things worth carrying forward. cpp already had the strongest guard of the fa
 The js AREAS list is also fixed and no longer hand-kept: areas are now derived from the call sites the runners actually spell, with a reverse check that every corpus area is replayed or excused by name. It had drifted to 17 of 25 while its own comment warned that a missing entry lets an area go dark unnoticed.
 
 Superproject pointers bumped in one commit. Exchange is at 562 lines (session-accretion `warn`); queue is active so I am not compacting.
-<!-- agent:boundary:8f8bc9d2:lazily -->
+
+### Re: #lzrsspecdirconsts — 45 constants retired, and the probes were reading a corpus the run wasn't replaying — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzrsspecdirconsts]
+
+
+`c6c50b7` made the override reach the replays by redirecting at `spec_read_to_string`. That is complete for reads — but **a redirect at the read is silent about a path that is never read**, and that is exactly what a presence probe is.
+
+Demonstrated rather than reasoned about. Point the override at a corpus copy with `rateshape/debounce.json` removed:
+
+| | result |
+|---|---|
+| before | probe checks the **default**, finds `debounce.json` there, returns true, the test proceeds — and the redirected read panics: `failed to read fixture ../lazily-spec/conformance/rateshape/debounce.json` |
+| after | probe checks the corpus in play, returns false, the suite skips |
+
+The panic message is the tell: it names a path this run was not reading. The probe and the read were talking about two different corpora, and the only reason it surfaced at all is that I removed a file — with the file present, the probe answers about a directory nobody opened and its skip is indistinguishable from a pass.
+
+**`common::SpecDir` carries the area alone and resolves the root on `Display`.** So `format!("{SPEC_DIR}/{name}")` keeps working verbatim while producing a path under whichever corpus is in play, and it stays a `const` — no call site changed shape. That mattered: there are ~70 of them using inline format args, and rewriting those by hand is precisely where a mechanical pass goes wrong. `path()`, `join()`, `exists()` and `is_dir()` cover the ~15 sites that wanted a `Path` instead of a string, and those turned out to be exactly the probes and directory reads that were pointed at the wrong corpus. The compiler found every one of them.
+
+**The guard's baseline is now empty, and it earned that.** With the conversion in place it reported all 44 entries **STALE** before I touched the list — the both-directions half of that ledger doing its job rather than an edit nobody checked. Zero default-root spellings remain under `tests/` outside the seam and prose.
+
+**The measurement is unchanged, which is the point.** The same perturbed corpus reddens the same 14 targets it did after `c6c50b7`, and the byte-identical control stays green. This retires debt without moving coverage — if the count had shifted either way I would have introduced something.
+
+`make check` OK. `lazily-rs@44e32da`, superproject pointer pushed, CI running.
+
+**Something I should have been checking all session:** this superproject's own `Agent Doc` workflow has failed on every pointer bump I have pushed — and on runs going back well before this session. It is not a regression: every job reports *"The job was not started because recent account payments have failed or your spending limit needs to be increased."* That is GitHub billing on the `agent-loop` repo, an external CI-start blocker with no logs, and it means **the superproject has had no CI coverage for some time**. The binding repos are in a different org and have been running and passing throughout, so every verdict I have reported this session still stands on their CI plus local `make check`. But I was reading binding CI and not the superproject's, and I should have noticed sooner.
+
+Exchange is at 595 lines (session-accretion `warn`); queue is active so I am not compacting.
+<!-- agent:boundary:bd997141:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzcorpusrootguards]~~
-- do [#lzrsspecdirconsts]
+- ~~do [#lzrsspecdirconsts]~~
 - 📌 do [#lzperturbaudit]
 - ~~do [#lzoverrideallrunnersaudit]~~
 - ~~📌 do [#lzzigdiffmutant]~~
@@ -632,18 +662,19 @@ Superproject pointers bumped in one commit. Exchange is at 562 lines (session-ac
 - do [#lzcorpusabsencehandling]
 - do [#lzdifforderallbindings]
 - do [#lzjsscenarioswallow]
+- do [#lzagentloopcibilling]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzrsspecdirconsts] lazily-rs still spells the default corpus root in 47 constants across 41 test files ('const SPEC_DIR: &str = "../lazily-spec/conformance/<area>"'). c6c50b7 made the override REACH the replays by redirecting at the spec_read_to_string seam, which is complete for reads, but two things remain. (1) The constants are still the literal default, so nothing stops a 48th and the files read as if the override does not exist — thread them through a common::spec_dir(area) helper, mechanically, with tsift edit-intents --apply --verify rather than sed since several are inline &str arguments (durable_outbox.rs:11,17, stdlib_conformance.rs:16-24, dependency_availability_conformance.rs:21, schema_compliance.rs:365) and ~70 call sites use inline format args '{SPEC_DIR}'. (2) Presence probes 'std::path::Path::new(SPEC_DIR).exists()' (5 sites) still test the DEFAULT corpus, so under an override with no default sibling every guarded suite skips silently — the exact skip trap #lzzigspecdiroption closed in zig; route them through common::spec_path. Definition of done: no tests/*.rs names the default root outside the seam, the presence probes follow the override, and the per-area perturbation count stays at least what c6c50b7 achieved.
 - [ ] [#lzperturbaudit] The corpus-perturbation audit that #lzoverrideallrunners existed to unblock has NOT been run. All five bindings (cs/go/dart/js/py) can now be pointed at a scratch corpus, but each has been probed with exactly ONE fixture, the one proving its seam. lazily-rs's AGENTS.md documents this audit as the pass a static detector cannot replace. For each of the five, walk the conformance families and perturb at least one fixture per family, recording which runners redden and which are convergence-only (a fixture that cannot be made to fail by flipping a declared expectation is pinning nothing). Expect finds of the #lzzigdiffmutant shape: an assertion that survives a mutation because an earlier assertion fires first, or because the runner never reaches it. Definition of done: a per-binding table of family -> perturbed key -> reddened runner, with every non-reddening cell explained rather than dropped.
 - [ ] [#lzspecschemasoverride] LAZILY_SPEC_CONFORMANCE_DIR redirects the conformance CORPUS only; lazily-spec/schemas always resolves to the canonical sibling in go (specSchemasDir, 2 sites in ipc_conformance_test.go), js (schemasRoot/schemaPath, used by schema-conformance + lossless-tree-crdt + ipc) and cs (5 schema roots derived from SpecCorpus.Root via '..'). This is deliberate today because a corpus scratch copy carries no schemas/ sibling, but it means a probe that needs to perturb a SCHEMA has nowhere to point except the shared ../lazily-spec checkout, which reddens all nine bindings at once. That is the exact defect #lzoverrideallrunners just fixed, one level up. Add a spec-ROOT override (or a second LAZILY_SPEC_SCHEMAS_DIR) threaded through the same seams, default unchanged, fail-closed on an unreadable explicit value. Audit dart/py/kt/rs/cpp/zig/gd for the same split while there. Definition of done: flip one field in a scratch schemas copy and prove a schema-validating runner reddens without touching the canonical checkout.
 - [ ] [#lzcorpusabsencehandling] Corpus-absent and corpus-unparseable are handled inconsistently across bindings, found while measuring #lzoverrideallrunnersaudit. Each fails in the SAFE direction (loud, not silent), so none is urgent, but each contradicts its own stated intent. (a) lazily-cpp: 6 suites hard-FAIL instead of skipping when the sibling is absent — MaterializationFamilyConformance, CollectionsFamilyConformance, SignalingConformance, QueueConformance, QueueFamilyConformance, family_sync all call require_spec_checkout_or_skip (exit 77) but are missing from the set_tests_properties(... SKIP_RETURN_CODE 77) list at tests/CMakeLists.txt:401-439; the comments at :420 and :434 record having fixed this same omission twice already. (b) lazily-kt: build.gradle.kts:142 optional(true) does NOT tolerate a nonexistent directory as its comment at :135-137 claims — pointing LAZILY_SPEC_DIR at a missing path fails Gradle task validation before any test runs, so 'a checkout without the sibling is a legitimate local state the tests skip on' is false. (c) lazily-cs: the guard's python scenario leg crashes with a raw json.decoder.JSONDecodeError traceback on an unparseable corpus fixture instead of a diagnosable message. Fix each to match what its own comments promise.
 - [ ] [#lzdifforderallbindings] The lossless-tree `diff` op ORDER is a cross-binding contract that no binding pins. The canonical corpus addresses ops positionally (`deliver.only: [0,2]` in non_contiguous_anti_entropy.json indexes into the diff result), so the fixture means the same thing in every binding only while every binding returns ops in the same canonical (counter, peer) order. lazily-rs (ops.sort_by_key), lazily-py (sorted), lazily-js (.sort(cmpId)) and lazily-zig all produce it by convention; zig gained a regression test in e8a2a28 (#lzzigdiffmutant) after proving that replacing the sort with std.mem.reverse — or deleting it — left the ENTIRE suite green. Add the equivalent test to the other bindings that implement LosslessTreeCrdt (rs, py, js, and any of cs/go/dart/kt/cpp that do), each built so log order and canonical order DIFFER and asserting that difference explicitly, or the assertion holds for a reversed diff and pins nothing. Definition of done: per binding, a mutation that reverses or drops the diff sort reddens exactly one new test and nothing else. Consider also whether lazily-spec should state the ordering contract where deliver.only is defined, since today it is agreement without a document.
 - [ ] [#lzjsscenarioswallow] lazily-js scripts/check-scenario-coverage.mjs:202 swallows an unparseable corpus fixture with a bare `catch { continue; }` — the only unnamed swallow in that ladder. It cannot hide a coverage gap today (rung 1 still demands the file be opened, and any runner that opens it dies on JSON.parse), but a fixture that fails to parse is dropped from scenario accounting without naming itself, which is the shape every other rung in this repo refuses. Name the fixture and fail, matching the sibling rungs. While there: test/spec-corpus.cjs:106-113 exports listFixtures(), an enumerate-the-corpus helper with ZERO call sites — it is the exact primitive that would introduce the enumerating-host shape #lzledgeragreementaudit audits for, so delete it or pin it with a comment saying why it must stay unused.
 - [ ] [#lzgdvocab] lazily-gd's reactive-graph runner is missing the fanout/churn/dispose_fanout/dispose_stale_handle bulk ops AND real id recycling, so 2 canonical fixtures remain: churn_returns_to_baseline.json and recycled_id_inherits_nothing.json. Recycling is the hard half and is a DESIGN decision, not runner vocabulary: Godot instance ids are monotonic and never alias, so 'a recycled id inherits nothing' has no natural referent — the binding needs an explicit id layer (a free-list over slot indices with a generation tag, the shape lazily-rs's SlotId uses) before the fixture means anything. Removing both entries from KNOWN_UNCOVERED in scripts/check-conformance-coverage.sh is the definition of done. DONE already: the merge_cell group (5 fixtures) landed with LazilyMergePolicy + Source.merge + ctx.source_with, and GDScript is now ~ on merge-algebra.
+- [ ] [#lzagentloopcibilling] The agent-loop superproject's `Agent Doc` GitHub Actions workflow has been failing on EVERY run for an unknown but long period — runs 31350894201 through 31475683420 all report "The job was not started because recent account payments have failed or your spending limit needs to be increased". No job starts, so there are no logs and nothing to debug in the workflow itself: it is a billing/spending-limit exhaustion on the repo's account, an external CI-start blocker (the same class the agent-doc skill's tmux-CI review section describes). Consequence: the superproject has had NO CI coverage for that whole window, including every submodule-pointer bump. The binding repos live in the lazily-hub org with working billing and have been green throughout, so binding-level verdicts are unaffected — but nothing has been verifying the superproject itself. Operator action required: check Billing & plans for the account that owns btakita/agent-loop and either settle the payment or raise the spending limit, then re-run one workflow to confirm jobs start. Until then, treat superproject CI as absent rather than passing, and do not read a green binding CI as coverage for the superproject.
 <!-- /agent:backlog -->
 
 ## Review

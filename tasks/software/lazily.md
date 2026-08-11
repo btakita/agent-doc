@@ -870,7 +870,28 @@ Four of the six also widened their corpus-root source guard to cover the schemas
 All six `make check` exit 0 and CI green; `../lazily-spec` was never written to by any agent — every perturbation lived in a scratch copy.
 
 Exchange is at 818 lines and session-accretion has crossed to `block`; the queue is active, so per its own guidance I am continuing to drain rather than compacting, and noting the size here.
-<!-- agent:boundary:594e2056:lazily -->
+
+### Re: #lzcorpusabsencehandling — three comment/behaviour mismatches, and one of them was mine — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzcorpusabsencehandling]
+
+
+All three fixed, all CI green: `cpp@d052c4f`, `kt@22e75e0`, `cs@35b9e08`.
+
+**cpp — fixed structurally rather than by a fourth list edit.** Six suites exited 77 to mean SKIP while missing from the `SKIP_RETURN_CODE 77` registration, so CTest read them as failures; the comments beside that list recorded having fixed the same omission twice before. A single `lazily_add_spec_conformance_test()` now states all three facts about a corpus-reading suite in one place, and a configure-time guard walks each target's transitive include closure and **fails configure** if anything reaching `require_spec_checkout_or_skip` was registered with a bare `add_test()`. Measured: 30 skips + 6 failures → **36 skips, 0 failures**, and the CI hard-error property still bites (both existing guards replayed red on an absent corpus).
+
+**kt — I asked for either fix, and the agent chose the other one, correctly.** I leaned toward making a sibling-less checkout runnable. It verified three things first: `requireRoot()` *throws* rather than skipping, so the comment's premise was already false; `optional(true)` was inert (it excuses an absent provider *value*, not a nonexistent directory); and `proto { srcDir("../lazily-spec/proto") }` is hardcoded, so **a sibling-less checkout cannot compile at all** — 28 unresolved references before `:test` is even configured. There is no state where this repo builds without `lazily-spec`, so there was nothing for the input to be lenient about. Making configuration lenient would have traded one loud failure for ~450 red replays. It kept the hard failure and corrected the comment.
+
+**cs — the exposure was in six places, not one.** Beyond the reported scenario-leg `JSONDecodeError`, it found and *reproduced* a `UnicodeDecodeError` traceback on an interleaved manifest and `ValueError` tracebacks on non-integer `MIN_BLOCKS`/`MIN_SCENARIOS`. All six now name the file and say what to do, all still hard failures, and the failure lands *before* any coverage arithmetic — a count over a partly-readable corpus is untrustworthy in both directions.
+
+**And a correction to my own prior cycle.** The rationale I had an agent write into `d8b6c08` last cycle claims that a missing directory under an explicit override "fingerprints the same as no sibling at all (both absent, because the input is `optional`), so a probe pointed at a nonexistent tree could be answered from a cached GREEN." **That case cannot occur** — a missing input directory fails Gradle task validation outright, and `optional(true)` does not change it. The `inputs.property` is still justified by the *other* half of its argument (a byte-identical copy at another path really does fingerprint identically, measured), so nothing is broken — but half of that comment is folklore I introduced, and I have updated `#lzktgradleinputfingerprint` to say so and to require deleting it.
+
+Two process notes. The coined-id hook blocked a commit because my message contained `#include` — same false-positive class as `#error` two cycles ago; a C preprocessor directive read as an untracked backlog id. And the kt agent hit the same hook writing `#lzvacuousrun` into a source comment, so it cited the class by name instead.
+
+Exchange is at 850 lines, accretion `block`; queue is active so I keep draining per its guidance.
+<!-- agent:boundary:bfaad200:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -889,7 +910,7 @@ Exchange is at 818 lines and session-accretion has crossed to `block`; the queue
 - ~~📌 do [#lzledgeragreementaudit]~~
 - ~~📌 do [#lzzigingressspecdir]~~
 - ~~📌 do [#lzspecschemasoverride]~~
-- 🚧 do [#lzcorpusabsencehandling]
+- ~~do [#lzcorpusabsencehandling]~~
 - do [#lzdifforderallbindings]
 - do [#lzjsscenarioswallow]
 - do [#lzagentloopcibilling]
@@ -902,7 +923,6 @@ Exchange is at 818 lines and session-accretion has crossed to `block`; the queue
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzcorpusabsencehandling] Corpus-absent and corpus-unparseable are handled inconsistently across bindings, found while measuring #lzoverrideallrunnersaudit. Each fails in the SAFE direction (loud, not silent), so none is urgent, but each contradicts its own stated intent. (a) lazily-cpp: 6 suites hard-FAIL instead of skipping when the sibling is absent — MaterializationFamilyConformance, CollectionsFamilyConformance, SignalingConformance, QueueConformance, QueueFamilyConformance, family_sync all call require_spec_checkout_or_skip (exit 77) but are missing from the set_tests_properties(... SKIP_RETURN_CODE 77) list at tests/CMakeLists.txt:401-439; the comments at :420 and :434 record having fixed this same omission twice already. (b) lazily-kt: build.gradle.kts:142 optional(true) does NOT tolerate a nonexistent directory as its comment at :135-137 claims — pointing LAZILY_SPEC_DIR at a missing path fails Gradle task validation before any test runs, so 'a checkout without the sibling is a legitimate local state the tests skip on' is false. (c) lazily-cs: the guard's python scenario leg crashes with a raw json.decoder.JSONDecodeError traceback on an unparseable corpus fixture instead of a diagnosable message. Fix each to match what its own comments promise.
 - [ ] [#lzdifforderallbindings] The lossless-tree `diff` op ORDER is a cross-binding contract that no binding pins. The canonical corpus addresses ops positionally (`deliver.only: [0,2]` in non_contiguous_anti_entropy.json indexes into the diff result), so the fixture means the same thing in every binding only while every binding returns ops in the same canonical (counter, peer) order. lazily-rs (ops.sort_by_key), lazily-py (sorted), lazily-js (.sort(cmpId)) and lazily-zig all produce it by convention; zig gained a regression test in e8a2a28 (#lzzigdiffmutant) after proving that replacing the sort with std.mem.reverse — or deleting it — left the ENTIRE suite green. Add the equivalent test to the other bindings that implement LosslessTreeCrdt (rs, py, js, and any of cs/go/dart/kt/cpp that do), each built so log order and canonical order DIFFER and asserting that difference explicitly, or the assertion holds for a reversed diff and pins nothing. Definition of done: per binding, a mutation that reverses or drops the diff sort reddens exactly one new test and nothing else. Consider also whether lazily-spec should state the ordering contract where deliver.only is defined, since today it is agreement without a document.
 - [ ] [#lzjsscenarioswallow] lazily-js scripts/check-scenario-coverage.mjs:202 swallows an unparseable corpus fixture with a bare `catch { continue; }` — the only unnamed swallow in that ladder. It cannot hide a coverage gap today (rung 1 still demands the file be opened, and any runner that opens it dies on JSON.parse), but a fixture that fails to parse is dropped from scenario accounting without naming itself, which is the shape every other rung in this repo refuses. Name the fixture and fail, matching the sibling rungs. While there: test/spec-corpus.cjs:106-113 exports listFixtures(), an enumerate-the-corpus helper with ZERO call sites — it is the exact primitive that would introduce the enumerating-host shape #lzledgeragreementaudit audits for, so delete it or pin it with a comment saying why it must stay unused.
 - [ ] [#lzgdvocab] lazily-gd's reactive-graph runner is missing the fanout/churn/dispose_fanout/dispose_stale_handle bulk ops AND real id recycling, so 2 canonical fixtures remain: churn_returns_to_baseline.json and recycled_id_inherits_nothing.json. Recycling is the hard half and is a DESIGN decision, not runner vocabulary: Godot instance ids are monotonic and never alias, so 'a recycled id inherits nothing' has no natural referent — the binding needs an explicit id layer (a free-list over slot indices with a generation tag, the shape lazily-rs's SlotId uses) before the fixture means anything. Removing both entries from KNOWN_UNCOVERED in scripts/check-conformance-coverage.sh is the definition of done. DONE already: the merge_cell group (5 fixtures) landed with LazilyMergePolicy + Source.merge + ctx.source_with, and GDScript is now ~ on merge-algebra.

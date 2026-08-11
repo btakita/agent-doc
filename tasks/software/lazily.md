@@ -708,14 +708,45 @@ One thing I deliberately did **not** do: the audit noted that corrupting `algebr
 `make check` OK, control on a byte-identical copy green. `lazily-dart@d5ccebd`, superproject pointer pushed, CI queued.
 
 Exchange is at 662 lines (session-accretion `warn`); queue is active so I am not compacting.
-<!-- agent:boundary:0c72d322:lazily -->
+
+### Re: #lzgoassertkeygaps — an assertion against a no-op, and a comparison that could not resolve its own inputs — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzgoassertkeygaps]
+
+
+**`stable_keys_not_invalidated` was asserted against a no-op.** The runner primed its readers *after* the prior→target reconcile, then ran a second reconcile to the same target. That invalidates nothing by construction, so every reader was trivially warm.
+
+| declared list | old | new |
+|---|---|---|
+| `["b","c","a"]` (over-claim) | green | **red** |
+| `["b"]` (shrunk) | green | **red** |
+| `["zzz"]` (key not in the map) | green | **red** |
+| `[]` | red | red |
+| `["c","b"]` (permutation) | green | green — correct, it is a set |
+
+Readers now prime on the **prior** state, before the real reorder. That alone is still a lower bound — a shortened list just stops being checked — so the declared set is also compared against `prior ∩ target` minus the keys named by a `move` op. That is the spec's own definition of an LIS member, **derived from data the fixture already declares** rather than restated in the test, which is what makes `["b"]` a failure instead of a smaller obligation.
+
+**`assertKey` could not resolve any integer above 2^53.** Both sides of `jsonValueEqual` are `any` decoded from JSON, so both are `float64`; at `arena_blob.json`'s 1.3e19 checksum the spacing between representable doubles is 2048, so ±1 is invisible while +7700 — past one ULP — reddens.
+
+The important thing here is what *couldn't* be fixed. The precision is gone before the comparison starts: the fixture was decoded into `float64` long before `jsonValueEqual` sees it, so nothing at that layer can recover the digits. Decoding the whole corpus with `UseNumber` would fix it properly but rewires ~30 runners' decode paths, which is out of proportion to one cell. So the comparator now does the one honest thing available — **a comparison that cannot resolve its own inputs fails and says so**, naming the two exact channels (a typed `expected` field, or a decimal string, which the corpus already uses for `codec/nodeid_exact_range.json`).
+
+That guard fires on the one cell affected today, so the redundant `assertions` copy of the checksum is excused with its reason. Redundant, not unchecked: `expected.descriptor.checksum` is a typed `uint64` compared with `==`, and I verified ±1 there reddens.
+
+Worth naming the shared shape, since it is the third instance this session: **an assertion satisfied by its own bookkeeping rather than by the system's behaviour.** The no-op reconcile satisfied `assertKeyWith` because the callback returned; the float comparison satisfied it because the numbers matched *after* both were degraded. Neither guard was wrong about what it measured — they were measuring the wrong thing.
+
+`make check` OK. `lazily-go@c5cce05`, superproject pointer pushed. Last cycle's `lazily-dart` CI came back green.
+
+Exchange is at 688 lines (session-accretion `warn`); queue is active so I am not compacting.
+<!-- agent:boundary:9be09ba5:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzdartvacuousfixtures]~~
-- do [#lzgoassertkeygaps]
+- ~~do [#lzgoassertkeygaps]~~
 - do [#lzpystdlibfloorsunread]
 - do [#lzconvergedlistlength]
 - do [#lzunboundblockguard]
@@ -736,7 +767,6 @@ Exchange is at 662 lines (session-accretion `warn`); queue is active so I am not
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzgoassertkeygaps] Two defects in lazily-go's assertion plumbing, found by #lzperturbaudit. (1) collections_conformance_test.go:345-364 asserts expected.stable_keys_not_invalidated against a NO-OP reconcile: m was already reconciled to the same target one line earlier (:341), so the sibling reorder the fixture's comment names never happens, nothing invalidates, and every primed reader is trivially warm. Measured: ['b','c','a'] passes, ['b'] passes, and ['zzz'] -- a key not in the map -- passes; only [] reddens via the emptiness guard. The fixture's central claim (stable siblings survive a reorder) is untested. Fix: reconcile to a DIFFERENT order than the primed state, then assert. (2) conformance_strict_json_test.go:411 assertKey delegates to jsonValueEqual (:1215-1224), which marshals the actual value to JSON and unmarshals into any -> float64. At arena_blob.json's ~1.3e19 checksum the double spacing is 2048, so a +/-1 perturbation is invisible (+7700 reddens). Only that one cell is affected today and its twin in the typed 'expected' block still catches the error, but it is a live trap for any future fixture carrying a hash or u64 id as a bare number in an assertions block. Fix: compare integers via json.Number or a typed path rather than float64.
 - [ ] [#lzpystdlibfloorsunread] lazily-py's stdlib anti-vacuity budget is not read by anything, found by #lzperturbaudit. scenario_floor, assertion_floor and mutation_floor are REQUIRED properties of lazily-spec/schemas/stdlib-fixture.schema.json, and a repo-wide grep (excluding build/ and .claude/worktrees/) finds zero references in src/, tests/ or scripts/ — tests/test_stdlib_conformance.py:148-161 reads feature/scenarios/steps/mutations and stops. Measured: scenario_floor 6 -> 99 against a six-scenario fixture is green. The mutation ledger beside them is self-referential: :159-161 asserts must_fail is non-empty and a subset of the fixture's own scenario ids, and never APPLIES a mutation — so mutations: [] passes (zero iterations) and rebinding an operator to an unrelated scenario passes; only an id outside the fixture reddens. This is the failure mode feedback_conformance_tests_drive_real_behavior_not_runner_bookkeeping names. Fix: enforce the three floors against what the run actually replayed, and either apply the mutations or stop shipping them as if they were checked. Definition of done: raising any floor above the real count reddens, and emptying mutations reddens.
 - [ ] [#lzconvergedlistlength] List-shaped expectations checked by per-element membership never assert their own LENGTH, so the corpus can shrink an obligation and stay green (#lzperturbaudit). Confirmed in lazily-py distributed/anti_entropy_converge.json expect.converged (tests/test_collection_conformance.py:586-593 loops the declared wants and searches plane.converged() for each; contents are pinned but deleting an entry is green) and lazily-py lossless-tree/one_leaf_edit_delta.json expect.converged (tests/test_lossless_tree_conformance.py:160-168 compares names[1:] against names[0], so a one-element list runs ZERO comparisons). lazily-go's message-passing expect.rpc.unresolved_after_frame_indices is the same shape — a membership filter where [7] (no such frame) is fully vacuous. Add a length/coverage assertion beside each membership loop so the declared list must account for every element the run produced. Audit cs/dart/js for the same shape while there — dart's materialization eager_present and receipts nonterminal_outcomes are order-blind but DO redden on drop, so they are fine and make a good contrast.
 - [ ] [#lzunboundblockguard] The unconsumed-assertion-key guards in every binding share a blind spot, which is why several #lzperturbaudit findings survived them. They prove that keys inside blocks a runner REACHED were read; they say nothing about (a) blocks no runner ever binds, or (b) callbacks that receive a key and never compare it. Concretely: lazily-dart's tracker only registers a block passed to assertionsOf (test/conformance_assertions.dart:239,254), so signaling/frames.json's per-frame assertions blocks are invisible rather than unconsumed; lazily-go's assertKeyWith marks a key asserted when the callback RETURNS (conformance_strict_json_test.go:438), so a callback ignoring its argument satisfies it; lazily-cs's AssertKeyWith has the same property, which is how an Assert.All over an empty array counts as asserted (CausalReceiptConformanceTests.cs:44-48). Strengthen the guards in both directions: enumerate every assertions/expect block the CORPUS carries for an opened fixture and fail on blocks no runner bound, and make an assertion count as satisfied only when it actually consumed the fixture value (e.g. require the callback to return a compared value, or record a read of the want). Definition of done: per binding, a probe that adds an unbound assertions block to an opened fixture fails the guard, and a callback that ignores its argument fails it.

@@ -628,7 +628,10 @@ class EditorTabSyncListenerTest {
                 .substringAfter("fun onEditorFocusGained(project: Project, file: VirtualFile)")
                 .substringBefore("fun onEditorLayoutChanged")
         assertTrue(focusGained.contains("requestFocusProjection(project, file)"))
-        assertFalse(focusGained.contains("requestObservation("))
+        assertTrue(focusGained.contains("requestObservation("))
+        assertTrue(focusGained.contains("preferredFile = file"))
+        assertTrue(focusGained.contains("forceReconcile = false"))
+        assertTrue(focusGained.contains("authority = ObservationAuthority.EditorFocus"))
         assertFalse(focusGained.contains("delayMs"))
 
         val focusProjection =
@@ -816,7 +819,7 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `component focus publishes selection-only state`() {
+    fun `component focus republishes spanning surface and selection state`() {
         val listenerPath =
             listOf(
                     Paths.get(
@@ -833,6 +836,40 @@ class EditorTabSyncListenerTest {
                 .substringBefore("fun onEditorLayoutChanged(project: Project)")
 
         assertTrue(focusBody.contains("requestFocusProjection(project, file)"))
-        assertFalse(focusBody.contains("requestObservation("))
+        assertTrue(focusBody.contains("requestObservation("))
+        assertTrue(focusBody.contains("preferredFile = file"))
+        assertTrue(focusBody.contains("authority = ObservationAuthority.EditorFocus"))
+    }
+
+    @Test
+    fun `component focus cannot supersede a pending document selection`() {
+        assertFalse(
+            EditorTabSyncListener.SurfaceObservationOrdering.shouldReplace(
+                currentAuthority = EditorTabSyncListener.ObservationAuthority.DocumentSelection,
+                incomingAuthority = EditorTabSyncListener.ObservationAuthority.EditorFocus,
+            ),
+        )
+        assertFalse(
+            EditorTabSyncListener.SurfaceObservationOrdering.shouldReplace(
+                currentAuthority = EditorTabSyncListener.ObservationAuthority.DocumentSelection,
+                incomingAuthority = EditorTabSyncListener.ObservationAuthority.EditorFocus,
+            ),
+        )
+    }
+
+    @Test
+    fun `component focus publishes when no document selection is pending`() {
+        assertTrue(
+            EditorTabSyncListener.SurfaceObservationOrdering.shouldReplace(
+                currentAuthority = null,
+                incomingAuthority = EditorTabSyncListener.ObservationAuthority.EditorFocus,
+            ),
+        )
+        assertTrue(
+            EditorTabSyncListener.SurfaceObservationOrdering.shouldReplace(
+                currentAuthority = EditorTabSyncListener.ObservationAuthority.EditorFocus,
+                incomingAuthority = EditorTabSyncListener.ObservationAuthority.DocumentSelection,
+            ),
+        )
     }
 }

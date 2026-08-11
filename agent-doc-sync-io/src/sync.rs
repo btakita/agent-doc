@@ -707,12 +707,50 @@ pub fn run_layout_only_exact_visible_in_project_root(
     window: Option<&str>,
     focus: Option<&str>,
 ) -> Result<()> {
-    run_layout_only_exact_visible_with_actor_bindings_in_project_root(
+    run_layout_only_exact_visible_with_tmux_in_project_root(
+        project_root,
+        col_args,
+        window,
+        focus,
+        &Tmux::default_server(),
+    )
+}
+
+pub fn run_layout_only_exact_visible_with_tmux_in_project_root(
+    project_root: &Path,
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+    tmux: &Tmux,
+) -> Result<()> {
+    run_layout_only_exact_visible_with_actor_bindings_and_tmux_in_project_root(
         project_root,
         col_args,
         window,
         focus,
         &[],
+        tmux,
+    )
+}
+
+pub fn run_layout_only_exact_visible_with_actor_bindings_and_tmux_in_project_root(
+    project_root: &Path,
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+    actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
+    tmux: &Tmux,
+) -> Result<()> {
+    run_with_options_internal_at_root(
+        project_root,
+        col_args,
+        window,
+        focus,
+        AutoStartMode::SafePassive,
+        true,
+        false,
+        actor_bindings,
+        tmux,
     )
 }
 
@@ -723,14 +761,11 @@ pub fn run_layout_only_exact_visible_with_actor_bindings_in_project_root(
     focus: Option<&str>,
     actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
 ) -> Result<()> {
-    run_with_options_internal_at_root(
+    run_layout_only_exact_visible_with_actor_bindings_and_tmux_in_project_root(
         project_root,
         col_args,
         window,
         focus,
-        AutoStartMode::SafePassive,
-        true,
-        false,
         actor_bindings,
         &Tmux::default_server(),
     )

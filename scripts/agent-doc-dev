@@ -54,7 +54,7 @@ MUTATION_CAPTURE_CALL = (
     "capture_validated_stream_closeout_before_authority_resolution("
 )
 AUTHORITY_RESOLUTION_CALL = (
-    "let current_content = resolve_document_content_for_write_mode("
+    "None => resolve_document_content_for_write_mode("
 )
 
 
@@ -402,8 +402,8 @@ install-full:
     )
     (root / MUTATION_CAPTURE_RUNTIME).write_text(
         """pub(crate) fn run_stream() {
-    capture_validated_stream_closeout_before_authority_resolution(
-    let current_content = resolve_document_content_for_write_mode(
+capture_validated_stream_closeout_before_authority_resolution(
+None => resolve_document_content_for_write_mode(
 }
 """
     )

@@ -119,12 +119,28 @@ private val focusProjectionExecutor = Executors.newSingleThreadScheduledExecutor
     }
     }
 
-internal enum class ObservationAuthority {
-    Layout,
-    DocumentSelection,
-    FileOpened,
-    IdeActivation,
-}
+    internal enum class ObservationAuthority {
+        Layout,
+        DocumentSelection,
+        EditorFocus,
+        FileOpened,
+        IdeActivation,
+    }
+
+    internal object SurfaceObservationOrdering {
+        fun shouldReplace(
+            currentAuthority: ObservationAuthority?,
+            incomingAuthority: ObservationAuthority,
+        ): Boolean {
+            if (
+                currentAuthority == ObservationAuthority.DocumentSelection &&
+                incomingAuthority == ObservationAuthority.EditorFocus
+            ) {
+                return false
+            }
+            return true
+        }
+    }
 
     /**
      * The pending slot protects editor-event ordering only until the EDT has captured a
@@ -197,11 +213,12 @@ internal object SelectionProjectionSettling {
         remainingPasses: Int,
     ): Boolean =
         when (authority) {
-            ObservationAuthority.Layout,
-            ObservationAuthority.DocumentSelection,
-            ObservationAuthority.FileOpened,
-            ObservationAuthority.IdeActivation -> remainingPasses > 0
-        }
+                ObservationAuthority.Layout,
+                ObservationAuthority.DocumentSelection,
+                ObservationAuthority.EditorFocus,
+                ObservationAuthority.FileOpened,
+                ObservationAuthority.IdeActivation -> remainingPasses > 0
+            }
 
     fun reconcileEventEdge(
         preferredFile: String?,
@@ -437,7 +454,22 @@ private data class CapturedSurface(
     private fun requestObservation(
         observation: PendingSurfaceObservation,
     ) {
-        latestSurfaceObservation.set(observation)
+        while (true) {
+            val current = latestSurfaceObservation.get()
+            if (
+                !SurfaceObservationOrdering.shouldReplace(
+                    currentAuthority = current?.authority,
+                    incomingAuthority = observation.authority,
+                )
+            ) {
+                log(
+                    "observe: retained pending ${current?.authority} over " +
+                        "${observation.authority}",
+                )
+                return
+            }
+            if (latestSurfaceObservation.compareAndSet(current, observation)) break
+        }
         val requested = generation.incrementAndGet()
         projectLatestSurfaceOnEditorThread(requested)
     }
@@ -919,15 +951,23 @@ private data class CapturedSurface(
      * without this entry point split navigation never moves the tmux active pane.
      * [EditorFocusSyncListener] wires the per-editor focus events that call this.
      *
-     * Focus events fire repeatedly for the same editor. The micro-coalesced focus lane collapses
-     * those repeats. A component-focus event cannot change which tabs or splits are visible, so it
-     * deliberately does not enqueue a second surface observation that could race the targeted pane
-     * focus.
+    * Focus events fire repeatedly for the same editor. The focus lane and surface generation guard
+    * independently collapse those repeats. Republish the spanning surface as well as the targeted
+    * focus: a focus-only projection deliberately leaves a stashed pane for the layout reconciler,
+    * and IDEA does not emit [selectionChanged] when the operator moves between existing splits.
      */
     fun onEditorFocusGained(project: Project, file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
         requestFocusProjection(project, file)
-        log("focusGained: file=${file.name}")
+        requestObservation(
+            PendingSurfaceObservation(
+                project = project,
+                preferredFile = file,
+                forceReconcile = false,
+                authority = ObservationAuthority.EditorFocus,
+            ),
+        )
+        log("focusGained: file=${file.name}; spanning projection queued")
     }
 
     /**

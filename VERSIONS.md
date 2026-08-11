@@ -2,6 +2,45 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.241
+
+- **Fix: validated stream pre-capture preserves the established empty-response
+proof guard.**
+
+The 0.35.240 pre-capture validation correctly prevented malformed strict
+template payloads from opening a durable cycle, but checked the response
+heading before the existing response-write proof. An empty `patch:exchange`
+therefore reported a missing heading instead of the more specific
+`no real response-body write` error and broke the integration contract.
+
+Pre-capture validation now runs the response-write proof first, matching the
+ordinary stream pipeline, then enforces strict marker and heading shape. Empty
+shells retain their specific diagnostic, while unwrapped or headingless real
+responses still fail before any durable capture. Legacy standalone finalize
+calls without a preflight baseline first resolve current content through the
+binary-owned authority adapter, preserving compatibility without bypassing
+editor authority or reading the session file directly.
+
+- **Fix: a route-created pane now reconciles into the existing editor split
+instead of becoming a third pane.**
+
+The controller projects the requested editor layout before route provisioning,
+so that first pass cannot place a pane that does not exist yet. A successful
+route now detects when it created the target pane and performs one exact-visible,
+layout-only reconciliation with the freshly registered actor bindings. The
+incoming pane replaces its outgoing column, while a live outgoing turn is moved
+intact to `stash`.
+
+- **Fix: switching to an already-open JetBrains editor now republishes the
+spanning layout as well as focused-document state.**
+
+IDEA does not emit `selectionChanged` when focus moves between existing split
+editors. The focus listener previously sent only the narrow focus projection,
+which deliberately cannot promote a stashed pane. Focus activation now also
+queues the generation-guarded spanning surface observation, allowing the
+controller reconciler to swap `agent-doc-bugs2.md` and `lazily.md` in place
+without growing a two-column editor layout to three tmux panes.
+
 ## 0.35.240
 
 - **Fix: strict stream closeout validates template patch shape before durable

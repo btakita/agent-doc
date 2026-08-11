@@ -1049,17 +1049,21 @@ pub(crate) fn run_stream(
     }
     sanitize_template_patchback_response(&mut response)?;
 
-    capture_validated_stream_closeout_before_authority_resolution(
-        file, baseline, &response, &flags,
-    )?;
+    let pre_capture_current_content =
+        capture_validated_stream_closeout_before_authority_resolution(
+            file, baseline, force_disk, &response, &flags,
+        )?;
 
-    let current_content = resolve_document_content_for_write_mode(
-        file,
-        force_disk,
-        "write_stream_current_content",
-        "write_stream_force_disk_current_content",
-    )
-    .with_context(|| format!("failed to read {}", file.display()))?;
+    let current_content = match pre_capture_current_content {
+        Some(content) => content,
+        None => resolve_document_content_for_write_mode(
+            file,
+            force_disk,
+            "write_stream_current_content",
+            "write_stream_force_disk_current_content",
+        )
+        .with_context(|| format!("failed to read {}", file.display()))?,
+    };
     let mut snapshot_doc = agent_doc_snapshot_io::load_document_baseline(file)
         .ok()
         .flatten();
@@ -1892,24 +1896,53 @@ pub(crate) fn run_stream(
 fn capture_validated_stream_closeout_before_authority_resolution(
     file: &Path,
     baseline: Option<&str>,
+    force_disk: bool,
     response: &str,
     flags: &WriteFlags,
-) -> Result<()> {
+) -> Result<Option<String>> {
+    if !flags.has_pending_mutation {
+        return Ok(None);
+    }
+    // Harness-native closeout supplies the preflight-owned baseline, so the
+    // normal path captures its validated mutation plan before editor authority.
+    // Standalone `finalize --done/--pending-add` remains compatible without
+    // weakening validation: resolve through the binary-owned write adapter,
+    // validate before capture, and return that content for reuse by run_stream.
+    // This exceptional no-preflight lane never performs a direct disk read.
+    let pre_capture_current_content = if flags.strict_closeout && baseline.is_none() {
+        Some(
+            resolve_document_content_for_write_mode(
+                file,
+                force_disk,
+                "write_stream_pre_capture_current_content",
+                "write_stream_force_disk_pre_capture_current_content",
+            )
+            .with_context(|| format!("failed to read {}", file.display()))?,
+        )
+    } else {
+        None
+    };
     if flags.strict_closeout {
-        let disk_content;
-        let pre_capture_content = if let Some(baseline) = baseline {
-            baseline
-        } else {
-            disk_content = std::fs::read_to_string(file)
-                .with_context(|| format!("failed to read {}", file.display()))?;
-            &disk_content
-        };
+        let pre_capture_content = baseline
+            .or(pre_capture_current_content.as_deref())
+            .ok_or_else(|| {
+            anyhow::anyhow!(
+                "strict stream closeout for {} cannot durably capture tracked-work mutations without a binary-owned cycle baseline",
+                file.display()
+            )
+        })?;
         let parsed = agent_doc_template_io::parse_template_patchback(
             file,
             response,
             "run_stream_pre_capture",
             agent_doc_ops_log_io::log_op,
         )?;
+        if !flags.allow_replace_pending && !template_io::pending_replace_escape_hatch_enabled() {
+            agent_doc_template::response_materialization::ensure_template_response_write_proof(
+                &parsed.patches,
+                &parsed.unmatched,
+            )?;
+        }
         enforce_strict_template_closeout_contract(
             pre_capture_content,
             parsed.marker_count,
@@ -1919,7 +1952,8 @@ fn capture_validated_stream_closeout_before_authority_resolution(
         )?;
     }
 
-    capture_closeout_mutation_plan_before_authority_resolution(file, response, flags)
+    capture_closeout_mutation_plan_before_authority_resolution(file, response, flags)?;
+    Ok(pre_capture_current_content)
 }
 
 fn capture_closeout_mutation_plan_before_authority_resolution(
@@ -2753,6 +2787,7 @@ mod tests {
         capture_validated_stream_closeout_before_authority_resolution(
             &doc,
             Some(baseline),
+            false,
             response,
             &flags,
         )
@@ -2799,19 +2834,25 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, baseline).unwrap();
+        let plan = agent_doc_write_command_io::CapturedCloseoutMutationPlan {
+            is_template: true,
+            is_stream: true,
+            pending_gate: vec!["operatorverifylive".to_string()],
+            ..Default::default()
+        };
         let flags = WriteFlags {
             allow_replace_pending: false,
             has_pending_add: false,
             has_pending_done: false,
-            has_pending_mutation: false,
-            has_metadata_only_mutation: false,
+            has_pending_mutation: true,
+            has_metadata_only_mutation: true,
             pending_done_ids: Vec::new(),
             queue_completion_ids: Vec::new(),
             pending_kept_open_ids: Vec::new(),
             strict_closeout: true,
             force_disk: false,
             no_pending_capture: false,
-            mutation_plan_json: None,
+            mutation_plan_json: Some(serde_json::to_string(&plan).unwrap()),
             empty_response_recovery: None,
             rerun_command_base: None,
         };
@@ -2819,6 +2860,7 @@ mod tests {
         let err = capture_validated_stream_closeout_before_authority_resolution(
             &doc,
             Some(baseline),
+            false,
             "### Re: malformed — gpt-5\n\nNo patch markers.\n",
             &flags,
         )

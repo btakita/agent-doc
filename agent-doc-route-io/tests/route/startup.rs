@@ -15,7 +15,10 @@ mod tests {
     use agent_doc_controller::dispatch::is_codex_shell_search_blocker;
     use agent_doc_controller::dispatch::{PromptReadyBarrierFacts, classify_prompt_ready_barrier};
     use agent_doc_route_io::direct_pane_dispatch::CommandDispatchStatus;
-    use agent_doc_route_io::startup_sync::sync_after_claim;
+    use agent_doc_route_io::startup_sync::{
+        newly_provisioned_route_needs_reconcile, reconcile_newly_provisioned_route,
+        sync_after_claim,
+    };
     use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};
     use agent_doc_supervisor_io::ipc::SupervisorIpc;
     #[test]
@@ -3745,6 +3748,125 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         assert!(
             iso.pane_alive(&pane_a),
             "pane should survive sync with unresolved files"
+        );
+    }
+
+    #[test]
+    fn newly_provisioned_route_reconciles_only_its_created_multicolumn_target() {
+        let cols = vec![
+            "tasks/software/lazily.md".to_string(),
+            "tasks/haiven-dev.md".to_string(),
+        ];
+        assert!(newly_provisioned_route_needs_reconcile(
+            "%13",
+            &["%13".to_string()],
+            &cols,
+        ));
+        assert!(!newly_provisioned_route_needs_reconcile(
+            "%8",
+            &["%13".to_string()],
+            &cols,
+        ));
+        assert!(!newly_provisioned_route_needs_reconcile(
+            "%13",
+            &["%13".to_string()],
+            &["tasks/software/lazily.md".to_string()],
+        ));
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn newly_spawned_third_pane_replaces_outgoing_split_and_stashes_live_turn() {
+        let _env_guard = env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-post-provision-two-pane-reconcile");
+        let outgoing_pane = iso.auto_start("test", dir.path()).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let neighbor_pane = iso.split_window(&outgoing_pane, dir.path(), "-dh").unwrap();
+        let incoming_pane = iso.split_window(&neighbor_pane, dir.path(), "-dh").unwrap();
+        let target_window = iso.pane_window(&incoming_pane).unwrap();
+
+        let write_doc = |name: &str, session: &str| {
+            let file = dir.path().join(name);
+            let content = format!(
+                "---\nagent_doc_session: {session}\nagent_doc_format: template\nagent: codex\n---\n\n<!-- agent:exchange patch=append -->\n### User Prompt\n\n{name}\n<!-- agent:boundary:base -->\n<!-- /agent:exchange -->\n"
+            );
+            std::fs::write(&file, &content).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &file,
+                &content,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
+            file
+        };
+        let outgoing = write_doc("agent-doc-bugs2.md", "route-outgoing-live");
+        let incoming = write_doc("lazily.md", "route-incoming-new");
+        let neighbor = write_doc("haiven-dev.md", "route-neighbor-visible");
+        let active_agent = write_mock_active_codex_turn_registered_agent_doc(dir.path());
+        let idle_agent = write_mock_registered_agent_doc(dir.path());
+        send_keys_with_retry(
+            &iso,
+            &outgoing_pane,
+            &format!("exec {} {}", active_agent.display(), outgoing.display()),
+        );
+        let outgoing_capture = wait_for_pane_contains(
+            &iso,
+            &outgoing_pane,
+            "esc to interrupt",
+            std::time::Duration::from_secs(5),
+        );
+        assert!(
+            outgoing_capture.contains("esc to interrupt"),
+            "outgoing fixture should retain an active turn: {outgoing_capture}"
+        );
+        launch_mock_registered_agent_doc(&iso, &incoming_pane, &idle_agent, &incoming);
+        launch_mock_registered_agent_doc(&iso, &neighbor_pane, &idle_agent, &neighbor);
+
+        for (session, pane, file) in [
+            ("route-outgoing-live", &outgoing_pane, &outgoing),
+            ("route-incoming-new", &incoming_pane, &incoming),
+            ("route-neighbor-visible", &neighbor_pane, &neighbor),
+        ] {
+            sessions::register(session, pane, &file.to_string_lossy()).unwrap();
+        }
+        let columns = vec![
+            incoming.to_string_lossy().to_string(),
+            neighbor.to_string_lossy().to_string(),
+        ];
+
+        reconcile_newly_provisioned_route(
+            &iso,
+            &incoming_pane,
+            std::slice::from_ref(&incoming_pane),
+            &columns,
+        );
+
+        let visible = iso.list_panes_ordered(&target_window).unwrap();
+        assert_eq!(
+            visible.len(),
+            2,
+            "new pane must replace, not append: {visible:?}"
+        );
+        assert!(visible.contains(&incoming_pane));
+        assert!(visible.contains(&neighbor_pane));
+        assert!(!visible.contains(&outgoing_pane));
+        assert!(iso.pane_alive(&outgoing_pane));
+        let outgoing_window = iso.pane_window(&outgoing_pane).unwrap();
+        let outgoing_window_name = iso
+            .raw_cmd(&[
+                "display-message",
+                "-p",
+                "-t",
+                &outgoing_window,
+                "#{window_name}",
+            ])
+            .unwrap();
+        assert!(
+            outgoing_window_name.trim().starts_with("stash"),
+            "outgoing turn must remain alive in stash, got {outgoing_window_name:?}"
         );
     }
     #[test]

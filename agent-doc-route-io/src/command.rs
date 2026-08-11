@@ -199,13 +199,17 @@ pub fn run_with_tmux_with_options(
     };
 
     match pane_id {
-        Ok(ref _pid) => {
-            // NOTE: sync_after_claim was removed here to eliminate the double-sync
-            // glitch. The JB plugin already triggers sync with the correct window
-            // and col_args via the route call. A second sync (with window=None)
-            // races with the first sync's stash operations, causing panes to
-            // bounce between stash and agent-doc window visibly.
-            // The JB plugin's sync call is authoritative - no defensive re-sync needed.
+        Ok(ref pid) => {
+            // The command plane publishes the exact editor layout before route
+            // dispatch, but a pane provisioned by this route did not exist during
+            // that pass. Reconcile only that fresh-target case. Existing-pane
+            // routes stay single-sync and therefore keep the anti-bounce guarantee.
+            crate::startup_sync::reconcile_newly_provisioned_route(
+                tmux,
+                pid,
+                &created_panes,
+                col_args,
+            );
             agent_doc_controller_io::editor_route_errors::clear_for_success(
                 file,
                 "route_success",

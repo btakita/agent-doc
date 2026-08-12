@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -1269,18 +1269,52 @@ Coverage with the corpus present is unchanged: 62/62 pass, 139 fixtures, 149/149
 One observation I am *not* filing, so it stays your call: `tests/test_reactive_graph_conformance.cpp` still uses `cell` and `slot` around line 1338 and the compiler deprecates both in favour of `source` and `computed` — leftover from the v2 kernel rename. Harmless today, but it is test code teaching the old vocabulary.
 
 Queue is drained. Exchange is at ~1250 lines / 38 sections, well past the clear threshold — worth a `compact` before the next substantial run.
-<!-- agent:boundary:e27f184a:lazily -->
+
+### Re: #lzgdvocab — the vocabulary landed; the id-layer premise was wrong twice — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzgdvocab]
+
+`lazily-gd@0fa9094`, CI `31554785155` green on the pinned 4.4.1 floor. `lazily-spec@fbdacd2`, CI `31554800613` green. Pointers bumped in `6ee8ab9e5e`. **All 21 canonical `reactive-graph` fixtures now replay and `KNOWN_UNCOVERED` is empty.**
+
+The four ops (`fanout` / `churn` / `dispose_fanout` / `dispose_stale_handle`) plus the `observed_count` expectation they carry were the easy half, and they went in as written. Subscribers are **Effects, not derived cells** — `churn_returns_to_baseline` asserts `observed_count` on a publish, and only a sink observes a publish without being pulled, so a `Computed` subscriber satisfies every degree assertion in both fixtures while the propagation assertion silently reads 0.
+
+**The hard half didn't exist.** The item said id recycling was a design decision needing "an explicit id layer — a free-list over slot indices with a generation tag, the shape lazily-rs's `SlotId` uses". Two things were wrong with that, and the second outranks the first.
+
+Godot's ObjectDB already *is* that layer. Measured over 200k allocations: the slot recycles on 199,744 of them while the composed id never repeats once, because the high bits carry a validator that increments on each reuse. So the repo's own justification for keying the edge index on `get_instance_id()` — "Godot instance ids are monotonic" — is false as stated; it is generational, which is a stronger property and the one the fixture presumes a binding must build. That is now `test_instance_ids_are_generational_not_monotonic` rather than a comment.
+
+But the fixture's aliasing hazard can't arise here for a plainer reason: **`_dependents` lives inside the node**, so a fresh node has a fresh index. There is no owner-keyed side table to alias, whatever the ids do. I tried to demonstrate the id scheme was load-bearing by keying `_dependents` on the slot alone (`id & 0xFFFFFFFF`) and the whole suite stayed green — the entries are `WeakRef`s and a slot is only handed out after its occupant is gone. That negative is recorded in the test rather than dropped, because the claim I was about to write in its place would have been unbacked.
+
+Same discipline on the other trivially-satisfied step: `dispose_stale_handle` is structural here, since handles are `RefCounted` references — one of the two outs the fixture's own note names. I say so in `AGENTS.md` instead of implying it discriminates. The runner still *checks* the declared `handle_kind` against the handle it recorded, so a runner disposing something else is caught.
+
+What does discriminate, measured against kernel mutations rather than assumed:
+
+- `Effect._detach()` → no-op: `churn_returns_to_baseline` reports **508 and 509** dependents against a baseline of 8 — the leak the fixture predicts, to the count — and `recycled_id_inherits_nothing` reports 64 where it wants 0.
+- `Computed._detach()` → no-op: `recycled_id_inherits_nothing` reddens alongside four already-replayed fixtures.
+
+Two things fell out that were worth fixing in the same pass:
+
+- **The empty-ledger spelling is a trap.** `KNOWN_UNCOVERED=()` on one line would have been silently mis-parsed: lazily-spec's `check-coverage-claims.mjs` scans from `NAME=(` to the next line beginning with `)`, so a one-liner has no terminator and the read runs on into whichever array closes next — a wrong gap ledger in the guard whose entire job is making gaps visible. Kept multi-line, with the reason written down.
+- **Emptying the ledger forces the matrix.** `check-coverage-claims.mjs` fails a `~` its ledger cannot distinguish from `✅` (`#lzpartialmarkadjudicate`), so it went red the moment the excuses were deleted. GDScript's `reactive-graph` detail row is now `✅`. The **family** roll-up stays `~` — `thread-safe-context` and `async-reactive-context` are `—`, and `merge-algebra` still cites `collections/mergecell_algebra.json`, outside gd's implemented families.
+- The runner now disposes its root scope after the last expectation. Every subscriber body captures the runner, so `runner → scope → effect → body → runner` is a cycle and `RefCounted` has no collector; the 1000-subscriber churn fixture took leaked-at-exit instances from 191 to 781. Clearing the member list brings it to 263. The runner proving a graph doesn't leak shouldn't leak that graph on the way out.
+
+lazily-spec's `AGENTS.md` was dirty from another session — committed with `--only` on `coverage.json` and `docs/coverage.md`, and it is still unstaged there.
+
+Queue is drained. Exchange is at ~1290 lines / 39 sections, well past the clear threshold; `compact` before the next substantial run.
+<!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- 🚧 do [#lzgdvocab]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzgdvocab] lazily-gd's reactive-graph runner is missing the fanout/churn/dispose_fanout/dispose_stale_handle bulk ops AND real id recycling, so 2 canonical fixtures remain: churn_returns_to_baseline.json and recycled_id_inherits_nothing.json. Recycling is the hard half and is a DESIGN decision, not runner vocabulary: Godot instance ids are monotonic and never alias, so 'a recycled id inherits nothing' has no natural referent — the binding needs an explicit id layer (a free-list over slot indices with a generation tag, the shape lazily-rs's SlotId uses) before the fixture means anything. Removing both entries from KNOWN_UNCOVERED in scripts/check-conformance-coverage.sh is the definition of done. DONE already: the merge_cell group (5 fixtures) landed with LazilyMergePolicy + Source.merge + ctx.source_with, and GDScript is now ~ on merge-algebra.
+- [ ] 🚧 [#lzgdvocab] lazily-gd's reactive-graph runner is missing the fanout/churn/dispose_fanout/dispose_stale_handle bulk ops AND real id recycling, so 2 canonical fixtures remain: churn_returns_to_baseline.json and recycled_id_inherits_nothing.json. Recycling is the hard half and is a DESIGN decision, not runner vocabulary: Godot instance ids are monotonic and never alias, so 'a recycled id inherits nothing' has no natural referent — the binding needs an explicit id layer (a free-list over slot indices with a generation tag, the shape lazily-rs's SlotId uses) before the fixture means anything. Removing both entries from KNOWN_UNCOVERED in scripts/check-conformance-coverage.sh is the definition of done. DONE already: the merge_cell group (5 fixtures) landed with LazilyMergePolicy + Source.merge + ctx.source_with, and GDScript is now ~ on merge-algebra.
 <!-- /agent:backlog -->
 
 ## Review

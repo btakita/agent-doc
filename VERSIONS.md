@@ -76,6 +76,29 @@ one and a headless identity still resolves to nothing, so both fail-closed
 guarantees are unchanged — proven by the dead-editor and headless negative
 controls beside the new test.
 
+- **Fix: a retained canonical projection no longer adopts over unpublished
+  operator text (JetBrains plugin 0.2.353,
+  `#retainedprojectionclobbersoperatortext`).**
+
+The third defect from the same incident, and the one that cost real work. While
+registration was being refused the operator kept typing into a buffer that
+reached nothing — not the controller, not the CRDT, not disk. A compaction
+computed at 04:14:47 against disk could not be delivered, was retained, and at
+04:23 was adopted over that buffer. The prompt existed only there, so it
+survived nowhere: not git, not the compaction archive, not a snapshot.
+
+Registration arms a retained-canonical suppression so a stale restarted buffer
+cannot publish itself over controller state. That reasoning is right for a
+restarted IDE and exactly inverted for a live one. The shadow separates the two
+and needs no new state: it is the last text the plugin proved reached canonical,
+and it is in-memory, so a restarted IDE has none and its adoption path is
+unchanged. A live buffer that has moved past its shadow holds operator text the
+controller has never seen, and the plugin now keeps it and forwards it as a
+local delta instead of adopting over it. Unknown buffer text is not divergence,
+so a closed document cannot strand a retained projection. Verified by mutation:
+restoring the old unconditional adoption reddens the positive case while all
+three negative controls stay green.
+
 ## 0.35.244
 
 - **Fix: captured edit-and-gate replay converges after a partially published

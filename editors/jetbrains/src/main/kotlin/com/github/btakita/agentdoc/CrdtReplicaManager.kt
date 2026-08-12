@@ -2296,11 +2296,48 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             // Controller state survives an IDEA/plugin restart; this local set
             // does not. Restore the fail-closed baseline before any whole-editor
             // synchronization can publish a stale restarted buffer.
-            retainedCanonicalProjectionPaths.add(filePath)
-            log.info(
-                "[crdt-replica] registration retained the controller canonical projection for " +
-                    "${File(filePath).name}; canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
-            )
+            //
+            // `#retainedprojectionclobbersoperatortext`: that reasoning holds for
+            // a RESTARTED buffer and inverts for a live one. When registration is
+            // refused for hours (see `#registeridentitypid`) the operator keeps
+            // typing into a buffer that reaches nothing, and a retained projection
+            // computed before those keystrokes then adopts over them on attach.
+            // Measured 2026-08-12: a compaction computed at 04:14:47 against disk
+            // was retained undelivered, and at 04:23 it replaced a buffer holding a
+            // prompt typed in between. The prompt existed only in that buffer, so
+            // it was not in git, not in the CRDT, and not in the compaction
+            // archive — it was simply gone.
+            //
+            // The shadow separates the two cases exactly, and needs no new state:
+            // it is the last text this plugin PROVED reached canonical, and it
+            // lives in memory. A restarted IDE has none, so that path is unchanged
+            // and still fail-closed. A live IDE whose buffer has moved past its
+            // shadow is holding operator text the controller has never seen, and
+            // adopting canonical over it is data loss, not recovery.
+            // The live buffer, not the caller's captured cut: this decides whether
+            // operator text is about to be destroyed, so it must read what the
+            // operator can currently see.
+            val bufferText = editorBufferText(filePath) ?: initialEditorText
+            val publishedShadow = shadows[filePath]
+            if (retainedCanonicalWouldClobberOperatorTextUtil(publishedShadow, bufferText)) {
+                log.warn(
+                    "[crdt-replica] registration retained a controller canonical projection for " +
+                        "${File(filePath).name} while the buffer holds unpublished operator text; " +
+                        "keeping the buffer and forwarding it as a local delta. " +
+                        "shadow_hash=${contentHash(publishedShadow!!)} " +
+                        "buffer_hash=${contentHash(bufferText!!)} " +
+                        "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
+                )
+                // Do NOT arm the retained-canonical suppression. The ordinary
+                // local-delta path owns this text and must publish it.
+                retainedCanonicalProjectionPaths.remove(filePath)
+            } else {
+                retainedCanonicalProjectionPaths.add(filePath)
+                log.info(
+                    "[crdt-replica] registration retained the controller canonical projection for " +
+                        "${File(filePath).name}; canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
+                )
+            }
         }
         if (bootstrapFromControllerCanonical) {
             nativeReloadResumeStates.remove(filePath)
@@ -2955,6 +2992,29 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
     }
 }
+
+/**
+ * Whether adopting a retained controller canonical projection would destroy
+ * operator text (`#retainedprojectionclobbersoperatortext`).
+ *
+ * [publishedShadow] is the last text this plugin PROVED reached canonical, held
+ * in memory; [bufferText] is what the operator can currently see. The two cases
+ * that reach the retained-canonical branch are opposite and must not be
+ * conflated:
+ *
+ *  - a RESTARTED IDE has no shadow (the map does not survive a restart), so its
+ *    buffer is a stale reconstruction and adopting canonical is the recovery;
+ *  - a LIVE IDE whose buffer has moved past its shadow is holding text the
+ *    controller has never seen — because registration was being refused — and
+ *    adopting canonical over it is data loss.
+ *
+ * Unknown buffer text is not divergence: without both facts this returns false
+ * and the historical fail-closed adoption stands.
+ */
+internal fun retainedCanonicalWouldClobberOperatorTextUtil(
+    publishedShadow: String?,
+    bufferText: String?,
+): Boolean = publishedShadow != null && bufferText != null && publishedShadow != bufferText
 
 internal fun shouldApplyRemoteCrdtUpdateUtil(update: ReplicaRemoteUpdate, clientId: Long): Boolean =
     update.origin != clientId

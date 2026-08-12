@@ -9084,7 +9084,14 @@ fn controller_crdt_replica_data(
                     .transpose()
                     .context("CRDT replica register payload has invalid state_vector_b64")?
             };
-            let registration = match payload.editor_pid {
+            // `#registeridentitypid`: an editor integration that predates the
+            // explicit `editor_pid` field still names its PID inside the identity
+            // it has always sent, so resolve it there rather than falling through
+            // to the headless path and refusing a live editor forever.
+            let resolved_editor_pid = payload.editor_pid.or_else(|| {
+                agent_doc_crdt_relay_io::editor_process_id_from_identity(identity)
+            });
+            let registration = match resolved_editor_pid {
                 Some(editor_pid) => {
                     agent_doc_crdt_relay_io::register_editor_replica_for_file_incremental(
                         canonical,
@@ -9128,7 +9135,13 @@ fn controller_crdt_replica_data(
             }
         }
         ControllerCrdtReplicaMethod::Deregister => {
-            let removed = match payload.editor_pid {
+            // Same resolution on the way out, or an identity-resolved
+            // registration would deregister through the headless path and leave
+            // its editor attachment behind (`#registeridentitypid`).
+            let resolved_editor_pid = payload.editor_pid.or_else(|| {
+                agent_doc_crdt_relay_io::editor_process_id_from_identity(identity)
+            });
+            let removed = match resolved_editor_pid {
                 Some(editor_pid) => agent_doc_crdt_relay_io::deregister_editor_replica_for_file(
                     canonical, identity, editor_pid,
                 )?,
@@ -10629,6 +10642,7 @@ pub(crate) fn serve_with_options(
                 if controller_self_watchdog_should_suicide(
                     &runtime,
                     handoff_temp_socket.as_deref(),
+                    &public_sock,
                     controller_launched_at.elapsed(),
                     watchdog_threshold,
                 ) {
@@ -11533,6 +11547,7 @@ fn controller_supervisor_watchdog_tick(
 pub(crate) fn controller_self_watchdog_should_suicide(
     runtime: &ControllerRuntime,
     handoff_temp_socket: Option<&Path>,
+    public_sock: &Path,
     launched_elapsed: Duration,
     threshold: Duration,
 ) -> bool {
@@ -11546,6 +11561,11 @@ pub(crate) fn controller_self_watchdog_should_suicide(
         stale_after: threshold,
         is_handoff_replacement: handoff_temp_socket.is_some(),
         handoff_replacement_socket_exists: handoff_temp_socket.is_some_and(|temp| temp.exists()),
+        // `#strandedreplacementnopublic`: only `promote_handoff` (and its
+        // self-promoting twin) moves the recorded path onto the public socket, so
+        // this is the fact that says a completed handoff apart from a replacement
+        // whose socket simply vanished. Both look identical from the temp path.
+        replacement_promotion_recorded: bootstrap.socket_path == public_sock,
         // `#handoffdeadpredecessor`: only a recorded predecessor can be dead.
         // No predecessor stays `None`, which never reads as dead.
         previous_controller_alive: bootstrap

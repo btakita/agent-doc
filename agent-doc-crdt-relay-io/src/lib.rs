@@ -613,6 +613,10 @@ fn replica_registration_lock(document_hash: &str) -> Result<Arc<Mutex<()>>> {
 /// Both integrations append document/refresh suffixes after their stable
 /// `editor-pid-uuid` prefix, so only the decimal field immediately after the
 /// integration name is significant here.
+///
+/// Also the fallback source of a registration's editor PID when the request
+/// itself does not carry one (`#registeridentitypid`) — see
+/// [`editor_process_id_from_identity`].
 fn editor_process_id(identity: &str) -> Option<u32> {
     let rest = ["jetbrains-", "vscode-", "zed-"]
         .into_iter()
@@ -622,6 +626,28 @@ fn editor_process_id(identity: &str) -> Option<u32> {
         return None;
     }
     pid.parse().ok()
+}
+
+/// The editor PID an identity names, for callers that must resolve a
+/// registration's owning editor without an explicit PID field
+/// (`#registeridentitypid`).
+///
+/// A replica registration is refused as `detached_authority` when it carries no
+/// LIVE editor PID, which is correct — a dead editor must never bootstrap
+/// authority. But the PID was being read from one place only: an explicit
+/// payload field. An editor integration that predates that field sends nothing,
+/// so its registration is refused on every retry, forever, for every document —
+/// even though the same request has always carried the PID inside its identity
+/// (`jetbrains-<pid>-<uuid>:...`). Observed 2026-08-11: an IDE running since
+/// before that field was added retried every 8 seconds across four projects
+/// while every version check read current, because the plugin on DISK was
+/// current and only the loaded generation was not.
+///
+/// This is not a weakening of the gate. The derived PID is checked for liveness
+/// exactly like an explicit one, and a headless replica — whose identity has no
+/// editor prefix — still resolves to `None` and stays fail-closed.
+pub fn editor_process_id_from_identity(identity: &str) -> Option<u32> {
+    editor_process_id(identity)
 }
 
 fn editor_route_from_replica_identity(identity: &str) -> Option<ReplicaSignalRoute> {
@@ -4295,6 +4321,75 @@ mod tests {
         assert!(!hub_is_allocated(
             &agent_doc_fs::document_state_hash(&doc).unwrap()
         ));
+    }
+
+    /// `#registeridentitypid` — the 2026-08-11 fleet-wide refusal.
+    ///
+    /// An IDE running a plugin generation older than the explicit `editor_pid`
+    /// field sends no PID, so its live registration was refused as
+    /// `detached_authority` on every retry for every document. The PID was in the
+    /// identity the whole time.
+    #[test]
+    fn identity_derived_pid_bootstraps_a_registration_that_carries_no_explicit_pid() {
+        let (_dir, doc) = temp_doc("identity-pid-register.md");
+        let editor_pid = 515_151;
+
+        let registration = register_replica_for_file_incremental_with_liveness(
+            &doc,
+            &format!("jetbrains-{editor_pid}-abc:/tmp/identity-pid-register.md"),
+            None,
+            // Exactly what the older generation sends: nothing.
+            None,
+            |pid| pid == editor_pid,
+        );
+        // Resolution happens at the controller seam, so the relay still refuses a
+        // bare `None`; the seam is what must supply the derived PID.
+        assert!(registration.unwrap().is_none());
+
+        let resolved = editor_process_id_from_identity(&format!(
+            "jetbrains-{editor_pid}-abc:/tmp/identity-pid-register.md"
+        ));
+        assert_eq!(resolved, Some(editor_pid));
+
+        let registration = register_replica_for_file_incremental_with_liveness(
+            &doc,
+            &format!("jetbrains-{editor_pid}-abc:/tmp/identity-pid-register.md"),
+            None,
+            resolved,
+            |pid| pid == editor_pid,
+        )
+        .unwrap()
+        .expect("a live editor named only by its identity must still bootstrap");
+        assert_ne!(registration.client_id, 0);
+        assert!(crdt_authority_for_file(&doc).editor_attached());
+    }
+
+    /// The negative controls that keep the fallback from being a hole: a DEAD
+    /// identity-named editor still cannot bootstrap, and a headless identity
+    /// resolves to no PID at all and stays fail-closed.
+    #[test]
+    fn identity_derived_pid_stays_fail_closed_for_dead_and_headless_replicas() {
+        let (_dir, doc) = temp_doc("identity-pid-fail-closed.md");
+        let identity = "jetbrains-777777-def:/tmp/identity-pid-fail-closed.md";
+
+        let registration = register_replica_for_file_incremental_with_liveness(
+            &doc,
+            identity,
+            None,
+            editor_process_id_from_identity(identity),
+            |_| false,
+        )
+        .unwrap();
+        assert!(
+            registration.is_none(),
+            "a dead editor must not bootstrap just because its identity names a pid"
+        );
+
+        assert_eq!(
+            editor_process_id_from_identity("generic:headless-replica"),
+            None,
+            "a headless identity names no editor and must resolve to no pid"
+        );
     }
 
     #[test]

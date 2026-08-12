@@ -113,8 +113,18 @@ class CrdtReplicaForwarder(
      * document) — the caller must keep recovery controller-owned instead of
      * treating editor projections as authority.
      */
+    /**
+     * Why the most recent [register] was refused, or `null` if it has not failed
+     * since the last success. Read by operator-facing commands so a refusal is
+     * reported with its cause instead of as an unexplained attach failure.
+     */
+    @Volatile
+    var lastRegisterFailureReason: String? = null
+        private set
+
     fun register(): Boolean {
         val started = System.nanoTime()
+        lastRegisterFailureReason = null
         try {
             val registerStarted = System.nanoTime()
             val ack = transport.register(filePath, identity, resumeState?.stateVector).also {
@@ -126,7 +136,14 @@ class CrdtReplicaForwarder(
                 // wedge (controller.sock down / protocol mismatch / oversized bootstrap
                 // round-trip) is undiagnosable from idea.log. The transport already
                 // recorded the specific `send` failure via `lastError`.
-                log.warn("[crdt-replica] transport.register returned null for ${File(filePath).name}; reason=${transport.lastRegisterError() ?: "unknown"}")
+                val reason = transport.lastRegisterError() ?: "unknown"
+                // Retain the reason for the operator-facing surfaces too, not only
+                // idea.log. A command that fails because registration was refused
+                // must be able to say WHY and name the remedy; "could not be
+                // attached" alone sends the operator looking at the controller,
+                // which is usually healthy (`#replicarefusalreason`).
+                lastRegisterFailureReason = reason
+                log.warn("[crdt-replica] transport.register returned null for ${File(filePath).name}; reason=$reason")
                 return false
             }
             clientId = ack.clientId

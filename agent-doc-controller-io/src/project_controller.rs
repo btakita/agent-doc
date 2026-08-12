@@ -11915,6 +11915,7 @@ agent:queue\n\
             !controller_self_watchdog_should_suicide(
                 &runtime,
                 None,
+                &socket_path(dir.path()),
                 Duration::ZERO,
                 Duration::from_secs(45),
             ),
@@ -11934,6 +11935,7 @@ agent:queue\n\
             !controller_self_watchdog_should_suicide(
                 &runtime,
                 None,
+                &socket_path(dir.path()),
                 Duration::ZERO,
                 Duration::from_secs(0),
             ),
@@ -11954,6 +11956,7 @@ agent:queue\n\
             controller_self_watchdog_should_suicide(
                 &runtime,
                 None,
+                &socket_path(dir.path()),
                 Duration::ZERO,
                 Duration::from_secs(45),
             ),
@@ -11991,6 +11994,7 @@ agent:queue\n\
         assert!(controller_self_watchdog_should_suicide(
             &runtime,
             Some(temp.as_path()),
+            &socket_path(dir.path()),
             Duration::from_secs(600),
             Duration::from_secs(45),
         ));
@@ -11999,7 +12003,10 @@ agent:queue\n\
     fn self_watchdog_keeps_replacement_after_promote_rename_removes_temp_socket() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        // A completed handoff renamed temp -> public, so the temp path is gone.
+        // A completed handoff renamed temp -> public, so the temp path is gone —
+        // and `promote_handoff` recorded `socket_path = public`. That RECORD is
+        // what makes this authoritative; the missing temp socket alone is also
+        // the signature of the `#strandedreplacementnopublic` wedge below.
         let temp = dir.path().join("controller-handoff-1234-9.sock");
         assert!(!temp.exists());
         let runtime = runtime_for_bootstrap(preparing_runtime_bootstrap(
@@ -12011,12 +12018,52 @@ agent:queue\n\
             !controller_self_watchdog_should_suicide(
                 &runtime,
                 Some(temp.as_path()),
+                &socket_path(dir.path()),
                 Duration::from_secs(600),
                 Duration::from_secs(45),
             ),
-            "a promoted+renamed replacement (temp socket gone) is authoritative, never stranded"
+            "a promoted replacement is authoritative because its RECORDED socket_path \
+             is the public one — not because the temp socket is gone, which is equally \
+             true of the #strandedreplacementnopublic wedge"
         );
     }
+    /// `#strandedreplacementnopublic` — the 2026-08-11 6h58m wedge, end to end.
+    ///
+    /// Generation 536 was launched as a handoff replacement, its predecessor died
+    /// without promoting, its temp socket went away, and `abort_handoff` left it
+    /// `Stable` with no handoff clock while `socket_path` still named the private
+    /// path. Every `Preparing`-keyed escape is dark and the stranded rule wanted a
+    /// socket that no longer existed, so the watchdog ticked for seven hours and
+    /// said "healthy" every time. Meanwhile `controller.sock` resolved to nothing:
+    /// editor replicas could not attach and an `agent-doc write --commit` blocked
+    /// for 8h.
+    #[test]
+    fn self_watchdog_suicides_for_a_replacement_that_lost_its_socket() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        // The temp socket is gone — nothing left to rename onto the public path.
+        let temp = dir.path().join("controller-handoff-3021135-536.sock");
+        assert!(!temp.exists());
+        let mut bootstrap =
+            preparing_runtime_bootstrap(dir.path(), ControllerHandoffState::Stable, None);
+        // `abort_handoff` writes Stable + clears the clock but never moves this
+        // off the private path, so no promotion was ever recorded.
+        bootstrap.socket_path = temp.clone();
+        bootstrap.previous_controller_pid = Some(u32::MAX);
+        let runtime = runtime_for_bootstrap(bootstrap);
+
+        assert!(
+            controller_self_watchdog_should_suicide(
+                &runtime,
+                Some(temp.as_path()),
+                &socket_path(dir.path()),
+                Duration::from_secs(25_080),
+                Duration::from_secs(45),
+            ),
+            "a replacement that can neither be promoted nor reached must self-terminate"
+        );
+    }
+
     #[test]
     fn self_watchdog_suicide_marks_failed_for_stranded_stable_replacement() {
         // The M1b structural watchdog hands a `Stable`-in-memory stranded replacement

@@ -2274,7 +2274,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             resumeState = retainedResumeState,
         )
         if (!forwarder.register()) {
-            recordRegisterFailure(filePath)
+            recordRegisterFailure(filePath, forwarder.lastRegisterFailureReason ?: "controller-register")
+            forwarder.lastRegisterFailureReason?.let { attachFailureReasons[filePath] = it }
             if (cached != null) {
                 log.warn("[crdt-replica] replacement register failed for ${File(filePath).name}; retained cached forwarder")
             }
@@ -2453,6 +2454,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     }
 
     private fun clearRegisterFailure(filePath: String) {
+        attachFailureReasons.remove(filePath)
         registerFailureCounts.remove(filePath)
         registerRetryAfterMs.remove(filePath)
         registerRetryProjections.remove(filePath)
@@ -2874,6 +2876,42 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         fun hasOpenDocumentReplica(filePath: String): Boolean =
             instances.values.any { it.forwarders.containsKey(filePath) }
 
+        /**
+         * Why the most recent replica attach for [filePath] was refused, or `null`
+         * when the last attempt succeeded or none has run (`#replicarefusalreason`).
+         *
+         * Operator-facing commands gate on `ensureReplicaForOpenDocument` returning
+         * false. Reporting only that fact sends the operator to the controller,
+         * which is typically healthy — the actual cause lives here.
+         */
+        fun lastAttachFailureReason(filePath: String): String? =
+            instances.values.firstNotNullOfOrNull { it.attachFailureReasons[filePath] }
+
+        /**
+         * A one-line operator remedy for [reason], or `null` when there is no
+         * specific advice beyond the reason itself.
+         *
+         * `detached_authority` on a *registration* means the controller saw no
+         * live editor PID for the request. Registration is what establishes editor
+         * authority, so the controller does not refuse it for lacking authority —
+         * it refuses when the request carries no live PID, which is what a plugin
+         * generation loaded before that field existed sends. The IDE keeps the
+         * generation it started with, so the installed jar can read current on disk
+         * while the loaded one is not: only an IDE restart replaces it. This is the
+         * same conclusion the controller reaches in its refusal-storm advisory.
+         */
+        fun attachFailureRemedy(reason: String): String? = when {
+            reason.contains("detached_authority") ->
+                "Restart the IDE. The controller saw no live editor PID on the registration, which is " +
+                    "what a plugin generation loaded before the current install sends. Reloading the " +
+                    "native library or recycling the controller cannot replace a loaded plugin generation."
+            reason.contains("socket_unavailable") ->
+                "No project controller is listening for that document's project root; start or recycle it."
+            reason.contains("not_agent_doc_document") ->
+                "That file is not an agent-doc session document (no agent_doc_* frontmatter, no <!-- agent: markers)."
+            else -> null
+        }
+
         fun isApplyingNonOperatorMutation(filePath: String): Boolean =
             applyingAgentMutations.contains(filePath) ||
                 isApplyingRemote(filePath) ||
@@ -2904,6 +2942,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 .incrementAndGet()
         }
     }
+
+    /** Last refusal reason per document path; cleared on a successful register. */
+    private val attachFailureReasons = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     private fun ownsFilePath(filePath: String): Boolean {
         val base = project.basePath ?: return false

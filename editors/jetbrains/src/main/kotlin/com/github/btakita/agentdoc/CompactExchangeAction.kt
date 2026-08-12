@@ -67,11 +67,24 @@ class CompactExchangeAction : AnAction() {
                         }
                         if (!attached) {
                             refresher.clearTransientStatus(file.path, statusToken)
+                            // `#replicarefusalreason`: report the refusal CAUSE and its
+                            // remedy. "Could not be attached" alone points the operator at
+                            // the controller, which is usually healthy and reports ready —
+                            // observed twice on 2026-08-11, where the real cause was an IDE
+                            // running a plugin generation older than the installed jar.
+                            val reason = CrdtReplicaManager.lastAttachFailureReason(file.path)
+                            val remedy = reason?.let { CrdtReplicaManager.attachFailureRemedy(it) }
                             TerminalUtil.notifyError(
                                 project,
-                                "Compact Exchange was not started because the open editor replica " +
-                                    "could not be attached to its owning project controller. " +
-                                    "The editor buffer and disk were left unchanged.",
+                                buildString {
+                                    append(
+                                        "Compact Exchange was not started because the open editor replica " +
+                                            "could not be attached to its owning project controller.",
+                                    )
+                                    if (reason != null) append(" Cause: $reason.")
+                                    if (remedy != null) append(" $remedy")
+                                    append(" The editor buffer and disk were left unchanged.")
+                                },
                             )
                             return@invokeLater
                         }

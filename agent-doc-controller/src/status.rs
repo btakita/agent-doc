@@ -523,6 +523,14 @@ pub struct ControllerWatchdogFacts {
     pub stale_after: Duration,
     pub is_handoff_replacement: bool,
     pub handoff_replacement_socket_exists: bool,
+    /// Whether this replacement's promotion was ever recorded — its
+    /// `socket_path` moved onto the public path, which only `promote_handoff`
+    /// and its self-promoting twin write.
+    ///
+    /// Needed because a MISSING temp socket means two opposite things: a healthy
+    /// completed handoff, or a replacement that can never be promoted or reached
+    /// (`#strandedreplacementnopublic`). This is what tells them apart.
+    pub replacement_promotion_recorded: bool,
     /// Whether the controller this one is replacing is still running.
     /// `None` when there is no predecessor or liveness could not be determined —
     /// unknown must never read as dead (`#handoffdeadpredecessor`).
@@ -555,6 +563,12 @@ pub fn controller_watchdog_should_suicide(facts: ControllerWatchdogFacts) -> boo
     ) || handoff_replacement_is_stranded(
         facts.is_handoff_replacement,
         facts.handoff_replacement_socket_exists,
+        facts.launched_elapsed,
+        facts.stale_after,
+    ) || handoff_replacement_lost_its_socket(
+        facts.is_handoff_replacement,
+        facts.handoff_replacement_socket_exists,
+        facts.replacement_promotion_recorded,
         facts.launched_elapsed,
         facts.stale_after,
     )
@@ -636,6 +650,44 @@ pub fn handoff_replacement_is_stranded(
     stale_after: Duration,
 ) -> bool {
     is_handoff_replacement && handoff_replacement_socket_exists && launched_elapsed > stale_after
+}
+
+/// A handoff replacement whose temp socket is GONE and whose promotion was never
+/// recorded (`#strandedreplacementnopublic`).
+///
+/// The last hole in the watchdog, and the worst one. Everything above keys on
+/// `Preparing`, and [`handoff_replacement_is_stranded`] requires the temp socket
+/// to still exist — so a replacement that is `Stable` in memory with its socket
+/// already gone satisfies nothing at all. It cannot be promoted, because
+/// promotion is a rename of a file that no longer exists; it cannot be reached,
+/// because no client resolves a path that no longer exists; and it holds the
+/// bootstrap record, so nothing else binds the public socket either.
+///
+/// Observed live 2026-08-11: generation 536 sat exactly here for **6h58m** with
+/// a dead predecessor while `controller.sock` resolved to nothing. Every editor
+/// replica failed to attach ("could not be attached to its owning project
+/// controller") and an `agent-doc write --commit` blocked for 8h. Not one
+/// watchdog tick fired in that window. `abort_handoff` is one route in: it
+/// writes `Stable` and clears the handoff clock, but leaves `socket_path` on the
+/// private path — so the controller declares itself healthy while unreachable.
+///
+/// The missing socket alone cannot decide this: it is equally the signature of a
+/// HEALTHY promotion, where the client renamed temp onto the public path. What
+/// separates them is whether promotion was ever recorded — `socket_path` moving
+/// to the public path, which only `promote_handoff` and its self-promoting twin
+/// write. Absence of the artifact is not evidence of health; that is the
+/// `#idlerevisionreactive` rule again, in the direction that costs hours.
+pub fn handoff_replacement_lost_its_socket(
+    is_handoff_replacement: bool,
+    handoff_replacement_socket_exists: bool,
+    replacement_promotion_recorded: bool,
+    launched_elapsed: Duration,
+    stale_after: Duration,
+) -> bool {
+    is_handoff_replacement
+        && !handoff_replacement_socket_exists
+        && !replacement_promotion_recorded
+        && launched_elapsed > stale_after
 }
 
 /// `#stuckhandoffselfheal` — a promoted-but-stranded replacement should COMPLETE its
@@ -1376,6 +1428,98 @@ mod tests {
         ));
     }
 
+    /// `#strandedreplacementnopublic` — the twin of the rule above, for the case
+    /// it deliberately does not cover.
+    #[test]
+    fn handoff_replacement_that_lost_its_socket_needs_no_recorded_promotion() {
+        let stale_after = Duration::from_secs(45);
+
+        // Socket gone, promotion never recorded, past the threshold: unreachable
+        // and unpromotable. This is the 6h58m wedge.
+        assert!(handoff_replacement_lost_its_socket(
+            true,
+            false,
+            false,
+            Duration::from_secs(46),
+            stale_after,
+        ));
+        // The negative control that makes this rule safe: the temp socket is
+        // ALSO gone after a healthy handoff, and the recorded promotion is the
+        // only thing separating the two. Without this distinction the rule would
+        // reap every successfully-promoted controller 45s into its life.
+        assert!(!handoff_replacement_lost_its_socket(
+            true,
+            false,
+            true,
+            Duration::from_secs(46),
+            stale_after,
+        ));
+        // Socket still present is the other rule's business, not this one's.
+        assert!(!handoff_replacement_lost_its_socket(
+            true,
+            true,
+            false,
+            Duration::from_secs(46),
+            stale_after,
+        ));
+        // The original controller is not a replacement.
+        assert!(!handoff_replacement_lost_its_socket(
+            false,
+            false,
+            false,
+            Duration::from_secs(46),
+            stale_after,
+        ));
+        // Still inside the handoff window.
+        assert!(!handoff_replacement_lost_its_socket(
+            true,
+            false,
+            false,
+            Duration::from_secs(45),
+            stale_after,
+        ));
+    }
+
+    /// `#strandedreplacementnopublic` — the 2026-08-11 6h58m wedge, replayed
+    /// through the whole policy rather than the one predicate.
+    ///
+    /// `abort_handoff` writes `Stable` + clears the handoff clock but leaves
+    /// `socket_path` on the private path, so all four `Preparing`-keyed escapes
+    /// are dark; the temp socket is gone, which used to close the fifth. Under
+    /// the old policy this returns `false` forever — the controller holds the
+    /// bootstrap record while `controller.sock` resolves to nothing, every
+    /// editor replica fails to attach, and writes block indefinitely.
+    #[test]
+    fn a_replacement_that_lost_its_socket_reaps() {
+        // 6h58m of wall clock, as measured.
+        let facts = ControllerWatchdogFacts {
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            now: 1_000,
+            stale_after: Duration::from_secs(45),
+            is_handoff_replacement: true,
+            handoff_replacement_socket_exists: false,
+            replacement_promotion_recorded: false,
+            previous_controller_alive: Some(false),
+            launched_elapsed: Duration::from_secs(25_080),
+        };
+        assert!(controller_watchdog_should_suicide(facts));
+
+        // The negative control that keeps this from reaping healthy controllers:
+        // the identical shape once promotion actually landed. A completed handoff
+        // has no temp socket either, so this is the ONLY thing separating them.
+        assert!(!controller_watchdog_should_suicide(ControllerWatchdogFacts {
+            replacement_promotion_recorded: true,
+            ..facts
+        }));
+
+        // And the original controller, which is not a replacement at all.
+        assert!(!controller_watchdog_should_suicide(ControllerWatchdogFacts {
+            is_handoff_replacement: false,
+            ..facts
+        }));
+    }
+
     #[test]
     fn handoff_replacement_self_promote_policy_requires_stable_socket_and_grace() {
         let grace = Duration::from_secs(3);
@@ -1434,6 +1578,7 @@ mod tests {
             stale_after,
             is_handoff_replacement: false,
             handoff_replacement_socket_exists: false,
+            replacement_promotion_recorded: true,
             previous_controller_alive: None,
             launched_elapsed: Duration::from_secs(0),
         };
@@ -1446,6 +1591,9 @@ mod tests {
                 ..base
             }
         ));
+        // A replacement that is still not the public controller past the
+        // threshold. `#strandedreplacementnopublic`: this used to also require
+        // the temp socket to exist, which excused the worst version of the wedge.
         assert!(controller_watchdog_should_suicide(
             ControllerWatchdogFacts {
                 is_handoff_replacement: true,
@@ -1455,6 +1603,8 @@ mod tests {
                 ..base
             }
         ));
+        // A replacement that DID take over the public socket is the authoritative
+        // controller and is never reaped for having been a replacement.
         assert!(!controller_watchdog_should_suicide(
             ControllerWatchdogFacts {
                 is_handoff_replacement: true,
@@ -1518,10 +1668,15 @@ mod preparing_without_a_handoff_clock_tests {
             handoff_started_at,
             now: 1_000,
             stale_after: Duration::from_secs(45),
-            is_handoff_replacement: true,
-            // The wedge that motivated this: the temporary socket is GONE, so
-            // `handoff_replacement_is_stranded` cannot fire either.
+            // The ORIGINAL controller, not a replacement: it serves the public
+            // socket directly and enters `Preparing` when it recycles itself.
+            // Stated this way so the stranded-replacement escape stays dark and
+            // these cases exercise the clock-less rule on its own — a fixture
+            // that could pass through a second escape proves nothing about the
+            // one it names.
+            is_handoff_replacement: false,
             handoff_replacement_socket_exists: false,
+            replacement_promotion_recorded: true,
             previous_controller_alive: None,
             launched_elapsed,
         }
@@ -1577,6 +1732,22 @@ mod preparing_without_a_handoff_clock_tests {
                 "{state:?} must not be reaped on age"
             );
         }
+
+        // The boundary this rule does NOT own: a *replacement* sitting in
+        // `Stable` with its socket gone and no recorded promotion is the
+        // `#strandedreplacementnopublic` wedge, and it IS reaped. Asserted here
+        // so restoring "Stable is always healthy" has to fail a test rather than
+        // read as a tidy-up.
+        assert!(controller_watchdog_should_suicide(ControllerWatchdogFacts {
+            is_handoff_replacement: true,
+            handoff_replacement_socket_exists: false,
+            replacement_promotion_recorded: false,
+            ..facts(
+                ControllerHandoffState::Stable,
+                None,
+                Duration::from_secs(100_000),
+            )
+        }));
     }
 
     /// When the handoff clock IS recorded, the existing predicate owns the
@@ -1608,7 +1779,11 @@ mod preparing_with_a_dead_predecessor_tests {
             now: 1_000,
             stale_after: Duration::from_secs(45),
             is_handoff_replacement: true,
-            handoff_replacement_socket_exists: true,
+            // Temp socket gone AND promotion recorded, so BOTH replacement
+            // escapes stay dark and the dead-predecessor rule is what these
+            // cases actually measure.
+            handoff_replacement_socket_exists: false,
+            replacement_promotion_recorded: true,
             previous_controller_alive,
             launched_elapsed,
         }

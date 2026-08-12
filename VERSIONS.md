@@ -2,6 +2,80 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.245
+
+- **Fix: a handoff replacement that lost its socket is reaped instead of wedging
+  the project for hours.**
+
+Observed 2026-08-11 on `src/haiven-dev`: controller generation 536 sat in a
+handoff for **6h58m** while `controller.sock` resolved to nothing. Every editor
+replica failed to attach ("the open editor replica could not be attached to its
+owning project controller", which is what a `compact exchange` reported), and an
+`agent-doc write --commit` blocked for 8h holding its harness session open. The
+self-watchdog ticked throughout and said healthy every time, and `admin inspect`
+plus `admin detect` were both green; only the controller's own argv showed the
+wedge.
+
+Four of the five suicide predicates key on `Preparing`, and `abort_handoff`
+writes `Stable` with a cleared handoff clock while leaving `socket_path` on the
+private path — so the replacement declared itself healthy while unreachable. The
+fifth, `handoff_replacement_is_stranded`, required the temp socket to still
+exist. That was backwards: a replacement whose socket is gone can never be
+promoted, because promotion is a rename of that file, and can never be reached,
+because no client resolves a path that is not there. The worst case was the
+invisible one.
+
+`handoff_replacement_lost_its_socket` closes it. The missing socket alone cannot
+decide the question — it is equally the signature of a healthy completed handoff
+— so the new rule pairs it with whether promotion was ever recorded, which only
+`promote_handoff` and its self-promoting twin write. The existing stranded and
+self-promote rules are unchanged, so the M1b promoted-but-stranded path keeps
+completing its own promotion rather than suiciding. Regression coverage replays
+the measured shape at both the policy and runtime layers, each with the
+healthy-promotion negative control that keeps the rule from reaping every
+successfully-promoted controller 45 seconds into its life.
+
+- **Fix: a refused editor-replica attach reports its cause and remedy (JetBrains
+  plugin 0.2.352).**
+
+The same operator hit a second, unrelated wedge with an identical-looking
+message: Compact Exchange said only that the replica "could not be attached to
+its owning project controller", which points at the controller — and the
+controller was healthy. The actual cause was an IDE that had been running since
+before the plugin generation which sends the editor PID on `replica_register`
+was installed. The relay refuses a registration carrying no live PID
+(`detached_authority`), the plugin retried every 8s forever for every open
+document in every project, and every version check read current because the
+installed jar on disk WAS current — only the loaded generation was not.
+
+The refusal reason was already in `idea.log` and thrown away at the operator
+surface. `CrdtReplicaForwarder` now retains it, `CrdtReplicaManager` exposes it
+per document with a remedy, and Compact Exchange reports both. For
+`detached_authority` the remedy names the IDE restart and says explicitly that
+reloading the native library or recycling the controller cannot replace a loaded
+plugin generation — the same conclusion the controller's own refusal-storm
+advisory reaches.
+
+- **Fix: a registration that carries no explicit editor PID resolves it from the
+  identity instead of being refused forever (`#registeridentitypid`).**
+
+This is the runtime half of the same incident, and it removes the IDE restart
+from the recovery path. A replica registration is refused as
+`detached_authority` when it carries no LIVE editor PID — correct, because a dead
+editor must never bootstrap authority. But the PID was read from exactly one
+place: an explicit payload field. An editor generation that predates that field
+sends nothing and is refused on every retry, forever, for every open document in
+every project, while the plugin ON DISK reads current and only the loaded
+generation is stale.
+
+The PID was in the request the whole time: editor identities are
+`jetbrains-<pid>-<uuid>:<path>`, and `editor_process_id` has always parsed them.
+The controller register/deregister seam now falls back to that when the explicit
+field is absent. The derived PID is liveness-checked exactly like an explicit
+one and a headless identity still resolves to nothing, so both fail-closed
+guarantees are unchanged — proven by the dead-editor and headless negative
+controls beside the new test.
+
 ## 0.35.244
 
 - **Fix: captured edit-and-gate replay converges after a partially published

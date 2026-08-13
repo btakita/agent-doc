@@ -358,6 +358,131 @@ pub fn repair_file_state(file: &Path) -> Result<Vec<String>> {
     repair_file_state_with_tmux(&tmux, file)
 }
 
+/// Rewrite a document's recorded pane→window binding from where the pane
+/// actually is (`#panewindowbindingrebind`).
+///
+/// `session doctor` reports recorded-vs-live window drift, and the pane-layout
+/// focus effect refuses to mirror onto a pane whose binding drifted — both
+/// correct, and together they mean a bad binding silently and permanently
+/// disables editor→tmux focus sync for that document. Nothing rewrote the
+/// binding: `project_binding_in` runs at bind time and never again, so
+/// `window_id` freezes at whatever was captured then.
+///
+/// Measured 2026-08-13: `tasks/haiven-dev.md` was bound `window=@0` on both the
+/// actor record and the registry entry. `@0` is not a live window here (`@6` is
+/// `agent-doc`, `@9` is `stash`), so the drift predicate was true wherever the
+/// pane sat — moving the pane back into the visible window did not help, and
+/// `session doctor --repair`, `resync --fix`, and `agent-doc sync` all left it.
+/// The sibling `tasks/sdk.md`, bound `window=@6`, worked throughout.
+///
+/// The live window is the only authority for where a pane IS; that is already
+/// why `pane_window_binding_drifted` exists, and this applies the same rule in
+/// the repair direction. Re-binding through `project_binding_in` also re-derives
+/// the recorded harness, which freezes at bind time for the same reason.
+///
+/// Conservative in the same way as the predicate it reuses: an unreadable record
+/// or a window tmux cannot report is not drift and is never repaired. The
+/// generation is preserved because the pane is unchanged — this corrects a
+/// stale FACT about a binding, it does not re-elect one.
+/// Public entry point, so the doctor can run this BEFORE the document-repair
+/// pass. The two are unrelated concerns, and document repair can legitimately
+/// fail (an attached editor with no replica, say) — ordering the binding repair
+/// behind it made a defect that permanently breaks focus sync unfixable exactly
+/// when the document was also unhealthy.
+pub fn repair_pane_window_binding(file: &Path) -> Result<Option<String>> {
+    let tmux = Tmux::default_server();
+    refresh_drifted_pane_window_binding(&tmux, file)
+}
+
+fn refresh_drifted_pane_window_binding(tmux: &Tmux, file: &Path) -> Result<Option<String>> {
+    let base_dir = match agent_doc_fs::find_project_root_canonical(file) {
+        Some(root) => root,
+        None => return Ok(None),
+    };
+    let file_key = file.to_string_lossy().to_string();
+    let Some(record) = agent_doc_session_actor_io::load_record_in(&base_dir, &file_key)? else {
+        return Ok(None);
+    };
+    if record.pane_id.trim().is_empty() {
+        return Ok(None);
+    }
+    let Some(live_window) = agent_doc_tmux_io::target_window_id(tmux, &record.pane_id) else {
+        return Ok(None);
+    };
+    let live_window = live_window.trim().to_string();
+    if live_window.is_empty() {
+        return Ok(None);
+    }
+
+    let registry_window = registry_window_for_pane(&base_dir, &record.pane_id)?;
+    let actor_drifted = agent_doc_controller::pane_layout::pane_window_binding_drifted(
+        &record.window_id,
+        Some(&live_window),
+    );
+    let registry_drifted = registry_window.as_deref().is_some_and(|window| {
+        agent_doc_controller::pane_layout::pane_window_binding_drifted(window, Some(&live_window))
+    });
+    if !actor_drifted && !registry_drifted {
+        return Ok(None);
+    }
+
+    let recorded = record.window_id.clone();
+    if actor_drifted {
+        agent_doc_session_actor_io::project_binding_in(
+            &base_dir,
+            &file_key,
+            &record.session_id,
+            &record.pane_id,
+            &live_window,
+            "session-doctor",
+            "live_window_rebind",
+        )?;
+    }
+    if registry_drifted {
+        rebind_registry_pane_window(&base_dir, &record.pane_id, &live_window)?;
+    }
+
+    Ok(Some(format!(
+        "Rebound pane `{}` for `{}` from stale window `{}` to its live window `{}`.",
+        record.pane_id,
+        file.display(),
+        recorded,
+        live_window,
+    )))
+}
+
+/// The window the durable registry records for `pane`, if it has an entry.
+fn registry_window_for_pane(base_dir: &Path, pane: &str) -> Result<Option<String>> {
+    let registry = agent_doc_session_registry_io::load_in(base_dir)?;
+    Ok(registry
+        .values()
+        .find(|entry| entry.pane == pane)
+        .map(|entry| entry.window.clone()))
+}
+
+/// Point the registry entry for `pane` at `live_window`, under the registry lock.
+fn rebind_registry_pane_window(base_dir: &Path, pane: &str, live_window: &str) -> Result<()> {
+    let registry_path = agent_doc_session_registry_io::registry_path_in(base_dir);
+    let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
+    let mut registry = agent_doc_session_registry_io::load_in(base_dir)?;
+    let Some(key) = registry
+        .iter()
+        .find(|(_, entry)| entry.pane == pane)
+        .map(|(key, _)| key.clone())
+    else {
+        return Ok(());
+    };
+    let Some(entry) = registry.get_mut(&key) else {
+        return Ok(());
+    };
+    if entry.window == live_window {
+        return Ok(());
+    }
+    entry.window = live_window.to_string();
+    agent_doc_session_registry_io::save_in(base_dir, &registry)?;
+    Ok(())
+}
+
 fn recover_jb_cache_conflict_cancel_commit_boundary(file: &Path) -> Result<Option<String>> {
     if !crate::runtime_effects()?.detect_jb_cache_conflict_cancel_recoverable(file)? {
         return Ok(None);
@@ -10154,6 +10279,120 @@ mod tests {
             "focused replacement pane should be selected without collapsing the sibling pane"
         );
     }
+    /// A window id no live tmux window in these fixtures can hold.
+    const STALE_WINDOW: &str = "@9999";
+
+    /// `#panewindowbindingrebind` — the 2026-08-13 defect: a document bound with
+    /// a window id that is not a live window (`@0`) drifts against EVERY live
+    /// window, so the focus effect refuses forever and editor->tmux sync is
+    /// permanently dead for that document. Nothing rewrote the binding, because
+    /// `project_binding_in` runs once at bind time and never again.
+    #[test]
+    #[ignore = "live tmux server; runs in the tmux CI leg (`make tmux-ci`), not the default development suite"]
+    fn drifted_pane_window_binding_is_rebound_from_the_live_window() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        let doc = root.join("tasks/bound.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: bound-session\nagent_doc_format: template\n---\n",
+        )
+        .unwrap();
+        let _cwd = ScopedCurrentDir::set(root);
+
+        let iso = IsolatedTmux::new("pane-window-binding-rebind");
+        let pane = iso.new_session("test", root).unwrap();
+        let live_window = iso.pane_window(&pane).unwrap();
+        let file_key = doc.to_string_lossy().to_string();
+
+        // Bind with a window that is not the pane's live window — the observed
+        // shape, where the recorded value never named a real window at all.
+        agent_doc_session_actor_io::project_binding_in(
+            root,
+            &file_key,
+            "bound-session",
+            &pane,
+            // NOT `@0`: a fresh tmux server really does hand out `@0`, which is
+            // why the production defect could not be fixed by treating `@0` as a
+            // sentinel — it is a legitimate window id, just not this pane's.
+            STALE_WINDOW,
+            "test",
+            "seed_stale_binding",
+        )
+        .unwrap();
+        assert_ne!(live_window, STALE_WINDOW, "fixture must actually be drifted");
+
+        let note = refresh_drifted_pane_window_binding(&iso, &doc)
+            .unwrap()
+            .expect("a drifted binding must be repaired");
+        assert!(
+            note.contains(STALE_WINDOW),
+            "the note names the stale window: {note}"
+        );
+        assert!(note.contains(&live_window), "and the live one: {note}");
+
+        let record = agent_doc_session_actor_io::load_record_in(root, &file_key)
+            .unwrap()
+            .expect("record survives the rebind");
+        assert_eq!(record.window_id, live_window);
+        assert_eq!(record.pane_id, pane, "the pane binding itself is unchanged");
+
+        // Idempotent: a converged binding is not a repair, so a second pass
+        // reports nothing rather than rewriting on every doctor run.
+        assert!(
+            refresh_drifted_pane_window_binding(&iso, &doc)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// The conservative half, mirroring `pane_window_binding_drifted`: a pane
+    /// tmux cannot locate is never "misplaced", so a transient read failure must
+    /// not rewrite a binding.
+    #[test]
+    #[ignore = "live tmux server; runs in the tmux CI leg (`make tmux-ci`), not the default development suite"]
+    fn an_unlocatable_pane_is_never_rebound() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        let doc = root.join("tasks/gone.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: gone-session\nagent_doc_format: template\n---\n",
+        )
+        .unwrap();
+        let _cwd = ScopedCurrentDir::set(root);
+
+        let iso = IsolatedTmux::new("pane-window-binding-unlocatable");
+        let file_key = doc.to_string_lossy().to_string();
+        agent_doc_session_actor_io::project_binding_in(
+            root,
+            &file_key,
+            "gone-session",
+            "%99999",
+            STALE_WINDOW,
+            "test",
+            "seed_stale_binding",
+        )
+        .unwrap();
+
+        assert!(
+            refresh_drifted_pane_window_binding(&iso, &doc)
+                .unwrap()
+                .is_none()
+        );
+        let record = agent_doc_session_actor_io::load_record_in(root, &file_key)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            record.window_id, STALE_WINDOW,
+            "an unknown live window is not drift"
+        );
+    }
+
     #[test]
     #[ignore = "covered by sync_sim_tmuxbudget_seed_3004; safe-passive attach/focus tmux smoke keeps the real pane/window path covered"]
     fn safe_passive_protected_open_cycle_sync_still_selects_visible_focus_pane() {

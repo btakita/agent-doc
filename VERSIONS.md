@@ -99,6 +99,60 @@ so a closed document cannot strand a retained projection. Verified by mutation:
 restoring the old unconditional adoption reddens the positive case while all
 three negative controls stay green.
 
+- **Fix: the editor stops registering markdown that is not an agent-doc session
+  document (JetBrains plugin 0.2.354, `#replicarefusalstorm` editor half).**
+
+The controller has refused non-agent-doc markdown terminally and cheaply since
+the refusal-storm work — no refusal ledger, no `log_op` — and its comment named
+the remaining half: "the durable stop is the editor only registering agent-doc
+documents". That half was never written, so the plugin registered every `.md` it
+opened and retried each terminal refusal on its 8s backoff indefinitely.
+Measured 2026-08-12, twenty minutes after an IDE restart: ~150 retries each for
+`README.md`, `CONTRIBUTING.md`, `sdk-market-research.md` and
+`contract-source-of-truth-plan.md`.
+
+The plugin now applies the same content test as the controller — `agent_doc_*`
+frontmatter or an `<!-- agent:` marker — before registering, and skips without
+arming a retry, since there is nothing to converge on. The test reads the CURRENT
+text with no memoization, so a plain file that later gains markers registers on
+the next observation with nothing to invalidate. The skip still records
+`not_agent_doc_document` as the attach-failure reason, so an operator-facing
+command explains itself rather than failing blankly. Verified by mutation:
+registering unconditionally reddens three of the four cases.
+
+- **Fix: a stale pane→window binding is rebound from the live pane instead of
+  disabling editor focus sync forever (`#panewindowbindingrebind`).**
+
+`session doctor` reports recorded-vs-live window drift and the pane-layout focus
+effect refuses to mirror onto a drifted pane — both correct, and together they
+mean a bad binding permanently kills editor→tmux sync for that document while
+every diagnostic explains why and nothing repairs it. `project_binding_in` runs
+at bind time and never again, so `window_id` (and the recorded harness) freeze at
+whatever was captured then.
+
+Measured 2026-08-13: `tasks/haiven-dev.md` was bound `window=@0` on both the
+actor record and the registry entry while the live windows were `@6`
+(`agent-doc`) and `@9` (`stash`). The drift was therefore true wherever the pane
+sat — moving it back into the visible window changed nothing — and
+`session doctor --repair`, `resync --fix` and `agent-doc sync` all left it. The
+sibling `tasks/sdk.md`, bound `window=@6`, worked throughout. `@0` is not a
+sentinel to special-case: a fresh tmux server really does hand out `@0`, as the
+regression fixture found the hard way.
+
+The repair rewrites the binding from the live pane, which is the same authority
+`pane_window_binding_drifted` already trusts, applied in the repair direction.
+Re-binding through `project_binding_in` also re-derives the recorded harness,
+which had frozen the same way — the affected document was labelled
+`[claude-code]` while its pane ran Codex. The pane binding and generation are
+untouched: this corrects a stale FACT about a binding, it does not re-elect one.
+An unreadable record or a window tmux cannot report is not drift and is never
+repaired.
+
+It runs FIRST in `session doctor --repair` and reports even when the rest of the
+pass fails. Ordered behind the document-repair pass it was unreachable on exactly
+the documents that needed it, which is how it was found: the live repair aborted
+on an unrelated attached-editor condition before ever reaching the binding.
+
 ## 0.35.244
 
 - **Fix: captured edit-and-gate replay converges after a partially published

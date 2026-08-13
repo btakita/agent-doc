@@ -764,6 +764,24 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 val text = editorText ?: tryReadDocumentText(document)
                     ?: return@attach false
                 chars = text.length
+                // `#replicarefusalstorm` (the editor half). The controller refuses a
+                // non-agent-doc markdown file terminally and cheaply, and its comment
+                // names this as the durable stop: "the editor only registering
+                // agent-doc documents". Until now the editor registered every `.md`
+                // it opened and retried the refusal on an 8s backoff forever —
+                // measured 2026-08-12 at ~150 retries per file per 20 minutes across
+                // four plain markdown files.
+                //
+                // No sticky state: the test runs on the CURRENT text every time, so a
+                // plain file that later gains `<!-- agent:` markers registers on the
+                // next observation without anything to invalidate.
+                if (!isAgentDocDocumentTextUtil(text)) {
+                    // Recorded so an operator-facing command can say WHY, but
+                    // deliberately NOT through `recordRegisterFailure`: that arms a
+                    // retry, and there is nothing here to converge on.
+                    attachFailureReasons[filePath] = "not_agent_doc_document"
+                    return@attach false
+                }
                 // Registration always opens the controller bootstrap. An existing
                 // editor buffer is a downstream consumer until subsequent DocumentEvent
                 // deltas prove new operator intent.
@@ -2992,6 +3010,22 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
     }
 }
+
+/**
+ * Whether [text] is an agent-doc session document.
+ *
+ * Mirrors the controller's `is_agent_doc_document`: a session document carries
+ * `agent_doc_*` frontmatter or an `<!-- agent:` component marker. A README,
+ * CONTRIBUTING, plan note, or draft has neither, never attaches an editor
+ * authority, and is refused terminally — so registering one is work that cannot
+ * succeed. Kept as a plain content test, deliberately identical to the
+ * controller's, so the two ends cannot disagree about what a session document is.
+ */
+internal fun isAgentDocDocumentTextUtil(text: String): Boolean =
+    text.contains("agent_doc_session") ||
+        text.contains("agent_doc_format") ||
+        text.contains("agent_doc_write") ||
+        text.contains("<!-- agent:")
 
 /**
  * Whether adopting a retained controller canonical projection would destroy

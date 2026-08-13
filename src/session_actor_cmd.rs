@@ -2867,9 +2867,27 @@ fn idle_projection_needs_reconciliation(ctx: &SessionContext, evidence: &LivePan
 
 pub fn doctor(file: &Path, repair: bool) -> Result<()> {
     if repair {
+        // Ordered FIRST and reported even when the rest of the repair path fails:
+        // a stale pane->window binding permanently disables editor focus sync
+        // (`#panewindowbindingrebind`), and it is independent of document health.
+        // Behind the document-repair pass it was unreachable on exactly the
+        // documents that needed it most.
+        let binding_note = match agent_doc_sync_io::sync::repair_pane_window_binding(file) {
+            Ok(note) => note,
+            Err(error) => {
+                eprintln!("[doctor] pane window binding repair failed: {error:#}");
+                None
+            }
+        };
+        if let Some(note) = &binding_note {
+            println!("{note}");
+        }
         let closeout = agent_doc_repair_command_io::repair(file)?;
         let mut repair_notes = agent_doc_sync_io::sync::repair_file_state(file)?;
         let repair_ctx = build_context(file)?;
+        if let Some(note) = binding_note {
+            repair_notes.push(note);
+        }
         if let Some(note) = clear_closed_actor_pane_projection(&repair_ctx)? {
             repair_notes.push(note);
         }

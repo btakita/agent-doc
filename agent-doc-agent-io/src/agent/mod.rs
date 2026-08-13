@@ -323,15 +323,27 @@ mod tests {
         configure_agent_child_process_group(&mut command);
         let child = command.spawn().unwrap();
 
+        // Wait for a pid that PARSES, not merely for the path to exist.
+        // `echo $! > file` creates the file and writes it in two observable
+        // steps, so `exists()` goes true while the content is still empty and
+        // the parse below then panics on `""`. Observed on CI 2026-08-12
+        // (run 31600939949) as a bare panic at the `.parse().unwrap()`, which
+        // says nothing about which of the two races fired.
         let started = Instant::now();
-        while !descendant_pid_path.exists() && started.elapsed() < Duration::from_secs(2) {
+        let descendant_pid: libc::pid_t = loop {
+            if let Some(pid) = std::fs::read_to_string(&descendant_pid_path)
+                .ok()
+                .and_then(|raw| raw.trim().parse::<libc::pid_t>().ok())
+            {
+                break pid;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "background descendant never published a pid to {}",
+                descendant_pid_path.display(),
+            );
             std::thread::sleep(Duration::from_millis(10));
-        }
-        let descendant_pid: libc::pid_t = std::fs::read_to_string(&descendant_pid_path)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
+        };
 
         let err = wait_with_output_timeout(child, Duration::from_millis(100)).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);

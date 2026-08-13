@@ -4,15 +4,6 @@
       {
         "hooks": [
           {
-            "command": "agent-doc hook codex-stop",
-            "statusMessage": "Checking agent-doc completion boundary",
-            "type": "command"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
             "command": "agent-doc turn-status idle",
             "type": "command"
           }
@@ -22,11 +13,6 @@
     "UserPromptSubmit": [
       {
         "hooks": [
-          {
-            "command": "agent-doc hook codex-user-prompt-submit",
-            "statusMessage": "Preparing agent-doc cycle",
-            "type": "command"
-          },
           {
             "command": "/home/brian/work/btakita/agent-loop/.codex/tsift-autoindex.sh",
             "statusMessage": "tsift auto-reindex",

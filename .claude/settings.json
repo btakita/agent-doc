@@ -3,6 +3,9 @@
     "claude-mem@thedotmack": true,
     "frontend-design@claude-plugins-official": true
   },
+  "env": {
+    "AGENT_DOC_PREFLIGHT_HOOK_BUDGET_SECS": "300"
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -55,6 +58,15 @@
         "hooks": [
           {
             "command": "agent-doc turn-status active",
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "command": "agent-doc hook preflight-user-prompt-submit",
+            "timeout": 120,
             "type": "command"
           }
         ]

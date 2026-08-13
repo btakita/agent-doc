@@ -449,6 +449,88 @@ fn bare_path_alias_uses_same_template_safe_path() {
 }
 
 #[test]
+fn run_answers_fresh_typed_component_edit_after_committed_cycle() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    let initial = concat!(
+        "---\nagent_doc_format: template\nagent_doc_write: crdt\nmodel: gpt-5\n---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "❯ Please reply\n",
+        "<!-- /agent:exchange -->\n\n",
+        "## Queue\n\n",
+        "<!-- agent:queue -->\n",
+        "<!-- /agent:queue -->\n\n",
+        "## Pending\n\n",
+        "<!-- agent:backlog -->\n",
+        "<!-- /agent:backlog -->\n"
+    );
+    fs::write(&doc, initial).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let prior_script = write_mock_agent(
+        tmp.path(),
+        "<!-- patch:exchange -->\n### Re: prior — gpt-5\nPrior turn closed.\n<!-- /patch:exchange -->\n",
+    );
+    let config_root = write_config(tmp.path(), &prior_script);
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["run", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    assert_eq!(read_cycle_phase(&doc), "committed");
+
+    let committed = fs::read_to_string(&doc).unwrap();
+    let edited = committed
+        .replace(
+            "<!-- agent:queue -->\n<!-- /agent:queue -->",
+            "<!-- agent:queue -->\n- do [#next]\n<!-- /agent:queue -->",
+        )
+        .replace(
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->",
+            "<!-- agent:backlog -->\n- [ ] [#next] answer the current edit\n<!-- /agent:backlog -->",
+        );
+    assert_ne!(
+        edited, committed,
+        "fixture must add a typed-component prompt"
+    );
+    fs::write(&doc, &edited).unwrap();
+
+    let (current_script, marker) = write_marker_agent(
+        tmp.path(),
+        "<!-- patch:exchange -->\n### Re: current edit — gpt-5\nAnswered once.\n\nVerification:\n- `cargo test --test run_integration`\n<!-- /patch:exchange -->\n",
+    );
+    let config_root = write_config(tmp.path(), &current_script);
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["run", doc.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "pre-commit preserved an unanswered document edit for this run to answer",
+        ));
+
+    assert!(
+        marker.exists(),
+        "the current edit must reach the configured agent"
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("### Re: current edit — gpt-5"));
+    assert_eq!(read_cycle_phase(&doc), "committed");
+
+    let head = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    let head = String::from_utf8_lossy(&head.stdout);
+    assert!(head.contains("- do [#next]"));
+    assert!(head.contains("### Re: current edit — gpt-5"));
+}
+
+#[test]
 fn run_auto_queue_continues_until_drained() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");

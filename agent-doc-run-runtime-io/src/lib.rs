@@ -15,8 +15,20 @@ impl agent_doc_run_io::DirectRunEffects for RuntimeDirectRunEffects {
         agent_doc_run_io::guard_no_exchange_compaction_request_for_diff(file, diff_text)
     }
 
-    fn commit(&self, file: &Path) -> Result<bool> {
-        agent_doc_commit_io::commit(file)
+    fn commit(&self, file: &Path) -> Result<agent_doc_run_io::DirectRunPrecommitOutcome> {
+        match agent_doc_commit_io::commit(file) {
+            Ok(true) => Ok(agent_doc_run_io::DirectRunPrecommitOutcome::Committed),
+            Ok(false) => Ok(agent_doc_run_io::DirectRunPrecommitOutcome::AlreadyCurrent),
+            Err(error)
+                if agent_doc_commit_io::retained_write_commit_refusal_verdict(&error)
+                    == Some(
+                        agent_doc_turn::write_ownership::RetainedWriteVerdict::UnansweredEditPending,
+                    ) =>
+            {
+                Ok(agent_doc_run_io::DirectRunPrecommitOutcome::AnswerCurrentEdit)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn normalize_template_structure_or_fail(&self, content: &str, file: &Path) -> Result<String> {

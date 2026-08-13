@@ -2407,6 +2407,11 @@ Duplicate replay should stay live.
         );
 
         let err = commit(&doc).expect_err("a fresh operator edit must still fail closed");
+        assert_eq!(
+            agent_doc_commit_io::retained_write_commit_refusal_verdict(&err),
+            Some(agent_doc_turn::write_ownership::RetainedWriteVerdict::UnansweredEditPending),
+            "the refusal must expose the policy verdict without diagnostic parsing"
+        );
         let err = format!("{err:#}");
         assert!(
             err.contains("UNANSWERED DOCUMENT EDIT"),

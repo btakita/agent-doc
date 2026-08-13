@@ -2,6 +2,28 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.246
+
+- **Fix: direct `agent-doc <FILE>` no longer repeats the raw-commit refusal for
+  a fresh typed-component prompt after a committed cycle.**
+
+Raw `commit` correctly refuses to absorb queue, backlog, status, or other typed
+component drift when the staged snapshot already matches `HEAD`: that drift is
+the next unanswered prompt, and committing it would swallow the prompt. The
+refusal's recovery names direct `agent-doc <FILE>`, but direct run previously
+called the same raw commit path unconditionally before dispatch and propagated
+the refusal. Reopening the document therefore repeated the identical error
+forever.
+
+Commit I/O now exposes the retained-write refusal as a typed lifecycle verdict.
+The direct-run runtime maps only `UnansweredEditPending` to
+`AnswerCurrentEdit`, and run policy skips only that precommit before dispatching
+the real editor-authored diff. Synthetic queue prompts and every other commit
+error remain fail-closed, while raw `commit` retains its original refusal and
+operator-facing diagnostic. Regression coverage closes a prior cycle, adds a
+fresh queue/backlog prompt, proves the configured agent is invoked, and proves
+the prompt plus response land together in the next committed cycle.
+
 ## 0.35.245
 
 - **Fix: a handoff replacement that lost its socket is reaped instead of wedging

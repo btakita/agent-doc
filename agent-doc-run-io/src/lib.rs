@@ -78,6 +78,13 @@ pub enum AutoQueueContinuation {
     Continue { force_fresh_agent_session: bool },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectRunPrecommitOutcome {
+    Committed,
+    AlreadyCurrent,
+    AnswerCurrentEdit,
+}
+
 pub trait DirectRunEffects {
     fn guard_no_exchange_compaction_request_for_diff(
         &self,
@@ -85,7 +92,7 @@ pub trait DirectRunEffects {
         diff_text: &str,
     ) -> Result<()>;
 
-    fn commit(&self, file: &Path) -> Result<bool>;
+    fn commit(&self, file: &Path) -> Result<DirectRunPrecommitOutcome>;
 
     fn normalize_template_structure_or_fail(&self, content: &str, file: &Path) -> Result<String>;
 
@@ -555,20 +562,41 @@ pub fn run_once(
     }
 
     if !no_git {
-        let did_commit = effects.commit(file)?;
-        if !did_commit
-            && !queue_synthetic_diff
-            && agent_doc_diff_io::compute(
-                &agent_doc_snapshot_io::DiffBaselineStore::new(agent_doc_ops_log_io::log_op),
-                file,
-            )?
-            .is_none()
-        {
-            anyhow::bail!(
-                "no child-agent dispatch: the pre-commit repair closed {} as already committed and no new assistant response body was supplied. If you need to recover a missed response patchback, pipe the response through `agent-doc write --commit {}`.",
-                file.display(),
-                file.display()
-            );
+        match effects.commit(file)? {
+            DirectRunPrecommitOutcome::Committed => {}
+            DirectRunPrecommitOutcome::AlreadyCurrent => {
+                if !queue_synthetic_diff
+                    && agent_doc_diff_io::compute(
+                        &agent_doc_snapshot_io::DiffBaselineStore::new(
+                            agent_doc_ops_log_io::log_op,
+                        ),
+                        file,
+                    )?
+                    .is_none()
+                {
+                    anyhow::bail!(
+                        "no child-agent dispatch: the pre-commit repair closed {} as already committed and no new assistant response body was supplied. If you need to recover a missed response patchback, pipe the response through `agent-doc write --commit {}`.",
+                        file.display(),
+                        file.display()
+                    );
+                }
+            }
+            DirectRunPrecommitOutcome::AnswerCurrentEdit => {
+                anyhow::ensure!(
+                    !queue_synthetic_diff,
+                    "refusing direct-run precommit recovery for a synthetic queue prompt without an editor-authored diff"
+                );
+                eprintln!(
+                    "[run] pre-commit preserved an unanswered document edit for this run to answer"
+                );
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "run_precommit_answer_current_edit file={} verdict=unanswered_edit_pending",
+                        file.display()
+                    ),
+                );
+            }
         }
     }
     start_run_cycle(file)?;

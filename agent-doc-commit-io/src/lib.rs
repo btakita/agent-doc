@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::collections::{BTreeSet, HashSet};
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -52,6 +53,48 @@ thread_local! {
 pub struct CommitOutcome {
     pub did_commit: bool,
     pub vcs_refresh_signaled: Option<bool>,
+}
+
+/// A typed refusal to commit a retained write whose lifecycle verdict names a
+/// different transition. Callers must preserve the refusal unless they own
+/// that exact transition.
+#[derive(Debug)]
+pub struct RetainedWriteCommitRefusal {
+    verdict: agent_doc_turn::write_ownership::RetainedWriteVerdict,
+    message: String,
+}
+
+impl RetainedWriteCommitRefusal {
+    fn new(
+        verdict: agent_doc_turn::write_ownership::RetainedWriteVerdict,
+        message: String,
+    ) -> Self {
+        Self { verdict, message }
+    }
+
+    pub const fn verdict(&self) -> agent_doc_turn::write_ownership::RetainedWriteVerdict {
+        self.verdict
+    }
+}
+
+impl fmt::Display for RetainedWriteCommitRefusal {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for RetainedWriteCommitRefusal {}
+
+/// Recover the policy verdict from a commit refusal without parsing its
+/// operator-facing diagnostic text.
+pub fn retained_write_commit_refusal_verdict(
+    error: &anyhow::Error,
+) -> Option<agent_doc_turn::write_ownership::RetainedWriteVerdict> {
+    error.chain().find_map(|cause| {
+        cause
+            .downcast_ref::<RetainedWriteCommitRefusal>()
+            .map(RetainedWriteCommitRefusal::verdict)
+    })
 }
 
 fn retained_pending_commit_proof(
@@ -1907,14 +1950,17 @@ where
                     verdict.as_str()
                 ),
             );
-            anyhow::bail!(
-                "refusing to close {} as already committed: the staged snapshot matches HEAD, but the editor-authoritative document has uncommitted queue, backlog, status, or other typed-component drift without an exact binary-owned retained-target proof. {}",
-                file.display(),
-                agent_doc_turn::write_ownership::retained_write_remedy(
-                    ownership,
-                    &file.display().to_string()
-                )
-            );
+            return Err(anyhow::Error::new(RetainedWriteCommitRefusal::new(
+                verdict,
+                format!(
+                    "refusing to close {} as already committed: the staged snapshot matches HEAD, but the editor-authoritative document has uncommitted queue, backlog, status, or other typed-component drift without an exact binary-owned retained-target proof. {}",
+                    file.display(),
+                    agent_doc_turn::write_ownership::retained_write_remedy(
+                        ownership,
+                        &file.display().to_string()
+                    )
+                ),
+            )));
         }
     }
     if snapshot_matches_head && binary_owned_side_effects.is_empty() {

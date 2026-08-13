@@ -1,6 +1,5 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 019fee96-fc00-7053-ad11-b20c53388296
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -371,11 +370,19 @@ The requested reproduction loop completed without another corrupt ledger: one fu
 No source files changed. Shipping database deletion, replacement, or retry behavior without the offending bytes would weaken the fail-closed concurrency guarantee and repeat the already-falsified 0.35.235 draft. The existing diagnostic is sufficient for the next occurrence: implementation resumes only when a failure reports `main=<bytes> header=<sqlite|foreign> first16=<hex> (<printable>) wal=<size|absent> shm=<size|absent>`. The same tracked item now carries that unblocker, so no additional backlog item is needed.
 
 Verification: `make check` passed locally; ten repeated `make test` runs each passed 8,942/8,942; `make tmux-ci` passed. The latest hosted CI passed its Rust tests but failed later in the TLA step, before tmux-ci, with no state-database evidence. Confidence is high that ordinary nextest parallelism is not a reproducible cause; root-cause confidence remains intentionally unset until the byte signature exists.
-<!-- agent:boundary:601f3f5d:agent-doc-bugs2 -->
+
+### Re: session frontmatter update — gpt-5
+
+The stale `resume` binding has been removed. No implementation or repository work was requested, so this cycle only persists that document update.
+
+Preflight also found one legacy gated item still in `agent:backlog`; `agent-doc migrate tasks/agent-doc/agent-doc-bugs2.md` will move it into `agent:review`. I left it unchanged because this edit did not request migration.
+
+The exchange is at the compaction warning threshold. I left it intact; `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` is available when compaction is explicitly requested.
+<!-- agent:boundary:5fdc4e19:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 
 ## Notes

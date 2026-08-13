@@ -102,15 +102,51 @@ pub fn dispatch_only_dispatch_start_proof_required(file: &Path, harness: &Harnes
     controller_dispatch_only_dispatch_start_proof_required(&harness.binary)
 }
 
+#[cfg(test)]
+fn dispatch_only_dispatch_start_proof_required_with_user_hooks(
+    file: &Path,
+    harness: &HarnessConfig,
+    user_hooks: Option<&Path>,
+) -> bool {
+    if harness.binary == "codex"
+        && crate::dispatch_start::codex_dispatch_start_tracking_enabled_with_user_hooks(
+            file, user_hooks,
+        )
+    {
+        return true;
+    }
+    controller_dispatch_only_dispatch_start_proof_required(&harness.binary)
+}
+
 pub fn require_dispatch_only_dispatch_start_proof(
     file: &Path,
     pane: &str,
     harness: &HarnessConfig,
     delivery: DispatchOnlyReopenDelivery,
     dispatch_start: RoutedDispatchStartProof,
-    mut report_bug: impl FnMut(DispatchOnlyBugReportFacts),
+    report_bug: impl FnMut(DispatchOnlyBugReportFacts),
 ) -> Result<()> {
     let proof_required = dispatch_only_dispatch_start_proof_required(file, harness);
+    require_dispatch_only_dispatch_start_proof_with_requirement(
+        file,
+        pane,
+        harness,
+        delivery,
+        dispatch_start,
+        proof_required,
+        report_bug,
+    )
+}
+
+fn require_dispatch_only_dispatch_start_proof_with_requirement(
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+    delivery: DispatchOnlyReopenDelivery,
+    dispatch_start: RoutedDispatchStartProof,
+    proof_required: bool,
+    mut report_bug: impl FnMut(DispatchOnlyBugReportFacts),
+) -> Result<()> {
     let classification =
         agent_doc_controller::dispatch::classify_dispatch_start_proof(DispatchStartProofFacts {
             proof: dispatch_start,
@@ -211,19 +247,35 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(dir.path().join(".codex/hooks.json"), "{}").unwrap();
+        std::fs::write(
+            dir.path().join(".codex/hooks.json"),
+            serde_json::json!({
+                "hooks": {
+                    "UserPromptSubmit": [{
+                        "hooks": [{
+                            "type": "command",
+                            "command": "agent-doc hook codex-user-prompt-submit",
+                        }]
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        assert!(dispatch_only_dispatch_start_proof_required(
+        assert!(dispatch_only_dispatch_start_proof_required_with_user_hooks(
             &doc,
-            &HarnessConfig::codex()
+            &HarnessConfig::codex(),
+            None,
         ));
-        let err = require_dispatch_only_dispatch_start_proof(
+        let err = require_dispatch_only_dispatch_start_proof_with_requirement(
             &doc,
             "%4",
             &HarnessConfig::codex(),
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
             RoutedDispatchStartProof::CommandAcceptedOnly,
+            true,
             |_| {},
         )
         .expect_err("visible Codex hooks make accepted-only delivery insufficient");
@@ -243,16 +295,20 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "# Session\n").unwrap();
 
-        assert!(!dispatch_only_dispatch_start_proof_required(
-            &doc,
-            &HarnessConfig::codex()
-        ));
-        require_dispatch_only_dispatch_start_proof(
+        assert!(
+            !dispatch_only_dispatch_start_proof_required_with_user_hooks(
+                &doc,
+                &HarnessConfig::codex(),
+                None,
+            )
+        );
+        require_dispatch_only_dispatch_start_proof_with_requirement(
             &doc,
             "%4",
             &HarnessConfig::codex(),
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
             RoutedDispatchStartProof::CommandAcceptedOnly,
+            false,
             |_| {},
         )
         .expect(
@@ -284,12 +340,13 @@ mod tests {
             HarnessConfig::opencode(),
             HarnessConfig::claude(),
         ] {
-            require_dispatch_only_dispatch_start_proof(
+            require_dispatch_only_dispatch_start_proof_with_requirement(
                 &doc,
                 "%4",
                 &harness,
                 DispatchOnlyReopenDelivery::DirectPaneSubmit,
                 RoutedDispatchStartProof::CommandAcceptedOnly,
+                false,
                 |_| {},
             )
             .expect("accepted-only delivery remains an explicit success path for this harness");
@@ -298,12 +355,13 @@ mod tests {
 
     #[test]
     fn dispatch_only_tracked_timeout_fails_closed_even_when_accepted_only_is_allowed() {
-        let err = require_dispatch_only_dispatch_start_proof(
+        let err = require_dispatch_only_dispatch_start_proof_with_requirement(
             Path::new("/tmp/agent-doc-bugs2.md"),
             "%4",
             &HarnessConfig::codex(),
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
             RoutedDispatchStartProof::DispatchStartUnproven,
+            true,
             |_| {},
         )
         .expect_err("tracked dispatch-start timeouts must not report route success");

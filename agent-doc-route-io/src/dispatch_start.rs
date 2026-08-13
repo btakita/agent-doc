@@ -11,6 +11,8 @@ use agent_doc_controller::dispatch::{
 use agent_doc_harness::HarnessConfig;
 use tmux_router::Tmux;
 
+const CODEX_USER_PROMPT_COMMAND: &str = "agent-doc hook codex-user-prompt-submit";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RoutedDispatchStartTracker {
     CodexHook {
@@ -29,9 +31,58 @@ pub enum RoutedDispatchStartTracker {
 }
 
 pub fn codex_dispatch_start_tracking_enabled(file: &Path) -> bool {
+    let user_hooks = codex_user_hooks_path();
+    codex_dispatch_start_tracking_enabled_with_user_hooks(file, user_hooks.as_deref())
+}
+
+pub(crate) fn codex_dispatch_start_tracking_enabled_with_user_hooks(
+    file: &Path,
+    user_hooks: Option<&Path>,
+) -> bool {
+    if user_hooks.is_some_and(codex_hooks_include_agent_doc_tracking) {
+        return true;
+    }
     codex_tracking_roots(file)
         .into_iter()
         .any(|root| codex_hooks_visible_from_file(file, &root))
+}
+
+fn codex_user_hooks_path() -> Option<PathBuf> {
+    std::env::var_os("CODEX_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|value| !value.is_empty())
+                .map(|home| PathBuf::from(home).join(".codex"))
+        })
+        .map(|codex_dir| codex_dir.join("hooks.json"))
+}
+
+fn codex_hooks_include_agent_doc_tracking(path: &Path) -> bool {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return false;
+    };
+    root.get("hooks")
+        .and_then(|hooks| hooks.get("UserPromptSubmit"))
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|entries| {
+            entries.iter().any(|entry| {
+                entry
+                    .get("hooks")
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|hooks| {
+                        hooks.iter().any(|hook| {
+                            hook.get("type").and_then(serde_json::Value::as_str) == Some("command")
+                                && hook.get("command").and_then(serde_json::Value::as_str)
+                                    == Some(CODEX_USER_PROMPT_COMMAND)
+                        })
+                    })
+            })
+        })
 }
 
 fn codex_hooks_visible_from_file(file: &Path, hook_root: &Path) -> bool {
@@ -45,10 +96,11 @@ fn codex_hooks_visible_from_file(file: &Path, hook_root: &Path) -> bool {
     while let Some(path) = current {
         let codex_path = path.join(".codex");
         if codex_path.exists() {
-            return path == hook_root && codex_path.join("hooks.json").is_file();
+            return path == hook_root
+                && codex_hooks_include_agent_doc_tracking(&codex_path.join("hooks.json"));
         }
         if path == hook_root {
-            return hook_root.join(".codex/hooks.json").is_file();
+            return codex_hooks_include_agent_doc_tracking(&hook_root.join(".codex/hooks.json"));
         }
         current = path.parent();
     }
@@ -387,11 +439,25 @@ gpt-5.6 · ~/work/sample-app · 40% left"
         std::fs::create_dir_all(workspace.join(".codex")).unwrap();
         std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(workspace.join(".codex/hooks.json"), "{}").unwrap();
+        std::fs::write(
+            workspace.join(".codex/hooks.json"),
+            serde_json::json!({
+                "hooks": {
+                    "UserPromptSubmit": [{
+                        "hooks": [{
+                            "type": "command",
+                            "command": CODEX_USER_PROMPT_COMMAND,
+                        }]
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
         std::fs::write(&doc, "# Session\n").unwrap();
 
         assert!(
-            codex_dispatch_start_tracking_enabled(&doc),
+            codex_dispatch_start_tracking_enabled_with_user_hooks(&doc, None),
             "workspace-level Codex hooks should enable routed dispatch tracking for nested agent-doc roots"
         );
     }
@@ -408,7 +474,7 @@ gpt-5.6 · ~/work/sample-app · 40% left"
         std::fs::write(&doc, "# Session\n").unwrap();
 
         assert!(
-            !codex_dispatch_start_tracking_enabled(&doc),
+            !codex_dispatch_start_tracking_enabled_with_user_hooks(&doc, None),
             "route should not wait for hook-backed submission proof when no tracked root has Codex hooks installed"
         );
     }
@@ -424,13 +490,62 @@ gpt-5.6 · ~/work/sample-app · 40% left"
         std::fs::create_dir_all(workspace.join(".codex")).unwrap();
         std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(workspace.join(".codex/hooks.json"), "{}").unwrap();
+        std::fs::write(
+            workspace.join(".codex/hooks.json"),
+            serde_json::json!({
+                "hooks": {
+                    "UserPromptSubmit": [{
+                        "hooks": [{
+                            "type": "command",
+                            "command": CODEX_USER_PROMPT_COMMAND,
+                        }]
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
         std::fs::write(nested.join(".codex"), "").unwrap();
         std::fs::write(&doc, "# Session\n").unwrap();
 
         assert!(
-            !codex_dispatch_start_tracking_enabled(&doc),
+            !codex_dispatch_start_tracking_enabled_with_user_hooks(&doc, None),
             "route should not require hook-backed submission proof when a nearer `.codex` path shadows the workspace install"
+        );
+    }
+
+    #[test]
+    fn codex_dispatch_start_tracking_uses_user_hook_across_nested_git_roots() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("src/haiven-dev");
+        let doc = nested.join("tasks/backend.md");
+        let user_hooks = dir.path().join("codex-home/hooks.json");
+
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(user_hooks.parent().unwrap()).unwrap();
+        std::fs::write(nested.join(".codex"), "").unwrap();
+        std::fs::write(&doc, "# Session\n").unwrap();
+        std::fs::write(
+            &user_hooks,
+            serde_json::json!({
+                "hooks": {
+                    "UserPromptSubmit": [{
+                        "hooks": [{
+                            "type": "command",
+                            "command": CODEX_USER_PROMPT_COMMAND,
+                        }]
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert!(
+            codex_dispatch_start_tracking_enabled_with_user_hooks(&doc, Some(&user_hooks)),
+            "the user hook remains visible when nested git roots or `.codex` paths hide project hooks"
         );
     }
 }

@@ -19,6 +19,7 @@ use agent_doc_hooks_io::preflight_user_prompt_submit::{invoked_document, resolve
 /// this as the final seal prevents partial preflight output from being mistaken
 /// for an admitted cycle.
 pub const CONTRACT_MARKER: &str = "[agent-doc] cycle contract (preflight already ran in the binary; do NOT run `agent-doc preflight` for this turn)";
+const CODEX_IN_PANE_ADMISSION_DIRECTIVE: &str = "[agent-doc] Codex in-pane admission: continue this response cycle in the current turn. Do NOT execute `agent-doc <FILE>` as a shell command; that would recursively re-enter the owning pane.";
 
 /// Printed to **stdout** when the prompt *was* an `agent-doc <FILE>` trigger but
 /// preflight could not produce a contract (`#hookcontractlost`).
@@ -139,7 +140,11 @@ enum HookAdmission {
     Failed,
 }
 
-fn run_preflight_for_prompt(prompt: &str, cwd: &Path) -> HookAdmission {
+fn run_preflight_for_prompt(
+    prompt: &str,
+    cwd: &Path,
+    admitted_directive: Option<&str>,
+) -> HookAdmission {
     let Some(target) = invoked_document(prompt) else {
         return HookAdmission::NotATrigger;
     };
@@ -176,7 +181,12 @@ fn run_preflight_for_prompt(prompt: &str, cwd: &Path) -> HookAdmission {
             // The marker seals a successfully produced contract. It must not
             // appear on any error path because the skill treats its absence as
             // failed admission.
-            emit_user_prompt_submit_context(&format!("{}\n{CONTRACT_MARKER}", contract.trim_end()));
+            let mut context = format!("{}\n{CONTRACT_MARKER}", contract.trim_end());
+            if let Some(directive) = admitted_directive {
+                context.push('\n');
+                context.push_str(directive);
+            }
+            emit_user_prompt_submit_context(&context);
             HookAdmission::Admitted
         }
         Err(err) => {
@@ -303,7 +313,7 @@ pub fn handle_user_prompt_submit() -> anyhow::Result<()> {
 
     // Every outcome is already reported to the agent and the operator inside
     // `run_preflight_for_prompt`, so a refusal never blocks an ordinary prompt.
-    run_preflight_for_prompt(prompt, &cwd);
+    run_preflight_for_prompt(prompt, &cwd, None);
     Ok(())
 }
 
@@ -342,7 +352,11 @@ pub fn handle_codex_user_prompt_submit() -> anyhow::Result<()> {
         }
         return Ok(());
     }
-    run_preflight_for_prompt(&input.prompt, Path::new(&input.cwd));
+    run_preflight_for_prompt(
+        &input.prompt,
+        Path::new(&input.cwd),
+        Some(CODEX_IN_PANE_ADMISSION_DIRECTIVE),
+    );
     Ok(())
 }
 
@@ -362,7 +376,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // The prompt IS a trigger; only the path is wrong for this cwd.
         assert_eq!(
-            run_preflight_for_prompt("/loop agent-doc tasks/missing.md", dir.path()),
+            run_preflight_for_prompt("/loop agent-doc tasks/missing.md", dir.path(), None),
             HookAdmission::Failed,
             "an unresolvable trigger must be a named failure, never silence"
         );
@@ -370,11 +384,11 @@ mod tests {
         // A genuinely unrelated prompt is still a silent no-op — the hook must
         // not start shouting about every prompt in the session.
         assert_eq!(
-            run_preflight_for_prompt("what does this function do?", dir.path()),
+            run_preflight_for_prompt("what does this function do?", dir.path(), None),
             HookAdmission::NotATrigger,
         );
         assert_eq!(
-            run_preflight_for_prompt("/loop check the deploy", dir.path()),
+            run_preflight_for_prompt("/loop check the deploy", dir.path(), None),
             HookAdmission::NotATrigger,
         );
     }

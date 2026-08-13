@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-debounce"
-version = "0.35.247"
+version = "0.35.248"
 edition = "2024"
 description = "Bounded Lazily current-state settle budgets for agent-doc"
 license = "MIT"

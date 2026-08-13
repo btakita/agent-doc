@@ -34,7 +34,7 @@
 
 use anyhow::{Context, Result};
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The shared SKILL.md source bundled at build time.
 const SKILL_TEMPLATE: &str = include_str!("../SKILL.md");
@@ -116,7 +116,7 @@ const OPENCODE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-d
 
 /// Claude-Code-only auto-loop instruction appended to the rendered SKILL.md.
 ///
-/// Codex has a `Stop` hook in `.codex/hooks.json` that blocks final-answer
+/// Codex has a `Stop` hook in user-level `$CODEX_HOME/hooks.json` that blocks final-answer
 /// completion and instructs the active turn to continue the next queue head
 /// in-pane when the queue is still active. Claude Code has no equivalent Stop
 /// hook, so without this instruction the operator has to retype `agent-doc
@@ -146,7 +146,7 @@ Skip the auto-loop on any failed closeout, `session-check` interruption, or `lin
 
 **The skip list above is exhaustive — do NOT invent stop reasons after a proven editor delivery (`#degraded-ipc-no-stall`).** A closeout is successful only after the monotonic write pipeline reaches `committed` and `session-check` is OK. A timeout, missing Lazily visibility proof, or `recovery=retry_without_disk_write` is not success: do not continue the queue or elect an attached-document disk write. The keyed worker retains the same intent in `state.db` and resumes it after the registered editor endpoint recovers. When `queue_continuation_required == true`, follow the binary's `queue_continuation_guidance`; high session accretion and semantic-completion warnings are not stop reasons after proven closeout. A stale binary recycles at the next idle boundary through the controller projection or `agent-doc admin recycle`, after which the loop continues on the fresh build. `make install` / `agent-doc lib-install` sends the shared `reload_library` intent to every live Lazily editor registration through its PID-scoped endpoint; `agent-doc admin reload-lib` repeats that typed fan-out. No filesystem delivery or reload broadcast participates in the hot path.
 
-This section's `/loop` invocation is Claude-Code-specific. Codex auto-loops via its `Stop` hook in `.codex/hooks.json`. **OpenCode has no `/loop` and no `Stop` hook, so the OpenCode agent MUST self-drive the drain in-turn (`#ocdrainstall` Part A):** after a proven closeout (`agent-doc write --commit <FILE>` reached `committed` + `session-check` OK) with `preflight.queue_continuation_required == true` and `preflight.queue_drainable_head_count > 0`, do NOT end the turn — immediately run `agent-doc preflight <FILE>` again and drain the next head (preflight → respond → `agent-doc write --commit <FILE>`), repeating in the SAME turn until `queue_continuation_required == false`, `queue_drainable_head_count == 0`, a genuine stop condition (failed closeout, `session-check` interruption, only `[operator-verify]` heads remaining), or the `agent_doc_queue_max_iterations` / `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` (default `50`) cap is reached. "Low context budget" and "this head deserves its own focused/clean cycle" are **NOT** stop reasons (`#drain-no-defer`) — they are stalls; keep draining. If context is genuinely saturated, finish the current item's proven closeout, then end the turn for the supervisor's idle-boundary recycle + re-dispatch — but never stop mid-queue without a proven closeout, and never hand an agent-drainable head back to the operator to re-invoke manually. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) and `tasks/agent-doc/plan-claude-code-queue-auto-loop.md`.
+This section's `/loop` invocation is Claude-Code-specific. Codex auto-loops via its `Stop` hook in user-level `$CODEX_HOME/hooks.json`. **OpenCode has no `/loop` and no `Stop` hook, so the OpenCode agent MUST self-drive the drain in-turn (`#ocdrainstall` Part A):** after a proven closeout (`agent-doc write --commit <FILE>` reached `committed` + `session-check` OK) with `preflight.queue_continuation_required == true` and `preflight.queue_drainable_head_count > 0`, do NOT end the turn — immediately run `agent-doc preflight <FILE>` again and drain the next head (preflight → respond → `agent-doc write --commit <FILE>`), repeating in the SAME turn until `queue_continuation_required == false`, `queue_drainable_head_count == 0`, a genuine stop condition (failed closeout, `session-check` interruption, only `[operator-verify]` heads remaining), or the `agent_doc_queue_max_iterations` / `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` (default `50`) cap is reached. "Low context budget" and "this head deserves its own focused/clean cycle" are **NOT** stop reasons (`#drain-no-defer`) — they are stalls; keep draining. If context is genuinely saturated, finish the current item's proven closeout, then end the turn for the supervisor's idle-boundary recycle + re-dispatch — but never stop mid-queue without a proven closeout, and never hand an agent-drainable head back to the operator to re-invoke manually. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md) and `tasks/agent-doc/plan-claude-code-queue-auto-loop.md`.
 "#;
 
 /// Bundled runbooks installed alongside the skill.
@@ -1195,9 +1195,99 @@ fn install_codex_hook_artifacts(root: Option<&Path>) -> Result<()> {
     let base = resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let codex_dir = base.join(".codex");
     std::fs::create_dir_all(&codex_dir)?;
-    merge_codex_hooks_json(&codex_dir.join("hooks.json"))?;
+    // `#codex-user-hook-owner`: Codex loads both user and project hook layers.
+    // Keeping the consequential admission/closeout commands in both places
+    // runs preflight twice whenever project-hook discovery works, while relying
+    // on the project layer alone misses nested submodules and worktrees. The
+    // user hook is therefore the sole owner; remove only our managed commands
+    // from an existing project file and preserve every unrelated hook.
+    retire_codex_project_hook_commands(&codex_dir.join("hooks.json"))?;
     merge_codex_config(&codex_dir.join("config.toml"))?;
     Ok(())
+}
+
+fn install_codex_user_hook_artifacts() -> Result<()> {
+    let Some(codex_dir) = codex_user_config_dir() else {
+        return Ok(());
+    };
+    install_codex_user_hook_artifacts_at(&codex_dir)
+}
+
+fn install_codex_user_hook_artifacts_at(codex_dir: &Path) -> Result<()> {
+    std::fs::create_dir_all(codex_dir)?;
+    merge_codex_hooks_json(&codex_dir.join("hooks.json"))
+}
+
+fn codex_user_config_dir() -> Option<PathBuf> {
+    std::env::var_os("CODEX_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|value| !value.is_empty())
+                .map(|home| PathBuf::from(home).join(".codex"))
+        })
+}
+
+fn retire_codex_project_hook_commands(path: &Path) -> Result<()> {
+    if !path.is_file() {
+        return Ok(());
+    }
+
+    let content =
+        std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let mut root = serde_json::from_str::<serde_json::Value>(&content)
+        .with_context(|| format!("parse {}", path.display()))?;
+    let hooks = root
+        .as_object_mut()
+        .context("Codex hooks.json root must be an object")?
+        .get_mut("hooks")
+        .and_then(serde_json::Value::as_object_mut);
+    let Some(hooks_map) = hooks else {
+        return Ok(());
+    };
+
+    retire_codex_hook_command(hooks_map, "UserPromptSubmit", CODEX_USER_PROMPT_COMMAND);
+    retire_codex_hook_command(hooks_map, "Stop", CODEX_STOP_COMMAND);
+
+    let rendered = ensure_trailing_newline(&serde_json::to_string_pretty(&root)?);
+    write_if_changed(path, &rendered)
+}
+
+fn retire_codex_hook_command(
+    hooks_map: &mut serde_json::Map<String, serde_json::Value>,
+    event: &str,
+    command: &str,
+) {
+    let remove_event = if let Some(entries) = hooks_map
+        .get_mut(event)
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for entry in entries.iter_mut() {
+            if let Some(hooks) = entry
+                .get_mut("hooks")
+                .and_then(serde_json::Value::as_array_mut)
+            {
+                hooks.retain(|hook| {
+                    hook.get("type").and_then(serde_json::Value::as_str) != Some("command")
+                        || hook.get("command").and_then(serde_json::Value::as_str) != Some(command)
+                });
+            }
+        }
+        entries.retain(|entry| {
+            entry
+                .get("hooks")
+                .and_then(serde_json::Value::as_array)
+                .is_none_or(|hooks| !hooks.is_empty())
+        });
+        entries.is_empty()
+    } else {
+        false
+    };
+
+    if remove_event {
+        hooks_map.remove(event);
+    }
 }
 
 const OPENCODE_COMMAND_CONTENT: &str = "\
@@ -1657,6 +1747,7 @@ fn ensure_trailing_newline(content: &str) -> String {
 /// When `root` is None, resolves to git superproject root (or CWD fallback).
 #[allow(dead_code)]
 pub fn install_at(root: Option<&Path>) -> Result<()> {
+    let install_user_codex_hooks = root.is_none();
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
     let env = detect_install_env();
     install_skill_for_env(env, resolved.as_deref())?;
@@ -1665,6 +1756,9 @@ pub fn install_at(root: Option<&Path>) -> Result<()> {
     retire_managed_runbook_mirrors(resolved.as_deref())?;
     install_okf(resolved.as_deref())?;
     install_env_artifacts(env, resolved.as_deref())?;
+    if install_user_codex_hooks && matches!(env, agent_kit::detect::Environment::Codex) {
+        install_codex_user_hook_artifacts()?;
+    }
     retire_managed_always_on_agents(resolved.as_deref())
 }
 
@@ -1688,6 +1782,9 @@ pub fn install_and_check_updated() -> Result<bool> {
     retire_managed_runbook_mirrors(resolved.as_deref())?;
     install_okf(resolved.as_deref())?;
     install_env_artifacts(env, resolved.as_deref())?;
+    if matches!(env, agent_kit::detect::Environment::Codex) {
+        install_codex_user_hook_artifacts()?;
+    }
     retire_managed_always_on_agents(resolved.as_deref())?;
     Ok(!was_current)
 }
@@ -1698,6 +1795,7 @@ pub fn install_and_check_updated() -> Result<bool> {
 /// resolution prefers the superproject, so `src/agent-doc/.claude/...` is
 /// otherwise unreachable from inside the submodule (`#skillinstallstalemirror`).
 pub fn install_for_at(env: agent_kit::detect::Environment, root: Option<&Path>) -> Result<()> {
+    let install_user_codex_hooks = root.is_none();
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
     install_skill_for_env(env, resolved.as_deref())?;
     install_runbooks_for(env, resolved.as_deref())?;
@@ -1705,12 +1803,16 @@ pub fn install_for_at(env: agent_kit::detect::Environment, root: Option<&Path>) 
     retire_managed_runbook_mirrors(resolved.as_deref())?;
     install_okf_for(env, resolved.as_deref())?;
     install_env_artifacts(env, resolved.as_deref())?;
+    if install_user_codex_hooks && matches!(env, agent_kit::detect::Environment::Codex) {
+        install_codex_user_hook_artifacts()?;
+    }
     retire_managed_always_on_agents(resolved.as_deref())
 }
 
 /// Install the skill for all supported harnesses under an explicit root.
 /// A `None` root resolves to the superproject (or git toplevel) install root.
 pub fn install_all_at(root: Option<&Path>) -> Result<()> {
+    let install_user_codex_hooks = root.is_none();
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
     for (env, _) in agent_kit::detect::Environment::all_skill_rel_paths("agent-doc") {
         install_skill_for_env(env, resolved.as_deref())?;
@@ -1720,6 +1822,9 @@ pub fn install_all_at(root: Option<&Path>) -> Result<()> {
     retire_managed_runbook_mirrors(resolved.as_deref())?;
     install_okf_all(resolved.as_deref())?;
     install_env_artifacts_all(resolved.as_deref())?;
+    if install_user_codex_hooks {
+        install_codex_user_hook_artifacts()?;
+    }
     retire_managed_always_on_agents(resolved.as_deref())
 }
 
@@ -2759,17 +2864,23 @@ mod tests {
     }
 
     #[test]
-    fn install_for_codex_writes_hooks_json_and_feature_flag() {
+    fn install_for_codex_writes_user_hooks_and_project_feature_flag() {
         let dir = tempfile::tempdir().unwrap();
+        let user_codex = dir.path().join("codex-home");
 
         super::install_skill_for_env(Environment::Codex, Some(dir.path())).unwrap();
         super::install_runbooks_for(Environment::Codex, Some(dir.path())).unwrap();
         super::install_env_artifacts(Environment::Codex, Some(dir.path())).unwrap();
+        super::install_codex_user_hook_artifacts_at(&user_codex).unwrap();
 
-        let hooks_path = dir.path().join(".codex/hooks.json");
+        let hooks_path = user_codex.join("hooks.json");
         let config_path = dir.path().join(".codex/config.toml");
         assert!(hooks_path.exists(), "missing {}", hooks_path.display());
         assert!(config_path.exists(), "missing {}", config_path.display());
+        assert!(
+            !dir.path().join(".codex/hooks.json").exists(),
+            "a fresh project install must not duplicate the user-owned Codex lifecycle hooks"
+        );
 
         let hooks: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&hooks_path).unwrap()).unwrap();
@@ -2822,9 +2933,11 @@ mod tests {
     #[test]
     fn codex_install_artifacts_end_with_a_newline_and_do_not_churn() {
         let dir = tempfile::tempdir().unwrap();
+        let user_codex = dir.path().join("codex-home");
         super::install_codex_hook_artifacts(Some(dir.path())).unwrap();
+        super::install_codex_user_hook_artifacts_at(&user_codex).unwrap();
 
-        let hooks_path = dir.path().join(".codex/hooks.json");
+        let hooks_path = user_codex.join("hooks.json");
         let config_path = dir.path().join(".codex/config.toml");
         for path in [&hooks_path, &config_path] {
             let content = std::fs::read_to_string(path).unwrap();
@@ -2843,6 +2956,7 @@ mod tests {
         let config_before = std::fs::read_to_string(&config_path).unwrap();
 
         super::install_codex_hook_artifacts(Some(dir.path())).unwrap();
+        super::install_codex_user_hook_artifacts_at(&user_codex).unwrap();
 
         assert_eq!(std::fs::read_to_string(&hooks_path).unwrap(), hooks_before);
         assert_eq!(
@@ -2961,7 +3075,7 @@ mod tests {
     }
 
     #[test]
-    fn install_for_codex_preserves_existing_hook_and_config_entries() {
+    fn install_for_codex_retires_project_commands_and_preserves_other_entries() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codex")).unwrap();
         std::fs::write(
@@ -3011,20 +3125,9 @@ mod tests {
                 .iter()
                 .any(|hook| hook["command"].as_str() == Some("echo existing-stop"))
         }));
-        assert!(stop_hooks.iter().any(|entry| {
-            entry["hooks"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|hook| hook["command"].as_str() == Some(CODEX_STOP_COMMAND))
-        }));
-        let submit_hooks = hooks["hooks"]["UserPromptSubmit"][0]["hooks"]
-            .as_array()
-            .unwrap();
-        assert_eq!(submit_hooks.len(), 1, "managed hook must not be duplicated");
-        assert_eq!(
-            submit_hooks[0]["statusMessage"].as_str(),
-            Some("Preparing agent-doc cycle")
+        assert!(
+            hooks["hooks"].get("UserPromptSubmit").is_none(),
+            "the project-layer managed admission hook must be retired to prevent duplicate preflight"
         );
 
         let config: toml::Value = toml::from_str(
@@ -3290,7 +3393,7 @@ mod tests {
         assert!(content.contains("generic document-editing request"));
         assert!(content.contains("final document-mutation boundary for the cycle"));
         assert!(content.contains("do not start more long-running task work for that same turn"));
-        assert!(content.contains(".codex/hooks.json"));
+        assert!(content.contains("$CODEX_HOME/hooks.json"));
         assert!(content.contains(".codex/config.toml"));
         assert!(content.contains("fail-closed backstop"));
         assert!(content.contains("MCP auth / OAuth steps are sub-steps"));
@@ -3794,7 +3897,7 @@ mod tests {
             assert!(content.contains("Do not rely on a pre-commit hook"));
         }
         assert!(claude.contains("final document-mutation boundary for the cycle"));
-        assert!(codex.contains(".codex/hooks.json"));
+        assert!(codex.contains("$CODEX_HOME/hooks.json"));
         assert!(codex.contains("fail-closed backstop"));
     }
 }

@@ -223,6 +223,11 @@ fn codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit() {
         additional_context
             .contains("[agent-doc] cycle contract (preflight already ran in the binary;")
     );
+    assert!(
+        additional_context
+            .contains("Codex in-pane admission: continue this response cycle in the current turn"),
+        "an admitted Codex trigger must forbid recursive shell reinvocation: {additional_context}"
+    );
     let contract_end = additional_context
         .find("\n[agent-doc] cycle contract")
         .expect("contract marker must seal the captured preflight JSON");

@@ -5590,7 +5590,18 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                 .to_string_lossy()
         );
         let iso = tmux_router::IsolatedTmux::new("session-clear-direct-pane");
-        let pane = iso.new_session("test", dir.path()).unwrap();
+        let default_tmux = Tmux::default_server();
+        let mut pane = iso.new_session("test", dir.path()).unwrap();
+        for _ in 0..64 {
+            if !default_tmux.pane_alive(&pane) {
+                break;
+            }
+            pane = iso.new_window("test", dir.path()).unwrap();
+        }
+        assert!(
+            !default_tmux.pane_alive(&pane),
+            "fixture requires an isolated pane id that is absent from the operator's default tmux server"
+        );
         let doc = dir.path().join("doc.md");
         std::fs::write(
             &doc,

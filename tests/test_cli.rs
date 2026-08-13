@@ -3402,7 +3402,8 @@ fn test_agent_doc_codex_hook_io_owns_blocked_stop_payload_sidecar() {
     );
     assert!(
         preflight_hook_source.contains("agent_doc_codex_hook_io::apply_user_prompt_submit(&input)")
-            && preflight_hook_source.contains("run_preflight_for_prompt(&input.prompt"),
+            && preflight_hook_source.contains("run_preflight_for_prompt(")
+            && preflight_hook_source.contains("&input.prompt,"),
         "combined Codex admission must use focused tracking IO before binary preflight"
     );
 }
@@ -31745,21 +31746,49 @@ fn test_skill_md_contains_required_steps() {
 #[test]
 fn test_codex_skill_install_writes_hook_artifacts() {
     let tmp = tempfile::TempDir::new().unwrap();
+    let codex_home = tmp.path().join("user-codex-home");
+    std::fs::create_dir_all(&codex_home).unwrap();
+    std::fs::write(
+        codex_home.join("hooks.json"),
+        serde_json::json!({
+            "hooks": {
+                "UserPromptSubmit": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": "agent-doc turn-status active"
+                    }]
+                }],
+                "Stop": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": "agent-doc turn-status idle"
+                    }]
+                }]
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
     cmd.env("CODEX_CLI", "1");
+    cmd.env("CODEX_HOME", &codex_home);
     cmd.env_remove("CLAUDE_CODE");
     cmd.env_remove("CLAUDE_CODE_ENTRYPOINT");
     cmd.env_remove("OPENCODE");
     cmd.args(["skill", "install"]);
     cmd.assert().success();
 
-    let hooks_path = tmp.path().join(".codex/hooks.json");
+    let hooks_path = codex_home.join("hooks.json");
     let config_path = tmp.path().join(".codex/config.toml");
     let skill_path = tmp.path().join(".codex/skills/agent-doc/SKILL.md");
     assert!(hooks_path.exists(), "missing {}", hooks_path.display());
     assert!(config_path.exists(), "missing {}", config_path.display());
     assert!(skill_path.exists(), "missing {}", skill_path.display());
+    assert!(
+        !tmp.path().join(".codex/hooks.json").exists(),
+        "Codex lifecycle hooks must have one user-level owner, not a duplicate project install"
+    );
     assert!(
         !tmp.path().join(".codex/AGENTS.md").exists(),
         "Codex workflow must not be installed into always-on .codex/AGENTS.md"
@@ -31799,6 +31828,20 @@ fn test_codex_skill_install_writes_hook_artifacts() {
                     .any(|hook| hook["command"].as_str() == Some("agent-doc hook codex-stop"))
             })
     );
+    assert!(
+        hooks["hooks"]["UserPromptSubmit"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| {
+                entry["hooks"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|hook| hook["command"].as_str() == Some("agent-doc turn-status active"))
+            }),
+        "install must preserve an existing user-level prompt hook"
+    );
 
     let config: toml::Value =
         toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
@@ -31832,7 +31875,7 @@ fn test_codex_skill_install_writes_hook_artifacts() {
         std::fs::read_to_string(&hooks_path)
             .unwrap()
             .ends_with('\n'),
-        "installed .codex/hooks.json must end with a newline"
+        "installed user-level Codex hooks.json must end with a newline"
     );
 }
 

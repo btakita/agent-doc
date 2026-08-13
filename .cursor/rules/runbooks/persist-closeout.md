@@ -11,7 +11,7 @@ Complete requested implementation, verification, build/install, and local
 inspection **before** persisting. The response-persistence command is the final
 document-mutation boundary for the cycle, not an intermediate checkpoint. After
 `finalize` / `write --commit`, do not start more long-running task work for that
-same turn. Codex hooks in `.codex/hooks.json` / `.codex/config.toml` are a
+same turn. Codex hooks in user-level `$CODEX_HOME/hooks.json` plus project-local `.codex/config.toml` are a
 fail-closed backstop, not a replacement for explicit closeout.
 
 ## Agent harnesses own full-suite verification

@@ -2,6 +2,22 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.248
+
+- **Fix: a Codex owner pane now admits `agent-doc <FILE>` in the current turn
+instead of shell-running the command back into itself.**
+
+Codex lifecycle admission is now installed once at the user hook layer, so it
+remains visible when a session document lives below a nested Git root, submodule,
+or worktree. Reinstall retires only agent-doc's legacy project-local lifecycle
+commands and preserves unrelated hooks, avoiding both missed admission and
+double preflight. Successful preflight context now ends with an explicit in-pane
+directive; tracking or preflight failures still emit no success marker and fail
+closed. The existing process-entry recursion guard remains the last line of
+defense for a genuine nested invocation, but no longer substitutes for handling
+the unresolved prompt. Installer, route detection, and absolute-path hook
+regressions cover the user-owned topology and nested-root case.
+
 ## 0.35.247
 
 - **Fix: an editor-native save race no longer tells the foreground agent to

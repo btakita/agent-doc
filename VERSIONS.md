@@ -2,6 +2,28 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.247
+
+- **Fix: an editor-native save race no longer tells the foreground agent to
+compete with captured-finalize by running `agent-doc commit`.**
+
+When a response had reached canonical editor authority but its exact native-save
+projection had not reached disk, the document actor correctly retained the same
+write intent. The lifecycle verdict then saw `write_applied` and named manual
+`commit` recovery even though the response capture and its captured-finalize
+worker were still active. The agent obeyed that instruction, racing the worker
+that already owned the terminal boundary.
+
+Retained-capture ownership now takes precedence over the `write_applied` phase:
+captured-finalize keeps responsibility for delivery settlement and terminal
+commit, and the foreground recovery is observation through `session-check`
+without resending or mutation. An uncaptured `write_applied` crash state still
+names manual `commit`. The commit-side capture-materialization guard also treats
+the capture it has already loaded as authoritative ownership evidence, so a
+racing sidecar read cannot bounce recovery among `commit`, `write --commit`, and
+a new cycle. Focused ownership, materialization, realtime retained-write,
+session-check, and deterministic simulator regressions cover both branches.
+
 ## 0.35.246
 
 - **Fix: direct `agent-doc <FILE>` no longer repeats the raw-commit refusal for

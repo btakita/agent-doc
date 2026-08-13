@@ -44,16 +44,19 @@ pub struct RetainedWriteOwnership {
     /// `response_captured`, or `write_applied`).
     pub cycle_open: bool,
     /// A response capture is retained for this document.
+    ///
+    /// This is also ownership of the terminal commit. A captured-finalize
+    /// worker resumes the exact same response after editor delivery converges;
+    /// `write_applied` does not transfer that ownership to the calling agent.
     pub retained_capture: bool,
     /// The open cycle is specifically at `write_applied`
     /// (`#ownershipverdictdiverges`).
     ///
-    /// Not every open phase is self-committing, and treating them alike is what
-    /// made this predicate contradict `session-check`. At `preflight_started` and
-    /// `response_captured` a state edge really does still fire. At
-    /// `write_applied` the response write has ALREADY landed and only the
-    /// terminal commit is outstanding — `session-check` calls that cycle
-    /// INTERRUPTED, and only `agent-doc commit` advances it.
+    /// Not every open phase is self-committing. At `write_applied` the response
+    /// write has ALREADY landed and only the terminal commit is outstanding.
+    /// When no response capture remains, `agent-doc commit` is the recovery;
+    /// when a capture remains, its captured-finalize worker still owns that
+    /// exact commit and manual recovery would race it.
     pub write_applied: bool,
     /// The divergence is an unanswered edit to typed components this turn's
     /// write never produced — a queue strike, a backlog add — that the disk
@@ -117,13 +120,26 @@ impl RetainedWriteOwnership {
         self
     }
 
+    /// Refine ownership with a response capture proven by the current caller.
+    ///
+    /// Some guards already hold the loaded capture. Keeping that evidence is
+    /// stronger than re-reading a sidecar that can race capture settlement.
+    pub const fn with_retained_capture(mut self, retained_capture: bool) -> Self {
+        self.retained_capture |= retained_capture;
+        self
+    }
+
     pub const fn verdict(self) -> RetainedWriteVerdict {
-        // Checked FIRST: `write_applied` implies `cycle_open`, and the broader
-        // arm would otherwise swallow it and promise a self-commit that never
-        // comes.
-        if self.write_applied {
+        // A retained capture owns the whole closeout, including the terminal
+        // commit after `write_applied`. This must be checked before phase: the
+        // captured-finalize worker is waiting on the same editor state edge and
+        // a manual `commit` would race it. Only an *uncaptured* write-applied
+        // cycle needs the manual terminal-commit recovery.
+        if self.retained_capture {
+            RetainedWriteVerdict::Deferred
+        } else if self.write_applied {
             RetainedWriteVerdict::AwaitingTerminalCommit
-        } else if self.cycle_open || self.retained_capture {
+        } else if self.cycle_open {
             RetainedWriteVerdict::Deferred
         } else if self.unanswered_edit {
             // Refines the unowned case only. With a durable holder the write
@@ -149,12 +165,15 @@ pub enum RetainedWriteVerdict {
     /// Nothing holds the write. No state edge can fire, so waiting never
     /// commits it — the visible edits are stranded, not deferred.
     Stranded,
-    /// The response write already landed; only the terminal commit is
-    /// outstanding (`#ownershipverdictdiverges`).
+    /// The response write already landed, no response capture remains to own
+    /// closeout, and only the terminal commit is outstanding
+    /// (`#ownershipverdictdiverges`).
     ///
     /// Between the other two: the response is NOT lost, so re-sending it would
     /// duplicate work — but nothing is going to finish it either, so waiting is
     /// equally wrong. `agent-doc commit` is the one command that advances it.
+    /// A retained capture instead yields [`Self::Deferred`], because its
+    /// captured-finalize worker still owns this boundary.
     AwaitingTerminalCommit,
     /// Nothing owns a write because there is no write — the divergence is an
     /// unanswered edit to typed components this turn's write never produced
@@ -550,20 +569,16 @@ mod tests {
         }
     }
 
-    /// `#ownershipverdictdiverges`: `write_applied` is not self-committing, and
-    /// lumping it in with the other open phases made this predicate contradict
-    /// `session-check`. Observed three times on 2026-08-09 on
-    /// `tasks/agent-doc/agent-doc-bugs2.md`: the refusal promised the intent
-    /// "commits itself once delivery converges", `session-check` then reported
-    /// INTERRUPTED at `write_applied`, and a single `agent-doc commit` finished
-    /// it every time.
+    /// `#ownershipverdictdiverges`: an uncaptured `write_applied` cycle is not
+    /// self-committing. A retained capture is different: its captured-finalize
+    /// worker owns the terminal commit and wakes on editor convergence.
     #[test]
-    fn write_applied_is_awaiting_a_terminal_commit_not_self_committing() {
-        let applied = RetainedWriteOwnership::new_with_phase(true, true, true);
+    fn uncaptured_write_applied_is_awaiting_a_terminal_commit() {
+        let applied = RetainedWriteOwnership::new_with_phase(true, false, true);
         assert_eq!(
             applied.verdict(),
             RetainedWriteVerdict::AwaitingTerminalCommit,
-            "write_applied must not be swallowed by the broader cycle_open arm"
+            "an uncaptured write_applied cycle has no binary owner left"
         );
         assert!(!applied.is_stranded(), "the response body IS durable");
 
@@ -578,13 +593,35 @@ mod tests {
         );
     }
 
+    /// Regression for the editor-save race: the response reached canonical
+    /// editor authority, native-save projection lagged, and the capture worker
+    /// remained active. The refusal must not tell the model to race that worker
+    /// with a second `agent-doc commit` invocation.
+    #[test]
+    fn captured_write_applied_remains_binary_owned() {
+        let captured = RetainedWriteOwnership::new_with_phase(true, true, true);
+        assert_eq!(captured.verdict(), RetainedWriteVerdict::Deferred);
+
+        let remedy = retained_write_remedy(captured, "plan.md");
+        assert!(remedy.contains("agent-doc session-check plan.md"));
+        assert!(remedy.contains("commits itself"));
+        assert!(
+            !remedy.contains("Finish it from the pane"),
+            "manual commit recovery races captured-finalize ownership: {remedy}"
+        );
+        assert!(
+            !captured.verdict().commit_is_the_named_recovery(),
+            "the captured-finalize worker, not the model, owns terminal commit"
+        );
+    }
+
     /// The remedy must name the command that actually recovers. Naming only
     /// `session-check` — an OBSERVATION — is what left the agent with an
     /// accurate diagnosis and no way to act on it.
     #[test]
     fn the_awaiting_commit_remedy_names_agent_doc_commit() {
         let remedy = retained_write_remedy(
-            RetainedWriteOwnership::new_with_phase(true, true, true),
+            RetainedWriteOwnership::new_with_phase(true, false, true),
             "plan.md",
         );
 
@@ -626,7 +663,7 @@ mod tests {
                 RetainedWriteVerdict::Deferred => RetainedWriteOwnership::new(true, false),
                 RetainedWriteVerdict::Stranded => RetainedWriteOwnership::UNOWNED,
                 RetainedWriteVerdict::AwaitingTerminalCommit => {
-                    RetainedWriteOwnership::new_with_phase(true, true, true)
+                    RetainedWriteOwnership::new_with_phase(true, false, true)
                 }
                 RetainedWriteVerdict::UnansweredEditPending => {
                     RetainedWriteOwnership::UNOWNED.with_unanswered_edit(true)

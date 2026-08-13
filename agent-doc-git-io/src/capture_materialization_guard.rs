@@ -122,43 +122,18 @@ pub fn ensure_active_capture_materialized_for_commit(
     );
     effects.log_missing_capture_guard(file);
 
-    // `#commitwritecommitdeadlock`: pick the remedy from the shared ownership
-    // predicate instead of always naming `write --commit`.
-    //
-    // Observed 2026-08-09 on `tasks/agent-doc/agent-doc-bugs2.md` at
-    // `cycle-1786271908581`: `respond` failed with the `AwaitingTerminalCommit`
-    // remedy naming `agent-doc commit`; `commit` reached this guard and named
-    // `agent-doc write --commit`; `write --commit` answered with the SAME
-    // `AwaitingTerminalCommit` remedy, naming `commit` again. Three commands, a
-    // closed cycle, and an agent following the instructions faithfully has no
-    // move — the identical failure `#strandedremedydeadlock` fixed for the
-    // `commit`/`session-check` pair, in a pair that fix did not cover.
-    //
-    // `commit_is_the_named_recovery` is the same predicate that resolved that
-    // one: it is true exactly for the verdicts whose remedy sends the agent to
-    // `agent-doc commit`. When it holds, naming `write --commit` here is what
-    // closes the loop, because `write --commit` will bounce straight back. The
-    // recovery that actually works in that state — proven on the incident above
-    // — is the next cycle, whose preflight owns capture materialisation and
-    // committed both responses without losing any text.
-    let ownership = effects.retained_write_ownership(file);
-    let remedy = if ownership.verdict().commit_is_the_named_recovery() {
-        format!(
-            "This is NOT a missed patchback: the capture is durable and the cycle is already at \
-             `write_applied`, so `agent-doc write --commit {}` will answer that the write ALREADY \
-             LANDED and send you back to `agent-doc commit` — a loop with no exit. Open the next \
-             cycle instead: `agent-doc {}`. Preflight owns capture materialisation and recovery, \
-             and no visible text is lost while it is pending",
-            file.display(),
-            file.display()
-        )
-    } else {
-        format!(
-            "Replay the captured response with `agent-doc write --commit {}` before marking the \
-             cycle committed",
-            file.display()
-        )
-    };
+    // The capture loaded above is stronger evidence than a second sidecar read:
+    // it proves captured-finalize still owns materialization and terminal
+    // commit. Preserve that evidence through the shared verdict so this guard
+    // cannot bounce between `commit`, `write --commit`, and a new cycle while
+    // the binary-owned worker is already waiting on editor convergence.
+    let ownership = effects
+        .retained_write_ownership(file)
+        .with_retained_capture(true);
+    let remedy = agent_doc_turn::write_ownership::retained_write_remedy(
+        ownership,
+        &file.display().to_string(),
+    );
     anyhow::bail!(
         "captured response body is not present in the staged snapshot for {} even though the snapshot already matches HEAD; refusing already-committed closeout. {remedy}.",
         file.display()
@@ -230,56 +205,36 @@ mod tests {
         format!("{err:#}")
     }
 
-    /// `#commitwritecommitdeadlock`: at `write_applied` this guard must NOT name
-    /// `write --commit`.
-    ///
-    /// Observed 2026-08-09 on `tasks/agent-doc/agent-doc-bugs2.md`: `respond`
-    /// named `agent-doc commit`, `commit` reached this guard and named
-    /// `agent-doc write --commit`, and `write --commit` answered with the same
-    /// `AwaitingTerminalCommit` remedy naming `commit` again. An agent obeying
-    /// the instructions faithfully has no move.
+    /// At `write_applied`, an active capture still owns materialization and the
+    /// terminal commit. This guard must not prescribe any competing mutation.
     #[test]
-    fn a_write_applied_cycle_is_not_sent_to_the_command_that_sends_it_back() {
-        let awaiting = RetainedWriteOwnership::new_with_phase(true, true, true);
+    fn a_captured_write_applied_cycle_stays_with_binary_owned_finalize() {
+        let captured = RetainedWriteOwnership::new_with_phase(true, true, true);
         assert!(
-            awaiting.verdict().commit_is_the_named_recovery(),
-            "fixture must be a verdict whose remedy names `agent-doc commit`"
+            !captured.verdict().commit_is_the_named_recovery(),
+            "a retained capture must keep terminal commit binary-owned"
         );
 
-        let err = blocked_error(awaiting);
-        // Mentioning the command to warn against it is fine — PRESCRIBING it is
-        // the deadlock. Same distinction the `#strandedremedydeadlock`
-        // biconditional draws.
+        let err = blocked_error(captured);
+        assert!(err.contains("`agent-doc session-check plan.md`"));
         assert!(
-            !err.contains("Replay the captured response with `agent-doc write --commit"),
-            "prescribing the command that bounces straight back is the deadlock: {err}"
-        );
-        assert!(
-            err.contains("`agent-doc plan.md`"),
-            "the remedy must name the recovery that actually works: {err}"
-        );
-        assert!(
-            err.contains("no exit") || err.contains("loop"),
-            "say why the obvious command is wrong, or the next agent will try it: {err}"
+            !err.contains("Replay the captured response with `agent-doc write --commit")
+                && !err.contains("Finish it from the pane"),
+            "manual recovery races the retained capture: {err}"
         );
     }
 
-    /// The ordinary missed-patchback case is unchanged: nothing owns a retained
-    /// write, `write --commit` really is the replay path, and it does not bounce.
+    /// Loading the active capture is itself ownership proof even if a racing
+    /// secondary read reports an unowned shape.
     #[test]
-    fn an_unowned_missed_patchback_still_names_write_commit() {
+    fn loaded_capture_refines_a_racing_unowned_read() {
         let unowned = RetainedWriteOwnership::UNOWNED;
-        // `Stranded` also routes through `commit`, so use the shape that does
-        // not: something durable still holds the write.
-        let deferred = RetainedWriteOwnership::new(true, false);
-        assert!(!deferred.verdict().commit_is_the_named_recovery());
-
-        let err = blocked_error(deferred);
+        let err = blocked_error(unowned);
         assert!(
-            err.contains("`agent-doc write --commit plan.md`"),
-            "the replay path must still be named when it works: {err}"
+            err.contains("`agent-doc session-check plan.md`")
+                && err.contains("deferral, not a lost response"),
+            "the loaded capture must retain recovery ownership: {err}"
         );
-        // And the guard still fires at all for the unowned shape.
-        assert!(blocked_error(unowned).contains("captured response body is not present"));
+        assert!(err.contains("captured response body is not present"));
     }
 }

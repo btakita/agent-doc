@@ -5381,8 +5381,9 @@ fn defer_visible_delivery_projection(
     );
     // `#retainedwriteremedy`: this refusal must name its recovery, exactly like
     // its two sibling branches above. Without the remedy the message reads as
-    // "nothing happened" — but the write may already have applied and be waiting
-    // only on the terminal commit, which `agent-doc commit <FILE>` completes.
+    // "nothing happened" — but the write may already have applied. A retained
+    // response capture keeps terminal commit binary-owned; only an uncaptured
+    // `write_applied` cycle names `agent-doc commit <FILE>` as recovery.
     // An agent that reads "no ... write was attempted" as "the response was
     // lost" re-answers or resubmits, which is precisely what `#percellconverge`
     // forbids. Derive the wording from the one ownership predicate so an agent

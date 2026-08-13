@@ -459,10 +459,10 @@ fn checkpoint_partial_response_for_cycle_with_current_content(
 pub fn retained_write_ownership(
     file: &Path,
 ) -> agent_doc_turn::write_ownership::RetainedWriteOwnership {
-    // `#ownershipverdictdiverges`: carry the PHASE, not just "open". A
-    // `write_applied` cycle has already landed its write and needs
-    // `agent-doc commit`; the other open phases still self-commit. Collapsing
-    // them here is what let the verdict contradict `session-check`.
+    // `#ownershipverdictdiverges`: carry the PHASE, not just "open". An
+    // uncaptured `write_applied` cycle needs `agent-doc commit`; a retained
+    // capture still owns the terminal boundary through captured-finalize.
+    // Preserve both facts so phase cannot erase the stronger ownership proof.
     let mut write_applied = false;
     let cycle_open = match agent_doc_cycle_state_io::load_with_closeout_projection(file) {
         Ok(state) => state.is_some_and(|state| {

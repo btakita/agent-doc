@@ -84,6 +84,53 @@ struct StreamFinalPayload {
     replayed_pending_editor_ops: bool,
 }
 
+/// Opening-cycle proof that the visible document at preflight, rather than the
+/// older durable snapshot, is the response's application base.
+///
+/// A prompt may already be visible when preflight opens the cycle. That prompt
+/// belongs to the response being written and must be committed with it. A
+/// prompt that appears after preflight is concurrent carry-forward and must
+/// remain outside the response snapshot. Capture this witness before pending
+/// response persistence advances the cycle to `response_captured`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreflightApplicationBaseWitness {
+    file_hash: String,
+}
+
+fn capture_preflight_application_base_witness(
+    file: &Path,
+    baseline: Option<&str>,
+) -> Result<Option<PreflightApplicationBaseWitness>> {
+    let Some(baseline) = baseline else {
+        return Ok(None);
+    };
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    if state.phase != agent_doc_turn::CyclePhase::PreflightStarted
+        || state.snapshot_hash.as_deref() != Some(agent_doc_hash::content_hash(baseline).as_str())
+    {
+        return Ok(None);
+    }
+    Ok(state
+        .file_hash
+        .map(|file_hash| PreflightApplicationBaseWitness { file_hash }))
+}
+
+fn application_baseline_for_preflight_witness<'a>(
+    witness: Option<&PreflightApplicationBaseWitness>,
+    baseline: Option<&'a str>,
+    current_content: &'a str,
+) -> Option<&'a str> {
+    if witness
+        .is_some_and(|witness| witness.file_hash == agent_doc_hash::content_hash(current_content))
+    {
+        Some(current_content)
+    } else {
+        baseline
+    }
+}
+
 fn clear_replayed_editor_ops_after_write(file: &Path, replayed: bool, source: &str) {
     if !replayed {
         return;
@@ -457,6 +504,8 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
         anyhow::bail!(EMPTY_RESPONSE_ERROR);
     }
 
+    let preflight_application_base = capture_preflight_application_base_witness(file, baseline)?;
+
     let current_content = resolve_document_content_for_write_mode(
         file,
         flags.force_disk,
@@ -464,6 +513,11 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
         "write_append_force_disk_current_content",
     )
     .with_context(|| format!("failed to read {}", file.display()))?;
+    let baseline = application_baseline_for_preflight_witness(
+        preflight_application_base.as_ref(),
+        baseline,
+        &current_content,
+    );
     enforce_imperative_response_contract_with_mutation_evidence(
         file,
         baseline,
@@ -668,6 +722,8 @@ pub(crate) fn run_template(
         anyhow::bail!(EMPTY_RESPONSE_ERROR);
     }
 
+    let preflight_application_base = capture_preflight_application_base_witness(file, baseline)?;
+
     let current_content = resolve_document_content_for_write_mode(
         file,
         flags.force_disk,
@@ -675,6 +731,11 @@ pub(crate) fn run_template(
         "write_template_force_disk_current_content",
     )
     .with_context(|| format!("failed to read {}", file.display()))?;
+    let baseline = application_baseline_for_preflight_witness(
+        preflight_application_base.as_ref(),
+        baseline,
+        &current_content,
+    );
     let snapshot_doc = agent_doc_snapshot_io::load_document_baseline(file)
         .ok()
         .flatten();
@@ -1049,6 +1110,8 @@ pub(crate) fn run_stream(
     }
     sanitize_template_patchback_response(&mut response)?;
 
+    let preflight_application_base = capture_preflight_application_base_witness(file, baseline)?;
+
     let pre_capture_current_content =
         capture_validated_stream_closeout_before_authority_resolution(
             file, baseline, force_disk, &response, &flags,
@@ -1064,6 +1127,11 @@ pub(crate) fn run_stream(
         )
         .with_context(|| format!("failed to read {}", file.display()))?,
     };
+    let baseline = application_baseline_for_preflight_witness(
+        preflight_application_base.as_ref(),
+        baseline,
+        &current_content,
+    );
     let mut snapshot_doc = agent_doc_snapshot_io::load_document_baseline(file)
         .ok()
         .flatten();
@@ -2677,6 +2745,59 @@ mod tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    #[test]
+    fn preflight_visible_prompt_is_the_response_application_base() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("preflight-owned-prompt.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n<!-- agent:boundary:base -->\n<!-- /agent:exchange -->\n";
+        let current = "<!-- agent:exchange patch=append -->\n❯ fix the retained prompt\n<!-- agent:boundary:base -->\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, current).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(current)).unwrap();
+
+        let witness = capture_preflight_application_base_witness(&doc, Some(snapshot)).unwrap();
+        assert_eq!(
+            application_baseline_for_preflight_witness(witness.as_ref(), Some(snapshot), current,),
+            Some(current),
+            "the prompt visible when preflight opened belongs to this response cycle",
+        );
+
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "test_capture",
+            Some(snapshot),
+            Some(current),
+            "response-sha",
+            None,
+        )
+        .unwrap();
+        assert!(
+            capture_preflight_application_base_witness(&doc, Some(snapshot))
+                .unwrap()
+                .is_none(),
+            "a replayed response_captured cycle must not adopt a later visible prompt",
+        );
+    }
+
+    #[test]
+    fn prompt_typed_after_preflight_remains_carry_forward() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("post-preflight-prompt.md");
+        let snapshot = "<!-- agent:exchange patch=append -->\n<!-- agent:boundary:base -->\n<!-- /agent:exchange -->\n";
+        let opening = "<!-- agent:exchange patch=append -->\n❯ answer this cycle\n<!-- agent:boundary:base -->\n<!-- /agent:exchange -->\n";
+        let later = "<!-- agent:exchange patch=append -->\n❯ answer this cycle\n❯ next cycle prompt\n<!-- agent:boundary:base -->\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, opening).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(opening)).unwrap();
+
+        let witness = capture_preflight_application_base_witness(&doc, Some(snapshot)).unwrap();
+        assert_eq!(
+            application_baseline_for_preflight_witness(witness.as_ref(), Some(snapshot), later,),
+            Some(snapshot),
+            "text that diverges after preflight must stay outside the response snapshot",
+        );
+    }
 
     /// `#fzmutloss`: a CRDT convergence timeout retains its change for retry,
     /// so it must also retain the SAME closeout's backlog/status mutations.

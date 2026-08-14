@@ -2,6 +2,30 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.250
+
+- **Fix: route-owned queue activation no longer strands an editor-retained write
+  or rejects the fresh Codex turn that already accepted it.**
+
+  A route mutation accepted by the CRDT plane now stays route-owned until its
+  exact target becomes editor-visible; only then may queue activation checkpoint
+  and dispatch. If it cannot settle, recovery is rerunning route rather than an
+  owner-pane-only manual commit. After a `/clear`-driven fresh restart, a newer
+  authoritative actor generation whose busy transition is the supervisor's own
+  `auto_trigger_inject` is accepted as an owned dispatch instead of being
+  misreported as “never became ready.”
+
+- **Fix: the prompt visible when preflight opens is committed with its response,
+  while prompts typed later still carry forward.**
+
+  Write entry points capture a preflight application-base witness before pending
+  response persistence advances the cycle. The visible document is adopted only
+  when its hash is exactly the opening cycle's recorded `file_hash` and the
+  explicit baseline matches the recorded snapshot. A replayed capture or any
+  post-preflight text divergence keeps the older baseline, preserving the next
+  prompt outside the current commit. Route projection, fresh-restart admission,
+  and preflight/carry-forward regressions cover all three fixes.
+
 ## 0.35.249
 
 - **Fix: a Codex owner pane now executes an unwrapped, multiline queue task

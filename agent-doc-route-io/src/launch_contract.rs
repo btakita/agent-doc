@@ -9,8 +9,8 @@ use agent_doc_harness::HarnessConfig;
 use tmux_router::Tmux;
 
 use crate::authoritative_actor::{
-    ManagedCapabilityProofStatus, managed_capability_proof_status,
-    tracked_harness_clear_requires_fresh_restart,
+    ManagedCapabilityProofStatus, load_authoritative_actor_for_registered_pane,
+    managed_capability_proof_status, tracked_harness_clear_requires_fresh_restart,
 };
 use crate::dispatch_target::register_dispatch_target;
 use crate::restart_handoff::wait_for_busy_restart_handoff;
@@ -27,6 +27,49 @@ const CONTROLLER_REPLACEMENT_POLL_INTERVAL: Duration = Duration::from_millis(100
 enum TrackedClearRestartFallback {
     ForceControllerReplacement,
     Refuse,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FreshRestartAutoTriggerFacts<'a> {
+    pane: &'a str,
+    generation: u64,
+    state: agent_doc_controller::actor::ActorState,
+    transition_reason: &'a str,
+}
+
+fn fresh_restart_auto_trigger_accepted(
+    previous_generation: Option<u64>,
+    dispatch_pane: &str,
+    facts: Option<FreshRestartAutoTriggerFacts<'_>>,
+) -> bool {
+    facts.is_some_and(|facts| {
+        facts.pane == dispatch_pane
+            && facts.state == agent_doc_controller::actor::ActorState::Busy
+            && facts.transition_reason == "auto_trigger_inject"
+            && previous_generation.is_none_or(|generation| facts.generation > generation)
+    })
+}
+
+fn fresh_restart_auto_trigger_accepted_for_pane(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    pane: &str,
+    previous_generation: Option<u64>,
+) -> Result<bool> {
+    let actor =
+        load_authoritative_actor_for_registered_pane(tmux, file, session_id, file_path, pane)?;
+    Ok(fresh_restart_auto_trigger_accepted(
+        previous_generation,
+        pane,
+        actor.as_ref().map(|actor| FreshRestartAutoTriggerFacts {
+            pane: &actor.record.pane_id,
+            generation: actor.record.generation,
+            state: actor.actor_state(),
+            transition_reason: &actor.record.last_transition.reason,
+        }),
+    ))
 }
 
 fn tracked_clear_restart_fallback(
@@ -132,6 +175,9 @@ fn reapply_harness_launch_contract_after_clear(
         .map(str::trim)
         .filter(|prompt| !prompt.is_empty())
         .unwrap_or("<unknown>");
+    let previous_generation =
+        load_authoritative_actor_for_registered_pane(tmux, file, session_id, file_path, pane)?
+            .map(|actor| actor.record.generation);
 
     agent_doc_ops_log_io::log_op(
         file,
@@ -203,12 +249,25 @@ fn reapply_harness_launch_contract_after_clear(
             );
         }
     };
-    if !wait_for_agent_ready(
+    let pane_ready = wait_for_agent_ready(
         tmux,
         &dispatch_pane,
         fresh_route_admission_timeout(cfg!(test)),
         harness,
-    ) {
+    );
+    let auto_trigger_accepted = if pane_ready {
+        false
+    } else {
+        fresh_restart_auto_trigger_accepted_for_pane(
+            tmux,
+            file,
+            session_id,
+            file_path,
+            &dispatch_pane,
+            previous_generation,
+        )?
+    };
+    if !pane_ready && !auto_trigger_accepted {
         anyhow::bail!(
             "latest tracked {} prompt for {} was `{}`, and the fresh recovery session in pane {} never became ready. Run `agent-doc start {}` manually to recover",
             harness.binary,
@@ -216,6 +275,21 @@ fn reapply_harness_launch_contract_after_clear(
             latest_prompt_label,
             dispatch_pane,
             file.display()
+        );
+    }
+    if auto_trigger_accepted {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_fresh_restart_auto_trigger_accepted file={} pane={} harness={} recovery=coalesce_active_dispatch",
+                file.display(),
+                dispatch_pane,
+                harness.binary,
+            ),
+        );
+        eprintln!(
+            "[route] fresh {} session in pane {} already accepted the agent-doc auto-trigger; continuing as an owned active dispatch",
+            harness.binary, dispatch_pane,
         );
     }
     register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
@@ -362,6 +436,39 @@ pub fn reapply_codex_launch_contract_before_reuse(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fresh_restart_accepts_new_generation_auto_trigger_as_owned_dispatch() {
+        let accepted = FreshRestartAutoTriggerFacts {
+            pane: "%4",
+            generation: 73,
+            state: agent_doc_controller::actor::ActorState::Busy,
+            transition_reason: "auto_trigger_inject",
+        };
+        assert!(fresh_restart_auto_trigger_accepted(
+            Some(72),
+            "%4",
+            Some(accepted),
+        ));
+        assert!(!fresh_restart_auto_trigger_accepted(
+            Some(73),
+            "%4",
+            Some(accepted),
+        ));
+        assert!(!fresh_restart_auto_trigger_accepted(
+            Some(72),
+            "%9",
+            Some(accepted),
+        ));
+        assert!(!fresh_restart_auto_trigger_accepted(
+            Some(72),
+            "%4",
+            Some(FreshRestartAutoTriggerFacts {
+                transition_reason: "ipc_inject",
+                ..accepted
+            }),
+        ));
+    }
 
     #[test]
     fn tracked_clear_open_cycle_fallback_only_replaces_idle_retained_closeouts() {

@@ -441,7 +441,12 @@ resume:
 ```
 
 Each harness must read, update, and invalidate only its own slot. A legacy scalar should migrate only into the document's active harness slot; it must never be offered to another harness. That change remains explicitly queued as `#harnessresumemap`; it was not mixed into the stranded-write release.
-<!-- agent:boundary:558d86cd:agent-doc-bugs2 -->
+
+### Re: restored prompt markers — gpt-5.6
+
+There is no new substantive operator prompt in these eight steering fragments. They are the already-answered backend wedge prompt plus restored quote-marker lines from the live editor projection. The backend fix and its live proof remain recorded above; no work item or answer is being duplicated.
+
+<!-- agent:boundary:9691d218:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 

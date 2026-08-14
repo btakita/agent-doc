@@ -812,6 +812,13 @@ fn prompt_change_run_is_already_answered(changes: &[PromptBearingChange], idx: u
 }
 
 fn prompt_target_is_marker_only_normalization(diff_text: &str, change_text: &str) -> bool {
+    if change_text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .all(prompt_line_is_projection_envelope)
+    {
+        return true;
+    }
     let Some(added_prompt) = change_text
         .lines()
         .find(|line| !line.trim().is_empty())
@@ -840,6 +847,21 @@ fn prompt_target_is_marker_only_normalization(diff_text: &str, change_text: &str
     saw_removed_equivalent && saw_added_equivalent
 }
 
+fn prompt_line_is_projection_envelope(line: &str) -> bool {
+    let trimmed = line.trim();
+    let Some(rest) = trimmed.strip_prefix('❯') else {
+        return false;
+    };
+    let rest = rest.trim().strip_prefix('>').unwrap_or(rest.trim()).trim();
+    rest.is_empty() || matches!(rest, "**User prompt:**" | "**Queue prompt:**")
+}
+
+fn prompt_line_semantic_text(line: &str) -> &str {
+    let trimmed = line.trim();
+    let unprefixed = trimmed.strip_prefix('❯').unwrap_or(trimmed).trim();
+    unprefixed.strip_prefix('>').unwrap_or(unprefixed).trim()
+}
+
 pub fn strip_queue_components_for_unstarted_prompt_guard(body: &str) -> String {
     let Ok(components) = element::parse(body) else {
         return body.to_string();
@@ -864,13 +886,10 @@ pub fn prompt_target_is_immediately_before_existing_response(
     current_doc: &str,
     change_text: &str,
 ) -> bool {
-    let target_line = change_text
+    let target = change_text
         .lines()
         .find(|line| !line.trim().is_empty())
-        .map(|line| line.trim().to_string());
-    let target = target_line
-        .as_deref()
-        .map(|line| line.trim_start_matches('❯').trim().to_string());
+        .map(prompt_line_semantic_text);
     let Some(target) = target else {
         return false;
     };
@@ -891,7 +910,7 @@ pub fn prompt_target_is_immediately_before_existing_response(
     };
     let lines: Vec<&str> = exchange.content(&body).lines().collect();
     for (idx, line) in lines.iter().enumerate() {
-        let normalized = line.trim().trim_start_matches('❯').trim();
+        let normalized = prompt_line_semantic_text(line);
         if normalized != target {
             continue;
         }
@@ -902,6 +921,13 @@ pub fn prompt_target_is_immediately_before_existing_response(
             }
             if is_exchange_response_heading(trimmed) {
                 return true;
+            }
+            // A restored editor projection can materialize a complete quoted
+            // prompt block immediately before the response that already answers
+            // it. Walk the rest of that quoted block instead of requiring the
+            // first restored line to be adjacent to the response heading.
+            if trimmed.starts_with('❯') {
+                continue;
             }
             // Only an adjacent response cell can acknowledge this exact
             // prompt block.  In particular, do not scan across another
@@ -4303,6 +4329,82 @@ Done.\n\
         assert!(
             change.is_none(),
             "the only newly added prompt is immediately before an existing response"
+        );
+    }
+
+    #[test]
+    fn restored_prompt_envelopes_and_multiline_block_before_response_are_not_steering() {
+        let snapshot = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: queued item — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            "> do [#queued]\n\n",
+            "Done.\n\n",
+            "❯ > Fix the owner-pane invocation.\n\n",
+            "### Re: owner-pane invocation — gpt-5.6\n\n",
+            "Fixed the first layer.\n\n",
+            "### Re: backend owner-pane queue admission — gpt-5.6\n\n",
+            "Fixed the remaining wedge.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: queued item — gpt-5\n\n",
+            "❯ >\n",
+            "> **Queue prompt:**\n",
+            "> do [#queued]\n\n",
+            "Done.\n\n",
+            "❯ > **User prompt:**\n",
+            "❯ >\n",
+            "❯ > Fix the owner-pane invocation.\n\n",
+            "### Re: owner-pane invocation — gpt-5.6\n\n",
+            "Fixed the first layer.\n\n",
+            "❯ > **User prompt:**\n",
+            "❯ >\n",
+            "❯ > The backend task is wedged:\n",
+            "❯ > `agent-doc tasks/backend.md`\n",
+            "❯ > returns Already active.\n",
+            "❯ > Fix this issue first.\n\n",
+            "### Re: backend owner-pane queue admission — gpt-5.6\n\n",
+            "Fixed the remaining wedge.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let diff = unified_diff_from_contents(snapshot, current).expect("diff");
+
+        let changes = all_unstarted_prompt_bearing_changes_from_diff(&diff, current);
+
+        assert!(
+            changes.is_empty(),
+            "projection-restored prompt envelopes before existing responses are already answered: {changes:?}"
+        );
+    }
+
+    #[test]
+    fn restored_prompt_envelope_at_tail_remains_actionable() {
+        let snapshot = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: existing — gpt-5.6\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: existing — gpt-5.6\n\n",
+            "Done.\n\n",
+            "❯ > **User prompt:**\n",
+            "❯ >\n",
+            "❯ > Fix the new tail bug.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let diff = unified_diff_from_contents(snapshot, current).expect("diff");
+
+        let changes = all_unstarted_prompt_bearing_changes_from_diff(&diff, current);
+
+        assert!(
+            changes
+                .iter()
+                .any(|change| change.text.contains("Fix the new tail bug")),
+            "a genuinely unacknowledged prompt after the last response must remain actionable: {changes:?}"
         );
     }
 

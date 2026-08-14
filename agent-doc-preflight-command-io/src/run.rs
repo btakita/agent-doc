@@ -5,8 +5,8 @@ use agent_doc_diff as diff;
 use agent_doc_diff::semantic::semantic_diff_summary;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_preflight_io::{
-    PendingMaintenanceReport, QueueState, check_linked_docs, checkpoint_baseline_content,
-    enforce_no_dropped_backlog, enforce_no_shadow_open_backlog,
+    PendingMaintenanceReport, PreflightResponseContract, QueueState, check_linked_docs,
+    checkpoint_baseline_content, enforce_no_dropped_backlog, enforce_no_shadow_open_backlog,
     explicit_backlog_target_requirements, inspect_queue_state, read_and_truncate_claims,
     read_claims, resolve_pipeline_state, run_gate_verify, run_pending_maintenance,
     run_queue_maintenance,
@@ -64,6 +64,13 @@ pub struct PreflightOptions {
     /// diagnostic preflight is not dispatch/response-bound, so opening a cycle
     /// only leaves open state that later wedges `session-check`.
     pub probe: bool,
+}
+
+pub(crate) fn response_contract_for_content(content: &str) -> Option<PreflightResponseContract> {
+    frontmatter::parse(content)
+        .ok()
+        .filter(|(fm, _)| fm.resolve_mode().is_template())
+        .map(|_| PreflightResponseContract::strict_template())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -349,6 +356,13 @@ pub fn run_with_options_to_writer(
     } else {
         enforce_cycle_completion(file)?
     };
+
+    let response_contract = response_contract_for_content(&content);
+    if response_contract.is_some() {
+        eprintln!(
+            "[preflight] response contract: strict template; persist with `agent-doc finalize --template <FILE>` (or `write --template --commit`) and wrap stdin in matching `<!-- patch:exchange -->` / `<!-- /patch:exchange -->` markers"
+        );
+    }
 
     // Step 0: Check tmux layout health.
     eprintln!("[preflight] step 0: layout check");
@@ -1874,6 +1888,7 @@ pub fn run_with_options_to_writer(
         layout_issues,
         recovered,
         committed,
+        response_contract,
         claims: preflight_read_projection.claims.clone(),
         diff: preflight_read_projection.diff.clone(),
         no_changes,

@@ -111,12 +111,12 @@
 use anyhow::Result;
 use std::path::Path;
 
-#[cfg(test)]
-use agent_doc_preflight_io::layout::detect_duplicate_claims;
 use agent_doc_preflight_io::{
     PreflightOutput, PreflightWarning,
     layout::{check_layout, maybe_auto_repair_base_index, maybe_auto_resync_on_drift},
 };
+#[cfg(test)]
+use agent_doc_preflight_io::{PreflightResponseContract, layout::detect_duplicate_claims};
 use agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS;
 #[cfg(test)]
 use agent_doc_session_accretion::SessionAccretionLevel;
@@ -1196,6 +1196,42 @@ mod tests {
             parsed.get("document").is_none(),
             "document field must be absent"
         );
+    }
+
+    #[test]
+    fn strict_template_response_contract_is_explicit_and_inline_docs_omit_it() {
+        let template = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "# Session\n",
+        );
+        let contract = response_contract_for_content(template)
+            .expect("template documents must publish their closeout contract");
+        assert_eq!(contract, PreflightResponseContract::strict_template());
+
+        let output = PreflightOutput {
+            response_contract: Some(contract),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&output).unwrap();
+        assert_eq!(json["response_contract"]["mode"], "strict_template");
+        assert_eq!(json["response_contract"]["required_option"], "--template");
+        assert_eq!(
+            json["response_contract"]["opening_marker"],
+            "<!-- patch:exchange -->"
+        );
+        assert_eq!(
+            json["response_contract"]["closing_marker"],
+            "<!-- /patch:exchange -->"
+        );
+        assert_eq!(json["response_contract"]["plain_stdin_allowed"], false);
+
+        let inline = "---\nagent_doc_session: test\nagent_doc_format: append\n---\n\n# Session\n";
+        assert!(response_contract_for_content(inline).is_none());
+        let inline_json = serde_json::to_value(PreflightOutput::default()).unwrap();
+        assert!(inline_json.get("response_contract").is_none());
     }
     #[test]
     fn preflight_output_includes_orchestration_request() {

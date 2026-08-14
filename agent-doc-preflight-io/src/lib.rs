@@ -549,6 +549,27 @@ pub fn explicit_backlog_target_requirements(
     Ok(requirements)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreflightResponseContract {
+    pub mode: String,
+    pub required_option: String,
+    pub opening_marker: String,
+    pub closing_marker: String,
+    pub plain_stdin_allowed: bool,
+}
+
+impl PreflightResponseContract {
+    pub fn strict_template() -> Self {
+        Self {
+            mode: "strict_template".to_string(),
+            required_option: "--template".to_string(),
+            opening_marker: "<!-- patch:exchange -->".to_string(),
+            closing_marker: "<!-- /patch:exchange -->".to_string(),
+            plain_stdin_allowed: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PreflightOutput {
     /// Non-blocking warnings the skill should surface before responding.
@@ -563,6 +584,10 @@ pub struct PreflightOutput {
     pub recovered: bool,
     /// Whether a git commit was made for the previous cycle.
     pub committed: bool,
+    /// Closeout syntax that the document requires. Omitted for inline/append
+    /// documents so the routine preflight payload stays small.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_contract: Option<PreflightResponseContract>,
     /// Lines from `.agent-doc/claims.log` (truncated after read).
     /// #per-cycle-protocol-output-overhead: omit when empty (the common case).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

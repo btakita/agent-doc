@@ -2,6 +2,31 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.254
+
+- **Fix: editor-restored prompt envelopes no longer manufacture an endless
+  post-commit steering cycle.**
+
+JetBrains may restore display-only `❯ >` / `❯ > **User prompt:**` envelope
+lines and a previously answered quoted prompt block immediately before the
+response that already owns it. The unstarted-prompt selector now treats empty
+envelopes as projection metadata and walks the complete contiguous quoted block
+when checking response adjacency. A restored answered block is therefore not
+reported as new steering after every successful commit, while a quoted prompt
+at the exchange tail with no following response remains actionable. The exact
+live `agent-doc-bugs2.md` document now passes session-check under the patched
+binary after previously reproducing the eight-fragment loop twice.
+
+- **Fix: preflight now publishes the strict template response contract before
+  an agent chooses its closeout command.**
+
+For a document with `agent_doc_format: template`, stderr names the required
+`--template` option and matching `patch:exchange` markers, and the JSON output
+includes a structured `response_contract` with the same facts. Inline/append
+documents omit the field. The strict write boundary remains fail-closed and does not
+implicitly convert free-form stdin; the agent now receives the requirement at
+preflight instead of discovering it only after a rejected closeout.
+
 ## 0.35.253
 
 - **Fix: rerouting an already-busy owner no longer tries to restart it solely

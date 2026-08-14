@@ -1,6 +1,5 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -161,16 +160,42 @@ Deployed commit `aad08786` to both environments.
 - All three review excerpts are live.
 - No pending D1 migrations.
 - Repository remains clean and synchronized.
-<!-- agent:boundary:b0c9230c:equityfundingsource -->
+
+### Re: Current EFS administrators — gpt-5
+
+> **Queue prompt:**
+>
+> do [#pnm1]
+
+
+I checked the live D1 `users` tables. Production currently has four active admin accounts:
+
+- Brian Takita — `brian.takita@gmail.com`
+- April Armas & Diko Baghdasarian — `contact@equityfundingsource.com`
+- Equity Funding Source, Inc — `judithkrug@gmail.com`
+- Robert Waldman — `rwaldman100@gmail.com`
+
+Staging currently has one active admin account: Brian Takita — `brian.takita@gmail.com`.
+
+There is one configuration discrepancy worth noting: the source-controlled bootstrap list contains Robert Waldman as `rwaldman100+admin@gmail.com`, but that alias is not currently an admin row in either live database. I did not change or provision any account.
+
+- Changed paths: none in the EFS repository.
+- Commands: read-only D1 queries against staging `equityfundingsource` and production `equityfundingsource-production`.
+- Verification: both queries succeeded; each reported `changes: 0`. Production returned four active admins and staging returned one.
+- Confidence: high.
+- Escalation: none.
+
+Agent-doc maintenance: the queue mirror was populated automatically; the misplaced `go` attribute on `agent:backlog` is ignored, and the unrelated `#zwws-vestings-local` semantic-completion candidate was left unchanged. The exchange is large, but the active queue is being drained as required.
+<!-- agent:boundary:7a492ed7:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Can you use the actual review text on the website?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog
 
-<!-- agent:backlog priority queue -->
+<!-- agent:backlog priority queue go -->
+- [ ] [#8ty2] Please resend the admin invite emails.
 <!-- /agent:backlog -->
 
 ## Review

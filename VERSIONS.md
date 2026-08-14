@@ -2,6 +2,40 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.253
+
+- **Fix: rerouting an already-busy owner no longer tries to restart it solely
+  because its capability proof is missing.**
+
+Capability proof remains a pre-dispatch admission gate for an idle pane. When
+the authoritative same-document actor is already `busy` in the registered
+owner pane, or that same pane has live harness-specific active-turn proof while
+the persisted actor projection still says `ready`, route now coalesces the
+active dispatch before capability reuse instead of issuing a restart that the
+open cycle must reject. The explicit failed-proof state remains fatal. Focused
+regressions cover pane identity, actor/live-state skew, Codex approval modals,
+and the idle fallback. Live proof uses the shared prompt-at-cursor classifier,
+so any non-empty same-owner pane that is not dispatch-ready is protected even
+when an approval UI replaces the ordinary working spinner.
+
+- **Fix: compact may subsume an exact retained editor projection instead of
+prescribing an impossible response-cycle commit.**
+
+When the pre-write delivery barrier reports its typed retained-projection state
+and the relay still exposes the exact canonical base from which compact derived
+its successor, the successor now composes over that pending cut. The ordinary
+CRDT compare-and-swap and final editor-delivery proof still protect the new
+target. A different live editor value, detached authority, or an unrelated
+failure remains fail-closed; no disk, snapshot, or commit fallback is inferred.
+
+- **Test reliability: the delayed Lazily-proof poll regression is synchronized
+before its timeout begins.**
+
+The test now proves its writer thread has started, retains and joins that thread,
+and allows a bounded five-second scheduling window. This removes the prior
+500ms thread-scheduling race under a saturated CI runner without weakening the
+production polling assertion.
+
 ## 0.35.250
 
 - **Fix: route-owned queue activation no longer strands an editor-retained write

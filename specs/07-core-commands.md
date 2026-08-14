@@ -37,6 +37,7 @@ This file covers the lower-churn command surface that is not primarily about tmu
 - Template-mode partial exchange compaction follows the same unresolved-tail rule when keeping recent `### Re:` sections.
 - `--commit` closes compacted state through the normal binary-owned commit path. It commits only the compacted snapshot state; any unresolved post-boundary prompt left visible remains the next prompt-bearing diff for a later `agent-doc <FILE>` cycle.
 - The controller must carry that intentional split as two targets through the whole transaction. Editor-buffer flush and relay fallback repair use the live target (including unresolved input); snapshot staging and post-commit HEAD verification use the committed target. Closeout must not force a whole-buffer relay rebootstrap when the live target is already converged, and must fail closed instead of overwriting a concurrent live-editor change.
+- If compact reaches the pre-write barrier while an earlier editor delivery is retained, it may subsume that pending projection only when the typed retained state and the relay's exact canonical text prove the same base used to derive the compact successor. The successor still requires normal CRDT compare-and-swap and editor-delivery settlement. Relay drift, detached authority, and unrelated errors remain fail-closed, and this state must not prescribe `commit` or `write --commit` because no response cycle owns the earlier projection.
 
 ## init
 

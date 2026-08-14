@@ -2441,6 +2441,21 @@ pub fn adopt_verified_editor_text_through_relay_authority(
     Ok(Some(false))
 }
 
+fn retained_prewrite_base_can_be_superseded(
+    error: &anyhow::Error,
+    expected_current: &str,
+    observed: &agent_doc_crdt_relay_io::CurrentText,
+) -> bool {
+    error
+        .downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+        .is_some()
+        && matches!(
+            observed,
+            agent_doc_crdt_relay_io::CurrentText::Current { text, .. }
+                if text == expected_current
+        )
+}
+
 pub fn apply_canonical_replace_if_attached(
     file: &Path,
     expected_current: &str,
@@ -2499,10 +2514,11 @@ pub fn apply_canonical_replace_if_attached(
         // A CP write is issued only from a quiescent editor cut. Waiting here
         // happens in the caller, outside the controller RPC loop, so editor
         // deltas and delivery projections remain responsive while typing settles.
+        let mut prewrite_observed = None;
         if pending_target.is_none() {
             let remaining_ms =
                 CRDT_WRITE_CONVERGENCE_TIMEOUT_MS.saturating_sub(controller_elapsed_ms);
-            guard_visible_write_current_transition_with_budget(
+            let prewrite_barrier = guard_visible_write_current_transition_with_budget(
                 file,
                 source,
                 CRDT_WRITE_SETTLE_MS,
@@ -2513,11 +2529,35 @@ pub fn apply_canonical_replace_if_attached(
                     "{source}: waiting for the pre-write editor delivery barrier for {}",
                     file.display()
                 )
-            })?;
+            });
+            if let Err(error) = prewrite_barrier {
+                let observed = observe_live_editor_authority_after_model_ensure(file, source)?;
+                // A retained pre-write projection has not mutated disk, snapshot, or the
+                // response-cycle graph. When the relay still exposes the exact base used
+                // to derive this canonical successor, the successor may subsume that
+                // pending cut. Any drift fails closed through the original typed error.
+                if retained_prewrite_base_can_be_superseded(&error, expected_current, &observed) {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "{source}_crdt_prewrite_retained_base_superseded file={} base_hash={} action=compose_successor_on_exact_pending_base",
+                            file.display(),
+                            agent_doc_hash::content_hash(expected_current),
+                        ),
+                    );
+                    prewrite_observed = Some(observed);
+                } else {
+                    return Err(error);
+                }
+            }
         }
 
         let mut delivery_wait_cursor: Option<(u64, usize)> = None;
-        let observed = match observe_live_editor_authority_after_model_ensure(file, source) {
+        let observed_result: Result<_> = match prewrite_observed {
+            Some(observed) => Ok(observed),
+            None => observe_live_editor_authority_after_model_ensure(file, source),
+        };
+        let observed = match observed_result {
             Ok(current) => Some(current),
             Err(err) if transient_convergence_backpressure_error(&err) => {
                 wait_state = CrdtConvergenceState::ControllerModelBackpressure;
@@ -7394,6 +7434,44 @@ pub fn retained_write_blocks_session_closeout(file: &Path, source: &str) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retained_prewrite_can_compose_successor_only_from_exact_pending_base() {
+        let retained = await_editor_replica_no_disk_write("retained pending projection".into());
+        let exact_pending_base = agent_doc_crdt_relay_io::CurrentText::Current {
+            text: "base".to_string(),
+            live_editors: 1,
+            delivery_converged: false,
+            delivery_version: 7,
+            semantics: None,
+        };
+        assert!(retained_prewrite_base_can_be_superseded(
+            &retained,
+            "base",
+            &exact_pending_base,
+        ));
+
+        let drifted = agent_doc_crdt_relay_io::CurrentText::Current {
+            text: "new operator edit".to_string(),
+            live_editors: 1,
+            delivery_converged: false,
+            delivery_version: 8,
+            semantics: None,
+        };
+        assert!(!retained_prewrite_base_can_be_superseded(
+            &retained, "base", &drifted,
+        ));
+        assert!(!retained_prewrite_base_can_be_superseded(
+            &anyhow::anyhow!("unrelated failure"),
+            "base",
+            &exact_pending_base,
+        ));
+        assert!(!retained_prewrite_base_can_be_superseded(
+            &retained,
+            "base",
+            &agent_doc_crdt_relay_io::CurrentText::Detached,
+        ));
+    }
 
     fn satisfied_settlement(intent_id: &str, settled_hash: &str) -> SettlementVerdict {
         SettlementVerdict::Satisfied {

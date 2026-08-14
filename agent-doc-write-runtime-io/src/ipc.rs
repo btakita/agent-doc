@@ -1115,20 +1115,27 @@ mod visible_write_content_snapshot_tests {
         std::fs::create_dir_all(project_root.join(".agent-doc")).unwrap();
         let doc = project_root.join("session.md");
 
-        // Spawn a thread that records the durable lazily proof after 50ms.
+        // Spawn a thread that records the durable lazily proof after 50ms. Wait
+        // until it has actually started before beginning the polling budget:
+        // heavily parallel CI can otherwise leave a newly spawned thread
+        // unscheduled for the entire short test timeout.
         let doc_for_thread = doc.clone();
-        std::thread::spawn(move || {
+        let (started_tx, started_rx) = std::sync::mpsc::sync_channel(0);
+        let writer = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(50));
             record_lazily_visible_write_candidate(&doc_for_thread, patch_id, "delayed content");
         });
+        started_rx.recv().unwrap();
 
         let result = poll_visible_write_content_lazily_event(
             &doc,
             patch_id,
-            std::time::Duration::from_millis(500),
+            std::time::Duration::from_secs(5),
             std::time::Duration::from_millis(10),
         )
         .unwrap();
+        writer.join().unwrap();
         assert_eq!(result, Some("delayed content".to_string()));
     }
 

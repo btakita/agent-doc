@@ -35,6 +35,32 @@ struct FreshRestartAutoTriggerFacts<'a> {
     generation: u64,
     state: agent_doc_controller::actor::ActorState,
     transition_reason: &'a str,
+    live_busy_proof: bool,
+}
+
+fn authoritative_busy_owner_accepted(
+    dispatch_pane: &str,
+    facts: Option<FreshRestartAutoTriggerFacts<'_>>,
+) -> bool {
+    facts.is_some_and(|facts| {
+        facts.pane == dispatch_pane
+            && (facts.state == agent_doc_controller::actor::ActorState::Busy
+                || facts.live_busy_proof)
+    })
+}
+
+fn captured_pane_has_live_busy_proof(
+    content: &str,
+    harness: &HarnessConfig,
+    cursor_y: Option<usize>,
+) -> bool {
+    if content.trim().is_empty() {
+        return false;
+    }
+    harness.busy_proof_line(content).is_some()
+        || !agent_doc_supervisor::detection::pane_dispatch_ready_at_cursor(
+            content, harness, cursor_y,
+        )
 }
 
 fn fresh_restart_auto_trigger_accepted(
@@ -68,6 +94,38 @@ fn fresh_restart_auto_trigger_accepted_for_pane(
             generation: actor.record.generation,
             state: actor.actor_state(),
             transition_reason: &actor.record.last_transition.reason,
+            live_busy_proof: false,
+        }),
+    ))
+}
+
+fn authoritative_busy_owner_accepted_for_pane(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    pane: &str,
+    harness: &HarnessConfig,
+) -> Result<bool> {
+    let actor =
+        load_authoritative_actor_for_registered_pane(tmux, file, session_id, file_path, pane)?;
+    let live_busy_proof = agent_doc_tmux_io::capture_pane(tmux, pane)
+        .ok()
+        .is_some_and(|content| {
+            captured_pane_has_live_busy_proof(
+                &content,
+                harness,
+                agent_doc_tmux_io::pane_cursor_y(tmux, pane),
+            )
+        });
+    Ok(authoritative_busy_owner_accepted(
+        pane,
+        actor.as_ref().map(|actor| FreshRestartAutoTriggerFacts {
+            pane: &actor.record.pane_id,
+            generation: actor.record.generation,
+            state: actor.actor_state(),
+            transition_reason: &actor.record.last_transition.reason,
+            live_busy_proof,
         }),
     ))
 }
@@ -325,6 +383,26 @@ fn reapply_capability_contract_before_reuse(
             );
         }
         ManagedCapabilityProofStatus::Missing => {
+            if authoritative_busy_owner_accepted_for_pane(
+                tmux, file, session_id, file_path, pane, harness,
+            )? {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_capability_proof_missing_active_owner_coalesced file={} pane={} harness={} recovery=coalesce_active_dispatch",
+                        file.display(),
+                        pane,
+                        harness.binary,
+                    ),
+                );
+                eprintln!(
+                    "[route] managed {} session in pane {} is already the authoritative busy owner for {}; coalescing the active dispatch before capability-proof reuse",
+                    harness.binary,
+                    pane,
+                    file.display(),
+                );
+                return Ok(pane.to_string());
+            }
             format!(
                 "managed {} session has no current capability proof for requested network, SSH, or writable-root access",
                 harness.binary
@@ -444,6 +522,7 @@ mod tests {
             generation: 73,
             state: agent_doc_controller::actor::ActorState::Busy,
             transition_reason: "auto_trigger_inject",
+            live_busy_proof: false,
         };
         assert!(fresh_restart_auto_trigger_accepted(
             Some(72),
@@ -468,6 +547,55 @@ mod tests {
                 ..accepted
             }),
         ));
+    }
+
+    #[test]
+    fn missing_capability_proof_accepts_authoritative_busy_owner_without_restart() {
+        let busy = FreshRestartAutoTriggerFacts {
+            pane: "%4",
+            generation: 73,
+            state: agent_doc_controller::actor::ActorState::Busy,
+            transition_reason: "ipc_inject",
+            live_busy_proof: false,
+        };
+        assert!(authoritative_busy_owner_accepted("%4", Some(busy)));
+        assert!(!authoritative_busy_owner_accepted("%9", Some(busy)));
+        assert!(!authoritative_busy_owner_accepted(
+            "%4",
+            Some(FreshRestartAutoTriggerFacts {
+                state: agent_doc_controller::actor::ActorState::Ready,
+                ..busy
+            }),
+        ));
+        assert!(authoritative_busy_owner_accepted(
+            "%4",
+            Some(FreshRestartAutoTriggerFacts {
+                state: agent_doc_controller::actor::ActorState::Ready,
+                live_busy_proof: true,
+                ..busy
+            }),
+        ));
+    }
+
+    #[test]
+    fn live_busy_proof_accepts_codex_approval_modal_but_not_idle_or_empty_panes() {
+        let harness = HarnessConfig::codex();
+        let approval_modal = "\
+Would you like to run the following command?\n\n\
+› 1. Yes, proceed (y)\n\
+  2. No, and tell Codex what to do differently (esc)\n\n\
+  Press enter to confirm or esc to cancel\n";
+        assert!(captured_pane_has_live_busy_proof(
+            approval_modal,
+            &harness,
+            None,
+        ));
+
+        let idle = "\
+› Ask Codex to do anything\n\
+gpt-5.6-sol xhigh · ~/work/btakita/agent-loop · Context 10% used\n";
+        assert!(!captured_pane_has_live_busy_proof(idle, &harness, None));
+        assert!(!captured_pane_has_live_busy_proof("", &harness, None));
     }
 
     #[test]

@@ -19,7 +19,7 @@ use agent_doc_hooks_io::preflight_user_prompt_submit::{invoked_document, resolve
 /// this as the final seal prevents partial preflight output from being mistaken
 /// for an admitted cycle.
 pub const CONTRACT_MARKER: &str = "[agent-doc] cycle contract (preflight already ran in the binary; do NOT run `agent-doc preflight` for this turn)";
-const CODEX_IN_PANE_ADMISSION_DIRECTIVE: &str = "[agent-doc] Codex in-pane admission: continue this response cycle in the current turn. Do NOT execute `agent-doc <FILE>` as a shell command; that would recursively re-enter the owning pane.";
+const CODEX_IN_PANE_ADMISSION_DIRECTIVE: &str = "[agent-doc] Codex in-pane admission: continue this response cycle in the current turn. Do NOT execute `agent-doc <FILE>` as a shell command; that would recursively re-enter the owning pane. When `owned_pane_self_invocation` is non-null, execute its unresolved work now; do not reply that the document is merely already active or ask the operator to resend the task.";
 
 /// Printed to **stdout** when the prompt *was* an `agent-doc <FILE>` trigger but
 /// preflight could not produce a contract (`#hookcontractlost`).
@@ -490,5 +490,12 @@ mod tests {
     fn admission_failure_marker_is_not_the_contract_marker() {
         assert_ne!(ADMISSION_FAILURE_MARKER, CONTRACT_MARKER);
         assert!(!ADMISSION_FAILURE_MARKER.contains(CONTRACT_MARKER));
+    }
+
+    #[test]
+    fn codex_in_pane_directive_forbids_already_active_deflection() {
+        assert!(CODEX_IN_PANE_ADMISSION_DIRECTIVE.contains("execute its unresolved work now"));
+        assert!(CODEX_IN_PANE_ADMISSION_DIRECTIVE.contains("already active"));
+        assert!(CODEX_IN_PANE_ADMISSION_DIRECTIVE.contains("do not"));
     }
 }

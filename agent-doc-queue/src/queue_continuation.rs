@@ -1340,6 +1340,29 @@ mod tests {
         assert!(continuation.reason.contains("agent:queue go"));
     }
 
+    /// `#queue-unwrapped-fenced-task`: a go-mode queue must not disappear when
+    /// its sole task is direct prose surrounding a fenced quote/log.
+    #[test]
+    fn required_continuation_returns_unwrapped_fenced_task() {
+        let task = concat!(
+            "This message is from Dillon about the release gate:\n",
+            "```\n",
+            "Release Please must still create its PR.\n",
+            "```\n\n",
+            "Please describe what we should do here."
+        );
+        let content = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n\
+## Queue\n\n<!-- agent:queue go -->\n{task}\n<!-- /agent:queue -->\n"
+        );
+
+        let continuation = required_continuation(&content, Some(&content))
+            .unwrap()
+            .expect("the recovered task is a ready continuation");
+        assert_eq!(continuation.head_prompt, task);
+        assert_eq!(continuation.head_id, None);
+    }
+
     #[test]
     fn required_continuation_none_when_snapshot_head_was_modified() {
         let snapshot = doc_with_backlog(&["do [#a]"], &["- [ ] [#a] first"]);

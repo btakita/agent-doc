@@ -9088,9 +9088,9 @@ fn controller_crdt_replica_data(
             // explicit `editor_pid` field still names its PID inside the identity
             // it has always sent, so resolve it there rather than falling through
             // to the headless path and refusing a live editor forever.
-            let resolved_editor_pid = payload.editor_pid.or_else(|| {
-                agent_doc_crdt_relay_io::editor_process_id_from_identity(identity)
-            });
+            let resolved_editor_pid = payload
+                .editor_pid
+                .or_else(|| agent_doc_crdt_relay_io::editor_process_id_from_identity(identity));
             let registration = match resolved_editor_pid {
                 Some(editor_pid) => {
                     agent_doc_crdt_relay_io::register_editor_replica_for_file_incremental(
@@ -9138,9 +9138,9 @@ fn controller_crdt_replica_data(
             // Same resolution on the way out, or an identity-resolved
             // registration would deregister through the headless path and leave
             // its editor attachment behind (`#registeridentitypid`).
-            let resolved_editor_pid = payload.editor_pid.or_else(|| {
-                agent_doc_crdt_relay_io::editor_process_id_from_identity(identity)
-            });
+            let resolved_editor_pid = payload
+                .editor_pid
+                .or_else(|| agent_doc_crdt_relay_io::editor_process_id_from_identity(identity));
             let removed = match resolved_editor_pid {
                 Some(editor_pid) => agent_doc_crdt_relay_io::deregister_editor_replica_for_file(
                     canonical, identity, editor_pid,

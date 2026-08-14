@@ -10322,7 +10322,10 @@ mod tests {
             "seed_stale_binding",
         )
         .unwrap();
-        assert_ne!(live_window, STALE_WINDOW, "fixture must actually be drifted");
+        assert_ne!(
+            live_window, STALE_WINDOW,
+            "fixture must actually be drifted"
+        );
 
         let note = refresh_drifted_pane_window_binding(&iso, &doc)
             .unwrap()

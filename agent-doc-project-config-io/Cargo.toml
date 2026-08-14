@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-project-config-io"
-version = "0.35.248"
+version = "0.35.249"
 edition = "2024"
 description = "File-backed project configuration IO for agent-doc"
 license = "MIT"
@@ -11,8 +11,8 @@ publish = false
 name = "agent_doc_project_config_io"
 
 [dependencies]
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.248" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.248" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.249" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.249" }
 anyhow = "1"
 toml = "1.1"
 

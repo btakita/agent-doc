@@ -5,6 +5,8 @@
 //! Hybrid syntax:
 //! - `- text` / `1. text` → single-line prompt
 //! - `~~~prompt` / `---` → multi-line prompt fence
+//! - unwrapped prose + a closed Markdown code fence + a trailing explicit
+//!   request → recovered multi-line prompt (`#queue-unwrapped-fenced-task`)
 //! - `--- start [at <datetime>]` / `~~~start` → start fence (activation signal)
 //! - `--- stop` / `~~~stop` → stop fence (breakpoint)
 //! - any other non-empty line (and an unclosed fence opener) → `Freeform`:
@@ -270,6 +272,26 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
         start..end
     };
 
+    // `#queue-unwrapped-fenced-task`: editor-authored queue tasks are sometimes
+    // pasted as a prose introduction, a fenced quote/log, and a trailing
+    // explicit request, without a list marker or `~~~prompt` wrapper. That is
+    // one lossless multiline task, not a collection of inert noise lines. Keep
+    // the recovery deliberately narrow: every queue-native directive still
+    // wins, the Markdown fence must be balanced, and prose after the final
+    // fence must be an unmistakable request. This admits the live
+    // `backend.md` shape without promoting arbitrary pasted console output.
+    if let Some((start_line, end_line, text)) = recover_unwrapped_fenced_prompt(&lines) {
+        return Ok(vec![(
+            QueueEntry::Prompt(QueuePrompt {
+                text,
+                multiline: true,
+                indent: 0,
+                ordered_marker: None,
+            }),
+            span(start_line, end_line + 1),
+        )]);
+    }
+
     let mut entries: Vec<(QueueEntry, std::ops::Range<usize>)> = Vec::new();
     let mut i = 0;
 
@@ -474,6 +496,141 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
     }
 
     Ok(entries)
+}
+
+/// Recover one operator-authored task that was pasted directly into the queue
+/// without the canonical list/fence wrapper.
+///
+/// The shape must contain prose before a balanced Markdown code fence and an
+/// explicit request after the final fence. Any queue-native syntax outside the
+/// code fence disables recovery so normal mixed queues and corruption guards
+/// keep their existing semantics.
+fn recover_unwrapped_fenced_prompt(lines: &[&str]) -> Option<(usize, usize, String)> {
+    let start_line = lines.iter().position(|line| !line.trim().is_empty())?;
+    let end_line = lines.iter().rposition(|line| !line.trim().is_empty())?;
+
+    let mut open_fence: Option<&'static str> = None;
+    let mut first_fence_line = None;
+    let mut last_fence_line = None;
+
+    for (line_index, line) in lines.iter().enumerate().take(end_line + 1).skip(start_line) {
+        let trimmed = line.trim();
+        if let Some(marker) = open_fence {
+            if trimmed == marker {
+                open_fence = None;
+                last_fence_line = Some(line_index);
+            }
+            continue;
+        }
+
+        if let Some(marker) = markdown_code_fence_marker(trimmed) {
+            open_fence = Some(marker);
+            first_fence_line.get_or_insert(line_index);
+            continue;
+        }
+
+        if !trimmed.is_empty() && line_has_queue_native_syntax(line) {
+            return None;
+        }
+    }
+
+    if open_fence.is_some() {
+        return None;
+    }
+    let first_fence_line = first_fence_line?;
+    let last_fence_line = last_fence_line?;
+    if first_fence_line <= start_line || last_fence_line >= end_line {
+        return None;
+    }
+    if !lines[start_line..first_fence_line]
+        .iter()
+        .any(|line| !line.trim().is_empty())
+    {
+        return None;
+    }
+
+    let request_tail = lines[last_fence_line + 1..=end_line]
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !tail_is_explicit_request(&request_tail) {
+        return None;
+    }
+
+    Some((
+        start_line,
+        end_line,
+        lines[start_line..=end_line].join("\n"),
+    ))
+}
+
+fn markdown_code_fence_marker(line: &str) -> Option<&'static str> {
+    if line.starts_with("```") {
+        Some("```")
+    } else if line.starts_with("~~~")
+        && !matches!(line, "~~~prompt" | "~~~done" | "~~~start" | "~~~stop")
+    {
+        Some("~~~")
+    } else {
+        None
+    }
+}
+
+fn line_has_queue_native_syntax(line: &str) -> bool {
+    let trimmed = line.trim();
+    let item_line = match line.strip_prefix('`') {
+        Some(rest) if split_list_item(rest).is_some() => rest,
+        _ => line,
+    };
+    crate::queue_command::is_slash_command(trimmed)
+        || split_list_item(item_line).is_some()
+        || trimmed
+            .strip_prefix("preset ")
+            .is_some_and(|rest| !rest.trim().is_empty())
+        || trimmed
+            .strip_prefix("dispatch ")
+            .is_some_and(|rest| !rest.trim().is_empty())
+        || is_start_fence(trimmed)
+        || is_stop_fence(trimmed)
+        || is_completed_fence_open(trimmed)
+        || is_prompt_fence_open(trimmed)
+        || is_bare_fence_open(trimmed)
+}
+
+fn tail_is_explicit_request(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.ends_with('?') {
+        return true;
+    }
+    let first_word = trimmed
+        .split(|c: char| !c.is_alphanumeric())
+        .find(|word| !word.is_empty())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    matches!(
+        first_word.as_str(),
+        "please"
+            | "do"
+            | "fix"
+            | "describe"
+            | "explain"
+            | "review"
+            | "implement"
+            | "run"
+            | "build"
+            | "test"
+            | "investigate"
+            | "diagnose"
+            | "update"
+            | "create"
+            | "decide"
+            | "tell"
+            | "recommend"
+            | "analyze"
+            | "assess"
+    )
 }
 
 pub fn render(entries: &[QueueEntry]) -> String {
@@ -4455,6 +4612,67 @@ mod tests {
                 ordered_marker: None,
             })
         );
+    }
+
+    /// `#queue-unwrapped-fenced-task`: the document UI may contain a complete
+    /// task pasted directly into `agent:queue`, with evidence in a Markdown
+    /// fence and the request after it. It must become one actionable head.
+    #[test]
+    fn parse_recovers_unwrapped_prose_fence_and_trailing_request() {
+        let body = concat!(
+            "This message is from Dillon about our backend release gate:\n",
+            "```\n",
+            "Release Please must still create its PR.\n",
+            "Gate the merge instead of the generator action.\n",
+            "```\n\n",
+            "Please describe what we should do here.\n",
+        );
+        let entries = parse(body).unwrap();
+        let prompts = prompts(&entries);
+
+        assert_eq!(prompts.len(), 1);
+        assert_eq!(prompts[0].text, body.trim_end());
+        assert!(prompts[0].multiline);
+        assert_eq!(
+            parse_spans(body).unwrap()[0].1,
+            0..body.trim_end_matches('\n').len() + 1,
+            "the recovered prompt owns the exact visible source span"
+        );
+    }
+
+    #[test]
+    fn unwrapped_fenced_console_dump_without_trailing_request_stays_inert() {
+        let body = concat!(
+            "route diagnostics\n",
+            "```\n",
+            "[route] target tmux session: 0\n",
+            "```\n",
+        );
+        let entries = parse(body).unwrap();
+
+        assert!(prompts(&entries).is_empty());
+        assert!(
+            entries
+                .iter()
+                .all(|entry| matches!(entry, QueueEntry::Freeform(_)))
+        );
+    }
+
+    #[test]
+    fn unwrapped_fenced_recovery_does_not_swallow_real_queue_items() {
+        let body = concat!(
+            "Context:\n",
+            "```\n",
+            "diagnostic output\n",
+            "```\n",
+            "Please review this.\n",
+            "- do [#real]\n",
+        );
+        let entries = parse(body).unwrap();
+        let prompts = prompts(&entries);
+
+        assert_eq!(prompts.len(), 1);
+        assert_eq!(prompts[0].text, "do [#real]");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-review"
-version = "0.35.248"
+version = "0.35.249"
 edition = "2024"
 description = "Review element descriptor for agent-doc"
 license = "MIT"
@@ -11,7 +11,7 @@ publish = false
 name = "agent_doc_element_review"
 
 [dependencies]
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.248" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.248" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.249" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.249" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

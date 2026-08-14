@@ -1508,16 +1508,20 @@ mod tests {
         // The negative control that keeps this from reaping healthy controllers:
         // the identical shape once promotion actually landed. A completed handoff
         // has no temp socket either, so this is the ONLY thing separating them.
-        assert!(!controller_watchdog_should_suicide(ControllerWatchdogFacts {
-            replacement_promotion_recorded: true,
-            ..facts
-        }));
+        assert!(!controller_watchdog_should_suicide(
+            ControllerWatchdogFacts {
+                replacement_promotion_recorded: true,
+                ..facts
+            }
+        ));
 
         // And the original controller, which is not a replacement at all.
-        assert!(!controller_watchdog_should_suicide(ControllerWatchdogFacts {
-            is_handoff_replacement: false,
-            ..facts
-        }));
+        assert!(!controller_watchdog_should_suicide(
+            ControllerWatchdogFacts {
+                is_handoff_replacement: false,
+                ..facts
+            }
+        ));
     }
 
     #[test]
@@ -1738,16 +1742,18 @@ mod preparing_without_a_handoff_clock_tests {
         // `#strandedreplacementnopublic` wedge, and it IS reaped. Asserted here
         // so restoring "Stable is always healthy" has to fail a test rather than
         // read as a tidy-up.
-        assert!(controller_watchdog_should_suicide(ControllerWatchdogFacts {
-            is_handoff_replacement: true,
-            handoff_replacement_socket_exists: false,
-            replacement_promotion_recorded: false,
-            ..facts(
-                ControllerHandoffState::Stable,
-                None,
-                Duration::from_secs(100_000),
-            )
-        }));
+        assert!(controller_watchdog_should_suicide(
+            ControllerWatchdogFacts {
+                is_handoff_replacement: true,
+                handoff_replacement_socket_exists: false,
+                replacement_promotion_recorded: false,
+                ..facts(
+                    ControllerHandoffState::Stable,
+                    None,
+                    Duration::from_secs(100_000),
+                )
+            }
+        ));
     }
 
     /// When the handoff clock IS recorded, the existing predicate owns the

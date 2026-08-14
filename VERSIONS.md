@@ -2,6 +2,20 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.249
+
+- **Fix: a Codex owner pane now executes an unwrapped, multiline queue task
+instead of dismissing the invocation as “already active.”**
+
+Queue parsing now losslessly recovers the operator-authored shape used by
+`backend.md`: introductory prose, balanced Markdown-fenced evidence, and a
+trailing explicit request. The deliberately narrow recovery leaves log-only
+dumps inert and yields to every canonical queue directive, while the shared
+continuation detector exposes the recovered prompt to owner-pane preflight and
+idle drain. Codex admission context also explicitly forbids the “already
+active; resend the task” deflection when unresolved owner-pane work is present.
+Parser, continuation, and admission-directive regressions cover the behavior.
+
 ## 0.35.248
 
 - **Fix: a Codex owner pane now admits `agent-doc <FILE>` in the current turn

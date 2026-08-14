@@ -186,7 +186,30 @@ There is one configuration discrepancy worth noting: the source-controlled boots
 - Escalation: none.
 
 Agent-doc maintenance: the queue mirror was populated automatically; the misplaced `go` attribute on `agent:backlog` is ignored, and the unrelated `#zwws-vestings-local` semantic-completion candidate was left unchanged. The exchange is large, but the active queue is being drained as required.
-<!-- agent:boundary:7a492ed7:equityfundingsource -->
+
+### Re: Resend production admin invites — gpt-5
+
+> **Queue prompt:**
+>
+> do [#8ty2]
+
+
+Done. Fresh production admin sign-in invitations were sent only to the three requested accounts:
+
+- `contact@equityfundingsource.com`
+- `judithkrug@gmail.com`
+- `rwaldman100@gmail.com`
+
+Each production request returned HTTP 200. The production D1 database shows a new, unused single-use token for all three recipients, with a 30-minute validity window. Persisted Worker logs contain no matching email-send failure. `brian.takita@gmail.com` was not included in this resend.
+
+- Changed paths: none in the EFS repository.
+- Commands: three production `POST /login/email?role=admin` requests; read-only production D1 verification; production Workers Logs failure audit.
+- Verification: three fresh tokens, all `used_at = null`, each with approximately 30 minutes remaining; telemetry query succeeded with zero matching failures.
+- Confidence: high.
+- Escalation: none.
+
+Agent-doc maintenance: the empty queue was populated from `#8ty2` automatically. The unrelated `#zwws-vestings-local` semantic-completion candidate was left unchanged. The exchange remains large, but the active queue was drained without pausing for compaction.
+<!-- agent:boundary:36f9b2a0:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
@@ -194,8 +217,7 @@ Agent-doc maintenance: the queue mirror was populated automatically; the misplac
 
 ## Backlog
 
-<!-- agent:backlog priority queue go -->
-- [ ] [#8ty2] Please resend the admin invite emails.
+<!-- agent:backlog priority queue -->
 <!-- /agent:backlog -->
 
 ## Review

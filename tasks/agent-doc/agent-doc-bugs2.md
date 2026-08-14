@@ -417,7 +417,31 @@ The v0.35.249 CI, Release, and PyPI workflows were still running at inspection t
 ### Re: retained prompt reconciliation — gpt-5.6
 
 The eight steering fragments are one restored backend wedge prompt plus six Markdown quote-marker normalizations from earlier queue echoes. The substantive prompt is already answered by the immediately preceding committed `### Re: backend owner-pane queue admission` response; this recovery cycle only seals those retained user lines beside that response and does not repeat or replace the answer.
-<!-- agent:boundary:461a657d:agent-doc-bugs2 -->
+
+### Re: stranded route and compact recovery — gpt-5.6
+
+Fixed and released. The complete recovery line is now agent-doc **0.35.253** (commit `5112eb536`, tag `v0.35.253`).
+
+- The backend owner-pane recursion/wedge was fixed in 0.35.249: an unresolved owner-pane prompt is admitted as work in the current turn instead of being shell-invoked back into agent-doc. The backend task subsequently ran to completion.
+- The Haiven route path now preserves pre-write editor authority and coalesces an exact authoritative same-pane live turn even when the durable actor projection still says `ready`. Its live-busy proof recognizes Codex confirmation/approval screens as well as ordinary spinner state, without treating an idle prompt or an empty pane as busy.
+- Compact now handles the SDK failure at the actual ownership boundary. When the delivery barrier reports a retained lazy projection, compact may compose its successor only if the authoritative relay text exactly equals its expected base. Drift, detach, and unrelated failures remain fail-closed. It no longer tells the operator to run a commit that cannot own the stranded write.
+- The remote-CI-only delayed IPC polling race exposed by 0.35.250 was also synchronized and bounded in this release.
+
+Both reported live cases passed after installation. Routing `haiven-dev.md` recovered and coalesced pane `%4` without a duplicate restart or prompt injection. The owner of `sdk.md` crossed the formerly failing pre-write barrier, logged `compact_crdt_prewrite_retained_base_superseded`, committed the compacted document as `b0e4ebd7e`, and then passed `agent-doc session-check` with no drainable work.
+
+Verification passed with `make check`, `make tmux-ci`, focused realtime/route/IPC regression suites, release-version projection verification, and `git diff --check`. GitHub Actions CI run `31765775968` started for the pushed release and was still in progress at closeout.
+
+For the Claude-to-Codex “No conversation found” issue, the right schema is one harness-keyed `resume` mapping, not three parallel top-level fields:
+
+```yaml
+resume:
+  claude: <claude-session-id>
+  codex: <codex-session-id>
+  opencode: <opencode-session-id>
+```
+
+Each harness must read, update, and invalidate only its own slot. A legacy scalar should migrate only into the document's active harness slot; it must never be offered to another harness. That change remains explicitly queued as `#harnessresumemap`; it was not mixed into the stranded-write release.
+<!-- agent:boundary:558d86cd:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -413,7 +413,11 @@ Verification passed: all focused parser, continuation, and admission regressions
 The live backend proof is complete. I restarted only its stale Codex child with `--fresh` so the incompatible Claude scalar resume ID was ignored, the new UserPromptSubmit hook emitted its cycle contract, and pane `%6` executed the Dillon/OpenAPI task. It persisted the recommendation, consumed the recovered free-text head, cleared queue activation, and finished with `queue_continuation_required=false` and no drainable work. This resolves `#codexinpanereverify`.
 
 The v0.35.249 CI, Release, and PyPI workflows were still running at inspection time. The separate resume compatibility change remains next: use one harness-keyed `resume` map and migrate a legacy scalar only into the active harness key.
-<!-- agent:boundary:04e9ff9e:agent-doc-bugs2 -->
+
+### Re: retained prompt reconciliation — gpt-5.6
+
+The eight steering fragments are one restored backend wedge prompt plus six Markdown quote-marker normalizations from earlier queue echoes. The substantive prompt is already answered by the immediately preceding committed `### Re: backend owner-pane queue admission` response; this recovery cycle only seals those retained user lines beside that response and does not repeat or replace the answer.
+<!-- agent:boundary:461a657d:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 

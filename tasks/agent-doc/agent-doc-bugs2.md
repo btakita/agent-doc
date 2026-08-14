@@ -43,7 +43,6 @@ Compacted content:
 ### Re: do [#skillinstallstalemirror] — opus-5
 
 > **Queue prompt:**
->
 > do [#skillinstallstalemirror]
 
 
@@ -71,7 +70,6 @@ One thing worth flagging: `.agent-doc/` is gitignored in agent-loop, so the `ski
 ### Re: do [#skillinstallconfigpath] — opus-5
 
 > **Queue prompt:**
->
 > do [#skillinstallconfigpath]
 
 
@@ -127,7 +125,6 @@ One correction to what I wrote last cycle: I said editing it "is the two-session
 ### Re: do [#hookhashanchortags] — opus-5
 
 > **Queue prompt:**
->
 > do [#hookhashanchortags]
 
 
@@ -170,7 +167,6 @@ Released as **0.35.230**.
 ### Re: do [#coinedguardledgerasymmetry] — opus-5
 
 > **Queue prompt:**
->
 > do [#coinedguardledgerasymmetry]
 
 
@@ -231,7 +227,6 @@ The operator's environment is recovered independently of this: `haiven-dev` repo
 ### Re: do [#flakystatedbfixture] — opus-5
 
 > **Queue prompt:**
->
 > do [#flakystatedbfixture]
 
 
@@ -275,7 +270,6 @@ Restart the JetBrains IDE once to load the updated Kotlin plugin. The route supe
 ### Re: #dispatchonlyresubmitwiring — gpt-5
 
 > **Queue prompt:**
->
 > do [#dispatchonlyresubmitwiring]
 
 
@@ -379,8 +373,6 @@ Preflight also found one legacy gated item still in `agent:backlog`; `agent-doc 
 
 The exchange is at the compaction warning threshold. I left it intact; `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` is available when compaction is explicitly requested.
 
-❯ > **User prompt:**
-❯ >
 ❯ > Fix. Fix this issue first: a Codex owner pane received
 ❯ > `agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md`,
 ❯ > shell-ran that command back into itself, hit the recursive-direct-invocation
@@ -406,7 +398,22 @@ Verification passed: focused absolute-path admission and nested-root regressions
 One live proof remains: on the next Codex startup, approve the changed user-level hooks if Codex presents hook review, then retry the exact `agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md` prompt. It should stay in-pane with no `Ran agent-doc` shell entry and no recursive refusal.
 
 The resume schema was deliberately not changed in this first fix. For that next compatibility change, use a harness-keyed `resume` map (`claude`, `codex`, `opencode`) and migrate a legacy scalar only into the document's active harness; do not introduce three parallel top-level fields.
-<!-- agent:boundary:eb7b85de:agent-doc-bugs2 -->
+
+
+### Re: backend owner-pane queue admission — gpt-5.6
+
+Fixed and released as agent-doc 0.35.249 (commit `eaf032e17`, tag `v0.35.249`).
+
+The remaining wedge was queue classification. The backend task was authored as introductory prose, a fenced Slack quote, and a trailing request without a list marker or `~~~prompt` wrapper. The parser preserved every line as inert freeform noise, so owner-pane preflight had no unresolved work to expose and Codex fell back to the incorrect “already active” response.
+
+The queue parser now losslessly recognizes that narrow shape as one multiline prompt: the Markdown fence must be balanced, prose must precede it, an explicit request must follow it, and any canonical queue syntax disables recovery. Log-only dumps remain inert. The shared continuation detector now delivers the recovered prompt to owner-pane admission, and the Codex hook directive explicitly forbids the “already active; resend it” deflection when owner-pane work is present.
+
+Verification passed: all focused parser, continuation, and admission regressions; `make check` with 8,957/8,957 tests plus formal models; `make tmux-ci`; formatting and release projection checks; and the single release-profile `make install-full`.
+
+The live backend proof is complete. I restarted only its stale Codex child with `--fresh` so the incompatible Claude scalar resume ID was ignored, the new UserPromptSubmit hook emitted its cycle contract, and pane `%6` executed the Dillon/OpenAPI task. It persisted the recommendation, consumed the recovered free-text head, cleared queue activation, and finished with `queue_continuation_required=false` and no drainable work. This resolves `#codexinpanereverify`.
+
+The v0.35.249 CI, Release, and PyPI workflows were still running at inspection time. The separate resume compatibility change remains next: use one harness-keyed `resume` map and migrate a legacy scalar only into the active harness key.
+<!-- agent:boundary:04e9ff9e:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -421,6 +428,7 @@ The resume schema was deliberately not changed in this first fix. For that next 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#harnessresumemap] Implement a harness-keyed resume map with claude, codex, and opencode entries; each launch or restart must read only the active harness key, and legacy scalar resume values must migrate only into the document active harness. Add cross-harness restart and compatibility regressions.
 - [/] [#clearsubmitunobservedverify] [operator-verify] Live re-proof for #clearsubmitunobserved (0.35.225): reproduce the reported haiven-dev.md sequence — let the supervisor go dead (or `session restart-supervisor`), then Run Agent Doc so the flow cold-starts a replacement and immediately runs Clear Session Context on the fresh pane. Expect it to SUCCEED instead of failing with `result=submission_unobserved ... unblocker=clear_submission_unobserved`, and expect `session_clear_submit_cleared_state_probe ... result=cleared_state_proven retained_lines=<small>` in ops.log. Then the half that must not regress: on a pane holding a real conversation, break submission (e.g. leave the composer wedged) and confirm the clear still fails closed with `result=conversation_retained`. Unit tests pin the predicate against synthetic captures; only a live pane exercises the tmux scrollback capture and the real harness prompt shapes.
 <!-- /agent:backlog -->
 
@@ -428,7 +436,6 @@ The resume schema was deliberately not changed in this first fix. For that next 
  
 <!-- agent:review -->
 - [/] [#pypi10gbquota] [operator-verify] Request a PyPI agent-doc project-size limit increase or remove superseded releases. The 0.35.248 workflow built and attested all four wheels, then PyPI rejected upload because the project has reached its external 10 GB storage quota.
-- [/] [#codexinpanereverify] [operator-verify] On the next Codex startup, approve the new user-level agent-doc lifecycle hooks if hook review is shown, then enter agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md in its owning pane. Expect the UserPromptSubmit cycle contract plus in-pane directive, with no shell Ran agent-doc entry and no recursive-direct-invocation refusal.
 - [/] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [/] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 - [/] [#operatorverifyrestart] [operator-verify] Restart a running JetBrains IDE (installed plugin is 0.2.350; this item originally named 0.2.340, long superseded — the single restart in #stickymdpaneverify covers it), then move from fpe-service-topology.md in a one-pane surface to agent-doc-bugs2.md in its two-column surface and confirm the first selection restores two tmux panes without a second navigation.

@@ -31,14 +31,8 @@ Operational task document for agent-loop workspace management.
 - Nested submodule fixes (ctx-core-dev/lib/relysjs, rappstack-dev/lib/ui--server--blog)
 
 <!-- agent:exchange patch=append -->
-### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b9ff27f894487e97141f4cdafe2a9d12a4a19b1-20260625-183304.md`*
-
-Compacted content:
-- Archived 5 response topic(s): Commit + push workspace changes; Rebase agent-loop origin; Queue Preservation Repair; 2 more
-- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b...
-<!-- agent:boundary:545cd8fe -->
+<!-- agent:boundary:6c68cd7d -->
 <!-- /agent:exchange -->
 ###
 <!--

@@ -1086,7 +1086,7 @@ pub fn run_with_options_to_writer(
     } else {
         command_diff_result.clone()
     };
-    let mut prompt_bearing_changes = diff_result
+    let mut semantic_prompt_bearing_changes = diff_result
         .as_ref()
         .map(|_| {
             prompt_diff_result
@@ -1099,8 +1099,37 @@ pub fn run_with_options_to_writer(
         && let Some(harness_only_diff) = harness_diff.as_ref()
     {
         push_unique_prompt_bearing_changes(
-            &mut prompt_bearing_changes,
+            &mut semantic_prompt_bearing_changes,
             diff::classify_prompt_bearing_changes(harness_only_diff),
+        );
+    }
+    // User work requires current-document adjacency evidence. The broad
+    // semantic classifier intentionally retains artifacts for diagnostics,
+    // while this actionable projection drops managed prefix chrome and prompt
+    // envelopes already followed by their existing response.
+    let mut prompt_bearing_changes = diff_result
+        .as_ref()
+        .map(|_| {
+            prompt_diff_result
+                .as_deref()
+                .map(|diff_text| {
+                    diff::classify_contextual_prompt_bearing_changes(
+                        diff_text,
+                        &diff_result_with_current.current,
+                    )
+                })
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+    if raw_diff.is_some()
+        && let Some(harness_only_diff) = harness_diff.as_ref()
+    {
+        push_unique_prompt_bearing_changes(
+            &mut prompt_bearing_changes,
+            diff::classify_contextual_prompt_bearing_changes(
+                harness_only_diff,
+                &diff_result_with_current.current,
+            ),
         );
     }
     let prompt_targets =
@@ -1129,7 +1158,7 @@ pub fn run_with_options_to_writer(
     let semantic_diff = semantic_diff_summary(
         &diff_result_with_current.previous,
         &diff_result_with_current.current,
-        &prompt_bearing_changes,
+        &semantic_prompt_bearing_changes,
     );
 
     // #op-scoped-drift-1: persist this cycle's node ops to the durable op log,
@@ -1738,7 +1767,10 @@ pub fn run_with_options_to_writer(
             .map(|change| change.text.clone());
         let suppress_active_queue_head = exchange_prompt_preempts_queue
             || (!diff_from_queue_head_only
-                && !prompt_bearing_changes.is_empty()
+                // Preserve the broad semantic signal here: an independent
+                // managed queue edit still suppresses recursive dispatch even
+                // though it is intentionally absent from actionable intent.
+                && !semantic_prompt_bearing_changes.is_empty()
                 && user_intent_prompt_changes.is_empty()
                 && (prompt_edit_independent_of_active_turn
                     || op_affectedness.as_ref().is_some_and(|affectedness| {
@@ -2153,6 +2185,70 @@ mod tests {
         run(&doc).unwrap();
         // If run() returns Ok(()), the JSON was printed to stdout without error.
         // The test verifies no panic and no error return.
+    }
+
+    #[test]
+    fn preflight_probe_ignores_answered_restored_prompt_projection() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: resolved prompt — test\n\n",
+            "Resolved.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let restored = baseline
+            .replace(
+                "agent_doc_write: crdt\n",
+                concat!(
+                    "agent_doc_write: crdt\n",
+                    "resume: 01900000-0000-7000-8000-000000000000\n",
+                ),
+            )
+            .replace(
+                "### Re: resolved prompt — test",
+                concat!(
+                    "❯ >\n",
+                    "❯ > **User prompt:**\n",
+                    "❯ >\n",
+                    "❯ > Please resolve this prompt.\n",
+                    "❯ >\n\n",
+                    "### Re: resolved prompt — test",
+                ),
+            );
+        std::fs::write(&doc, &restored).unwrap();
+
+        let mut output = Vec::new();
+        run_with_options_to_writer(&doc, PreflightOptions { probe: true }, &mut output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
+
+        assert_eq!(
+            parsed["no_changes"], false,
+            "the projection diff must remain visible"
+        );
+        assert!(
+            parsed.get("user_intent_prompt_changes").is_none(),
+            "an answered restored envelope must not become fresh operator intent: {:?}",
+            parsed.get("user_intent_prompt_changes")
+        );
+        assert!(
+            parsed.get("owned_pane_self_invocation").is_none(),
+            "projection chrome must not request recursive owner-pane dispatch"
+        );
     }
 
     #[test]

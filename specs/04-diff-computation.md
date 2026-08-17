@@ -13,7 +13,7 @@ Prompt-bearing diff triage is part of the diff contract, not just a prompt-build
 
 Mixed changes must preserve encounter order across those kinds. The classifier must not bubble later `prompt_target` items ahead of earlier `content_edit` or artifact lines from the same changed tail.
 
-Prompt-prefix normalization targets are narrower than prompt-target blocks: bare prompt prose in an answered prompt block may be repaired to `❯ prose`, but markdown list items (`- `, `* `, `+ `, `1. `, `1) `, including nested items) are context and must not be selected as lines that need an automatic `❯ ` prefix.
+Prompt-prefix normalization targets are narrower than prompt-target blocks: bare prompt prose in an answered prompt block may be repaired to `❯ prose`, but markdown list items (`- `, `* `, `+ `, `1. `, `1) `, including nested items) are context and must not be selected as lines that need an automatic `❯ ` prefix. Markdown blockquotes retain their leading `>` structure; prefix projection must never turn `> ...` into `❯ > ...`. Empty or label-only projection envelopes and complete restored quoted prompt runs immediately followed by their existing response remain visible in semantic diagnostics but are excluded from actionable user intent. A quoted prompt at the exchange tail without a following response remains actionable.
 
 `flow::session_cycle` consumes the ordered prompt-bearing changes and owns the prompt-target list used by both `preflight` and `plan`. Command modules may still compute the underlying diff, but they must not derive a separate prompt-target order or pending-mutation closeout contract.
 

@@ -60,6 +60,10 @@ retained state.
 Individual specs are in `specs/`. This file is the index.
 
 Notable invariants:
+- Prompt provenance normalization preserves Markdown quote structure: it never
+rewrites `> ...` as `❯ > ...`. Marker-only projection envelopes and restored
+quoted prompts already adjacent to their response are semantic diagnostics, not
+new operator intent; an unanswered quoted tail remains actionable.
 - Real-time document authority is operator-first. The editor-visible document
   state owns every operator-authored change, including ordinary non-prompt text,
   queue/backlog edits, frontmatter, comments, whitespace, and partial words.

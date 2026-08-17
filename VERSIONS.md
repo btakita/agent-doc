@@ -2,6 +2,22 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.255
+
+- **Fix: Markdown prompt quote envelopes remain structurally valid and cannot
+reactivate an answered turn.**
+
+Prompt-prefix projection no longer selects blockquote lines, and committed
+exchange normalization preserves bare `> ...` lines while repairing the
+historical invalid `❯ > ...` form, including quoted prompt blocks separated
+from their response by normal Markdown spacing. Preflight now derives
+actionable user intent with current-document response-adjacency evidence rather
+than routing the broad semantic diagnostic classifier directly. Empty
+projection chrome and restored answered prompt blocks therefore cannot request
+recursive owner-pane work, while a genuinely unanswered quoted tail remains
+actionable. Regression coverage exercises the exact preflight JSON contract in
+addition to the pure normalization and diff transitions.
+
 ## 0.35.254
 
 - **Fix: editor-restored prompt envelopes no longer manufacture an endless

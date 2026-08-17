@@ -886,10 +886,11 @@ pub fn prompt_target_is_immediately_before_existing_response(
     current_doc: &str,
     change_text: &str,
 ) -> bool {
-    let target = change_text
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .map(prompt_line_semantic_text);
+    let target = change_text.lines().find_map(|line| {
+        let semantic = prompt_line_semantic_text(line);
+        (!semantic.is_empty() && !matches!(semantic, "**User prompt:**" | "**Queue prompt:**"))
+            .then_some(semantic)
+    });
     let Some(target) = target else {
         return false;
     };
@@ -960,6 +961,30 @@ pub fn all_unstarted_prompt_bearing_changes_from_diff(
     diff_text: &str,
     current_doc: &str,
 ) -> Vec<PromptBearingChange> {
+    contextual_prompt_bearing_changes_from_diff(diff_text, current_doc, false)
+}
+
+/// Return prompt targets and content edits with current-document response
+/// adjacency applied.
+///
+/// Unlike [`classify_prompt_bearing_changes`], this classifier has the current
+/// document available, so it can prove that a projection-restored prompt
+/// envelope is immediately followed by its existing response. It preserves
+/// managed queue targets and content edits because preflight still needs them
+/// for selection and turn affectedness; the workflow layer derives actionable
+/// operator intent from this contextual projection.
+pub fn classify_contextual_prompt_bearing_changes(
+    diff_text: &str,
+    current_doc: &str,
+) -> Vec<PromptBearingChange> {
+    contextual_prompt_bearing_changes_from_diff(diff_text, current_doc, true)
+}
+
+fn contextual_prompt_bearing_changes_from_diff(
+    diff_text: &str,
+    current_doc: &str,
+    include_content_edits: bool,
+) -> Vec<PromptBearingChange> {
     // Keep the unsuppressed encounter order here.  The public classifier
     // intentionally removes answered response runs for broad consumers, but
     // that erases the intervening content this safety-critical selector needs
@@ -974,6 +999,12 @@ pub fn all_unstarted_prompt_bearing_changes_from_diff(
                 continue;
             }
             PromptBearingChangeKind::PromptTarget => {
+                // Projection envelope chrome is metadata, not an answered run.
+                // Do not let it arm `skip_answered_response_run`, because a
+                // genuinely fresh prompt may follow later in the same diff.
+                if prompt_target_is_marker_only_normalization(diff_text, &change.text) {
+                    continue;
+                }
                 if skip_answered_response_run {
                     let preview = change
                         .text
@@ -985,8 +1016,7 @@ pub fn all_unstarted_prompt_bearing_changes_from_diff(
                         continue;
                     }
                 }
-                if prompt_target_is_marker_only_normalization(diff_text, &change.text)
-                    || prompt_change_run_is_already_answered(&changes, idx)
+                if prompt_change_run_is_already_answered(&changes, idx)
                     || prompt_target_is_immediately_before_existing_response(
                         current_doc,
                         &change.text,
@@ -998,7 +1028,9 @@ pub fn all_unstarted_prompt_bearing_changes_from_diff(
                 unstarted.push(change.clone());
             }
             PromptBearingChangeKind::ContentEdit => {
-                continue;
+                if include_content_edits && !skip_answered_response_run {
+                    unstarted.push(change.clone());
+                }
             }
         }
     }
@@ -1016,6 +1048,14 @@ fn suppress_answered_prompt_runs(changes: Vec<PromptBearingChange>) -> Vec<Promp
                 filtered.push(change.clone());
             }
             PromptBearingChangeKind::PromptTarget => {
+                if change
+                    .text
+                    .lines()
+                    .filter(|line| !line.trim().is_empty())
+                    .all(prompt_line_is_projection_envelope)
+                {
+                    continue;
+                }
                 if skip_answered_response_run {
                     let preview = change
                         .text
@@ -1389,6 +1429,7 @@ fn is_queue_prompt_echo_block(lines: &[&str]) -> bool {
         if trimmed.is_empty() {
             continue;
         }
+        let trimmed = trimmed.strip_prefix("❯ ").unwrap_or(trimmed).trim_start();
         let Some(quoted) = trimmed.strip_prefix('>') else {
             return false;
         };
@@ -1410,6 +1451,11 @@ fn is_queue_prompt_echo_block(lines: &[&str]) -> bool {
 fn line_is_managed_state_only(line: &str) -> bool {
     let trimmed = line.trim();
     if trimmed.is_empty() {
+        return true;
+    }
+    // Editor/commit projection may restore quote-envelope chrome. A bare
+    // `❯ >` or prefixed envelope label carries no operator instruction.
+    if prompt_line_is_projection_envelope(trimmed) {
         return true;
     }
     // Queue activity comment marker (with or without `auto`)
@@ -1664,6 +1710,14 @@ fn prompt_prefix_lines_from_block(block: &str) -> Vec<PromptPrefixLine> {
         }
 
         if in_fence || trimmed.is_empty() || trimmed.starts_with("<!--") {
+            continue;
+        }
+
+        // Markdown quote envelopes are already structural prompt provenance.
+        // Prefixing them produces invalid `❯ >` lines, breaks the blockquote,
+        // and makes projection chrome look like fresh operator steering.
+        let without_prompt_marker = trimmed.strip_prefix("❯ ").unwrap_or(trimmed).trim_start();
+        if without_prompt_marker.starts_with('>') {
             continue;
         }
 
@@ -4380,6 +4434,90 @@ Done.\n\
     }
 
     #[test]
+    fn contextual_classifier_ignores_restored_prompt_and_projection_quote_chrome() {
+        let snapshot = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "---\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: queued item — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            "> do [#queued]\n\n",
+            "Done.\n\n",
+            "### Re: restored prompt — gpt-5.6\n\n",
+            "Fixed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "resume: 01900000-0000-7000-8000-000000000000\n",
+            "---\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: queued item — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            "❯ >\n",
+            "> do [#queued]\n\n",
+            "Done.\n\n",
+            "❯ > **User prompt:**\n",
+            "❯ >\n",
+            "❯ > Fix the sample route.\n\n",
+            "### Re: restored prompt — gpt-5.6\n\n",
+            "Fixed.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let diff = unified_diff_from_contents(snapshot, current).expect("diff");
+
+        let changes = classify_contextual_prompt_bearing_changes(&diff, current);
+
+        assert!(
+            changes.iter().all(|change| {
+                change.kind == PromptBearingChangeKind::ContentEdit
+                    && change.text.contains("resume:")
+            }),
+            "the answered prompt projection must be suppressed; only managed resume state may remain for workflow filtering: {changes:?}"
+        );
+    }
+
+    #[test]
+    fn projection_quote_chrome_does_not_hide_a_later_bare_tail_envelope() {
+        let snapshot = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: queued item — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            "> do [#queued]\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: queued item — gpt-5\n\n",
+            "> **Queue prompt:**\n",
+            "❯ >\n",
+            "> do [#queued]\n\n",
+            "Done.\n\n",
+            "> **User prompt:**\n",
+            ">\n",
+            "> Fix the new tail issue.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let diff = unified_diff_from_contents(snapshot, current).expect("diff");
+
+        let changes = classify_contextual_prompt_bearing_changes(&diff, current);
+
+        assert!(
+            changes
+                .iter()
+                .any(|change| change.text.contains("Fix the new tail issue")),
+            "a genuine unanswered quote envelope must remain actionable: {changes:?}"
+        );
+        assert!(
+            changes.iter().all(|change| change.text.trim() != "❯ >"),
+            "projection quote chrome must not appear as a separate prompt: {changes:?}"
+        );
+    }
+
+    #[test]
     fn restored_prompt_envelope_at_tail_remains_actionable() {
         let snapshot = concat!(
             "<!-- agent:exchange patch=append -->\n",
@@ -5113,6 +5251,23 @@ Done.\n\
             targets,
             vec!["See my inquiry:".to_string(),],
             "only bare prompt-context prose should need fresh prefixing"
+        );
+    }
+
+    #[test]
+    fn prompt_prefix_normalization_targets_preserve_markdown_quote_envelopes() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,2 +1,6 @@\n\
+ ctx\n\
++> **User prompt:**\n\
++>\n\
++> Fix the sample route.\n\
++### Re: route — gpt-5\n";
+
+        let targets = prompt_prefix_normalization_targets(diff);
+
+        assert!(
+            targets.is_empty(),
+            "Markdown quote structure is prompt provenance and must never become `❯ >`: {targets:?}"
         );
     }
 

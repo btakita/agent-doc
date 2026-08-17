@@ -31,12 +31,40 @@ fn fence_close(trimmed: &str, fence_char: char, fence_len: usize) -> bool {
 
 fn prefix_prompt_line(line: &str) -> Option<String> {
     let trimmed = line.trim_start();
+    let indent_len = line.len() - trimmed.len();
+
+    // Markdown quote envelopes carry their own provenance. Preserve a bare
+    // blockquote and repair the historical corrupt `❯ >` form back to `>`;
+    // placing the terminal prompt glyph before `>` breaks Markdown structure.
+    if let Some(quoted) = trimmed.strip_prefix("❯ ")
+        && quoted.starts_with('>')
+    {
+        return Some(format!("{}{}", &line[..indent_len], quoted));
+    }
+    if trimmed.starts_with('>') {
+        return None;
+    }
     if trimmed.is_empty() || trimmed.starts_with('❯') || line_looks_like_markdown_list_item(trimmed)
     {
         return None;
     }
-    let indent_len = line.len() - trimmed.len();
     Some(format!("{}❯ {}", &line[..indent_len], trimmed))
+}
+
+fn block_is_markdown_quote_envelope(lines: &[&str]) -> bool {
+    let mut saw_quote = false;
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let unprefixed = trimmed.strip_prefix("❯ ").unwrap_or(trimmed).trim_start();
+        if !unprefixed.starts_with('>') {
+            return false;
+        }
+        saw_quote = true;
+    }
+    saw_quote
 }
 
 fn answered_prompt_prelude_start(lines: &[&str]) -> Option<usize> {
@@ -98,12 +126,19 @@ pub fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> String {
         let mut cursor = idx;
         let mut stopped_on_response_heading = false;
         let mut stopped_on_boundary = false;
+        let mut skipped_response_gap = false;
         while cursor > 0 {
             cursor -= 1;
             let line = lines[cursor].trim_end_matches('\n');
             let trimmed = line.trim();
+            if trimmed.is_empty() {
+                if block_indices.is_empty() {
+                    skipped_response_gap = true;
+                    continue;
+                }
+                break;
+            }
             if line_in_fence[cursor]
-                || trimmed.is_empty()
                 || trimmed.starts_with("<!--")
                 || is_response_heading_line(trimmed)
             {
@@ -131,6 +166,13 @@ pub fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> String {
             .iter()
             .map(|&line_idx| lines[line_idx])
             .collect();
+        let markdown_quote_envelope = block_is_markdown_quote_envelope(&block_lines);
+        // An optional blank line between a quoted prompt and its response is
+        // ordinary Markdown spacing. Only quote envelopes may cross that gap;
+        // prose there could still be the prior assistant response body.
+        if skipped_response_gap && !markdown_quote_envelope {
+            continue;
+        }
         // A prose block bounded above by an `<!-- agent:boundary -->` marker is,
         // by construction, the operator's newly-answered prompt: the boundary
         // separates it from the last committed response and the answering
@@ -141,7 +183,7 @@ pub fn canonicalize_answered_prompt_prefixes(exchange_content: &str) -> String {
         // is in Rust & Vue." blurs into the preceding assistant reply. Without a
         // boundary the block is ambiguous (it may be trailing assistant prose),
         // so keep the conservative opt-in heuristic there.
-        let prefix_start = if stopped_on_boundary {
+        let prefix_start = if stopped_on_boundary || markdown_quote_envelope {
             0
         } else {
             match answered_prompt_prelude_start(&block_lines) {
@@ -365,6 +407,46 @@ Done.
                 && !normalized.contains("\n❯ 1. keep this ordered bullet bare"),
             "markdown list items must not receive prompt prefixes:\n{normalized}"
         );
+    }
+
+    #[test]
+    fn canonicalize_answered_prompt_prefixes_preserves_markdown_quote_envelopes() {
+        let exchange = "\
+❯ > **User prompt:**
+❯ >
+❯ > Fix the sample route.
+
+### Re: route — gpt-5.6
+
+Fixed.
+";
+
+        let normalized = canonicalize_answered_prompt_prefixes(exchange);
+
+        assert!(
+            normalized.starts_with(
+                "> **User prompt:**\n>\n> Fix the sample route.\n\n### Re: route — gpt-5.6\n"
+            ),
+            "answered prompt normalization must repair corrupt terminal markers without breaking the blockquote:\n{normalized}"
+        );
+        assert!(
+            !normalized.contains("❯ >"),
+            "Markdown quote envelopes must never retain terminal prompt prefixes:\n{normalized}"
+        );
+    }
+
+    #[test]
+    fn canonicalize_answered_prompt_prefixes_does_not_prefix_bare_markdown_quotes() {
+        let exchange = "\
+> **User prompt:**
+>
+> Fix the sample route.
+### Re: route — gpt-5.6
+
+Fixed.
+";
+
+        assert_eq!(canonicalize_answered_prompt_prefixes(exchange), exchange);
     }
 
     #[test]

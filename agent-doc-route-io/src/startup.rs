@@ -525,6 +525,12 @@ pub fn auto_start_in_session_with_lock_mode(
             return Ok(None);
         }
     };
+    // Resolve the document's project root before ownership admission. The
+    // controller actor graph is the live owner source; the registry remains a
+    // durable dispatch projection.
+    let cwd = agent_doc_git_io::dirs::resolve_pane_cwd(file);
+    let registry_base_dir = agent_doc_project_root_io::project_root_or_file_parent(file)
+        .unwrap_or_else(|_| cwd.clone());
     let existing_registration = agent_doc_session_registry_io::lookup(session_id)?;
     let existing_alive = existing_registration
         .as_deref()
@@ -532,7 +538,27 @@ pub fn auto_start_in_session_with_lock_mode(
     // Resolve the runtime owner independently of the registry. A missing or
     // stale row must not suppress live-owner discovery and turn autostart into
     // a duplicate-pane allocator.
-    let live_owner = agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id);
+    let local_actor_authority =
+        agent_doc_controller_io::project_controller::local_controller_runtime_available(
+            &registry_base_dir,
+        )?;
+    let actor_owner = local_actor_authority
+        .then(|| {
+            agent_doc_controller_io::project_controller::authoritative_actor_binding(
+                &registry_base_dir,
+                file,
+            )
+        })
+        .transpose()?
+        .flatten()
+        .filter(|record| {
+            record.session_id == session_id
+                && record.state != agent_doc_controller::actor::ActorState::Closed
+                && tmux.pane_alive(&record.pane_id)
+        })
+        .map(|record| record.pane_id);
+    let live_owner = agent_doc_sync_io::sync::find_normal_path_owner_pane(tmux, file, session_id)
+        .or(actor_owner);
     match decide_existing_startup_registration(
         existing_registration.as_deref(),
         existing_alive,
@@ -565,10 +591,6 @@ pub fn auto_start_in_session_with_lock_mode(
     // so `/agent-doc` invocations on submodule-hosted documents spawn panes
     // inside the correct submodule (e.g. `src/session-share`) instead of the
     // agent-loop super root where the command happened to be invoked from.
-    let cwd = agent_doc_git_io::dirs::resolve_pane_cwd(file);
-    let registry_base_dir = agent_doc_project_root_io::project_root_or_file_parent(file)
-        .unwrap_or_else(|_| cwd.clone());
-
     // Resolve the agent-doc binary path (same binary that's currently running)
     let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
 
@@ -701,6 +723,42 @@ pub fn auto_start_in_session_with_lock_mode(
 
     // Register immediately so subsequent route calls find this pane
     register_dispatch_target(tmux, session_id, &new_pane, file_path)?;
+    // Publish a provisional Starting actor while the startup locks still own
+    // admission. A newer layout generation can now reuse this pane before the
+    // child process has booted far enough to publish its own actor generation.
+    let generation = agent_doc_session_actor_io::next_generation(file, session_id)?;
+    let pane_window = agent_doc_tmux_io::target_window_id(tmux, &new_pane).unwrap_or_default();
+    if local_actor_authority {
+        let provisional_actor = agent_doc_controller_io::project_controller::start_session(
+            &registry_base_dir,
+            agent_doc_controller_io::project_controller::StartSessionRequest {
+                file: file.to_path_buf(),
+                session_id: session_id.to_string(),
+                pane_id: new_pane.clone(),
+                window_id: pane_window,
+                generation: generation.new_generation,
+            },
+        )?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_startup_provisional_actor file={} pane={} generation={} state={}",
+                file.display(),
+                new_pane,
+                provisional_actor.generation,
+                provisional_actor.state.as_str(),
+            ),
+        );
+    } else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_startup_provisional_actor_skipped file={} pane={} reason=standalone_startup",
+                file.display(),
+                new_pane,
+            ),
+        );
+    }
     drop(startup_locks);
 
     // Standalone route startup owns focus. Provisioning inside a layout

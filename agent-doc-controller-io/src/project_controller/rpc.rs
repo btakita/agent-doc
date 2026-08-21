@@ -1278,6 +1278,28 @@ pub fn start_session(
     project_root: &Path,
     request: StartSessionRequest,
 ) -> Result<agent_doc_controller::actor::ActorRecord> {
+    if let Some(runtime) = local_controller_runtime_for_project(project_root)? {
+        let bootstrap = runtime.bootstrap_snapshot()?;
+        return handle_start_session(
+            &bootstrap,
+            Some(runtime.as_ref()),
+            ControllerRequest {
+                command: "start_session".to_string(),
+                file: Some(request.file),
+                session_id: Some(request.session_id),
+                pane_id: Some(request.pane_id),
+                window_id: Some(request.window_id),
+                generation: Some(request.generation),
+                state: None,
+                caller: Some("start".to_string()),
+                reason: Some("session_start".to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+            },
+        );
+    }
     request_controller(
         project_root,
         ControllerRequest {
@@ -1446,6 +1468,13 @@ pub fn authoritative_actor_binding(
     project_root: &Path,
     file: &Path,
 ) -> Result<Option<agent_doc_controller::actor::ActorRecord>> {
+    if let Some(runtime) = local_controller_runtime_for_project(project_root)? {
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            project_root,
+            &file.to_string_lossy(),
+        );
+        return runtime.actor_record(&document_id);
+    }
     #[cfg(any(test, feature = "test-support"))]
     {
         let document_id = agent_doc_session_actor_io::canonical_document_id_in(
@@ -5330,9 +5359,30 @@ pub fn await_local_delivery_convergence_change_for_file(
     await_local_delivery_convergence_change_for_file_inner(file, after_version, wait)
 }
 
-#[cfg(test)]
 fn local_controller_runtime() -> Option<Arc<ControllerRuntime>> {
     LOCAL_CONTROLLER_RUNTIME.with(|slot| slot.borrow().as_ref().and_then(std::sync::Weak::upgrade))
+}
+
+fn local_controller_runtime_for_project(
+    project_root: &Path,
+) -> Result<Option<Arc<ControllerRuntime>>> {
+    let Some(runtime) = local_controller_runtime() else {
+        return Ok(None);
+    };
+    let runtime_root = runtime.bootstrap_snapshot()?.project_root;
+    let canonical_runtime_root = runtime_root.canonicalize().unwrap_or(runtime_root);
+    let canonical_project_root = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
+    Ok((canonical_runtime_root == canonical_project_root).then_some(runtime))
+}
+
+/// Whether this thread is executing inside the controller runtime for `project_root`.
+///
+/// Controller-owned effect workers use this to publish nested actor transitions
+/// directly. Standalone callers must retain their legacy no-controller path.
+pub fn local_controller_runtime_available(project_root: &Path) -> Result<bool> {
+    Ok(local_controller_runtime_for_project(project_root)?.is_some())
 }
 
 fn await_local_delivery_convergence_change_for_file_inner(
@@ -17222,6 +17272,7 @@ fn layout_sync_state_operator_owned_documents(
     expected_documents: &[String],
     physical_panes: &[String],
     actor_store: &BTreeMap<String, agent_doc_controller::actor::ActorRecord>,
+    effect_file_panes: &[(String, String)],
 ) -> Vec<String> {
     actor_store
         .values()
@@ -17229,7 +17280,14 @@ fn layout_sync_state_operator_owned_documents(
             record.state != agent_doc_controller::actor::ActorState::Closed
                 && physical_panes.contains(&record.pane_id)
         })
-        .map(|record| canonical_layout_document_id(project_root, &record.document_id))
+        .filter_map(|record| {
+            let document = canonical_layout_document_id(project_root, &record.document_id);
+            let structurally_assigned = effect_file_panes.iter().any(|(file, pane)| {
+                *pane == record.pane_id
+                    && canonical_layout_document_id(project_root, file) == document
+            });
+            (!structurally_assigned).then_some(document)
+        })
         .filter(|document| !expected_documents.contains(document))
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -17760,6 +17818,7 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
         &expected_documents,
         &panes,
         &actor_store,
+        &visible_effect_file_panes,
     );
     let (synced, reason) = layout_sync_state_result(
         &expected_documents,
@@ -18481,6 +18540,11 @@ fn pane_layout_effect_worker(
             state.lock().deactivate();
             return;
         };
+        // The pane-layout worker executes controller-owned effects on its own
+        // thread. Install the local runtime there so nested route/start effects
+        // publish actor transitions directly instead of self-RPCing through the
+        // controller socket.
+        install_controller_request_thread_context(&runtime);
         let Some(desired) = runtime.pane_layout_desired() else {
             state.lock().deactivate();
             return;
@@ -18547,11 +18611,12 @@ fn pane_layout_effect_worker(
         };
         if desired.invocation.caller_kind == "automatic" {
             let observation_invocation = pane_layout_state_invocation(&desired);
+            let structural_file_panes = runtime.pane_layout_structural_file_panes();
             if let Ok(report) = tmux_layout_sync_state_for_invocation_with_effect_assignment(
                 &bootstrap,
                 &runtime,
                 &observation_invocation,
-                &[],
+                &structural_file_panes,
             ) && !report.operator_owned_documents.is_empty()
             {
                 if state.lock().is_superseded(work_revision) {
@@ -23743,6 +23808,104 @@ mod tests {
         // Unknown pane resolves to None so the caller falls back to the
         // process-owner (/proc) probe.
         assert!(actor_record_for_active_pane(&store, "%99").is_none());
+    }
+
+    #[test]
+    fn structurally_assigned_outgoing_actor_is_not_operator_owned() {
+        use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState};
+
+        let project_root = Path::new("/project");
+        let outgoing = "/project/tasks/outgoing.md".to_string();
+        let actor = ActorRecord {
+            document_id: outgoing.clone(),
+            session_id: "outgoing-session".to_string(),
+            generation: 7,
+            pane_id: "%2".to_string(),
+            window_id: "@1".to_string(),
+            harness: "codex".to_string(),
+            state: ActorState::Busy,
+            last_transition: ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "turn_in_progress".to_string(),
+                timestamp: 0,
+                prior_generation: 6,
+                new_generation: 7,
+            },
+        };
+        let actor_store = BTreeMap::from([(outgoing.clone(), actor)]);
+        let physical_panes = vec!["%1".to_string(), "%2".to_string()];
+        let expected_documents = vec!["/project/tasks/current.md".to_string()];
+
+        assert_eq!(
+            layout_sync_state_operator_owned_documents(
+                project_root,
+                &expected_documents,
+                &physical_panes,
+                &actor_store,
+                &[],
+            ),
+            vec![outgoing.clone()],
+            "without a controller receipt the unexpected live actor remains operator-owned",
+        );
+        assert!(
+            layout_sync_state_operator_owned_documents(
+                project_root,
+                &expected_documents,
+                &physical_panes,
+                &actor_store,
+                &[(outgoing, "%2".to_string())],
+            )
+            .is_empty(),
+            "a superseded structural effect remains controller-owned and must be reconciled by the newest exact-visible generation",
+        );
+    }
+
+    #[test]
+    fn pane_layout_worker_can_publish_a_provisional_start_without_self_rpc() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("tasks/session.md");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "# Session\n").unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: dir.path().to_path_buf(),
+            socket_path: socket_path(dir.path()),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: current_binary_identity().ok(),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let runtime = ControllerRuntime::new_arc(bootstrap).unwrap();
+        install_controller_request_thread_context(&runtime);
+
+        let record = start_session(
+            dir.path(),
+            StartSessionRequest {
+                file: file.clone(),
+                session_id: "provisional-session".to_string(),
+                pane_id: "%17".to_string(),
+                window_id: "@2".to_string(),
+                generation: 1,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            record.state,
+            agent_doc_controller::actor::ActorState::Starting
+        );
+        assert_eq!(record.pane_id, "%17");
+        assert_eq!(
+            authoritative_actor_binding(dir.path(), &file)
+                .unwrap()
+                .map(|record| record.pane_id),
+            Some("%17".to_string()),
+            "the provisional owner must be observable before the child process starts",
+        );
     }
 
     #[test]

@@ -306,11 +306,23 @@ tmux-router registry metadata only as a projection of that binding.
 - If two visible files point at the same pane, sync must either find one decisive owner or drop the duplicate from the synthetic registry so tmux-router cannot alias both files onto one pane.
 - Once a live pane is reserved for one file during the pass, later files in the same pass must treat it as unavailable.
 - The auto-start pre-sync pass must make at most one pane decision per document. The same document may appear in more than one requested column (column memory, focus + column overlap, repeated layout requests), but its candidate set is deduped by path (first-seen order) before resolution. Without this, a document requested twice can cold-start a second pane on its second occurrence — before the first freshly-provisioned pane has recorded a registry / session-log binding that the second occurrence's lookup or `find_associated_panes` could see — producing the duplicate-editor-pane regression ("3 tmux panes with 2 editor panes"). This complements `find_associated_panes` (which dedups against already-discoverable live panes) by closing the same-run, not-yet-discoverable window.
+- Route-owned auto-start under Project Controller authority must publish a
+provisional `Starting` actor for the new pane before releasing document/session
+startup admission and before sending the child start command. A concurrent
+layout generation must reuse that actor binding while process-tree ownership is
+still materializing; an alive registry pane without either proof remains
+non-authoritative. Standalone startup retains its no-controller path.
 - If a registered pane is stashed, sync must rescue it back into the visible `agent-doc` window rather than treating the stash copy as disposable.
 - An active actor pane outside the exact visible editor projection is
   detachable, not terminal layout ownership. Reconciliation moves it to
-  `stash` without killing or interrupting its harness and remains retryable
-  until the requested pane count and order converge.
+`stash` without killing or interrupting its harness and remains retryable
+until the requested pane count and order converge.
+- A successfully applied structural effect remains controller-ownership
+provenance even when a newer desired generation supersedes it before terminal
+observation. Exact-visible reconciliation must not reclassify a pane placed by
+that effect as operator-owned merely because its actor is absent from the newer
+projection; it must reconcile or stash that pane. Truly operator-placed panes
+without structural provenance retain the operator-owned protection.
 - Protected outgoing on a 1-in/1-out reconcile preserves layout (`#jb-nav-3pane-promote-swap`): when the reconciler's SWAP fast path detects exactly one pane to attach and one to detach, and the outgoing pane is protected (busy / `protect_pane`), it must NOT fall through to ATTACH (join the incoming) while DETACH skips the protected outgoing pane — that grows the window to N+1 panes. Instead it preserves the current layout, leaves the incoming pane in its stash, and defers; the caller's deferred-retry resurfaces it once the busy pane frees. Keep this aligned in the `tmux-router` reconciler (`sync.rs`) and this spec.
 - Manual/full sync is also the operator repair surface behind editor
   `Sync Tmux Layout`: before reconciliation it runs file-scoped doctor repair for

@@ -7840,10 +7840,21 @@ mod tests {
             focus_required: true,
             focus_applied: true,
         });
+        graph.record_structural_assignment(
+            &first,
+            graph.actor_bindings(),
+            None,
+            first_assignment.clone(),
+        );
 
         assert!(
             graph.effect_file_panes(second.generation).is_empty(),
             "a late receipt from the prior desired generation cannot identify panes for the new layout"
+        );
+        assert_eq!(
+            graph.last_structural_file_panes(),
+            first_assignment,
+            "a completed structural effect remains ownership provenance for the superseding layout"
         );
     }
 

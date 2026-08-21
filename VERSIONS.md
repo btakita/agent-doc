@@ -2,6 +2,22 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.256
+
+- **Fix: exact-visible editor layout no longer stalls at three panes after a
+superseded sync or rapid cold start.**
+
+The Project Controller now retains a successfully applied structural
+file-to-pane assignment as ownership provenance even when a newer desired
+generation arrives before terminal observation. The newer exact-visible sync
+therefore reconciles and stashes the outgoing controller-placed pane instead of
+misclassifying it as operator-owned. Route auto-start also publishes a
+provisional `Starting` actor before releasing startup admission, so a concurrent
+generation reuses the freshly allocated pane while child process ownership is
+still materializing instead of allocating duplicate panes. Busy outgoing
+sessions remain alive in `stash`, and genuinely operator-placed panes retain
+their protection.
+
 ## 0.35.255
 
 - **Fix: Markdown prompt quote envelopes remain structurally valid and cannot

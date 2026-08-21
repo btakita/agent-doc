@@ -31,8 +31,20 @@ Operational task document for agent-loop workspace management.
 - Nested submodule fixes (ctx-core-dev/lib/relysjs, rappstack-dev/lib/ui--server--blog)
 
 <!-- agent:exchange patch=append -->
+### Session Summary
 
-<!-- agent:boundary:6c68cd7d -->
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b9ff27f894487e97141f4cdafe2a9d12a4a19b1-20260625-183304.md`*
+
+Compacted content:
+- Archived 5 response topic(s): Commit + push workspace changes; Rebase agent-loop origin; Queue Preservation Repair; 2 more
+- Prior summary/context: ❯ *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/18c3ca3007b9c6c5bc21d81a0b...
+
+### Re: Session compaction — gpt-5
+
+The compacted exchange is reconciled. I reviewed the archived response topics: the workspace commit/push, root rebase, and queue-preservation work were already completed; the JetBrains restart-delay report and inert `#advance-review` token were already captured as follow-up work.
+
+No new operator request or uncompleted repository action was introduced by this compaction artifact, so no code, tests, builds, commits, or pushes were needed beyond this session-document closeout. The existing backlog remains intact, including `#2f3v` for the `#advance-review` normalization.
+<!-- agent:boundary:857a0a1a:agent-loop -->
 <!-- /agent:exchange -->
 ###
 <!--
@@ -40,7 +52,7 @@ Operational task document for agent-loop workspace management.
 
 ## Queue
 
-<!-- agent:queue go -->
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

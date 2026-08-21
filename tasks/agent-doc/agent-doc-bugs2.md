@@ -1,5 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
+resume: 019faf4c-a885-76d0-9d98-56694b84d79a
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -373,11 +374,11 @@ Preflight also found one legacy gated item still in `agent:backlog`; `agent-doc 
 
 The exchange is at the compaction warning threshold. I left it intact; `agent-doc compact tasks/agent-doc/agent-doc-bugs2.md --commit` is available when compaction is explicitly requested.
 
-❯ > Fix. Fix this issue first: a Codex owner pane received
-❯ > `agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md`,
-❯ > shell-ran that command back into itself, hit the recursive-direct-invocation
-❯ > deadlock guard, and then falsely reported that the document was already owned
-❯ > and ready instead of handling the unresolved prompt in the current turn.
+> Fix. Fix this issue first: a Codex owner pane received
+> `agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md`,
+> shell-ran that command back into itself, hit the recursive-direct-invocation
+> deadlock guard, and then falsely reported that the document was already owned
+> and ready instead of handling the unresolved prompt in the current turn.
 
 ### Re: Codex owner-pane invocation routing — gpt-5.6
 
@@ -446,7 +447,24 @@ Each harness must read, update, and invalidate only its own slot. A legacy scala
 
 There is no new substantive operator prompt in these eight steering fragments. They are the already-answered backend wedge prompt plus restored quote-marker lines from the live editor projection. The backend fix and its live proof remain recorded above; no work item or answer is being duplicated.
 
-<!-- agent:boundary:9691d218:agent-doc-bugs2 -->
+
+### Re: three-pane exact-visible mismatch — gpt-5.6
+
+Fixed and released as agent-doc **0.35.256** (agent-doc commit `f6ea73781`, tag `v0.35.256`; agent-loop release-pointer commit `02e1b1f0a`).
+
+Two coupled races caused the mismatch:
+
+- A structural layout effect could finish just as a newer editor generation superseded it. The next generation discarded that successful file-to-pane assignment while surveying ownership, misclassified the controller-placed outgoing pane as operator-owned, and refused to stash it.
+- Cold-start registered a new pane and released startup admission before the child published actor ownership. Rapid newer generations saw an alive but apparently unowned registry pane and allocated more panes.
+
+The Project Controller now retains successful structural assignments as cross-generation ownership provenance. Exact-visible reconciliation can therefore stash a controller-placed outgoing pane while preserving protection for genuinely operator-placed panes. Controller-owned route startup also publishes a provisional `Starting` actor before releasing startup admission; nested publication is direct through the local reactive runtime, while standalone startup keeps its no-controller compatibility path.
+
+Regression coverage pins superseded structural provenance, operator-owned classification, provisional actor publication without controller self-RPC, standalone orchestration compatibility, and the live busy-outgoing two-pane behavior. The affected crate suites and full `make check` pass, and the single release-profile `make install-full` completed successfully.
+
+The live window is repaired and idempotent: `0:agent-doc` now contains exactly `%0` (`agent-doc-bugs2.md`) and `%10` (`equityfundingsource.md`). Busy pane `%1` (`agent-loop.md`) remains alive in `0:stash`; it was moved, not interrupted. A second exact-visible sync retained the same two panes. This also completes the live proof tracked by `#run3rdpaneswitchverify`.
+
+At the required one-time CI inspection, the v0.35.256 CI, Release, PyPI, and Pages workflows were in progress; the Book workflow was green. Per the no-wait release contract, local full-suite and release-artifact verification are the closeout proof.
+<!-- agent:boundary:0fb8f3d3:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -469,7 +487,6 @@ There is no new substantive operator prompt in these eight steering fragments. T
  
 <!-- agent:review -->
 - [/] [#pypi10gbquota] [operator-verify] Request a PyPI agent-doc project-size limit increase or remove superseded releases. The 0.35.248 workflow built and attested all four wheels, then PyPI rejected upload because the project has reached its external 10 GB storage quota.
-- [/] [#run3rdpaneswitchverify] [operator-verify] Live-editor proof for #run3rdpaneswitch (0.35.198): with a two-column editor layout, Run Agent Doc on document A, let its turn keep running, then switch the editor to document B. Expect the agent-doc window to hold exactly two panes, A's pane to be moved into the 1:stash window still alive with its turn running (ops shows 'Stashed busy pane %N from window @M'), and NO third pane. The fix is proven deterministically by switching_documents_while_the_outgoing_turn_runs_stays_two_panes against live tmux with an injected busy probe; this item is only the real-IDE eyeball, since that test stages tmux directly rather than driving the JetBrains layout path. Unblocks on a human watching a real IDE + tmux session.
 - [/] [#operatorverifylive] [operator-verify] #panewindowdriftverify Live-pane proof for #panewindowdrift (0.35.187): with a two-column agent-doc layout, move the focused document's pane into the stash window, then trigger an editor tab/focus change for that document. Expect NO select-pane onto the stashed pane (ops.log shows pane_layout_projection ... focus=focus_pane_not_co_visible:...), the structural reconcile surfaces the pane, and the retry focuses it in the agent-doc window. Unblocks on a human watching a real IDE + tmux session.
 - [/] [#operatorverifyrestart] [operator-verify] Restart a running JetBrains IDE (installed plugin is 0.2.350; this item originally named 0.2.340, long superseded — the single restart in #stickymdpaneverify covers it), then move from fpe-service-topology.md in a one-pane surface to agent-doc-bugs2.md in its two-column surface and confirm the first selection restores two tmux panes without a second navigation.
 - [/] [#stickymdpaneverify] [operator-verify] #stickymdpane live proof: restart a JetBrains IDE — plugin 0.2.350 is ALREADY INSTALLED in all four IDE configs, so only the restart is missing, and that one restart also satisfies the install precondition for #operatorverifyrestart, #rebootselfhealverify and #falsetyping-guard — then open a two-column split with an agent-doc document in each and switch ONE column to a source file. Expect tmux to keep both panes with that column still showing its last document, instead of collapsing to one pane. Then close that split entirely and confirm tmux DOES collapse — the fallback must be memory, not invention. Unit tests pin the pure resolution but cannot prove the live IDE wiring.

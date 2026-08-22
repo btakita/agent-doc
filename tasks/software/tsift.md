@@ -1,5 +1,6 @@
 ---
 agent_doc_session: tsift-v0.1
+resume: 01a02767-e76b-7183-9616-e762301dee47
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -59,15 +60,30 @@ Implemented and committed all three issue fixes in the tsift submodule.
 - **#3 — portable AGENTS boilerplate:** generated verification guidance is capability-based: `make check` or a supported `just` recipe, plus `gh` or `glab` only when the matching repository metadata and executable exist.
 
 Verification is green: focused summarize/init/conformance tests, full `make check`, `cargo install --path .`, installed `tsift 0.1.80`, two-pass `tsift init .` idempotence, current `tsift status`, and the latest existing GitHub Actions CI run. The implementation commit is `2d018e2` (`Fixes #1`, `Fixes #2`, `Fixes #3`); its push follows this document closeout.
+
+### Re: release + publish + install — gpt-5
+
+> **Queue prompt:**
+>
+> release + publish + install
+
+Released tsift `0.1.81` completely.
+
+- Fixed the clean-runner clippy regression in SQLite semantic-vector decoding by using fixed-width byte arrays, with direct round-trip and invalid-payload regression coverage.
+- Versioned all 26 Rust packages, the OpenCode npm package, generated instruction surfaces, and release history for `0.1.81`.
+- Committed and pushed `3ca8655` (`release: 0.1.81 -- portable summarize and init`), then pushed the annotated `v0.1.81` tag.
+- Verification is green: focused SQLite clippy/test gates, full `make check`, package-file checks for all 26 crates, the OpenCode npm publish dry run, `main` CI including live Convex acceptance, and the complete tagged Release workflow.
+- Publication is proven: [GitHub Release v0.1.81](https://github.com/btakita/tsift/releases/tag/v0.1.81) is live with Linux, macOS ARM, and Windows binaries plus SHA-256 files; all 26 crates, including `tsift-sim-world`, are live on crates.io; and npm reports `opencode-tsift` `0.1.81`.
+- Installed locally with `cargo install --path . --locked`; `tsift --version` reports `tsift 0.1.81`.
+- Rebuilt the stale local agent-doc binary/native library before closeout; the installed version remains current at `0.35.258`.
+
+The tsift submodule is clean and synchronized with `origin/main`. No additional backlog follow-up is needed for this release.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Fix https://github.com/btakita/tsift/issues/1~~
-- ~~Fix https://github.com/btakita/tsift/issues/2~~
-- ~~Fix https://github.com/btakita/tsift/issues/~~
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

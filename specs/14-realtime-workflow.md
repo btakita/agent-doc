@@ -239,10 +239,13 @@ derived settlement Computed and resumes the eligible Effect.
 
 A controller handoff restores retained encoded CRDT state, lineage, and the
 cached committed state vector without materializing the ordered document under
-the default projection path. Recovery may render current text only when an
-explicit live-document projection cutover requires it. Handoff therefore cannot
-turn an inflated retained history into a whole-document CPU loop that blocks the
-controller RPC needed to resume the already-owned continuation.
+the default projection path. More importantly, every relay entry point checks
+for the process-local live hub before observing or decoding that retained
+recovery value; retained decoding is first-contact recovery, never per-RPC work.
+Recovery may render current text only when an explicit live-document projection
+cutover requires it. Handoff therefore cannot turn an inflated retained history
+into a repeated whole-document CPU loop that blocks the controller RPC needed to
+resume the already-owned continuation.
 
 Retained delivery has an explicit reactive fixed point. When the retained
 Base→Target delta projected over the converged visible cut produces that same

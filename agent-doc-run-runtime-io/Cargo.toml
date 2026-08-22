@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-run-runtime-io"
-version = "0.35.261"
+version = "0.35.262"
 edition = "2024"
 description = "Direct-run runtime effects for agent-doc"
 license = "MIT"
@@ -11,13 +11,13 @@ publish = false
 name = "agent_doc_run_runtime_io"
 
 [dependencies]
-agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.35.261" }
-agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.35.261" }
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.261" }
-agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.35.261" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.261" }
-agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.35.261" }
-agent-doc-run-io = { path = "../agent-doc-run-io", version = "0.35.261" }
-agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.35.261" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.261" }
+agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.35.262" }
+agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.35.262" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.262" }
+agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.35.262" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.262" }
+agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.35.262" }
+agent-doc-run-io = { path = "../agent-doc-run-io", version = "0.35.262" }
+agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.35.262" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.262" }
 anyhow = "1"

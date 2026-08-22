@@ -797,16 +797,25 @@ fn replica_identity_registry_has_editor_pid(document_hash: &str, editor_pid: u32
 /// finalize/disk entry points below do).
 pub fn with_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T> {
     let hash = agent_doc_fs::document_state_hash(file)?;
-    let retained = retained_canonical_projections().observe(&hash);
-    let retained_hub = retained
-        .as_ref()
-        .map(|projection| {
-            RelayHub::from_retained_canonical_projection(CANONICAL_CLIENT_ID, projection)
+    // The live hub is the hot-path authority. Retained recovery belongs only to
+    // first contact after eviction/restart; decoding it before checking the
+    // registry rebuilds and discards the entire CRDT on every pull/projection RPC.
+    // A sufficiently accreted editor history can keep that redundant decode at
+    // 100% CPU and starve controller requests even though the hub already exists.
+    let handle = if let Some(handle) = hub_handle(&hash) {
+        handle
+    } else {
+        let retained = retained_canonical_projections().observe(&hash);
+        let retained_hub = retained
+            .as_ref()
+            .map(|projection| {
+                RelayHub::from_retained_canonical_projection(CANONICAL_CLIENT_ID, projection)
+            })
+            .transpose()?;
+        hub_handle_or_insert_with(&hash, || {
+            retained_hub.unwrap_or_else(|| RelayHub::new(CANONICAL_CLIENT_ID))
         })
-        .transpose()?;
-    let handle = hub_handle_or_insert_with(&hash, || {
-        retained_hub.unwrap_or_else(|| RelayHub::new(CANONICAL_CLIENT_ID))
-    });
+    };
     let mut hub = handle.lock();
     let result = f(&mut hub);
     retained_canonical_projections().retain(&hash, hub.retained_canonical_projection());
@@ -4028,6 +4037,26 @@ mod tests {
             "document B must be served while document A's hub is held; \
              a process-global registry lock makes one busy document starve every other",
         );
+    }
+
+    #[test]
+    fn an_existing_hub_never_decodes_its_retained_recovery_projection() {
+        let (_dir, doc) = temp_doc("existing-hub-skips-retained-decode.md");
+        with_hub(&doc, |hub| {
+            hub.apply_canonical_replace("", "live canonical\n").unwrap();
+        })
+        .unwrap();
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let mut poisoned = retained_canonical_projections()
+            .observe(&hash)
+            .expect("the live hub publishes a retained recovery projection");
+        poisoned.state = vec![0xff];
+        retained_canonical_projections().retain(&hash, poisoned);
+
+        let text = with_hub(&doc, |hub| hub.canonical_text())
+            .expect("an existing live hub must bypass retained decoding");
+
+        assert_eq!(text, "live canonical\n");
     }
 
     /// The registry lock itself must never be held across hub work, which is what

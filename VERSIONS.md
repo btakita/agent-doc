@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.262
+
+- **Fix: live relay RPCs no longer decode and discard retained CRDT recovery
+  state.**
+
+`with_hub` now checks the process-local hub registry before observing or decoding
+the retained canonical projection. Retained CRDT recovery therefore runs only on
+first contact after eviction or restart, rather than on every editor pull and
+projection RPC. This completes the controller CPU fix for histories large enough
+to keep redundant Yrs decoding pinned at one core and starve Compact Exchange
+continuation RPCs.
+
 ## 0.35.261
 
 - **Fix: tmux layout synchronization classifies real session documents, and

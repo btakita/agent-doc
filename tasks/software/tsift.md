@@ -42,6 +42,16 @@ Compacted content:
 
 ### Re: Fix tsift issues 1–3 — gpt-5
 
+> **Queue prompt:**
+>
+> Fix https://github.com/btakita/tsift/issues/2
+
+
+> **Queue prompt:**
+>
+> Fix https://github.com/btakita/tsift/issues/1
+
+
 Implemented and committed all three issue fixes in the tsift submodule.
 
 - **#1 — AWS Bedrock summarize:** extraction now resolves one reusable backend only for real cache misses. Hosted Claude providers run through authenticated, non-interactive `claude -p`; direct Anthropic keys retain the API transport. Missing or unusable credentials fail once, before the extraction walk, with a nonzero exit.
@@ -55,9 +65,9 @@ Verification is green: focused summarize/init/conformance tests, full `make chec
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Fix https://github.com/btakita/tsift/issues/1
-- Fix https://github.com/btakita/tsift/issues/2
-- Fix https://github.com/btakita/tsift/issues/
+- ~~Fix https://github.com/btakita/tsift/issues/1~~
+- ~~Fix https://github.com/btakita/tsift/issues/2~~
+- ~~Fix https://github.com/btakita/tsift/issues/~~
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -66,13 +66,23 @@ This also avoids the extra interaction contract required for accessible autoplay
 Completed `#testimonialsautonavigate` by declaring `data-testimonial-rotation="manual"`, documenting the no-autoplay decision and future accessibility requirements in the homepage PRD, and updating regression coverage. Focused homepage/carousel tests passed, and the full `make check` suite completed successfully (exit 0). The EFS repository has no GitHub Actions workflows configured to inspect.
 
 Committed and pushed to `equityfundingsource-dev` as `d5dfef77` (`fix(home): keep testimonials user-controlled (#testimonialsautonavigate)`).
+
+### Re: Yelp full-review formatting — gpt-5
+
+Fixed and pushed in `11a2822f` (`fix(home): make Yelp review embeds responsive`).
+
+The failure was the carousel layout, not the review text: at the medium breakpoint, three cards squeezed Yelp’s injected iframe to 154px, producing the clipped widget and horizontal scrollbar shown in `img_5.png`. Yelp’s official embed uses a script-injected iframe and message-based resizing ([Yelp’s embed architecture](https://engineeringblog.yelp.com/2016/10/embedded-reviews-at-yelp.html)), so the surrounding card must provide a usable responsive width.
+
+The testimonial grid now stays single-column below the wide-desktop breakpoint and temporarily becomes one full-width column whenever a Yelp disclosure is open. The iframe and all of its grid/flex ancestors have explicit shrink and width constraints, while the disclosure keeps a clean keyboard-visible focus ring.
+
+Headless-browser verification at a 780px viewport showed the expanded Yelp iframe increase from 154px to 589px inside a 637px card, with the document width remaining 765px—no page-level horizontal overflow. The focused testimonial tests pass, `make check` exits 0, and `git diff --check` passes. No GitHub Actions workflows are configured for this repository.
 <!-- agent:boundary:a61b5b26:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#yelpalongside]~~
 - ~~do [#testimonialsautonavigate]~~
-- Full Yelp review does not format correctly ![img_5.png](img_5.png) 
+- 🚧 Full Yelp review does not format correctly ![img_5.png](img_5.png)
 <!-- /agent:queue -->
 
 ## Backlog

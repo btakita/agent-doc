@@ -2,6 +2,30 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.259
+
+- **Fix: response persistence follows the authoritative editor buffer, and
+  automatic tmux focus cannot monopolize pane synchronization.**
+
+Attached CRDT documents now close out stale disk projections through a
+generation-fenced `persist_current` editor intent. JetBrains and VS Code verify
+the exact visible content hash and UTF-8 byte length, invoke only the native
+single-document save, and emit `disk_persisted` only after the editor, replica,
+and raw disk bytes remain identical. Git snapshots, controller projections, and
+the working-tree file remain evidence rather than write authority; no restore,
+direct disk replacement, save-all, reload, focus, or reopen fallback is used.
+Registration also re-reads the installed JetBrains document before acknowledging
+canonical delivery, preventing a captured pre-registration buffer from producing
+a false visible receipt.
+
+The Project Controller now treats an automatic focus target that is absent from
+an otherwise exact retained tmux layout as terminal for that generation. Replaying
+the same editor-surface generation cannot create a missing file-to-pane mapping,
+so the pane effect worker retires and the next real editor-surface edge owns any
+structural update. Manual focus, co-visibility failures, and actual tmux errors
+remain fail-closed and retryable. This removes the twice-per-second impossible
+focus retry that delayed later automatic pane synchronization.
+
 ## 0.35.258
 
 - **Fix: retained Compact Exchange delivery resumes after an editor restart.**

@@ -3585,6 +3585,79 @@ pub struct ReplicaSignalOutcome {
     pub build_mismatches: Vec<ReplicaSignalRoute>,
 }
 
+/// Ask one live replica endpoint to persist the exact visible editor revision.
+///
+/// Routes are derived from the same liveness/replica union as CRDT delivery,
+/// then sorted so repeated evaluations choose the same endpoint. Delivery stops
+/// after the first terminal editor receipt: disk is a single projection and a
+/// save from every collaborative head would add no evidence.
+pub fn request_native_save_for_current_projection(
+    file: &Path,
+    expected_content_hash: &str,
+    expected_content_len: usize,
+) -> Result<ReplicaSignalOutcome> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let _ = reliable_sync_editor_live_for_file(&canonical);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let registrations = agent_doc_reliable_sync_io::global_liveness_plane()
+        .lock()
+        .projection()
+        .live_registrations(&document_hash);
+    let mut routes = HashSet::new();
+    for registration in registrations {
+        routes.insert(ReplicaSignalRoute {
+            editor_id: registration.editor_id,
+            editor_pid: registration.pid,
+        });
+    }
+    routes.extend(live_replica_signal_routes(&document_hash));
+    let mut routes = routes.into_iter().collect::<Vec<_>>();
+    routes.sort_by(|left, right| {
+        (left.editor_pid, left.editor_id.as_str())
+            .cmp(&(right.editor_pid, right.editor_id.as_str()))
+    });
+
+    let found = routes.len();
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+    let mut notified = 0usize;
+    let mut build_mismatches = Vec::new();
+    for route in routes {
+        match agent_doc_ipc_io::send_persist_current_to_editor(
+            &project_root,
+            route.editor_pid,
+            &route.editor_id,
+            &canonical.to_string_lossy(),
+            expected_content_hash,
+            expected_content_len,
+        ) {
+            Ok(true) => {
+                notified = 1;
+                break;
+            }
+            Ok(false) => {}
+            Err(error) => {
+                if agent_doc_ipc_io::is_ipc_build_mismatch_error(&error) {
+                    build_mismatches.push(route.clone());
+                }
+                agent_doc_ops_log_io::log_op(
+                    &canonical,
+                    &format!(
+                        "native_editor_save_request_deferred file={} editor_pid={} content_hash={} error={error:#}",
+                        canonical.display(),
+                        route.editor_pid,
+                        expected_content_hash,
+                    ),
+                );
+            }
+        }
+    }
+    Ok(ReplicaSignalOutcome {
+        found,
+        notified,
+        build_mismatches,
+    })
+}
+
 impl ReplicaSignalOutcome {
     /// The diagnosis token for ops logs. `found == 0` is a stale-attachment
     /// wedge inside agent-doc; `found > 0` with `notified == 0` is a delivery

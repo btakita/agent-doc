@@ -30,6 +30,7 @@ private enum class EditorIntent(val token: String) {
     Reposition("reposition"),
     RefreshContent("refresh_content"),
     ObserveLazilyCurrent("observe_lazily_current"),
+    PersistCurrent("persist_current"),
     DeliverCrdtRemote("deliver_crdt_remote"),
     RefreshVcs("refresh_vcs"),
     ReloadLibrary("reload_library"),
@@ -474,6 +475,24 @@ class PatchWatcher(private val project: Project) : Disposable {
                 val file = extractStringField(json, "file") ?: return APPLY_FAILED
                 if (TypingTracker.observeLazilyCurrentNow(file)) {
                     recordDocumentActivity(file, "socket-publish-current-document")
+                    APPLY_APPLIED
+                } else {
+                    APPLY_FAILED
+                }
+            }
+            EditorIntent.PersistCurrent.token -> {
+                val file = extractStringField(json, "file") ?: return APPLY_FAILED
+                val expectedHash =
+                    extractStringField(json, "expected_content_hash") ?: return APPLY_FAILED
+                val expectedLen = extractIntField(json, "expected_content_len") ?: return APPLY_FAILED
+                if (CrdtReplicaManager.persistCurrentVisibleRevision(
+                        project,
+                        file,
+                        expectedHash,
+                        expectedLen,
+                    )
+                ) {
+                    recordDocumentActivity(file, "socket-persist-current")
                     APPLY_APPLIED
                 } else {
                     APPLY_FAILED

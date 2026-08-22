@@ -7,7 +7,11 @@ import * as net from 'net';
 import { execFile } from 'child_process';
 import * as native from './native.js';
 import * as stateMirror from './stateMirror.js';
-import { createEditorApplyProof, isEditorApplyProofCurrent } from './patchGuard.js';
+import {
+    createEditorApplyProof,
+    isEditorApplyProofCurrent,
+    isFullContentExpectedBufferCurrent,
+} from './patchGuard.js';
 import { EditorIntent } from './editorIntent.js';
 import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement } from './patchPlan.js';
 import {
@@ -2481,6 +2485,37 @@ class PatchWatcher implements vscode.Disposable {
                 if (!document) return 0;
                 this.observeLazilyCurrentNow(document, projectRoot);
                 return 1;
+            }
+            case EditorIntent.PersistCurrent: {
+                const document = filePath
+                    ? vscode.workspace.textDocuments.find((candidate) => candidate.uri.fsPath === filePath)
+                    : undefined;
+                const expectedHash = typeof message.expected_content_hash === 'string'
+                    ? message.expected_content_hash
+                    : undefined;
+                const expectedLen = typeof message.expected_content_len === 'number'
+                    ? message.expected_content_len
+                    : undefined;
+                if (!document || !expectedHash || !isFullContentExpectedBufferCurrent(
+                    document.getText(),
+                    expectedHash,
+                    expectedLen,
+                )) {
+                    if (filePath) this.crdtReplicas?.requestRemoteDrain(filePath);
+                    return 0;
+                }
+                const visibleText = document.getText();
+                if (!(await document.save()) || document.getText() !== visibleText) return 0;
+                const diskText = new TextDecoder('utf-8').decode(
+                    await vscode.workspace.fs.readFile(document.uri),
+                );
+                if (diskText !== visibleText) return 0;
+                return this.crdtReplicas?.projectPersistedVisibleRevision(
+                    document.uri.fsPath,
+                    visibleText,
+                )
+                    ? 1
+                    : 0;
             }
             case EditorIntent.DeliverCrdtRemote:
                 if (!filePath) return 0;

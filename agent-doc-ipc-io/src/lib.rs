@@ -41,8 +41,9 @@ use agent_doc_ipc_protocol::{
     classify_socket_receipt, early_receipt_line, early_receipt_ops_marker,
     early_receipt_tagged_message, ipc_accept_thread_ops_marker, ipc_handshake_rejection,
     ipc_hello_ack_message, ipc_hello_message, message_is_reload_library,
-    message_requests_early_receipt, observe_lazily_current_message, refresh_content_message,
-    reload_lib_message, validate_ipc_hello, validate_ipc_hello_ack, vcs_refresh_message,
+    message_requests_early_receipt, observe_lazily_current_message, persist_current_message,
+    refresh_content_message, reload_lib_message, validate_ipc_hello, validate_ipc_hello_ack,
+    vcs_refresh_message,
 };
 use anyhow::{Context, Result};
 use interprocess::local_socket::{
@@ -786,6 +787,23 @@ pub fn send_observe_lazily_current_to_editor_with_timeout(
     // liveness probe. Returning on the early `accepted` receipt lets the caller
     // poll the relay before the plugin has registered/refreshed its replica.
     send_message_to_pid_with_timeout(project_root, editor_pid, &message, timeout).map(|_| true)
+}
+
+/// Ask one explicitly registered editor endpoint to persist the exact visible
+/// revision through its native save lifecycle. A terminal receipt is required:
+/// the early/accepted receipt used by observation would race disk projection.
+pub fn send_persist_current_to_editor(
+    project_root: &Path,
+    editor_pid: u64,
+    editor_id: &str,
+    file: &str,
+    expected_content_hash: &str,
+    expected_content_len: usize,
+) -> Result<bool> {
+    let mut message = persist_current_message(file, expected_content_hash, expected_content_len);
+    message["editor_id"] = serde_json::Value::String(editor_id.to_string());
+    message["editor_pid"] = serde_json::Value::from(editor_pid);
+    send_message_to_pid(project_root, editor_pid, &message).map(|_| true)
 }
 
 /// Re-register the editor's current document immediately after that same

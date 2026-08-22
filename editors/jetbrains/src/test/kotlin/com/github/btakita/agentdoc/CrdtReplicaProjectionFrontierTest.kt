@@ -73,7 +73,7 @@ class CrdtReplicaProjectionFrontierTest {
             .substringBefore("private fun refreshReplicaAfterTransportLoss(")
         assertTrue(registrationBody.contains("forwarder.canonicalProjectionRetained"))
         assertTrue(
-            registrationBody.contains("retainCanonicalProjectionAfterRegistration(filePath, initialEditorText, forwarder)"),
+            registrationBody.contains("retainCanonicalProjectionAfterRegistration(filePath, forwarder)"),
         )
         assertFalse(
             registrationBody.contains("forwarder.ensureEditorText(initialEditorText)"),
@@ -83,8 +83,13 @@ class CrdtReplicaProjectionFrontierTest {
             .substringBefore("private fun refreshReplicaAfterTransportLoss(")
         assertTrue(
             "an exact registered buffer must publish the visible-state receipt",
-            retainedRegistrationBody.contains("if (editorText == canonical)") &&
-                retainedRegistrationBody.contains("forwarder.projectVisibleState(canonical)"),
+            retainedRegistrationBody.contains("val visibleText = editorBufferText(filePath)") &&
+                retainedRegistrationBody.contains("if (visibleText == canonical)") &&
+                retainedRegistrationBody.contains("forwarder.projectVisibleState(visibleText)"),
+        )
+        assertFalse(
+            "a captured pre-swap editor cut must never acknowledge the replacement generation",
+            retainedRegistrationBody.contains("projectVisibleState(canonical)"),
         )
         assertTrue(
             "a failed registration receipt must remain retryable",
@@ -92,6 +97,26 @@ class CrdtReplicaProjectionFrontierTest {
                 "requestRemoteDrain(filePath, \"registration-visible-projection-retry\")",
             ),
         )
+    }
+
+    @Test
+    fun `persist current saves and receipts only the exact visible replica`() {
+        val managerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
+        val manager = Files.readString(managerPath)
+        val body = manager
+            .substringAfter("private fun persistCurrentVisibleRevision(")
+            .substringBefore("private fun reconcileRemotePersistence(")
+
+        assertTrue(body.contains("visibleText.toByteArray(Charsets.UTF_8).size != expectedContentLen"))
+        assertTrue(body.contains("forwarder.replicaText() != visibleText"))
+        assertTrue(body.contains("saveDocument(document)"))
+        assertTrue(body.contains("readRawDiskText(filePath) == visibleText"))
+        assertTrue(body.contains("forwarder.projectVisibleState(visibleText, true)"))
+        assertFalse(body.contains("applyMinimalDocumentEditUtil("))
+        assertFalse(body.contains("reloadFromDisk("))
     }
 
     /**

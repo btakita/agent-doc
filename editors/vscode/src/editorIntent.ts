@@ -7,6 +7,7 @@ export const EditorIntent = {
     Reposition: 'reposition',
     RefreshContent: 'refresh_content',
     ObserveLazilyCurrent: 'observe_lazily_current',
+    PersistCurrent: 'persist_current',
     DeliverCrdtRemote: 'deliver_crdt_remote',
     RefreshVcs: 'refresh_vcs',
     ReloadLibrary: 'reload_library',

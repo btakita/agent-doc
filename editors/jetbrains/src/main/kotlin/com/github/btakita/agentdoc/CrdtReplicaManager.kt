@@ -886,13 +886,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                             replacement.deregister()
                             raced
                     } else {
-                        retainCanonicalProjectionAfterRegistration(newPath, editorText, replacement)
+                        retainCanonicalProjectionAfterRegistration(newPath, replacement)
                         replacement
                         }
             }
 
             if (!activeNew.attached) return@submit false
-            retainCanonicalProjectionAfterRegistration(newPath, editorText, activeNew)
+            retainCanonicalProjectionAfterRegistration(newPath, activeNew)
             clearRegisterFailure(newPath)
                 scheduleDeferredWriteReplayAfterRegistration(
                     newPath,
@@ -1923,6 +1923,56 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
     }
 
+    /** Save the exact already-visible replica revision through IntelliJ without
+     * replacing the Document. Every observation is repeated after the native
+     * save so an operator edit or endpoint swap retires the receipt. */
+    private fun persistCurrentVisibleRevision(
+        filePath: String,
+        expectedContentHash: String,
+        expectedContentLen: Int,
+    ): Boolean {
+        val forwarder = forwarders[filePath] ?: return false
+        if (!forwarder.attached) return false
+        val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return false
+        val document = FileDocumentManager.getInstance().getDocument(targetFile) ?: return false
+        val visibleText = document.text
+        if (
+            visibleText.toByteArray(Charsets.UTF_8).size != expectedContentLen ||
+            !contentHash(visibleText).equals(expectedContentHash, ignoreCase = true) ||
+            forwarder.replicaText() != visibleText
+        ) {
+            requestUrgentRemoteDrain(filePath, "persist-current-visible-mismatch")
+            return false
+        }
+        return try {
+            FileDocumentManager.getInstance().saveDocument(document)
+            val exact =
+                forwarders[filePath] === forwarder &&
+                forwarder.attached &&
+                document.text == visibleText &&
+                forwarder.replicaText() == visibleText &&
+                readRawDiskText(filePath) == visibleText
+            if (!exact) return false
+            documentWorkers.forDocument(filePath).execute {
+                if (
+                    !disposed.get() &&
+                    forwarders[filePath] === forwarder &&
+                    forwarder.attached &&
+                    editorBufferText(filePath) == visibleText &&
+                    forwarder.replicaText() == visibleText &&
+                    readRawDiskText(filePath) == visibleText &&
+                    !forwarder.projectVisibleState(visibleText, true)
+                ) {
+                    requestRemoteDrain(filePath, "persist-current-receipt-retry")
+                }
+            }
+            true
+        } catch (failure: RuntimeException) {
+            log.warn("[crdt-replica] native persist-current failed for $filePath", failure)
+            false
+        }
+    }
+
     private fun reconcileRemotePersistence(
         filePath: String,
         document: Document,
@@ -2437,7 +2487,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 log.info(
                     "[crdt-replica] atomically replaced cached forwarder for ${File(filePath).name}",
                 )
-                retainCanonicalProjectionAfterRegistration(filePath, initialEditorText, forwarder)
+                retainCanonicalProjectionAfterRegistration(filePath, forwarder)
                 return forwarder
             }
             // The manager worker is serialized, but preserve a concurrently
@@ -2451,7 +2501,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return existing
         }
         log.info("[crdt-replica] attached ${File(filePath).name} as $identity")
-        retainCanonicalProjectionAfterRegistration(filePath, initialEditorText, forwarder)
+        retainCanonicalProjectionAfterRegistration(filePath, forwarder)
         return forwarder
     }
 
@@ -2462,18 +2512,22 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      */
     private fun retainCanonicalProjectionAfterRegistration(
         filePath: String,
-        editorText: String?,
         forwarder: CrdtReplicaForwarder,
     ) {
         val canonical = forwarder.replicaText() ?: return
         shadows[filePath] = canonical
-        if (editorText == null) return
-        if (editorText == canonical) {
+        val visibleText = editorBufferText(filePath)
+        if (visibleText == null) {
+            retainedCanonicalProjectionPaths.add(filePath)
+            requestRemoteDrain(filePath, "registration-visible-observation-pending")
+            return
+        }
+        if (visibleText == canonical) {
             // Registration proves which canonical generation the replacement
             // replica opened, but not what the IDE buffer currently displays.
             // Publish the exact post-swap view so the controller can discharge
             // this generation's delivery receipt.
-            if (!forwarder.projectVisibleState(canonical)) {
+            if (!forwarder.projectVisibleState(visibleText)) {
                 requestRemoteDrain(filePath, "registration-visible-projection-retry")
             }
             return
@@ -2481,12 +2535,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         retainedCanonicalProjectionPaths.add(filePath)
         log.info(
             "[crdt-replica] projecting controller bootstrap into ${File(filePath).name}; " +
-                "editor_hash=${contentHash(editorText)} canonical_hash=${contentHash(canonical)} " +
+            "editor_hash=${contentHash(visibleText)} canonical_hash=${contentHash(canonical)} " +
                 "driver=lazy-controller-canonical-projection",
         )
         queueRemoteTextApply(
             filePath = filePath,
-            expectedText = editorText,
+        expectedText = visibleText,
             converged = canonical,
             forwarder = forwarder,
             updates = emptyList(),
@@ -2705,6 +2759,32 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
         fun requestUrgentRemoteDrain(project: Project, filePath: String, reason: String) {
             instances[project]?.requestUrgentRemoteDrain(filePath, reason)
+        }
+
+        fun persistCurrentVisibleRevision(
+            project: Project,
+            filePath: String,
+            expectedContentHash: String,
+            expectedContentLen: Int,
+        ): Boolean {
+            if (project.isDisposed) return false
+            val manager = instances[project] ?: return false
+            val result = AtomicBoolean(false)
+            val persist = {
+                result.set(
+                    manager.persistCurrentVisibleRevision(
+                        filePath,
+                        expectedContentHash,
+                        expectedContentLen,
+                    ),
+                )
+            }
+            if (SwingUtilities.isEventDispatchThread()) {
+                persist()
+            } else {
+                ApplicationManager.getApplication().invokeAndWait { persist() }
+            }
+            return result.get()
         }
 
         /**

@@ -760,6 +760,22 @@ export class CrdtReplicaManager {
         void Promise.allSettled(attached).then(() => this.pullMissingReplicas('activation'));
     }
 
+    /** Publish a native-save receipt only for the still-current visible/replica
+     * revision. The save itself remains owned by the VS Code adapter. */
+    projectPersistedVisibleRevision(filePath: string, expectedText: string): boolean {
+        const forwarder = this.forwarders.get(filePath);
+        if (!forwarder?.attached) return false;
+        if (this.currentEditorText(filePath) !== expectedText) return false;
+        if (forwarder.replicaText() !== expectedText) {
+            this.requestRemoteDrain(filePath);
+            return false;
+        }
+        void forwarder.projectVisibleState(expectedText, true).then((projected) => {
+            if (!projected) this.requestRemoteDrain(filePath);
+        });
+        return true;
+    }
+
     dispose(): void {
         this.disposed = true;
         this.drainRequestedPaths.clear();

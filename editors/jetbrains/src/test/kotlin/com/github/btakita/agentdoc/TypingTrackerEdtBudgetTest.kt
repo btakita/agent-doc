@@ -457,7 +457,7 @@ class TypingTrackerEdtBudgetTest {
                 source.contains(".get(CRDT_AWAIT_ATTACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)") &&
                 source.contains("private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L") &&
                 source.contains("documentWorkers.forDocument(filePath).execute { attach() }") &&
-                source.contains("retainCanonicalProjectionAfterRegistration(filePath, initialEditorText, forwarder)"),
+                source.contains("retainCanonicalProjectionAfterRegistration(filePath, forwarder)"),
         )
         val forceRefreshAttachBody = source.substringAfter("fun ensureOpenDocumentReplica(")
             .substringBefore("private fun scheduleDeferredWriteReplayAfterRegistration(")
@@ -575,7 +575,7 @@ class TypingTrackerEdtBudgetTest {
                 forwarderForBody.indexOf("editorBufferText(filePath) != expectedEditorTextAtSwap") &&
                 forwarderForBody.lastIndexOf("editorBufferText(filePath) != expectedEditorTextAtSwap") <
                 forwarderForBody.indexOf("forwarders.replace(filePath, cached, forwarder)") &&
-                forwarderForBody.contains("retainCanonicalProjectionAfterRegistration(filePath, initialEditorText, forwarder)") &&
+                forwarderForBody.contains("retainCanonicalProjectionAfterRegistration(filePath, forwarder)") &&
                 !forwarderForBody.contains("forwarder.ensureEditorText(initialEditorText)"),
         )
         assertTrue(

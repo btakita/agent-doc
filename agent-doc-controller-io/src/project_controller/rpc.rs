@@ -18467,6 +18467,21 @@ struct PaneLayoutFocusEffectReceipt {
     reason: String,
 }
 
+/// A missing file→pane assignment cannot become true by replaying the same
+/// automatic editor-surface generation. The next editor observation owns any
+/// structural change that could make the focused document visible. Retire the
+/// current generation after proving its structure instead of letting an
+/// impossible focus target hold the single pane-effect worker in its retry
+/// ladder. Manual commands and live-pane/co-visibility failures retain their
+/// existing fail-closed retry semantics.
+fn focus_required_for_pane_layout_generation(
+    caller_kind: &str,
+    receipt: &PaneLayoutFocusEffectReceipt,
+) -> bool {
+    receipt.required
+        && !(caller_kind == "automatic" && receipt.reason.starts_with("focus_pane_not_found:"))
+}
+
 /// Resolve the window this pane-layout generation is arranging its columns in.
 ///
 /// `#panewindowdrift`: the focus guard needs an explicit *visible window*
@@ -18826,15 +18841,20 @@ fn pane_layout_effect_worker(
                 attempt = 0;
                 continue;
             }
+            let focus_required = focus_required_for_pane_layout_generation(
+                &desired.invocation.caller_kind,
+                &focus_receipt,
+            );
             let mut observation_invocation = pane_layout_state_invocation(&desired);
-            observation_invocation.focus = projected_focus.clone();
+            observation_invocation.focus =
+                focus_required.then(|| projected_focus.clone()).flatten();
             let fresh_report = tmux_layout_sync_state_for_invocation_with_effect_assignment(
                 &bootstrap,
                 &runtime,
                 &observation_invocation,
                 &reusable.file_panes,
             );
-            if (!focus_receipt.required || focus_receipt.applied)
+            if (!focus_required || focus_receipt.applied)
                 && let Ok(report) = fresh_report
                 && report.synced
             {
@@ -18857,7 +18877,7 @@ fn pane_layout_effect_worker(
                     phase: PaneLayoutEffectPhase::Converged,
                     reason: format!("reused_structural_layout; {focus_reason}"),
                     file_panes: reusable.file_panes,
-                    focus_required: focus_receipt.required,
+                    focus_required,
                     focus_applied: focus_receipt.applied,
                 });
                 publish_pane_layout_status(&runtime);
@@ -18982,8 +19002,12 @@ fn pane_layout_effect_worker(
                 },
             }
         };
+        let focus_required = focus_required_for_pane_layout_generation(
+            &desired.invocation.caller_kind,
+            &focus_receipt,
+        );
         let mut observation_invocation = pane_layout_state_invocation(&desired);
-        observation_invocation.focus = projected_focus.clone();
+        observation_invocation.focus = focus_required.then(|| projected_focus.clone()).flatten();
         let report = tmux_layout_sync_state_for_invocation_with_effect_assignment(
             &bootstrap,
             &runtime,
@@ -19026,7 +19050,7 @@ fn pane_layout_effect_worker(
                 ),
             ),
         };
-        let synced = report.synced && (!focus_receipt.required || focus_receipt.applied);
+        let synced = report.synced && (!focus_required || focus_receipt.applied);
         let observation_reason = report.reason.clone();
         let focus_reason = focus_receipt.reason.clone();
         let logged_expected_documents = report.expected_documents.clone();
@@ -19069,7 +19093,7 @@ fn pane_layout_effect_worker(
                 format!("{observation_reason}; {effect_reason}; {focus_reason}")
             },
             file_panes: effect_file_panes,
-            focus_required: focus_receipt.required,
+            focus_required,
             focus_applied: focus_receipt.applied,
         });
         publish_pane_layout_status(&runtime);
@@ -20158,6 +20182,32 @@ mod pane_layout_projection_dispatch_tests {
         assert!(pane_layout_invocation_allows_structural_reuse(&invocation(
             "manual", false
         )));
+    }
+
+    #[test]
+    fn automatic_unmapped_focus_settles_until_the_next_editor_surface_edge() {
+        let missing = PaneLayoutFocusEffectReceipt {
+            required: true,
+            applied: false,
+            reason: "focus_pane_not_found:/notes/design.md".to_string(),
+        };
+        assert!(!focus_required_for_pane_layout_generation(
+            "automatic",
+            &missing,
+        ));
+        assert!(focus_required_for_pane_layout_generation(
+            "manual", &missing,
+        ));
+
+        let transient = PaneLayoutFocusEffectReceipt {
+            required: true,
+            applied: false,
+            reason: "focus_pane_not_co_visible:/tasks/backend.md:%11".to_string(),
+        };
+        assert!(focus_required_for_pane_layout_generation(
+            "automatic",
+            &transient,
+        ));
     }
 
     #[test]
@@ -24875,6 +24925,7 @@ mod tests {
 
     #[test]
     fn crdt_current_text_rpc_reads_relay_without_publish_recovery() {
+        let _env = reliable_sync_env_lock();
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
@@ -24932,6 +24983,7 @@ mod tests {
 
     #[test]
     fn crdt_current_text_rpc_does_not_promote_projection_when_editor_is_attached() {
+        let _env = reliable_sync_env_lock();
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
@@ -29140,6 +29192,8 @@ mod tests {
         std::fs::write(&file, "# peer ack\n").unwrap();
         let bootstrap = test_bootstrap(&dir);
         let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let peer_pid = u64::from(std::process::id());
+        let editor_id = format!("jetbrains-{peer_pid}-fmgc");
         for (cycle, current) in [("cycle-1", "one"), ("cycle-2", "two")] {
             let event = realtime_steering_event_for_text(&document_hash, cycle, "", current);
             append_state_event(&bootstrap.project_root, &event).unwrap();
@@ -29148,9 +29202,9 @@ mod tests {
 
         let registration = agent_doc_reliable_sync_io::liveness::EditorRegistration {
             document_hash: document_hash.clone(),
-            pid: 100,
+            pid: peer_pid,
             path: file.to_string_lossy().into_owned(),
-            editor_id: "jetbrains-100-fmgc".to_string(),
+            editor_id: editor_id.clone(),
             editor_kind: "jetbrains".to_string(),
             editor_version: "test".to_string(),
             capabilities: vec![],
@@ -29162,7 +29216,7 @@ mod tests {
             plane.restore_liveness(&[
                 agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
                     document_hash: document_hash.clone(),
-                    pid: 100,
+                    pid: peer_pid,
                     tag: "open-fmgc".to_string(),
                 },
                 agent_doc_reliable_sync_io::liveness::LivenessOp::Register(registration),
@@ -29176,8 +29230,8 @@ mod tests {
             request.diagnostic_payload = Some(
                 serde_json::json!({
                     "document_hash": document_hash,
-                    "peer_pid": 100,
-                    "editor_id": "jetbrains-100-fmgc",
+                    "peer_pid": peer_pid,
+                    "editor_id": editor_id,
                     "acked_version": acked_version,
                 })
                 .to_string(),
@@ -29202,7 +29256,7 @@ mod tests {
         .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].acked_version, 2);
-        assert_eq!(rows[0].registration_pid, 100);
+        assert_eq!(rows[0].registration_pid, peer_pid);
         let remaining_versions: Vec<i64> = conn
             .prepare(
                 "SELECT document_version FROM state_events \
@@ -29241,7 +29295,7 @@ mod tests {
              the Lazily epoch is process-local and intentionally restarts"
         );
 
-        record_reliable_sync_editor_exit(&bootstrap.project_root, 100);
+        record_reliable_sync_editor_exit(&bootstrap.project_root, peer_pid);
         assert!(
             agent_doc_sqlite::state_store::load_state_event_peer_acks_from_db(
                 &conn,

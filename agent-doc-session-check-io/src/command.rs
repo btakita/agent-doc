@@ -1039,8 +1039,9 @@ fn run_with_options_inner(
         );
         let divergence_owner_note = match ownership.verdict() {
             agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred => {
-                "The controller owns the next closeout attempt and will wake on that state edge. \
-                 Do not ask the operator to save, rerun session-check, or resubmit finalize"
+                "The controller has requested the generation-fenced native editor save and owns the next closeout attempt. \
+                 The editor buffer remains authoritative; Git, disk, and snapshots are evidence only. \
+                 Do not patch or restore the file, ask the operator to save, rerun session-check, or resubmit finalize"
                     .to_string()
             }
             agent_doc_turn::write_ownership::RetainedWriteVerdict::Stranded

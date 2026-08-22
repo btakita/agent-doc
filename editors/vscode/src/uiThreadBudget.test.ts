@@ -160,11 +160,20 @@ it('VS Code receives CRDT events and renders the controller-owned reactive turn 
         assert.strictEqual(publisher.includes('.save('), false);
     });
 
-    it('VS Code has no imperative save-document socket handler', () => {
+    it('VS Code persists only the exact current buffer through its native save lifecycle', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         assert.strictEqual(source.includes('case EditorIntent.SaveDocument:'), false);
         assert.strictEqual(source.includes('processSaveDocumentIntent'), false);
         assert.strictEqual(source.includes('save_document failed'), false);
+        const start = source.indexOf('case EditorIntent.PersistCurrent:');
+        const end = source.indexOf('case EditorIntent.DeliverCrdtRemote:', start);
+        assert.ok(start >= 0 && end > start);
+        const handler = source.slice(start, end);
+        assert.ok(handler.includes('isFullContentExpectedBufferCurrent('));
+        assert.ok(handler.includes('await document.save()'));
+        assert.ok(handler.includes('vscode.workspace.fs.readFile(document.uri)'));
+        assert.ok(handler.includes('projectPersistedVisibleRevision('));
+        assert.strictEqual(handler.includes('workspace.applyEdit'), false);
     });
 
     it('VS Code refreshes only the repository containing the requested file', () => {

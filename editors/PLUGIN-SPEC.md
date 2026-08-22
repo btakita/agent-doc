@@ -79,6 +79,7 @@ Rust, JetBrains, and VS Code use the same `EditorIntent` names:
 | `reposition` | Move the exchange boundary without changing user text |
 | `refresh_content` | Republish the already-open editor value to Lazily |
 | `observe_lazily_current` | Legacy compatibility input only; current runtimes observe the Lazily projection and emit no request |
+| `persist_current` | Save the exact already-visible revision through the editor's native save lifecycle; reject a hash/length mismatch without replacing the buffer |
 | `deliver_crdt_remote` | Integrate a remote Lazily change |
 | `refresh_vcs` | Refresh VCS decoration for the required absolute `file` after a durable commit |
 | `reload_library` | Reload a compatible native library only when the adapter can prove a safe boundary; otherwise require process restart |
@@ -131,10 +132,14 @@ operations so every editor implements the same semantics.
 
 ## 6. Persistence, reconnect, and reload
 
-Persistence is a state projection, not an editor command. The plugin publishes
-the visible CRDT state and its ordinary platform save lifecycle makes the disk
-projection observable; the controller derives convergence without requesting a
-save or receiving a per-operation ACK.
+Persistence is a state projection with one narrowly typed editor effect. The
+plugin continuously publishes visible CRDT state. When closeout is blocked only
+on disk, the controller may issue `persist_current` with the exact visible hash
+and byte length. The adapter rechecks its current buffer, performs the host's
+native save without changing that buffer, verifies the matching disk projection,
+and publishes `disk_persisted`. A raced editor revision rejects the request and
+returns to ordinary CRDT delivery; disk, Git, and retained snapshots never become
+replacement authority.
 
 On reconnect, the editor republishes its current value and generation. The
 controller rebases pending intents from `state.db`; the plugin must not reread

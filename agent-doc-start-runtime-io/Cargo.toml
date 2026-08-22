@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-start-runtime-io"
-version = "0.35.258"
+version = "0.35.259"
 edition = "2024"
 description = "Start command host runtime for agent-doc"
 license = "MIT"
@@ -18,52 +18,52 @@ uuid = { version = "1", features = ["v4"] }
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-agent-io = { path = "../agent-doc-agent-io", version = "0.35.258" }
-agent-doc-codex-hook-io = { path = "../agent-doc-codex-hook-io", version = "0.35.258" }
-agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.35.258" }
-agent-doc-config = { path = "../agent-doc-config", version = "0.35.258" }
-agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.258" }
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.258" }
-agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.258" }
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.258" }
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.258" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.258" }
-agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.258" }
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.258" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.258" }
-agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.258" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.258" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.258" }
-agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.258" }
-agent-doc-session-actor-io = { path = "../agent-doc-session-actor-io", version = "0.35.258" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.258" }
-agent-doc-hooks-io = { path = "../agent-doc-hooks-io", version = "0.35.258" }
-agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.258" }
-agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.35.258" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.258" }
-agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.35.258" }
-agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.258" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.258" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.258" }
-agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.35.258" }
-agent-doc-repair-command-io = { path = "../agent-doc-repair-command-io", version = "0.35.258" }
-agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.35.258" }
-agent-doc-session-accretion-io = { path = "../agent-doc-session-accretion-io", version = "0.35.258" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.258" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.258" }
-agent-doc-start-io = { path = "../agent-doc-start-io", version = "0.35.258" }
-agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.258" }
-agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.258" }
-agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.258" }
-agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.35.258" }
-agent-doc-supervisor-process-io = { path = "../agent-doc-supervisor-process-io", version = "0.35.258" }
-agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.258" }
-agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.258" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.258" }
-agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.35.258" }
-agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.35.258" }
-agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.35.258" }
-agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.35.258" }
+agent-doc-agent-io = { path = "../agent-doc-agent-io", version = "0.35.259" }
+agent-doc-codex-hook-io = { path = "../agent-doc-codex-hook-io", version = "0.35.259" }
+agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.35.259" }
+agent-doc-config = { path = "../agent-doc-config", version = "0.35.259" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.259" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.259" }
+agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.259" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.259" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.259" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.259" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.259" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.259" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.259" }
+agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.259" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.259" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.259" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.259" }
+agent-doc-session-actor-io = { path = "../agent-doc-session-actor-io", version = "0.35.259" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.259" }
+agent-doc-hooks-io = { path = "../agent-doc-hooks-io", version = "0.35.259" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.259" }
+agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.35.259" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.259" }
+agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.35.259" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.259" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.259" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.259" }
+agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.35.259" }
+agent-doc-repair-command-io = { path = "../agent-doc-repair-command-io", version = "0.35.259" }
+agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.35.259" }
+agent-doc-session-accretion-io = { path = "../agent-doc-session-accretion-io", version = "0.35.259" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.259" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.259" }
+agent-doc-start-io = { path = "../agent-doc-start-io", version = "0.35.259" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.259" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.259" }
+agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.259" }
+agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.35.259" }
+agent-doc-supervisor-process-io = { path = "../agent-doc-supervisor-process-io", version = "0.35.259" }
+agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.259" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.259" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.259" }
+agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.35.259" }
+agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.35.259" }
+agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.35.259" }
+agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.35.259" }
 anyhow = "1"
 libc = "0.2"
 portable-pty = "0.9"
@@ -71,7 +71,7 @@ serde_json = "1"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }
 
 [dev-dependencies]
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.258", features = ["test-support"] }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.258" }
-agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.35.258" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.259", features = ["test-support"] }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.259" }
+agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.35.259" }
 tempfile = "3"

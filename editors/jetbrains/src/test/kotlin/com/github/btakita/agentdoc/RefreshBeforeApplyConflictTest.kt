@@ -177,7 +177,7 @@ class RefreshBeforeApplyConflictTest {
         assertTrue(
             "a raced editor cut must be rejected before the controller bootstrap is projected",
             forwarderFor.contains("editorBufferText(filePath) != expectedEditorTextAtSwap") &&
-                forwarderFor.contains("retainCanonicalProjectionAfterRegistration(filePath, initialEditorText, forwarder)") &&
+                forwarderFor.contains("retainCanonicalProjectionAfterRegistration(filePath, forwarder)") &&
                 !forwarderFor.contains("forwarder.ensureEditorText(initialEditorText)"),
         )
         assertTrue(

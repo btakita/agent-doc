@@ -24,6 +24,10 @@ pub enum EditorIntent {
     Reposition,
     RefreshContent,
     ObserveLazilyCurrent,
+    /// Persist the exact, already-visible editor revision through the host
+    /// editor's native save lifecycle. The payload carries an expected hash and
+    /// byte length; adapters must reject rather than replace a newer buffer.
+    PersistCurrent,
     DeliverCrdtRemote,
     RefreshVcs,
     ReloadLibrary,
@@ -37,6 +41,7 @@ impl EditorIntent {
             Self::Reposition => "reposition",
             Self::RefreshContent => "refresh_content",
             Self::ObserveLazilyCurrent => "observe_lazily_current",
+            Self::PersistCurrent => "persist_current",
             Self::DeliverCrdtRemote => "deliver_crdt_remote",
             Self::RefreshVcs => "refresh_vcs",
             Self::ReloadLibrary => "reload_library",
@@ -922,6 +927,22 @@ pub fn observe_lazily_current_message(file: &str) -> serde_json::Value {
     })
 }
 
+/// Build a generation-fenced request for the editor to save its current
+/// authoritative buffer without changing it.
+pub fn persist_current_message(
+    file: &str,
+    expected_content_hash: &str,
+    expected_content_len: usize,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": EditorIntent::PersistCurrent.as_str(),
+        "file": file,
+        "expected_content_hash": expected_content_hash,
+        "expected_content_len": expected_content_len,
+        "issued_at_ms": now_millis(),
+    })
+}
+
 fn now_millis() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1168,8 +1189,9 @@ mod tests {
         is_socket_receipt_timeout_error, is_socket_status_error, message_is_reload_library,
         message_requests_early_receipt, normalization_repair_patch_message,
         observe_lazily_current_message, patch_message, pending_callback_from_request,
-        queue_convergence_message, refresh_content_message, reload_lib_message, reposition_message,
-        validate_ipc_hello, validate_ipc_hello_ack, vcs_refresh_message, vcs_refresh_probe_message,
+        persist_current_message, queue_convergence_message, refresh_content_message,
+        reload_lib_message, reposition_message, validate_ipc_hello, validate_ipc_hello_ack,
+        vcs_refresh_message, vcs_refresh_probe_message,
     };
 
     #[test]
@@ -1564,6 +1586,17 @@ mod tests {
         assert!(message_requests_early_receipt(&message.to_string()));
         assert!(message.get("content").is_none());
         assert!(message.get("patches").is_none());
+    }
+
+    #[test]
+    fn persist_current_message_fences_the_native_save_to_one_visible_revision() {
+        let message = persist_current_message("/tmp/plan.md", "abc123", 42);
+        assert_eq!(message["type"], "persist_current");
+        assert_eq!(message["file"], "/tmp/plan.md");
+        assert_eq!(message["expected_content_hash"], "abc123");
+        assert_eq!(message["expected_content_len"], 42);
+        assert!(message.get("content").is_none());
+        assert!(message.get("early_receipt").is_none());
     }
 
     #[test]

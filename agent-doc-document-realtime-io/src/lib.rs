@@ -1216,10 +1216,65 @@ fn canonical_editor_projection_is_persisted(
     {
         return Ok(true);
     }
+    let ready_for_native_save = matches!(
+        observe_live_editor_authority_after_model_ensure(
+            path,
+            "editor_projection_native_save_gate",
+        )?,
+        agent_doc_crdt_relay_io::CurrentText::Current {
+            ref text,
+            live_editors,
+            delivery_converged,
+            ..
+        } if editor_save_authority_is_sufficient(
+            text,
+            canonical,
+            live_editors,
+            delivery_converged,
+        )
+    );
+    if ready_for_native_save {
+        let outcome = agent_doc_crdt_relay_io::request_native_save_for_current_projection(
+            path,
+            &agent_doc_hash::content_hash(canonical),
+            canonical.len(),
+        )?;
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "editor_projection_native_save_requested file={} source={} content_hash={} endpoints_found={} endpoints_notified={}",
+                path.display(),
+                source,
+                agent_doc_hash::content_hash(canonical),
+                outcome.found,
+                outcome.notified,
+            ),
+        );
+        if outcome.notified > 0
+            && canonical_disk_projection_is_exact(path, canonical)
+            && let agent_doc_crdt_relay_io::CurrentText::Current {
+                text,
+                live_editors,
+                delivery_converged,
+                ..
+            } = observe_live_editor_authority_after_model_ensure(
+                path,
+                "editor_projection_native_save_receipt",
+            )?
+            && editor_save_authority_is_sufficient(
+                &text,
+                canonical,
+                live_editors,
+                delivery_converged,
+            )
+        {
+            return Ok(true);
+        }
+    }
     agent_doc_ops_log_io::log_op(
         path,
         &format!(
-            "editor_projection_persistence_pending file={} source={} content_hash={} driver=state_projection operator_action=none disk_write=false",
+            "editor_projection_persistence_pending file={} source={} content_hash={} driver=editor_native_save operator_action=none disk_write=false",
             path.display(),
             source,
             agent_doc_hash::content_hash(canonical),
@@ -10760,7 +10815,7 @@ mod tests {
         assert!(
             ops.contains("editor_projection_persistence_pending")
                 && ops.contains("source=projected_captured_response_settlement")
-                && ops.contains("driver=state_projection"),
+                && ops.contains("driver=editor_native_save"),
             "current response authority must retain the persistence continuation: {ops}"
         );
 
@@ -11385,7 +11440,7 @@ mod tests {
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("editor_projection_persistence_pending")
-                && log.contains("driver=state_projection")
+                && log.contains("driver=editor_native_save")
         );
         assert!(!log.contains("proof=missing_operator_cut_lineage"));
         assert!(pending_document_write(&file).is_some());

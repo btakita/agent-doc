@@ -35,8 +35,8 @@
 //! - `stop_fails_closed_after_one_auto_continue`
 
 use agent_doc_codex_hook_io::{
-    SessionState, clear_state_across_roots, load_state_any, project_roots_for,
-    save_state_across_roots, tracking_roots,
+    SessionState, clear_state_across_roots, load_state_any, parked_session_state,
+    project_roots_for, prompt_writeback_debt, save_state_across_roots, tracking_roots,
 };
 #[cfg(test)]
 use agent_doc_codex_hook_io::{
@@ -61,7 +61,6 @@ use agent_doc_codex_hook_io::project_root_for;
 #[derive(Debug, Clone, Deserialize)]
 struct StopInput {
     session_id: String,
-    #[allow(dead_code)]
     turn_id: String,
     cwd: String,
     #[serde(default)]
@@ -254,7 +253,7 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             {
                 return Ok(response);
             }
-            clear_state_across_roots(&cleanup_roots, &loaded_root, &input.session_id)?;
+            settle_session_binding(&file, &cleanup_roots, &loaded_root, &state)?;
             Ok(StopResponse::Continue { continue_: true })
         }
         agent_doc_session_check_io::SessionCheckStatus::Interrupted(reason) => {
@@ -323,7 +322,7 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
                         )? {
                             return Ok(response);
                         }
-                        clear_state_across_roots(&cleanup_roots, &loaded_root, &input.session_id)?;
+                        settle_session_binding(&file, &cleanup_roots, &loaded_root, &state)?;
                         return Ok(StopResponse::Continue { continue_: true });
                     }
                     StopCloseAttempt::StillOpen { note } => {
@@ -490,8 +489,18 @@ fn active_session_prompt_requires_writeback(
     state: &SessionState,
     input: &StopInput,
 ) -> Result<Option<StopResponse>> {
-    let Some(prompt) = active_session_prompt_or_queue_head(file)? else {
-        return Ok(None);
+    let prompt = match active_session_prompt_or_queue_head(file)? {
+        Some(prompt) => prompt,
+        None => {
+            let Some(prompt) = prompt_writeback_debt(state, &input.turn_id) else {
+                return Ok(None);
+            };
+            let content = current_document_content(file, "codex_stop_same_turn_prompt_debt")?;
+            if agent_doc_turn::closeout_signal::exchange_contains_prompt_line(&content, prompt) {
+                return Ok(None);
+            }
+            prompt.to_string()
+        }
     };
     let capture_note = if input.stop_hook_active {
         String::new()
@@ -506,6 +515,48 @@ fn active_session_prompt_requires_writeback(
             prompt = first_nonempty_prompt_line(&prompt),
         ),
     }))
+}
+
+fn park_state_across_roots(
+    roots: &[PathBuf],
+    loaded_root: &Path,
+    state: &SessionState,
+) -> Result<()> {
+    let parked = parked_session_state(state, now_secs());
+    save_state_across_roots(roots, loaded_root, &parked)
+}
+
+fn settle_session_binding(
+    file: &Path,
+    roots: &[PathBuf],
+    loaded_root: &Path,
+    state: &SessionState,
+) -> Result<()> {
+    let queue_requests_clear = document_queue_requests_clear(file)?;
+    if agent_doc_codex_hook_io::prompt_requests_clear(&state.last_prompt) || queue_requests_clear {
+        clear_state_across_roots(roots, loaded_root, &state.session_id)
+    } else {
+        park_state_across_roots(roots, loaded_root, state)
+    }
+}
+
+fn document_queue_requests_clear(file: &Path) -> Result<bool> {
+    if active_auto_queue_prompt(file)?
+        .as_deref()
+        .is_some_and(agent_doc_codex_hook_io::prompt_requests_clear)
+    {
+        return Ok(true);
+    }
+    let content = current_document_content(file, "codex_stop_context_clear_queue")?;
+    let Ok(components) = agent_doc_element::element::parse(&content) else {
+        return Ok(false);
+    };
+    Ok(components
+        .iter()
+        .find(|component| component.name == "queue")
+        .is_some_and(|queue| {
+            agent_doc_codex_hook_io::prompt_requests_clear(queue.content(&content))
+        }))
 }
 
 fn active_session_prompt_or_queue_head(file: &Path) -> Result<Option<String>> {
@@ -779,12 +830,12 @@ fn tracked_repeated_queue_recovery_response(
     cleanup_roots: &[PathBuf],
     loaded_root: &Path,
     state: &SessionState,
-    input: &StopInput,
+    _input: &StopInput,
     prompt: &str,
     note: String,
 ) -> Result<StopResponse> {
     let Some(next_prompt) = active_auto_queue_prompt(file)? else {
-        clear_state_across_roots(cleanup_roots, loaded_root, &input.session_id)?;
+        park_state_across_roots(cleanup_roots, loaded_root, state)?;
         return Ok(StopResponse::Continue { continue_: true });
     };
     if next_prompt == prompt {
@@ -1633,7 +1684,52 @@ Done.\n\
             String::from_utf8_lossy(&log.stdout)
         );
         let root = project_root_for(dir.path()).unwrap();
-        assert!(load_state(&root, "codex-session").unwrap().is_none());
+        let state = load_state(&root, "codex-session").unwrap().unwrap();
+        assert!(state.last_turn_id.is_empty());
+        assert!(state.last_prompt.is_empty());
+    }
+
+    #[test]
+    fn ordinary_same_thread_followup_after_clean_closeout_requires_document_writeback() {
+        let dir = setup_project();
+        let doc = write_template_doc(&dir);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "turn-1");
+
+        let first_stop = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Initial closeout.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+        assert_eq!(first_stop, StopResponse::Continue { continue_: true });
+
+        let prompt = "Why did you not acknowledge this in the agent document?";
+        apply_user_prompt_submit(&UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-2".to_string(),
+            cwd: dir.path().display().to_string(),
+            prompt: prompt.to_string(),
+        })
+        .unwrap();
+
+        let followup_stop = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-2".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "I only acknowledged it in chat.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+        match followup_stop {
+            StopResponse::Block { reason, .. } => {
+                assert!(reason.contains("binary-owned write boundary"), "{reason}");
+                assert!(reason.contains(prompt), "{reason}");
+            }
+            other => panic!("expected same-thread follow-up writeback block, got {other:?}"),
+        }
     }
 
     #[test]
@@ -2397,8 +2493,11 @@ Done.\n\
         }
 
         let outer_root = project_root_for(dir.path()).unwrap();
-        assert!(load_state(&outer_root, "codex-session").unwrap().is_none());
-        assert!(load_state(&nested_root, "codex-session").unwrap().is_none());
+        for root in [&outer_root, &nested_root] {
+            let state = load_state(root, "codex-session").unwrap().unwrap();
+            assert!(state.last_turn_id.is_empty());
+            assert!(state.last_prompt.is_empty());
+        }
     }
 
     #[test]

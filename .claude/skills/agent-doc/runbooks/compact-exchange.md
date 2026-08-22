@@ -2,6 +2,14 @@
 
 Before selecting archive topics, compaction folds any active captured response that is not yet present in the current document projection into its working model. The controller CAS still uses the actual current projection as the write base. This guarantees that a response retained during a zero-replica gap is archived or kept exactly once instead of being omitted by a later compact target. If another deferred write already exists, Lazily composes the targets by component rather than allowing the newer compact to replace the earlier response lineage.
 
+`Compact Exchange` owns only the selected `agent:exchange` component. Frontmatter
+and every sibling component are outside that operation's conflict domain: the
+controller rebases the compacted Exchange cell onto their latest authoritative
+values and preserves them verbatim. Only concurrent drift inside the same
+Exchange cell may reject or retain the compact target. Sibling edits, including
+queue/backlog changes and unmarked scratch text outside `agent:exchange`, never
+invalidate an Exchange compact and must not be rewritten from its stale base.
+
 The JetBrains action saves only the selected target document before routing the
 compact command. It must never call `saveAllDocuments()`: doing so can wake a
 retained ACK recovery for an unrelated open session and make a compact request

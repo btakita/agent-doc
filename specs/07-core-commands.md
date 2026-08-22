@@ -33,6 +33,12 @@ This file covers the lower-churn command surface that is not primarily about tmu
 
 `agent-doc compact <FILE> [--component NAME] [--keep N] [--message TEXT|-] [--tag NAME|skip] [--commit]`
 
+- A component compact has a component-scoped compare-and-swap boundary. For
+  `--component exchange`, only the attributes and content of `agent:exchange`
+  participate in drift detection. Frontmatter and all sibling components are
+  rebased from the latest authoritative document and preserved verbatim; their
+  changes are irrelevant to whether the Exchange compact can converge. Drift
+  within `agent:exchange` remains fail-closed.
 - Template-mode full exchange compaction must split the component at the live `agent:boundary` marker. Content before the boundary is archiveable and may be summarized; content after the boundary is unresolved live prompt drift and must remain visible in the working tree while staying out of the archive body, compact summary digest, saved snapshot, and closeout commit.
 - Template-mode partial exchange compaction follows the same unresolved-tail rule when keeping recent `### Re:` sections.
 - `--commit` closes compacted state through the normal binary-owned commit path. It commits only the compacted snapshot state; any unresolved post-boundary prompt left visible remains the next prompt-bearing diff for a later `agent-doc <FILE>` cycle.
@@ -122,6 +128,10 @@ Two modes:
 - The orphaned-socket cleanup keeps sockets whose supervisor PID is alive or whose socket still answers.
 - Stale `starting` actor records older than one hour are closed unless a live supervisor PID still has a fresh supervisor heartbeat proving the actor is booting; this updates the controller SQLite store transactionally. A live PID with a stale heartbeat is treated as stuck startup state.
 - A controller wedged in handoff `Preparing`/`Promoted` past the seconds-scale stuck-handoff threshold (`AGENT_DOC_STALE_PREPARING_CONTROLLER_SECS`, default 45s) is terminated (#kqr6 / #sjwm / #stuckhandoff). Unlike the stale-`starting` actor cleanup — which closes a projection record and cannot stop a live process — this kills the live wedged `controller serve` process (verified by `/proc` cmdline and never self) so it stops racing the IDE listener on `ipc.sock`, then supersedes the bootstrap with `Failed` so the next bind promotes a clean controller and the `1002 → 1004 → 1006` respawn loop cannot continue. A promoted controller's immutable argv can still say `--handoff-state preparing`; that argv is discovery evidence only. While the authoritative bootstrap records a fresh replacement handoff, orphan scanning uses its handoff start time rather than the predecessor's process age and cannot reap the healthy predecessor/replacement transition. It logs `stale_preparing_controller_reaped pid=… generation=… age_secs=… caller=…`. The same reaper runs as a self-heal step at controller bind (`connect_or_launch`) before any handoff/promote, and is exposed for operators as `agent-doc admin reap-stale-controllers [--dry-run]` (replacing the manual `pkill -f 'controller serve … --handoff-state preparing'`). `--dry-run` reports without killing.
+- A detached controller serving a test-style temporary project root (`.tmp*`
+  directly under `/tmp`, `/var/tmp`, or `/dev/shm`) exits after 60 seconds with
+  no active or newly accepted clients. The classifier is deliberately narrow;
+  persistent project roots and live clients are never reaped by this idle rule.
 - Prunes accumulated pre-mutation recovery tags (`#x8aw`): keeps the newest `KEEP_RECOVERY_TAGS` (20) `agent-doc/<doc>/pre-auto-run-N` and `pre-compact-N` tags **per `<doc>/<slug>` series**, deleting older ones. One tag is created per queue auto-run / compaction, so without pruning they grow unbounded over a document's life. Best-effort: a non-git root or git failure is a no-op. `--dry-run` reports the deletions without applying them.
 - `preflight` runs the full orphan-file GC automatically at most once per day via a coordination throttle in `.agent-doc/state.db`; `preflight`, `start`, and `sync` still run the lightweight stale-`starting` actor cleanup every cycle.
 

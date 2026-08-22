@@ -1194,6 +1194,7 @@ fn spawn_auto_trigger_thread(
         .spawn(move || {
             let path = PathBuf::from(&file);
             let mut clear_cooldown_logged = false;
+            let mut projection_delivery_logged = false;
             let mut monitor = AutoTriggerMonitor::new(Instant::now(), AUTO_TRIGGER_TIMEOUT);
             let mut live_pane_ready_ticks = 0;
             for attempt in 0.. {
@@ -1242,6 +1243,35 @@ fn spawn_auto_trigger_thread(
                             return;
                         }
                     }
+                }
+                // A restarted harness must not immediately run session-check
+                // against a pre-restart retained write. The controller/editor
+                // delivery owns that projection; reset the readiness deadline
+                // until it settles, then begin normal prompt admission.
+                if agent_doc_document_realtime_io::pending_document_write(&path).is_some() {
+                    if !projection_delivery_logged {
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "auto_trigger_waiting harness={} reason=pending_document_projection",
+                                harness.binary
+                            ),
+                        );
+                        projection_delivery_logged = true;
+                    }
+                    monitor = AutoTriggerMonitor::new(Instant::now(), AUTO_TRIGGER_TIMEOUT);
+                    live_pane_ready_ticks = 0;
+                    continue;
+                }
+                if projection_delivery_logged {
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "auto_trigger_projection_settled harness={}",
+                            harness.binary
+                        ),
+                    );
+                    projection_delivery_logged = false;
                 }
                 // `#startupmissgates`: keep the individual readiness gates so a
                 // `no_prompt` deadline can name which one never opened. The
@@ -3409,6 +3439,26 @@ mod tests {
         assert!(
             !verification.contains("agent_doc_tmux_io::capture_pane(&tmux"),
             "plain capture strips the only evidence that an unlisted Codex suggestion is not operator input"
+        );
+    }
+
+    #[test]
+    fn auto_trigger_waits_for_retained_document_projection_after_restart() {
+        let source = include_str!("lib.rs");
+        let trigger = source
+            .split_once("fn spawn_auto_trigger_thread(")
+            .map(|(_, tail)| tail)
+            .expect("auto-trigger thread must remain discoverable");
+        let delivery_gate = trigger
+            .split_once("pending_document_write(&path).is_some()")
+            .map(|(_, tail)| tail)
+            .expect("auto-trigger must gate on retained document delivery");
+        assert!(
+            delivery_gate.contains("monitor = AutoTriggerMonitor::new")
+                && delivery_gate.contains("continue;")
+                && delivery_gate.find("continue;")
+                    < delivery_gate.find("auto_trigger_prompt_decision("),
+            "retained delivery must reset the deadline and skip readiness/dispatch"
         );
     }
     #[test]

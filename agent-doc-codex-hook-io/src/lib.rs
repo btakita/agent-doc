@@ -87,6 +87,41 @@ pub struct SessionState {
     pub updated_at: u64,
 }
 
+/// Whether the exact Codex turn still owes a document writeback.
+///
+/// A clean agent-doc closeout parks the document binding instead of deleting
+/// it, so a later ordinary prompt in the same Codex thread remains bound to the
+/// session document. Only the prompt submitted for the exact Stop turn can
+/// create debt; stale turns and harness-control prompts are inert.
+pub fn prompt_writeback_debt<'a>(state: &'a SessionState, turn_id: &str) -> Option<&'a str> {
+    if state.last_turn_id != turn_id {
+        return None;
+    }
+    let prompt = state.last_prompt.trim();
+    if prompt.is_empty()
+        || prompt_requests_clear(prompt)
+        || agent_doc_prompt_contract::harness_prompt::agent_doc_invocation_file_from_text(prompt)
+            .is_some()
+    {
+        return None;
+    }
+    Some(prompt)
+}
+
+/// Preserve the exact-thread document binding after a clean closeout while
+/// clearing all turn-scoped continuation debt.
+pub fn parked_session_state(state: &SessionState, updated_at: u64) -> SessionState {
+    SessionState {
+        session_id: state.session_id.clone(),
+        doc_path: state.doc_path.clone(),
+        last_turn_id: String::new(),
+        last_prompt: String::new(),
+        last_auto_queue_head: None,
+        last_context_clear_at: state.last_context_clear_at,
+        updated_at,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveSessionState {
     pub session_id: String,

@@ -107,6 +107,12 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 - If a passive sync terminal outcome contains `[sync] safe_passive_sync_lock_contention_retry`, JetBrains must treat the command as deferred, keep the dedup state unchanged, and retry the newest pending automatic selection/layout request rather than waiting for the CLI's full sync-lock budget. Manual `Sync Tmux Layout` uses Project Controller command supersede/admission instead of a long-lived editor-side native sync guard.
 - JetBrains split-editor focus follows both editor focus-gained events and editor mouse-press activation because Swing focus is not guaranteed to change on every click between already-open split editors. Consecutive events for the same markdown path are deduped locally, but alternating paths such as A -> B -> A must each attempt the Project Controller focus handoff.
 - The structural layout-change detector only reports a new editor surface observation into `EditorTabSyncListener`; it has no second CLI planner, lock, or tmux process. The JetBrains/native boundary validates and enqueues that observation without waiting for a controller probe or tmux consequence. One delivery worker serializes publications and controller-root handoff off the EDT; each controller's process-scoped graph replaces any not-yet-started surface with the newest one. Tab selection and structural changes therefore share one latest-wins surface graph, while component focus uses only the separate selection lane, without letting a blocked controller call freeze or disable the IDE bridge.
+- A failed editor-surface publication remains generation-fenced retry work. The
+  listener retries the latest observation with capped exponential backoff (100,
+  200, 400, 800, 1600, then 2000 ms) so a controller recycle or brief socket
+  refusal cannot permanently disable automatic tmux pane synchronization. A
+  successful publication resets the retry counter, and a newer generation
+  supersedes every older retry.
 - JetBrains bounds every command-plane automatic and manual sync call. On timeout or failure, it releases the plugin-local request guard, logs the failure, and leaves automatic tab-sync dedup state unchanged so the latest queued selection or a manual retry can run again. A dead or externally killed tmux pane may delay one request, but it cannot leave a second editor-side sync owner wedged.
 
 ### Prompt Poller Removed

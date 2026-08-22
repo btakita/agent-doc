@@ -2,6 +2,34 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.260
+
+- **Fix: component compaction, Codex write-back, restart projection gates,
+  automatic pane sync, and controller CPU/process leaks converge independently.**
+
+`Compact Exchange` now compares and replaces only `agent:exchange`.
+Frontmatter and sibling components are rebased from the latest authoritative
+document and preserved verbatim; only drift in the Exchange cell can reject the
+compact. Retained targets therefore resume without treating unrelated edits as a
+second compact owner.
+
+Codex clean closeout parks its exact-thread document binding, so the next
+ordinary same-thread prompt still owes binary-owned document write-back instead
+of being acknowledged only in chat. Explicit `/clear`, `/new`, and a new
+agent-doc invocation sever or replace that binding.
+
+Restarted harnesses now wait for a retained editor delivery to settle before
+auto-triggering the document, preventing an immediate `session-check` from
+racing reconciliation. JetBrains also recovers rejected canonical projections
+through a replacement CRDT replica and retries failed editor-surface publication
+with generation-fenced capped backoff, restoring automatic tmux pane sync after
+a controller recycle.
+
+Relay eviction now compares a cached committed CRDT state vector instead of
+materializing the entire ordered document under the global relay lock. Detached
+controllers for narrowly classified test temporary roots self-reap after 60
+idle seconds, preventing orphan process accumulation.
+
 ## 0.35.259
 
 - **Fix: response persistence follows the authoritative editor buffer, and

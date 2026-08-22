@@ -610,14 +610,16 @@ class TypingTrackerEdtBudgetTest {
         val guardRecoveryBody = source.substringAfter("private fun recoverRejectedRemoteCanonical")
             .substringBefore("private fun scheduleTemplateGuardRecoveryRetry")
         assertTrue(
-            "template-guard recovery must retain and lazily pull controller canonical state",
+            "template-guard recovery must replace the rejected replica and rebuild from the unchanged exact editor baseline",
             guardRecoveryBody.contains("retainedCanonicalProjectionPaths.add(filePath)") &&
-                guardRecoveryBody.contains("requestRemoteDrain(filePath, \"template-guard-lazy-canonical-projection\")"),
+                guardRecoveryBody.contains("replaceCached = true") &&
+                guardRecoveryBody.contains("bootstrapFromControllerCanonical = true") &&
+                guardRecoveryBody.contains("replacement.ensureEditorText(editorText)") &&
+                guardRecoveryBody.contains("replacement.projectVisibleState(editorText)"),
         )
         assertFalse(
-            "template-guard recovery must never adopt a whole editor baseline",
-            guardRecoveryBody.contains("pushTextAdopt") ||
-                guardRecoveryBody.contains("replaceCached = true"),
+            "template-guard recovery must rebuild through the replacement CRDT replica, not a direct whole-buffer adopt RPC",
+            guardRecoveryBody.contains("pushTextAdopt"),
         )
         assertTrue(
             "remote CRDT editor apply should use RelayCell backpressure and schedule bounded EDT work",

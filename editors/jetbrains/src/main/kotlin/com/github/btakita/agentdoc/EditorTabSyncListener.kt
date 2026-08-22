@@ -29,11 +29,13 @@ import java.util.concurrent.atomic.AtomicReference
  * controller's process-scoped graph folds it against locally observed tmux state, derives
  * focus-vs-sync, and runs the tmux consequence as an `Effect`.
  *
- * The plugin therefore holds no plan, no previous-signature field, and no retry ladder: an
- * observation identical to the last one is idle and costs nothing, so repeat events need no dedup
- * here. What remains is event-storm handling that is genuinely the editor's: a 40ms debounce plus a
- * generation guard so a burst reports only its final state. Capture is projected by the next EDT
- * event; socket delivery remains off the EDT, so neither side waits on the other.
+ * The plugin therefore holds no plan or previous-signature field: an observation identical to the
+ * last one is idle and costs nothing, so repeat events need no dedup here. A failed controller
+ * handoff retains the observation and retries it with a capped backoff; otherwise a one-time socket
+ * refusal would strand auto-sync until an unrelated editor event. What remains is event-storm
+ * handling that is genuinely the editor's: a generation guard so a burst reports only its final
+ * state. Capture is projected by the next EDT event; socket delivery remains off the EDT, so neither
+ * side waits on the other.
  *
  * Focus has a separate micro-coalesced state lane because a visible editor surface may span
  * documents owned by different project controllers. The focused file resolves its own controller
@@ -58,17 +60,18 @@ class EditorTabSyncListener : FileEditorManagerListener {
      * project's pending observation.
      */
     private val generation = AtomicLong(0)
-private val focusProjectionGeneration = AtomicLong(0)
+    private val focusProjectionGeneration = AtomicLong(0)
+    private val surfaceDeliveryRetryAttempt = AtomicLong(0)
     private val lifecycleLock = Any()
 
     @Volatile
     private var closed = false
 
-    private val surfaceDeliveryExecutor = Executors.newSingleThreadExecutor { runnable ->
+    private val surfaceDeliveryExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "agent-doc-editor-surface-delivery").apply { isDaemon = true }
     }
-private val focusProjectionExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
-    Thread(runnable, "agent-doc-editor-focus-projection").apply { isDaemon = true }
+    private val focusProjectionExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "agent-doc-editor-focus-projection").apply { isDaemon = true }
     }
 
     companion object {
@@ -254,6 +257,16 @@ internal object SelectionProjectionSettling {
             )
     }
 }
+
+    internal object SurfaceDeliveryRetry {
+        private const val BASE_DELAY_MS = 100L
+        private const val MAX_DELAY_MS = 2_000L
+
+        fun delayMs(attempt: Long): Long {
+            val exponent = (attempt.coerceAtLeast(1L) - 1L).coerceAtMost(5L).toInt()
+            return (BASE_DELAY_MS shl exponent).coerceAtMost(MAX_DELAY_MS)
+        }
+    }
 
     /** One column of the reported split layout. Wire shape of Rust `SurfaceColumn`. */
     internal data class SurfaceColumnPayload(val files: List<String>)
@@ -471,7 +484,41 @@ private data class CapturedSurface(
             if (latestSurfaceObservation.compareAndSet(current, observation)) break
         }
         val requested = generation.incrementAndGet()
+        surfaceDeliveryRetryAttempt.set(0)
         projectLatestSurfaceOnEditorThread(requested)
+    }
+
+    private fun scheduleRetainedSurfaceRetry(
+        requestedGeneration: Long,
+        observation: PendingSurfaceObservation,
+    ) {
+        if (
+            closed ||
+                generation.get() != requestedGeneration ||
+                latestSurfaceObservation.get() !== observation
+        ) {
+            return
+        }
+        val attempt = surfaceDeliveryRetryAttempt.incrementAndGet()
+        val delayMs = SurfaceDeliveryRetry.delayMs(attempt)
+        try {
+            surfaceDeliveryExecutor.schedule(
+                {
+                    if (
+                        !closed &&
+                            generation.get() == requestedGeneration &&
+                            latestSurfaceObservation.get() === observation
+                    ) {
+                        projectLatestSurfaceOnEditorThread(requestedGeneration)
+                    }
+                },
+                delayMs,
+                TimeUnit.MILLISECONDS,
+            )
+            log("observe: retained retry attempt=$attempt delay_ms=$delayMs")
+        } catch (_: RejectedExecutionException) {
+            // Project disposal owns executor shutdown; there is no surface left to deliver.
+        }
     }
 
     private fun projectLatestSurfaceOnEditorThread(requestedGeneration: Long) {
@@ -580,18 +627,25 @@ private data class CapturedSurface(
                             surfaceJson = pending.surfaceJson,
                         )
                     if (receipt.exitCode != 0) {
-                        if (generation.get() == requestedGeneration) {
-                            ObservationDeliveryOwnership.retainAfterFailure(
-                                latestSurfaceObservation,
-                                observation,
-                            )
-                        }
+                        val retained =
+                            if (generation.get() == requestedGeneration) {
+                                ObservationDeliveryOwnership.retainAfterFailure(
+                                    latestSurfaceObservation,
+                                    observation,
+                                )
+                            } else {
+                                false
+                            }
                         LOG.warn(
                             "[layout-sync] surface observation unavailable for " +
                                 "${pending.relativePath}: ${receipt.output}",
                         )
+                        if (retained || latestSurfaceObservation.get() === observation) {
+                            scheduleRetainedSurfaceRetry(requestedGeneration, observation)
+                        }
                         return@execute
                     }
+                    surfaceDeliveryRetryAttempt.set(0)
                     val obsoleteRoots =
                         synchronized(lifecycleLock) {
                             if (closed) {

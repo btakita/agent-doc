@@ -215,6 +215,7 @@ internal fun remoteReplaceStructureAcceptedUtil(
 
 internal enum class RemoteTemplateProjectionDecision {
     QueueRemote,
+    RecoverEditorBaseline,
     RetryFailClosed,
 }
 
@@ -226,6 +227,10 @@ internal fun remoteTemplateProjectionDecisionUtil(
 ): RemoteTemplateProjectionDecision = when {
     remoteState == TemplateStructureProjectionState.Exact ->
         RemoteTemplateProjectionDecision.QueueRemote
+    !recoveryInFlight &&
+        editorState == TemplateStructureProjectionState.Exact &&
+        editorMatchesExpected ->
+        RemoteTemplateProjectionDecision.RecoverEditorBaseline
     else -> RemoteTemplateProjectionDecision.RetryFailClosed
 }
 
@@ -1648,17 +1653,79 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         remoteState: TemplateStructureProjectionState,
     ): RemoteTextApplyDisposition {
         retainedCanonicalProjectionPaths.add(filePath)
-        log.warn(
-            "[crdt-replica] rejected malformed remote projection for ${File(filePath).name}; " +
-                "remote_state=$remoteState expected_hash=${contentHash(expectedText)} " +
-                "remote_hash=${contentHash(remoteText)} recovery=lazy-controller-canonical-projection",
-        )
-        requestRemoteDrain(filePath, "template-guard-lazy-canonical-projection")
-        return RemoteTextApplyDisposition.RetryFailClosed
+        val editorText = editorBufferText(filePath)
+        val editorState =
+            editorText?.let {
+                templateStructureState(
+                    filePath,
+                    it,
+                    TemplateValidationPlane.Lane.Editor,
+                    "template-guard-recovery-editor",
+                )
+            }
+        val decision =
+            remoteTemplateProjectionDecisionUtil(
+                remoteState = remoteState,
+                editorState = editorState,
+                editorMatchesExpected = editorText == expectedText,
+                recoveryInFlight = templateGuardRecoveryPaths.contains(filePath),
+            )
+        if (decision != RemoteTemplateProjectionDecision.RecoverEditorBaseline || editorText == null) {
+            log.warn(
+                "[crdt-replica] rejected malformed remote projection for ${File(filePath).name}; " +
+                    "remote_state=$remoteState editor_state=$editorState " +
+                    "expected_hash=${contentHash(expectedText)} remote_hash=${contentHash(remoteText)} " +
+                    "recovery=bounded-template-guard-retry",
+            )
+            scheduleTemplateGuardRecoveryRetry(filePath, "template-guard-rejected-remote")
+            return RemoteTextApplyDisposition.RetryFailClosed
+        }
+        if (!templateGuardRecoveryPaths.add(filePath)) {
+            scheduleTemplateGuardRecoveryRetry(filePath, "template-guard-recovery-in-flight")
+            return RemoteTextApplyDisposition.RetryFailClosed
+        }
+        try {
+            val replacement =
+                forwarderFor(
+                    filePath = filePath,
+                    initialEditorText = editorText,
+                    bypassRegisterBackoff = true,
+                    replaceCached = true,
+                    expectedEditorTextAtSwap = editorText,
+                    bootstrapFromControllerCanonical = true,
+                )
+            if (replacement == null || replacement === staleForwarder) {
+                scheduleTemplateGuardRecoveryRetry(filePath, "template-guard-reregister")
+                return RemoteTextApplyDisposition.RetryFailClosed
+            }
+            replacement.ensureEditorText(editorText)
+            if (replacement.replicaText() != editorText || editorBufferText(filePath) != editorText) {
+                scheduleTemplateGuardRecoveryRetry(filePath, "template-guard-editor-adopt")
+                return RemoteTextApplyDisposition.RetryFailClosed
+            }
+            shadows[filePath] = editorText
+            retainedCanonicalProjectionPaths.remove(filePath)
+            clearTemplateGuardRecoveryBackoff(filePath)
+            if (!replacement.projectVisibleState(editorText)) {
+                scheduleTemplateGuardRecoveryRetry(filePath, "template-guard-visible-proof")
+            }
+            log.warn(
+                "[crdt-replica] rejected malformed remote projection and rebuilt canonical from " +
+                    "the unchanged exact editor baseline for ${File(filePath).name}; " +
+                    "editor_hash=${contentHash(editorText)} rejected_hash=${contentHash(remoteText)}",
+            )
+            requestRemoteDrain(filePath, "template-guard-editor-baseline-rebuilt")
+            return RemoteTextApplyDisposition.Recovered
+        } finally {
+            if (!templateGuardRecoveryRetryPaths.contains(filePath)) {
+                templateGuardRecoveryPaths.remove(filePath)
+            }
+        }
     }
 
     private fun scheduleTemplateGuardRecoveryRetry(filePath: String, reason: String) {
         if (!templateGuardRecoveryRetryPaths.add(filePath)) return
+        templateGuardRecoveryPaths.add(filePath)
         val failureCount = templateGuardRecoveryFailureCounts.merge(filePath, 1) { current, one ->
             current + one
         } ?: 1
@@ -1674,6 +1741,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         documentWorkers.forDocument(filePath).schedule(
             {
                 templateGuardRecoveryRetryPaths.remove(filePath)
+                templateGuardRecoveryPaths.remove(filePath)
                 if (!disposed.get()) requestRemoteDrain(filePath, "template-guard-retry")
             },
             delayMs,
@@ -2135,6 +2203,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val editorRemoteGeneration = matchingRemoteTargetGenerationUtil(updates, editorHash)
         val replicaRemoteGeneration = matchingRemoteTargetGenerationUtil(updates, replicaHash)
         val canonicalProjectionRetained = retainedCanonicalProjectionPaths.contains(filePath)
+        val recoveryInFlight = templateGuardRecoveryPaths.contains(filePath)
         val decision = replicaBaselineDecisionUtil(
             editorState = editorState,
             editorMatchesExpected = editorText == expectedText,
@@ -2142,7 +2211,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             replicaMatchesEditor = replicaText == editorText,
             editorMatchesRemoteTarget = editorRemoteGeneration != null,
             replicaMatchesRemoteTarget = replicaRemoteGeneration != null,
-            recoveryInFlight = templateGuardRecoveryPaths.contains(filePath),
+            recoveryInFlight = recoveryInFlight,
             canonicalProjectionRetained = canonicalProjectionRetained,
         )
         if (
@@ -2184,9 +2253,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 replaceCached = true,
                 expectedEditorTextAtSwap = editorText,
                 bootstrapFromControllerCanonical = true,
+                expectedCanonicalTextAtSwap = editorText,
             )
             if (replacement == null || replacement === forwarder) {
-                requestRemoteDrain(filePath, "visible-target-canonical-rebootstrap-retry")
+                scheduleTemplateGuardRecoveryRetry(
+                    filePath,
+                    "visible-target-canonical-rebootstrap-retry",
+                )
                 return false
             }
             val replacementText = replacement.replicaText()
@@ -2197,13 +2270,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         "editor_hash=$editorHash replacement_hash=${replacementText?.let(::contentHash) ?: "missing"} " +
                         "generation=$editorRemoteGeneration",
                 )
-                requestRemoteDrain(filePath, "visible-target-canonical-advanced")
+                scheduleTemplateGuardRecoveryRetry(filePath, "visible-target-canonical-advanced")
                 return false
             }
             shadows[filePath] = editorText
             if (!replacement.projectVisibleState(editorText)) {
                 retainedCanonicalProjectionPaths.add(filePath)
-                requestRemoteDrain(filePath, "visible-target-projection-retry")
+                scheduleTemplateGuardRecoveryRetry(filePath, "visible-target-projection-retry")
                 return false
             }
             retainedCanonicalProjectionPaths.remove(filePath)
@@ -2250,6 +2323,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             )
             shadows[filePath] = editorText
             requestRemoteDrain(filePath, "shadow-realigned")
+            return false
+        }
+        if (decision == ReplicaBaselineDecision.RetryFailClosed && recoveryInFlight) {
+            scheduleTemplateGuardRecoveryRetry(filePath, "baseline-recovery-in-flight")
             return false
         }
         log.warn(

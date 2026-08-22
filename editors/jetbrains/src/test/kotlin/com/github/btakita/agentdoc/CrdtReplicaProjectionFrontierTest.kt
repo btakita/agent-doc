@@ -255,6 +255,33 @@ class CrdtReplicaProjectionFrontierTest {
             TemplateStructureProjectionState.Invalid,
             templateStructureProjectionStateUtil("raw", null),
         )
+        assertEquals(
+            RemoteTemplateProjectionDecision.RecoverEditorBaseline,
+            remoteTemplateProjectionDecisionUtil(
+                remoteState = TemplateStructureProjectionState.Invalid,
+                editorState = TemplateStructureProjectionState.Exact,
+                editorMatchesExpected = true,
+                recoveryInFlight = false,
+            ),
+        )
+        assertEquals(
+            RemoteTemplateProjectionDecision.RetryFailClosed,
+            remoteTemplateProjectionDecisionUtil(
+                remoteState = TemplateStructureProjectionState.RepairRequired,
+                editorState = TemplateStructureProjectionState.Exact,
+                editorMatchesExpected = true,
+                recoveryInFlight = true,
+            ),
+        )
+        assertEquals(
+            RemoteTemplateProjectionDecision.RetryFailClosed,
+            remoteTemplateProjectionDecisionUtil(
+                remoteState = TemplateStructureProjectionState.Invalid,
+                editorState = TemplateStructureProjectionState.Exact,
+                editorMatchesExpected = false,
+                recoveryInFlight = false,
+            ),
+        )
     }
 
     @Test
@@ -282,13 +309,13 @@ class CrdtReplicaProjectionFrontierTest {
     }
 
     @Test
-    fun `rejected remote canonical never adopts an editor baseline`() {
+    fun `rejected remote canonical rebuilds from an unchanged exact editor baseline`() {
         for (remoteState in listOf(
             TemplateStructureProjectionState.Invalid,
             TemplateStructureProjectionState.RepairRequired,
         )) {
             assertEquals(
-                RemoteTemplateProjectionDecision.RetryFailClosed,
+                RemoteTemplateProjectionDecision.RecoverEditorBaseline,
                 remoteTemplateProjectionDecisionUtil(
                     remoteState = remoteState,
                     editorState = TemplateStructureProjectionState.Exact,

@@ -131,6 +131,13 @@ A restart iteration that re-resolves the harness records its outcome in
 `agent_restart_respec_failed` / `agent_restart_respec_skipped`), so "the restart
 came back on the old agent" is answerable from the log instead of inferred.
 
+The replacement child must not auto-trigger the document while that document has
+a retained binary-owned editor delivery. The supervisor keeps resetting the
+dispatch-readiness deadline until the pending projection settles, then admits
+the normal generation-fenced auto-trigger. This prevents a post-restart
+`agent-doc session-check` from racing the pre-restart write and diagnosing an
+authority/disk divergence that reconciliation already owns.
+
 Route/startup code must not cold-replace a healthy live authoritative actor
 solely because the document's `agent:` frontmatter changed. A live wrong-harness
 actor is deferred to the boundary restart path; only an unhealthy supervisor or

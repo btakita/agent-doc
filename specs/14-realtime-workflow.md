@@ -1192,6 +1192,13 @@ admits an install-handoff auto-trigger is likewise an explicit lazily-rs
 `ReadinessCore` composition of current-child output, actor readiness, and exact
 owned-pane dispatch readiness; no single stale projection is sufficient.
 
+Relay eviction safety uses the cached committed CRDT state vector, populated
+only when the commit boundary proves the canonical text equals the committed
+baseline. Deregistration and retained-hub eviction compare state vectors; they
+must not materialize the full ordered CRDT text while holding the global relay
+registry lock. A retained canonical projection carries that committed frontier
+across controller handoff.
+
 Durable storage may keep append-only facts, checkpoints, and backup snapshots,
 but the hot path reads the lazily-backed projection when deciding:
 

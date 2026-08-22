@@ -139,6 +139,17 @@ struct CompactApplyOptions<'a> {
     force_disk: bool,
 }
 
+fn find_compact_target<'a>(
+    components: &'a [agent_doc_element::element::Component],
+    target: &str,
+    context: &str,
+) -> Result<&'a agent_doc_element::element::Component> {
+    components
+        .iter()
+        .find(|component| component.name == target)
+        .ok_or_else(|| anyhow::anyhow!("component '{}' not found in {}", target, context))
+}
+
 impl CompactDocumentTargets {
     fn same(content: String) -> Self {
         Self {
@@ -217,27 +228,67 @@ impl CompactDocumentTargets {
             );
         }
 
-        let mut live = if retained_exchange_supersedes_authority {
+        let live = if retained_exchange_supersedes_authority {
             authoritative_target.replace_content(authoritative, intended_target_content)
         } else {
             authoritative.to_string()
         };
-        let mut committed =
+        let committed =
             authoritative_target.replace_content(authoritative, committed_target_content);
-        if let Some(reconciled) =
-            agent_doc_document::status_projection::reconcile_top_backlog_status_content(&live)?
-        {
-            live = reconciled;
-        }
-        if let Some(reconciled) =
-            agent_doc_document::status_projection::reconcile_top_backlog_status_content(&committed)?
-        {
-            committed = reconciled;
-        }
 
         Ok(Self {
             live,
             committed,
+            settled: self.settled,
+        })
+    }
+
+    /// Rebase an as-yet-undelivered component compact onto the latest document.
+    ///
+    /// Only `target` participates in the compare-and-swap. Every sibling byte,
+    /// including frontmatter, is copied from `authoritative` verbatim. A change
+    /// to the target itself remains a real conflict.
+    fn rebase_undelivered_target(
+        self,
+        source: &str,
+        authoritative: &str,
+        target: &str,
+    ) -> Result<Self> {
+        let intended_components = element::parse(&self.live)?;
+        let committed_components = element::parse(&self.committed)?;
+        let source_components = element::parse(source)?;
+        let authoritative_components = element::parse(authoritative)?;
+        let intended_target =
+            find_compact_target(&intended_components, target, "compacted target")?;
+        let committed_target =
+            find_compact_target(&committed_components, target, "compacted snapshot")?;
+        let source_target = find_compact_target(&source_components, target, "compact source")?;
+        let authoritative_target = find_compact_target(
+            &authoritative_components,
+            target,
+            "current document authority",
+        )?;
+
+        if authoritative_target.attrs != source_target.attrs
+            || authoritative_target.content(authoritative) != source_target.content(source)
+        {
+            anyhow::bail!(
+                "compact: '{}' changed during compaction; refusing to replace a concurrently edited target component",
+                target,
+            );
+        }
+        anyhow::ensure!(
+            intended_target.attrs == source_target.attrs
+                && committed_target.attrs == source_target.attrs,
+            "compact: '{}' marker attributes changed while building the compact target",
+            target,
+        );
+
+        Ok(Self {
+            live: authoritative_target
+                .replace_content(authoritative, intended_target.content(&self.live)),
+            committed: authoritative_target
+                .replace_content(authoritative, committed_target.content(&self.committed)),
             settled: self.settled,
         })
     }
@@ -1568,11 +1619,36 @@ fn converge_compacted_with_retry(
     compacted: &str,
     source_content: &str,
 ) -> Result<()> {
+    converge_compact_targets_with_retry(
+        effects,
+        file,
+        CompactDocumentTargets::same(compacted.to_string()),
+        source_content,
+        None,
+    )?;
+    Ok(())
+}
+
+fn converge_compact_targets_with_retry(
+    effects: &dyn CompactRuntimeEffects,
+    file: &Path,
+    mut targets: CompactDocumentTargets,
+    source_content: &str,
+    target_component: Option<&str>,
+) -> Result<CompactDocumentTargets> {
     let mut attempt = 0usize;
+    let mut source_content = source_content.to_string();
+    if let Some(target) = target_component {
+        let current = effects.current_document_content(file, "compact_component_preconverge")?;
+        if current != source_content {
+            targets = targets.rebase_undelivered_target(&source_content, &current, target)?;
+            source_content = current;
+        }
+    }
     loop {
         attempt += 1;
-        match effects.try_editor_converge(file, compacted, source_content, "compact") {
-            Ok(_) => return Ok(()),
+        match effects.try_editor_converge(file, &targets.live, &source_content, "compact") {
+            Ok(_) => return Ok(targets),
             Err(err)
                 if attempt < COMPACT_CONVERGE_MAX_ATTEMPTS
                     && is_retryable_crdt_merge_error(&err) =>
@@ -1621,7 +1697,13 @@ fn converge_compacted_with_retry(
                 let current = effects
                     .current_document_content(file, "compact_converge_retry")
                     .unwrap_or_default();
-                if current != source_content {
+                if let Some(target) = target_component {
+                    if current != source_content {
+                        targets =
+                            targets.rebase_undelivered_target(&source_content, &current, target)?;
+                        source_content = current;
+                    }
+                } else if current != source_content {
                     anyhow::bail!(
                         "compact: document changed during compaction; re-run compact when the editor is idle (the live buffer no longer matches the compacted base). Underlying: {err:#}"
                     );
@@ -1732,8 +1814,17 @@ fn apply_compacted_document(
         settled: true,
     };
     if force_disk {
-        runtime_effects()?.force_disk_atomic_write(file, compacted)?;
-        if let Some(outcome) = agent_doc_crdt_relay_io::apply_disk_change_for_file(file, compacted)?
+        if let Some(target) = target_component {
+            let authority = runtime_effects()?
+                .force_disk_document_content(file, "compact_component_force_disk_prewrite")?;
+            if authority != write_base_content {
+                targets =
+                    targets.rebase_undelivered_target(write_base_content, &authority, target)?;
+            }
+        }
+        runtime_effects()?.force_disk_atomic_write(file, &targets.live)?;
+        if let Some(outcome) =
+            agent_doc_crdt_relay_io::apply_disk_change_for_file(file, &targets.live)?
         {
             agent_doc_ops_log_io::log_op(
                 file,
@@ -1748,8 +1839,8 @@ fn apply_compacted_document(
             &format!(
                 "compact_writeback file={} transport=disk_force reason=force_disk len={} hash={}",
                 file.display(),
-                compacted.len(),
-                agent_doc_hash::content_hash(compacted)
+                targets.live.len(),
+                agent_doc_hash::content_hash(&targets.live)
             ),
         );
     } else {
@@ -1768,7 +1859,13 @@ fn apply_compacted_document(
         // operator re-runs compact when the editor is idle, instead of surfacing the
         // raw CP error (the reported JB `Compact Exchange` exit-1). The zero-live
         // editor case is already resolved to disk authority by #stale-lease-cp-authority.
-        converge_compacted_with_retry(runtime_effects()?, file, compacted, write_base_content)?;
+        targets = converge_compact_targets_with_retry(
+            runtime_effects()?,
+            file,
+            targets,
+            write_base_content,
+            target_component,
+        )?;
         if let Err(error) = agent_doc_document_realtime_io::guard_visible_delivery_convergence(
             file,
             "compact_post_write_delivery_projection",
@@ -2472,17 +2569,12 @@ mod tests {
         "<!-- /agent:review -->\n",
     );
 
-    fn assert_stale_compact_source_refusal(err: &anyhow::Error, ops_log: &str) {
+    fn assert_target_compact_source_refusal(err: &anyhow::Error) {
         let err = format!("{err:#}");
         assert!(
-            err.contains("document changed after the response merge was computed"),
-            "compact must fail closed when the visible file changed after compaction input: {err}"
-        );
-        assert!(
-            ops_log.contains("visible_write_deferred_current_changed")
-                && ops_log.contains("source=compact")
-                && !ops_log.contains("transport=disk_detached"),
-            "stale compact-source refusal should be logged without detached disk write:\n{ops_log}"
+            err.contains("'exchange' changed during compaction")
+                || err.contains("document changed after the response merge was computed"),
+            "compact must fail closed when its target component changed after compaction input: {err}"
         );
     }
 
@@ -2603,6 +2695,68 @@ mod tests {
             assert!(!projection.contains("- do [#q2]"));
             assert!(!projection.contains("- do [#q3]"));
         }
+    }
+
+    #[test]
+    fn compact_exchange_preconverge_ignores_frontmatter_and_sibling_drift() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let base = COMPACTDROPITEM_DOC.replace(
+            "agent_doc_format: template\n",
+            "agent_doc_format: template\nagent: codex\n",
+        );
+        let compacted = base.replace("Response one.", "*Compacted exchange.*");
+        let current = base
+            .replace("agent: codex", "agent: claude")
+            .replace("- [ ] [#a2] item two\n", "");
+        let effects = RetryConvergeEffects {
+            fail_times: AtomicUsize::new(0),
+            current,
+            converge_calls: AtomicUsize::new(0),
+        };
+
+        let targets = converge_compact_targets_with_retry(
+            &effects,
+            Path::new("/tmp/does-not-matter.md"),
+            CompactDocumentTargets::same(compacted),
+            &base,
+            Some("exchange"),
+        )
+        .expect("non-exchange changes must not block Compact Exchange");
+
+        assert!(targets.live.contains("agent: claude"));
+        assert!(!targets.live.contains("agent: codex"));
+        assert!(!targets.live.contains("- [ ] [#a2] item two"));
+        assert!(targets.live.contains("*Compacted exchange.*"));
+        assert_eq!(effects.converge_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn compact_exchange_preconverge_fails_closed_only_on_exchange_drift() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let compacted = COMPACTDROPITEM_DOC.replace("Response one.", "*Compacted exchange.*");
+        let current = COMPACTDROPITEM_DOC.replace("Response one.", "Operator changed exchange.");
+        let effects = RetryConvergeEffects {
+            fail_times: AtomicUsize::new(0),
+            current,
+            converge_calls: AtomicUsize::new(0),
+        };
+
+        let error = converge_compact_targets_with_retry(
+            &effects,
+            Path::new("/tmp/does-not-matter.md"),
+            CompactDocumentTargets::same(compacted),
+            COMPACTDROPITEM_DOC,
+            Some("exchange"),
+        )
+        .expect_err("a concurrent exchange edit must remain a real compact conflict");
+
+        assert!(
+            error.to_string().contains("'exchange' changed"),
+            "{error:#}"
+        );
+        assert_eq!(effects.converge_calls.load(Ordering::Relaxed), 0);
     }
 
     #[test]
@@ -3601,8 +3755,7 @@ mod tests {
             doc,
             "failed compact must not advance the snapshot"
         );
-        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert_stale_compact_source_refusal(&err, &ops_log);
+        assert_target_compact_source_refusal(&err);
     }
 
     #[test]
@@ -3725,7 +3878,7 @@ mod tests {
     }
 
     #[test]
-    fn component_compact_detached_disk_rejects_late_post_exchange_scratch_comment() {
+    fn component_compact_preserves_late_post_exchange_scratch_comment() {
         let prompt = "The post-exchange scratch comment was typed while compact exchange was being computed. #spec-test-build-install-commit-push";
         let doc = concat!(
             "---\nagent_doc_session: test-compact-comment-cas\nagent_doc_format: template\n---\n\n",
@@ -3753,27 +3906,28 @@ mod tests {
         )
         .unwrap();
 
-        let err = run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
-            .unwrap_err();
+        let result =
+            run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
+                .unwrap();
 
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),
-            live,
-            "detached-disk compact must not overwrite scratch comments typed after compaction was computed"
+            result,
+            "component compact must publish its rebased target"
         );
+        assert!(result.contains("Compacted summary."));
+        assert_eq!(result.matches(prompt).count(), 1);
         assert_eq!(
             agent_doc_snapshot_io::load_document_baseline(&file)
                 .unwrap()
                 .unwrap(),
-            doc,
-            "failed compact must not advance the snapshot"
+            result,
+            "successful component compact must checkpoint the rebased document"
         );
-        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert_stale_compact_source_refusal(&err, &ops_log);
     }
 
     #[test]
-    fn component_compact_rejects_cycle_1779845677327_scratch_directive_race() {
+    fn component_compact_preserves_cycle_1779845677327_scratch_directive_race() {
         let scratch_prompt = "The duplicate content corrupting document and duplicate prompt issues happened yet again. Reproduce bugs with tests first that fail and fix the implementation.";
         let scratch_directive = "#spec-test-build-install-commit-push";
         let scratch_dispatch = "dispatch #spec-test-build-install-commit-push";
@@ -3814,14 +3968,16 @@ mod tests {
         )
         .unwrap();
 
-        let err = run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
-            .unwrap_err();
+        let result =
+            run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
+                .unwrap();
 
         let file_after = std::fs::read_to_string(&file).unwrap();
         assert_eq!(
-            file_after, live,
-            "detached-disk compact must not overwrite cycle-1779845677327 scratch directives"
+            file_after, result,
+            "component compact must publish the rebased exchange target"
         );
+        assert!(file_after.contains("Compacted summary."));
         assert_eq!(
             file_after.matches(scratch_prompt).count(),
             1,
@@ -3836,8 +3992,8 @@ mod tests {
             agent_doc_snapshot_io::load_document_baseline(&file)
                 .unwrap()
                 .unwrap(),
-            doc,
-            "failed compact must not advance the snapshot to the shorter or live buffer"
+            file_after,
+            "successful compact must checkpoint the rebased full document"
         );
         let patch_count = std::fs::read_dir(&patches_dir)
             .unwrap()
@@ -3849,12 +4005,6 @@ mod tests {
         assert_eq!(
             patch_count, 0,
             "compact race handling must not emit file IPC or fullContent payloads"
-        );
-        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert_stale_compact_source_refusal(&err, &ops_log);
-        assert!(
-            !ops_log.contains("snapshot_absorb"),
-            "compact race handling must not silently absorb a shorter disk snapshot:\n{ops_log}"
         );
     }
 

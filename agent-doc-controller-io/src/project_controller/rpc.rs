@@ -10560,6 +10560,19 @@ impl ProjectRootIncarnation {
     }
 }
 
+fn detached_temp_project_root(project_root: &Path) -> bool {
+    let Some(name) = project_root.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    if !name.starts_with(".tmp") {
+        return false;
+    }
+    matches!(
+        project_root.parent().and_then(Path::to_str),
+        Some("/tmp" | "/var/tmp" | "/dev/shm")
+    )
+}
+
 pub(crate) fn serve_with_options(
     project_root: &Path,
     launch_mode: LaunchMode,
@@ -10701,9 +10714,11 @@ pub(crate) fn serve_with_options(
     let mut supervisor_watchdog_last_run: Option<Instant> = None;
     let mut supervisor_watchdog_halt_notified: std::collections::HashSet<String> =
         std::collections::HashSet::new();
+    let mut last_client_activity = Instant::now();
     while !should_stop.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok(stream) => {
+                last_client_activity = Instant::now();
                 let runtime = Arc::clone(&runtime);
                 let should_stop = Arc::clone(&should_stop);
                 let active_clients = Arc::clone(&active_clients);
@@ -10720,6 +10735,17 @@ pub(crate) fn serve_with_options(
                 if !project_root.exists() {
                     eprintln!(
                         "[controller] project root {} no longer exists; shutting down detached controller",
+                        project_root.display()
+                    );
+                    should_stop.store(true, Ordering::SeqCst);
+                    break;
+                }
+                if detached_temp_project_root(project_root)
+                    && active_clients.load(Ordering::SeqCst) == 0
+                    && last_client_activity.elapsed() >= Duration::from_secs(60)
+                {
+                    eprintln!(
+                        "[controller] detached temporary project {} has been idle for 60s; shutting down controller",
                         project_root.display()
                     );
                     should_stop.store(true, Ordering::SeqCst);
@@ -22010,6 +22036,18 @@ pub fn run_restart(root: Option<&Path>, force: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
+
+    #[test]
+    fn detached_temp_controller_roots_are_narrowly_classified_for_idle_reaping() {
+        assert!(detached_temp_project_root(Path::new("/tmp/.tmpABC123")));
+        assert!(detached_temp_project_root(Path::new("/var/tmp/.tmpABC123")));
+        assert!(detached_temp_project_root(Path::new("/dev/shm/.tmpABC123")));
+        assert!(!detached_temp_project_root(Path::new("/tmp/real-project")));
+        assert!(!detached_temp_project_root(Path::new(
+            "/home/user/.tmpABC123"
+        )));
+    }
+
     /// `#resumeownerfmread`: the controller answers the resume-claim question
     /// for every candidate in one call, from hubs it already holds.
     ///

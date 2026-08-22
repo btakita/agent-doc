@@ -160,6 +160,15 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `failed surface delivery retries promptly then settles at a bounded rate`() {
+        assertEquals(100L, EditorTabSyncListener.SurfaceDeliveryRetry.delayMs(1))
+        assertEquals(200L, EditorTabSyncListener.SurfaceDeliveryRetry.delayMs(2))
+        assertEquals(1_600L, EditorTabSyncListener.SurfaceDeliveryRetry.delayMs(5))
+        assertEquals(2_000L, EditorTabSyncListener.SurfaceDeliveryRetry.delayMs(6))
+        assertEquals(2_000L, EditorTabSyncListener.SurfaceDeliveryRetry.delayMs(100))
+    }
+
+    @Test
     fun `publishing through a new controller root retires the prior layout authority`() {
         val ownership = EditorTabSyncListener.SurfaceRootOwnership()
 

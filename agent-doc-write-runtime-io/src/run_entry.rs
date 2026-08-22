@@ -3089,13 +3089,8 @@ mod tests {
         fs::write(&doc, baseline).unwrap();
 
         let editor_id = "intellij:response-cell-materialization";
-        agent_doc_test_support::publish_editor_text_via_crdt_relay(&doc, editor_id, baseline);
+        agent_doc_test_support::seed_durable_open_zero_live_replica(&doc, editor_id);
         let canonical = doc.canonicalize().unwrap();
-        let identity = format!("{editor_id}:{}", canonical.display());
-        assert!(
-            agent_doc_crdt_relay_io::deregister_replica_for_file(&canonical, &identity).unwrap(),
-            "fixture should retain the CRDT model after the live replica leaves",
-        );
         assert!(
             agent_doc_crdt_relay_io::crdt_authority_for_file(&canonical).editor_attached(),
             "durable reliable-sync authority remains attached while no relay member is live",

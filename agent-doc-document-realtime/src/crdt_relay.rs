@@ -279,6 +279,7 @@ pub struct RetainedCanonicalProjection {
     pub state: Vec<u8>,
     pub lineage: String,
     pub last_committed_text: Option<String>,
+    pub last_committed_state_vector: Option<Vec<u8>>,
     pub compact_epoch_requested: bool,
 }
 
@@ -304,6 +305,11 @@ pub struct RelayHub {
     /// hub did not author) so the stale canonical can be rebuilt from the
     /// correction instead of re-committing the discarded content forever.
     last_committed_text: Option<String>,
+    /// O(1)-sized CRDT frontier paired with [`Self::last_committed_text`] when
+    /// that text exactly matched the canonical at the commit boundary. Hub
+    /// eviction compares this token instead of materializing the entire CRDT
+    /// while the global relay registry is locked.
+    last_committed_state_vector: Option<Vec<u8>>,
     /// Live editors that need a **replace-capable re-bootstrap** (D2): after an
     /// out-of-band deletion rebuilds the canonical, an additive CRDT delta cannot
     /// express the removal, so each live editor must replace its buffer with the
@@ -666,6 +672,7 @@ impl RelayHub {
             members: HashMap::new(),
             awareness: AwarenessChannel::new(),
             last_committed_text: None,
+            last_committed_state_vector: None,
             pending_rebootstrap: HashSet::new(),
             compact_epoch_requested: false,
             canonical_projection_required,
@@ -688,6 +695,7 @@ impl RelayHub {
         hub.canonical = ReplicaState::from_text(canonical_id, text);
         hub.reset_live_document_projection(text);
         hub.last_committed_text = Some(text.to_string());
+        hub.last_committed_state_vector = Some(hub.canonical.state_vector());
         hub
     }
 
@@ -721,6 +729,7 @@ impl RelayHub {
             hub.lineage = lineage.to_string();
         }
         hub.last_committed_text = last_committed_text;
+        hub.last_committed_state_vector = Some(hub.canonical.state_vector());
         Ok(hub)
     }
 
@@ -736,6 +745,7 @@ impl RelayHub {
             Some(&projection.lineage),
         )?;
         hub.last_committed_text = projection.last_committed_text.clone();
+        hub.last_committed_state_vector = projection.last_committed_state_vector.clone();
         hub.compact_epoch_requested = projection.compact_epoch_requested;
         Ok(hub)
     }
@@ -747,6 +757,7 @@ impl RelayHub {
             state: self.canonical.encode_state(),
             lineage: self.lineage.clone(),
             last_committed_text: self.last_committed_text.clone(),
+            last_committed_state_vector: self.last_committed_state_vector.clone(),
             compact_epoch_requested: self.compact_epoch_requested,
         }
     }
@@ -807,14 +818,16 @@ impl RelayHub {
     ///
     /// An empty member set alone is insufficient: the canonical may still be
     /// ahead of the last disk commit. Re-contact can safely rebuild from disk
-    /// only after that committed baseline exactly matches the canonical text.
+    /// only after that committed baseline exactly matches the canonical CRDT
+    /// frontier. The frontier comparison avoids materializing large documents
+    /// while the process-global relay registry is locked.
     pub fn is_safe_to_evict(&self) -> bool {
         self.members.is_empty()
             && self.pending_rebootstrap.is_empty()
             && self
-                .last_committed_text
+                .last_committed_state_vector
                 .as_ref()
-                .is_some_and(|committed| self.canonical.text() == *committed)
+                .is_some_and(|committed| self.canonical.state_vector() == *committed)
     }
 
     /// Whether `client_id` is registered (live or offline).
@@ -1643,6 +1656,8 @@ impl RelayHub {
     /// git commit. This is the in-memory-wins path's only notion of "what we last
     /// authored on disk".
     pub fn record_committed_baseline(&mut self, committed: &str) {
+        self.last_committed_state_vector =
+            (self.canonical.text() == committed).then(|| self.canonical.state_vector());
         self.last_committed_text = Some(committed.to_string());
     }
 
@@ -1681,6 +1696,7 @@ impl RelayHub {
             // before this document's first finalize.
             None => {
                 self.last_committed_text = Some(on_disk.to_string());
+                self.last_committed_state_vector = None;
                 return Ok(false);
             }
         };
@@ -1692,6 +1708,7 @@ impl RelayHub {
             // The canonical already agrees with the corrected disk; no rebuild
             // needed, just advance the recorded baseline so we do not re-detect it.
             self.last_committed_text = Some(on_disk.to_string());
+            self.last_committed_state_vector = Some(self.canonical.state_vector());
             return Ok(false);
         }
         // Out-of-band correction: rebuild the canonical from the corrected baseline.
@@ -1712,6 +1729,7 @@ impl RelayHub {
             }
         }
         self.last_committed_text = Some(on_disk.to_string());
+        self.last_committed_state_vector = Some(self.canonical.state_vector());
         Ok(true)
     }
 
@@ -1736,6 +1754,7 @@ impl RelayHub {
         let before_text = self.canonical.text();
         if before_text == text {
             self.last_committed_text = Some(text.to_string());
+            self.last_committed_state_vector = Some(self.canonical.state_vector());
             return Ok(false);
         }
         self.rebuild_authoritative_epoch(&before_text, text)?;
@@ -1811,6 +1830,7 @@ impl RelayHub {
             .collect();
         self.pending_rebootstrap.extend(live);
         self.last_committed_text = Some(text.to_string());
+        self.last_committed_state_vector = Some(self.canonical.state_vector());
         Ok(())
     }
 
@@ -3224,6 +3244,23 @@ mod tests {
         assert!(
             hub.is_safe_to_evict(),
             "deregister drops the member's stale rebootstrap flag"
+        );
+    }
+
+    #[test]
+    fn retained_canonical_projection_preserves_the_committed_eviction_frontier() {
+        let hub = RelayHub::from_text(1, "committed body");
+        assert!(hub.is_safe_to_evict());
+
+        let retained = hub.retained_canonical_projection();
+        assert!(retained.last_committed_state_vector.is_some());
+        let recovered = RelayHub::from_retained_canonical_projection(2, &retained).unwrap();
+        assert!(recovered.is_safe_to_evict());
+
+        recovered.canonical.apply_local_edit(0, 0, "new ");
+        assert!(
+            !recovered.is_safe_to_evict(),
+            "a changed CRDT frontier must fence eviction without a whole-text comparison"
         );
     }
 

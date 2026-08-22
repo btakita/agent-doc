@@ -106,10 +106,28 @@ The homepage PRD now requires complete verified Google disclosure copy, and regr
 The requested EFS push follows this required session-document closeout. I also rebuilt and installed `agent-doc` 0.35.260 plus its native library/plugin package to resolve the preflight stale-install warning; route-owned supervisors were marked for idle-boundary recycling.
 
 Suggested commit message (used): `fix(home): show complete Google reviews`
+
+### Re: Staging deployment — gpt-5
+
+> **Queue prompt:**
+>
+> deploy to staging
+
+Staging deployment is complete.
+
+- Pushed commit `117a2efc` (`fix(home): show complete Google reviews`) to `origin/main`.
+- Ran the default staging `make deploy` target successfully.
+- Deployed Worker version `301b441e-31de-4f11-87da-b4d6c02a9f3c` to [equityfundingsource.brian-takita.workers.dev](https://equityfundingsource.brian-takita.workers.dev).
+- Confirmed the staging D1 database had no pending migrations before or after deployment. The pre-deploy Time Travel bookmark was `000018de-00000000-000050cf-e76dedef1a2f1d198cdcf6330abbf390`.
+- Confirmed the live homepage returns HTTP `200`, contains Tim Hayden, California Hard Money Direct, and Alfredo Arteaga, and renders all three full-review disclosure blocks.
+- `make check` passed before deployment.
+- GitHub Actions inspection returned no workflow runs.
+- Preserved the pre-existing `AGENTS.md` modification and untracked `.agent/` directory without changing them.
 <!-- agent:boundary:a61b5b26:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
+- deploy to staging
 <!-- /agent:queue -->
 
 ## Backlog

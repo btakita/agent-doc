@@ -1308,8 +1308,16 @@ Implementations must keep tests for these cases:
   project to disk; registration and controller delivery events wake the same
   canonical projection without a recovery request;
 - a peer-pull-capable editor still receives the controller's targeted
-missing-replica rebuild after restart, and an idle explicit missing/sync-pending
-observation schedules one bounded repair before the zero-replica backoff;
+  missing-replica rebuild after restart, and an idle explicit missing/sync-pending
+  observation schedules one bounded repair before the zero-replica backoff. The
+  controller claims the exact missing-registration edge before editor IPC, so a
+  synchronous reliable-sync callback cannot republish that edge into the running
+  effect; an unchanged edge is single-flight, failure stays retryable, and a
+  target that leaves then re-enters the set is eligible again;
+- a retained component compact derives completion from only its pending-write,
+  exact compact-continuation, and live-delivery frontiers. Aggregate document
+  projection changes outside the target component (including queue, backlog,
+  authority, and lifecycle facts) do not invalidate or retry Compact Exchange;
 - stale-replica handling quarantines the obsolete delta and retains the
   controller revision. JetBrains, VS Code, and Zed project that revision
   downstream and expose no whole-editor recovery publication;

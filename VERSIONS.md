@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.263
+
+- **Fix: controller restart recovery is single-flight, Compact Exchange ignores
+  sibling projection churn, and routed starts remain responsive.**
+
+The missing-replica restart push now claims each replicated liveness edge before
+calling editor IPC. A synchronous editor callback therefore observes the claimed
+edge instead of republishing the same Lazily Source while its Effect is flushing.
+Failed transports remain retryable on a later liveness edge, and a target that
+leaves and re-enters the missing set is signaled again without a hot loop.
+
+Compact completion now observes a narrow pending-write/compact-continuation
+Source rather than the aggregate document-state projection. Queue, backlog,
+authority, lifecycle, and other sibling facts cannot retrigger the retained
+Exchange continuation; only its own frontier or a changed live-delivery edge can.
+This removes the controller saturation that made route-owned `agent-doc start`
+requests hit the five-second RPC timeout.
+
 ## 0.35.262
 
 - **Fix: live relay RPCs no longer decode and discard retained CRDT recovery

@@ -2146,11 +2146,18 @@ struct ControllerDocumentGraphs {
     /// hydrates its durable inputs, then the sink installation advances this
     /// Source so already-satisfied effects rerun with a live durable sink.
     settle_generation: lazily::ThreadSafeSourceMap<String, u64>,
-    /// Projection/delivery edge for retryable compact completion. The compact
+    /// Compact Exchange's narrow durable input. The full document projection
+    /// includes queue, backlog, authority, and lifecycle facts; subscribing the
+    /// compact Effect to that aggregate made unrelated state churn look like a
+    /// retry. This cell changes only when the pending write or exact compact
+    /// continuation changes.
+    compact_resume_frontier: lazily::ThreadSafeSourceMap<String, CompactResumeFrontier>,
+    /// Compact-relevant projection/delivery edge for retryable completion. The
     /// continuation itself is stable while editor delivery is unavailable, so
     /// observing only its Computed value would make a failed Effect one-shot.
-    /// A later durable projection or changed live-delivery frontier advances
-    /// this generation while the continuation remains pending.
+    /// Only a pending-write/compact-continuation transition or changed live-
+    /// delivery frontier advances this generation. Queue, backlog, authority,
+    /// and other sibling facts are outside Compact Exchange's conflict domain.
     compact_retry_generation: lazily::ThreadSafeSourceMap<String, u64>,
     next_compact_retry_generation: AtomicU64,
     verdict: lazily::ThreadSafeComputedMap<
@@ -3006,6 +3013,7 @@ impl ControllerDocumentGraphs {
             settlement_receipt: lazily::ThreadSafeSourceMap::new(&ctx),
             retained_delivery: lazily::ThreadSafeSourceMap::new(&ctx),
             settle_generation: lazily::ThreadSafeSourceMap::new(&ctx),
+            compact_resume_frontier: lazily::ThreadSafeSourceMap::new(&ctx),
             compact_retry_generation: lazily::ThreadSafeSourceMap::new(&ctx),
             next_compact_retry_generation: AtomicU64::new(1),
             verdict: lazily::ThreadSafeComputedMap::new(&ctx),
@@ -3074,6 +3082,13 @@ impl ControllerDocumentGraphs {
         document_hash: &str,
         projection: Option<agent_doc_state_backbone::DocumentStateProjection>,
     ) {
+        let key = document_hash.to_string();
+        let compact_frontier = CompactResumeFrontier::from_projection(projection.as_ref());
+        let compact_frontier_changed = self
+            .compact_resume_frontier
+            .observe(&self.ctx, &key)
+            .as_ref()
+            != Some(&compact_frontier);
         let (authority, disk) = projection
             .as_ref()
             .map(|document| {
@@ -3101,10 +3116,11 @@ impl ControllerDocumentGraphs {
             .as_ref()
             .and_then(|document| document.closeout.owner.clone());
         let settle_generation = u64::from(self.settle_sink.get().is_some());
-        let compact_retry_generation = has_compact_continuation.then(|| {
-            self.next_compact_retry_generation
-                .fetch_add(1, Ordering::SeqCst)
-        });
+        let compact_retry_generation =
+            (has_compact_continuation && compact_frontier_changed).then(|| {
+                self.next_compact_retry_generation
+                    .fetch_add(1, Ordering::SeqCst)
+            });
         self.ctx.batch(|ctx| {
             self.authority
                 .set(ctx, document_hash.to_string(), authority);
@@ -3113,6 +3129,10 @@ impl ControllerDocumentGraphs {
                 .set(ctx, document_hash.to_string(), None);
             self.settle_generation
                 .set(ctx, document_hash.to_string(), settle_generation);
+            if compact_frontier_changed {
+                self.compact_resume_frontier
+                    .set(ctx, document_hash.to_string(), compact_frontier);
+            }
             if let Some(compact_retry_generation) = compact_retry_generation {
                 self.compact_retry_generation.set(
                     ctx,
@@ -3404,18 +3424,18 @@ impl ControllerDocumentGraphs {
         &self,
         document_hash: &str,
     ) -> Option<agent_doc_state_backbone::DocumentCompactProjectionContinuation> {
-        let projection = self.projection.clone();
+        let frontier = self.compact_resume_frontier.clone();
         let settle_generation = self.settle_generation.clone();
         let applied = self.compact_resume_applied.clone();
         let signal = self.compact_resume.get_or_insert_with(
             &self.ctx,
             document_hash.to_string(),
             move |ctx, key| {
-                let _projection_present = projection.contains_key(ctx, key);
+                let _frontier_present = frontier.contains_key(ctx, key);
                 let _generation_present = settle_generation.contains_key(ctx, key);
                 let _applied_present = applied.contains_key(ctx, key);
-                let candidate = compact_resume_signal(
-                    projection.observe(ctx, key).flatten().as_ref(),
+                let candidate = compact_resume_signal_from_frontier(
+                    frontier.observe(ctx, key).as_ref(),
                     settle_generation.observe(ctx, key).unwrap_or_default(),
                 );
                 match candidate {
@@ -4220,18 +4240,45 @@ fn retained_resume_signal(
     retained_transition_state(projection, delivery, controller_generation).resume_signal()
 }
 
+#[cfg(test)]
 fn compact_resume_signal(
     projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
+    controller_generation: u64,
+) -> Option<agent_doc_state_backbone::DocumentCompactProjectionContinuation> {
+    let frontier = CompactResumeFrontier::from_projection(projection);
+    compact_resume_signal_from_frontier(Some(&frontier), controller_generation)
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct CompactResumeFrontier {
+    pending_write: Option<agent_doc_state_backbone::DocumentWriteIntentProjection>,
+    pending_compact_projection:
+        Option<agent_doc_state_backbone::DocumentCompactProjectionContinuation>,
+}
+
+impl CompactResumeFrontier {
+    fn from_projection(
+        projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
+    ) -> Self {
+        projection.map_or_else(Self::default, |projection| Self {
+            pending_write: projection.document.pending_write.clone(),
+            pending_compact_projection: projection.document.pending_compact_projection.clone(),
+        })
+    }
+}
+
+fn compact_resume_signal_from_frontier(
+    frontier: Option<&CompactResumeFrontier>,
     controller_generation: u64,
 ) -> Option<agent_doc_state_backbone::DocumentCompactProjectionContinuation> {
     if controller_generation == 0 {
         return None;
     }
-    let projection = projection?;
-    if projection.document.pending_write.is_some() {
+    let frontier = frontier?;
+    if frontier.pending_write.is_some() {
         return None;
     }
-    projection.document.pending_compact_projection.clone()
+    frontier.pending_compact_projection.clone()
 }
 
 fn retained_resume_signal_matches_projection(
@@ -13955,7 +14002,7 @@ revised operator request
     }
 
     #[test]
-    fn pending_compact_retries_on_projection_and_changed_delivery_edges() {
+    fn pending_compact_retries_only_on_its_own_frontier_and_changed_delivery_edges() {
         let scope = agent_doc_state_scope::ProcessScope::new();
         let document_graphs = ControllerDocumentGraphs::new_in(&scope);
         let document_hash = "doc-compact-retry";
@@ -13978,15 +14025,43 @@ revised operator request
             .observe(&document_graphs.ctx, &document_hash.to_string())
             .unwrap();
 
-        document_graphs.set_projection(document_hash, Some(projection));
-        let projection_retry = document_graphs
+        document_graphs.set_projection(document_hash, Some(projection.clone()));
+        let unchanged_projection = document_graphs
             .compact_retry_generation
             .observe(&document_graphs.ctx, &document_hash.to_string())
             .unwrap();
+        assert_eq!(
+            unchanged_projection, first,
+            "replaying an unchanged projection must not spin compact completion"
+        );
 
+        projection.apply_fact(&agent_doc_state_backbone::StateFact::QueueHeadCompleted {
+            document_hash: document_hash.to_string(),
+            node_key: "queue:0:sibling:0".to_string(),
+            backlog_id: Some("sibling".to_string()),
+            hosting_epoch: None,
+        });
+        document_graphs.set_projection(document_hash, Some(projection.clone()));
+        let unrelated_projection = document_graphs
+            .compact_retry_generation
+            .observe(&document_graphs.ctx, &document_hash.to_string())
+            .unwrap();
+        assert_eq!(
+            unrelated_projection, first,
+            "queue/backlog/lifecycle projection changes are outside Compact Exchange"
+        );
+
+        projection.apply_fact(
+            &deferred_document_write_event(document_hash, "compact-write", "compact-target").fact,
+        );
+        document_graphs.set_projection(document_hash, Some(projection.clone()));
+        let write_projection = document_graphs
+            .compact_retry_generation
+            .observe(&document_graphs.ctx, &document_hash.to_string())
+            .unwrap();
         assert!(
-            projection_retry > first,
-            "a durable projection edge must retry the unchanged compact continuation"
+            write_projection > unrelated_projection,
+            "the pending-write frontier is compact-relevant"
         );
 
         let delivery = RetainedDeliveryObservation {
@@ -14003,7 +14078,7 @@ revised operator request
             .observe(&document_graphs.ctx, &document_hash.to_string())
             .unwrap();
         assert!(
-            registration_retry > projection_retry,
+            registration_retry > write_projection,
             "editor registration must retry the compact continuation even without a state event"
         );
 

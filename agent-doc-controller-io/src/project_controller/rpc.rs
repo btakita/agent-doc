@@ -13237,10 +13237,10 @@ fn restore_reliable_sync_liveness(
 }
 
 fn project_editor_replica_rebuilds(project_root: &Path) {
-    request_editor_replica_rebuild_after_restart(project_root);
-    // Arm the Tier 2 reactive path from boot as well, so later registrations
-    // are covered without another explicit call site.
-    publish_editor_replica_rebuild_targets(project_root);
+    // Publish the restored missing-replica edge once. The same edge dispatcher
+    // also covers registrations that arrive later; keeping restart and liveness
+    // on one single-flight path prevents duplicate startup signals.
+    publish_editor_replica_rebuild_targets(project_root, "restart");
 }
 
 fn public_controller_matches_generation(
@@ -13309,9 +13309,9 @@ fn schedule_editor_replica_rebuild_after_promotion(
 /// cannot be reached is left to the existing missing-replica recovery, and a failure
 /// here must never block the controller from finishing startup — so failures are
 /// logged, never propagated.
-/// `#ctrlkillreregister` Tier 2 — the rebuild request as an **Effect over a signal**,
-/// so it fires whenever an editor becomes registered-without-a-replica rather than
-/// only at the restart instant.
+/// `#ctrlkillreregister` Tier 2 — the rebuild request as a single-flight effect of
+/// the replicated missing-replica edge, so it fires whenever an editor becomes
+/// registered-without-a-replica rather than only at the restart instant.
 ///
 /// Tier 1 is a one-shot call at boot: an editor that registers later, or reconnects
 /// while the controller is up, hits the same missing-replica state with nobody left
@@ -13324,87 +13324,136 @@ fn schedule_editor_replica_rebuild_after_promotion(
 /// without either side being upgraded first. It is a compatibility layer with an
 /// explicit retirement condition, not the destination.
 ///
-/// The target set lives in a `Source` inside a [`ProcessScope`] — a real scope with a
-/// process lifetime, not another private context — and the request is an `Effect`
-/// reading it. Publishing is idempotent and an empty set does nothing, so callers
-/// simply report the current truth whenever it may have changed.
+/// The published set is claimed before editor IPC and released when a target leaves
+/// the missing set (or delivery fails). Editor IPC can synchronously publish another
+/// liveness frame, so running that IPC inside a Lazily Effect creates a dependency
+/// cycle: the callback sets the Effect's Source while `flush_effects` is still
+/// invalidating it. The explicit edge receipt preserves reactive late-registration
+/// behavior without allowing that re-entrant CPU loop.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct EditorReplicaRebuildTarget {
+    path: String,
+    pid: u64,
+    editor_id: String,
+    strategy: EditorReplicaRepairStrategy,
+}
+
+#[derive(Default)]
 struct EditorReplicaRebuildPlane {
-    scope: agent_doc_state_backbone::ProcessScope,
-    targets: lazily::Source<Vec<(String, u64, String)>>,
-    /// Held so the effect is not disposed; it re-runs on every `targets` change.
-    _effect: lazily::Effect,
+    published: Mutex<BTreeSet<EditorReplicaRebuildTarget>>,
 }
 
-fn editor_replica_rebuild_plane(project_root: &Path) -> &'static EditorReplicaRebuildPlane {
+fn editor_replica_rebuild_plane() -> &'static EditorReplicaRebuildPlane {
     static PLANE: std::sync::OnceLock<EditorReplicaRebuildPlane> = std::sync::OnceLock::new();
-    PLANE.get_or_init(|| {
-        let scope = agent_doc_state_backbone::ProcessScope::new();
-        let targets: lazily::Source<Vec<(String, u64, String)>> = scope.ctx().source(Vec::new());
-        let root = project_root.to_path_buf();
-        // `Source` is `Copy`, so the `move` closure takes its own handle to the same
-        // cell and `targets` stays usable below — no rebinding needed.
-        let effect = scope.ctx().effect(move |ctx| {
-            for (path, pid, editor_id) in ctx.get(&targets) {
-                let file = std::path::PathBuf::from(&path);
-                match agent_doc_crdt_relay_io::signal_crdt_replica_event(
-                    &file,
-                    agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
-                    1,
-                ) {
-                    Ok(()) => agent_doc_ops_log_io::log_op(
-                        &root,
-                        &format!(
-                            "editor_replica_rebuild_requested file={path} pid={pid} editor_id={editor_id} driver=effect"
-                        ),
-                    ),
-                    // Never swallow: an editor we could not reach is exactly the one
-                    // an operator will find stranded, so name it.
-                    Err(err) => agent_doc_ops_log_io::log_op(
-                        &root,
-                        &format!(
-                            "editor_replica_rebuild_failed file={path} pid={pid} editor_id={editor_id} error={}",
-                            format!("{err:#}")
-                                .replace('\n', " | ")
-                                .chars()
-                                .take(160)
-                                .collect::<String>()
-                        ),
-                    ),
-                }
-            }
-        });
-        EditorReplicaRebuildPlane {
-            scope,
-            targets,
-            _effect: effect,
-        }
-    })
+    PLANE.get_or_init(EditorReplicaRebuildPlane::default)
 }
 
-/// Publish the current missing-replica set so the Tier 2 effect re-runs.
+fn claim_editor_replica_rebuild_edges(
+    plane: &EditorReplicaRebuildPlane,
+    targets: &BTreeSet<EditorReplicaRebuildTarget>,
+) -> Vec<EditorReplicaRebuildTarget> {
+    let mut published = plane.published.lock();
+    published.retain(|target| targets.contains(target));
+    let claimed = targets.difference(&published).cloned().collect::<Vec<_>>();
+    published.extend(claimed.iter().cloned());
+    claimed
+}
+
+fn dispatch_editor_replica_rebuild_targets_with(
+    project_root: &Path,
+    plane: &EditorReplicaRebuildPlane,
+    targets: &BTreeSet<EditorReplicaRebuildTarget>,
+    driver: &str,
+    mut signal: impl FnMut(&Path) -> Result<()>,
+) {
+    for target in claim_editor_replica_rebuild_edges(plane, targets) {
+        let file = std::path::PathBuf::from(&target.path);
+        match signal(&file) {
+            Ok(()) => agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "editor_replica_rebuild_requested file={} pid={} editor_id={} strategy={} driver={driver}",
+                    target.path,
+                    target.pid,
+                    target.editor_id,
+                    target.strategy.label(),
+                ),
+            ),
+            Err(err) => {
+                // A future liveness edge may retry a failed transport, but this
+                // dispatch never retries inline and therefore cannot spin.
+                plane.published.lock().remove(&target);
+                agent_doc_ops_log_io::log_op(
+                    project_root,
+                    &format!(
+                        "editor_replica_rebuild_failed file={} pid={} editor_id={} strategy={} driver={driver} error={}",
+                        target.path,
+                        target.pid,
+                        target.editor_id,
+                        target.strategy.label(),
+                        format!("{err:#}")
+                            .replace('\n', " | ")
+                            .chars()
+                            .take(160)
+                            .collect::<String>()
+                    ),
+                );
+            }
+        }
+    }
+}
+
+/// Publish the current missing-replica set through the Tier 2 edge dispatcher.
 ///
-/// Idempotent: an unchanged set does not re-fire, and an empty set does nothing.
+/// Idempotent: an unchanged set does not re-fire, and an empty set retires prior
+/// receipts without sending IPC.
 /// Called at controller start and whenever folded liveness ops may have changed the
 /// registration set.
-fn publish_editor_replica_rebuild_targets(project_root: &Path) {
+fn publish_editor_replica_rebuild_targets(project_root: &Path, driver: &str) {
     // The hub is process-local, so anything the plane says is registered but this
     // process cannot serve is stranded. Peer pull is a complementary recovery
     // path, not a reason to suppress this targeted push: a controller restart can
     // be transport-transparent to the editor, so no peer pull is triggered.
     let held: BTreeSet<String> = BTreeSet::new();
-    let targets: Vec<(String, u64, String)> = controller_liveness_plane()
+    let registrations = controller_liveness_plane()
         .lock()
         .projection()
         .registrations_missing_replica(&held)
-        .into_iter()
-        .filter(|registration| !controller_serves_replica(&registration.path))
-        .map(|registration| (registration.path, registration.pid, registration.editor_id))
-        .collect();
-    let plane = editor_replica_rebuild_plane(project_root);
-    plane.scope.ctx().set(&plane.targets, targets);
+        .into_iter();
+    // One document needs one rebuild signal even if stale liveness contains more
+    // than one registration for the same path.
+    let mut by_path = BTreeMap::<String, EditorReplicaRebuildTarget>::new();
+    for registration in registrations {
+        if controller_serves_replica(&registration.path) {
+            continue;
+        }
+        let strategy = editor_replica_repair_strategy(&registration);
+        by_path
+            .entry(registration.path.clone())
+            .or_insert_with(|| EditorReplicaRebuildTarget {
+                path: registration.path,
+                pid: registration.pid,
+                editor_id: registration.editor_id,
+                strategy,
+            });
+    }
+    let targets = by_path.into_values().collect::<BTreeSet<_>>();
+    dispatch_editor_replica_rebuild_targets_with(
+        project_root,
+        editor_replica_rebuild_plane(),
+        &targets,
+        driver,
+        |file| {
+            agent_doc_crdt_relay_io::signal_crdt_replica_event(
+                file,
+                agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
+                1,
+            )
+        },
+    );
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum EditorReplicaRepairStrategy {
     ControllerPush,
     ControllerPushWithPeerPull,
@@ -13436,58 +13485,6 @@ fn editor_replica_repair_strategy(
         EditorReplicaRepairStrategy::ControllerPushWithPeerPull
     } else {
         EditorReplicaRepairStrategy::ControllerPush
-    }
-}
-
-fn request_editor_replica_rebuild_after_restart(project_root: &Path) {
-    // Ask the REPLICATED plane which registrations lack a replica here,
-    // rather than re-deriving "everyone" and pushing at all of them. `held` is what
-    // this process actually has — the hub is process-local, so after a restart it is
-    // empty and the derivation names exactly the stranded set.
-    let held: BTreeSet<String> = BTreeSet::new();
-    let registrations = controller_liveness_plane()
-        .lock()
-        .projection()
-        .registrations_missing_replica(&held);
-    let mut requested: BTreeSet<String> = BTreeSet::new();
-    for registration in registrations {
-        let strategy = editor_replica_repair_strategy(&registration);
-        if !requested.insert(registration.path.clone()) {
-            continue;
-        }
-        let file = std::path::PathBuf::from(&registration.path);
-        match agent_doc_crdt_relay_io::signal_crdt_replica_event(
-            &file,
-            agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
-            1,
-        ) {
-            Ok(()) => agent_doc_ops_log_io::log_op(
-                project_root,
-                &format!(
-                    "controller_restart_editor_replica_rebuild_requested file={} pid={} editor_id={} strategy={}",
-                    registration.path,
-                    registration.pid,
-                    registration.editor_id,
-                    strategy.label()
-                ),
-            ),
-            // Never swallow: an editor we could not reach is exactly the one an
-            // operator will find stranded, so name it.
-            Err(err) => agent_doc_ops_log_io::log_op(
-                project_root,
-                &format!(
-                    "controller_restart_editor_replica_rebuild_failed file={} pid={} editor_id={} error={}",
-                    registration.path,
-                    registration.pid,
-                    registration.editor_id,
-                    format!("{err:#}")
-                        .replace('\n', " | ")
-                        .chars()
-                        .take(160)
-                        .collect::<String>()
-                ),
-            ),
-        }
     }
 }
 
@@ -13996,7 +13993,7 @@ fn handle_reliable_sync(
     // set is unchanged or empty. Done after the plane lock is released so the effect
     // never runs while holding it.
     if folded_liveness {
-        publish_editor_replica_rebuild_targets(project_root);
+        publish_editor_replica_rebuild_targets(project_root, "liveness_edge");
     }
 
     Ok(ControllerReliableSyncResponse {
@@ -29220,6 +29217,77 @@ mod tests {
         assert!(!public_controller_matches_generation(&status, 42, 8));
         status.handoff_state = Some(ControllerHandoffState::Preparing);
         assert!(!public_controller_matches_generation(&status, 42, 7));
+    }
+
+    #[test]
+    fn editor_replica_rebuild_edge_is_claimed_before_reentrant_editor_ipc() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let plane = EditorReplicaRebuildPlane::default();
+        let target = EditorReplicaRebuildTarget {
+            path: dir.path().join("session.md").to_string_lossy().into_owned(),
+            pid: 42,
+            editor_id: "jetbrains-42".to_string(),
+            strategy: EditorReplicaRepairStrategy::ControllerPush,
+        };
+        let targets = BTreeSet::from([target]);
+        let calls = std::cell::Cell::new(0usize);
+
+        dispatch_editor_replica_rebuild_targets_with(
+            dir.path(),
+            &plane,
+            &targets,
+            "test_outer",
+            |_| {
+                calls.set(calls.get() + 1);
+                // The real signal can synchronously produce a reliable-sync
+                // callback. Republishing the same missing set from that callback
+                // must observe the pre-claimed edge and return without another
+                // signal or a Lazily invalidation loop.
+                dispatch_editor_replica_rebuild_targets_with(
+                    dir.path(),
+                    &plane,
+                    &targets,
+                    "test_reentrant",
+                    |_| {
+                        calls.set(calls.get() + 100);
+                        Ok(())
+                    },
+                );
+                Ok(())
+            },
+        );
+        assert_eq!(calls.get(), 1);
+
+        dispatch_editor_replica_rebuild_targets_with(
+            dir.path(),
+            &plane,
+            &targets,
+            "test_unchanged",
+            |_| {
+                calls.set(calls.get() + 100);
+                Ok(())
+            },
+        );
+        assert_eq!(calls.get(), 1, "an unchanged edge stays single-flight");
+
+        dispatch_editor_replica_rebuild_targets_with(
+            dir.path(),
+            &plane,
+            &BTreeSet::new(),
+            "test_cleared",
+            |_| Ok(()),
+        );
+        dispatch_editor_replica_rebuild_targets_with(
+            dir.path(),
+            &plane,
+            &targets,
+            "test_reappeared",
+            |_| {
+                calls.set(calls.get() + 1);
+                Ok(())
+            },
+        );
+        assert_eq!(calls.get(), 2, "a genuinely new edge remains retryable");
     }
 
     #[test]

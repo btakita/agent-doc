@@ -2,6 +2,25 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.257
+
+- **Fix: Compact Exchange is single-flight while editor delivery is pending,
+  and Codex lifecycle hooks return before their harness deadlines.**
+
+The Project Controller now gives compaction a typed terminal or retained
+outcome. A retained compact target owns one durable continuation per document;
+repeated Compact Exchange requests reuse that continuation instead of composing
+another target. `--commit` reports its HEAD scope only after the compacted
+projection was delivered and the matching commit was proven. Pending delivery
+instead prints a truthful recovery note that tells the operator not to retry and
+to restart a stale editor plugin when necessary.
+
+Codex Stop handling now has a 20-second binary-owned budget inside the installed
+30-second hook timeout, returns a valid fail-closed response when recovery takes
+too long, and leaves longer retries to the route-owned supervisor. Codex hook
+installation also projects and repairs explicit 120-second preflight and
+30-second Stop timeouts for existing user hook entries.
+
 ## 0.35.256
 
 - **Fix: exact-visible editor layout no longer stalls at three panes after a

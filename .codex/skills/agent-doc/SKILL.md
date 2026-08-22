@@ -2,7 +2,7 @@
 description: "Interactive markdown session for Codex. TRIGGER: user writes agent-doc <file> as a normal Codex message. Requires a markdown session document, installed CLI, and write+commit every cycle. Do not use slash commands; Codex rejects project-defined /agent-doc."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.35.256"
+agent-doc-version: "0.35.257"
 ---
 
 # agent-doc
@@ -115,7 +115,7 @@ Complete requested implementation, verification, build/install, and local inspec
 
 **Tmux CI review for test-bearing turns:** when the cycle runs tests or changes test/build/instruction surfaces, inspect the latest CI tmux-test result. Check the latest run status with `gh run list --workflow CI --limit 1`; if it is already red after runner startup, run `make tmux-ci` locally, fix it, and add deterministic SimWorld coverage for the regression class. If the latest run is queued or in progress, record that it is still pending and continue the turn from local verification evidence instead of waiting for CI to finish. Do not use `gh run watch` as a closeout gate unless the user explicitly asks. An empty-step job with no logs because GitHub never started a runner (for example billing/spending-limit exhaustion) is an external CI-start blocker, not a code/tmux regression; record the annotation and continue with local evidence.
 
-The `respond` command is the binary-owned turn-resolution and final document-mutation boundary for the cycle (`finalize` is its compatibility alias). After `respond` / `write --commit`, do not start more long-running task work for that same turn. Codex hooks in user-level `$CODEX_HOME/hooks.json` plus project-local `.codex/config.toml` are a fail-closed backstop, not a replacement for binary-owned closeout.
+The `respond` command is the binary-owned turn-resolution and final document-mutation boundary for the cycle (`finalize` is its compatibility alias). After `respond` / `write --commit`, do not start more long-running task work for that same turn. Codex hooks in user-level `$CODEX_HOME/hooks.json` plus project-local `.codex/config.toml` are a bounded, fail-closed backstop, not a replacement for binary-owned closeout; the supervisor owns retries that outlive a hook budget.
 
 ```bash
 cat <<'RESPONSE' | agent-doc respond <FILE> --stream --origin skill

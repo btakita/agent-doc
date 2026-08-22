@@ -447,7 +447,8 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         &self,
         file: &Path,
         invocation: agent_doc_controller_io::project_controller::ControllerCompactDocumentInvocation,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<agent_doc_controller_io::project_controller::ControllerCompactDocumentOutcome>
+    {
         agent_doc_document_realtime_io::with_controller_document_mutation(|| {
             agent_doc_compact_io::run_in_controller(
                 file,

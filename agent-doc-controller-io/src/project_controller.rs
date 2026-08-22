@@ -170,7 +170,29 @@ pub struct ControllerCompactDocumentInvocation {
     pub force_disk: bool,
 }
 
+/// Authoritative result of one controller-owned Compact Exchange request.
+///
+/// A retained write is accepted work, but it is not a commit. Keeping that
+/// distinction in the RPC result prevents CLI/editor adapters from inferring
+/// HEAD state from command acceptance (`#compact-outcome-truth`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ControllerCompactDocumentOutcome {
+    NoChanges,
+    AppliedUncommitted,
+    Committed,
+    RetainedPending {
+        continuation_id: String,
+        commit: bool,
+    },
+    AlreadyPending {
+        continuation_id: String,
+        commit: bool,
+    },
+}
+
 pub const COMPACT_COMMIT_SCOPE_NOTE: &str = "[compact] note: --commit persists only the compacted document state now in HEAD; any later console explanation still needs its own `agent-doc finalize` or `agent-doc write --commit` cycle to land in `exchange`";
+pub const COMPACT_RETAINED_PENDING_NOTE: &str = "[compact] pending: the compacted target is retained for editor delivery and is not yet committed. Do not retry Compact Exchange while this target is pending; if delivery remains pending, restart the editor so its agent-doc plugin reconnects";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerTmuxLayoutSyncInvocation {
@@ -1531,7 +1553,7 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         &self,
         file: &Path,
         invocation: ControllerCompactDocumentInvocation,
-    ) -> Result<()>;
+    ) -> Result<ControllerCompactDocumentOutcome>;
 
     /// Apply the snapshot/commit Effect selected by a durable compact
     /// continuation after the document projection clears its retained write.
@@ -1636,7 +1658,7 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
         &self,
         _file: &Path,
         _invocation: ControllerCompactDocumentInvocation,
-    ) -> Result<()> {
+    ) -> Result<ControllerCompactDocumentOutcome> {
         anyhow::bail!("project controller test runtime does not compact documents")
     }
 
@@ -13893,6 +13915,75 @@ revised operator request
         let continuation = compact_resume_signal(Some(&projection), 1).unwrap();
         assert_eq!(continuation.continuation_id, "compact-continuation");
         assert!(continuation.commit);
+    }
+
+    #[test]
+    fn compact_admission_composes_unrelated_retained_write_then_reuses_compact_continuation() {
+        let document_hash = "doc-compact-admission";
+        let mut projection = agent_doc_state_backbone::DocumentStateProjection::new(document_hash);
+        let deferred =
+            deferred_document_write_event(document_hash, "retained-intent", "retained-target");
+        projection.apply_fact(&deferred.fact);
+
+        assert_eq!(
+            compact_document_admission(Some(&projection)),
+            CompactDocumentAdmission::Execute,
+            "an unrelated retained response remains eligible for component composition",
+        );
+
+        projection.apply_fact(
+            &agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
+                document_hash: document_hash.to_string(),
+                continuation_id: "compact-continuation".to_string(),
+                file: "/work/sample.md".to_string(),
+                live_content: "live compact target".to_string(),
+                committed_content: "committed compact target".to_string(),
+                target_component: Some("exchange".to_string()),
+                commit: true,
+            },
+        );
+
+        assert_eq!(
+            compact_document_admission(Some(&projection)),
+            CompactDocumentAdmission::AlreadyPending {
+                continuation_id: "compact-continuation".to_string(),
+                commit: true,
+            },
+            "a repeated compact request must reuse the existing continuation instead of composing another write",
+        );
+    }
+
+    #[test]
+    fn compact_admission_executes_without_retained_state() {
+        assert_eq!(
+            compact_document_admission(None),
+            CompactDocumentAdmission::Execute
+        );
+        let projection =
+            agent_doc_state_backbone::DocumentStateProjection::new("doc-compact-ready");
+        assert_eq!(
+            compact_document_admission(Some(&projection)),
+            CompactDocumentAdmission::Execute
+        );
+    }
+
+    #[test]
+    fn compact_head_claim_requires_committed_outcome() {
+        assert!(compact_outcome_claims_head(
+            &ControllerCompactDocumentOutcome::Committed
+        ));
+        assert!(!compact_outcome_claims_head(
+            &ControllerCompactDocumentOutcome::RetainedPending {
+                continuation_id: "compact-continuation".to_string(),
+                commit: true,
+            }
+        ));
+        assert!(!compact_outcome_claims_head(
+            &ControllerCompactDocumentOutcome::AlreadyPending {
+                continuation_id: "compact-continuation".to_string(),
+                commit: true,
+            }
+        ));
     }
 
     #[test]

@@ -6641,17 +6641,47 @@ pub fn compact_document_via_controller(
             CONTROLLER_COMPACT_DOCUMENT_TIMEOUT,
         )
     };
-    match submit(request.clone()) {
-        Err(err) if err.to_string().contains("controller_binary_stale") => {
-            submit(request)?;
-        }
-        other => {
-            other?;
-        }
-    }
-    if commit {
+    let outcome = match submit(request.clone()) {
+        Err(err) if err.to_string().contains("controller_binary_stale") => submit(request)?,
+        other => other?,
+    };
+    let outcome: ControllerCompactDocumentOutcome =
+        serde_json::from_value(outcome).context("failed to parse compact_document outcome")?;
+    if compact_outcome_claims_head(&outcome) {
         eprintln!("{COMPACT_COMMIT_SCOPE_NOTE}");
     }
+    match &outcome {
+        ControllerCompactDocumentOutcome::Committed => {}
+        ControllerCompactDocumentOutcome::RetainedPending { .. } => {
+            eprintln!("{COMPACT_RETAINED_PENDING_NOTE}");
+        }
+        ControllerCompactDocumentOutcome::AlreadyPending {
+            continuation_id,
+            commit: pending_commit,
+        } => {
+            eprintln!("{COMPACT_RETAINED_PENDING_NOTE}");
+            eprintln!(
+                "[compact] pending: existing continuation {continuation_id} already owns this document (commit_requested={pending_commit})"
+            );
+        }
+        ControllerCompactDocumentOutcome::NoChanges => {
+            eprintln!(
+                "[compact] no compaction changes; leaving document and commit state untouched"
+            );
+        }
+        ControllerCompactDocumentOutcome::AppliedUncommitted => {
+            eprintln!(
+                "[compact] WARNING: compaction was applied without a commit; run Compact Exchange with --commit after the document settles"
+            );
+        }
+    }
+    debug_assert!(
+        !commit
+            || !matches!(
+                outcome,
+                ControllerCompactDocumentOutcome::AppliedUncommitted
+            )
+    );
     Ok(())
 }
 
@@ -7008,6 +7038,40 @@ fn handle_commit_document_rpc(
     runtime_effects()?.commit_document(&canonical, payload.authoritative_compaction)
 }
 
+/// Single-flight admission for controller-owned compaction.
+///
+/// This is a one-shot command admission read from the controller's existing
+/// document graph. The long-lived relationship remains reactive: retained
+/// delivery receipts clear `pending_write`, which enables the compact
+/// continuation effect. The RPC does not poll or recompute settlement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CompactDocumentAdmission {
+    Execute,
+    AlreadyPending {
+        continuation_id: String,
+        commit: bool,
+    },
+}
+
+pub(crate) fn compact_outcome_claims_head(outcome: &ControllerCompactDocumentOutcome) -> bool {
+    matches!(outcome, ControllerCompactDocumentOutcome::Committed)
+}
+
+pub(crate) fn compact_document_admission(
+    projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
+) -> CompactDocumentAdmission {
+    let Some(projection) = projection else {
+        return CompactDocumentAdmission::Execute;
+    };
+    if let Some(continuation) = projection.document.pending_compact_projection.as_ref() {
+        return CompactDocumentAdmission::AlreadyPending {
+            continuation_id: continuation.continuation_id.clone(),
+            commit: continuation.commit,
+        };
+    }
+    CompactDocumentAdmission::Execute
+}
+
 fn handle_compact_document_rpc(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -7018,6 +7082,30 @@ fn handle_compact_document_rpc(
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
     let invocation: ControllerCompactDocumentInvocation =
         serde_json::from_str(&payload_json).context("failed to parse compact_document payload")?;
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let projection = runtime.document_state_projection(&document_hash)?;
+    match compact_document_admission(projection.as_ref()) {
+        CompactDocumentAdmission::Execute => {}
+        CompactDocumentAdmission::AlreadyPending {
+            continuation_id,
+            commit,
+        } => {
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "controller_compact_document_already_pending file={} continuation_id={} commit={} action=return_existing_without_rewrite",
+                    canonical.display(),
+                    continuation_id,
+                    commit,
+                ),
+            );
+            return serde_json::to_value(ControllerCompactDocumentOutcome::AlreadyPending {
+                continuation_id,
+                commit,
+            })
+            .context("failed to serialize already-pending compact outcome");
+        }
+    }
     let barrier_ready = commit_barrier_for_closeout(runtime, &canonical)?;
     agent_doc_ops_log_io::log_op(
         &canonical,
@@ -7029,12 +7117,12 @@ fn handle_compact_document_rpc(
             barrier_ready,
         ),
     );
-    runtime_effects()?.compact_document(&canonical, invocation)?;
+    let outcome = runtime_effects()?.compact_document(&canonical, invocation)?;
     // Compact may admit a durable continuation from inside the runtime port.
     // Rehydrate that state into the same per-document Lazily graph before this
     // RPC returns; no caller retry or editor receipt drives the continuation.
     runtime.refresh_memory()?;
-    Ok(serde_json::json!({ "executed_by": "cp" }))
+    serde_json::to_value(outcome).context("failed to serialize compact_document outcome")
 }
 
 fn handle_crdt_record_committed_baseline_rpc(

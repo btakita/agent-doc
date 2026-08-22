@@ -1339,14 +1339,14 @@ fn merge_codex_hooks_json(path: &Path) -> Result<()> {
         "UserPromptSubmit",
         CODEX_USER_PROMPT_COMMAND,
         Some("Preparing agent-doc cycle"),
-        None,
+        Some(PREFLIGHT_HOOK_TIMEOUT_SECS),
     );
     ensure_codex_hook_command(
         hooks_map,
         "Stop",
         CODEX_STOP_COMMAND,
         Some("Checking agent-doc completion boundary"),
-        None,
+        Some(CODEX_STOP_HOOK_TIMEOUT_SECS),
     );
 
     let rendered = ensure_trailing_newline(&serde_json::to_string_pretty(&root)?);
@@ -1366,7 +1366,7 @@ const COINED_ID_PRETOOLUSE_COMMAND: &str = "agent-doc hook coined-id-pre-tool-us
 /// it cannot perturb an ordinary prompt.
 const PREFLIGHT_USER_PROMPT_COMMAND: &str = "agent-doc hook preflight-user-prompt-submit";
 
-/// `timeout` written onto the installed Claude `UserPromptSubmit` preflight hook.
+/// `timeout` written onto installed Claude/Codex `UserPromptSubmit` preflight hooks.
 ///
 /// Claude Code defaults an untimed hook to 30s and **discards its output** on
 /// expiry. Preflight measured 23-34s on an 87KB session document (2026-08-09),
@@ -1377,6 +1377,11 @@ const PREFLIGHT_USER_PROMPT_COMMAND: &str = "agent-doc hook preflight-user-promp
 /// always gets to name its own overrun before the harness kills it silently.
 pub(crate) const PREFLIGHT_HOOK_TIMEOUT_SECS: u64 = 120;
 
+/// Outer harness timeout for the Codex Stop backstop. The Stop implementation
+/// returns its own fail-closed JSON response first; this larger deadline exists
+/// only so the harness never discards that response.
+pub(crate) const CODEX_STOP_HOOK_TIMEOUT_SECS: u64 = 60;
+
 /// The harness timeout is the outer bound and the binary's own budget the inner
 /// one. If they ever crossed, the harness would kill the hook before it could
 /// name its overrun and the silence both exist to prevent would return — so this
@@ -1384,6 +1389,10 @@ pub(crate) const PREFLIGHT_HOOK_TIMEOUT_SECS: u64 = 120;
 const _: () = assert!(
     PREFLIGHT_HOOK_TIMEOUT_SECS > crate::preflight_hook::HOOK_ADMISSION_BUDGET_SECS,
     "the installed hook timeout must exceed the binary's admission budget"
+);
+const _: () = assert!(
+    CODEX_STOP_HOOK_TIMEOUT_SECS > agent_doc_codex_stop_io::STOP_HOOK_BUDGET_SECS,
+    "the installed Codex Stop timeout must exceed the binary's Stop budget"
 );
 
 const TURN_STATUS_ACTIVE_COMMAND: &str = "agent-doc turn-status active";
@@ -2888,6 +2897,7 @@ mod tests {
         assert!(stop_hooks.iter().any(|hook| {
             hook["command"].as_str() == Some(CODEX_STOP_COMMAND)
                 && hook["type"].as_str() == Some("command")
+                && hook["timeout"].as_u64() == Some(CODEX_STOP_HOOK_TIMEOUT_SECS)
         }));
         let submit_hooks = hooks["hooks"]["UserPromptSubmit"][0]["hooks"]
             .as_array()
@@ -2895,6 +2905,7 @@ mod tests {
         assert!(submit_hooks.iter().any(|hook| {
             hook["command"].as_str() == Some(CODEX_USER_PROMPT_COMMAND)
                 && hook["statusMessage"].as_str() == Some("Preparing agent-doc cycle")
+                && hook["timeout"].as_u64() == Some(PREFLIGHT_HOOK_TIMEOUT_SECS)
         }));
 
         let config: toml::Value =
@@ -2907,6 +2918,51 @@ mod tests {
             "Codex workflow should be installed as a skill, not .codex/AGENTS.md"
         );
         assert!(!dir.path().join(".codex/AGENTS.md").exists());
+    }
+
+    #[test]
+    fn codex_install_repairs_existing_lifecycle_hook_timeouts() {
+        let dir = tempfile::tempdir().unwrap();
+        let user_codex = dir.path().join("codex-home");
+        std::fs::create_dir_all(&user_codex).unwrap();
+        std::fs::write(
+            user_codex.join("hooks.json"),
+            serde_json::json!({
+                "hooks": {
+                    "UserPromptSubmit": [{
+                        "hooks": [{ "type": "command", "command": CODEX_USER_PROMPT_COMMAND }]
+                    }],
+                    "Stop": [{
+                        "hooks": [{ "type": "command", "command": CODEX_STOP_COMMAND }]
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        super::install_codex_user_hook_artifacts_at(&user_codex).unwrap();
+
+        let hooks: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(user_codex.join("hooks.json")).unwrap())
+                .unwrap();
+        let find = |event: &str, command: &str| {
+            hooks["hooks"][event]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|entry| entry["hooks"].as_array().unwrap())
+                .find(|hook| hook["command"].as_str() == Some(command))
+                .unwrap()
+        };
+        assert_eq!(
+            find("UserPromptSubmit", CODEX_USER_PROMPT_COMMAND)["timeout"].as_u64(),
+            Some(PREFLIGHT_HOOK_TIMEOUT_SECS),
+        );
+        assert_eq!(
+            find("Stop", CODEX_STOP_COMMAND)["timeout"].as_u64(),
+            Some(CODEX_STOP_HOOK_TIMEOUT_SECS),
+        );
     }
 
     #[test]

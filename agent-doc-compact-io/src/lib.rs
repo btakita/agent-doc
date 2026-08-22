@@ -426,7 +426,7 @@ pub fn run(
 
     #[cfg(test)]
     {
-        run_in_controller(file, keep, component_name, message, tag, commit, force_disk)
+        run_in_controller(file, keep, component_name, message, tag, commit, force_disk).map(|_| ())
     }
     #[cfg(not(test))]
     agent_doc_controller_io::project_controller::compact_document_via_controller(
@@ -535,7 +535,7 @@ pub fn run_in_controller(
     tag: Option<&str>,
     commit: bool,
     force_disk: bool,
-) -> Result<()> {
+) -> Result<agent_doc_controller_io::project_controller::ControllerCompactDocumentOutcome> {
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
         run_in_controller_scoped(file, keep, component_name, message, tag, commit, force_disk)
     })
@@ -549,7 +549,8 @@ fn run_in_controller_scoped(
     tag: Option<&str>,
     commit: bool,
     force_disk: bool,
-) -> Result<()> {
+) -> Result<agent_doc_controller_io::project_controller::ControllerCompactDocumentOutcome> {
+    use agent_doc_controller_io::project_controller::ControllerCompactDocumentOutcome;
     let compact_started = std::time::Instant::now();
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -649,7 +650,7 @@ fn run_in_controller_scoped(
     };
     if requested_noop {
         eprintln!("[compact] no compaction changes; leaving document and commit state untouched");
-        return Ok(());
+        return Ok(ControllerCompactDocumentOutcome::NoChanges);
     }
     let prepare_ms = compact_started.elapsed().as_millis();
 
@@ -705,7 +706,7 @@ fn run_in_controller_scoped(
                 exchanges.len(),
                 keep_n
             );
-            return Ok(());
+            return Ok(ControllerCompactDocumentOutcome::NoChanges);
         }
 
         let to_archive = &exchanges[..exchanges.len() - keep_n];
@@ -769,14 +770,17 @@ fn run_in_controller_scoped(
     // the requested compaction retained the document byte-for-byte.
     if targets.live == content && targets.committed == content {
         eprintln!("[compact] no compaction changes; leaving document and commit state untouched");
-        return Ok(());
+        return Ok(ControllerCompactDocumentOutcome::NoChanges);
     }
     if !targets.settled {
-        retain_compact_projection(file, &targets, component_name, commit)?;
+        let continuation_id = retain_compact_projection(file, &targets, component_name, commit)?;
         eprintln!(
             "[compact] canonical target retained; lazy editor delivery projection will settle it"
         );
-        return Ok(());
+        return Ok(ControllerCompactDocumentOutcome::RetainedPending {
+            continuation_id,
+            commit,
+        });
     }
 
     if component_name.is_none() || component_name == Some("exchange") {
@@ -947,7 +951,11 @@ fn run_in_controller_scoped(
         ),
     );
 
-    Ok(())
+    Ok(if commit {
+        ControllerCompactDocumentOutcome::Committed
+    } else {
+        ControllerCompactDocumentOutcome::AppliedUncommitted
+    })
 }
 
 /// `#bbdcompactnocommit`: how long a `--commit` compact waits for its own change
@@ -990,7 +998,7 @@ fn retain_compact_projection(
     targets: &CompactDocumentTargets,
     target_component: Option<&str>,
     commit: bool,
-) -> Result<()> {
+) -> Result<String> {
     let canonical = file
         .canonicalize()
         .with_context(|| format!("failed to canonicalize {}", file.display()))?;
@@ -1025,7 +1033,7 @@ fn retain_compact_projection(
             commit,
         ),
     );
-    Ok(())
+    Ok(continuation_id)
 }
 
 #[cfg(not(test))]
@@ -1131,7 +1139,7 @@ fn commit_compacted_authoritative(
     file: &Path,
     authoritative_snapshot: &str,
     live_target: &str,
-) -> Result<()> {
+) -> Result<CompactCommitOutcome> {
     // The commit boundary may not create or reassert secondary durability
     // projections while the editor still owes an ACK for the live target.
     // Matching canonical text is necessary but not sufficient: it can be a
@@ -1163,8 +1171,9 @@ fn commit_compacted_authoritative(
     // `Ok(None)` (headless / missing relay model) leaves the disk+snapshot write
     // authoritative, and `verify_compact_head_landed` still fails closed if HEAD
     // does not land the compacted content.
-    closeout_compact_with_commit(file)?;
-    verify_compact_head_landed(file, authoritative_snapshot)
+    let outcome = closeout_compact_with_commit(file)?;
+    verify_compact_head_landed(file, authoritative_snapshot)?;
+    Ok(outcome)
 }
 
 fn fence_compacted_crdt_epoch(file: &Path) -> Result<()> {
@@ -1309,7 +1318,7 @@ fn verify_compact_head_landed(file: &Path, authoritative_snapshot: &str) -> Resu
     Ok(())
 }
 
-fn closeout_compact_with_commit(file: &Path) -> Result<()> {
+fn closeout_compact_with_commit(file: &Path) -> Result<CompactCommitOutcome> {
     // The `commit_with_outcome` port MUST establish the authoritative-compaction
     // scope (`agent_doc_commit_io::commit_with_authoritative_compaction`) so the
     // committed-historical response-patchback guard stands down for the archived
@@ -1325,11 +1334,7 @@ fn closeout_compact_with_commit(file: &Path) -> Result<()> {
             file.display()
         );
     }
-    eprintln!(
-        "{}",
-        agent_doc_controller_io::project_controller::COMPACT_COMMIT_SCOPE_NOTE
-    );
-    Ok(())
+    Ok(outcome)
 }
 
 /// `#stale-capture-after-compaction-blocks-route`: best-effort retirement of

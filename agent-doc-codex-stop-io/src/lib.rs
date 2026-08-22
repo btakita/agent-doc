@@ -58,7 +58,7 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 use agent_doc_codex_hook_io::project_root_for;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct StopInput {
     session_id: String,
     #[allow(dead_code)]
@@ -95,19 +95,111 @@ enum StopCloseAttempt {
     NotPossible,
 }
 
+/// Inner wall-clock budget for one Codex Stop hook invocation.
+///
+/// The route-owned supervisor owns long-lived closeout retries. A hook is an
+/// interactive status gate and must return a valid fail-closed response before
+/// the harness's outer timeout can discard its output.
+pub const STOP_HOOK_BUDGET_SECS: u64 = 45;
+const STOP_HOOK_BUDGET_ENV: &str = "AGENT_DOC_CODEX_STOP_HOOK_BUDGET_SECS";
+#[cfg(test)]
+const STOP_HOOK_TEST_DELAY_MS_ENV: &str = "AGENT_DOC_CODEX_STOP_HOOK_TEST_DELAY_MS";
+
+struct StopHookRun {
+    response: StopResponse,
+    timed_out: bool,
+}
+
+fn stop_hook_budget() -> std::time::Duration {
+    resolve_stop_hook_budget(std::env::var(STOP_HOOK_BUDGET_ENV).ok().as_deref())
+}
+
+fn resolve_stop_hook_budget(raw: Option<&str>) -> std::time::Duration {
+    let secs = raw
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .unwrap_or(STOP_HOOK_BUDGET_SECS);
+    std::time::Duration::from_secs(secs)
+}
+
 pub fn handle_stop() -> Result<()> {
-    let response = match read_stdin_payload()
+    let run = match read_stdin_payload()
         .and_then(|payload| serde_json::from_str::<StopInput>(&payload).context("parse stop JSON"))
-        .and_then(|input| apply_stop(&input))
+        .and_then(|input| apply_stop_within_budget(input, stop_hook_budget()))
     {
-        Ok(response) => response,
-        Err(err) => StopResponse::Stop {
-            continue_: false,
-            stop_reason: format!("agent-doc Stop hook failed closed: {err}"),
+        Ok(run) => run,
+        Err(err) => StopHookRun {
+            response: StopResponse::Stop {
+                continue_: false,
+                stop_reason: format!("agent-doc Stop hook failed closed: {err}"),
+            },
+            timed_out: false,
         },
     };
-    println!("{}", serde_json::to_string(&response)?);
+    println!("{}", serde_json::to_string(&run.response)?);
+    if run.timed_out {
+        // Rust threads cannot be cancelled. A timed-out recovery worker may
+        // still own long-running IO, so returning from this function alone can
+        // leave the hook process alive until the harness kills it and discards
+        // the response. Flush the valid fail-closed response, then terminate
+        // the hook process without waiting for that detached worker.
+        use std::io::Write as _;
+        std::io::stdout()
+            .flush()
+            .context("flush timed-out Codex Stop response")?;
+        std::process::exit(0);
+    }
     Ok(())
+}
+
+fn apply_stop_within_budget(input: StopInput, budget: std::time::Duration) -> Result<StopHookRun> {
+    #[cfg(test)]
+    if let Some(delay_ms) = std::env::var(STOP_HOOK_TEST_DELAY_MS_ENV)
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+    {
+        return run_stop_hook_task_within_budget(budget, move || {
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+            Ok(StopResponse::Continue { continue_: true })
+        });
+    }
+    run_stop_hook_task_within_budget(budget, move || apply_stop(&input))
+}
+
+fn run_stop_hook_task_within_budget<F>(budget: std::time::Duration, task: F) -> Result<StopHookRun>
+where
+    F: FnOnce() -> Result<StopResponse> + Send + 'static,
+{
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("agent-doc-codex-stop".to_string())
+        .spawn(move || {
+            if sender.send(task()).is_err() {
+                eprintln!(
+                    "[agent-doc] Codex Stop hook worker finished after its response receiver closed"
+                );
+            }
+        })
+        .context("spawn Codex Stop hook worker")?;
+    match receiver.recv_timeout(budget) {
+        Ok(response) => response.map(|response| StopHookRun {
+            response,
+            timed_out: false,
+        }),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Ok(StopHookRun {
+            response: StopResponse::Stop {
+                continue_: false,
+                stop_reason: format!(
+                    "agent-doc Stop hook exceeded its {}s internal budget and failed closed before the harness timeout. The route-owned supervisor retains any captured closeout and continues recovery; do not rerun finalize or recapture the response.",
+                    budget.as_secs(),
+                ),
+            },
+            timed_out: true,
+        }),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            anyhow::bail!("Codex Stop hook worker exited without a response")
+        }
+    }
 }
 
 /// Resolve only the document binding owned by this exact Codex thread.
@@ -285,7 +377,9 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
     else {
         return false;
     };
-    const MAX_ATTEMPTS: u32 = 4;
+    // Stop is a status gate, not the retry owner. The supervisor reacts to the
+    // retained state edge after this single opportunistic attempt.
+    const MAX_ATTEMPTS: u32 = 1;
     for attempt in 1..=MAX_ATTEMPTS {
         match agent_doc_repair_command_io::resume_captured_finalize(file, &key) {
             agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. } => {
@@ -1183,6 +1277,87 @@ mod tests {
     use super::*;
     use std::fs;
     use std::process::Command as ProcessCommand;
+
+    #[test]
+    fn stop_hook_budget_override_is_positive_and_bounded_by_default() {
+        assert_eq!(
+            resolve_stop_hook_budget(None),
+            std::time::Duration::from_secs(STOP_HOOK_BUDGET_SECS)
+        );
+        assert_eq!(
+            resolve_stop_hook_budget(Some("3")),
+            std::time::Duration::from_secs(3)
+        );
+        assert_eq!(
+            resolve_stop_hook_budget(Some("0")),
+            std::time::Duration::from_secs(STOP_HOOK_BUDGET_SECS)
+        );
+    }
+
+    #[test]
+    fn stop_hook_budget_returns_a_fail_closed_response_before_outer_timeout() {
+        let run = run_stop_hook_task_within_budget(std::time::Duration::from_millis(1), || {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            Ok(StopResponse::Continue { continue_: true })
+        })
+        .unwrap();
+
+        assert!(run.timed_out);
+        assert!(matches!(
+            run.response,
+            StopResponse::Stop {
+                continue_: false,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn stop_hook_timeout_flushes_response_and_terminates_the_process() {
+        const CHILD_ENV: &str = "AGENT_DOC_CODEX_STOP_HOOK_TIMEOUT_CHILD";
+        if std::env::var_os(CHILD_ENV).is_some() {
+            handle_stop().unwrap();
+            panic!("timed-out hook must terminate the process after flushing its response");
+        }
+
+        let mut child = ProcessCommand::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::stop_hook_timeout_flushes_response_and_terminates_the_process",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, "1")
+            .env(STOP_HOOK_BUDGET_ENV, "1")
+            .env(STOP_HOOK_TEST_DELAY_MS_ENV, "5000")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        use std::io::Write as _;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(
+                br#"{"session_id":"session","turn_id":"turn","cwd":"/tmp","last_assistant_message":"","stop_hook_active":false}"#,
+            )
+            .unwrap();
+
+        let started = std::time::Instant::now();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "child failed: {output:?}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(4),
+            "timed-out hook waited for the detached worker: {:?}",
+            started.elapsed()
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(stdout.contains("\"continue\":false"), "{stdout}");
+        assert!(
+            stdout.contains("exceeded its 1s internal budget"),
+            "{stdout}"
+        );
+    }
 
     struct EnvGuard {
         key: &'static str,

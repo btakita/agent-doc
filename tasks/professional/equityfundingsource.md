@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -90,6 +90,11 @@ The completed Yelp formatting response is committed above. Its answered free-tex
 
 > **Queue prompt:**
 >
+> staging deploy
+
+
+> **Queue prompt:**
+>
 > The read full reviews on the Google reviews is not showing the full Google review. Please fix. Based on https://www.google.com/maps/place/Equity+Funding+Source/@34.0945796,-118.2175058,17z/data=!3m1!4b1!4m6!3m5!1s0x80c2c7de7f00feb1:0x6881362d450c158d!8m2!3d34.0945796!4d-118.2175058!16s%2Fg%2F11w9s1jmh7?entry=ttu&g_ep=EgoyMDI2MDgxMi4wIKXMDSoASAFQAw%3D%3D
 
 Fixed and committed in `117a2efc` (`fix(home): show complete Google reviews`).
@@ -105,8 +110,6 @@ Suggested commit message (used): `fix(home): show complete Google reviews`
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 The read full reviews on the Google reviews is not showing the full Google review. Please fix. Based on https://www.google.com/maps/place/Equity+Funding+Source/@34.0945796,-118.2175058,17z/data=!3m1!4b1!4m6!3m5!1s0x80c2c7de7f00feb1:0x6881362d450c158d!8m2!3d34.0945796!4d-118.2175058!16s%2Fg%2F11w9s1jmh7?entry=ttu&g_ep=EgoyMDI2MDgxMi4wIKXMDSoASAFQAw%3D%3D
-- staging deploy
 <!-- /agent:queue -->
 
 ## Backlog

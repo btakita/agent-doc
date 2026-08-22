@@ -183,14 +183,36 @@ Verification completed:
 - No GitHub Actions workflow named **CI** exists in this repository.
 
 Only the six intended implementation, PRD, and test files were committed. The existing **AGENTS.md** and **.agent/** worktree changes were preserved. The code push follows successful agent-doc closeout.
+
+### Re: Side-by-side Google and Yelp ratings — gpt-5
+
+> **Queue prompt:**
+>
+> Also show 5.0 on Yelp along-side 5.0 on Google ![img_8.png](img_8.png).
+
+Implemented and committed as **6db40390** (**fix(home): show Google and Yelp ratings together**).
+
+The testimonial summary card now presents two distinct rating columns: **5.0 on Google** and **5.0 on Yelp**, each with its own five-star accessibility label. The verified Google and Yelp profile links remain directly beneath the ratings. The layout follows the supplied screenshot on desktop and preserves the side-by-side ratings at 390 px; the narrower viewport stacks only the profile buttons.
+
+Verification completed:
+
+- Focused homepage tests passed.
+- Full **make check** completed with exit code 0; the digest matched the suite's expected mocked **d1 down** error path.
+- Headless-browser checks at desktop and 390 px confirmed equal rating columns, single-line platform labels, and no horizontal page overflow.
+- The public Yelp page blocked automated retrieval, so the operator-supplied screenshot is the approval source for the Yelp **5.0** claim.
+- No GitHub Actions workflow named **CI** exists in this repository.
+
+Only the three intended homepage, PRD, and test files were committed. The existing **AGENTS.md** and **.agent/** worktree changes were preserved. The code push follows successful agent-doc closeout.
+
+The session exchange is large; active queue draining continues without compaction as required by the current auto-queue.
 <!-- agent:boundary:a61b5b26:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Full Yelp reviews are still not rendering properly. Should this be a modal instead? ![img_7.png](img_7.png)~~
-- 🚧 Google full reviews should also be a modal...instead of expanding the height of the review section.
-- Also show 5.0 on Yelp along-side 5.0 on Google ![img_8.png](img_8.png).
-- deploy to staging
+- ~~Google full reviews should also be a modal...instead of expanding the height of the review section.~~
+- 🚧 📌 Also show 5.0 on Yelp along-side 5.0 on Google ![img_8.png](img_8.png).
+- 📌 deploy to staging
 <!-- /agent:queue -->
 
 ## Backlog

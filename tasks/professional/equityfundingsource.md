@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -38,10 +38,26 @@ complete
 Compacted content:
 - Archived 10 response topic(s): Google Reviews social proof; Remove Google Reviews border box; Deploy borderless Google Reviews to production; 7 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): do [#recommendedprunestale]; do [#recommendeddeploybrowser]; d...
+
+### Re: Homepage testimonial copy — gpt-5
+
+> **Queue prompt:** On the home page, replace "“Frankly the staff and leadership at Equity Funding saved my home from foreclosure.” with "Equity Funding provided me a high quality, high effort and the highest professionalism on a very difficult file, never wavering toward the goal of funding my loan.".
+
+Updated the Tim Hayden testimonial on the homepage to the approved wording. I also updated the lending-portal PRD to identify the approved excerpt and strengthened the homepage-copy regression test so it requires the new quote and rejects the retired quote.
+
+Verification passed:
+
+- `bun test tests/home-copy.test.ts`
+- `make check` (exit 0; the digest's `d1 down` match is an intentionally injected test error)
+- `git diff --check`
+
+Committed in the EFS repository as `edefef8a` (`fix(home): update Tim Hayden testimonial`). GitHub reports no workflow named `CI` and no recent workflow runs for this repository.
 <!-- agent:boundary:36f9b2a0:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~On the home page, replace "“Frankly the staff and leadership at Equity Funding saved my home from foreclosure.” with "Equity Funding provided me a high quality, high effort and the highest professionalism on a very difficult file, never wavering toward the goal of funding my loan.".~~
+- deploy to staging + production.
 <!-- /agent:queue -->
 
 ## Backlog

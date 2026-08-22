@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: go
+queue: start
 ---
 
 ## Status
@@ -205,13 +205,33 @@ Verification completed:
 Only the three intended homepage, PRD, and test files were committed. The existing **AGENTS.md** and **.agent/** worktree changes were preserved. The code push follows successful agent-doc closeout.
 
 The session exchange is large; active queue draining continues without compaction as required by the current auto-queue.
+
+### Re: Deploy to staging — gpt-5
+
+> **Queue prompt:**
+>
+> deploy to staging
+
+Deployed current **main** at **6db40390** to the isolated Cloudflare staging environment.
+
+- **Staging URL:** https://equityfundingsource.brian-takita.workers.dev
+- **Worker version:** **f81e53b9-f271-4f80-bf1c-e82950c102e3**
+- **Homepage smoke test:** HTTP 200
+- **Live content:** confirmed the Google and Yelp rating columns, Yelp **5.0** accessibility label, and **on Yelp** copy in the deployed HTML
+- **Live styling:** confirmed the deployed CSS contains the two-column rating grid rule
+- **Staging D1:** no migrations pending before or after deployment
+- **Recovery posture:** D1 Time Travel returned a current bookmark before deployment
+
+The deploy used the already-tested and pushed commits for the responsive Yelp review modal, Google review modal, and side-by-side Google/Yelp ratings. No additional source change or code commit was needed for this deployment-only queue item. The existing **AGENTS.md** and **.agent/** worktree changes remain untouched.
+
+The session exchange is large; this final active queue item is now complete without compacting during the drain.
 <!-- agent:boundary:a61b5b26:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Full Yelp reviews are still not rendering properly. Should this be a modal instead? ![img_7.png](img_7.png)~~
 - ~~Google full reviews should also be a modal...instead of expanding the height of the review section.~~
-- 🚧 📌 Also show 5.0 on Yelp along-side 5.0 on Google ![img_8.png](img_8.png).
+- ~~📌 Also show 5.0 on Yelp along-side 5.0 on Google ![img_8.png](img_8.png).~~ — auto-struck: answered this cycle (#ftstrike)
 - 📌 deploy to staging
 <!-- /agent:queue -->
 

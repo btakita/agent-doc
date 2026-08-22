@@ -33,103 +33,11 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260822-054320.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260822-180929.md`*
 
 Compacted content:
-- Archived 10 response topic(s): Google Reviews social proof; Remove Google Reviews border box; Deploy borderless Google Reviews to production; 7 more
-- Prior summary/context: prior compacted content: Archived 5 response topic(s): do [#recommendedprunestale]; do [#recommendeddeploybrowser]; d...
-
-### Re: Homepage testimonial copy — gpt-5
-
-> **Queue prompt:** On the home page, replace "“Frankly the staff and leadership at Equity Funding saved my home from foreclosure.” with "Equity Funding provided me a high quality, high effort and the highest professionalism on a very difficult file, never wavering toward the goal of funding my loan.".
-
-Updated the Tim Hayden testimonial on the homepage to the approved wording. I also updated the lending-portal PRD to identify the approved excerpt and strengthened the homepage-copy regression test so it requires the new quote and rejects the retired quote.
-
-Verification passed:
-
-- `bun test tests/home-copy.test.ts`
-- `make check` (exit 0; the digest's `d1 down` match is an intentionally injected test error)
-- `git diff --check`
-
-Committed in the EFS repository as `edefef8a` (`fix(home): update Tim Hayden testimonial`). GitHub reports no workflow named `CI` and no recent workflow runs for this repository.
-
-### Re: Staging and production deployment — gpt-5
-
-> **Queue prompt:** deploy to staging + production.
-
-Deployed EFS commit `edefef8a` to both isolated Cloudflare environments through the migration-aware release commands.
-
-- Staging: version `a4db3466-1ac0-425c-93ef-f84edcd5e2bb`; `https://equityfundingsource.brian-takita.workers.dev/` returns HTTP 200 and contains the exact new testimonial.
-- Production: version `3e21b070-8e4c-4d67-8ac9-e7ba7e3dde74`; both `https://equityfundingsource.com/` and `https://www.equityfundingsource.com/` return HTTP 200 and contain the exact new testimonial.
-- Both D1 environments reported current Time Travel bookmarks before deployment and no pending migrations before or after deployment.
-- The EFS checkout is clean and synchronized with `origin/main`.
-
-The semantic-completion deployment warning referred to an older `20d7a416` release and was advisory; this cycle deployed and verified the new testimonial commit. The unrelated `#zwws-vestings-local` semantic warning did not affect this release.
-
-### Re: Expandable homepage review — gpt-5
-
-> **Queue prompt:** Please make the review expandable to include the entire text of the review on the home page.
-
-Implemented and shipped the expandable Tim Hayden homepage review. The card now shows a concise, impactful lead by default and uses a native keyboard-accessible `<details>` / `<summary>` disclosure to reveal the exact complete EFS-approved wording in place. The control changes from “Read full review” to “Hide full review” when opened; no JavaScript is required.
-
-I also updated the lending-portal PRD to make the expandable-review behavior explicit and strengthened the homepage regression test to prove the disclosure structure, the collapsed preview, both control labels, and reconstruction of the exact approved full quote. The other two Google cards remain the short EFS-supplied excerpts because no unverified text was invented.
-
-Verification passed:
-
-- `bun test tests/home-copy.test.ts`
-- `make check` (exit 0; the digest's `d1 down` match is the suite's intentional error-path fixture)
-- `git diff --check`
-
-GitHub reports no workflow named `CI` for this repository. The EFS change is committed and pushed to `origin/main` as `a725b337` (`feat(home): add expandable testimonial review`). The preflight's stale-install warning was also resolved by rebuilding the local agent-doc binary/cdylib and installed editor plugins with `make install`; its two semantic-completion warnings concern older unrelated work and did not affect this change.
-
-Suggested commit message (used):
-
-```txt
-feat(home): add expandable testimonial review
-
-Add a native accessible disclosure for the approved Tim Hayden testimonial, document the homepage behavior in the lending-portal PRD, and cover the collapsed and expanded copy with a regression test.
-```
-
-### Re: Yelp testimonial carousel — gpt-5
-
-> **Queue prompt:** For EFS, we want to add more testimonials to the site, with a carousel showing 3 at a time. There are more reviews at https://www.yelp.com/biz/equity-funding-source-los-angeles. Please include Yelp reviews, showing the most impactful text of the review and expanding to the entire review. Also include a direct link to the review.
-
-Implemented and shipped a six-testimonial homepage carousel that pages through exactly three cards at a time. The first page already includes Yelp feedback, and the second page contains the remaining Google and Yelp cards.
-
-Added verified Yelp reviews from Ellisha S., Danny r., and Stephanie J. Each card shows a short high-impact excerpt, expands through Yelp's official full-review widget, and retains a reviewer-specific `hrid` link to the exact review. The widget is lazy-loaded only after a disclosure opens. The carousel has native previous/next buttons, disabled endpoint states, a live visible-range announcement, and accessible carousel semantics.
-
-Updated the lending-portal PRD and added both rendered-copy regression coverage and browser-DOM interaction tests. Verification passed:
-
-- `bun test tests/home-copy.test.ts tests/testimonials-carousel.test.ts`
-- `make check` (exit 0; the digest's `d1 down` match is the suite's intentional outage fixture)
-- `git diff --check`
-- Local Chromium smoke checks of the first page, next page, and an expanded live Yelp widget
-
-GitHub reports no workflow named `CI` for this repository. The implementation is committed and pushed to `origin/main` as `9b8ba667` (`feat(home): add Yelp testimonial carousel`). Unrelated local `AGENTS.md` and `.agent/` changes were left untouched.
-
-Suggested commit message (used):
-
-```txt
-feat(home): add Yelp testimonial carousel
-
-Add three verified Yelp testimonials to an accessible three-at-a-time carousel, lazy-load official full-review embeds, preserve direct review links, and cover the behavior in the PRD and tests.
-```
-
-### Re: Deploy testimonial carousel to staging — gpt-5
-
-> **Queue prompt:** deploy to staging
-
-Deployed EFS commit `9b8ba667` to the isolated top-level staging Worker. Production was not touched.
-
-- Staging URL: `https://equityfundingsource.brian-takita.workers.dev/`
-- Worker version: `62760fc4-481c-465e-af49-bde51f404aa0`
-- Pre-deploy D1 check: no pending migrations and a current Time Travel bookmark
-- Post-deploy D1 check: no pending migrations
-- Live HTTP check: 200
-- Live markup check: six testimonial cards, three Yelp cards, all three reviewer-specific `hrid` links, and carousel controls present
-- Live Chromium interaction check: the deployed browser bundle initialized successfully and advanced from testimonials 1–3 to 4–6, showing Danny r., Alfredo Arteaga, and Stephanie J. with correct endpoint button states
-
-The EFS checkout remains on `main` at `9b8ba667`, synchronized with `origin/main`. The pre-existing unrelated `AGENTS.md` and `.agent/` changes remain untouched.
+- Archived 5 response topic(s): Homepage testimonial copy; Staging and production deployment; Expandable homepage review; 2 more
+- Prior summary/context: prior compacted content: Archived 10 response topic(s): Google Reviews social proof; Remove Google Reviews border box...
 <!-- agent:boundary:36f9b2a0:equityfundingsource -->
 <!-- /agent:exchange -->
 

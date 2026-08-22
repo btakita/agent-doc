@@ -51,19 +51,29 @@ Completed `#yelpalongside`. The testimonial summary card now presents sibling **
 Updated the homepage PRD and regression coverage for the two profile destinations. Focused homepage/carousel tests passed, and the full `make check` suite completed successfully (exit 0). This repository currently has no GitHub Actions workflows configured to inspect.
 
 Committed and pushed to `equityfundingsource-dev` as `fd648226` (`feat(home): link Yelp beside Google reviews (#yelpalongside)`). I also rebuilt and installed the current `agent-doc` binary/library and matching JetBrains plugin package to resolve the preflight stale-install warning; supervisor recycling was scheduled for the next idle boundary.
-<!-- agent:boundary:36f9b2a0:equityfundingsource -->
+
+### Re: Testimonial auto-navigation — gpt-5
+
+Recommendation: **keep the testimonials manually navigated**. There are only two pages of text-heavy reviews, so autoplay adds distraction and can move content while someone is reading or interacting with an expanded review. The current Previous/Next controls keep the reading pace predictable.
+
+This also avoids the extra interaction contract required for accessible autoplay. WAI's [carousel pattern](https://www.w3.org/WAI/ARIA/apg/patterns/carousel/) says an auto-rotating carousel needs a stop/restart control, must stop when keyboard focus enters, and must stop on pointer hover; its [carousel tutorial](https://www.w3.org/WAI/tutorials/carousels/) likewise emphasizes user control over movement.
+
+Completed `#testimonialsautonavigate` by declaring `data-testimonial-rotation="manual"`, documenting the no-autoplay decision and future accessibility requirements in the homepage PRD, and updating regression coverage. Focused homepage/carousel tests passed, and the full `make check` suite completed successfully (exit 0). The EFS repository has no GitHub Actions workflows configured to inspect.
+
+Committed and pushed to `equityfundingsource-dev` as `d5dfef77` (`fix(home): keep testimonials user-controlled (#testimonialsautonavigate)`).
+<!-- agent:boundary:a61b5b26:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#yelpalongside]~~
-- do [#testimonialsautonavigate]
+- 🚧 do [#testimonialsautonavigate]
 - Full Yelp review does not format correctly ![img_5.png](img_5.png) 
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#testimonialsautonavigate] Should we make the testimonials auto-navigate?
+- [ ] 🚧 [#testimonialsautonavigate] Should we make the testimonials auto-navigate?
 <!-- /agent:backlog -->
 
 ## Review

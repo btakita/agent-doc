@@ -62,12 +62,49 @@ Thus preflight—and later Stop/session-check—waited on editor convergence unt
 The `monsterrodholders.md` dialog exposes a related bug: the “now in HEAD” note is printed unconditionally after the controller accepts the compact request ([rpc.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-controller-io/src/project_controller/rpc.rs:6652)), even when delivery is merely retained with `delivery_converged=false`. JetBrains also merges stderr into command output ([TerminalUtil.kt](/home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt:1374)).
 
 Four Compact Exchange attempts were recorded, but no compact commit landed after the 18:41:06 commit. The working document is only 8 additions/2 deletions from HEAD, so there is no wholesale content loss—but the note was premature and retries accumulated retained writes. Avoid further Compact Exchange retries until the JetBrains plugin generation is refreshed and the retained state settles.
+
+### Re: Response
+
+Fixed and released as agent-doc 0.35.258.
+
+The JetBrains notification you missed was recoverable from the retained controller state. The actionable text was:
+
+```
+[compact] pending: the compacted target is retained for editor delivery and is not yet committed. Do not retry Compact Exchange while this target is pending; if delivery remains pending, restart the editor so its agent-doc plugin reconnects
+[compact] pending: existing continuation compact-projection-ca2dcf...-b349dce3... already owns this document (commit_requested=true)
+```
+
+The separate `[compact] note: --commit persists only the compacted document state now in HEAD...` message is informational: the compact command commits the compacted document cut, but any explanation printed afterward still requires its own agent-doc response/finalize cycle.
+
+There were three linked Compact Exchange faults:
+
+- Production reconnect bypassed the semantic retained-write replay path, while JetBrains could abandon a transient post-registration read.
+- A newer retained Exchange target could remain behind an older converged compact summary. Recovery did not have a guarded way to replay the newer target while preserving sibling components.
+- Most importantly, compact completion failed once before the editor replica existed and then became one-shot. The retained continuation stayed unchanged, and replica registration did not emit the durable projection change that the Effect was waiting for.
+
+The fix routes reconnect through the durable semantic policy, adds fenced JetBrains retries and durable IDEA error logging, safely rebases a strictly newer retained Exchange target only when the authoritative post-boundary tail is empty, and advances a controller retry edge from changed CRDT registration/projection frontiers. Identical pull frontiers are deduplicated, and any operator text in the authoritative Exchange tail still fails closed.
+
+The Stop-hook timeout was a separate boundedness bug: repair/recovery work could outlive the harness's 30-second Stop deadline, so the harness killed the hook before it returned. The hook now owns a 20-second internal budget inside that deadline; longer recovery remains supervisor-owned. Preflight and Stop timeouts were also projected explicitly.
+
+Verification:
+
+- Focused Rust and JetBrains regressions pass.
+- Full `make check` passes.
+- Public-name hygiene and `git diff --check` pass.
+- The installed CLI/native/plugin report 0.35.258.
+- The original live continuation settled as state event 21522 without issuing another compact request.
+- JetBrains converged and saved hash `28652794132a52b2f34e21c495137b4f411f060f5e2fb66538d2484ee33907ff`.
+- The document worktree is clean at commit `5e0af2cf`.
+- Public fix commit `51ee565c9` and tag `v0.35.258` are pushed. CI and release workflows were started.
+The `agent-doc` cycle was not admitted because the document authority remained `delivery_pending` for 3079 ms.
+
+No preflight, document changes, or commit were performed. Retry after the current transition settles.
 <!-- agent:boundary:fdac7425:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- Compact Exchange is not compacting exchanges on monsterrodholders.md or agent-doc-bugs2.md. Please fix agent-doc causes.
+- do [#harnessresumemap]
 <!-- /agent:queue -->
 
 ## Notes

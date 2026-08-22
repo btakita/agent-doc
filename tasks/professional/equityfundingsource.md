@@ -149,11 +149,26 @@ fix(home): open Yelp reviews in responsive modal
 
 Move Yelp's official review widgets out of carousel cards and into accessible native dialogs, scale the branded widget for narrow viewports, preserve lazy loading and direct Yelp links, and update the PRD and testimonial coverage.
 ~~~
+
+### Re: Response
+
+Implemented and pushed the Yelp review modal fix.
+
+- Native accessible modal with Escape, backdrop/close controls, and focus restoration
+- Lazy Yelp widget loading
+- Responsive mobile scaling with no page or modal-panel overflow
+- Focused tests and full `make check` passed
+- Browser-verified at desktop and 390px mobile widths
+- Commit `30baab79` pushed to `origin/main`
+- `agent-doc` cycle committed; `session-check` passed
+- Unrelated `AGENTS.md` and `.agent/` changes preserved
+
+Suggested commit message (used): `fix(home): open Yelp reviews in responsive modal`
 <!-- agent:boundary:a61b5b26:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 Full Yelp reviews are still not rendering properly. Should this be a modal instead? ![img_7.png](img_7.png)
+- ~~Full Yelp reviews are still not rendering properly. Should this be a modal instead? ![img_7.png](img_7.png)~~
 - Google full reviews should also be a modal...instead of expanding the height of the review section.
 - Also show 5.0 on Yelp along-side 5.0 on Google ![img_8.png](img_8.png).
 - deploy to staging

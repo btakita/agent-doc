@@ -6,12 +6,27 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
+import com.intellij.openapi.vfs.VirtualFile
 import java.io.File
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import javax.swing.SwingUtilities
+
+/**
+ * Classifies editor files from their live document text, so layout projection never mistakes an
+ * ordinary Markdown plan/README for an agent-doc session document. Open editor files already have
+ * a document; using its chars avoids a disk read and observes unsaved frontmatter changes.
+ */
+internal object AgentDocSessionFiles {
+    fun isSessionDocument(file: VirtualFile): Boolean {
+        if (!file.name.endsWith(".md")) return false
+        val document = FileDocumentManager.getInstance().getDocument(file) ?: return false
+        return isAgentDocDocumentTextUtil(document.charsSequence)
+    }
+}
 
 /**
  * Manually re-syncs the tmux pane layout to match the current IDE editor split.
@@ -139,8 +154,9 @@ class SyncLayoutAction : AnAction() {
 
         internal fun collectVisibleMarkdownFiles(
             files: Array<out com.intellij.openapi.vfs.VirtualFile>,
+            isSessionDocument: (VirtualFile) -> Boolean = { it.name.endsWith(".md") },
         ): List<String> = files
-            .filter { it.name.endsWith(".md") }
+            .filter(isSessionDocument)
             .map { it.path }
             .distinct()
 
@@ -302,11 +318,14 @@ class SyncLayoutAction : AnAction() {
             }
             val manager = FileEditorManager.getInstance(project)
             val focusedVFile = manager.selectedTextEditor?.virtualFile
-                ?.takeIf { it.name.endsWith(".md") }
-                ?: manager.selectedFiles.firstOrNull { it.name.endsWith(".md") }
+                ?.takeIf(AgentDocSessionFiles::isSessionDocument)
+                ?: manager.selectedFiles.firstOrNull(AgentDocSessionFiles::isSessionDocument)
                 ?: return
             val focusedFile = focusedVFile.path
-            val visibleMdFiles = collectVisibleMarkdownFiles(manager.selectedFiles)
+            val visibleMdFiles = collectVisibleMarkdownFiles(
+                manager.selectedFiles,
+                AgentDocSessionFiles::isSessionDocument,
+            )
             if (visibleMdFiles.isEmpty()) {
                 if (notify) TerminalUtil.showHint(project, "No .md files open")
                 return
@@ -325,7 +344,13 @@ class SyncLayoutAction : AnAction() {
                 normalizeEditorLayout(
                     basePath,
                     projectRoot,
-                    LayoutDetector.detectEditorLayout(project),
+                    LayoutDetector.detectEditorLayout(
+                        project,
+                        manager.openFiles
+                            .filter(AgentDocSessionFiles::isSessionDocument)
+                            .map { it.path }
+                            .toSet(),
+                    ),
                 ),
             )
 
@@ -423,8 +448,8 @@ object LayoutDetector {
         selectedPath: String?,
         windowMarkdownTabsMruLast: List<String>,
     ): String? =
-        selectedPath?.takeIf { it.endsWith(".md") }
-            ?: windowMarkdownTabsMruLast.lastOrNull { it.endsWith(".md") }
+        selectedPath?.takeIf(windowMarkdownTabsMruLast::contains)
+            ?: windowMarkdownTabsMruLast.lastOrNull()
 
     /**
      * That window's `.md` tabs, ordered so the most recently used is last.
@@ -456,7 +481,10 @@ object LayoutDetector {
      * Detect the editor layout as a list of columns, each containing stacked files.
      * Returns null if detection fails or there's only one editor window.
      */
-    fun detectEditorLayout(project: com.intellij.openapi.project.Project): EditorLayout? {
+    fun detectEditorLayout(
+        project: com.intellij.openapi.project.Project,
+        sessionDocumentPaths: Set<String>? = null,
+    ): EditorLayout? {
         try {
             val managerEx = FileEditorManagerEx.getInstanceEx(project)
             val windows = managerEx.windows
@@ -472,6 +500,11 @@ object LayoutDetector {
                 return null
             }
 
+            val classifiedSessionPaths = sessionDocumentPaths ?: windows
+                .flatMap { it.fileList.toList() }
+                .filter(AgentDocSessionFiles::isSessionDocument)
+                .map { it.path }
+                .toSet()
             val snapshots = windows.map { window ->
                 // `#stickymdpane`: a window showing a source file still stands
                 // for the last document it showed, so the mirrored column
@@ -480,7 +513,9 @@ object LayoutDetector {
                     selectedPath = window.selectedFile?.path,
                     windowMarkdownTabsMruLast = markdownTabsMruLast(
                         project,
-                        window.fileList.map { it.path },
+                        window.fileList
+                            .map { it.path }
+                            .filter(classifiedSessionPaths::contains),
                     ),
                 )
                 val file = stickyPath

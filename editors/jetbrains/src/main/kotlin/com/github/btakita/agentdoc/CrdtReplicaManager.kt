@@ -3224,7 +3224,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
  * succeed. Kept as a plain content test, deliberately identical to the
  * controller's, so the two ends cannot disagree about what a session document is.
  */
-internal fun isAgentDocDocumentTextUtil(text: String): Boolean =
+internal fun isAgentDocDocumentTextUtil(text: CharSequence): Boolean =
     text.contains("agent_doc_session") ||
         text.contains("agent_doc_format") ||
         text.contains("agent_doc_write") ||

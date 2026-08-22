@@ -354,11 +354,16 @@ private data class CapturedSurface(
         fun visibleMarkdownFilesFromRestoredWindows(
             selectedWindowFiles: List<String?>,
             stickyWindowFallbacks: List<String?> = emptyList(),
+            sessionDocumentPaths: Set<String>? = null,
         ): List<String> =
             selectedWindowFiles
                 .mapIndexed { index, selected ->
-                    selected?.takeIf { it.endsWith(".md") }
-                        ?: stickyWindowFallbacks.getOrNull(index)?.takeIf { it.endsWith(".md") }
+                    selected?.takeIf { path ->
+                        sessionDocumentPaths?.contains(path) ?: path.endsWith(".md")
+                    }
+                        ?: stickyWindowFallbacks.getOrNull(index)?.takeIf { path ->
+                            sessionDocumentPaths?.contains(path) ?: path.endsWith(".md")
+                        }
                 }
                 .filterNotNull()
                 .distinct()
@@ -701,6 +706,8 @@ private data class CapturedSurface(
         ) {
             return null
         }
+        val openSessionFiles = manager.openFiles.filter(AgentDocSessionFiles::isSessionDocument)
+        val sessionDocumentPaths = openSessionFiles.map { it.path }.toSet()
         val rawVisibleMdFiles =
             SurfaceReport.visibleMarkdownFilesFromRestoredWindows(
                 selectedWindowFiles.map { it?.path },
@@ -710,20 +717,23 @@ private data class CapturedSurface(
                     LayoutDetector.stickyMarkdownForWindow(
                         selectedPath = window.selectedFile?.path,
                         windowMarkdownTabsMruLast =
-                            LayoutDetector.markdownTabsMruLast(
-                                project,
-                                window.fileList.map { it.path },
-                            ),
+                        LayoutDetector.markdownTabsMruLast(
+                            project,
+                            window.fileList
+                                .map { it.path }
+                                .filter(sessionDocumentPaths::contains),
+                        ),
                     )
                 },
+                sessionDocumentPaths,
             )
         val rawEditorLayout =
             project.basePath?.let { basePath ->
                 SyncLayoutAction.absolutizeEditorLayout(
                     basePath,
-                    LayoutDetector.detectEditorLayout(project),
-                )
-            } ?: LayoutDetector.detectEditorLayout(project)
+                        LayoutDetector.detectEditorLayout(project, sessionDocumentPaths),
+                    )
+                } ?: LayoutDetector.detectEditorLayout(project, sessionDocumentPaths)
         val settledProjection =
             if (reconcileStaleSelection) {
                 SelectionProjectionSettling.reconcileEventEdge(
@@ -740,10 +750,10 @@ private data class CapturedSurface(
             }
         val visibleMdFiles = settledProjection.visibleMdFiles
         if (visibleMdFiles.isEmpty()) return null
-        val openMarkdownFiles = manager.openFiles.filter { it.name.endsWith(".md") }
+        val openMarkdownFiles = openSessionFiles
         val preferredMarkdownFile = preferredFile?.takeIf { candidate ->
             candidate.isValid &&
-                candidate.name.endsWith(".md") &&
+                AgentDocSessionFiles.isSessionDocument(candidate) &&
                 openMarkdownFiles.any { it.path == candidate.path }
         }
         if (preferredFile != null && preferredMarkdownFile == null) return null
@@ -760,7 +770,8 @@ private data class CapturedSurface(
             return null
         }
         val selectedEditorFile =
-            manager.selectedTextEditor?.virtualFile?.takeIf { it.name.endsWith(".md") }
+            manager.selectedTextEditor?.virtualFile
+                ?.takeIf(AgentDocSessionFiles::isSessionDocument)
         val activeFilePath =
             SurfaceReport.resolveActiveFilePath(
                 preferredActiveFile = preferredMarkdownFile?.path,
@@ -769,9 +780,9 @@ private data class CapturedSurface(
             ) ?: return null
         val file =
             sequenceOf(
-                    preferredMarkdownFile,
-                    selectedEditorFile,
-                    manager.selectedFiles.firstOrNull { it.name.endsWith(".md") },
+                preferredMarkdownFile,
+                selectedEditorFile,
+                manager.selectedFiles.firstOrNull(AgentDocSessionFiles::isSessionDocument),
                 )
                 .filterNotNull()
                 .firstOrNull { it.path == activeFilePath } ?: return null
@@ -779,7 +790,7 @@ private data class CapturedSurface(
             managerEx.windows
                 .firstOrNull { it.selectedFile?.path == activeFilePath }
                 ?.fileList
-                ?.filter { it.name.endsWith(".md") }
+                ?.filter(AgentDocSessionFiles::isSessionDocument)
                 ?.map { it.path }
                 .orEmpty()
         val openMdFiles =
@@ -959,9 +970,22 @@ private data class CapturedSurface(
 
     override fun selectionChanged(event: FileEditorManagerEvent) {
         val file = event.newFile ?: return
-        if (!file.name.endsWith(".md")) return
-
         val project = event.manager.project
+        if (!AgentDocSessionFiles.isSessionDocument(file)) {
+            // A plain Markdown/source tab can occupy one editor split while that window still
+            // stands for its last agent-doc tab. Reproject the spanning layout, but never route
+            // focus or pane creation to the non-session file itself.
+            requestObservation(
+                PendingSurfaceObservation(
+                    project = project,
+                    preferredFile = null,
+                    forceReconcile = false,
+                    authority = ObservationAuthority.Layout,
+                ),
+            )
+            log("selectionChanged: non-session file=${file.name}; spanning projection queued")
+            return
+        }
         requestFocusProjection(project, file)
         log("selectionChanged: newFile=${file.name}; projection queued")
 
@@ -1011,7 +1035,18 @@ private data class CapturedSurface(
     * and IDEA does not emit [selectionChanged] when the operator moves between existing splits.
      */
     fun onEditorFocusGained(project: Project, file: VirtualFile) {
-        if (!file.name.endsWith(".md")) return
+        if (!AgentDocSessionFiles.isSessionDocument(file)) {
+            requestObservation(
+                PendingSurfaceObservation(
+                    project = project,
+                    preferredFile = null,
+                    forceReconcile = false,
+                    authority = ObservationAuthority.Layout,
+                ),
+            )
+            log("focusGained: non-session file=${file.name}; spanning projection queued")
+            return
+        }
         requestFocusProjection(project, file)
         requestObservation(
             PendingSurfaceObservation(
@@ -1055,7 +1090,18 @@ private data class CapturedSurface(
      * not depend on an explicit Sync Tmux Layout action.
      */
     override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
-        if (!file.name.endsWith(".md")) return
+        if (!AgentDocSessionFiles.isSessionDocument(file)) {
+            requestObservation(
+                PendingSurfaceObservation(
+                    project = source.project,
+                    preferredFile = null,
+                    forceReconcile = false,
+                    authority = ObservationAuthority.Layout,
+                ),
+            )
+            log("fileOpened: non-session file=${file.name}; spanning projection queued")
+            return
+        }
         log("fileOpened: file=${file.name}")
         requestObservation(
             PendingSurfaceObservation(

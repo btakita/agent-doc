@@ -62,7 +62,19 @@ class LayoutDetectorTest {
             "/repo/tasks/now.md",
             LayoutDetector.stickyMarkdownForWindow(
                 selectedPath = "/repo/tasks/now.md",
-                windowMarkdownTabsMruLast = listOf("/repo/tasks/stale.md"),
+                windowMarkdownTabsMruLast =
+                    listOf("/repo/tasks/stale.md", "/repo/tasks/now.md"),
+            ),
+        )
+    }
+
+    @Test
+    fun `stickyMarkdownForWindow ignores a selected non-session markdown plan`() {
+        assertEquals(
+            "/repo/tasks/backend.md",
+            LayoutDetector.stickyMarkdownForWindow(
+                selectedPath = "/repo/docs/backend-fpe-contracts-sdk-pr-plan.md",
+                windowMarkdownTabsMruLast = listOf("/repo/tasks/backend.md"),
             ),
         )
     }

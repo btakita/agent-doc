@@ -720,15 +720,14 @@ impl RelayHub {
         // commit barrier after a restart can already detect an out-of-band disk
         // correction / compaction (`#staleinmem`) instead of waiting for a finalize
         // to record one.
-        let last_committed_text = Some(canonical.text());
+        let recovered_text = canonical.text();
         let mut hub = Self::new(canonical_id);
         hub.canonical = canonical;
-        let recovered_text = hub.canonical.text();
         hub.reset_live_document_projection(&recovered_text);
         if let Some(lineage) = lineage.filter(|value| !value.is_empty()) {
             hub.lineage = lineage.to_string();
         }
-        hub.last_committed_text = last_committed_text;
+        hub.last_committed_text = Some(recovered_text);
         hub.last_committed_state_vector = Some(hub.canonical.state_vector());
         Ok(hub)
     }
@@ -739,14 +738,29 @@ impl RelayHub {
         canonical_id: u64,
         projection: &RetainedCanonicalProjection,
     ) -> Result<Self> {
-        let mut hub = Self::recover_from_projection_with_lineage(
-            canonical_id,
-            &projection.state,
-            Some(&projection.lineage),
-        )?;
+        // A controller handoff already carries the committed text/frontier beside the encoded
+        // CRDT. Re-entering through `recover_from_projection_with_lineage` would materialize the
+        // entire ordered CRDT merely to overwrite that baseline below. Repeated editor
+        // rebootstrap can make the retained history much larger than the visible document, so
+        // that redundant materialization can pin a replacement controller at 100% CPU and block
+        // the very RPC that is meant to complete the handoff.
+        //
+        // Decode the retained replica without rendering it on the default path. The opt-in
+        // CellDocTree projection still needs the exact current canonical text, so its explicit
+        // cutover pays that cost and keeps its incremental baseline correct.
+        let canonical = ReplicaState::from_encoded(canonical_id, &projection.state)?;
+        let mut hub = Self::new(canonical_id);
+        hub.canonical = canonical;
+        if let Some(lineage) = (!projection.lineage.is_empty()).then_some(&projection.lineage) {
+            hub.lineage = lineage.clone();
+        }
         hub.last_committed_text = projection.last_committed_text.clone();
         hub.last_committed_state_vector = projection.last_committed_state_vector.clone();
         hub.compact_epoch_requested = projection.compact_epoch_requested;
+        if hub.live_document_projection_enabled() {
+            let recovered_text = hub.canonical.text();
+            hub.reset_live_document_projection(&recovered_text);
+        }
         Ok(hub)
     }
 

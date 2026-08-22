@@ -2,6 +2,25 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.261
+
+- **Fix: tmux layout synchronization classifies real session documents, and
+  retained Compact Exchange recovery no longer pins a controller CPU.**
+
+JetBrains manual and automatic layout synchronization now classify an open
+Markdown buffer from its live editor content. An ordinary `.md` plan is excluded
+from the desired tmux surface, while that editor split retains its last visible
+agent document and still republishes spanning layout changes. Switching between
+agent documents in the opposite split therefore updates pane focus and layout
+without allowing an unrelated plan tab to suppress synchronization.
+
+Controller handoff now restores retained encoded CRDT state, lineage, and the
+committed state vector without eagerly materializing the whole document on the
+default projection path. Explicit CellDocTree cutover still renders the current
+text when required. This removes the hot recovery loop that could consume one
+CPU core, block controller RPCs, and leave the existing Compact Exchange
+continuation pending through repeated restart attempts.
+
 ## 0.35.260
 
 - **Fix: component compaction, Codex write-back, restart projection gates,

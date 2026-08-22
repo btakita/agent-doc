@@ -327,6 +327,22 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `a selected non-session markdown plan falls back to the windows agent doc`() {
+        val left = "/repo/tasks/left.md"
+        val right = "/repo/tasks/backend.md"
+        val plan = "/repo/docs/backend-fpe-contracts-sdk-pr-plan.md"
+
+        assertEquals(
+            listOf(left, right),
+            EditorTabSyncListener.SurfaceReport.visibleMarkdownFilesFromRestoredWindows(
+                selectedWindowFiles = listOf(left, plan),
+                stickyWindowFallbacks = listOf(left, right),
+                sessionDocumentPaths = setOf(left, right),
+            ),
+        )
+    }
+
+    @Test
     fun `stale selected-files projection is reread on later EDT turns`() {
         assertTrue(
             EditorTabSyncListener.SelectionProjectionSettling.shouldReproject(
@@ -717,7 +733,8 @@ class EditorTabSyncListenerTest {
             source
                 .substringAfter(fileOpenedMarker)
                 .substringBefore("override fun fileClosed")
-        assertTrue(fileOpened.contains("if (!file.name.endsWith(\".md\")) return"))
+        assertTrue(fileOpened.contains("if (!AgentDocSessionFiles.isSessionDocument(file))"))
+        assertTrue(fileOpened.contains("authority = ObservationAuthority.Layout"))
         assertTrue(fileOpened.contains("preferredFile = file"))
         assertTrue(fileOpened.contains("authority = ObservationAuthority.FileOpened"))
         assertFalse(fileOpened.contains("onEditorLayoutChanged(source.project)"))

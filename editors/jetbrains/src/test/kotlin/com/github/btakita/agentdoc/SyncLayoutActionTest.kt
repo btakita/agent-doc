@@ -382,6 +382,20 @@ class SyncLayoutActionTest {
     }
 
     @Test
+    fun `collect visible markdown files excludes non-session markdown plans`() {
+        val session = FakeVirtualFile("/repo/tasks/backend.md")
+        val plan = FakeVirtualFile("/repo/docs/backend-fpe-contracts-sdk-pr-plan.md")
+
+        assertEquals(
+            listOf(session.path),
+            SyncLayoutAction.collectVisibleMarkdownFiles(
+                arrayOf(session, plan),
+                isSessionDocument = { it.path == session.path },
+            ),
+        )
+    }
+
+    @Test
     fun `choose sync project root keeps single root sync scoped to that root`() {
         assertEquals(
             "/repo/src/sample-app",

@@ -2146,6 +2146,13 @@ struct ControllerDocumentGraphs {
     /// hydrates its durable inputs, then the sink installation advances this
     /// Source so already-satisfied effects rerun with a live durable sink.
     settle_generation: lazily::ThreadSafeSourceMap<String, u64>,
+    /// Projection/delivery edge for retryable compact completion. The compact
+    /// continuation itself is stable while editor delivery is unavailable, so
+    /// observing only its Computed value would make a failed Effect one-shot.
+    /// A later durable projection or changed live-delivery frontier advances
+    /// this generation while the continuation remains pending.
+    compact_retry_generation: lazily::ThreadSafeSourceMap<String, u64>,
+    next_compact_retry_generation: AtomicU64,
     verdict: lazily::ThreadSafeComputedMap<
         String,
         agent_doc_state_backbone::retained_write::SettlementVerdict,
@@ -2999,6 +3006,8 @@ impl ControllerDocumentGraphs {
             settlement_receipt: lazily::ThreadSafeSourceMap::new(&ctx),
             retained_delivery: lazily::ThreadSafeSourceMap::new(&ctx),
             settle_generation: lazily::ThreadSafeSourceMap::new(&ctx),
+            compact_retry_generation: lazily::ThreadSafeSourceMap::new(&ctx),
+            next_compact_retry_generation: AtomicU64::new(1),
             verdict: lazily::ThreadSafeComputedMap::new(&ctx),
             retained_transition_state: lazily::ThreadSafeComputedMap::new(&ctx),
             retained_transition_effect: lazily::ThreadSafeComputedMap::new(&ctx),
@@ -3092,6 +3101,10 @@ impl ControllerDocumentGraphs {
             .as_ref()
             .and_then(|document| document.closeout.owner.clone());
         let settle_generation = u64::from(self.settle_sink.get().is_some());
+        let compact_retry_generation = has_compact_continuation.then(|| {
+            self.next_compact_retry_generation
+                .fetch_add(1, Ordering::SeqCst)
+        });
         self.ctx.batch(|ctx| {
             self.authority
                 .set(ctx, document_hash.to_string(), authority);
@@ -3100,6 +3113,13 @@ impl ControllerDocumentGraphs {
                 .set(ctx, document_hash.to_string(), None);
             self.settle_generation
                 .set(ctx, document_hash.to_string(), settle_generation);
+            if let Some(compact_retry_generation) = compact_retry_generation {
+                self.compact_retry_generation.set(
+                    ctx,
+                    document_hash.to_string(),
+                    compact_retry_generation,
+                );
+            }
             self.closeout_cycle_id
                 .set(ctx, document_hash.to_string(), closeout_cycle_id);
             self.closeout_owner
@@ -3239,8 +3259,20 @@ impl ControllerDocumentGraphs {
         document_hash: &str,
         observation: Option<RetainedDeliveryObservation>,
     ) -> Option<RetainedResumeSignal> {
-        self.retained_delivery
-            .set(&self.ctx, document_hash.to_string(), observation);
+        let key = document_hash.to_string();
+        let delivery_changed =
+            self.retained_delivery.observe(&self.ctx, &key).flatten() != observation;
+        let compact_retry_generation = delivery_changed.then(|| {
+            self.next_compact_retry_generation
+                .fetch_add(1, Ordering::SeqCst)
+        });
+        self.ctx.batch(|ctx| {
+            self.retained_delivery.set(ctx, key.clone(), observation);
+            if let Some(compact_retry_generation) = compact_retry_generation {
+                self.compact_retry_generation
+                    .set(ctx, key, compact_retry_generation);
+            }
+        });
         self.current_retained_transition_state(document_hash)
             .resume_signal()
     }
@@ -3668,12 +3700,17 @@ impl ControllerDocumentGraphs {
         let key = document_hash.to_string();
         let signal_map = self.compact_resume.clone();
         let settle_generation = self.settle_generation.clone();
+        let compact_retry_generation = self.compact_retry_generation.clone();
         let applied = self.compact_resume_applied.clone();
         let sink = self.settle_sink.clone();
         let effect_key = key.clone();
         let effect = self.ctx.effect(move |ctx| {
             let _generation_present = settle_generation.contains_key(ctx, &effect_key);
             let _generation = settle_generation
+                .observe(ctx, &effect_key)
+                .unwrap_or_default();
+            let _retry_generation_present = compact_retry_generation.contains_key(ctx, &effect_key);
+            let _retry_generation = compact_retry_generation
                 .observe(ctx, &effect_key)
                 .unwrap_or_default();
             let Some(continuation) = signal_map.observe(ctx, &effect_key).flatten() else {
@@ -13915,6 +13952,86 @@ revised operator request
         let continuation = compact_resume_signal(Some(&projection), 1).unwrap();
         assert_eq!(continuation.continuation_id, "compact-continuation");
         assert!(continuation.commit);
+    }
+
+    #[test]
+    fn pending_compact_retries_on_projection_and_changed_delivery_edges() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let document_graphs = ControllerDocumentGraphs::new_in(&scope);
+        let document_hash = "doc-compact-retry";
+        let mut projection = agent_doc_state_backbone::DocumentStateProjection::new(document_hash);
+        projection.apply_fact(
+            &agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
+                document_hash: document_hash.to_string(),
+                continuation_id: "compact-continuation".to_string(),
+                file: "/work/task.md".to_string(),
+                live_content: "live compact target".to_string(),
+                committed_content: "committed compact target".to_string(),
+                target_component: Some("exchange".to_string()),
+                commit: true,
+            },
+        );
+
+        document_graphs.set_projection(document_hash, Some(projection.clone()));
+        let first = document_graphs
+            .compact_retry_generation
+            .observe(&document_graphs.ctx, &document_hash.to_string())
+            .unwrap();
+
+        document_graphs.set_projection(document_hash, Some(projection));
+        let projection_retry = document_graphs
+            .compact_retry_generation
+            .observe(&document_graphs.ctx, &document_hash.to_string())
+            .unwrap();
+
+        assert!(
+            projection_retry > first,
+            "a durable projection edge must retry the unchanged compact continuation"
+        );
+
+        let delivery = RetainedDeliveryObservation {
+            file: PathBuf::from("/work/task.md"),
+            content: Arc::from("live compact target"),
+            content_hash: "compact-target".to_string(),
+            live_editors: 1,
+            delivery_converged: false,
+            delivery_version: 1,
+        };
+        document_graphs.observe_retained_delivery(document_hash, Some(delivery.clone()));
+        let registration_retry = document_graphs
+            .compact_retry_generation
+            .observe(&document_graphs.ctx, &document_hash.to_string())
+            .unwrap();
+        assert!(
+            registration_retry > projection_retry,
+            "editor registration must retry the compact continuation even without a state event"
+        );
+
+        document_graphs.observe_retained_delivery(document_hash, Some(delivery.clone()));
+        assert_eq!(
+            document_graphs
+                .compact_retry_generation
+                .observe(&document_graphs.ctx, &document_hash.to_string()),
+            Some(registration_retry),
+            "an unchanged pull frontier must not spin compact completion"
+        );
+
+        document_graphs.observe_retained_delivery(
+            document_hash,
+            Some(RetainedDeliveryObservation {
+                delivery_converged: true,
+                delivery_version: 2,
+                ..delivery
+            }),
+        );
+        assert!(
+            document_graphs
+                .compact_retry_generation
+                .observe(&document_graphs.ctx, &document_hash.to_string())
+                .unwrap()
+                > registration_retry,
+            "the post-registration projection frontier must retry a transient failure"
+        );
     }
 
     #[test]

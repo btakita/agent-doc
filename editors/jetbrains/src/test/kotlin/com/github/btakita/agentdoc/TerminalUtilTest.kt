@@ -1090,6 +1090,28 @@ class TerminalUtilTest {
         )
     }
 
+    @Test
+    fun `document command failures are written to the durable idea log`() {
+        val terminalUtilPath =
+            listOf(
+                    Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt"),
+                    Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt"
+                    ),
+                )
+                .first { Files.exists(it) }
+        val source = Files.readString(terminalUtilPath)
+        val commandRunner =
+            source.substringAfter("private fun runDocumentCommand(")
+                .substringBefore("fun resolveAgentDoc(")
+
+        assertTrue(commandRunner.contains("LOG.warn("))
+        assertTrue(commandRunner.contains("[document-command] failed file="))
+        assertTrue(commandRunner.contains("exit=${'$'}exitCode"))
+        assertTrue(commandRunner.contains("output=${'$'}{output.ifBlank"))
+        assertTrue(commandRunner.contains("[document-command] failed to start file="))
+    }
+
     private class FakeRouteHandle(private var alive: Boolean) : TerminalUtil.InFlightRouteHandle {
         var cancelCount: Int = 0
             private set

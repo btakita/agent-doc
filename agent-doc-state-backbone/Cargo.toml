@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-state-backbone"
-version = "0.35.257"
+version = "0.35.258"
 edition = "2024"
 description = "Typed state event ledger and projections for agent-doc"
 license = "MIT"
@@ -11,8 +11,8 @@ publish = false
 name = "agent_doc_state_backbone"
 
 [dependencies]
-agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.257" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.257" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.258" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.258" }
 # Typed state-chart builder + ThreadSafeStateChart (lazily 0.21) plus the
 # generic causal receipt projection introduced in 0.21.3. The chart engine is
 # core as of 0.20, so only `thread-safe` is needed (for the cross-thread

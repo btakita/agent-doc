@@ -1380,11 +1380,15 @@ object TerminalUtil {
 
             Thread {
                 try {
-                    val output = process.inputStream.bufferedReader().readText().trim()
-                    val exitCode = process.waitFor()
-                    if (exitCode != 0) {
-                        onFailure?.invoke(relativePath, exitCode, output)
-                            ?: notifyError(
+                val output = process.inputStream.bufferedReader().readText().trim()
+                val exitCode = process.waitFor()
+                if (exitCode != 0) {
+                    LOG.warn(
+                        "[document-command] failed file=$relativePath exit=$exitCode " +
+                            "command=${command.joinToString(" ")} output=${output.ifBlank { "<empty>" }}",
+                    )
+                    onFailure?.invoke(relativePath, exitCode, output)
+                        ?: notifyError(
                                 project,
                                 "agent-doc command failed (exit $exitCode):\n$output",
                             )
@@ -1398,6 +1402,11 @@ object TerminalUtil {
         } catch (e: Exception) {
             onComplete?.invoke()
             val binary = command.firstOrNull() ?: "agent-doc"
+            LOG.warn(
+                "[document-command] failed to start file=$relativePath " +
+                    "command=${command.joinToString(" ")}: ${e.message}",
+                e,
+            )
             notifyError(project, "Failed to run agent-doc command: ${e.message}\nLooked for: $binary")
         }
     }

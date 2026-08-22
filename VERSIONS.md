@@ -2,6 +2,35 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.258
+
+- **Fix: retained Compact Exchange delivery resumes after an editor restart.**
+
+The production post-registration path now delegates to the same durable semantic
+replay policy as the document runtime, so a retained compact target is projected
+over the exact current editor cut instead of being returned only when the editor
+already contains that target. JetBrains retries this semantic projection when
+startup, indexing, or local-edit fencing makes the first editor read transiently
+unavailable; the retry no longer drains an empty replica and silently abandons
+the retained continuation.
+
+If delayed editor registration has already converged an older binary compact
+summary, completion now replays the strictly newer retained Exchange target
+through the normal editor convergence path while preserving authoritative
+sibling components. The replay remains fail-closed when the authoritative
+post-boundary Exchange cell contains operator text.
+
+The controller also advances a dedicated retry edge whenever a durable document
+projection still carries the same compact continuation or a changed live CRDT
+delivery frontier arrives. A completion attempt that ran before an editor
+replica registered is therefore retried directly by registration and its first
+settled projection, without requiring a second compact command. Identical pull
+frontiers are deduplicated so a persistent conflict cannot create a retry loop.
+
+JetBrains document-command failures and process-start errors now include the
+relative document, command, exit status, and captured output in `idea.log`, so a
+missed notification remains diagnosable after the fact.
+
 ## 0.35.257
 
 - **Fix: Compact Exchange is single-flight while editor delivery is pending,

@@ -1914,82 +1914,23 @@ fn editor_reconnect_projection_from_ffi(
     file: &Path,
     editor_content: &str,
 ) -> anyhow::Result<EditorReconnectProjection> {
-    #[cfg(not(test))]
-    {
-        let Some(document) =
-            agent_doc_controller_io::project_controller::document_state_projection_existing(
-                project_root,
-                file,
-            )?
-        else {
-            return Ok(EditorReconnectProjection {
-                content: None,
-                external_disk_pending: false,
-            });
-        };
-        let editor_hash = agent_doc_hash::content_hash(editor_content);
-        if let Some(pending) = document.document.pending_external_disk {
-            return match agent_doc_document_realtime::external_disk_decision(
-                &pending.expected_hash,
-                &pending.target_hash,
-                &editor_hash,
-            ) {
-                agent_doc_document_realtime::ExternalDiskDecision::AcceptedInEditor => {
-                    Ok(EditorReconnectProjection {
-                        content: Some(pending.target_content),
-                        external_disk_pending: true,
-                    })
-                }
-                agent_doc_document_realtime::ExternalDiskDecision::PendingUserDecision => {
-                    Ok(EditorReconnectProjection {
-                        content: None,
-                        external_disk_pending: true,
-                    })
-                }
-                agent_doc_document_realtime::ExternalDiskDecision::EditorSupersedes => {
-                    append_editor_convergence_from_ffi(
-                        project_root,
-                        file,
-                        pending,
-                        &editor_hash,
-                        "editor_reconnect_superseded_external_disk",
-                    )?;
-                    Ok(EditorReconnectProjection {
-                        content: None,
-                        external_disk_pending: false,
-                    })
-                }
-            };
-        }
-        let pending = document
-            .document
-            .pending_write_journal
-            .last()
-            .cloned()
-            .or(document.document.pending_write);
-        Ok(EditorReconnectProjection {
-            content: pending.and_then(|pending| {
-                editor_hash
-                    .eq_ignore_ascii_case(&pending.target_hash)
-                    .then_some(pending.target_content)
-            }),
-            external_disk_pending: false,
-        })
-    }
-    #[cfg(test)]
-    {
-        let _ = project_root;
-        let content = agent_doc_document_realtime_io::deferred_document_write_reconnect_content(
-            file,
-            editor_content,
-        )?;
-        let external_disk_pending =
-            agent_doc_document_realtime_io::pending_external_disk_candidate(file).is_some();
-        Ok(EditorReconnectProjection {
-            content,
-            external_disk_pending,
-        })
-    }
+    let _ = project_root;
+    // `deferred_document_write_reconnect_content` is the single reconnect
+    // policy owner. It replays the ordered durable intent journal over the
+    // exact editor cut, preserving operator edits and retaining a successor
+    // intent when the result advances beyond the previous target. The former
+    // FFI-only shortcut accepted a retained write only when the editor already
+    // equaled its target, which made a post-restart projection impossible.
+    let content = agent_doc_document_realtime_io::deferred_document_write_reconnect_content(
+        file,
+        editor_content,
+    )?;
+    let external_disk_pending =
+        agent_doc_document_realtime_io::pending_external_disk_candidate(file).is_some();
+    Ok(EditorReconnectProjection {
+        content,
+        external_disk_pending,
+    })
 }
 
 fn deferred_write_reconnect_propagated_from_ffi(

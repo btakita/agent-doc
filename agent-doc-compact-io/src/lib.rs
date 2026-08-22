@@ -189,14 +189,39 @@ impl CompactDocumentTargets {
         } else {
             authoritative_target_content == intended_target_content
         };
-        if authoritative_target.attrs != intended_target.attrs || !compact_owned_content_matches {
+        // A retained Compact Exchange continuation can outlive a later editor
+        // registration that publishes an older compact snapshot. That older
+        // summary is not an operator edit when all of the following are true:
+        // the retained binary archive is strictly newer, its two projections
+        // have valid prefix lineage, and the authoritative post-boundary cell
+        // is empty. In that narrow case replay the retained target while still
+        // treating every authoritative sibling component as current.
+        let authoritative_tail_is_empty = target == "exchange"
+            && split_component_content_at_boundary(authoritative_target_content)
+                .1
+                .trim()
+                .is_empty();
+        let retained_exchange_supersedes_authority = target == "exchange"
+            && intended_target_content.starts_with(committed_target_content)
+            && authoritative_tail_is_empty
+            && agent_doc_document::compact_projection::newer_compacted_exchange_supersedes(
+                authoritative,
+                &self.live,
+            );
+        if authoritative_target.attrs != intended_target.attrs
+            || (!compact_owned_content_matches && !retained_exchange_supersedes_authority)
+        {
             anyhow::bail!(
                 "compact: '{}' compact-owned content changed during compaction; refusing to rebase a same-cell edit over the compacted target",
                 target
             );
         }
 
-        let mut live = authoritative.to_string();
+        let mut live = if retained_exchange_supersedes_authority {
+            authoritative_target.replace_content(authoritative, intended_target_content)
+        } else {
+            authoritative.to_string()
+        };
         let mut committed =
             authoritative_target.replace_content(authoritative, committed_target_content);
         if let Some(reconciled) =
@@ -1066,7 +1091,7 @@ pub fn complete_retained_projection(
 ) -> Result<String> {
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
         let effects = runtime_effects()?;
-        let authority =
+        let mut authority =
             effects.current_document_content(file, "compact_projection_completion_authority")?;
         let disk = std::fs::read_to_string(file)
             .with_context(|| format!("failed to read disk projection for {}", file.display()))?;
@@ -1086,6 +1111,48 @@ pub fn complete_retained_projection(
             let target = target_component
                 .context("compact projection authority advanced for an inline compact target")?;
             targets = targets.rebase_onto_authoritative_siblings(&authority, target)?;
+            if authority != targets.live {
+                let authority_hash = agent_doc_hash::content_hash(&authority);
+                let replay_hash = agent_doc_hash::content_hash(&targets.live);
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "compact_projection_replaying_retained_target file={} target={} authority_hash={} replay_hash={} driver=state_projection_effect",
+                        file.display(),
+                        target,
+                        authority_hash,
+                        replay_hash,
+                    ),
+                );
+                converge_compacted_with_retry(effects, file, &targets.live, &authority)?;
+                agent_doc_document_realtime_io::guard_visible_delivery_convergence(
+                    file,
+                    "compact_projection_completion_replay",
+                )
+                .with_context(|| {
+                    format!(
+                        "compact projection replay is awaiting visible editor delivery for {}",
+                        file.display()
+                    )
+                })?;
+                authority = effects.current_document_content(
+                    file,
+                    "compact_projection_completion_replayed_authority",
+                )?;
+                let replayed_disk = std::fs::read_to_string(file).with_context(|| {
+                    format!(
+                        "failed to read replayed disk projection for {}",
+                        file.display()
+                    )
+                })?;
+                anyhow::ensure!(
+                    authority == targets.live && replayed_disk == targets.live,
+                    "compact projection replay is not converged: target hash {} authority hash {} disk hash {}",
+                    replay_hash,
+                    agent_doc_hash::content_hash(&authority),
+                    agent_doc_hash::content_hash(&replayed_disk),
+                );
+            }
         }
         anyhow::ensure!(
             authority == targets.live,
@@ -2583,6 +2650,62 @@ mod tests {
         );
         assert!(!rebased.live.contains("- do [#q2]"));
         assert!(!rebased.committed.contains("- do [#q2]"));
+    }
+
+    fn retained_compact_replay_doc(timestamp: &str, tail: &str, queue: &str) -> String {
+        format!(
+            concat!(
+                "# Session\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Session Summary\n\n",
+                "*Compacted. Content archived to `.agent-doc/archives/session-hash-{}.md`*\n\n",
+                "<!-- agent:boundary:session -->\n",
+                "{}",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue -->\n",
+                "{}",
+                "<!-- /agent:queue -->\n",
+            ),
+            timestamp, tail, queue,
+        )
+    }
+
+    #[test]
+    fn compact_targets_replay_newer_retained_exchange_over_older_empty_tail() {
+        let retained =
+            retained_compact_replay_doc("20260822-011601", "", "- stale sibling item [#stale]\n");
+        let authoritative = retained_compact_replay_doc(
+            "20260821-224328",
+            "",
+            "- current sibling item [#current]\n",
+        );
+
+        let rebased = CompactDocumentTargets::same(retained)
+            .rebase_onto_authoritative_siblings(&authoritative, "exchange")
+            .expect("a newer retained binary compact should replay over an older empty exchange");
+
+        for projection in [&rebased.live, &rebased.committed] {
+            assert!(projection.contains("session-hash-20260822-011601.md"));
+            assert!(!projection.contains("session-hash-20260821-224328.md"));
+            assert!(projection.contains("- current sibling item [#current]"));
+            assert!(!projection.contains("- stale sibling item [#stale]"));
+        }
+    }
+
+    #[test]
+    fn compact_targets_do_not_replay_over_authoritative_post_boundary_text() {
+        let retained = retained_compact_replay_doc("20260822-011601", "", "");
+        let authoritative = retained_compact_replay_doc(
+            "20260821-224328",
+            "Fresh operator prompt must survive.\n",
+            "",
+        );
+
+        let err = CompactDocumentTargets::same(retained)
+            .rebase_onto_authoritative_siblings(&authoritative, "exchange")
+            .expect_err("post-boundary authority must keep retained replay fail-closed");
+
+        assert!(err.to_string().contains("same-cell edit"), "{err:#}");
     }
 
     #[test]

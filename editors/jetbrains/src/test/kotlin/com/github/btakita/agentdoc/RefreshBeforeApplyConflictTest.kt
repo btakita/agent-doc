@@ -213,6 +213,11 @@ class RefreshBeforeApplyConflictTest {
                 crdtReplica,
                 "private fun replayDeferredWriteAfterRegistration(",
             )
+        val retryReplay =
+            functionBody(
+                crdtReplica,
+                "private fun scheduleDeferredWriteReplayRetry(",
+            )
         val queueRemoteApply =
             functionBody(
                 crdtReplica,
@@ -240,12 +245,24 @@ class RefreshBeforeApplyConflictTest {
                 scheduleReplay.contains("replayDeferredWriteAfterRegistration("),
         )
         assertTrue(
-            "the queued replay must project only after exact editor and local-edit fences",
-            replay.indexOf("tryReadDocumentText(document) != registrationText") <
+            "the queued replay must project only from the exact published editor cut",
+            replay.indexOf("publishedEditorCut == null") <
                 replay.indexOf("NativePatching.projectDeferredWritePostRegister") &&
+                replay.contains("hasPendingLocal(filePath)") &&
+                replay.contains("shadows[filePath] != publishedEditorCut") &&
+                replay.contains("projectDeferredWritePostRegister(filePath, publishedEditorCut)") &&
                 replay.contains(
                     "requestUrgentRemoteDrain(filePath, \"post-register-projected-intent\")"
                 ),
+        )
+        assertTrue(
+            "a transient editor race must retry semantic projection, not only drain an empty replica",
+            replay.contains("scheduleDeferredWriteReplayRetry(") &&
+                retryReplay.contains("deferredWriteReplayRetryPaths.add(filePath)") &&
+                retryReplay.contains(
+                    "replayDeferredWriteAfterRegistration(filePath, document, forwarder)"
+                ) &&
+                !retryReplay.contains("requestRemoteDrain("),
         )
         assertFalse(replay.contains("applyMinimalDocumentEditUtil("))
         assertFalse(replay.contains("persistRemoteCrdtTextIfSafe("))

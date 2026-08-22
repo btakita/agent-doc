@@ -451,6 +451,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val templateGuardRecoveryPaths = ConcurrentHashMap.newKeySet<String>()
     private val templateGuardRecoveryRetryPaths = ConcurrentHashMap.newKeySet<String>()
     private val templateGuardRecoveryFailureCounts = ConcurrentHashMap<String, Int>()
+    private val deferredWriteReplayRetryPaths = ConcurrentHashMap.newKeySet<String>()
+    private val deferredWriteReplayFailureCounts = ConcurrentHashMap<String, Int>()
     private val refreshConnectionEpoch = AtomicLong(0)
     // `#ctrlkillreregister` Tier 3: transport loss is reported per document, but a
     // dead controller strands every document at once. One pull answers for all of
@@ -496,6 +498,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         templateGuardRecoveryPaths.clear()
         templateGuardRecoveryRetryPaths.clear()
         templateGuardRecoveryFailureCounts.clear()
+        deferredWriteReplayRetryPaths.clear()
+        deferredWriteReplayFailureCounts.clear()
         drainRequestedPaths.clear()
         registerFailureCounts.clear()
         registerRetryAfterMs.clear()
@@ -810,7 +814,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         scheduleDeferredWriteReplayAfterRegistration(
                             filePath,
                             document,
-                            registrationText,
                             forwarder!!,
                         )
                         requestRemoteDrain(filePath, "open-document")
@@ -894,7 +897,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 scheduleDeferredWriteReplayAfterRegistration(
                     newPath,
                     document,
-                    editorText,
                     activeNew,
                 )
 
@@ -921,6 +923,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 templateGuardRecoveryPaths.remove(oldPath)
                 templateGuardRecoveryRetryPaths.remove(oldPath)
                 templateGuardRecoveryFailureCounts.remove(oldPath)
+                deferredWriteReplayRetryPaths.remove(oldPath)
+                deferredWriteReplayFailureCounts.remove(oldPath)
                 nonOperatorMutationEpochs.remove(oldPath)?.let { oldEpoch ->
                     nonOperatorMutationEpochs
                         .computeIfAbsent(newPath) { AtomicLong(0L) }
@@ -941,7 +945,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private fun scheduleDeferredWriteReplayAfterRegistration(
         filePath: String,
         document: Document,
-        registrationText: String,
         forwarder: CrdtReplicaForwarder,
     ) {
         try {
@@ -952,7 +955,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             replayDeferredWriteAfterRegistration(
                 filePath,
                 document,
-                registrationText,
                 forwarder,
             )
         }
@@ -969,30 +971,74 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private fun replayDeferredWriteAfterRegistration(
         filePath: String,
         document: Document,
-        registrationText: String,
         forwarder: CrdtReplicaForwarder,
     ): Boolean {
+        if (forwarders[filePath] !== forwarder) return false
+        val publishedEditorCut = tryReadDocumentText(document)
         if (
-            forwarders[filePath] !== forwarder ||
+            publishedEditorCut == null ||
             hasPendingLocal(filePath) ||
-            tryReadDocumentText(document) != registrationText
+            shadows[filePath] != publishedEditorCut
         ) {
-            scheduleTemplateGuardRecoveryRetry(filePath, "post-register-replay-replica-raced")
+            scheduleDeferredWriteReplayRetry(
+                filePath,
+                document,
+                forwarder,
+                "post-register-replay-replica-raced",
+            )
             return false
         }
-        if (!NativePatching.projectDeferredWritePostRegister(filePath, registrationText)) {
-            scheduleTemplateGuardRecoveryRetry(filePath, "post-register-projection-unavailable")
+        if (!NativePatching.projectDeferredWritePostRegister(filePath, publishedEditorCut)) {
+            scheduleDeferredWriteReplayRetry(
+                filePath,
+                document,
+                forwarder,
+                "post-register-projection-unavailable",
+            )
             return false
         }
+        deferredWriteReplayRetryPaths.remove(filePath)
+        deferredWriteReplayFailureCounts.remove(filePath)
         // FFI only wakes/projects the retained semantic intent into the
         // controller-owned CRDT authority. The ordinary remote-delivery path
         // below is the sole owner of editor mutation and persistence.
         requestUrgentRemoteDrain(filePath, "post-register-projected-intent")
         log.info(
             "[crdt-replica] projected deferred write after exact editor registration for $filePath; " +
-                "baseline_hash=${contentHash(registrationText)} editor_mutation=remote_delivery_only",
+                "baseline_hash=${contentHash(publishedEditorCut)} editor_mutation=remote_delivery_only",
         )
         return true
+    }
+
+    private fun scheduleDeferredWriteReplayRetry(
+        filePath: String,
+        document: Document,
+        forwarder: CrdtReplicaForwarder,
+        reason: String,
+    ) {
+        if (!deferredWriteReplayRetryPaths.add(filePath)) return
+        val failureCount = deferredWriteReplayFailureCounts.merge(filePath, 1) { current, one ->
+            current + one
+        } ?: 1
+        val shifted = 1L shl minOf(failureCount - 1, 12)
+        val delayMs = minOf(
+            CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS * shifted,
+            CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS,
+        )
+        log.info(
+            "[crdt-replica] deferred write replay retry scheduled for ${File(filePath).name}; " +
+                "reason=$reason delay_ms=$delayMs failures=$failureCount",
+        )
+        documentWorkers.forDocument(filePath).schedule(
+            {
+                deferredWriteReplayRetryPaths.remove(filePath)
+                if (!disposed.get() && forwarders[filePath] === forwarder) {
+                    replayDeferredWriteAfterRegistration(filePath, document, forwarder)
+                }
+            },
+            delayMs,
+            TimeUnit.MILLISECONDS,
+        )
     }
 
     /**

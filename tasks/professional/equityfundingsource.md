@@ -164,12 +164,31 @@ Implemented and pushed the Yelp review modal fix.
 - Unrelated `AGENTS.md` and `.agent/` changes preserved
 
 Suggested commit message (used): `fix(home): open Yelp reviews in responsive modal`
+
+### Re: Google review modals — gpt-5
+
+> **Queue prompt:**
+>
+> Google full reviews should also be a modal...instead of expanding the height of the review section.
+
+Implemented and committed as **229add16** (**fix(home): open Google reviews in testimonial modal**).
+
+Google and Yelp testimonials now share the same native, keyboard-accessible modal controller. Each Google card keeps its excerpt in the carousel and opens the complete multi-paragraph review in the modal, so expanding review content no longer changes the testimonial section height. Yelp widget loading remains lazy and Yelp-only. Escape, backdrop, close-button behavior, and focus restoration are preserved.
+
+Verification completed:
+
+- Focused homepage and carousel tests passed.
+- Full **make check** completed with exit code 0; the digest matched the suite's expected mocked **d1 down** error path.
+- A local headless-browser check confirmed the complete Google review opens, body scrolling locks, horizontal page overflow remains absent, the carousel stays exactly the same height, and closing restores focus.
+- No GitHub Actions workflow named **CI** exists in this repository.
+
+Only the six intended implementation, PRD, and test files were committed. The existing **AGENTS.md** and **.agent/** worktree changes were preserved. The code push follows successful agent-doc closeout.
 <!-- agent:boundary:a61b5b26:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Full Yelp reviews are still not rendering properly. Should this be a modal instead? ![img_7.png](img_7.png)~~
-- Google full reviews should also be a modal...instead of expanding the height of the review section.
+- 🚧 Google full reviews should also be a modal...instead of expanding the height of the review section.
 - Also show 5.0 on Yelp along-side 5.0 on Google ![img_8.png](img_8.png).
 - deploy to staging
 <!-- /agent:queue -->

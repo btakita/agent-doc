@@ -2,6 +2,43 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.265
+
+- **Fix: retained CRDT validation and idle projection stay bounded and stop
+  replay-driven controller CPU loops.**
+
+The malformed-origin guard now checks only the Lamport-order invariants needed
+to make origin cycles impossible and delete clocks causal. It no longer builds a
+duplicate-ID hash table proportional to the entire retained operation history.
+Large controller handoffs therefore keep the cycle quarantine introduced in
+0.35.264 without replacing the original infinite traversal with a long,
+memory-heavy validation spike.
+
+The durable replica now caches its visible-text projection until a real local or
+remote mutation invalidates it. It also retains one bounded encoded update and
+rejects an exact editor reconnect replay before merge. Agent-doc now uses
+lazily 0.56.1's unprojected delta apply, which reports structural mutation
+without ordering and rendering the entire retained graph before and after every
+snapshot. Idle checks, controller recovery, and repeated reconnect pulls no
+longer burn a core rebuilding the same 60–70KB document from tens of thousands
+of operations. The replay guard compares the actual payload rather than
+inferring coverage from a version vector, preserving causal buffering for
+out-of-order deltas.
+
+Read-side commit-barrier probes now determine coverage from the already-computed
+peer delta. They no longer rebuild canonical state in a throwaway replica merely
+to compare its version vector; that clone applied the entire retained snapshot
+and materialized its visible text twice on every idle check, keeping a controller
+CPU-bound and preventing editor attachment, routed starts, and Compact Exchange
+from reaching the controller within their timeout.
+
+Controller handoff now carries the exact visible-text projection beside its
+encoded canonical state. The replacement seeds its projection cache from that
+same-frontier pair instead of synchronously ordering the retained operation graph
+while an editor registration RPC is waiting. This closes the remaining hot path
+where a healthy replacement could consume a core and repeatedly miss the
+five-second route-owned start deadline.
+
 ## 0.35.264
 
 - **Fix: malformed editor replicas cannot pin a controller, and successful

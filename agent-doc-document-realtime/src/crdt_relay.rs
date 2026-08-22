@@ -277,6 +277,9 @@ pub enum DocumentOpDeltaOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RetainedCanonicalProjection {
     pub state: Vec<u8>,
+    /// Exact visible text captured beside `state` at the same hub frontier.
+    /// This is an in-memory controller handoff value, not a second authority.
+    pub current_text: String,
     pub lineage: String,
     pub last_committed_text: Option<String>,
     pub last_committed_state_vector: Option<Vec<u8>>,
@@ -748,7 +751,11 @@ impl RelayHub {
         // Decode the retained replica without rendering it on the default path. The opt-in
         // CellDocTree projection still needs the exact current canonical text, so its explicit
         // cutover pays that cost and keeps its incremental baseline correct.
-        let canonical = ReplicaState::from_encoded(canonical_id, &projection.state)?;
+        let canonical = ReplicaState::from_encoded_with_cached_text(
+            canonical_id,
+            &projection.state,
+            &projection.current_text,
+        )?;
         let mut hub = Self::new(canonical_id);
         hub.canonical = canonical;
         if let Some(lineage) = (!projection.lineage.is_empty()).then_some(&projection.lineage) {
@@ -769,6 +776,7 @@ impl RelayHub {
     pub fn retained_canonical_projection(&self) -> RetainedCanonicalProjection {
         RetainedCanonicalProjection {
             state: self.canonical.encode_state(),
+            current_text: self.canonical.text(),
             lineage: self.lineage.clone(),
             last_committed_text: self.last_committed_text.clone(),
             last_committed_state_vector: self.last_committed_state_vector.clone(),
@@ -3267,8 +3275,10 @@ mod tests {
         assert!(hub.is_safe_to_evict());
 
         let retained = hub.retained_canonical_projection();
+        assert_eq!(retained.current_text, "committed body");
         assert!(retained.last_committed_state_vector.is_some());
         let recovered = RelayHub::from_retained_canonical_projection(2, &retained).unwrap();
+        assert_eq!(recovered.canonical_text(), "committed body");
         assert!(recovered.is_safe_to_evict());
 
         recovered.canonical.apply_local_edit(0, 0, "new ");

@@ -371,12 +371,35 @@ behind that owner, so partially typed text is never submitted as a new turn.
 
 Replica updates are untrusted graph input. Before an update reaches the
 process-local document hub, the relay must reject origin edges that do not point
-strictly backward in Lamport order, deletes that precede their inserts, and
-conflicting immutable fields for the same operation identity. A rejected update
-must not mutate canonical state or fan out to peers; the sender is fenced behind
-a clean canonical projection. This validation occurs before any traversal of the
-replica graph so a cyclic payload cannot pin the Project Controller while it
-holds document authority.
+strictly backward in Lamport order and deletes that precede their inserts. A
+rejected update must not mutate canonical state or fan out to peers; the sender
+is fenced behind a clean canonical projection. This bounded-memory, single-pass
+validation occurs before any traversal of the replica graph so neither a cyclic
+payload nor validation of a large retained history can pin the Project
+Controller while it holds document authority.
+
+The durable replica caches the visible-text projection between mutations. An
+exact replay of the last accepted encoded update is rejected before the CRDT
+engine's apply path, and novel remote deltas use the engine's unprojected apply:
+the caller already owns the projection cache, so applying an update must not
+materialize the entire operation graph merely to compare the before/after
+strings. This replay guard is bounded to one payload and must compare the
+payload itself; it must not infer exact coverage from the maximum per-peer
+version-vector counter, because a later out-of-order delta can be present while
+an earlier causal dependency is still missing.
+
+A read-side commit-barrier coverage probe must inspect whether the peer delta is
+empty. It must not reconstruct a throwaway canonical replica and apply the full
+snapshot to compare frontiers: the delta was already computed from those same
+frontiers, while reconstruction invokes full visible-text materialization and
+can starve controller RPC and editor attachment on an accreted document.
+
+An in-memory controller handoff must carry the exact visible-text projection
+beside its encoded canonical state at the same frontier. The replacement seeds
+its projection cache from that pair; it must not synchronously reorder a large
+retained graph while an editor registration or route-owned start RPC is waiting.
+The paired text is an optimization over canonical state, not an independent
+authority, and any subsequent mutation invalidates it.
 
 Auto-DAG is part of realtime queue projection. Dependency edges such as
 `after=#id`, queue/backlog priority, and operator/agent priority pins are

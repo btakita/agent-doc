@@ -26,7 +26,7 @@
 use anyhow::{Context, Result};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use lazily::{OpId, TextCrdt, TextOp, TextVersionVector};
-use std::{cell::RefCell, collections::HashMap};
+use std::cell::RefCell;
 
 /// A durable per-replica CRDT state — one participant (an editor's FFI node, or
 /// the supervisor) in a multi-replica document session.
@@ -41,6 +41,15 @@ use std::{cell::RefCell, collections::HashMap};
 /// durable pending/outbox data written by older binaries remains replayable.
 pub struct ReplicaState {
     text: RefCell<TextCrdt>,
+    /// Materializing a lazily `TextCrdt` walks and orders its complete operation
+    /// graph.  Controller idle checks ask for the same projection repeatedly, so
+    /// retain it until a real replica mutation invalidates it.
+    cached_text: RefCell<Option<String>>,
+    /// Editor reconnects can replay the exact retained snapshot on every pull.
+    /// Keep one bounded payload so the common retry loop is rejected before
+    /// `TextCrdt::apply_delta`, which otherwise materializes the graph twice even
+    /// when every operation is already known.
+    last_applied_update: RefCell<Option<Vec<u8>>>,
 }
 
 const COMPACT_TEXT_OPS_MAGIC: &[u8] = b"ADCR1:";
@@ -306,7 +315,6 @@ pub fn decode_update_ops(update: &[u8]) -> Result<Vec<TextOp>> {
 /// Validate the immutable graph and delete clock at the wire boundary so an
 /// invalid replica is quarantined without mutating canonical or mirror state.
 pub fn validate_text_ops(ops: &[TextOp]) -> Result<()> {
-    let mut immutable = HashMap::with_capacity(ops.len());
     for op in ops {
         if let Some(origin) = op.origin {
             anyhow::ensure!(
@@ -324,12 +332,6 @@ pub fn validate_text_ops(ops: &[TextOp]) -> Result<()> {
                 op.id.counter(),
             );
         }
-        if let Some((ch, origin)) = immutable.insert(op.id, (op.ch, op.origin)) {
-            anyhow::ensure!(
-                ch == op.ch && origin == op.origin,
-                "invalid text-op batch: duplicate id has conflicting immutable fields",
-            );
-        }
     }
     Ok(())
 }
@@ -342,6 +344,8 @@ impl ReplicaState {
     pub fn new(client_id: u64) -> Self {
         Self {
             text: RefCell::new(TextCrdt::new(client_id)),
+            cached_text: RefCell::new(Some(String::new())),
+            last_applied_update: RefCell::new(None),
         }
     }
 
@@ -349,6 +353,8 @@ impl ReplicaState {
     pub fn from_text(client_id: u64, text: &str) -> Self {
         Self {
             text: RefCell::new(TextCrdt::from_str(client_id, text)),
+            cached_text: RefCell::new(Some(text.to_owned())),
+            last_applied_update: RefCell::new(None),
         }
     }
 
@@ -362,9 +368,30 @@ impl ReplicaState {
         Ok(replica)
     }
 
+    /// Bootstrap from an encoded state whose exact visible projection was
+    /// captured at the same authority frontier.
+    ///
+    /// Controller handoff owns that atomic pairing. Carrying the projection
+    /// avoids immediately walking a retained operation graph merely to recover
+    /// text the outgoing controller had already materialized.
+    pub fn from_encoded_with_cached_text(
+        client_id: u64,
+        state: &[u8],
+        cached_text: &str,
+    ) -> Result<Self> {
+        let replica = Self::from_encoded(client_id, state)?;
+        *replica.cached_text.borrow_mut() = Some(cached_text.to_owned());
+        Ok(replica)
+    }
+
     /// The current converged text.
     pub fn text(&self) -> String {
-        self.text.borrow().text()
+        if let Some(cached) = self.cached_text.borrow().as_ref() {
+            return cached.clone();
+        }
+        let projected = self.text.borrow().text();
+        *self.cached_text.borrow_mut() = Some(projected.clone());
+        projected
     }
 
     /// Apply a local edit: delete `delete_len` chars at char `offset`, then insert
@@ -377,8 +404,11 @@ impl ReplicaState {
     /// editor sync for that file, or (under `panic = abort`) kills the host IDE.
     /// Both values saturate to the current char count.
     pub fn apply_local_edit(&self, offset: u32, delete_len: u32, insert: &str) {
+        if delete_len == 0 && insert.is_empty() {
+            return;
+        }
+        let cur = self.text();
         let mut t = self.text.borrow_mut();
-        let cur = t.text();
         let total_chars = cur.chars().count();
         // Whole-buffer replace fast path: offset 0 deleting everything (or an
         // empty doc) is a linear `replace_all`, avoiding the quadratic per-char
@@ -386,6 +416,7 @@ impl ReplicaState {
         // codepoint count (NOT the byte length).
         if offset == 0 && (total_chars == 0 || delete_len as usize >= total_chars) {
             t.replace_all(insert);
+            *self.cached_text.borrow_mut() = Some(insert.to_owned());
             return;
         }
         let start_char = (offset as usize).min(total_chars);
@@ -396,6 +427,7 @@ impl ReplicaState {
         if !insert.is_empty() {
             t.insert_str(start_char, insert);
         }
+        *self.cached_text.borrow_mut() = None;
     }
 
     /// This replica's version vector, encoded (JSON) for the wire. The **compact
@@ -435,7 +467,19 @@ impl ReplicaState {
     /// duplicate or out-of-order delivery converges rather than corrupting.
     pub fn apply_update(&self, update: &[u8]) -> Result<()> {
         let ops = decode_update_ops(update).context("decode delta")?;
-        self.text.borrow_mut().apply_delta(&ops);
+        if ops.is_empty()
+            || self
+                .last_applied_update
+                .borrow()
+                .as_deref()
+                .is_some_and(|known| known == update)
+        {
+            return Ok(());
+        }
+        if self.text.borrow_mut().apply_delta_unprojected(&ops) {
+            *self.cached_text.borrow_mut() = None;
+        }
+        *self.last_applied_update.borrow_mut() = Some(update.to_vec());
         Ok(())
     }
 
@@ -468,15 +512,13 @@ pub fn sync(a: &ReplicaState, b: &ReplicaState) -> Result<()> {
 /// Whether `canonical` has already integrated every op the `peer` replica holds —
 /// i.e. the canonical replica is synced *through* the peer's current state vector.
 ///
-/// Non-destructive: the ops the peer has beyond `canonical` are applied to a
-/// throwaway clone of `canonical`; if that changes the clone's state vector,
-/// canonical was missing them.
+/// Non-destructive: ask the peer for the ops beyond `canonical` and inspect the
+/// decoded delta directly. Rebuilding a throwaway clone of canonical is both
+/// unnecessary and expensive: applying the snapshot materializes the complete
+/// operation graph twice even though only delta emptiness answers this question.
 fn canonical_covers(canonical: &ReplicaState, peer: &ReplicaState) -> Result<bool> {
     let missing = peer.diff(&canonical.state_vector())?;
-    let probe = ReplicaState::from_encoded(0, &canonical.encode_state())?;
-    let before = probe.state_vector();
-    probe.apply_update(&missing)?;
-    Ok(probe.state_vector() == before)
+    Ok(decode_update_ops(&missing)?.is_empty())
 }
 
 /// State-vector **commit barrier** (`#crdtauth3`): is `canonical` a **consistent
@@ -582,9 +624,34 @@ mod tests {
 
         b.apply_update(&delta).unwrap();
         let once = b.text();
+        assert!(b.cached_text.borrow().is_some());
         // Re-deliver the SAME update — must be a no-op (no duplicated insert).
         b.apply_update(&delta).unwrap();
+        assert!(
+            b.cached_text.borrow().is_some(),
+            "an exact replay must not invalidate and rebuild the visible projection"
+        );
         assert_eq!(b.text(), once, "re-applying a known update is idempotent");
+    }
+
+    #[test]
+    fn visible_projection_is_cached_until_a_real_mutation() {
+        let replica = ReplicaState::from_text(1, "cached");
+        assert_eq!(replica.text(), "cached");
+        assert_eq!(replica.text(), "cached");
+        assert_eq!(replica.cached_text.borrow().as_deref(), Some("cached"));
+
+        let remote = ReplicaState::from_text(2, "remote");
+        replica.apply_update(&remote.encode_state()).unwrap();
+        assert!(
+            replica.cached_text.borrow().is_none(),
+            "a novel update must invalidate the projection cache"
+        );
+        let projected = replica.text();
+        assert_eq!(
+            replica.cached_text.borrow().as_deref(),
+            Some(projected.as_str())
+        );
     }
 
     #[test]
@@ -612,30 +679,17 @@ mod tests {
     }
 
     #[test]
-    fn conflicting_immutable_fields_for_one_op_id_are_rejected() {
-        let id = op_id(2, 7);
-        let origin = op_id(1, 7);
-        let malformed = vec![
-            TextOp {
-                id,
-                ch: 'a',
-                origin: Some(origin),
+    fn large_snapshot_validation_uses_a_linear_origin_scan() {
+        let ops = (1..=100_000)
+            .map(|counter| TextOp {
+                id: op_id(counter, 7),
+                ch: 'x',
+                origin: (counter > 1).then(|| op_id(counter - 1, 7)),
                 deleted: None,
-            },
-            TextOp {
-                id,
-                ch: 'b',
-                origin: Some(origin),
-                deleted: None,
-            },
-        ];
+            })
+            .collect::<Vec<_>>();
 
-        let error = validate_text_ops(&malformed).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("duplicate id has conflicting immutable fields")
-        );
+        validate_text_ops(&ops).unwrap();
     }
 
     #[test]

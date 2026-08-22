@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -123,10 +123,39 @@ Staging deployment is complete.
 - `make check` passed before deployment.
 - GitHub Actions inspection returned no workflow runs.
 - Preserved the pre-existing `AGENTS.md` modification and untracked `.agent/` directory without changing them.
+
+### Re: Yelp reviews in a modal — gpt-5
+
+> **Queue prompt:**
+>
+> Full Yelp reviews are still not rendering properly. Should this be a modal instead? ![img_7.png](img_7.png)
+
+Yes. The screenshot confirms that Yelp's cross-origin widget is too wide to expand cleanly inside a carousel card, so I replaced the in-card Yelp disclosure with a responsive native modal.
+
+- **Modal interaction:** **Read full review** opens Yelp's official widget in the browser's modal top layer, leaving the three-card carousel layout unchanged.
+- **Accessibility:** Native Escape handling remains available; the close button and backdrop close the dialog, the close control receives initial focus, and closing restores focus to the review trigger.
+- **Responsive widget fit:** On narrow screens, the branded Yelp widget keeps a 400px internal layout and scales proportionally to the available modal width. Browser verification at a 390px viewport fit the widget into 350px at 0.875 scale with no horizontal overflow in the modal panel or page.
+- **Loading behavior:** Yelp's script remains lazy-loaded on first modal open and is added only once.
+- **Content integrity:** Direct reviewer-specific Yelp links remain on every Yelp card. The complete Google-review disclosures are unchanged.
+- **Specification and tests:** Updated the homepage testimonial PRD and added coverage for modal opening/closing, focus restoration, lazy script loading, narrow-screen fitting, markup, and styles.
+- **Verification:** Focused testimonial/homepage tests passed; full **make check** passed (exit 0). The digest's **d1 down** text is an expected mocked-outage case. **git diff --check** is clean. Browser-level desktop and mobile visual checks passed. No **CI** workflow is configured in this repository.
+- **Commit:** **30baab79** — **fix(home): open Yelp reviews in responsive modal**. Push follows the required session-document closeout.
+- Preserved the unrelated **AGENTS.md** modification and **.agent/** directory without staging or changing them.
+
+Suggested commit message (used):
+
+~~~txt
+fix(home): open Yelp reviews in responsive modal
+
+Move Yelp's official review widgets out of carousel cards and into accessible native dialogs, scale the branded widget for narrow viewports, preserve lazy loading and direct Yelp links, and update the PRD and testimonial coverage.
+~~~
 <!-- agent:boundary:a61b5b26:equityfundingsource -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- 🚧 Full Yelp reviews are still not rendering properly. Should this be a modal instead? ![img_7.png](img_7.png)
+- Google full reviews should also be a modal...instead of expanding the height of the review section.
+- Also show 5.0 on Yelp along-side 5.0 on Google ![img_8.png](img_8.png).
 - deploy to staging
 <!-- /agent:queue -->
 

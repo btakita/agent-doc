@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -114,13 +114,26 @@ feat(home): add Yelp testimonial carousel
 
 Add three verified Yelp testimonials to an accessible three-at-a-time carousel, lazy-load official full-review embeds, preserve direct review links, and cover the behavior in the PRD and tests.
 ```
+
+### Re: Deploy testimonial carousel to staging — gpt-5
+
+> **Queue prompt:** deploy to staging
+
+Deployed EFS commit `9b8ba667` to the isolated top-level staging Worker. Production was not touched.
+
+- Staging URL: `https://equityfundingsource.brian-takita.workers.dev/`
+- Worker version: `62760fc4-481c-465e-af49-bde51f404aa0`
+- Pre-deploy D1 check: no pending migrations and a current Time Travel bookmark
+- Post-deploy D1 check: no pending migrations
+- Live HTTP check: 200
+- Live markup check: six testimonial cards, three Yelp cards, all three reviewer-specific `hrid` links, and carousel controls present
+- Live Chromium interaction check: the deployed browser bundle initialized successfully and advanced from testimonials 1–3 to 4–6, showing Danny r., Alfredo Arteaga, and Stephanie J. with correct endpoint button states
+
+The EFS checkout remains on `main` at `9b8ba667`, synchronized with `origin/main`. The pre-existing unrelated `AGENTS.md` and `.agent/` changes remain untouched.
 <!-- agent:boundary:36f9b2a0:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Please make the review expandable to include the entire text of the review on the home page.~~
-- ~~For EFS, we want to add more testimonials to the site, with a carousel showing 3 at a time. There are more reviews at https://www.yelp.com/biz/equity-funding-source-los-angeles. Please include Yelp reviews, showing the most impactful text of the review and expanding to the entire review. Also include a direct link to the review.~~
-- deploy to staging
 <!-- /agent:queue -->
 
 ## Backlog

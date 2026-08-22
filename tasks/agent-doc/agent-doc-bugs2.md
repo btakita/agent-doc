@@ -99,7 +99,28 @@ Verification:
 The `agent-doc` cycle was not admitted because the document authority remained `delivery_pending` for 3079 ms.
 
 No preflight, document changes, or commit were performed. Retry after the current transition settles.
-<!-- agent:boundary:fdac7425:agent-doc-bugs2 -->
+
+### Re: agent-doc reconciliation, compaction, pane sync, CPU, and indentation
+
+You were right about the document acknowledgment and the indentation.
+
+The missing acknowledgment had a specific Codex lifecycle cause: after a clean committed closeout, the Stop path deleted the exact thread-to-document binding. Your next ordinary prompt in the same Codex thread therefore looked unrelated to agent-doc, so I answered in chat without acquiring document write-back debt. Clean closeout now parks that exact-thread binding. The next ordinary same-thread prompt must cross the agent-doc write/commit boundary; explicit `/clear`, `/new`, or a new agent-doc invocation severs or replaces the binding.
+
+I also corrected the Kotlin formatting mistakes: the focus projection fields/executor are class-indented consistently, and the remaining over-indented test assertion is aligned with its `assertEquals` arguments.
+
+The other fixes are now released together:
+
+- Compact Exchange compares and replaces only `agent:exchange`. Frontmatter, backlog, queue, review, and all other sibling or scratch content are irrelevant to the compact conflict decision and are rebased from current authority verbatim. Only concurrent changes inside the same Exchange cell fail closed. The retained/pending path uses the same target-scoped rule, so unrelated edits no longer create a second compact owner.
+- Restarted agents wait for any retained editor-delivery projection to settle before the automatic agent-doc trigger. This prevents the post-restart `session-check` from racing reconciliation and reporting the authority/disk divergence you saw after switching `backend.md` to Claude.
+- JetBrains rejected-canonical recovery now replaces the bad CRDT replica and rebuilds from the exact unchanged valid editor baseline with a generation/path-fenced bounded retry. A malformed retained canonical can no longer drive the recurring reconciliation loop.
+- Automatic tmux pane sync now retains and retries a failed editor-surface publication with 100/200/400/800/1600/2000 ms capped backoff. The one-time controller-recycle `Connection refused` can no longer permanently strand auto-sync until another editor event.
+- The 108% controller spike was full ordered-CRDT materialization inside `RelayHub::is_safe_to_evict` while the global relay registry lock was held. Eviction now compares the cached committed CRDT state vector. Detached test controllers under narrowly classified `.tmp*` roots also self-reap after 60 idle seconds; the accumulated temporary controllers are gone.
+- The currently loaded old JetBrains plugin is still re-registering documents about every seven seconds, which explains the remaining transient 24–38% controller bursts after installation. The fixed package is installed in all four detected JetBrains IDE installations, but JetBrains requires an IDE restart to activate the new Kotlin generation. I did not restart the IDE because that could discard unsaved editor buffers.
+
+Verification is green: `make check` passed all 8,995 workspace tests (253 skipped), doctests, documentation/release audits, and TLA+ models; the Compact Exchange crate passed all 68 tests; the JetBrains suite passed all 465 tests and built the plugin. The single parity `make install-full` completed successfully.
+
+Released and pushed as agent-doc `v0.35.260` at `92f163fd1`; the agent-loop pointer/instruction update is `2739460ab`. GitHub Book is green; CI, Release, PyPI, Pages, and the parent Agent Doc workflow were in progress at closeout.
+<!-- agent:boundary:e62e7f8e:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -147,7 +168,8 @@ No preflight, document changes, or commit were performed. Retry after the curren
 - [ ] [#qlm1] #agent-doc-feature Define queue item backend-selection syntax for local-model execution, separate from queued `/model <tier>` switches: support explicit per-item backend/model annotations on normal and loop queue items without changing prompt text or completion proof.
 - [ ] [#qlm2] #agent-doc-feature Implement a local-model queue dispatcher backend that can run eligible queue/loop items through a configured local model, capture stdout/structured results, and write responses through the normal agent-doc closeout boundary.
 - [ ] [#qlm3] #agent-doc-feature Add local-model dispatch safety gates and telemetry: capability checks, GPU/resource lease integration, fallback policy, provenance logs, and tests proving local-model queue items cannot be silently marked complete without a committed response/proof.
-- [ ] [#exttasksources] #agent-doc-feature Add external task source adapters that project PM-tool tasks into the active document/work graph as source-backed nodes, keeping local queue/closeout authority document-owned and making remote push-back explicit and audited. PRD: tasks/agent-doc/prd-external-task-sources.md
+- [ ] [#exttasksources] #agent-doc-feature Add external task sou
+rce adapters that project PM-tool tasks into the active document/work graph as source-backed nodes, keeping local queue/closeout authority document-owned and making remote push-back explicit and audited. PRD: tasks/agent-doc/prd-external-task-sources.md
 <!-- /agent:icebox -->
 
 ## Completed / Reaped

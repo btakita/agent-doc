@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: 01a02a62-f1a5-7861-92db-45127278e111
+resume: 01a02aa9-ece1-7eb2-9b55-6f59c683ad74
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -38,15 +38,32 @@ complete
 Compacted content:
 - Archived 5 response topic(s): Homepage testimonial copy; Staging and production deployment; Expandable homepage review; 2 more
 - Prior summary/context: prior compacted content: Archived 10 response topic(s): Google Reviews social proof; Remove Google Reviews border box...
+
+### Re: Yelp beside Google reviews — gpt-5
+
+> **Queue prompt:**
+>
+> do [#yelpalongside]
+
+
+Completed `#yelpalongside`. The testimonial summary card now presents sibling **Google reviews** and **Yelp reviews** links, with responsive side-by-side layout where space permits. The displayed 5.0 aggregate remains explicitly scoped to Google; the Yelp CTA links to EFS's verified Yelp business profile without implying an unverified Yelp aggregate rating.
+
+Updated the homepage PRD and regression coverage for the two profile destinations. Focused homepage/carousel tests passed, and the full `make check` suite completed successfully (exit 0). This repository currently has no GitHub Actions workflows configured to inspect.
+
+Committed and pushed to `equityfundingsource-dev` as `fd648226` (`feat(home): link Yelp beside Google reviews (#yelpalongside)`). I also rebuilt and installed the current `agent-doc` binary/library and matching JetBrains plugin package to resolve the preflight stale-install warning; supervisor recycling was scheduled for the next idle boundary.
 <!-- agent:boundary:36f9b2a0:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~do [#yelpalongside]~~
+- do [#testimonialsautonavigate]
+- Full Yelp review does not format correctly ![img_5.png](img_5.png) 
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#testimonialsautonavigate] Should we make the testimonials auto-navigate?
 <!-- /agent:backlog -->
 
 ## Review

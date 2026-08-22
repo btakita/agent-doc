@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: 019fa782-f025-7a10-8a66-3296f1b2bbc7
+resume: 01a02a62-f1a5-7861-92db-45127278e111
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -65,10 +65,37 @@ Deployed EFS commit `edefef8a` to both isolated Cloudflare environments through 
 - The EFS checkout is clean and synchronized with `origin/main`.
 
 The semantic-completion deployment warning referred to an older `20d7a416` release and was advisory; this cycle deployed and verified the new testimonial commit. The unrelated `#zwws-vestings-local` semantic warning did not affect this release.
+
+### Re: Expandable homepage review — gpt-5
+
+> **Queue prompt:** Please make the review expandable to include the entire text of the review on the home page.
+
+Implemented and shipped the expandable Tim Hayden homepage review. The card now shows a concise, impactful lead by default and uses a native keyboard-accessible `<details>` / `<summary>` disclosure to reveal the exact complete EFS-approved wording in place. The control changes from “Read full review” to “Hide full review” when opened; no JavaScript is required.
+
+I also updated the lending-portal PRD to make the expandable-review behavior explicit and strengthened the homepage regression test to prove the disclosure structure, the collapsed preview, both control labels, and reconstruction of the exact approved full quote. The other two Google cards remain the short EFS-supplied excerpts because no unverified text was invented.
+
+Verification passed:
+
+- `bun test tests/home-copy.test.ts`
+- `make check` (exit 0; the digest's `d1 down` match is the suite's intentional error-path fixture)
+- `git diff --check`
+
+GitHub reports no workflow named `CI` for this repository. The EFS change is committed and pushed to `origin/main` as `a725b337` (`feat(home): add expandable testimonial review`). The preflight's stale-install warning was also resolved by rebuilding the local agent-doc binary/cdylib and installed editor plugins with `make install`; its two semantic-completion warnings concern older unrelated work and did not affect this change.
+
+Suggested commit message (used):
+
+```txt
+feat(home): add expandable testimonial review
+
+Add a native accessible disclosure for the approved Tim Hayden testimonial, document the homepage behavior in the lending-portal PRD, and cover the collapsed and expanded copy with a regression test.
+```
 <!-- agent:boundary:36f9b2a0:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~Please make the review expandable to include the entire text of the review on the home page.~~
+- For EFS, we want to add more testimonials to the site, with a carousel showing 3 at a time. There are more reviews at https://www.yelp.com/biz/equity-funding-source-los-angeles. Please include Yelp reviews, showing the most impactful text of the review and expanding to the entire review. Also include a direct link to the review.
+- deploy to staging
 <!-- /agent:queue -->
 
 ## Backlog

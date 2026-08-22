@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: 01a02aa9-ece1-7eb2-9b55-6f59c683ad74
+resume: 01a02ad0-c273-7640-add0-d1a2d1b232f0
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -85,10 +85,28 @@ Headless-browser verification at a 780px viewport showed the expanded Yelp ifram
 ### Re: Queue closeout — gpt-5
 
 The completed Yelp formatting response is committed above. Its answered free-text queue head has now been consumed, and no drainable queue work remains.
+
+### Re: Complete Google reviews — gpt-5
+
+> **Queue prompt:**
+>
+> The read full reviews on the Google reviews is not showing the full Google review. Please fix. Based on https://www.google.com/maps/place/Equity+Funding+Source/@34.0945796,-118.2175058,17z/data=!3m1!4b1!4m6!3m5!1s0x80c2c7de7f00feb1:0x6881362d450c158d!8m2!3d34.0945796!4d-118.2175058!16s%2Fg%2F11w9s1jmh7?entry=ttu&g_ep=EgoyMDI2MDgxMi4wIKXMDSoASAFQAw%3D%3D
+
+Fixed and committed in `117a2efc` (`fix(home): show complete Google reviews`).
+
+The defect had two parts: Tim Hayden's **Read full review** disclosure stored only the first sentence, while the California Hard Money Direct and Alfredo Arteaga cards had no full-review disclosure. I verified all three against the linked Google listing and restored their complete listing copy. Each Google card now has a native keyboard-accessible disclosure; Alfredo's long review retains its four paragraph breaks, and the renderer HTML-escapes every paragraph before inserting it.
+
+The homepage PRD now requires complete verified Google disclosure copy, and regression coverage asserts all three full reviews plus the long-review paragraphs. The focused homepage/carousel tests pass, and the full `make check` suite exits 0. This repository has no GitHub Actions workflows configured to inspect.
+
+The requested EFS push follows this required session-document closeout. I also rebuilt and installed `agent-doc` 0.35.260 plus its native library/plugin package to resolve the preflight stale-install warning; route-owned supervisors were marked for idle-boundary recycling.
+
+Suggested commit message (used): `fix(home): show complete Google reviews`
 <!-- agent:boundary:a61b5b26:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- 🚧 The read full reviews on the Google reviews is not showing the full Google review. Please fix. Based on https://www.google.com/maps/place/Equity+Funding+Source/@34.0945796,-118.2175058,17z/data=!3m1!4b1!4m6!3m5!1s0x80c2c7de7f00feb1:0x6881362d450c158d!8m2!3d34.0945796!4d-118.2175058!16s%2Fg%2F11w9s1jmh7?entry=ttu&g_ep=EgoyMDI2MDgxMi4wIKXMDSoASAFQAw%3D%3D
+- staging deploy
 <!-- /agent:queue -->
 
 ## Backlog

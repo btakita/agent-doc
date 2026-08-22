@@ -120,7 +120,46 @@ The other fixes are now released together:
 Verification is green: `make check` passed all 8,995 workspace tests (253 skipped), doctests, documentation/release audits, and TLA+ models; the Compact Exchange crate passed all 68 tests; the JetBrains suite passed all 465 tests and built the plugin. The single parity `make install-full` completed successfully.
 
 Released and pushed as agent-doc `v0.35.260` at `92f163fd1`; the agent-loop pointer/instruction update is `2739460ab`. GitHub Book is green; CI, Release, PyPI, Pages, and the parent Agent Doc workflow were in progress at closeout.
-<!-- agent:boundary:e62e7f8e:agent-doc-bugs2 -->
+
+### Re: Agent-doc controller, Compact Exchange, restart, tmux sync, CPU, and formatting fixes — gpt-5
+
+I fixed and released the agent-doc causes reported in this exchange.
+
+#### Released fixes
+
+- **Tmux layout and auto-sync:** ordinary Markdown files no longer enter the agent-document attachment path, so opening a non-agent document cannot abort Sync Tmux Layout. Focus changes on either editor split now drive the same project-scoped layout reconciliation. The live `agent-doc` window has reconciled from three panes to two: pane `%0` owns this document and pane `%11` is the backend owner.
+- **Compact Exchange scope:** compaction admission and divergence checks are scoped to `agent:exchange`. Backlog, review, queue, and unrelated document changes do not block or invalidate an exchange-only compaction target.
+- **Retained Compact Exchange recovery:** a retained target has a single controller-owned continuation. Reconnect, live-hub recovery, malformed retained replicas, exact replay, and clear-session settlement no longer create competing continuations or attach loops.
+- **Restart Agent:** restart preserves the document-selected harness, including a switch to Claude, and routes through the already-owned pane instead of provisioning an extra pane.
+- **Clear Session Context:** an unavailable editor authority no longer leaves the actor stuck at `agent-doc: awaiting response`; the clear transition settles to `ready` while attachment recovery remains controller-owned.
+- **Controller timeout and CPU spike:** retained CRDT validation is linear and quarantines cyclic input before traversal. Replica updates use Lazily's unprojected merge, visible text is cached between mutations, exact replay is rejected early, commit-barrier coverage no longer constructs a throwaway full replica, and controller handoff carries the same-frontier visible projection beside the encoded state. The replacement therefore does not synchronously order the retained operation graph while a five-second registration/start RPC is waiting.
+- **Document formatting:** this response uses unindented exchange markers and indentation only for content that is structurally nested. The earlier improperly indented additions were a response-generation mistake, not an intended document format.
+
+The fixes were released as agent-doc `v0.35.261` through `v0.35.265`, with the final controller fix at commit `7756da7c3`. Lazily `v0.56.1` is commit `d45478402`, and the parent workspace records both at `2d9a5bba6`.
+
+#### Verification
+
+- `make check` passed.
+- `make tmux-ci` passed.
+- Focused CRDT merge, relay quarantine, retained-handoff, and clear-session settlement tests passed.
+- The private-name denylist scan reported zero hits.
+- The optimized `agent-doc 0.35.265` binary, native library, skills, and JetBrains plugin `0.2.355` were installed.
+- Backend, the equity document, and this bug document all inspect as `state=ready` with `projection_lag=false`.
+- The exact backend start path now reaches the controller immediately. From pane `%0` it returned in 0.027 seconds with the correct ownership guard because `%0` owns this document; it no longer reached the old five-second controller timeout.
+- The sustained 100% controller loop is gone. The final five-second sample averaged 5.8% of one core during normal polling, and the post-fix profile contains no `ordered_ids` hot loop.
+
+#### Existing retained backend delivery
+
+I did not retry Compact Exchange, resubmit the response, force disk, or replace the queued backend edit. The final backend `session-check` completed in 5.8 seconds and still reports the pre-existing retained document-write delivery as unsettled. That is now an editor-receipt issue, not a controller timeout.
+
+The final plugin package was installed after the current IDEA process started, and hot reload reported the running editor endpoint unavailable. Restart IDEA once more to load plugin `0.2.355`; after it reconnects, run only:
+
+    agent-doc session-check tasks/backend.md
+
+If it reports the delivery as applied and requests a commit, run the requested `agent-doc commit tasks/backend.md`. Do not retry Compact Exchange while that retained target owns the document.
+
+The agent-doc release workflows were still running when checked. The parent workspace CI jobs were prevented from starting by the GitHub account billing limit, and Lazily's tag workflow could not obtain a crates.io trusted-publishing token because that repository has no trusted-publisher configuration; Lazily `0.56.1` was already published successfully through the authenticated local release path.
+<!-- agent:boundary:0d0ed28d:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 

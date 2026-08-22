@@ -229,10 +229,8 @@ The session exchange is large; this final active queue item is now complete with
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Full Yelp reviews are still not rendering properly. Should this be a modal instead? ![img_7.png](img_7.png)~~
-- ~~Google full reviews should also be a modal...instead of expanding the height of the review section.~~
-- ~~📌 Also show 5.0 on Yelp along-side 5.0 on Google ![img_8.png](img_8.png).~~ — auto-struck: answered this cycle (#ftstrike)
-- 📌 deploy to staging
+- 🚧 Scrape the Yelp review text into the Full Yelp review modal?  Some of the Yelp full reviews are missing text.
+- ~~deploy to staging~~
 <!-- /agent:queue -->
 
 ## Backlog

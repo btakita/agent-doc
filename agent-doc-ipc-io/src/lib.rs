@@ -876,6 +876,49 @@ pub fn send_reload_library_to_editor(
     }
 }
 
+/// Outcome of sending an editor intent across a rolling native-library build
+/// boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildMismatchSendOutcome {
+    /// The original editor intent passed normal IPC negotiation.
+    Delivered,
+    /// The original intent was rejected by build negotiation, but the
+    /// reload-only compatibility request was accepted. The editor will
+    /// re-register and pull any retained CRDT work after the native handoff.
+    ReloadRequested,
+}
+
+/// Send an editor intent and recover a typed IPC build mismatch by requesting
+/// the listener's reload-only compatibility path.
+///
+/// Ordinary mutation intents remain fail-closed across mismatched builds. This
+/// helper does not replay the rejected intent: it asks the editor to reload and
+/// relies on the caller's retained CRDT frontier to be pulled after
+/// re-registration. If reload delivery fails, the returned error preserves the
+/// original typed build mismatch in its source chain.
+pub fn send_message_to_pid_recovering_build_mismatch(
+    project_root: &Path,
+    editor_pid: u64,
+    editor_id: &str,
+    message: &serde_json::Value,
+    lib_version: &str,
+) -> Result<BuildMismatchSendOutcome> {
+    match send_message_to_pid(project_root, editor_pid, message) {
+        Ok(_) => Ok(BuildMismatchSendOutcome::Delivered),
+        Err(handshake_error) if is_ipc_build_mismatch_error(&handshake_error) => {
+            match send_reload_library_to_editor(project_root, editor_pid, editor_id, lib_version) {
+                Ok(true) => Ok(BuildMismatchSendOutcome::ReloadRequested),
+                Ok(false) => Err(handshake_error
+                    .context("IPC build mismatch recovery did not deliver reload_library")),
+                Err(reload_error) => Err(handshake_error.context(format!(
+                    "IPC build mismatch recovery failed to deliver reload_library: {reload_error:#}"
+                ))),
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// Start a socket listener (for use by the FFI library / plugin).
 /// This blocks the calling thread — run it on a background thread.
 #[allow(unreachable_code)]
@@ -1432,14 +1475,16 @@ mod tests {
         );
         assert!(!mutation_reached.load(Ordering::SeqCst));
 
-        assert!(
-            send_reload_library_to_editor(
+        assert_eq!(
+            send_message_to_pid_recovering_build_mismatch(
                 &root,
                 u64::from(std::process::id()),
                 "test-editor",
+                &serde_json::json!({"type": "apply_canonical", "file": "/tmp/plan.md"}),
                 env!("CARGO_PKG_VERSION"),
             )
-            .expect("reload-only compatibility path should remain available")
+            .expect("build mismatch should request the reload-only compatibility path"),
+            BuildMismatchSendOutcome::ReloadRequested,
         );
         assert!(reload_reached.load(Ordering::SeqCst));
         assert!(!mutation_reached.load(Ordering::SeqCst));

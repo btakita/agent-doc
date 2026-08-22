@@ -4599,6 +4599,86 @@ Duplicate replay should stay live.
             "ops log should record the blocked bypassed patchback:\n{log}"
         );
     }
+
+    #[test]
+    fn commit_accepts_a_materialized_response_owned_by_the_active_capture() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+
+        let doc = root.join("session.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please answer the prompt\n",
+            "<!-- agent:boundary:head-boundary -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, committed).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "add doc", "--no-verify"])
+            .output()
+            .unwrap();
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: Please answer the prompt — gpt-5\n\n",
+            "Recovered answer from the durable capture.\n",
+            "<!-- /patch:exchange -->\n"
+        );
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(committed),
+            Some(committed),
+            &capture.response_sha256,
+            Some(&capture.cycle_id),
+        )
+        .unwrap();
+
+        let visible = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please answer the prompt\n",
+            "### Re: Please answer the prompt — gpt-5\n\n",
+            "Recovered answer from the durable capture.\n",
+            "<!-- agent:boundary:visible-boundary -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, visible).unwrap();
+
+        assert!(
+            commit(&doc).expect("the active durable capture owns this response patchback"),
+            "the recovered response should produce a real commit"
+        );
+        let head = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("committed session document");
+        assert!(head.contains("Recovered answer from the durable capture."));
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            !log.contains("commit_blocked_bypassed_patchback file="),
+            "capture-owned materialization must not be classified as a direct bypass:\n{log}"
+        );
+    }
+
     #[test]
     fn commit_blocks_committed_historical_patchback_that_mutates_status() {
         use std::fs;

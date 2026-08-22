@@ -2237,22 +2237,14 @@ fn apply_cp_write_on_hub(
         );
     }
     let canonical = hub.canonical_text();
-    if canonical != expected_current {
-        anyhow::bail!(
-            "CP relay write refused for {}: expected_hash={} current_hash={} recovery=retry_crdt_merge",
-            file.display(),
-            agent_doc_hash::content_hash(expected_current),
-            agent_doc_hash::content_hash(&canonical)
-        );
-    }
     let before_hash = agent_doc_hash::content_hash(&canonical);
     if canonical == content {
-        // Retained-transition Effects are allowed to re-evaluate after an ACK.
-        // An equal Yrs replace still emits a small transaction, which used to
-        // advance the delivery generation and invalidate the ACK that triggered
-        // the re-evaluation. The successful expected-current CAS proves this
-        // Effect is already at its fixed point, so observe it without publishing
-        // a successor frontier.
+        // A retained transition can re-evaluate after its first publication
+        // but before the editor ACK advances. Its CAS baseline is then stale
+        // even though the requested target is already canonical. Treat that
+        // exact target as an idempotent fixed point; delivery convergence is
+        // still reported from the existing frontier below, so this cannot
+        // manufacture an ACK or hide an unrelated concurrent edit.
         return Ok(CpRelayWrite {
             applied: false,
             content_len: content.len(),
@@ -2262,6 +2254,14 @@ fn apply_cp_write_on_hub(
             live_editors: hub.live_count(),
             delivery_converged: hub.delivery_converged(),
         });
+    }
+    if canonical != expected_current {
+        anyhow::bail!(
+            "CP relay write refused for {}: expected_hash={} current_hash={} recovery=retry_crdt_merge",
+            file.display(),
+            agent_doc_hash::content_hash(expected_current),
+            agent_doc_hash::content_hash(&canonical)
+        );
     }
     let packet = hub.apply_canonical_replace(expected_current, content)?;
     let targets = packet.targets.len();
@@ -3577,11 +3577,11 @@ pub struct ReplicaSignalOutcome {
     /// Distinct live editor routes discovered from reliable-sync liveness and
     /// the CRDT replica registry.
     pub found: usize,
-    /// Registrations an IPC message was successfully delivered to.
+    /// Registrations an IPC message or build-mismatch recovery request was
+    /// successfully delivered to.
     pub notified: usize,
-    /// Routes rejected specifically because sender and listener builds differ.
-    /// The controller uses these to choose the correct side of the rolling
-    /// upgrade boundary: recycle itself when stale, reload the editor when not.
+    /// Routes rejected specifically because sender and listener builds differ
+    /// and the reload-only compatibility request also failed.
     pub build_mismatches: Vec<ReplicaSignalRoute>,
 }
 
@@ -3646,6 +3646,7 @@ fn signal_crdt_replica_event_counting_inner(
     routes.extend(live_replica_signal_routes(&document_hash));
 
     let found = routes.len();
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
     let mut notified = 0usize;
     let mut build_mismatches = Vec::new();
     for route in routes {
@@ -3657,24 +3658,52 @@ fn signal_crdt_replica_event_counting_inner(
             "editor_id": route.editor_id.clone(),
             "editor_pid": route.editor_pid,
         });
-        if let Err(error) = agent_doc_ipc_io::send_message_to_pid(
-            &agent_doc_project_root_io::resolve_ipc_project_root(&canonical),
+        match agent_doc_ipc_io::send_message_to_pid_recovering_build_mismatch(
+            &project_root,
             route.editor_pid,
+            &route.editor_id,
             &payload,
+            env!("CARGO_PKG_VERSION"),
         ) {
-            if agent_doc_ipc_io::is_ipc_build_mismatch_error(&error) {
-                build_mismatches.push(route.clone());
+            Ok(agent_doc_ipc_io::BuildMismatchSendOutcome::Delivered) => {
+                notified += 1;
             }
-            agent_doc_ops_log_io::log_op(
-                &canonical,
-                &format!(
-                    "crdt_replica_notify_deferred reason={} editor_pid={} error={error:#}",
-                    reason.token(),
-                    route.editor_pid,
-                ),
-            );
-        } else {
-            notified += 1;
+            Ok(agent_doc_ipc_io::BuildMismatchSendOutcome::ReloadRequested) => {
+                // A same-version rebuild changes the IPC build identity even
+                // though the editor can hot-reload the installed native
+                // generation. The original event remains queued in the CRDT
+                // frontier and is pulled after editor re-registration.
+                notified += 1;
+                agent_doc_ops_log_io::log_op(
+                    &canonical,
+                    &format!(
+                        "crdt_replica_build_mismatch_recovery_requested reason={} editor_pid={} action=reload_editor_native",
+                        reason.token(),
+                        route.editor_pid,
+                    ),
+                );
+            }
+            Err(error) => {
+                if agent_doc_ipc_io::is_ipc_build_mismatch_error(&error) {
+                    build_mismatches.push(route.clone());
+                    agent_doc_ops_log_io::log_op(
+                        &canonical,
+                        &format!(
+                            "crdt_replica_build_mismatch_recovery_failed reason={} editor_pid={} error={error:#}",
+                            reason.token(),
+                            route.editor_pid,
+                        ),
+                    );
+                }
+                agent_doc_ops_log_io::log_op(
+                    &canonical,
+                    &format!(
+                        "crdt_replica_notify_deferred reason={} editor_pid={} error={error:#}",
+                        reason.token(),
+                        route.editor_pid,
+                    ),
+                );
+            }
         }
     }
     Ok(ReplicaSignalOutcome {
@@ -5069,6 +5098,44 @@ mod tests {
                 .unwrap();
             assert_eq!(pending.len(), 1);
             assert_eq!(pending[0].origin, CANONICAL_CLIENT_ID);
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn idempotent_cp_relay_retry_accepts_an_already_published_target_with_a_stale_base() {
+        let (_dir, doc) = temp_doc("cp-write-retained-retry.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let identity = "intellij:cp-write-retained-retry";
+        register_replica_for_file(&doc, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        let baseline = match current_text_for_file(&doc).unwrap() {
+            CurrentText::Current { text, .. } => text,
+            other => panic!("expected relay current text, got {other:?}"),
+        };
+        let target = format!("{baseline}\nretained target awaiting editor visibility\n");
+
+        let first = apply_cp_write_for_file(&doc, &baseline, &target, "test_retained_retry")
+            .unwrap()
+            .expect("first retained publication should apply");
+        assert!(first.applied);
+        assert!(!first.delivery_converged);
+
+        let retry = apply_cp_write_for_file(&doc, &baseline, &target, "test_retained_retry")
+            .unwrap()
+            .expect("an already-published exact target must be an idempotent retry");
+        assert!(!retry.applied);
+        assert_eq!(retry.targets, 0);
+        assert!(!retry.delivery_converged);
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), target);
+            assert_eq!(
+                hub.pending_updates(mint_client_id(identity)).unwrap().len(),
+                1,
+                "the retry must preserve the original unacked delivery frontier"
+            );
         })
         .unwrap();
     }

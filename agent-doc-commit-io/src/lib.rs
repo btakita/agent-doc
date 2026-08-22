@@ -1303,6 +1303,12 @@ where
         )?;
         snapshot_content = Some(rebased);
     }
+    let cycle_state_for_commit = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+    let active_response_body =
+        captured_response_body_for_commit(file, cycle_state_for_commit.as_ref());
+    let captured_response_materialized = active_response_body.as_deref().is_some_and(|body| {
+        agent_doc_turn::response_replay::response_materialized_in_content(body, &file_content)
+    });
     let snapshot_matched_head_before_absorb = snapshot_content
         .as_deref()
         .zip(head_doc.as_deref())
@@ -1322,6 +1328,7 @@ where
     if let Some(marker) = bypassed_response_write
         && !safe_out_of_band_exchange_only
         && !only_heading_attribution_drift
+        && !captured_response_materialized
     {
         agent_doc_ops_log_io::log_op(
             file,
@@ -1410,7 +1417,6 @@ where
         false
     };
 
-    let cycle_state_for_commit = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let latest_converged_pending_write_hash =
         agent_doc_cycle_state_io::load_latest_converged_pending_write_hash(file)?;
     let ipc_snapshot_adoption_blocked = cycle_state_for_commit
@@ -1419,8 +1425,6 @@ where
     let has_dropped_queue_prompt_evidence = cycle_state_for_commit
         .as_ref()
         .is_some_and(|state| !state.dropped_queue_prompts.is_empty());
-    let active_response_body =
-        captured_response_body_for_commit(file, cycle_state_for_commit.as_ref());
     let active_response_target = active_response_body.as_deref().and_then(|response_body| {
         agent_doc_turn::response_text::response_prompt_target_from_re_heading(response_body)
     });

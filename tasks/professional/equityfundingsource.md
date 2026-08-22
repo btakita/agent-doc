@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -69,6 +69,11 @@ Committed and pushed to `equityfundingsource-dev` as `d5dfef77` (`fix(home): kee
 
 ### Re: Yelp full-review formatting — gpt-5
 
+> **Queue prompt:**
+>
+> Full Yelp review does not format correctly ![img_5.png](img_5.png)
+
+
 Fixed and pushed in `11a2822f` (`fix(home): make Yelp review embeds responsive`).
 
 The failure was the carousel layout, not the review text: at the medium breakpoint, three cards squeezed Yelp’s injected iframe to 154px, producing the clipped widget and horizontal scrollbar shown in `img_5.png`. Yelp’s official embed uses a script-injected iframe and message-based resizing ([Yelp’s embed architecture](https://engineeringblog.yelp.com/2016/10/embedded-reviews-at-yelp.html)), so the surrounding card must provide a usable responsive width.
@@ -76,13 +81,14 @@ The failure was the carousel layout, not the review text: at the medium breakpoi
 The testimonial grid now stays single-column below the wide-desktop breakpoint and temporarily becomes one full-width column whenever a Yelp disclosure is open. The iframe and all of its grid/flex ancestors have explicit shrink and width constraints, while the disclosure keeps a clean keyboard-visible focus ring.
 
 Headless-browser verification at a 780px viewport showed the expanded Yelp iframe increase from 154px to 589px inside a 637px card, with the document width remaining 765px—no page-level horizontal overflow. The focused testimonial tests pass, `make check` exits 0, and `git diff --check` passes. No GitHub Actions workflows are configured for this repository.
+
+### Re: Queue closeout — gpt-5
+
+The completed Yelp formatting response is committed above. Its answered free-text queue head has now been consumed, and no drainable queue work remains.
 <!-- agent:boundary:a61b5b26:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#yelpalongside]~~
-- ~~do [#testimonialsautonavigate]~~
-- 🚧 Full Yelp review does not format correctly ![img_5.png](img_5.png)
 <!-- /agent:queue -->
 
 ## Backlog

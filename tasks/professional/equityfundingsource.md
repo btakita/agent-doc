@@ -89,12 +89,37 @@ feat(home): add expandable testimonial review
 
 Add a native accessible disclosure for the approved Tim Hayden testimonial, document the homepage behavior in the lending-portal PRD, and cover the collapsed and expanded copy with a regression test.
 ```
+
+### Re: Yelp testimonial carousel — gpt-5
+
+> **Queue prompt:** For EFS, we want to add more testimonials to the site, with a carousel showing 3 at a time. There are more reviews at https://www.yelp.com/biz/equity-funding-source-los-angeles. Please include Yelp reviews, showing the most impactful text of the review and expanding to the entire review. Also include a direct link to the review.
+
+Implemented and shipped a six-testimonial homepage carousel that pages through exactly three cards at a time. The first page already includes Yelp feedback, and the second page contains the remaining Google and Yelp cards.
+
+Added verified Yelp reviews from Ellisha S., Danny r., and Stephanie J. Each card shows a short high-impact excerpt, expands through Yelp's official full-review widget, and retains a reviewer-specific `hrid` link to the exact review. The widget is lazy-loaded only after a disclosure opens. The carousel has native previous/next buttons, disabled endpoint states, a live visible-range announcement, and accessible carousel semantics.
+
+Updated the lending-portal PRD and added both rendered-copy regression coverage and browser-DOM interaction tests. Verification passed:
+
+- `bun test tests/home-copy.test.ts tests/testimonials-carousel.test.ts`
+- `make check` (exit 0; the digest's `d1 down` match is the suite's intentional outage fixture)
+- `git diff --check`
+- Local Chromium smoke checks of the first page, next page, and an expanded live Yelp widget
+
+GitHub reports no workflow named `CI` for this repository. The implementation is committed and pushed to `origin/main` as `9b8ba667` (`feat(home): add Yelp testimonial carousel`). Unrelated local `AGENTS.md` and `.agent/` changes were left untouched.
+
+Suggested commit message (used):
+
+```txt
+feat(home): add Yelp testimonial carousel
+
+Add three verified Yelp testimonials to an accessible three-at-a-time carousel, lazy-load official full-review embeds, preserve direct review links, and cover the behavior in the PRD and tests.
+```
 <!-- agent:boundary:36f9b2a0:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Please make the review expandable to include the entire text of the review on the home page.~~
-- For EFS, we want to add more testimonials to the site, with a carousel showing 3 at a time. There are more reviews at https://www.yelp.com/biz/equity-funding-source-los-angeles. Please include Yelp reviews, showing the most impactful text of the review and expanding to the entire review. Also include a direct link to the review.
+- ~~For EFS, we want to add more testimonials to the site, with a carousel showing 3 at a time. There are more reviews at https://www.yelp.com/biz/equity-funding-source-los-angeles. Please include Yelp reviews, showing the most impactful text of the review and expanding to the entire review. Also include a direct link to the review.~~
 - deploy to staging
 <!-- /agent:queue -->
 

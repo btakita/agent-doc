@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -52,12 +52,23 @@ Verification passed:
 - `git diff --check`
 
 Committed in the EFS repository as `edefef8a` (`fix(home): update Tim Hayden testimonial`). GitHub reports no workflow named `CI` and no recent workflow runs for this repository.
+
+### Re: Staging and production deployment — gpt-5
+
+> **Queue prompt:** deploy to staging + production.
+
+Deployed EFS commit `edefef8a` to both isolated Cloudflare environments through the migration-aware release commands.
+
+- Staging: version `a4db3466-1ac0-425c-93ef-f84edcd5e2bb`; `https://equityfundingsource.brian-takita.workers.dev/` returns HTTP 200 and contains the exact new testimonial.
+- Production: version `3e21b070-8e4c-4d67-8ac9-e7ba7e3dde74`; both `https://equityfundingsource.com/` and `https://www.equityfundingsource.com/` return HTTP 200 and contain the exact new testimonial.
+- Both D1 environments reported current Time Travel bookmarks before deployment and no pending migrations before or after deployment.
+- The EFS checkout is clean and synchronized with `origin/main`.
+
+The semantic-completion deployment warning referred to an older `20d7a416` release and was advisory; this cycle deployed and verified the new testimonial commit. The unrelated `#zwws-vestings-local` semantic warning did not affect this release.
 <!-- agent:boundary:36f9b2a0:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~On the home page, replace "“Frankly the staff and leadership at Equity Funding saved my home from foreclosure.” with "Equity Funding provided me a high quality, high effort and the highest professionalism on a very difficult file, never wavering toward the goal of funding my loan.".~~
-- deploy to staging + production.
 <!-- /agent:queue -->
 
 ## Backlog

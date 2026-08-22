@@ -198,3 +198,4 @@ intelligence/search, borrower/broker/investor/admin portals, and tenant-ready re
 - 2026-08-14 [#pnm1] Who is an admin in the system?
 - 2026-08-14 [#8ty2] Please resend the admin invite emails. to contact + judithkrug + rwaldman100
 - 2026-08-22 [#yelpalongside] Please add Yelp along-side the Google Review link ![img_6.png](img_6.png)
+- 2026-08-22 [#testimonialsautonavigate] Should we make the testimonials auto-navigate?

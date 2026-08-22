@@ -54,6 +54,11 @@ Committed and pushed to `equityfundingsource-dev` as `fd648226` (`feat(home): li
 
 ### Re: Testimonial auto-navigation — gpt-5
 
+> **Queue prompt:**
+>
+> do [#testimonialsautonavigate]
+
+
 Recommendation: **keep the testimonials manually navigated**. There are only two pages of text-heavy reviews, so autoplay adds distraction and can move content while someone is reading or interacting with an expanded review. The current Previous/Next controls keep the reading pace predictable.
 
 This also avoids the extra interaction contract required for accessible autoplay. WAI's [carousel pattern](https://www.w3.org/WAI/ARIA/apg/patterns/carousel/) says an auto-rotating carousel needs a stop/restart control, must stop when keyboard focus enters, and must stop on pointer hover; its [carousel tutorial](https://www.w3.org/WAI/tutorials/carousels/) likewise emphasizes user control over movement.
@@ -66,14 +71,13 @@ Committed and pushed to `equityfundingsource-dev` as `d5dfef77` (`fix(home): kee
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#yelpalongside]~~
-- 🚧 do [#testimonialsautonavigate]
+- ~~do [#testimonialsautonavigate]~~
 - Full Yelp review does not format correctly ![img_5.png](img_5.png) 
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#testimonialsautonavigate] Should we make the testimonials auto-navigate?
 <!-- /agent:backlog -->
 
 ## Review

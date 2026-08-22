@@ -403,6 +403,18 @@ enum IdleQueueTransition {
     Unresolved,
 }
 
+/// A missing editor replica makes queue text unavailable, but it must not also
+/// hide the live pane edge that settles an already-delivered context clear.
+/// The clear owns no document mutation, so its completion is provable from the
+/// dispatch-ready pane without consulting editor or disk text.
+fn queue_authority_unavailable_blocks_idle_tick(
+    clear_cooldown_active: bool,
+    awaiting_clear_settle: bool,
+    context_reset_in_flight: bool,
+) -> bool {
+    !(clear_cooldown_active || awaiting_clear_settle || context_reset_in_flight)
+}
+
 impl IdleQueueTransition {
     fn from_converged(delivery_converged: bool) -> Self {
         if delivery_converged {
@@ -1924,9 +1936,16 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     transition
                 }
                 QueueHeadObservation::AuthorityUnavailable => {
-                        queue_state_observed = false;
-                        last_quiescent_maintenance = None;
-                    break 'drain;
+                    queue_state_observed = false;
+                    last_quiescent_maintenance = None;
+                    if queue_authority_unavailable_blocks_idle_tick(
+                        clear_cooldown_active,
+                        awaiting_clear_settle,
+                        context_reset_in_flight,
+                    ) {
+                        break 'drain;
+                    }
+                    IdleQueueTransition::Unresolved
                 }
             };
             queue_continuation_triggers.observe_head(
@@ -2365,6 +2384,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
             if clear_settle.settled_now {
                 awaiting_clear_settle = false;
                 clear_settle_idle_ticks = 0;
+                shared.transition_actor_state(
+                    agent_doc_controller::actor::ActorState::Ready,
+                    "supervisor",
+                    "context_clear_settled",
+                );
                 log_event(
                     &mut session_log,
                     &format!(
@@ -4701,6 +4725,22 @@ mod tests {
             IdleQueueTransition::from_converged(false),
             IdleQueueTransition::Pending
         );
+    }
+
+    #[test]
+    fn missing_queue_authority_does_not_block_context_clear_settlement() {
+        assert!(queue_authority_unavailable_blocks_idle_tick(
+            false, false, false
+        ));
+        assert!(!queue_authority_unavailable_blocks_idle_tick(
+            true, false, false
+        ));
+        assert!(!queue_authority_unavailable_blocks_idle_tick(
+            false, true, false
+        ));
+        assert!(!queue_authority_unavailable_blocks_idle_tick(
+            false, false, true
+        ));
     }
 
     #[test]

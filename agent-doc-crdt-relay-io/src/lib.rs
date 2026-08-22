@@ -2020,6 +2020,53 @@ pub fn relay_replica_update_for_file(
     }
     let client_id = mint_client_id(identity);
     let document_hash = agent_doc_fs::document_state_hash(file)?;
+    // A replica update is untrusted wire state. Validate its immutable origin
+    // graph before entering `CrdtRelayHub::relay_update`, which otherwise calls
+    // `TextCrdt::apply_delta` while holding the per-document hub mutex. A
+    // self-origin edge from a retained editor generation used to make text
+    // materialization loop forever, pin one CPU, and make unrelated controller
+    // RPCs time out behind that mutex. Keep canonical unchanged and turn the
+    // invalid member back into a canonical projection consumer.
+    if let Err(error) = agent_doc_merge::crdt_sync::decode_update_ops(update) {
+        let (canonical_len, projection_queued) =
+            with_hub_seeded_from_file(file, |hub| -> Result<_> {
+                let projection_queued = if hub.is_registered(client_id) {
+                    hub.require_canonical_projection(client_id);
+                    hub.ensure_canonical_projection_receipt(client_id)?
+                } else {
+                    false
+                };
+                Ok((hub.canonical_text().chars().count(), projection_queued))
+            })??;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_update_invalid_graph_rejected file={} authority=multi_replica client_id={} update_bytes={} projection_queued={} error={error:#}",
+                file.display(),
+                client_id,
+                update.len(),
+                projection_queued,
+            ),
+        );
+        if projection_queued
+            && let Err(err) =
+                signal_crdt_replica_event(file, CrdtReplicaEventReason::CanonicalProjection, 0)
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_replica_event_signal_failed file={} reason=invalid_graph_canonical_projection error={err}",
+                    file.display(),
+                ),
+            );
+        }
+        return Ok(Some(FanOut {
+            origin: client_id,
+            update: Vec::new(),
+            targets: Vec::new(),
+            canonical_len,
+        }));
+    }
     if !logical_replica_generation_is_current(&document_hash, identity, client_id)? {
         let canonical_len =
             with_hub_seeded_from_file(file, |hub| hub.canonical_text().chars().count())?;
@@ -5452,6 +5499,42 @@ mod tests {
             ops_log.contains("crdt_replica_update_corruption_rejected"),
             "ops.log must audit the rejected corruption:\n{ops_log}"
         );
+    }
+
+    #[test]
+    fn cyclic_replica_update_is_quarantined_without_mutating_canonical() {
+        let (_dir, doc) = temp_doc("replica-cycle-guard.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let identity = "intellij:cyclic-update";
+        let (client_id, _) = register_replica_for_file_with_liveness(&doc, identity, |_| true)
+            .unwrap()
+            .expect("editor replica should attach");
+        let canonical_before = with_hub(&doc, |hub| hub.canonical_text()).unwrap();
+        let malformed = serde_json::to_vec(&serde_json::json!([{
+            "id": { "counter": 9, "peer": client_id },
+            "ch": "x",
+            "origin": { "counter": 9, "peer": client_id },
+            "deleted": null
+        }]))
+        .unwrap();
+
+        let quarantined = relay_replica_update_for_file(&doc, identity, &malformed)
+            .unwrap()
+            .expect("invalid graph should be handled as a quarantined no-op");
+        assert!(quarantined.update.is_empty());
+        assert!(quarantined.targets.is_empty());
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), canonical_before);
+            assert!(
+                hub.awaits_canonical_projection(client_id),
+                "the invalid replica must receive a clean canonical projection"
+            );
+        })
+        .unwrap();
+        let ops_log =
+            std::fs::read_to_string(doc.parent().unwrap().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("crdt_replica_update_invalid_graph_rejected"));
     }
 
     #[test]

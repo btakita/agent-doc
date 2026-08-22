@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-syntax"
-version = "0.35.263"
+version = "0.35.264"
 edition = "2024"
 description = "Pure editor visual syntax tokenization for agent-doc documents"
 license = "MIT"
@@ -11,5 +11,5 @@ publish = false
 name = "agent_doc_syntax"
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.263" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.264" }
 serde = { version = "1", features = ["derive"] }

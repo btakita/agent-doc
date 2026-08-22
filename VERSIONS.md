@@ -2,6 +2,25 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.264
+
+- **Fix: malformed editor replicas cannot pin a controller, and successful
+session clears settle without editor authority.**
+
+Replica updates are now validated before they enter the process-local document
+hub. Cyclic origin edges, impossible delete ordering, and conflicting immutable
+fields for one operation identity are quarantined without mutating canonical
+state or fanning out to peers; the sender is resynchronized from a clean
+canonical projection. This prevents a malformed replica graph from looping in
+text traversal, consuming a CPU core, and starving Project Controller RPCs such
+as routed start and retained Compact Exchange recovery.
+
+The idle watcher now completes an in-flight Clear Session Context from the
+owning pane's cleared prompt even when editor/queue authority is temporarily
+unavailable. The actor returns to `ready` instead of remaining at
+`agent-doc: awaiting response`, while document attachment and a later Compact
+Exchange retry recover independently.
+
 ## 0.35.263
 
 - **Fix: controller restart recovery is single-flight, Compact Exchange ignores

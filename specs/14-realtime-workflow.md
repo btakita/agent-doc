@@ -369,6 +369,15 @@ aggregate to the active turn. An explicit `agent-doc <file>` / **Run Agent Doc**
 after editing is the settlement handoff; when a turn owner is active it queues
 behind that owner, so partially typed text is never submitted as a new turn.
 
+Replica updates are untrusted graph input. Before an update reaches the
+process-local document hub, the relay must reject origin edges that do not point
+strictly backward in Lamport order, deletes that precede their inserts, and
+conflicting immutable fields for the same operation identity. A rejected update
+must not mutate canonical state or fan out to peers; the sender is fenced behind
+a clean canonical projection. This validation occurs before any traversal of the
+replica graph so a cyclic payload cannot pin the Project Controller while it
+holds document authority.
+
 Auto-DAG is part of realtime queue projection. Dependency edges such as
 `after=#id`, queue/backlog priority, and operator/agent priority pins are
 recomputed before turn admission decides which queue head is active. A

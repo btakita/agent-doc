@@ -26,7 +26,7 @@
 use anyhow::{Context, Result};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use lazily::{OpId, TextCrdt, TextOp, TextVersionVector};
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::HashMap};
 
 /// A durable per-replica CRDT state — one participant (an editor's FFI node, or
 /// the supervisor) in a multi-replica document session.
@@ -279,18 +279,59 @@ fn ops_equivalent(left: &[TextOp], right: &[TextOp]) -> bool {
 /// `Vec<TextOp>`. Every historical format stays readable: durable pending/outbox
 /// data written by older binaries must remain replayable after an upgrade.
 pub fn decode_update_ops(update: &[u8]) -> Result<Vec<TextOp>> {
-    if let Some(compressed) = update.strip_prefix(COLUMNAR_TEXT_OPS_MAGIC) {
-        return decode_columnar_ops(compressed);
-    }
-    if let Some(compressed) = update.strip_prefix(COMPACT_TEXT_OPS_MAGIC) {
+    let ops = if let Some(compressed) = update.strip_prefix(COLUMNAR_TEXT_OPS_MAGIC) {
+        decode_columnar_ops(compressed)?
+    } else if let Some(compressed) = update.strip_prefix(COMPACT_TEXT_OPS_MAGIC) {
         let compressed = BASE64_STANDARD
             .decode(compressed)
             .context("decode compact text-op base64")?;
         let packed = zstd::stream::decode_all(compressed.as_slice())
             .context("decompress MessagePack text ops")?;
-        return rmp_serde::from_slice(&packed).context("decode MessagePack text ops");
+        rmp_serde::from_slice(&packed).context("decode MessagePack text ops")?
+    } else {
+        serde_json::from_slice(update).context("decode legacy JSON text ops")?
+    };
+    validate_text_ops(&ops)?;
+    Ok(ops)
+}
+
+/// Reject a malformed text-op graph before [`TextCrdt::apply_delta`] can
+/// materialize it.
+///
+/// Every valid insert is minted after its origin, so following `origin` links
+/// must strictly decrease the Lamport counter. That single invariant makes an
+/// origin cycle impossible. A retained editor generation once submitted a
+/// self-origin edge after controller replacement; `TextCrdt::text()` then
+/// traversed that one-node cycle forever while the hub mutex remained held.
+/// Validate the immutable graph and delete clock at the wire boundary so an
+/// invalid replica is quarantined without mutating canonical or mirror state.
+pub fn validate_text_ops(ops: &[TextOp]) -> Result<()> {
+    let mut immutable = HashMap::with_capacity(ops.len());
+    for op in ops {
+        if let Some(origin) = op.origin {
+            anyhow::ensure!(
+                origin.counter() < op.id.counter(),
+                "invalid text-op origin: origin counter {} must precede op counter {}",
+                origin.counter(),
+                op.id.counter(),
+            );
+        }
+        if let Some(deleted) = op.deleted {
+            anyhow::ensure!(
+                deleted.counter() > op.id.counter(),
+                "invalid text-op deletion: delete counter {} must follow op counter {}",
+                deleted.counter(),
+                op.id.counter(),
+            );
+        }
+        if let Some((ch, origin)) = immutable.insert(op.id, (op.ch, op.origin)) {
+            anyhow::ensure!(
+                ch == op.ch && origin == op.origin,
+                "invalid text-op batch: duplicate id has conflicting immutable fields",
+            );
+        }
     }
-    serde_json::from_slice(update).context("decode legacy JSON text ops")
+    Ok(())
 }
 
 impl ReplicaState {
@@ -485,6 +526,10 @@ mod tests {
         ReplicaState::new(999).state_vector()
     }
 
+    fn op_id(counter: u64, peer: u64) -> OpId {
+        rmp_serde::from_slice(&rmp_serde::to_vec(&(counter, peer)).unwrap()).unwrap()
+    }
+
     #[test]
     fn incremental_sync_converges_divergent_edits() {
         let base = ReplicaState::new(1);
@@ -540,6 +585,57 @@ mod tests {
         // Re-deliver the SAME update — must be a no-op (no duplicated insert).
         b.apply_update(&delta).unwrap();
         assert_eq!(b.text(), once, "re-applying a known update is idempotent");
+    }
+
+    #[test]
+    fn malformed_origin_cycle_is_rejected_before_replica_mutation() {
+        let replica = ReplicaState::from_text(7, "canonical stays responsive");
+        let id = op_id(42, 7);
+        let malformed = serde_json::to_vec(&vec![TextOp {
+            id,
+            ch: 'x',
+            origin: Some(id),
+            deleted: None,
+        }])
+        .unwrap();
+
+        let error = replica.apply_update(&malformed).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("invalid text-op origin"),
+            "unexpected error: {error:#}"
+        );
+        assert_eq!(
+            replica.text(),
+            "canonical stays responsive",
+            "validation must run before apply_delta mutates or materializes the malformed graph"
+        );
+    }
+
+    #[test]
+    fn conflicting_immutable_fields_for_one_op_id_are_rejected() {
+        let id = op_id(2, 7);
+        let origin = op_id(1, 7);
+        let malformed = vec![
+            TextOp {
+                id,
+                ch: 'a',
+                origin: Some(origin),
+                deleted: None,
+            },
+            TextOp {
+                id,
+                ch: 'b',
+                origin: Some(origin),
+                deleted: None,
+            },
+        ];
+
+        let error = validate_text_ops(&malformed).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("duplicate id has conflicting immutable fields")
+        );
     }
 
     #[test]

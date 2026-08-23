@@ -112,14 +112,34 @@ status fix: created .agent/runbooks/code-navigation.md (v0.1.80 -> v0.1.81)
 **Verification.** Five new CLI regressions, including the one that would have caught this — a bare `status` over a stale block plus a stale index must leave `AGENTS.md` byte-identical while still printing `status fix: refreshing index`. Full `make check` green (67 suites, 0 failed, clippy `-D warnings` clean), 8/8 `opencode-tsift` node tests, `cargo install --path .`, and the live repro above. Specs updated in `specs/search-navigation.md` (status section, injected block, OpenCode plugin) and `specs/graph.md` (cache eviction stays in the `.tsift/`-only class); `VERSIONS.md` has the unreleased entry.
 
 Two things I did not do. Tsift CI for `690317f` is queued, not finished — local evidence is what the above rests on. And the workspace's `agent-doc` binary is stale by one commit (`35efb2804`), but `src/agent-doc` currently holds a large uncommitted tree from a concurrent session, so building it here would install someone else's in-progress state; leaving that to the supervisor's idle-boundary recycle.
+
+### Re: release + publish + install — opus-5
+
+> **Queue prompt:**
+>
+> 📌 release + publish + install
+
+Release cut and tagged; install done; publication is in flight.
+
+**Cut.** `a498777` (`release: 0.1.82 -- status stops rewriting tracked files`), pushed to `main`, then annotated tag `v0.1.82` pushed. That is the trigger — the release workflow is tag-driven and fails closed if the tag does not exactly match `Cargo.toml` `package.version`.
+
+Versioned to 0.1.82: all 26 Rust packages plus `Cargo.lock`, the `opencode-tsift` npm package, and `VERSIONS.md` (the unreleased entry cut as `## 0.1.82`). Generated instruction surfaces were regenerated at the new version rather than hand-bumped — `AGENTS.md`, `.agent/runbooks/code-navigation.md`, and all 15 OpenCode command files in both `.opencode/commands/` and the packaged `packages/opencode-tsift/commands/` copies the release check compares them against.
+
+One thing the regeneration surfaced: this repo's own `.opencode/commands/` was three files behind what `tsift init --opencode` produces — `/tsift-explain`, `/tsift-graph`, and `/tsift-symbol-read` had never been written here. They are in the release commit now.
+
+**Verified before tagging.** Full `make check` at 0.1.82: 67 suites, 0 failed, `cargo clippy --workspace --all-targets -- -D warnings` clean, and the npm pack dry run reporting `opencode-tsift-0.1.82.tgz`. CI for the preceding fix commit `690317f` was green before the release commit went out.
+
+**Install.** `cargo install --path . --locked`; `tsift --version` reports `tsift 0.1.82`.
+
+**Publish is not yet proven.** [Release run 32661754044](https://github.com/btakita/tsift/actions/runs/32661754044) is in progress, currently in `verify release inputs`. The previous release took ~31 minutes end to end, so I am not holding this cycle open for it — the local evidence above is what this response rests on. I have a watch armed on the run's job results and will report the three publication facts when it lands: the GitHub Release with Linux/macOS-ARM/Windows archives plus `.sha256` files, all 26 crates on crates.io via OIDC trusted publishing, and `opencode-tsift@0.1.82` on npm. If a publish job fails, the crates.io step skips versions that already exist, so a re-run resumes rather than restarting.
+
+Leaving the queue head pinned until that proof is in.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Fix https://github.com/btakita/tsift/issues/4
-- release + publish + install
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

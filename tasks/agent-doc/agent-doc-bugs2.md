@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -246,12 +246,17 @@ No. The consolidated transition table was present only in this session document;
 It is now canonical in `specs/14-realtime-workflow.md` under **Retained closeout transition table**. The table documents all six cases: retained Compact with disk equal or stale, open versus terminal/mismatched response capture, and serialized delivery/save success versus timeout or authority advance. It also states that a terminal response cannot answer an identical recurring queue command added for a later task.
 
 A red/green contract test, `realtime_workflow_spec_documents_retained_closeout_transition_table`, pins the heading and all six rows. The focused test failed before the spec addition and passes afterward. Full `make check` passed (`tart-2e306df5ef`), and `make install-full` passed (`tart-fa9fdac8b3`). Public source commit `c21797d2b` is pushed to `main`.
+
+### Re: Transition table specification — Codex
+
+> **Queue prompt:** Is the transition table documented in the specs?
+
+Yes. It is now documented in `specs/14-realtime-workflow.md` under **Retained closeout transition table**, with all six state/evidence/transition rows pinned by `realtime_workflow_spec_documents_retained_closeout_transition_table`. Public source commit `c21797d2b` is pushed; full `make check` and `make install-full` passed. The exchange is large, but I did not compact while this queue head was active.
 <!-- agent:boundary:0d0ed28d:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 🚧 Is the transition table documented in the specs?
 <!-- /agent:queue -->
 
 ## Notes

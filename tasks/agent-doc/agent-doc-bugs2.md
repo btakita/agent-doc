@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 019faf4c-a885-76d0-9d98-56694b84d79a
+resume: 01a02bfa-7c55-73b2-80ff-0db00d81d1bb
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -159,12 +159,73 @@ The final plugin package was installed after the current IDEA process started, a
 If it reports the delivery as applied and requests a commit, run the requested `agent-doc commit tasks/backend.md`. Do not retry Compact Exchange while that retained target owns the document.
 
 The agent-doc release workflows were still running when checked. The parent workspace CI jobs were prevented from starting by the GitHub account billing limit, and Lazily's tag workflow could not obtain a crates.io trusted-publishing token because that repository has no trusted-publisher configuration; Lazily `0.56.1` was already published successfully through the authenticated local release path.
+
+### Re: Compact completion, recurring queue commands, and closeout delivery — Codex
+
+Fixed and released as agent-doc 0.35.267.
+
+The retained Compact Exchange defect is fixed. A retained compact whose exact canonical target is already delivery-converged in the editor now requests the editor's native save, re-observes exact editor/disk equality, and only then checkpoints, commits, and marks the continuation settled. The original live backend continuation was recovered through that path and committed as `4b8603fd5f918f24c5ff4119736f43fc9c162fb0`; no force-disk or manual document rewrite was used.
+
+The recurring free-text queue defect is also fixed. A captured response may strike an answered free-text command only while its exact closeout cycle is still open. After that cycle commits, its durable historical response can no longer strike a newly typed identical command. Consequently, a later `- deploy to staging` added after a second task remains pending for that second task; the first same-cycle occurrence is still consumed normally.
+
+Dogfooding closeout exposed and fixed one adjacent failure in 0.35.267: a serialized CLI write that has already advanced canonical CRDT authority now awaits the exact lazy editor-delivery transition and its asynchronous native-save disk receipt within the existing bounded deadline. A prompt ACK completes the original command. If the editor advances to a different cut or never acknowledges, the original captured target remains retained and the command fails closed without recapture or a behind-the-editor disk write.
+
+Public releases:
+
+- `0.35.266`, source commit `dc30a6168d6a84f3ebebaeac2ba1262eb88877fd`: retained Compact completion and recurring queue ownership.
+- `0.35.267`, source commit `3a71c9f47`: same-command delivery/native-save receipt settlement.
+- Parent projection commit `057a965cdd`; both public source tags and parent commits are pushed.
+- Installed binary: `agent-doc 0.35.267`; matching JetBrains plugin package installed in four existing IDE installations.
+
+Invariant:
+
+A compact cannot commit from stale disk while a live editor owns a newer exact target. A response capture cannot mutate queue text outside its own open closeout cycle. An accepted serialized write can complete only from exact canonical delivery plus native-save disk proof; authority drift preserves the original intent.
+
+Policy owner:
+
+Compact completion policy lives in `agent-doc-compact-io`; queue-strike capture eligibility lives in `agent-doc-state-backbone`; bounded serialized delivery and native-save proof live in `agent-doc-document-realtime-io`. The controller observes these policies and performs their effects rather than inventing duplicate eligibility rules.
+
+Transition table:
+
+| State | Evidence | Transition |
+|---|---|---|
+| Retained compact, editor target equals disk | Exact canonical/disk hash equality | Checkpoint, commit, settle |
+| Retained compact, target delivered but disk stale | Live editor target, delivery convergence, native-save receipt | Re-observe equality, then checkpoint/commit/settle |
+| Open exact closeout capture | Matching cycle identity and nonterminal phase | May project the answered free-text strike |
+| Terminal or mismatched capture | Committed/terminal proof or different cycle | No queue strike target |
+| Serialized target awaiting delivery/save | Exact delivery/disk receipt within deadline | Complete the same command |
+| Serialized target missing or authority advances | Timeout or different canonical hash | Preserve original retained intent; fail closed |
+
+Evidence inputs:
+
+Durable compact continuation identity, canonical editor text/hash, live-editor count, delivery version and convergence, disk text/hash, native-save receipt, closeout cycle identity and phase, captured-response terminal proof, and current queue authority.
+
+Reactive topology:
+
+Retained continuation plus editor delivery/native-save receipts derive the compact completion effect and settled event. Closeout capture plus cycle phase and queue authority derive the active strike target and CAS effect. Serialized write receipt plus delivery/native-save observations derive same-command completion or retained refusal.
+
+Imperative extraction audit:
+
+Native save remains an external authority effect after visible delivery, never an initial-admission disk write. Queue eligibility moved out of controller ad hoc logic into typed state policy. The serialized caller subscribes to existing delivery state and waits only for exact proof; it does not poll by resubmitting the mutation.
+
+Allowed edit surfaces:
+
+`agent-doc-compact-io`, `agent-doc-controller-io`, `agent-doc-state-backbone`, `agent-doc-document-realtime-io`, their focused tests, specifications, release notes, and projected version manifests/skills.
+
+Verification:
+
+Focused Compact, recurring queue, exact delivery, missing-ACK, single-submit, post-settlement editor-edit, and repair-race regressions pass. The complete affected crate suite passes. Full `make check` passes with artifact `tart-e6227e7a22`, and `make install-full` completed. The live retained Compact continuation settled and its session-check passed.
+
+The public 0.35.267 CI/Release workflows were in progress at closeout; 0.35.266 CI and Release were green. The root workflow was prevented from starting by the GitHub account billing/spending-limit gate, and the separate PyPI workflow remains subject to the external project storage quota.
+
+Out of scope:
+
+A global redesign of recurring queue identity, force-disk recovery, GitHub account billing administration, and PyPI storage-quota administration.
 <!-- agent:boundary:0d0ed28d:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#harnessresumemap]
 <!-- /agent:queue -->
 
 ## Notes
@@ -176,7 +237,6 @@ The agent-doc release workflows were still running when checked. The parent work
 
 <!-- agent:backlog priority queue -->
 - [ ] [#harnessresumemap] Implement a harness-keyed resume map with claude, codex, and opencode entries; each launch or restart must read only the active harness key, and legacy scalar resume values must migrate only into the document active harness. Add cross-harness restart and compatibility regressions.
-- [/] [#clearsubmitunobservedverify] [operator-verify] Live re-proof for #clearsubmitunobserved (0.35.225): reproduce the reported haiven-dev.md sequence — let the supervisor go dead (or `session restart-supervisor`), then Run Agent Doc so the flow cold-starts a replacement and immediately runs Clear Session Context on the fresh pane. Expect it to SUCCEED instead of failing with `result=submission_unobserved ... unblocker=clear_submission_unobserved`, and expect `session_clear_submit_cleared_state_probe ... result=cleared_state_proven retained_lines=<small>` in ops.log. Then the half that must not regress: on a pane holding a real conversation, break submission (e.g. leave the composer wedged) and confirm the clear still fails closed with `result=conversation_retained`. Unit tests pin the predicate against synthetic captures; only a live pane exercises the tmux scrollback capture and the real harness prompt shapes.
 <!-- /agent:backlog -->
 
 ## Review
@@ -192,6 +252,7 @@ The agent-doc release workflows were still running when checked. The parent work
 - [/] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.
 - [/] [#mtds] [operator-verify] #panedraftunblocker live proof: on a Claude pane whose footer reads `⏵⏵ bypass permissions on · 1 shell · ← for agents` (the variant without `(shift+tab to cycle)`), with an EMPTY composer and no active turn, trigger JB Run Agent Doc. Expect dispatch to succeed instead of refusing with `timed_out` / `unblocker=wait_for_dispatch_ready_prompt`. Then repeat with unsent text typed in the composer and expect the new refusal naming the draft with `unblocker=submit_or_clear_pane_draft`, and NO injection over that text. Finally confirm a genuinely mid-turn pane (live spinner, bare prompt) still refuses as busy. Fixed in 17848a927. This item named binary 0.35.6 and a pending idle-boundary recycle; the installed binary is now 0.35.174 and has recycled many times, so only the live eyeball remains.
 - [/] [#falsetyping-guard] #agent-doc-bug provenance-aware visible-write guard. INTEGRATED to main (merge on 5bcfc07b) + binary/cdylib installed + recycled; guard tests 7/7 green. JB install step DONE — the installed plugin is 0.2.350 in all four IDE configs, superseding the 0.2.205 zip this item named; only an IDE restart is missing, covered by #stickymdpaneverify. VS Code 0.2.38 install is UNVERIFIED — no agent-doc extension found under ~/.vscode/extensions. REMAINING (operator): restart the IDE, then live proof — type during replica churn (no wedge) + genuine unsaved edit still fails closed.
+- [/] [#clearsubmitunobservedverify] [operator-verify] Live re-proof for #clearsubmitunobserved (0.35.225): reproduce the reported haiven-dev.md sequence — let the supervisor go dead (or `session restart-supervisor`), then Run Agent Doc so the flow cold-starts a replacement and immediately runs Clear Session Context on the fresh pane. Expect it to SUCCEED instead of failing with `result=submission_unobserved ... unblocker=clear_submission_unobserved`, and expect `session_clear_submit_cleared_state_probe ... result=cleared_state_proven retained_lines=<small>` in ops.log. Then the half that must not regress: on a pane holding a real conversation, break submission (e.g. leave the composer wedged) and confirm the clear still fails closed with `result=conversation_retained`. Unit tests pin the predicate against synthetic captures; only a live pane exercises the tmux scrollback capture and the real harness prompt shapes.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

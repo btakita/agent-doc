@@ -9,7 +9,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue_active: false
+queue: stop
 ---
 
 ## Status
@@ -83,6 +83,49 @@ All 5 pass. The Stop-hook block message names `agent-doc finalize`, `agent-doc w
 - Ran `agent-doc migrate` on this document to clear the `legacy_gated_in_backlog` warning — `#ha3h` moved from `agent:backlog` into `agent:review`, where a gated `[/]` item belongs. It stays gated legitimately: upstream issue #40 says not to ship recipient-side policy config before multi-user workspace support exists.
 
 **One caveat on scope.** The enforcement is Codex-specific — it rides the Codex `Stop` hook (`agent-doc-codex-stop-io`) plus the `session-check` `codex-final-gate`. That matches the original repro, which was a Codex pane. OpenCode has neither a `Stop` hook nor `/loop`, so its equivalent protection is instruction-level (`#ocdrainstall`), not code-enforced. If you ever see this failure family from an OpenCode owned pane, that is a genuinely new item, not a reopen of this one.
+
+### Re: agent-doc in a Coder workspace (JB Toolbox + VS Code) — opus-5
+
+> **Queue prompt:**
+>
+> do [#createplanbacklog]
+
+
+Plan written: **`tasks/agent-doc/plan-coder-ide-hosted-tmux.md`** (committed `74c9526`), with phases `#coder1`..`#coder7` now in backlog. Planning only — no code changed.
+
+**The good news first.** I expected the hard part to be transport, and it isn't. In both Coder modes the plugin's process runs *on the workspace*: JetBrains Toolbox/Gateway starts a remote IDE **backend** there and the local window is a thin client; VS Code Remote-SSH / code-server runs the **extension host** there. agent-doc's editor endpoints are unix sockets at `<project_root>/.agent-doc/agent-doc-<pid>.sock` (`agent-doc-ipc-io/src/lib.rs:165`), so plugin and binary are same-host, same-user, same filesystem. CRDT replicas, reliable-sync registrations, endpoint fan-out — all unchanged. No new transport, no SSH tunnel.
+
+**What actually breaks** is only the bootstrap:
+
+1. `ensure_inside_tmux` (`agent-doc-start-io/src/lib.rs:934`) hard-bails with "start a tmux session first" — and in Coder there is nowhere to type that except the IDE terminal, which nothing mentions.
+2. `agent-doc terminal` spawns a **GUI terminal emulator** (`src/terminal.rs`, `[terminal] command` / `$TERMINAL`). A workspace container has no `$DISPLAY` and no emulator installed, so the one bootstrap affordance for plugin users is dead there.
+3. Neither plugin can open a terminal. I grepped: the JB plugin never touches `TerminalToolWindowManager`/`ShellTerminalWidget`, and the VS Code extension never calls `window.createTerminal`/`sendText`. There is no IDE-hosted shell path at all today.
+4. Workspace stop/start kills the tmux server while `.agent-doc/` registry rows and `*.sock` files survive on the persistent volume. Coder autostops aggressively, so that is the normal case there, not an edge case.
+
+The primitive we need already exists: `tmux_router::Tmux::new_session` (`src/tmux-router/src/tmux.rs:422`) runs `tmux new-session -d`, so the binary can stand up a server with no TTY of its own. Pane creation inside an existing server is already controller-owned (`editors/SPEC.md:25`).
+
+**Your four questions.**
+
+**Auto-start or require the operator?** Auto-start by default, with an explicit opt-out that shows the dialog. The primitive is idempotent and the registry already dedupes, so auto-start is re-entrant and costs nothing; requiring a manual `tmux new-session` on every workspace start is friction that will silently strand routes, and a Coder workspace restarts far more often than a laptop. The dialog is still needed for the three cases auto-start can't fix: tmux missing from the workspace image (where the fix is an image/`coder_script` change, not `apt install` — the operator may have no sudo), `auto_start_tmux = false`, and auto-start succeeding with no terminal API to attach a client.
+
+**If we integrate with the IDE's remote, should we also support the IDE's terminal?** They're the same surface — there's no second thing to build. The "remote tab" *is* the terminal tool window, and because the backend/extension host runs on the workspace, `createTerminal` already lands on the workspace shell. `vscode.env.remoteName` and the JB remote flag change what we print in diagnostics, not which API we call.
+
+**IDE-hosted tmux locally, or wait?** Ship it now, in the same change — the plugin terminal API can't tell local from remote, so excluding local means *adding* a guard for less capability. Your separate-shell workflow is protected by resolution order, not by a local/remote switch: **a live registry session for the project always wins** — attach, never create a second one (`src/terminal.rs` `find_active_project_session` already does this; it stays rule 1). Host selection only runs on a cold start with no session, which is exactly the Coder case. Locally your external shell keeps ownership as today.
+
+**How to configure it?** Extend the existing `[terminal]` table (`agent-doc-config/src/lib.rs:114`) rather than adding a second surface:
+
+```toml
+[terminal]
+host = "auto"                                  # auto | external | ide | none
+command = "wezterm start -- {tmux_command}"    # external only; unchanged
+auto_start_tmux = true                         # false => dialog instead
+session = "agent-doc"
+attach_command = "tmux new-session -A -s {session}"
+```
+
+`auto` resolves: live attached session → no-op; live detached → attach in place; IDE-hosted env **and** a registered plugin endpoint → `ide`; `command`/`$TERMINAL` → `external`; else dialog. Per-document override as `terminal_host:` frontmatter, so one workspace can mix an IDE-hosted document with an external-shell one.
+
+**One thing I'd flag.** Phase 1's detection signals — the exact `CODER_*` variable names, the JetBrains remote-backend probe, and the `vscode.env.remoteName` values — are asserted from general knowledge here, not read out of a live workspace. Everything downstream keys off that classification, so `#coder1` verifies them against a real Coder workspace before anything else lands. `#coder7` is tagged `[operator-verify]` because the integration matrix (both IDEs attached at once, stop/start mid-turn, an image without tmux) can't be proven offline.
 <!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 
@@ -91,11 +134,17 @@ All 5 pass. The Stop-hook block message names `agent-doc finalize`, `agent-doc w
 
 ## Pending / Not Built
 
-<!-- agent:queue go -->
-- ~~Is [#owned-pane-chat-writeback] still relevant or outdated?~~
+<!-- agent:queue go priority -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
+- [ ] [#coder1] Phase 1 — terminal-host environment classification (CODER_* / DISPLAY / SSH_CONNECTION / tmux presence) + `agent-doc env --json`. VERIFY the real Coder env var names, the JB remote-backend probe, and vscode.env.remoteName against a live workspace before landing. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
+- [ ] [#coder2] Phase 2 — headless tmux bootstrap: `agent-doc tmux ensure <FILE>` (idempotent detached new-session) and rewrite ensure_inside_tmux (agent-doc-start-io/src/lib.rs:934) to auto-start + re-exec into the pane instead of bailing. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
+- [ ] [#coder3] Phase 3 — JetBrains IDE-hosted terminal: open/reuse an `agent-doc` tab via TerminalToolWindowManager, run the attach command, dialog fallback with a Copy action. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
+- [ ] [#coder4] Phase 4 — VS Code IDE-hosted terminal: window.createTerminal/sendText parity, reuse live terminals, report vscode.env.remoteName in diagnostics, update editors/plugin-parity.tsv. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
+- [ ] [#coder5] Phase 5 — `[terminal] host/auto_start_tmux/session/attach_command` config + `terminal_host:` frontmatter override + pure resolution function shared by CLI and both plugins + runbooks/coder-workspace.md. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
+- [ ] [#coder6] Phase 6 — workspace restart resilience: record tmux server identity, GC stale registry rows + orphaned .sock files on server-identity mismatch, guard AF_UNIX-incapable project-root filesystems. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
+- [ ] [#coder7] [operator-verify] Phase 7 — live Coder workspace validation matrix (JB Gateway cold start, VS Code Remote-SSH cold start, both IDEs attached at once, workspace stop/start, image without tmux). Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 <!-- /agent:backlog -->
 
 ## Review
@@ -111,12 +160,6 @@ All 5 pass. The Stop-hook block message names `agent-doc finalize`, `agent-doc w
 ## Completed / Reaped
 
 <!-- agent:done archive=tasks/agent-doc/agent-doc-bugs.done.md -->
-- 2026-05-31 [#pbc1] Commit-boundary reliability for Codex/IPC sessions: fail closed when fresh-start route trigger never fires, and auto-resume commit when write/snapshot succeeded but commit boundary was interrupted. Plan: `tasks/agent-doc/plans/commit-boundary-reliability-codex-ipc.md`
-- 2026-05-31 [#dtmc] scan_text_source parallelized via std::thread::scope in diagnose_cycle
-- 2026-05-31 [#editor-buffer-state-ffi-debounce] [recommended] Replace `wait_for_stable_content`'s last-added-line/truncation heuristic with editor-authoritative buffer stability when an IDE plugin is attached. JetBrains and VS Code plugins should report normalized editor state through the FFI bridge to the Session Actor: canonical doc path/session, monotonic editor document version, dirty flag, last edit timestamp, optional save timestamp, optional buffer hash, and ideally current buffer content. Run requests should include the editor version/hash observed at click time so the Session Actor can detect edits after invocation, debounce until the version/hash is stable, and compute the diff against the exact stable editor buffer when available. If no editor state exists, fall back to whole-file content + mtime stability polling. This removes reliance on `extract_last_added_line`, which misses edits above the last inserted line, and reduces disk/snapshot/editor-buffer race classes seen in live IPC/JB/VSCode flows.
-- 2026-05-31 [#lr-found-1] Phase 1: Add lazily-rs dependency + define graph types in agent-doc-orchestration/src/graph.rs (RunContext, slot/cell handles, compute closures, unit tests). Plan: tasks/agent-doc/plans/lazily-rs-integration.md
-- 2026-05-31 [#lr-dedup-2] Phase 2: Deduplicate project_root_for_doc — consolidate 8+ find_project_root implementations into single graph slot. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
-- 2026-05-31 [#lr-config-3] Phase 3: Move load_project_for_doc and resolve_ssh_context_inputs into graph slots. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
-- 2026-05-31 [#lr-fmt-4] Phase 4: Move parse_for_file into graph slot. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
-- 2026-05-31 [#lr-actor-5] Phase 5: Wire ActorContext into watch daemon and supervisor with invalidation on file/config change events. Plan: tasks/agent-doc/plans/lazily-rs-integration.md
+
+<!-- completed work archived in tasks/agent-doc/agent-doc-bugs.done.md -->
 <!-- /agent:done -->

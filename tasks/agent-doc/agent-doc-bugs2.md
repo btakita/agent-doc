@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -238,12 +238,20 @@ I did not rewrite the already-struck item in `equityfundingsource.md`; it may ne
 Public release/CI jobs are still running. The parent repository’s jobs could not start because of GitHub’s account billing/spending-limit gate; PyPI also has an existing storage-quota issue.
 
 Full write-up: [agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md)
+
+### Re: Transition table specification — Codex
+
+No. The consolidated transition table was present only in this session document; the public specs covered its individual invariants in prose but did not publish the exact state/evidence/transition matrix.
+
+It is now canonical in `specs/14-realtime-workflow.md` under **Retained closeout transition table**. The table documents all six cases: retained Compact with disk equal or stale, open versus terminal/mismatched response capture, and serialized delivery/save success versus timeout or authority advance. It also states that a terminal response cannot answer an identical recurring queue command added for a later task.
+
+A red/green contract test, `realtime_workflow_spec_documents_retained_closeout_transition_table`, pins the heading and all six rows. The focused test failed before the spec addition and passes afterward. Full `make check` passed (`tart-2e306df5ef`), and `make install-full` passed (`tart-fa9fdac8b3`). Public source commit `c21797d2b` is pushed to `main`.
 <!-- agent:boundary:0d0ed28d:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- Is the transition table documented in the specs?
+- 🚧 Is the transition table documented in the specs?
 <!-- /agent:queue -->
 
 ## Notes

@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -241,12 +241,23 @@ Verification:
 - The agent-doc runtime is now 0.35.265, and the live JetBrains plugin 0.2.355 reattached after the IDEA restart.
 
 The exchange remains large; I continued the active queue without compacting it. The preset-authorized push follows successful agent-doc closeout.
+
+### Re: Closeout — gpt-5
+
+Completed and pushed to `main` as `94b1c681`.
+
+- Full Yelp review text now renders locally in the modal.
+- Removed the unreliable Yelp iframe/widget dependency.
+- `make check`: 2,303 tests passed; browser and Worker builds succeeded.
+- Agent-doc response committed and session-check passed.
+- No GitHub Actions workflows are configured.
+- Unrelated `AGENTS.md` and `.agent/` changes remain untouched.
+
+Suggested commit message: `fix(home): render complete Yelp reviews locally`
 <!-- agent:boundary:981ed11a:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 Scrape the Yelp review text into the Full Yelp review modal?  Some of the Yelp full reviews are missing text.
-- ~~deploy to staging~~
 <!-- /agent:queue -->
 
 ## Backlog

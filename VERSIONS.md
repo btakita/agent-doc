@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.270
+
+- **Fix: Claude routed prompts split composer insertion from submission.**
+
+Claude and Claude Code now use the existing split tmux submit profile: agent-doc
+inserts the routed prompt, waits for the TUI to settle, and sends Enter as a
+separate transport command. This prevents a load-sensitive same-call race where
+Run Agent Doc could report transport success after two briefly empty composer
+observations, yet leave the identical `/agent-doc ...` prompt stranded once
+Claude finished rendering. Regression coverage pins both accepted Claude harness
+names and the two-command tmux effect.
+
 ## 0.35.269
 
 - **Fix: JetBrains editor-focus session classification now owns model read access

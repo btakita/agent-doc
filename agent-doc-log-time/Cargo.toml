@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-log-time"
-version = "0.35.269"
+version = "0.35.270"
 edition = "2024"
 description = "Log timestamp and low-level ops-log formatting helpers for agent-doc"
 license = "MIT"

@@ -157,11 +157,10 @@ pub struct TmuxSubmitProfile {
     /// When non-zero, send the text and the submit key as separate
     /// `tmux send-keys` calls with this delay between them.
     ///
-    /// OpenCode's slash-command palette opens the moment `/` is typed. If Enter
-    /// is sent in the same `tmux send-keys` call as the text, the palette can
-    /// swallow the Enter instead of submitting the composer. Splitting the send
-    /// gives the TUI time to settle. Other harnesses keep the canonical
-    /// single-call form.
+    /// Interactive harnesses can consume or defer Enter when text and the key
+    /// arrive in one `tmux send-keys` call. Splitting the send gives the TUI time
+    /// to settle before the submit key arrives. Harnesses without an observed
+    /// same-call race keep the canonical single-call form.
     split_text_and_submit_delay_ms: u64,
 }
 
@@ -206,33 +205,17 @@ impl Default for TmuxSubmitProfile {
 }
 
 /// Codex/OpenCode need the split text+Enter send because their slash-command
-/// palettes can open on `/` and swallow a same-call Enter. This is
-/// `const fn`-safe byte compare because `str` equality is not const.
+/// palettes can open on `/` and swallow a same-call Enter. Claude needs the same
+/// transport shape because its composer can defer a same-call Enter under load.
+/// This is a `const fn`-safe byte compare because `str` equality is not const.
 ///
-/// **claude is deliberately NOT in this list (`#claudesplitsubmit`, measured
-/// 2026-08-08 on 0.35.181).** The open question was whether Claude's single-call
-/// text+Enter send drops often enough to need the same 80ms split. Measured with
-/// the corrected metric (`#ptsubmitmetric`, `agent-doc ops submit-profile`) over
-/// 23 post-0.35.164 `harness=claude` repairs:
-///
-/// - 12 controlled dispatches into an idle, unloaded pane: **12/12 submitted on
-///   the first send, 0 resubmits.** Confirmed independently against Claude's own
-///   session JSONL — 12 recorded trigger prompts for 12 dispatches — because
-///   `outcome=cleared` alone could in principle be an unrendered-pane false
-///   clear, and `elapsed_ms=305` on every line is the minimum two-settle path.
-/// - 11 production repairs from the same day under real editor/CPU load: 8
-///   needed at least one bare submit key (72%), `max_enters_sent=2`.
-///
-/// So the drop is **load-dependent, not inherent to the single-call send** — and
-/// in all 23 samples the settle-gated repair recovered the dispatch: every line
-/// is `outcome=cleared`, with zero `exhausted_still_stranded`. No dispatch was
-/// ever lost. Adding claude to the split profile would pay 80ms on every submit
-/// to remove a retry that already succeeds 100% of the time, so the decision is
-/// to leave the profile alone.
-///
-/// If the resubmit latency under load later matters on its own, that is a
-/// separate optimization with its own measurement — `agent-doc ops
-/// submit-profile --since <day>` re-checks the rate in one command.
+/// `#claudesplitsubmit`: 0.35.181 kept Claude on the single-call path after 23
+/// samples because the settle-gated repair appeared to recover every strand.
+/// A live 2026-08-23 routed `/agent-doc .../backend.md` dispatch disproved that
+/// acceptance premise: the composer was briefly absent for both clear
+/// observations, the route returned success, and the identical trigger later
+/// remained in Claude's composer. Splitting before Enter prevents the transport
+/// race instead of depending on a short post-send absence as terminal proof.
 const fn harness_uses_split_text_submit(harness: &str) -> bool {
     let b = harness.as_bytes();
     let opencode = b.len() == 8
@@ -250,7 +233,26 @@ const fn harness_uses_split_text_submit(harness: &str) -> bool {
         && b[2] == b'd'
         && b[3] == b'e'
         && b[4] == b'x';
-    opencode || codex
+    let claude = b.len() == 6
+        && b[0] == b'c'
+        && b[1] == b'l'
+        && b[2] == b'a'
+        && b[3] == b'u'
+        && b[4] == b'd'
+        && b[5] == b'e';
+    let claude_code = b.len() == 11
+        && b[0] == b'c'
+        && b[1] == b'l'
+        && b[2] == b'a'
+        && b[3] == b'u'
+        && b[4] == b'd'
+        && b[5] == b'e'
+        && b[6] == b'-'
+        && b[7] == b'c'
+        && b[8] == b'o'
+        && b[9] == b'd'
+        && b[10] == b'e';
+    opencode || codex || claude || claude_code
 }
 
 pub const fn tmux_submit_profile_for_harness(harness: &str) -> TmuxSubmitProfile {
@@ -1066,7 +1068,7 @@ mod tests {
     }
 
     #[test]
-    fn tmux_submit_profile_splits_text_and_enter_for_slash_palette_harnesses() {
+    fn tmux_submit_profile_splits_text_and_enter_for_racy_harness_composers() {
         let codex = tmux_submit_profile_for_harness("codex");
         assert!(
             codex.split_text_and_submit_delay_ms() > 0,
@@ -1087,7 +1089,19 @@ mod tests {
         assert_eq!(opencode.transform(), "tmux_text_enter");
         assert!(opencode.pending_draft_enter_resubmit());
 
-        for non_split in ["claude", "claude-code", "default", "", "unknown"] {
+        for claude in ["claude", "claude-code"] {
+            let profile = tmux_submit_profile_for_harness(claude);
+            assert!(
+                profile.split_text_and_submit_delay_ms() > 0,
+                "{claude} must separate prompt insertion from Enter so a transiently cleared composer cannot strand the routed trigger"
+            );
+            assert_eq!(profile.submit_key(), "Enter");
+            assert_eq!(profile.mode(), "tmux_text_enter");
+            assert_eq!(profile.transform(), "tmux_text_enter");
+            assert!(profile.pending_draft_enter_resubmit());
+        }
+
+        for non_split in ["default", "", "unknown"] {
             let profile = tmux_submit_profile_for_harness(non_split);
             assert_eq!(
                 profile.split_text_and_submit_delay_ms(),
@@ -1097,36 +1111,16 @@ mod tests {
         }
     }
 
-    /// `#claudesplitsubmit`, decided 2026-08-08 on measurement, not inference.
-    ///
-    /// Over 23 post-0.35.164 `harness=claude` repairs read with the corrected
-    /// metric (`agent-doc ops submit-profile`): 12 controlled dispatches into an
-    /// idle pane submitted 12/12 on the first send with 0 resubmits (verified
-    /// against Claude's own session JSONL, since `outcome=cleared` alone could be
-    /// an unrendered-pane false clear), while 11 production repairs under real
-    /// load needed a bare submit key 8 times. The drop is load-dependent, not
-    /// inherent to the single-call send — and every one of the 23 ended
-    /// `outcome=cleared` with zero `exhausted_still_stranded`, so the
-    /// settle-gated repair never lost a dispatch.
-    ///
-    /// Adding claude here would pay 80ms on every submit to remove a retry that
-    /// already succeeds 100% of the time. If you are about to change this,
-    /// re-run the measurement first.
+    /// `#claudesplitsubmit`: a live route can observe two empty composer frames,
+    /// return success, and still leave the trigger visible after Claude settles.
+    /// The submit profile must prevent that same-call race at the transport
+    /// boundary for both accepted Claude harness names.
     #[test]
-    fn claude_stays_on_the_single_call_submit_because_the_repair_never_loses_a_dispatch() {
-        assert_eq!(
-            tmux_submit_profile_for_harness("claude").split_text_and_submit_delay_ms(),
-            0,
-            "claude keeps the single-call send: measured 12/12 first-try submits on an idle \
-             pane, and under load the settle-gated repair recovered 8/8 strands with zero \
-             exhausted_still_stranded (#claudesplitsubmit)"
-        );
-        // The harnesses that DO split have a real mechanism behind it — a slash
-        // palette that swallows a same-call Enter — not a latency measurement.
-        for split in ["codex", "opencode"] {
+    fn claude_splits_prompt_insertion_from_submit_after_live_stranded_route() {
+        for split in ["claude", "claude-code"] {
             assert!(
                 tmux_submit_profile_for_harness(split).split_text_and_submit_delay_ms() > 0,
-                "{split} splits for the slash-palette reason, which claude does not share"
+                "{split} must split text from Enter after the live stranded-route repro (#claudesplitsubmit)"
             );
         }
     }

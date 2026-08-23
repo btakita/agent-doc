@@ -1081,14 +1081,14 @@ mod tests {
     }
 
     #[test]
-    fn send_submitted_text_for_harness_logged_uses_submit_profile() {
+    fn send_submitted_text_for_claude_uses_split_submit_profile() {
         let runner = RecordingRunner::new();
 
         send_submitted_text_for_harness_logged(
             &runner,
             "%1",
             "agent-doc plan.md\n",
-            "codex",
+            "claude",
             input_diag::InputDiagSink::new(None, |_file, _message| {}),
             "test.submit",
         )

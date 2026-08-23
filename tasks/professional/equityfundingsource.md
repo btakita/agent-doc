@@ -266,7 +266,23 @@ Completed and pushed to `main` as `94b1c681`.
 - Unrelated local changes remain untouched.
 
 Suggested commit message: `fix(home): render complete Yelp reviews locally`
-<!-- agent:boundary:981ed11a:equityfundingsource -->
+> **Queue prompt:** deploy to staging
+
+### Re: Staging deployment — gpt-5
+
+Deployed `main` at `94b1c681` to the top-level Cloudflare staging Worker.
+
+- Staging URL: [equityfundingsource.brian-takita.workers.dev](https://equityfundingsource.brian-takita.workers.dev/)
+- Cloudflare Version ID: `9ca7b035-a2e5-4bbd-a0a1-7a813000d5c5`
+- Live homepage returned HTTP 200.
+- The rendered homepage contains the recovered Ellisha S., Danny r., and Stephanie J. Yelp review text.
+- Staging D1 had no pending migrations before or after deployment, and a current Time Travel bookmark was confirmed before deployment.
+- The repository remains synced to `origin/main`; unrelated `AGENTS.md` and `.agent/` changes remain untouched. No new source commit was needed.
+
+The exchange remains large; I continued the active queue without compacting it.
+
+Suggested commit message: `fix(home): render complete Yelp reviews locally`
+<!-- agent:boundary:32fe6f8b:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->

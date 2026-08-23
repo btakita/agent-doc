@@ -69,27 +69,32 @@ This recurrence is not a new root-cause family. It is evidence that the current
 instruction/runbook invariant is insufficient without an enforced Codex final
 gate or Stop-hook block for owner-pane direct-chat turns.
 
+## Status
+
+**COMPLETE (verified 2026-08-23).** All fix-plan items landed and are covered by green
+regression tests; see Verification below.
+
 ## Fix Plan
 
-- [ ] Add a deterministic regression for an owned Codex pane that:
+- [x] Add a deterministic regression for an owned Codex pane that:
   - receives a session-document prompt,
   - trips the recursive direct invocation guard,
   - answers manually in chat,
   - and attempts to complete without `agent-doc finalize` or
     `agent-doc write --commit`.
-- [ ] Extend the regression to cover two consecutive direct-chat answers from
+- [x] Extend the regression to cover two consecutive direct-chat answers from
   the same owned pane, where the second answer also must not reach final success
   unless it crosses the `agent-doc` write boundary.
-- [ ] Make the Codex final gate fail closed when a known active session document
+- [x] Make the Codex final gate fail closed when a known active session document
   has an unresolved prompt or queue head and the final assistant message has not
   crossed the `agent-doc` write boundary.
-- [ ] Ensure the failure diagnostic names the exact recovery command:
+- [x] Ensure the failure diagnostic names the exact recovery command:
   `agent-doc finalize <FILE>` or `agent-doc write --commit <FILE>`, followed by
   `agent-doc session-check <FILE>`.
-- [ ] Treat malformed partial writeback markers such as
+- [x] Treat malformed partial writeback markers such as
   `no-free-text-queue-head-guard` plus a bare `###` as interrupted closeout
   evidence, not as a successful response body.
-- [ ] Keep recovery idempotent: if the operator asks for manual repair after a
+- [x] Keep recovery idempotent: if the operator asks for manual repair after a
   partial write attempt, the response should be appended once, the free-text
   queue head should be struck once, and repeated recovery must not duplicate the
   response.
@@ -105,3 +110,15 @@ gate or Stop-hook block for owner-pane direct-chat turns.
 - `agent-doc session-check` catches the `no-free-text-queue-head-guard` / bare
   heading residue when no response body exists.
 - Re-running recovery after a successful write is a no-op.
+
+## Verification (2026-08-23)
+
+| Acceptance criterion | Implementation | Regression test |
+|---|---|---|
+| Direct-chat answer cannot reach final success while the document lacks a matching response | `agent-doc-codex-stop-io/src/lib.rs` `active_session_prompt_requires_writeback` | `agent_doc_codex_stop_io::tests::stop_blocks_direct_chat_manual_queue_response_after_recursive_guard` |
+| Consecutive direct-chat answers each checked independently | same, keyed per `turn_id` via `prompt_writeback_debt` | `agent_doc_codex_stop_io::tests::stop_blocks_consecutive_direct_chat_manual_queue_answers` |
+| Final gate distinguishes chat-only from binary-owned closeout and prints one recovery command | `agent-doc-session-check-io/src/command.rs:1437` (`codex-final-gate`) | `session_check::tests::codex_final_gate_blocks_on_recursive_invocation_without_captured_response` |
+| `session-check` catches `no-free-text-queue-head-guard` + bare `###` residue | `agent-doc-workflow/src/session_check.rs:358`, `agent-doc-queue/src/queue_closeout_guard.rs` | `queue_closeout_guard::tests::free_text_queue_head_provenance_decision_reports_bare_heading_residue` |
+| Recovery after a successful write is a no-op | `agent-doc-session-check-io/src/command.rs:1423` (idempotent manual-patchback adoption) | `session_check::tests::codex_final_gate_adopts_manual_patchback_when_response_is_visible` |
+
+All listed tests pass on `agent-doc` v0.35.275.

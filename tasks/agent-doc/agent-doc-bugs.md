@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: e5a9d696-86fe-48f0-b162-4303a2c4670b
+  claude: 0fcd5662-6646-4bd1-91e9-e88a3993e42d
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -158,6 +158,30 @@ I refactored the precedence into a pure `resolve_session_name_from(explicit, con
 **One correction to yesterday's plan.** I'd proposed a `[terminal] session` config key — that would have been a second, competing binding. Dropped it; `#coder5` now says to reuse `tmux_session` and `agent-doc session set` instead. The plan file has a new "Session→project association" section recording what exists, so Phases 2 and 5 wire *into* that command rather than around it.
 
 The remaining Coder gap is unchanged and still real: `session set` tells agent-doc *which* session to use, but on a cold workspace nothing creates or attaches it. That is `#coder2` (headless bootstrap) and `#coder3`/`#coder4` (IDE terminal attach).
+
+### Re: do [#retainconv] + the two mid-turn reports — opus-5
+
+Three defects, all self-sustaining wedges, all fixed and shipped in **0.35.276**.
+
+**`#retainconv` — two independent bugs, not one.**
+
+*Misclassification.* `classify_captured_finalize_resume_error` decides between "wait for a state edge" and "needs an operator" by matching the error **text**. One of its needles is `await_editor_replica` — written for the name of `AwaitEditorReplicaNoDiskWrite`, the typed error the entire retained-write class is built from. But its `Display` prints only the prose, so nothing ever carried that string, and the canonical "retained, awaiting an editor state edge" failure fell straight through to the default `NeedsOperator` arm. The one constructor now stamps `recovery=await_editor_replica_no_disk_write` into every such refusal, so the needle is true by construction rather than by coincidence of wording — and it survives the boundaries a typed downcast cannot cross (ops-log `reason_head`, the retained capture, the Codex stop hook).
+
+*Lost wakeup.* `#needsoperatorstateedge` retires a latch on the **next** state edge. It cannot retire one recorded **after** the edge already fired, and a resume attempt — a full write plus commit against the controller — takes long enough for convergence to land mid-flight. That is exactly your trace: `ResumeSettledDelivery proof=exact_target` at 18:49:16, `captured_finalize_resume_needs_operator` at 18:49:17, then nothing, because `require_operator()` masked the pending edge with `needs_operator` and `ready()` is gated on `!needs_operator`. The triggers now **decline** the verdict when `state_epoch > consumed_state_epoch`, and the idle watch mirrors that decision instead of latching on its own second gate.
+
+**`#harnessswitchstorm` — the six Claude Code restarts.** The idle-watch `agent:` detector read the document with a bare `std::fs::read_to_string`; the restart executor in `run.rs` re-resolves it through `try_resolve_current_document_content`, the live editor buffer. While your codex → claude edit sat unsaved, the two views disagreed — and the disagreement fed itself: the detector requested a fresh restart, the executor re-resolved the live value, logged `agent_restart_respec_inert note=no_harness_change`, relaunched anyway, and the relaunch reset the detector's per-thread dedupe. Your ops log shows the cycle exactly, `harness_change_detected old=claude new=codex` every ~5s from 19:17:03 to 19:17:33, stopping only when the buffer reached disk. The detector now reads the same authority, and a detection backed **only** by a non-authoritative view is logged (`agent_restart_deferred reason=non_authoritative_document_view`) rather than acted on. A respawn kills your live agent — this one cost a session at 70% context — so it now requires evidence the policy will stand behind. The gate lives in `agent_change_restart_decision_from_view`, in the pure policy layer, not in the loop.
+
+Each fix has a regression test, and I verified all four are non-vacuous by perturbation: removing the token, the needle, the pending-edge guard, or the view gate each reddens exactly its own test. `make check`: **9027 passed, 0 failed**. Committed, `make install`ed, controllers recycled, pushed, tagged `v0.35.276`. Release/PyPI/Book runs are queued — not waited on.
+
+**Your third report — typing in the queue item getting reverted — is diagnosed but NOT fixed, and it is the top backlog item.**
+
+I have the mechanism from your ops log. At 19:22:09 `queue_maintenance` read the document at 51272 bytes; at 19:22:10 it wrote back a whole-document CAS at 51275 bytes with `update_bytes=902210` — a ~900KB CRDT update for a 3-byte change, i.e. a full-text span replace, not a targeted edit. Any keystroke that reaches the CP model inside that window anchors into a span the replace deletes, so the insert is dropped on merge. That is precisely what "my latest typings reverted to the previous state" looks like.
+
+There is a guard for this shape already — `#sqedit-race` defers all queue maintenance while a **queue-edit lease** is held — but it only covers another agent-doc process, not an operator typing in the editor. And the pure policy that would cover you does exist: `decide_watch_action(.., edit_in_flight: bool) -> DeferForEditSettle`, with tests. Its single production caller passes a hardcoded `false` (`agent-doc-crdt-relay-io/src/lib.rs:3852`). So the decision is written and tested; nothing publishes the fact it decides on.
+
+I am not landing that in this turn, and I want to be straight about why: the correct fix is a component-scoped queue write instead of a whole-document CAS (`#percellconverge`, `tasks/agent-doc/plan-per-component-convergence.md`), plus wiring a live operator-edit signal. That is the document write path — the one subsystem where a half-landed change loses operator text rather than merely annoying you. It is not blocked on you; it is the next item, at the top of the backlog with this evidence attached.
+
+**One caution while it is open:** avoid typing into `agent:queue` during an active preflight on that document. Everything else in the buffer is safe — the loss window is the read→CAS gap in queue maintenance specifically.
 <!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 
@@ -170,7 +194,7 @@ The remaining Coder gap is unchanged and still real: `session set` tells agent-d
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#retainconv] respond/finalize retained a capture as "editor state projection has not converged" while the SAME cycle logged live_editors=1 delivery_converged=true delivery_version=14, and the visible write plus all tracked-work mutations had already landed on disk (19404 bytes == crdt hash 398373016fd0). A bare `agent-doc commit` cleared it instantly with "repaired committed historical committed_capture snapshot drift". Observed 2026-08-23, cycle-1787510294962, agent-doc 0.35.275, JB idea pid 2077735 live, no replica storm (6 deregisters in 4000 log lines). Surviving shape of the needs_operator latch class fixed in a739c20b6: make the retention decision read the same delivery_converged signal the ops log reports, or self-resume via the commit path instead of latching.
+- [ ] [#qtypeclobber] Operator keystrokes in `agent:queue` are reverted by queue maintenance. Mechanism (ops.log, haiven-dev/tasks/backend.md 2026-08-23): `queue_maintenance` read the authority at 19:22:09 (`text_len=51272`), then at 19:22:10 wrote a whole-document CAS (`crdt_cp_write source=queue_maintenance content_len=51275 update_bytes=902210`) — a ~900KB CRDT update for a 3-byte delta, i.e. a full-text span replace. An operator insert that reaches the CP model in that window anchors into a replaced span and is dropped on merge. The `#sqedit-race` queue-edit lease guards only a FOREIGN agent-doc process, not the editor. The pure policy that would cover it exists and is tested — `decide_watch_action(.., edit_in_flight) -> DeferForEditSettle` — but its only production caller hardcodes `false` (agent-doc-crdt-relay-io/src/lib.rs:3852), so nothing publishes the fact it decides on. Fix = component-scoped queue write instead of whole-document CAS (`#percellconverge`) + a live operator-edit-in-flight signal from the editor plugin. Plan: tasks/agent-doc/plan-per-component-convergence.md
 - [ ] [#coder1] Phase 1 — terminal-host environment classification (CODER_* / DISPLAY / SSH_CONNECTION / tmux presence) + `agent-doc env --json`. VERIFY the real Coder env var names, the JB remote-backend probe, and vscode.env.remoteName against a live workspace before landing. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder2] Phase 2 — headless tmux bootstrap: `agent-doc tmux ensure <FILE>` (idempotent detached new-session) and rewrite ensure_inside_tmux (agent-doc-start-io/src/lib.rs:934) to auto-start + re-exec into the pane instead of bailing. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder3] Phase 3 — JetBrains IDE-hosted terminal: open/reuse an `agent-doc` tab via TerminalToolWindowManager, run the attach command, dialog fallback with a Copy action. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
@@ -183,6 +207,7 @@ The remaining Coder gap is unchanged and still real: `session set` tells agent-d
 ## Review
 
 <!-- agent:review -->
+- [/] [#harnessswitchverify] [operator-verify] Live proof of #harnessswitchstorm on 0.35.276: switch `agent:` (codex <-> claude) in a JB-held document WITHOUT saving, hit Restart Agent, and confirm exactly ONE harness spawn plus `agent_restart_deferred reason=non_authoritative_document_view` in ops.log while the edit is unsaved. Unit + policy coverage landed (agent-doc-supervisor/src/agent_change.rs); only the live editor/pane eyeball is outstanding.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:review -->
 

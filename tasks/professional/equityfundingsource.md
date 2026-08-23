@@ -74,6 +74,7 @@ Verification passed: the focused testimonial/homepage tests, full `make check`, 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#qhh8] deploy to staging
 <!-- /agent:backlog -->
 
 ## Review

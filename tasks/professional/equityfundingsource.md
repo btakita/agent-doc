@@ -38,10 +38,23 @@ complete
 Compacted content:
 - Archived 17 response topic(s): Yelp beside Google reviews; Testimonial auto-navigation; Yelp full-review formatting; 14 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): Homepage testimonial copy; Staging and production deployment; ...
-<!-- agent:boundary:ffc12163:equityfundingsource -->
+> **Queue prompt:** Deploy to production
+
+### Re: Production deployment — gpt-5
+
+Deployed synced `main` commit `94b1c681` to the isolated Cloudflare `[env.production]` environment.
+
+- Production Worker version: `09a4545a-b2d3-46e2-acb9-bbba96453e54`.
+- Verification: `make check` exited 0 (tests, application build, and Worker build); production D1 has no pending migrations and had a current Time Travel bookmark before deploy.
+- Live smoke tests: `https://equityfundingsource.com/` and `https://www.equityfundingsource.com/` both return 200; the live HTML references the newly built `index.server-F3GIZVIS_OJV2QJEG.css` and `index.browser-KPCOEO5T.js` assets.
+- The deployed version exposes the expected D1, R2, Durable Object, email, rate-limit, scheduled, and environment bindings.
+- No application commit or push was needed: `94b1c681` was already committed, pushed, and synchronized with `origin/main`. Unrelated local `AGENTS.md` / `.agent/` changes were preserved untouched.
+
+This was not a repeat of the older completed deployment: the previously active production version predated ten homepage commits now included in `94b1c681`.
+<!-- agent:boundary:d69a65b0:equityfundingsource -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
 <!-- /agent:queue -->
 
 ## Backlog

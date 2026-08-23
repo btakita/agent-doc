@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-boundary"
-version = "0.35.275"
+version = "0.35.276"
 edition = "2024"
 description = "Boundary marker element model and descriptor for agent-doc"
 license = "MIT"
@@ -11,7 +11,7 @@ publish = false
 name = "agent_doc_element_boundary"
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.275" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.276" }
 anyhow = "1"
 
 [dev-dependencies]

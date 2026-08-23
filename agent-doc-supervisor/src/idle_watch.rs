@@ -223,10 +223,30 @@ impl CapturedFinalizeResumeTriggers {
     /// Record that the last attempt failed on evidence a blind retry cannot
     /// change. Suppresses the effect-retry edge only; see
     /// [`Self::observe_state_edge`] for why a document transition retires it.
-    pub fn require_operator(&self) {
+    ///
+    /// Returns whether the verdict actually latched.
+    ///
+    /// `#retainconv`: the verdict describes the document state the attempt ran
+    /// *against*. When the controller publishes a newer state edge while that
+    /// attempt is still in flight, `state_epoch` has already moved past the
+    /// epoch the attempt consumed — and latching here would mask an edge that
+    /// arrived before the latch existed, because `observe_state_edge` cannot
+    /// retire a verdict recorded after it ran. That is a lost wakeup, not an
+    /// operator conflict: `#needsoperatorstateedge` retires the latch on the
+    /// *next* edge, and here there is no next edge to wait for. Observed
+    /// 2026-08-23 on `agent-doc-bugs.md` (cycle-1787510294962): delivery
+    /// converged at 18:49:16 with `ResumeSettledDelivery proof=exact_target`,
+    /// the resume latched at 18:49:17, nothing moved again, and the cycle stayed
+    /// open until an operator ran `agent-doc commit`. Decline the latch so
+    /// `ready()` fires on the edge that is already pending.
+    pub fn require_operator(&self) -> bool {
         let mut projection = self.scope.ctx().get(&self.projection);
+        if projection.state_epoch > projection.consumed_state_epoch {
+            return false;
+        }
         projection.needs_operator = true;
         self.scope.ctx().set(&self.projection, projection);
+        true
     }
 
     /// Whether the last attempt latched an operator-required verdict that no
@@ -798,6 +818,53 @@ mod tests {
         assert!(
             triggers.ready(),
             "the controller's settled-delivery edge must re-arm the resume"
+        );
+    }
+
+    /// `#retainconv` — the 2026-08-23 `agent-doc-bugs.md` lost wakeup.
+    ///
+    /// `#needsoperatorstateedge` retires a latch on the *next* state edge. It
+    /// cannot retire one recorded after the edge already fired, and a resume
+    /// attempt takes long enough (a full write + commit against the controller)
+    /// for convergence to land mid-flight — which is exactly what happened:
+    /// `ResumeSettledDelivery proof=exact_target` at 18:49:16, the latch at
+    /// 18:49:17, then nothing until an operator ran `agent-doc commit`.
+    #[test]
+    fn a_state_edge_during_the_attempt_declines_the_operator_verdict() {
+        let triggers = CapturedFinalizeResumeTriggers::new();
+        triggers.observe_operation(Some("cycle:capture:response".to_string()));
+        triggers.consume_attempt();
+        assert!(!triggers.ready());
+
+        // The controller publishes convergence while the attempt is in flight.
+        triggers.observe_state_edge();
+
+        assert!(
+            !triggers.require_operator(),
+            "a verdict computed against a superseded document state must not latch"
+        );
+        assert!(!triggers.needs_operator());
+        assert!(
+            triggers.ready(),
+            "the edge that landed mid-attempt must still re-arm the resume"
+        );
+    }
+
+    /// The decline is scoped to a genuinely pending edge — with no new evidence
+    /// the verdict must still latch, or `#needsoperatorstateedge`'s blind-retry
+    /// suppression is gone.
+    #[test]
+    fn a_verdict_with_no_pending_edge_still_latches() {
+        let triggers = CapturedFinalizeResumeTriggers::new();
+        triggers.observe_operation(Some("cycle:capture:response".to_string()));
+        triggers.consume_attempt();
+
+        assert!(triggers.require_operator());
+        assert!(triggers.needs_operator());
+        triggers.observe_effect_retry_due();
+        assert!(
+            !triggers.ready(),
+            "a blind backoff must not retry an operator-required verdict"
         );
     }
 

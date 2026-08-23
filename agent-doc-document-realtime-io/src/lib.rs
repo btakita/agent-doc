@@ -175,8 +175,33 @@ impl std::fmt::Display for AwaitEditorReplicaNoDiskWrite {
 
 impl std::error::Error for AwaitEditorReplicaNoDiskWrite {}
 
+/// The stable machine-readable recovery token every retained-write refusal
+/// carries.
+///
+/// `#retainconv`: the supervisor classifies a failed captured-finalize resume
+/// from the error *text*, and its `await_editor_replica` needle was written
+/// expecting this type's name to appear there — but `Display` prints only the
+/// prose. The entire typed "retained, awaiting an editor state edge" class
+/// therefore fell through the classifier's default arm to `NeedsOperator`,
+/// re-creating the very deadlock `#needsoperatorstateedge` removed for the error
+/// strings it happened to recognize. Observed 2026-08-23 on `agent-doc-bugs.md`
+/// (cycle-1787510294962): the same cycle logged `delivery_converged=true
+/// delivery_version=14` one second *before* the latch, and a bare
+/// `agent-doc commit` cleared it instantly.
+///
+/// Emitting the token from the one constructor makes the classification
+/// structural rather than remembered — the same reason `retained_refusal`
+/// centralizes the remedy — and it survives the process boundaries a typed
+/// `downcast_ref` cannot reach: the ops-log `reason_head`, the retained-capture
+/// reason, and the Codex stop hook all carry this failure as a bare string.
+pub const AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN: &str =
+    "recovery=await_editor_replica_no_disk_write";
+
 fn await_editor_replica_no_disk_write(message: String) -> anyhow::Error {
-    AwaitEditorReplicaNoDiskWrite(message).into()
+    AwaitEditorReplicaNoDiskWrite(format!(
+        "{message} [{AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN}]"
+    ))
+    .into()
 }
 
 /// The shared retained-write remedy for this crate's refusals.
@@ -5618,6 +5643,46 @@ fn defer_visible_delivery_projection(
         file.display(),
         retained_write_remedy_for(file),
     )))
+}
+
+#[cfg(test)]
+mod retained_refusal_token_tests {
+    use super::*;
+
+    /// `#retainconv`: the supervisor's captured-finalize classifier reads this
+    /// failure as a *string* — through the ops-log `reason_head`, the retained
+    /// capture, and the Codex stop hook, none of which can downcast. Every
+    /// refusal built by the one constructor must therefore name its own class,
+    /// or the classifier's default arm latches `needs_operator` on a write that
+    /// is merely deferred. Drive the real production builder; asserting a
+    /// hand-written copy of the message would prove nothing about it.
+    #[test]
+    fn every_retained_delivery_refusal_names_its_recovery_class() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "# plan\n").expect("write");
+
+        let err = defer_visible_delivery_projection(&file, "test", 14, 1)
+            .expect_err("a non-converged delivery projection must refuse");
+        let rendered = format!("{err:#}");
+
+        assert!(
+            rendered.contains(AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN),
+            "retained-delivery refusal must carry its recovery token: {rendered}"
+        );
+        assert!(
+            err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>().is_some(),
+            "and stay the typed retained-write error"
+        );
+    }
+
+    /// The sibling branches of `guard_visible_delivery_convergence` share the
+    /// constructor, so the token must not be something one branch remembers.
+    #[test]
+    fn the_recovery_token_comes_from_the_constructor_not_the_call_site() {
+        let err = await_editor_replica_no_disk_write("bare message".to_string());
+        assert!(format!("{err:#}").contains(AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN));
+    }
 }
 
 fn guard_visible_write_current_transition_with_policy(

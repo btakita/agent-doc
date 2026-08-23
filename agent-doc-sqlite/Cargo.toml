@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-sqlite"
-version = "0.35.275"
+version = "0.35.276"
 edition = "2024"
 description = "SQLite-backed persistence layer for agent-doc (archive index, controller state store) — isolates the bundled-SQLite C build from agent-doc-orchestration recompiles"
 license = "MIT"
@@ -16,12 +16,12 @@ name = "agent_doc_sqlite"
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.275" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.275" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.275" }
-agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.275" }
-agent-doc-topic = { path = "../agent-doc-topic", version = "0.35.275" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.275" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.276" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.276" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.276" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.276" }
+agent-doc-topic = { path = "../agent-doc-topic", version = "0.35.276" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.276" }
 anyhow = "1"
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

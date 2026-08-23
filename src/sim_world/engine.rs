@@ -1117,6 +1117,17 @@ impl SimWorld {
                 // Knob off: the idle-watch never restarts. The route disabled-bail
                 // owns the operator guidance in that state.
             }
+            AgentChangeRestartAction::AwaitAuthoritativeView => {
+                // `#harnessswitchstorm`: the change was seen only through a
+                // non-authoritative view of the document, so it is surfaced and
+                // held. The model never produces this — it drives the detector
+                // from the authoritative harness fields directly — but the arm is
+                // explicit rather than a wildcard so a future verdict cannot be
+                // silently absorbed into "held".
+                self.record_ops_proof(format!(
+                    "agent_restart_deferred old={old} new={new} reason=non_authoritative_document_view action=await_editor_authority"
+                ));
+            }
         }
     }
 

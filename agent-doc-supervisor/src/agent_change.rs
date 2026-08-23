@@ -12,6 +12,10 @@ pub enum AgentChangeRestartAction {
     Restart,
     /// Harness changed + knob on, but the pane is not at a quiet boundary yet.
     WaitForBoundary,
+    /// Harness changed + knob on + a quiet boundary, but the only evidence for
+    /// the change is a non-authoritative view of the document
+    /// (`#harnessswitchstorm`). Surface the detection; do not respawn.
+    AwaitAuthoritativeView,
 }
 
 /// Route-time policy for an explicit frontmatter harness change while the old
@@ -63,11 +67,42 @@ pub fn agent_change_restart_decision(
     prompt_visible: bool,
     turn_active: bool,
 ) -> AgentChangeRestartAction {
+    agent_change_restart_decision_from_view(harness_changed, knob_on, prompt_visible, turn_active, true)
+}
+
+/// `#harnessswitchstorm`: the same policy, plus the question of whether the
+/// detected change is trustworthy enough to kill and respawn the operator's
+/// agent on.
+///
+/// The detector and the restart executor must resolve `agent:` from the same
+/// authority. When the detector falls back to a disk read while a live editor
+/// holds an unsaved `agent:` edit, the two disagree — and the disagreement is
+/// self-sustaining, because the executor re-resolves the live value, finds no
+/// change (`agent_restart_respec_inert`), relaunches anyway, and the relaunch
+/// resets the detector's per-thread dedupe. Observed 2026-08-23 on
+/// `haiven-dev/tasks/backend.md`: an operator switched codex -> claude and hit
+/// Restart Agent, and the supervisor spawned Claude Code six times in 30s
+/// (`harness_change_detected old=claude new=codex` every ~5s) until the editor
+/// buffer happened to reach disk. Each spawn lands in the operator's live pane,
+/// so the loop destroyed a session at 70% context.
+///
+/// A restart is destructive and unrecoverable; waiting is neither. So a
+/// non-authoritative view yields the detection and nothing else.
+pub fn agent_change_restart_decision_from_view(
+    harness_changed: bool,
+    knob_on: bool,
+    prompt_visible: bool,
+    turn_active: bool,
+    authoritative_view: bool,
+) -> AgentChangeRestartAction {
     if !harness_changed || !knob_on {
         return AgentChangeRestartAction::None;
     }
     if !prompt_visible || turn_active {
         return AgentChangeRestartAction::WaitForBoundary;
+    }
+    if !authoritative_view {
+        return AgentChangeRestartAction::AwaitAuthoritativeView;
     }
     AgentChangeRestartAction::Restart
 }
@@ -79,6 +114,55 @@ pub fn harness_change_forces_fresh_spawn(running_binary: &str, resolved_binary: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#harnessswitchstorm` — the 2026-08-23 `backend.md` respawn loop.
+    ///
+    /// A quiet boundary plus a detected change is exactly the state that spawned
+    /// Claude Code six times in 30s, because the "detected change" came from a
+    /// disk read the executor immediately contradicted from the live buffer.
+    /// A restart is destructive; the detection alone must not authorize one.
+    #[test]
+    fn a_non_authoritative_view_never_authorizes_a_respawn() {
+        use AgentChangeRestartAction as A;
+
+        assert_eq!(
+            agent_change_restart_decision_from_view(true, true, true, false, false),
+            A::AwaitAuthoritativeView,
+            "a quiet boundary must not turn a stale read into a kill+respawn"
+        );
+        assert_eq!(
+            agent_change_restart_decision_from_view(true, true, true, false, true),
+            A::Restart,
+            "the same change from the authority still restarts exactly once"
+        );
+    }
+
+    /// The guard must not swallow the cheaper verdicts: a mid-turn or
+    /// prompt-less pane still reports `WaitForBoundary`, and no change is still
+    /// `None`, whatever the view was.
+    #[test]
+    fn the_view_gate_sits_below_the_existing_verdicts() {
+        use AgentChangeRestartAction as A;
+
+        for authoritative in [true, false] {
+            assert_eq!(
+                agent_change_restart_decision_from_view(false, true, true, false, authoritative),
+                A::None
+            );
+            assert_eq!(
+                agent_change_restart_decision_from_view(true, false, true, false, authoritative),
+                A::None
+            );
+            assert_eq!(
+                agent_change_restart_decision_from_view(true, true, true, true, authoritative),
+                A::WaitForBoundary
+            );
+            assert_eq!(
+                agent_change_restart_decision_from_view(true, true, false, false, authoritative),
+                A::WaitForBoundary
+            );
+        }
+    }
 
     #[test]
     fn agent_change_restart_decision_policy() {

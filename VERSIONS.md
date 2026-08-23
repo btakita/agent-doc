@@ -2,6 +2,48 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.276
+
+- **Fix: a deferred write no longer latches `needs_operator` (`#retainconv`).**
+
+The supervisor classifies a failed captured-finalize resume from the error
+text, and its `await_editor_replica` needle was written for the name of the
+typed error the whole retained-write class is built from — but `Display` prints
+only the prose, so nothing ever carried it. The canonical "retained, waiting for
+an editor state edge" failure therefore took the classifier's default arm and
+demanded an operator for a write that had already landed. The one constructor
+now stamps a stable recovery token into every such refusal, which also survives
+the process boundaries (ops-log `reason_head`, retained-capture reason, Codex
+stop hook) where a typed downcast cannot reach.
+
+- **Fix: an operator-required verdict no longer masks the edge that already
+  cleared it (`#retainconv`).**
+
+`#needsoperatorstateedge` retires the latch on the *next* controller state edge.
+A resume attempt takes long enough for convergence to land mid-flight, and a
+latch recorded after that edge had no next edge to wait for. The triggers now
+decline the verdict when a state edge arrived while the attempt was in flight,
+and the idle watch mirrors that decision instead of latching independently.
+Observed 2026-08-23 on `agent-doc-bugs.md`: `ResumeSettledDelivery
+proof=exact_target` at 18:49:16, the latch at 18:49:17, wedged until an operator
+ran `agent-doc commit`.
+
+- **Fix: a frontmatter `agent:` change no longer respawns the agent in a loop
+  (`#harnessswitchstorm`).**
+
+The idle-watch harness-change detector read `agent:` from disk while the restart
+executor re-resolved it from the live editor buffer. While an operator's edit
+sat unsaved, the two disagreed, and the disagreement was self-sustaining: the
+detector requested a fresh restart, the executor found no change
+(`agent_restart_respec_inert`), relaunched anyway, and the relaunch reset the
+detector's per-thread dedupe. The detector now reads the same authority, and a
+detection backed only by a non-authoritative view is logged
+(`agent_restart_deferred reason=non_authoritative_document_view`) rather than
+acted on — a respawn kills the operator's live agent, so it now requires
+evidence the policy stands behind. Observed 2026-08-23 on
+`haiven-dev/tasks/backend.md`: six Claude Code spawns in 30s after a codex ->
+claude switch, destroying a session at 70% context.
+
 ## 0.35.275
 
 - **Fix: a later committed cycle retires Codex prompt debt.**

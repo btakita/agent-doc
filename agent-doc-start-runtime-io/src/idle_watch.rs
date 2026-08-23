@@ -19,7 +19,7 @@ use agent_doc_queue::queue::{
 #[cfg(test)]
 use agent_doc_queue::queue::{idle_queue_context_reset_decision, idle_queue_drain_decision};
 use agent_doc_supervisor::{
-    agent_change::{AgentChangeRestartAction, agent_change_restart_decision},
+    agent_change::{AgentChangeRestartAction, agent_change_restart_decision_from_view},
     idle_reconcile::{
         ready_busy_conflict_reconcile_decision, reconcile_stale_busy_idle_queue_state,
         stale_busy_idle_reconcile_decision,
@@ -1281,6 +1281,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // reach a quiet boundary (`Restart`), so the trigger must not be
             // suppressed by the logging dedup.
             let mut agent_change_restart_requested_for: Option<String> = None;
+            // `#harnessswitchstorm` — a detected change whose evidence is a
+            // non-authoritative (disk-fallback) read is logged once and held, not
+            // acted on. Separate from the two dedupes above so the eventual
+            // authoritative answer still requests exactly one restart.
+            let mut agent_change_restart_deferred_for: Option<String> = None;
             let auto_install_enabled =
                 agent_doc_supervisor_io::config::supervisor_auto_install_enabled(&path);
             let install_crate_root = if auto_install_enabled {
@@ -1549,14 +1554,22 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::NeedsOperator {
                             reason,
                         } => {
+                    // `#retainconv`: the triggers decline the latch when a
+                    // controller state edge landed while this attempt was in
+                    // flight — that edge can never retire a verdict recorded
+                    // after it. Mirror the decision here, or this second,
+                    // independent gate reproduces the deadlock on its own.
+                    let latched = resume_triggers.require_operator();
                     resume_retry = Some(CapturedFinalizeResumeRetry {
                         key: key.clone(),
                         attempts: 1,
                         retry_at: now,
-                        needs_operator: true,
+                        needs_operator: latched,
+                        // Either the operator gate owns the next attempt, or the
+                        // already-pending state edge does. Neither wants a
+                        // backoff edge published on top of it.
                         trigger_published: true,
                     });
-                    resume_triggers.require_operator();
                     // `#needsoperatorstateedge`: carry a bounded, redacted head
                     // of the reason. A `reason_sha256` alone identifies the
                     // failure without ever explaining it, which is why the
@@ -1566,24 +1579,41 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         agent_doc_supervisor::idle_watch::captured_finalize_resume_reason_head(
                             &reason,
                         );
-                            let event = format!(
-                                "captured_finalize_resume_needs_operator file={} cycle_id={} capture_id={} response_sha256={} reason_bytes={} reason_sha256={} action=retain_without_mutation retry_on=controller_document_state_edge reason_head=\"{reason_head}\"",
-                                path.display(),
-                                key.cycle_id,
-                                key.capture_id,
-                                key.response_sha256,
-                                reason.len(),
-                                agent_doc_hash::content_hash(&reason),
-                            );
+                            let event = if latched {
+                                format!(
+                                    "captured_finalize_resume_needs_operator file={} cycle_id={} capture_id={} response_sha256={} reason_bytes={} reason_sha256={} action=retain_without_mutation retry_on=controller_document_state_edge reason_head=\"{reason_head}\"",
+                                    path.display(),
+                                    key.cycle_id,
+                                    key.capture_id,
+                                    key.response_sha256,
+                                    reason.len(),
+                                    agent_doc_hash::content_hash(&reason),
+                                )
+                            } else {
+                                format!(
+                                    "captured_finalize_resume_operator_gate_declined file={} cycle_id={} capture_id={} response_sha256={} reason_bytes={} reason_sha256={} action=retry_on_pending_state_edge reason=controller_document_state_edge_during_attempt reason_head=\"{reason_head}\" (#retainconv)",
+                                    path.display(),
+                                    key.cycle_id,
+                                    key.capture_id,
+                                    key.response_sha256,
+                                    reason.len(),
+                                    agent_doc_hash::content_hash(&reason),
+                                )
+                            };
                             log_event(&mut session_log, &event);
                             agent_doc_ops_log_io::log_op(&path, &event);
-                            eprintln!(
-                                "{}",
-                                agent_doc_supervisor::idle_watch::captured_finalize_resume_operator_message(
-                                    &path,
-                                    &reason_head,
-                                )
-                            );
+                            // Only a verdict that actually latched is the
+                            // operator's problem; a declined one retries itself
+                            // on the edge already pending (`#retainconv`).
+                            if latched {
+                                eprintln!(
+                                    "{}",
+                                    agent_doc_supervisor::idle_watch::captured_finalize_resume_operator_message(
+                                        &path,
+                                        &reason_head,
+                                    )
+                                );
+                            }
                         }
                     }
                 }
@@ -2016,19 +2046,48 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // The restart execution itself (spawn the new harness fresh) is the
                 // focused-cycle Phase 1b wiring; until then a detected change is
                 // surfaced so `agent:` edits are observable + operator-verifiable.
-                if agent_change_restart_enabled
-                    && let Ok(content) = std::fs::read_to_string(&path)
+                // `#harnessswitchstorm`: resolve `agent:` from the SAME authority the
+                // restart executor re-resolves it from. This read used to be a bare
+                // `std::fs::read_to_string`, i.e. the disk projection — while
+                // `run.rs` re-reads the live editor buffer via
+                // `try_resolve_current_document_content`. While an operator's `agent:`
+                // edit sits in the editor buffer and has not landed on disk, the two
+                // views disagree, and the disagreement is self-sustaining: the
+                // detector reads the stale harness, requests a fresh restart, the
+                // executor re-resolves the live one and logs
+                // `agent_restart_respec_inert note=no_harness_change`, the relaunch
+                // resets this thread's dedupe, and it all repeats. Observed
+                // 2026-08-23 on `haiven-dev/tasks/backend.md`: an operator switched
+                // codex -> claude and hit Restart Agent, and the supervisor relaunched
+                // Claude Code six times in 30s (`old=claude new=codex` every ~5s)
+                // until the buffer happened to reach disk. Disk stays the fallback
+                // for a detached document, which is what the authority resolver
+                // already returns for one.
+                let agent_change_view = agent_change_restart_enabled.then(|| {
+                    match agent_doc_document_realtime_io::try_resolve_current_document_content(
+                        &path,
+                        "idle_watch_agent_change_frontmatter",
+                    ) {
+                        Ok(content) => (content, true),
+                        Err(_) => (
+                            std::fs::read_to_string(&path).unwrap_or_default(),
+                            false,
+                        ),
+                    }
+                });
+                if let Some((content, authoritative_view)) = agent_change_view
                     && let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content)
                 {
                     let global = agent_doc_config::load().unwrap_or_default();
                     let resolved = agent_doc_harness::HarnessConfig::from_context(&fm, &global);
                     let harness_changed = resolved.binary != launch_harness_binary;
                     if harness_changed {
-                        let decision = agent_change_restart_decision(
+                        let decision = agent_change_restart_decision_from_view(
                             harness_changed,
                             agent_change_restart_enabled,
                             prompt_visible,
                             turn_active,
+                            authoritative_view,
                         );
                         let already_logged =
                             agent_change_logged_for.as_deref() == Some(resolved.binary.as_str());
@@ -2070,6 +2129,24 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // re-request a restart every tick.
                         let already_requested = agent_change_restart_requested_for.as_deref()
                             == Some(resolved.binary.as_str());
+                        // `#harnessswitchstorm`: a respawn kills the operator's live
+                        // agent, so a detection the policy will not stand behind is
+                        // logged once and held rather than acted on.
+                        if decision == AgentChangeRestartAction::AwaitAuthoritativeView
+                            && agent_change_restart_deferred_for.as_deref()
+                                != Some(resolved.binary.as_str())
+                        {
+                            agent_change_restart_deferred_for = Some(resolved.binary.clone());
+                            agent_doc_ops_log_io::log_op(
+                                &path,
+                                &format!(
+                                    "agent_restart_deferred file={} old={} new={} reason=non_authoritative_document_view action=await_editor_authority (#harnessswitchstorm)",
+                                    path.display(),
+                                    launch_harness_binary,
+                                    resolved.binary,
+                                ),
+                            );
+                        }
                         if decision == AgentChangeRestartAction::Restart
                             && !already_requested
                         {

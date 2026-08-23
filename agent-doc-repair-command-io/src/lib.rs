@@ -250,6 +250,17 @@ fn resume_captured_finalize_intent(
 
 fn classify_captured_finalize_resume_error(reason: &str) -> CapturedFinalizeResumeOutcome {
     let lower = reason.to_ascii_lowercase();
+    // Every needle here matches error *prose* except one. `#retainconv`:
+    // `await_editor_replica` was written for the name of the typed error the
+    // whole retained-write class is built from — but `Display` prints only the
+    // message, so nothing ever carried it and the canonical "wait for a state
+    // edge" failure took the default `NeedsOperator` arm instead. The emitting
+    // constructor now stamps `AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN`
+    // (`agent-doc-document-realtime-io`) into every such refusal, which is what
+    // makes this needle true by construction rather than by coincidence of
+    // wording — including across the process boundaries (ops-log `reason_head`,
+    // retained-capture reason, Codex stop hook) where a typed downcast cannot
+    // reach.
     let waiting_for_signal = [
         "retry_without_disk_write",
         "editor_convergence_required",
@@ -317,6 +328,30 @@ mod captured_finalize_resume_tests {
                 CapturedFinalizeResumeOutcome::RetryableEffect { .. }
             ));
         }
+    }
+
+    /// `#retainconv` — the 2026-08-23 `agent-doc-bugs.md` latch.
+    ///
+    /// A retained-delivery refusal is the canonical "wait for a state edge"
+    /// failure, yet none of the prose needles matched it, so it took the default
+    /// arm and demanded an operator for a write that had already landed on disk.
+    /// Bind the assertion to the emitting crate's exported token, not to a copy
+    /// of the message, so the two sides cannot drift apart silently.
+    #[test]
+    fn a_retained_delivery_refusal_waits_for_a_state_edge() {
+        let reason = format!(
+            "queue consume: failed to write document: visible document write for plan.md is \
+             retained by the lazy delivery projection because the editor state projection has not \
+             converged; no secondary snapshot/commit or forced disk write was attempted. [{}]",
+            agent_doc_document_realtime_io::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN,
+        );
+        assert!(
+            matches!(
+                classify_captured_finalize_resume_error(&reason),
+                CapturedFinalizeResumeOutcome::WaitingForSignal { .. }
+            ),
+            "a deferred write must not demand an operator: {reason}"
+        );
     }
 
     #[test]

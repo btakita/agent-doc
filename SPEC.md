@@ -19,13 +19,16 @@
   deletes with the compact rewrite, and consumes the op epoch only after the
   authoritative write and snapshot succeed (`#compactcachedeletetombstone`).
 - Normal preflight publishes typed document observations to one
-  controller-owned per-document `Computed`; short-lived preflight CLI processes
-  consume that projection instead of independently rebuilding output state.
-  Probe mode remains actorless and side-effect free. Effects advance only
-  through `repair -> prior-cycle commit -> derived reads -> baseline checkpoint
-  -> cycle-open`; exhaustive effect identities and the terminal gate make
-  skipped or newly inserted steps fail closed. Cycle-open remains a durable,
-  exactly-once identity rather than computed state (`#preflightreactive`).
+controller-owned per-document `Computed`; short-lived preflight CLI processes
+consume that projection instead of independently rebuilding output state. It
+must establish the project-controller actor before its first authoritative
+current-document read, so a controller recycle cannot leave a live editor
+registration querying a removed socket before startup/model reconciliation can
+run. Probe mode remains actorless and side-effect free. Effects advance only
+through `repair -> prior-cycle commit -> derived reads -> baseline checkpoint
+-> cycle-open`; exhaustive effect identities and the terminal gate make
+skipped or newly inserted steps fail closed. Cycle-open remains a durable,
+exactly-once identity rather than computed state (`#preflightreactive`).
 - Hot-path authority is singular and named consistently across the binary and editor plugins: Lazily current owns the live document, and `state.db` owns intent/lifecycle coordination. Normal execution must not read, write, import, scan, or replay filesystem live-buffer, patch-inbox, queue-journal, queue-delete, continuation, capture, cycle, turn-scope, editor-op, transport-health, hook-session, or cooldown state. Snapshot/CRDT files are permitted only as cold recovery projections after the authority is unavailable; they never vote in a live merge. There is no compatibility fallback to retired sidecars.
 - The Zed integration is a supplemental language server for Zed's existing
   `Markdown` language, not a second language that claims `.md`. It activates

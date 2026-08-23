@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-flow"
-version = "0.35.272"
+version = "0.35.273"
 edition = "2024"
 description = "Pure flow vocabulary and outcome contracts for agent-doc"
 license = "MIT"

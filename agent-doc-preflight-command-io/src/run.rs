@@ -174,6 +174,36 @@ pub fn run_with_options_to_writer(
         "preflight_entry",
     );
 
+    // A normal preflight already requires the project controller for its
+    // derived-read projection below. Establish that actor boundary before the
+    // first current-document read as well: immediately after `admin recycle`,
+    // Lazily can still prove an editor endpoint is attached while the old
+    // controller socket is gone. Reading through the existing-controller-only
+    // path in that window spends the replica retry budget against ENOENT and
+    // fails closed before the later controller ensure can run.
+    //
+    // Probes remain actorless, and unit tests continue to use their in-process
+    // projection just as they do at the later derived-read boundary.
+    let controller_projection_enabled = !options.probe && !cfg!(test);
+    if controller_projection_enabled {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "preflight_initial_controller_ensure_start file={} source=initial reason=current_document_actor_boundary",
+                file.display(),
+            ),
+        );
+        agent_doc_controller_io::project_controller::ensure_controller_running_for_file(file)
+            .context("preflight initial current-document controller ensure")?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "preflight_initial_controller_ensure_ready file={} source=initial",
+                file.display(),
+            ),
+        );
+    }
+
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     // #rtwwire (rung 3): classify against the realtime document model. When an
     // editor is active, the CRDT relay is the authority and disk is not read as
@@ -1548,7 +1578,6 @@ pub fn run_with_options_to_writer(
     // Unit tests run many temporary projects concurrently and intentionally do
     // not launch a separately-installed controller binary. Production normal
     // preflight always takes the controller branch; probes remain actorless.
-    let controller_projection_enabled = !options.probe && !cfg!(test);
     let cycle_read_projection = if !controller_projection_enabled {
         preflight_reads.projection()
     } else {

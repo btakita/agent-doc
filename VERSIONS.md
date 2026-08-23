@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.273
+
+- **Fix: preflight establishes controller authority before its first document read.**
+
+Immediately after a project-controller recycle, Lazily may still prove that an
+editor owns the session document while the old controller socket is absent.
+Normal preflight now completes its already-required lazy controller ensure
+before resolving the initial authoritative document cut, so replica recovery
+does not spend its retry budget against `ENOENT` and fail before the later
+derived-read boundary. Probe mode remains actorless.
+
 ## 0.35.272
 
 - **Fix: preflight rechecks delivery convergence at the defer boundary.**

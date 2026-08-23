@@ -254,6 +254,18 @@ Completed and pushed to `main` as `94b1c681`.
 - Unrelated `AGENTS.md` and `.agent/` changes remain untouched.
 
 Suggested commit message: `fix(home): render complete Yelp reviews locally`
+
+### Re: Response
+
+Completed and pushed to `main` as `94b1c681`.
+
+- Full Yelp reviews now render locally in the modal.
+- Removed the unreliable Yelp iframe/widget dependency.
+- `make check`: 2,303 tests passed; both builds succeeded.
+- Agent-doc closeout is committed and verified.
+- Unrelated local changes remain untouched.
+
+Suggested commit message: `fix(home): render complete Yelp reviews locally`
 <!-- agent:boundary:981ed11a:equityfundingsource -->
 <!-- /agent:exchange -->
 

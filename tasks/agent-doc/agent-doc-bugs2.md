@@ -246,7 +246,6 @@ No. The consolidated transition table was present only in this session document;
 It is now canonical in `specs/14-realtime-workflow.md` under **Retained closeout transition table**. The table documents all six cases: retained Compact with disk equal or stale, open versus terminal/mismatched response capture, and serialized delivery/save success versus timeout or authority advance. It also states that a terminal response cannot answer an identical recurring queue command added for a later task.
 
 A red/green contract test, `realtime_workflow_spec_documents_retained_closeout_transition_table`, pins the heading and all six rows. The focused test failed before the spec addition and passes afterward. Full `make check` passed (`tart-2e306df5ef`), and `make install-full` passed (`tart-fa9fdac8b3`). Public source commit `c21797d2b` is pushed to `main`.
-
 ### Re: Transition table specification — Codex
 
 > **Queue prompt:** Is the transition table documented in the specs?

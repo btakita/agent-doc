@@ -1,5 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
+resume:
+  claude: e5a9d696-86fe-48f0-b162-4303a2c4670b
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -9,7 +11,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -126,6 +128,36 @@ attach_command = "tmux new-session -A -s {session}"
 `auto` resolves: live attached session → no-op; live detached → attach in place; IDE-hosted env **and** a registered plugin endpoint → `ide`; `command`/`$TERMINAL` → `external`; else dialog. Per-document override as `terminal_host:` frontmatter, so one workspace can mix an IDE-hosted document with an external-shell one.
 
 **One thing I'd flag.** Phase 1's detection signals — the exact `CODER_*` variable names, the JetBrains remote-backend probe, and the `vscode.env.remoteName` values — are asserted from general knowledge here, not read out of a live workspace. Everything downstream keys off that classification, so `#coder1` verifies them against a real Coder workspace before anything else lands. `#coder7` is tagged `[operator-verify]` because the integration matrix (both IDEs attached at once, stop/start mid-turn, an image without tmux) can't be proven offline.
+
+### Re: A command to associate the tmux session with the project — opus-5
+
+> **Queue prompt:** Should we have an agent-doc command that associates the tmux session with the agent-doc project? If yes, this should work both locally and remotely (e.g. Coder environments).
+
+**Yes — and it already exists.** I went looking to design one and found the whole binding is already built:
+
+- `agent-doc session` — show the configured session, or `(auto-detect)`
+- `agent-doc session set <name>` — pin it, migrate the `agent-doc` + `stash` windows via `tmux move-window`, and close a superseded orphan session
+- `agent-doc session clear` — back to auto-detect
+
+It persists as `tmux_session` in `<project_root>/.agent-doc/config.toml` (`agent-doc-project-config-io`), and `start` self-heals it: `rebind_project_tmux_session_if_expected_dead` (`agent-doc-start-io/src/lib.rs:1130`) rewrites the binding when the configured session turns out to be dead. In this repo it currently reads `0`.
+
+**Local and remote need no extra scoping.** `.agent-doc/` is gitignored, so your laptop checkout and a Coder workspace checkout each carry their own binding — and since tmux runs on the cloud instance, the workspace's own `config.toml` is what governs it there. Nothing to sync, nothing to namespace.
+
+**But one path ignored it, and it was exactly the path Coder needs.** `resolve_session_name` in `src/terminal.rs` hardcoded `"0"` whenever no live pane existed. Its doc comment says "`tmux_session` frontmatter is deprecated and no longer consulted" — true, but when the frontmatter field was retired the *project config* replacement never got wired into this function. So the binding governed the sync/start paths and was silently dropped by the bootstrap path, which is the only one available on a cold workspace where no tmux server is running and the registry scan has nothing to derive from.
+
+Fixed and landed (`35efb28`, submodule pointer `6dfdff7`). Precedence is now:
+
+1. explicit `--session` flag
+2. project `tmux_session` binding
+3. `"0"`
+
+A live registry pane still outranks all three — `resolve_target_session` scans the registry first, so your separate-shell session keeps ownership exactly as before. Frontmatter stays deprecated and unconsulted; the unused `_file` parameter is what makes that structurally true.
+
+I refactored the precedence into a pure `resolve_session_name_from(explicit, configured)` and added two regression tests (`resolve_session_name_prefers_project_binding`, `resolve_session_name_explicit_beats_project_binding`) alongside the existing two. Full suite: **9020 passed, 253 skipped** (`make check` — clippy, nextest, sim-medium, version-sync, audit-docs, dev-harness-test, lean, TLA+ all green). Built and installed; latest CI on `main` is green.
+
+**One correction to yesterday's plan.** I'd proposed a `[terminal] session` config key — that would have been a second, competing binding. Dropped it; `#coder5` now says to reuse `tmux_session` and `agent-doc session set` instead. The plan file has a new "Session→project association" section recording what exists, so Phases 2 and 5 wire *into* that command rather than around it.
+
+The remaining Coder gap is unchanged and still real: `session set` tells agent-doc *which* session to use, but on a cold workspace nothing creates or attaches it. That is `#coder2` (headless bootstrap) and `#coder3`/`#coder4` (IDE terminal attach).
 <!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 
@@ -134,7 +166,8 @@ attach_command = "tmux new-session -A -s {session}"
 
 ## Pending / Not Built
 
-<!-- agent:queue go priority -->
+<!-- agent:queue priority go -->
+- 🚧 Should we have an agent-doc command that associates the tmux session with the agent-doc project? If yes, this should work both locally and remotely (e.g. Coder environments).
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
@@ -142,7 +175,7 @@ attach_command = "tmux new-session -A -s {session}"
 - [ ] [#coder2] Phase 2 — headless tmux bootstrap: `agent-doc tmux ensure <FILE>` (idempotent detached new-session) and rewrite ensure_inside_tmux (agent-doc-start-io/src/lib.rs:934) to auto-start + re-exec into the pane instead of bailing. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder3] Phase 3 — JetBrains IDE-hosted terminal: open/reuse an `agent-doc` tab via TerminalToolWindowManager, run the attach command, dialog fallback with a Copy action. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder4] Phase 4 — VS Code IDE-hosted terminal: window.createTerminal/sendText parity, reuse live terminals, report vscode.env.remoteName in diagnostics, update editors/plugin-parity.tsv. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
-- [ ] [#coder5] Phase 5 — `[terminal] host/auto_start_tmux/session/attach_command` config + `terminal_host:` frontmatter override + pure resolution function shared by CLI and both plugins + runbooks/coder-workspace.md. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
+- [ ] [#coder5] Phase 5 — `[terminal] host/auto_start_tmux/attach_command` config + `terminal_host:` frontmatter override + pure resolution function shared by CLI and both plugins + runbooks/coder-workspace.md. Do NOT add a `[terminal] session` key — reuse the existing project `tmux_session` binding owned by `agent-doc session set`. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder6] Phase 6 — workspace restart resilience: record tmux server identity, GC stale registry rows + orphaned .sock files on server-identity mismatch, guard AF_UNIX-incapable project-root filesystems. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder7] [operator-verify] Phase 7 — live Coder workspace validation matrix (JB Gateway cold start, VS Code Remote-SSH cold start, both IDEs attached at once, workspace stop/start, image without tmux). Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 <!-- /agent:backlog -->

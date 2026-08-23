@@ -278,12 +278,26 @@ I installed the full 0.35.271 release and restarted the live backend.md agent. T
 This release also hardens Codex Stop closeout after a cycle was already committed and makes fresh cycle IDs monotonic when two boundaries occur in the same millisecond. The earlier Claude prompt-submission and JetBrains read-action fixes remain installed in this release; restart a running JetBrains IDE to activate the updated plugin generation.
 
 Verification passed: targeted regressions and the full make check suite. The latest PyPI workflow failure is external to these fixes: PyPI reports that the agent-doc project has reached its 10 GB storage quota.
+
+### Re: Run Agent Doc submit, JetBrains read access, and Claude-to-Codex restart
+
+Fixed, verified, installed, and released.
+
+- v0.35.269 fixes the JetBrains focus-listener read-access exception by owning an IntelliJ ReadAction around session-document model reads. JetBrains plugin 0.2.356 is installed into four local IDE installations; restart running IDEs to activate that package generation.
+- v0.35.270 splits Claude routed composer insertion from Enter submission, preventing Run Agent Doc from leaving the prompt typed but unsubmitted.
+- v0.35.271 makes Restart Agent launch the newly selected harness fresh when switching Claude to Codex, bypassing the stale Claude resume/fresh menu. The live backend.md session was restarted into Codex and auto-submitted successfully.
+- v0.35.272 fixes the preflight delivery-ack deadline race found during the live replay.
+- v0.35.273 fixes the remaining post-recycle ordering defect: normal preflight now establishes the controller before its first authoritative document read. An immediate admin-recycle plus preflight replay completed successfully without ENOENT, editor_attached_model_missing, or disk fallback.
+
+Verification: targeted preflight tests and the complete make check passed; the optimized binary/library/plugin install succeeded. Release commits and tags are pushed through d2c8214e7 / v0.35.273.
+
+The broader #harnessresumemap backlog item remains queued: the requested Claude-to-Codex recovery is intentionally a fresh switch, while cross-harness session-ID mapping is separate work.
 <!-- agent:boundary:0d0ed28d:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 🚧 do [#harnessresumemap]
+- ⏭️ do [#harnessresumemap]
 <!-- /agent:queue -->
 
 ## Notes
@@ -294,7 +308,7 @@ Verification passed: targeted regressions and the full make check suite. The lat
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#harnessresumemap] Implement a harness-keyed resume map with claude, codex, and opencode entries; each launch or restart must read only the active harness key, and legacy scalar resume values must migrate only into the document active harness. Add cross-harness restart and compatibility regressions.
+- [ ] [#harnessresumemap] Implement a harness-keyed resume map with claude, codex, and opencode entries; each launch or restart must read only the active harness key, and legacy scalar resume values must migrate only into the document active harness. Add cross-harness restart and compatibility regressions.
 <!-- /agent:backlog -->
 
 ## Review

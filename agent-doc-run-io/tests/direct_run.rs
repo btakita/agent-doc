@@ -612,7 +612,7 @@ mod tests {
     #[test]
     fn build_prompt_places_turn_churn_after_cache_boundary() {
         let fm = frontmatter::Frontmatter {
-            resume: Some("sess-123".to_string()),
+            resume: Some(frontmatter::ResumeState::Legacy("sess-123".to_string())),
             ..Default::default()
         };
         let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\
@@ -672,7 +672,7 @@ mod tests {
     #[test]
     fn prompt_cache_boundary_contract_separates_durable_and_volatile_blocks() {
         let fm = frontmatter::Frontmatter {
-            resume: Some("sess-123".to_string()),
+            resume: Some(frontmatter::ResumeState::Legacy("sess-123".to_string())),
             ..Default::default()
         };
         let diff = "--- snapshot\n+++ document\n@@ -1,4 +1,6 @@\n\
@@ -747,7 +747,7 @@ old status\n\
     #[test]
     fn prompt_cache_replay_key_survives_session_churn_and_invalidates_on_durable_contract() {
         let fm = frontmatter::Frontmatter {
-            resume: Some("sess-123".to_string()),
+            resume: Some(frontmatter::ResumeState::Legacy("sess-123".to_string())),
             ..Default::default()
         };
         let report = SessionAccretionReport {
@@ -881,7 +881,7 @@ old status\n\
     #[test]
     fn build_prompt_resume_lists_required_response_targets() {
         let fm = frontmatter::Frontmatter {
-            resume: Some("sess-123".to_string()),
+            resume: Some(frontmatter::ResumeState::Legacy("sess-123".to_string())),
             ..Default::default()
         };
         let diff = "--- snapshot\n+++ document\n@@ -1 +1,5 @@\n\
@@ -907,7 +907,7 @@ old status\n\
     #[test]
     fn build_prompt_carries_forward_active_format_requirements() {
         let fm = frontmatter::Frontmatter {
-            resume: Some("sess-123".to_string()),
+            resume: Some(frontmatter::ResumeState::Legacy("sess-123".to_string())),
             ..Default::default()
         };
         let doc = concat!(
@@ -939,7 +939,7 @@ old status\n\
     #[test]
     fn build_prompt_uses_bounded_context_pack_for_warn_level_prompt_targets() {
         let fm = frontmatter::Frontmatter {
-            resume: Some("sess-123".to_string()),
+            resume: Some(frontmatter::ResumeState::Legacy("sess-123".to_string())),
             ..Default::default()
         };
         let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,4 @@\n\

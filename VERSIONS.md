@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.274
+
+- **Fix: conversation resume state is isolated by harness.**
+
+The `resume:` frontmatter value is now a map with independent `claude`, `codex`,
+and `opencode` entries. Launch, restart, controller recovery, direct-run, stream,
+stale-id clearing, and ownership checks preserve the per-harness boundary, so a
+Claude session id is never submitted to Codex during a harness switch. Legacy
+scalar values remain readable and migrate into only the active harness entry on
+the next managed resume write.
+
 ## 0.35.273
 
 - **Fix: preflight establishes controller authority before its first document read.**

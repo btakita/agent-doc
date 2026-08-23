@@ -7543,10 +7543,7 @@ fn document_claims_resume_id(content: &str, id: &str) -> bool {
     if id.is_empty() {
         return false;
     }
-    fm.resume
-        .as_deref()
-        .map(str::trim)
-        .is_some_and(|resume_id| resume_id == id)
+    fm.claims_resume_id(id)
         || fm
             .session
             .as_deref()
@@ -21564,20 +21561,18 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
         ),
     };
     let (current_frontmatter, _) = agent_doc_frontmatter::frontmatter::parse(&current_document)?;
-    // Continue mode means this document's exact conversation, never a global
-    // latest selector and never a silent fresh fallback.
-    let resume = match mode {
-        SupervisorReplacementMode::Fresh => None,
-        SupervisorReplacementMode::Continue => current_frontmatter
-            .resume
-            .as_deref()
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
-            .map(|id| agent_doc_harness::ResumeRequest::Id(id.to_string())),
-    };
     let document_harness = agent_doc_harness::document_harness_from_content(&current_document)
         .map(|name| agent_doc_harness::HarnessConfig::from_agent_name(&name).binary)
         .unwrap_or_else(|| agent_doc_harness::HarnessConfig::claude().binary);
+    // Continue mode means this document's exact conversation for the selected
+    // harness, never another harness's id, a global latest selector, or a silent
+    // fresh fallback.
+    let resume = match mode {
+        SupervisorReplacementMode::Fresh => None,
+        SupervisorReplacementMode::Continue => current_frontmatter
+            .resume_for_harness(&document_harness)
+            .map(|id| agent_doc_harness::ResumeRequest::Id(id.to_string())),
+    };
     if !work.pane_id.trim().is_empty() {
         let pane_alive = tmux.pane_alive(&work.pane_id);
         let current_command = if pane_alive {
@@ -22068,6 +22063,16 @@ mod tests {
         assert!(document_claims_resume_id(
             "---\nresume: \"  conv-3  \"\n---\n",
             "conv-3"
+        ));
+        // Harness-keyed documents claim every stored conversation even though a
+        // launch reads only its selected harness key.
+        assert!(document_claims_resume_id(
+            "---\nresume:\n  claude: conv-claude\n  codex: conv-codex\n---\n",
+            "conv-claude"
+        ));
+        assert!(document_claims_resume_id(
+            "---\nresume:\n  claude: conv-claude\n  codex: conv-codex\n---\n",
+            "conv-codex"
         ));
 
         // A different id does not claim.

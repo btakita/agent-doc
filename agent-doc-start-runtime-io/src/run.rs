@@ -259,11 +259,7 @@ fn resume_id_owner(canonical: &Path, request: &agent_doc_harness::ResumeRequest)
         let Ok((other_fm, _)) = frontmatter::parse(&content) else {
             continue;
         };
-        let claims_id = other_fm
-            .resume
-            .as_deref()
-            .map(str::trim)
-            .is_some_and(|resume_id| resume_id == id)
+        let claims_id = other_fm.claims_resume_id(id)
             || other_fm
                 .session
                 .as_deref()
@@ -311,7 +307,7 @@ fn assign_and_record_session_id(
     let assigned = agent_doc_harness::apply_session_id_assignment(harness, base_args, &new_id)?;
     // Record it up front: the document must know its own conversation id even if
     // this process dies before the session produces anything.
-    match record_document_resume_id(file, &assigned) {
+    match record_document_resume_id_for_harness(file, &harness.binary, &assigned) {
         Ok(_) => agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -327,7 +323,7 @@ fn assign_and_record_session_id(
     Some(assigned)
 }
 
-/// Write `resume: <id>` onto the document THROUGH the realtime authority.
+/// Write `resume.<harness>: <id>` through the realtime authority.
 ///
 /// Not a raw disk write: the document may be open in an editor, and the realtime
 /// model is the authority for its current text. Returns whether anything changed.
@@ -342,13 +338,32 @@ pub fn record_document_resume_id(file: &Path, id: &str) -> Result<bool> {
         file,
         "start_resume_id_capture",
     )?;
+    let (fm, _) = frontmatter::parse(&current)?;
+    let harness = fm.active_resume_harness();
+    record_document_resume_id_from_current(file, harness, id, current)
+}
+
+pub fn record_document_resume_id_for_harness(file: &Path, harness: &str, id: &str) -> Result<bool> {
+    let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "start_resume_id_capture",
+    )?;
+    record_document_resume_id_from_current(file, harness, id, current)
+}
+
+fn record_document_resume_id_from_current(
+    file: &Path,
+    harness: &str,
+    id: &str,
+    current: String,
+) -> Result<bool> {
     if frontmatter::parse(&current)
-        .map(|(fm, _)| fm.resume.as_deref() == Some(id))
+        .map(|(fm, _)| fm.has_harness_resume_entry(harness, id))
         .unwrap_or(false)
     {
         return Ok(false);
     }
-    let updated = frontmatter::set_resume_id(&current, id)?;
+    let updated = frontmatter::set_resume_id_for_harness(&current, harness, id)?;
     agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
         file,
         &updated,
@@ -365,10 +380,11 @@ pub fn record_document_resume_id(file: &Path, id: &str) -> Result<bool> {
 /// handling from the failed resume attempt.
 fn document_without_matching_resume_id(current: &str, id: &str) -> Result<Option<String>> {
     let (mut fm, body) = frontmatter::parse(current)?;
-    if fm.resume.as_deref().map(str::trim) != Some(id.trim()) {
+    let harness = fm.active_resume_harness();
+    if fm.resume_for_harness(harness) != Some(id.trim()) {
         return Ok(None);
     }
-    fm.resume = None;
+    fm.clear_resume_for_harness(harness);
     Ok(Some(frontmatter::write(&fm, body)?))
 }
 
@@ -646,7 +662,7 @@ pub fn run_with_reap_policy_and_resume(
     let initial_codex_projection = latest_codex_session_projection(&canonical, &harness);
     let resume = resolve_resume_request_from_sources(
         resume.as_ref(),
-        fm.resume.as_deref(),
+        fm.resume_for_harness(&harness.binary),
         initial_codex_projection
             .as_ref()
             .map(|state| state.session_id.as_str()),
@@ -763,9 +779,9 @@ pub fn run_with_reap_policy_and_resume(
         initial_codex_projection.map(|state| state.session_id),
     );
     if let Some(id) = session_lineage.active_id()
-        && fm.resume.as_deref() != Some(id)
+        && !fm.has_harness_resume_entry(&harness.binary, id)
     {
-        match record_document_resume_id(&canonical, id) {
+        match record_document_resume_id_for_harness(&canonical, &harness.binary, id) {
             Ok(changed) => log_event(
                 &mut session_log,
                 &format!(
@@ -1198,11 +1214,7 @@ pub fn run_with_reap_policy_and_resume(
                         Ok(restart_spec) => {
                             if refresh_resume_from_frontmatter
                                 && !first_run
-                                && let Some(id) = restart_fm
-                                    .resume
-                                    .as_deref()
-                                    .map(str::trim)
-                                    .filter(|id| !id.is_empty())
+                                && let Some(id) = restart_fm.resume_for_harness(&harness.binary)
                             {
                                 let requested =
                                     Some(agent_doc_harness::ResumeRequest::Id(id.to_string()));
@@ -1326,7 +1338,7 @@ pub fn run_with_reap_policy_and_resume(
                 let id = session_lineage
                     .active_id()
                     .expect("projection just captured");
-                match record_document_resume_id(&canonical, id) {
+                match record_document_resume_id_for_harness(&canonical, &harness.binary, id) {
                     Ok(changed) => log_event(
                         &mut session_log,
                         &format!(
@@ -1890,7 +1902,7 @@ pub fn run_with_reap_policy_and_resume(
             // writeback above is best-effort because a live editor may race it;
             // the next launch must still never reuse the proven-bad id.
             let mut fresh_fm = capability_proof_frontmatter.clone();
-            fresh_fm.resume = None;
+            fresh_fm.clear_resume_for_harness(&harness.binary);
             let mut launch_log = StartRunLaunchLog {
                 session_log: &mut session_log,
                 route_owned,
@@ -2431,6 +2443,24 @@ mod tests {
             None,
             "a different current resume pointer must survive stale recovery"
         );
+    }
+
+    #[test]
+    fn stale_resume_clear_preserves_other_harness_pointers() {
+        let source = concat!(
+            "---\n",
+            "agent: codex\n",
+            "resume:\n",
+            "  claude: claude-thread\n",
+            "  codex: stale-codex\n",
+            "---\n\n# Plan\n",
+        );
+        let updated = document_without_matching_resume_id(source, "stale-codex")
+            .unwrap()
+            .expect("active stale pointer should be removed");
+        let (fm, _) = frontmatter::parse(&updated).unwrap();
+        assert_eq!(fm.resume_for_harness("codex"), None);
+        assert_eq!(fm.resume_for_harness("claude"), Some("claude-thread"));
     }
 
     #[test]

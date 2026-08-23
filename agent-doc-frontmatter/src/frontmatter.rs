@@ -357,6 +357,73 @@ pub enum FreeTextExecutionMode {
     Queue,
 }
 
+/// Per-harness conversation pointers stored under the `resume:` frontmatter key.
+///
+/// Keeping the three supported harnesses as explicit fields makes the persisted
+/// contract closed and deterministic: a Claude id can never be selected by a
+/// Codex or OpenCode launch merely because it is the only id in the document.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnessResumeMap {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencode: Option<String>,
+}
+
+impl HarnessResumeMap {
+    fn is_empty(&self) -> bool {
+        self.claude.is_none() && self.codex.is_none() && self.opencode.is_none()
+    }
+
+    fn get(&self, harness: &str) -> Option<&str> {
+        match canonical_resume_harness(harness) {
+            "codex" => self.codex.as_deref(),
+            "opencode" => self.opencode.as_deref(),
+            _ => self.claude.as_deref(),
+        }
+    }
+
+    fn set(&mut self, harness: &str, id: Option<String>) {
+        match canonical_resume_harness(harness) {
+            "codex" => self.codex = id,
+            "opencode" => self.opencode = id,
+            _ => self.claude = id,
+        }
+    }
+
+    fn ids(&self) -> impl Iterator<Item = &str> {
+        [
+            self.claude.as_deref(),
+            self.codex.as_deref(),
+            self.opencode.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+    }
+}
+
+/// Backward-compatible representation of `resume:`.
+///
+/// Old documents used a scalar. It remains readable, but any managed resume-id
+/// write migrates it into [`HarnessResumeMap`] under the document's active
+/// harness only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ResumeState {
+    Legacy(String),
+    ByHarness(HarnessResumeMap),
+}
+
+fn canonical_resume_harness(raw: &str) -> &'static str {
+    match raw.trim() {
+        "codex" => "codex",
+        "opencode" | "open-code" | "open_code" => "opencode",
+        _ => "claude",
+    }
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Frontmatter {
     /// Document/routing UUID — permanent identifier for tmux pane routing.
@@ -368,10 +435,11 @@ pub struct Frontmatter {
         alias = "session"
     )]
     pub session: Option<String>,
-    /// Agent conversation ID — used for `--resume` with agent backends.
-    /// Separate from `session` so the routing key never changes.
+    /// Harness-keyed agent conversation IDs used for exact resume.
+    /// Separate from `session` so the routing key never changes. Legacy scalar
+    /// values remain readable and migrate on the next managed id write.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resume: Option<String>,
+    pub resume: Option<ResumeState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -799,6 +867,102 @@ pub fn resolve_prompt_preset_key(
 }
 
 impl Frontmatter {
+    /// Canonical harness selected by this document, defaulting to Claude for
+    /// backward compatibility with documents that predate `agent:`.
+    pub fn active_resume_harness(&self) -> &'static str {
+        canonical_resume_harness(self.agent.as_deref().unwrap_or("claude"))
+    }
+
+    /// Exact conversation id for `harness`.
+    ///
+    /// A legacy scalar is visible only to the document's active harness. A map
+    /// lookup always reads only the requested harness key.
+    pub fn resume_for_harness(&self, harness: &str) -> Option<&str> {
+        let requested = canonical_resume_harness(harness);
+        match self.resume.as_ref()? {
+            ResumeState::Legacy(id)
+                if self.agent.is_none() || requested == self.active_resume_harness() =>
+            {
+                Some(id.as_str())
+            }
+            ResumeState::Legacy(_) => None,
+            ResumeState::ByHarness(map) => map.get(requested),
+        }
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    }
+
+    pub fn active_resume_id(&self) -> Option<&str> {
+        self.resume_for_harness(self.active_resume_harness())
+    }
+
+    /// Whether any harness entry (or a legacy scalar) claims `id`.
+    /// Ownership checks intentionally inspect all keys even though launches read
+    /// only the active one.
+    pub fn claims_resume_id(&self, id: &str) -> bool {
+        let id = id.trim();
+        if id.is_empty() {
+            return false;
+        }
+        match self.resume.as_ref() {
+            Some(ResumeState::Legacy(value)) => value.trim() == id,
+            Some(ResumeState::ByHarness(map)) => map.ids().any(|value| value.trim() == id),
+            None => false,
+        }
+    }
+
+    /// Record `id` for one harness, preserving every other harness entry.
+    /// Legacy scalar state migrates under the document's active harness only.
+    pub fn set_resume_for_harness(&mut self, harness: &str, id: impl Into<String>) {
+        let active = self
+            .agent
+            .as_deref()
+            .map(canonical_resume_harness)
+            .unwrap_or_else(|| canonical_resume_harness(harness));
+        let mut map = match self.resume.take() {
+            Some(ResumeState::ByHarness(map)) => map,
+            Some(ResumeState::Legacy(legacy)) => {
+                let mut map = HarnessResumeMap::default();
+                map.set(active, Some(legacy));
+                map
+            }
+            None => HarnessResumeMap::default(),
+        };
+        map.set(harness, Some(id.into()));
+        self.resume = Some(ResumeState::ByHarness(map));
+    }
+
+    /// Clear only one harness's pointer, preserving the other harness histories.
+    pub fn clear_resume_for_harness(&mut self, harness: &str) {
+        let active = self
+            .agent
+            .as_deref()
+            .map(canonical_resume_harness)
+            .unwrap_or_else(|| canonical_resume_harness(harness));
+        let next = match self.resume.take() {
+            Some(ResumeState::Legacy(id)) if canonical_resume_harness(harness) != active => {
+                Some(ResumeState::Legacy(id))
+            }
+            Some(ResumeState::Legacy(_)) => None,
+            Some(ResumeState::ByHarness(mut map)) => {
+                map.set(harness, None);
+                (!map.is_empty()).then_some(ResumeState::ByHarness(map))
+            }
+            None => None,
+        };
+        self.resume = next;
+    }
+
+    /// True only when `harness` already has a map entry equal to `id`.
+    /// Legacy scalars deliberately return false so a normal write migrates them.
+    pub fn has_harness_resume_entry(&self, harness: &str, id: &str) -> bool {
+        matches!(
+            self.resume.as_ref(),
+            Some(ResumeState::ByHarness(map))
+                if map.get(harness).map(str::trim) == Some(id.trim())
+        )
+    }
+
     /// Does this frontmatter carry any agent-doc-managed field?
     ///
     /// Used by the opt-in document gate
@@ -1189,7 +1353,15 @@ pub fn set_session_id(content: &str, session_id: &str) -> Result<String> {
 /// Update the resume (agent conversation) ID in a document string.
 pub fn set_resume_id(content: &str, resume_id: &str) -> Result<String> {
     let (mut fm, body) = parse(content)?;
-    fm.resume = Some(resume_id.to_string());
+    let harness = fm.active_resume_harness();
+    fm.set_resume_for_harness(harness, resume_id);
+    write(&fm, body)
+}
+
+/// Update one harness's resume id while preserving the other harness entries.
+pub fn set_resume_id_for_harness(content: &str, harness: &str, resume_id: &str) -> Result<String> {
+    let (mut fm, body) = parse(content)?;
+    fm.set_resume_for_harness(harness, resume_id);
     write(&fm, body)
 }
 
@@ -1405,7 +1577,7 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
         let val_str = || value.as_str().map(|s| s.to_string());
         match key_str {
             "agent_doc_session" | "session" => fm.session = val_str(),
-            "resume" => fm.resume = val_str(),
+            "resume" => fm.resume = serde_yaml::from_value(value.clone()).ok(),
             "agent" => fm.agent = val_str(),
             "model" => fm.model = val_str(),
             "claude_model" => fm.claude_model = val_str(),
@@ -1911,6 +2083,69 @@ fn render_frontmatter_excerpt(yaml: &str, line: usize, column: usize) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn harness_resume_map_reads_only_requested_harness() {
+        let content = concat!(
+            "---\n",
+            "agent: codex\n",
+            "resume:\n",
+            "  claude: claude-thread\n",
+            "  codex: codex-thread\n",
+            "  opencode: opencode-thread\n",
+            "---\n\nbody\n",
+        );
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.resume_for_harness("claude"), Some("claude-thread"));
+        assert_eq!(fm.resume_for_harness("codex"), Some("codex-thread"));
+        assert_eq!(fm.resume_for_harness("open-code"), Some("opencode-thread"));
+    }
+
+    #[test]
+    fn legacy_resume_migrates_only_into_document_active_harness() {
+        let source = "---\nagent: codex\nresume: old-codex\n---\n\nbody\n";
+        let updated = set_resume_id_for_harness(source, "codex", "new-codex").unwrap();
+        let (fm, _) = parse(&updated).unwrap();
+        assert_eq!(fm.resume_for_harness("codex"), Some("new-codex"));
+        assert_eq!(fm.resume_for_harness("claude"), None);
+        assert!(updated.contains("resume:\n  codex: new-codex\n"));
+    }
+
+    #[test]
+    fn cross_harness_resume_write_preserves_other_harness_history() {
+        let source = concat!(
+            "---\n",
+            "agent: codex\n",
+            "resume:\n",
+            "  claude: claude-thread\n",
+            "---\n\nbody\n",
+        );
+        let updated = set_resume_id_for_harness(source, "codex", "codex-thread").unwrap();
+        let (fm, _) = parse(&updated).unwrap();
+        assert_eq!(fm.resume_for_harness("claude"), Some("claude-thread"));
+        assert_eq!(fm.resume_for_harness("codex"), Some("codex-thread"));
+        assert!(fm.claims_resume_id("claude-thread"));
+        assert!(fm.claims_resume_id("codex-thread"));
+    }
+
+    #[test]
+    fn legacy_resume_is_not_visible_to_a_different_harness() {
+        let (fm, _) = parse("---\nagent: claude\nresume: claude-thread\n---\n").unwrap();
+        assert_eq!(fm.resume_for_harness("claude"), Some("claude-thread"));
+        assert_eq!(fm.resume_for_harness("codex"), None);
+    }
+
+    #[test]
+    fn legacy_resume_without_agent_uses_the_caller_resolved_harness() {
+        let source = "---\nresume: old-thread\n---\n";
+        let (fm, _) = parse(source).unwrap();
+        assert_eq!(fm.resume_for_harness("codex"), Some("old-thread"));
+
+        let updated = set_resume_id_for_harness(source, "codex", "new-thread").unwrap();
+        let (fm, _) = parse(&updated).unwrap();
+        assert_eq!(fm.resume_for_harness("codex"), Some("new-thread"));
+        assert_eq!(fm.resume_for_harness("claude"), None);
+    }
 
     // ---- startup-tolerant frontmatter parse (malformed fm must not block open) ----
 
@@ -2589,7 +2824,7 @@ mod tests {
         // Start from write output to ensure consistent formatting
         let fm = Frontmatter {
             session: Some("test-id".to_string()),
-            resume: Some("resume-id".to_string()),
+            resume: Some(ResumeState::Legacy("resume-id".to_string())),
             agent: Some("claude".to_string()),
             model: Some("opus".to_string()),
             claude_model: None,

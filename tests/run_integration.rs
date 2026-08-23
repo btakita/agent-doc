@@ -395,7 +395,7 @@ fn run_template_mode_writes_inside_exchange_and_commits() {
         !content[exchange_end..].contains("### Re: topic — gpt-5"),
         "response should not be appended after exchange"
     );
-    assert!(content.contains("resume: sess-123"));
+    assert!(content.contains("resume:\n  claude: sess-123"));
 
     let head = ProcessCommand::new("git")
         .current_dir(tmp.path())
@@ -404,7 +404,7 @@ fn run_template_mode_writes_inside_exchange_and_commits() {
         .unwrap();
     let head_blob = String::from_utf8_lossy(&head.stdout);
     assert!(head_blob.contains("### Re: topic — gpt-5"));
-    assert!(head_blob.contains("resume: sess-123"));
+    assert!(head_blob.contains("resume:\n  claude: sess-123"));
     assert_eq!(read_cycle_phase(&doc), "committed");
 }
 
@@ -1610,7 +1610,7 @@ fn run_append_mode_keeps_inline_response_shape() {
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains("## Assistant\n\nAppend answer."));
-    assert!(content.contains("resume: sess-123"));
+    assert!(content.contains("resume:\n  claude: sess-123"));
     assert_eq!(read_cycle_phase(&doc), "committed");
 }
 

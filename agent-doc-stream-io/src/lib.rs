@@ -234,6 +234,9 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
     // Resolve streaming agent
     let streaming_agent = resolve_streaming(agent_name, agent_config, expanded_env, file, &fm)?;
 
+    let harness = agent_doc_model_tier::harness_key_for_agent_name(agent_name);
+    let resume_id = fm.resume_for_harness(&harness);
+
     // Build prompt
     let session_accretion = agent_doc_session_accretion_io::inspect(file).ok();
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
@@ -247,7 +250,7 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
     );
     let prompt =
         agent_doc_prompt_context::render_streaming_agent_prompt(StreamingAgentPromptContext {
-            resuming: fm.resume.is_some(),
+            resuming: resume_id.is_some(),
             diff_text: &the_diff,
             doc: &content_original,
             document_section: &document_section,
@@ -264,17 +267,12 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
     eprintln!("[stream] Submitting to {} (streaming)...", agent_name);
 
     // Send to streaming agent
-    let fork = fm.resume.is_none();
-    let harness = agent_doc_model_tier::harness_key_for_agent_name(agent_name);
+    let fork = resume_id.is_none();
     let resolved_model = model
         .or(fm.resolve_harness_model(&harness))
         .map(|m| agent_doc_model_tier::canonical_model_name(m, &harness, &config.model));
-    let chunks = streaming_agent.send_streaming(
-        &prompt,
-        fm.resume.as_deref(),
-        fork,
-        resolved_model.as_deref(),
-    )?;
+    let chunks =
+        streaming_agent.send_streaming(&prompt, resume_id, fork, resolved_model.as_deref())?;
 
     // Build thinking config
     let thinking_cfg = if thinking_enabled {
@@ -299,7 +297,7 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
     // Update resume ID if we got a session_id
     if let Some(ref sid) = result.session_id {
         let current = effects.current_document_content(file, "stream_run_resume_update")?;
-        let updated = frontmatter::set_resume_id(&current, sid)?;
+        let updated = frontmatter::set_resume_id_for_harness(&current, &harness, sid)?;
         effects.atomic_write(file, &updated)?;
         agent_doc_snapshot_io::checkpoint_document_baseline(
             file,

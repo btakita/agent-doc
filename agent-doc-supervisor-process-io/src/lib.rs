@@ -419,7 +419,8 @@ pub fn build_harness_launch_spec_with_resume(
     // Resume only an exact document-bound conversation. In particular, Codex
     // resume args must be derived from the complete fresh arg set so sandbox
     // flags are translated and unsupported `--add-dir` flags are removed.
-    let resolved_resume = agent_doc_harness::resolve_resume_request(resume, fm.resume.as_deref());
+    let resolved_resume =
+        agent_doc_harness::resolve_resume_request(resume, fm.resume_for_harness(&harness.binary));
     if let Some(agent_doc_harness::ResumeRequest::Id(id)) = resolved_resume.as_ref() {
         match harness.exact_resume_args(&fresh_base_args, id)? {
             Some(resume_args) => {
@@ -628,6 +629,48 @@ mod tests {
         }
 
         fn start_console_status(&mut self, _message: &str) {}
+    }
+
+    #[test]
+    fn launch_resume_reads_only_the_selected_harness_entry() {
+        let project = TempDir::new().unwrap();
+        let document = project.path().join("plan.md");
+        let content = concat!(
+            "---\n",
+            "agent: codex\n",
+            "resume:\n",
+            "  claude: claude-thread\n",
+            "  codex: codex-thread\n",
+            "  opencode: opencode-thread\n",
+            "---\n",
+        );
+        let (mut fm, _) = frontmatter::parse(content).unwrap();
+        let config = agent_doc_config::Config::default();
+        let request = agent_doc_harness::ResumeRequest::Latest;
+        let mut log = RecordingLaunchLog::default();
+
+        let codex = build_harness_launch_spec_with_resume(
+            &fm,
+            &config,
+            &document,
+            &mut log,
+            Some(&request),
+        )
+        .unwrap();
+        assert!(codex.base_args.iter().any(|arg| arg == "codex-thread"));
+        assert!(!codex.base_args.iter().any(|arg| arg == "claude-thread"));
+
+        fm.agent = Some("claude".to_string());
+        let claude = build_harness_launch_spec_with_resume(
+            &fm,
+            &config,
+            &document,
+            &mut log,
+            Some(&request),
+        )
+        .unwrap();
+        assert!(claude.base_args.iter().any(|arg| arg == "claude-thread"));
+        assert!(!claude.base_args.iter().any(|arg| arg == "codex-thread"));
     }
 
     #[test]

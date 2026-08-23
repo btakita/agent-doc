@@ -380,22 +380,22 @@ pub fn run_once(
         file,
         &rc.ssh_context(),
     )?;
-    let mut prompt_fm = fm.clone();
-    if force_fresh_agent_session && prompt_fm.resume.is_some() {
-        eprintln!(
-            "[run] queue context reset: starting a fresh agent session for {}",
-            file.display()
-        );
-        prompt_fm.resume = None;
-    }
-    let run_mode = RunMode::from_frontmatter(&prompt_fm);
-
     let agent_name = agent_name
         .or(fm.agent.as_deref())
         .or(config.default_agent.as_deref())
         .unwrap_or("claude");
-    let agent_config = config.agents.get(agent_name);
     let harness = agent_doc_model_tier::harness_key_for_agent_name(agent_name);
+    let mut prompt_fm = fm.clone();
+    if force_fresh_agent_session && prompt_fm.resume_for_harness(&harness).is_some() {
+        eprintln!(
+            "[run] queue context reset: starting a fresh agent session for {}",
+            file.display()
+        );
+        prompt_fm.clear_resume_for_harness(&harness);
+    }
+    let run_mode = RunMode::from_frontmatter(&prompt_fm);
+    let agent_config = config.agents.get(agent_name);
+    let resume_id = prompt_fm.resume_for_harness(&harness);
     let resolved_model = model
         .or(fm.resolve_harness_model(&harness))
         .map(|m| agent_doc_model_tier::canonical_model_name(m, &harness, &config.model));
@@ -423,10 +423,10 @@ pub fn run_once(
     )?;
 
     let session_accretion = agent_doc_session_accretion_io::inspect(file).ok();
-    let prompt = build_prompt(
+    let prompt = build_prompt_with_resume_state(
         file,
         run_mode,
-        &prompt_fm,
+        resume_id.is_some(),
         &the_diff,
         &content_original,
         session_accretion.as_ref(),
@@ -438,7 +438,7 @@ pub fn run_once(
         eprintln!("--- Prompt would be {} bytes ---", prompt.len());
         if let Some(blocks) = PromptCacheBlocks::from_rendered(&prompt) {
             let replay_key = blocks.replay_key(&prompt_cache_routing_affinity);
-            let adapter_state = if prompt_fm.resume.is_some() {
+            let adapter_state = if resume_id.is_some() {
                 "resumed"
             } else {
                 "fresh"
@@ -613,7 +613,7 @@ pub fn run_once(
         anyhow::bail!("{}", diagnostic);
     }
 
-    let fork = prompt_fm.resume.is_none();
+    let fork = resume_id.is_none();
     let response_result = {
         let _heartbeat = RunHeartbeat::start(
             file,
@@ -622,12 +622,7 @@ pub fn run_once(
             Some(&session_id),
             Some(agent_doc_agent_io::agent::run_agent_timeout()),
         );
-        backend.send(
-            &prompt,
-            prompt_fm.resume.as_deref(),
-            fork,
-            resolved_model.as_deref(),
-        )
+        backend.send(&prompt, resume_id, fork, resolved_model.as_deref())
     };
     let response = match response_result {
         Ok(response) => response,
@@ -668,7 +663,7 @@ pub fn run_once(
     mark_run_write_applied(file, "run_write_applied")?;
 
     if let Some(ref sid) = response.session_id {
-        update_resume_id(effects, file, sid)?;
+        update_resume_id_for_harness(effects, file, &harness, sid)?;
         mark_run_write_applied(file, "run_write_applied_resume")?;
     }
 
@@ -969,7 +964,21 @@ pub fn update_resume_id(
         file,
         "direct_run_update_resume_id",
     )?;
-    let updated = frontmatter::set_resume_id(&current, session_id)?;
+    let (fm, _) = frontmatter::parse(&current)?;
+    update_resume_id_for_harness(effects, file, fm.active_resume_harness(), session_id)
+}
+
+pub fn update_resume_id_for_harness(
+    effects: &impl DirectRunEffects,
+    file: &Path,
+    harness: &str,
+    session_id: &str,
+) -> Result<()> {
+    let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "direct_run_update_resume_id",
+    )?;
+    let updated = frontmatter::set_resume_id_for_harness(&current, harness, session_id)?;
     agent_doc_document_realtime_io::guard_visible_write_current_transition(
         file,
         "direct_run_update_resume_id",
@@ -1942,9 +1951,33 @@ pub fn build_prompt(
     content: &str,
     session_accretion: Option<&SessionAccretionReport>,
 ) -> String {
+    build_prompt_with_resume_state(
+        file,
+        run_mode,
+        fm.active_resume_id().is_some(),
+        the_diff,
+        content,
+        session_accretion,
+    )
+}
+
+fn build_prompt_with_resume_state(
+    file: &Path,
+    run_mode: RunMode,
+    resuming: bool,
+    the_diff: &str,
+    content: &str,
+    session_accretion: Option<&SessionAccretionReport>,
+) -> String {
     let stable_prefix = build_prompt_stable_prefix(run_mode);
-    let volatile_suffix =
-        build_prompt_volatile_suffix(file, run_mode, fm, the_diff, content, session_accretion);
+    let volatile_suffix = build_prompt_volatile_suffix(
+        file,
+        run_mode,
+        resuming,
+        the_diff,
+        content,
+        session_accretion,
+    );
     PromptCacheBlocks::new(stable_prefix, volatile_suffix).render()
 }
 
@@ -1989,7 +2022,7 @@ fn build_prompt_stable_prefix(run_mode: RunMode) -> String {
 fn build_prompt_volatile_suffix(
     file: &Path,
     run_mode: RunMode,
-    fm: &frontmatter::Frontmatter,
+    resuming: bool,
     the_diff: &str,
     content: &str,
     session_accretion: Option<&SessionAccretionReport>,
@@ -2010,7 +2043,7 @@ fn build_prompt_volatile_suffix(
         session_accretion,
         &ssh_context,
     );
-    match (run_mode, fm.resume.is_some()) {
+    match (run_mode, resuming) {
         (RunMode::Template, true) => format!(
             "<agent_doc_prompt_volatile_suffix>\n\
              The user edited the session document. Here is the diff since the last run:\n\n\

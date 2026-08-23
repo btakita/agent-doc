@@ -119,7 +119,11 @@ Restart Agent never takes the stale-binary in-place `execve` path — that path
 preserves the very child the operator asked to replace. The decoded intent
 remains attached to the pending restart until the old child exits. On a
 same-harness continue restart, it authorizes the new iteration to validate and
-adopt the current document's exact `resume:` binding. Crash restarts and plain
+adopt the current document's exact `resume.<active-harness>` binding. The
+persisted `resume:` value is a harness-keyed map (`claude`, `codex`, `opencode`),
+and restart/cold-recovery paths must never read another harness's entry. Legacy
+scalar values are interpreted only for the document's active harness and migrate
+to its map entry on the next managed write. Crash restarts and plain
 controller recycles never refresh lineage from frontmatter.
 - On the cold-start path a Restart Agent authorizes `RestartLiveHarness` even in
   continue mode. The foreign-pane guard is unchanged: only a pane running *this

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -60,6 +60,29 @@ Done. AGENTS.md reduced from **20,740 bytes (160 lines)** to **1,445 bytes (24 l
 - All runbooks untouched
 
 **Context savings:** ~19KB less instruction text loaded every turn for harnesses that read both AGENTS.md and skill files. The redundancy is eliminated; the authoritative source is now the skill file.
+
+### Re: Is #owned-pane-chat-writeback still relevant or out? — opus-5
+
+**Out.** The work landed. Marked `--done` this cycle.
+
+I checked each acceptance criterion in `tasks/agent-doc/plan-direct-chat-owned-pane-response-loss-2026-06-23.md` against the current `agent-doc` tree (v0.35.275) and ran the covering tests rather than trusting greps:
+
+| Acceptance criterion | Implementation | Test (green) |
+|---|---|---|
+| Direct-chat answer cannot reach final success while the document lacks a matching response | `agent-doc-codex-stop-io/src/lib.rs` — `active_session_prompt_requires_writeback` / `prompt_writeback_debt` | `stop_blocks_direct_chat_manual_queue_response_after_recursive_guard` |
+| Consecutive direct-chat answers each checked independently | same, keyed per `turn_id` | `stop_blocks_consecutive_direct_chat_manual_queue_answers` |
+| Final gate separates chat-only from binary-owned closeout, prints one recovery command | `agent-doc-session-check-io/src/command.rs:1437` (`codex-final-gate`) | `codex_final_gate_blocks_on_recursive_invocation_without_captured_response` |
+| `session-check` catches `no-free-text-queue-head-guard` + bare `###` residue | `agent-doc-workflow/src/session_check.rs:358`, `agent-doc-queue/src/queue_closeout_guard.rs:233` | `free_text_queue_head_provenance_decision_reports_bare_heading_residue` |
+| Recovery after a successful write is a no-op | `agent-doc-session-check-io/src/command.rs:1423` — idempotent manual-patchback adoption | `codex_final_gate_adopts_manual_patchback_when_response_is_visible` |
+
+All 5 pass. The Stop-hook block message names `agent-doc finalize`, `agent-doc write --commit`, and `agent-doc session-check`, and asserts on the live prompt text (`2300 words`) — so the diagnostic carries the actual unresolved prompt, not a generic warning.
+
+**Two things I also cleaned up:**
+
+- Updated the plan file with a Status header, checked boxes, and the criterion-to-test verification table. Committed as `44aab90`.
+- Ran `agent-doc migrate` on this document to clear the `legacy_gated_in_backlog` warning — `#ha3h` moved from `agent:backlog` into `agent:review`, where a gated `[/]` item belongs. It stays gated legitimately: upstream issue #40 says not to ship recipient-side policy config before multi-user workspace support exists.
+
+**One caveat on scope.** The enforcement is Codex-specific — it rides the Codex `Stop` hook (`agent-doc-codex-stop-io`) plus the `session-check` `codex-final-gate`. That matches the original repro, which was a Codex pane. OpenCode has neither a `Stop` hook nor `/loop`, so its equivalent protection is instruction-level (`#ocdrainstall`), not code-enforced. If you ever see this failure family from an OpenCode owned pane, that is a genuinely new item, not a reopen of this one.
 <!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 
@@ -68,14 +91,18 @@ Done. AGENTS.md reduced from **20,740 bytes (160 lines)** to **1,445 bytes (24 l
 
 ## Pending / Not Built
 
-<!-- agent:queue -->
-(queue cleared — cloc response already committed in prior cycle)
+<!-- agent:queue go -->
+- ~~Is [#owned-pane-chat-writeback] still relevant or outdated?~~
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#owned-pane-chat-writeback] [P1 Codex/closeout] Fix direct-chat owned-pane response loss: when a Codex pane already owns an agent-doc document and recursive direct invocation is blocked, a chat-only final response must fail closed or cross the `agent-doc write --commit` / finalize boundary before success. Repro: 2026-06-23 Big Bear species task in `src/boost-client/tasks/monsterrodholders.md` completed and pushed commits, but the final response was not added to the document. Plan: `tasks/agent-doc/plan-direct-chat-owned-pane-response-loss-2026-06-23.md`. Advances `#codex-final-response-not-written` / `#codex-queue-drain-no-response-body`.
-- [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:backlog -->
+
+## Review
+
+<!-- agent:review -->
+- [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
+<!-- /agent:review -->
 
 <!-- agent:icebox -->
 - [ ] [#pdar] [recommended] Evaluate optional binary auto-resolution only for the narrow case where the prompt is explicitly do #id and there is exactly one matching open pending item

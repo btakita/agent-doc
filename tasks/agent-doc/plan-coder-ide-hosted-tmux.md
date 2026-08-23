@@ -53,6 +53,38 @@ any new transport.**
    Coder workspaces are stopped aggressively (idle timeout, nightly autostop), so
    this is the *normal* case there, not an edge case.
 
+## Session→project association (already exists — landed fix 2026-08-23)
+
+The binding does **not** need a new command. It already exists and is
+project-scoped:
+
+- `agent-doc session` — show the configured session (or `(auto-detect)`)
+- `agent-doc session set <name>` — pin it; also migrates the `agent-doc` +
+  `stash` windows via `tmux move-window` and closes a superseded orphan session
+- `agent-doc session clear` — return to auto-detect
+
+It persists as `tmux_session` in `<project_root>/.agent-doc/config.toml`
+(`agent-doc-project-config-io`: `project_tmux_session` / `update_project_tmux_session`
+/ `clear_project_tmux_session`), and `start` self-heals it —
+`rebind_project_tmux_session_if_expected_dead` (`agent-doc-start-io/src/lib.rs:1130`)
+rewrites the binding when the configured session is dead.
+
+**Local vs remote needs no extra scoping.** `.agent-doc/` is gitignored, so a
+laptop checkout and a Coder workspace checkout each hold their own binding.
+tmux runs on the cloud instance; the workspace's `config.toml` is what governs
+it there.
+
+**The gap was one path, now fixed** (`src/terminal.rs`, commit `35efb28`):
+`resolve_session_name` ignored the project binding and hardcoded `"0"` whenever
+no live pane existed — exactly the cold-start case an IDE-hosted workspace
+depends on, where no tmux server is running and the registry scan cannot derive
+a session. Precedence is now explicit `--session` flag > project `tmux_session`
+> `"0"`; frontmatter stays deprecated and unconsulted. A live registry pane
+still outranks all of it (`resolve_target_session` scans first).
+
+So Phase 2/5 below **wire into** `agent-doc session set`; they do not introduce a
+parallel binding.
+
 ## Design decisions (answers to the open questions)
 
 ### Auto-start tmux, or require the operator to start it?

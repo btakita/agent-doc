@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: 01a02ad0-c273-7640-add0-d1a2d1b232f0
+resume: 01a02b41-5f63-7de1-8b6b-6fa21db0bd66
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: go
 ---
 
 ## Status
@@ -225,7 +225,23 @@ Deployed current **main** at **6db40390** to the isolated Cloudflare staging env
 The deploy used the already-tested and pushed commits for the responsive Yelp review modal, Google review modal, and side-by-side Google/Yelp ratings. No additional source change or code commit was needed for this deployment-only queue item. The existing **AGENTS.md** and **.agent/** worktree changes remain untouched.
 
 The session exchange is large; this final active queue item is now complete without compacting during the drain.
-<!-- agent:boundary:a61b5b26:equityfundingsource -->
+> **Queue prompt:** Scrape the Yelp review text into the Full Yelp review modal?  Some of the Yelp full reviews are missing text.
+
+### Re: Yelp full-review text — gpt-5
+
+Done. I recovered the complete Yelp review text for Ellisha S., Danny r., and Stephanie J. and now render those escaped paragraphs directly in the Full Yelp review modal. The modal no longer depends on Yelp's iframe/widget—which truncated Ellisha's and Stephanie's reviews—and each Yelp review still includes its direct attributed Yelp link.
+
+Implementation commit: `94b1c681` (`fix(home): render complete Yelp reviews locally`). Only the five testimonial/modal source and test files were included; unrelated `AGENTS.md` and `.agent/` changes remain untouched.
+
+Verification:
+
+- Focused homepage/modal regression tests passed.
+- Full `make check` passed: 2,303 tests, 0 failures, plus successful browser and Worker builds.
+- The submodule has no configured GitHub Actions workflows or prior runs, so there is no remote CI result to inspect.
+- The agent-doc runtime is now 0.35.265, and the live JetBrains plugin 0.2.355 reattached after the IDEA restart.
+
+The exchange remains large; I continued the active queue without compacting it. The preset-authorized push follows successful agent-doc closeout.
+<!-- agent:boundary:981ed11a:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->

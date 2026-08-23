@@ -1,7 +1,7 @@
 ---
 agent_doc_session: tsift-v0.1
 resume: 01a02767-e76b-7183-9616-e762301dee47
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -78,12 +78,48 @@ Released tsift `0.1.81` completely.
 - Rebuilt the stale local agent-doc binary/native library before closeout; the installed version remains current at `0.35.258`.
 
 The tsift submodule is clean and synchronized with `origin/main`. No additional backlog follow-up is needed for this release.
+
+### Re: Fix tsift issue #4 — opus-5
+
+> **Queue prompt:**
+>
+> Fix https://github.com/btakita/tsift/issues/4
+
+Fixed and pushed as `690317f` (`Fixes #4`).
+
+**The split.** 0.1.81's auto-fix bundled two unlike things. `apply_status_fixes` refreshed the tracked Code Navigation block and relocated the legacy runbook *before* touching the index, so a command whose help reads "Report index + summary status" left a two-file diff — one of them a deletion — in a version-controlled tree. Auto-fix now covers only the gitignored `.tsift/` state tsift owns: index refresh, workspace-scope rebuilds, cycle-packet cache eviction. Tracked-file rewrites moved into `apply_status_instruction_fixes`, reachable only from `tsift init` or the new `tsift status --fix-instructions`. Bare `status` reports `instructions: stale (... — run tsift init)` and folds `tsift init` into its `run:` line instead of writing.
+
+The deprecated `--fix` is no longer a no-op — it now means exactly `--fix-instructions`, which is the behavior it had before 0.1.81. An explicit flag writing tracked files was never the surprise; the bare command doing it was. `--no-fix` still skips everything.
+
+**Naming the writes.** `InitResult` carries the relocation as `migrated_runbook: Option<RunbookMigration>` rather than the bool it discarded, so both commands announce the move. Live repro against the installed binary, from the issue's own setup:
+
+```
+$ tsift status .                              # bare — the issue's repro
+instructions: stale (v0.1.80 installed, v0.1.81 available — run tsift init)
+  run: tsift init && tsift summarize --extract .
+$ git status --short
+?? .tsift/                                    # nothing tracked touched
+
+$ tsift status --fix-instructions .
+status fix: refreshing tsift instructions (tracked files)
+status fix: moved runbooks/code-navigation.md -> .agent/runbooks/code-navigation.md
+status fix: rewrote AGENTS.md (v0.1.80 -> v0.1.81)
+status fix: created .agent/runbooks/code-navigation.md (v0.1.80 -> v0.1.81)
+```
+
+**The templates.** The injected block and the `/tsift-status` OpenCode command said `tsift status --fix` — tsift shipping instructions for its own deprecated flag. Both now say `tsift status`, and the block explains the actual contract: status repairs `.tsift/` and never rewrites tracked files; `tsift init` refreshes the instruction surface and names what it touches. The OpenCode plugin's load-time freshness check drops the flag too, so plugin load cannot dirty a tracked file. Your "worth a release check" note is now enforced, not remembered: `init::DEPRECATED_FLAG_USAGES` lists deprecated forms and a unit test asserts the `AGENTS.md` block, the managed runbook, and every generated OpenCode command body are free of them.
+
+**Verification.** Five new CLI regressions, including the one that would have caught this — a bare `status` over a stale block plus a stale index must leave `AGENTS.md` byte-identical while still printing `status fix: refreshing index`. Full `make check` green (67 suites, 0 failed, clippy `-D warnings` clean), 8/8 `opencode-tsift` node tests, `cargo install --path .`, and the live repro above. Specs updated in `specs/search-navigation.md` (status section, injected block, OpenCode plugin) and `specs/graph.md` (cache eviction stays in the `.tsift/`-only class); `VERSIONS.md` has the unreleased entry.
+
+Two things I did not do. Tsift CI for `690317f` is queued, not finished — local evidence is what the above rests on. And the workspace's `agent-doc` binary is stale by one commit (`35efb2804`), but `src/agent-doc` currently holds a large uncommitted tree from a concurrent session, so building it here would install someone else's in-progress state; leaving that to the supervisor's idle-boundary recycle.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Fix https://github.com/btakita/tsift/issues/4
+- release + publish + install
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

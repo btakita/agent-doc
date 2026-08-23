@@ -221,11 +221,29 @@ The public 0.35.267 CI/Release workflows were in progress at closeout; 0.35.266 
 Out of scope:
 
 A global redesign of recurring queue identity, force-disk recovery, GitHub account billing administration, and PyPI storage-quota administration.
+
+### Re: Response
+
+Fixed and released in `agent-doc 0.35.267`.
+
+- Recurring free-text queue items now belong only to their exact open cycle. A completed earlier `deploy to staging` can no longer strike a newly added identical item.
+- Retained Compact writes now require exact editor/native-save/disk convergence before committing.
+- Added regressions for both defects and the adjacent serialized-write receipt race.
+- Full `make check` passed; CLI and JetBrains plugin were installed.
+- Source commits `dc30a616…` and `3a71c9f4…`; session commit `56b0b70d…` is pushed.
+- Agent-doc session-check passed with no remaining queue work.
+
+I did not rewrite the already-struck item in `equityfundingsource.md`; it may need to be re-added once. Future repetitions will remain pending correctly.
+
+Public release/CI jobs are still running. The parent repository’s jobs could not start because of GitHub’s account billing/spending-limit gate; PyPI also has an existing storage-quota issue.
+
+Full write-up: [agent-doc-bugs2.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md)
 <!-- agent:boundary:0d0ed28d:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- Is the transition table documented in the specs?
 <!-- /agent:queue -->
 
 ## Notes

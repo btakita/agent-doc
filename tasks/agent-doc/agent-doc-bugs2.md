@@ -1,6 +1,7 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 01a02c75-10ac-7543-bb6a-bd84116e808e
+resume:
+  codex: 01a02c75-10ac-7543-bb6a-bd84116e808e
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -20,7 +21,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -292,12 +293,21 @@ Fixed, verified, installed, and released.
 Verification: targeted preflight tests and the complete make check passed; the optimized binary/library/plugin install succeeded. Release commits and tags are pushed through d2c8214e7 / v0.35.273.
 
 The broader #harnessresumemap backlog item remains queued: the requested Claude-to-Codex recovery is intentionally a fresh switch, while cross-harness session-ID mapping is separate work.
-<!-- agent:boundary:0d0ed28d:agent-doc-bugs2 -->
+
+### Re: do [#harnessresumemap]
+
+Completed, installed, and released as agent-doc 0.35.274 (commit `4d95c727d`, tag `v0.35.274`).
+
+`resume:` is now a harness-keyed map with independent `claude`, `codex`, and `opencode` entries. Launch, same-harness restart, controller cold recovery, direct-run, and stream paths read only the selected harness entry. Recording or clearing one harness ID preserves the others, while ownership checks still inspect every entry. Legacy scalar values remain compatible and migrate into only the active harness entry on the next managed write.
+
+This closes the remaining cross-harness identity gap behind the earlier Claude-to-Codex restart fix: switching harnesses cannot submit a Claude conversation ID to Codex or reopen Claude's resume/fresh chooser in the Codex pane.
+
+Verification passed: focused frontmatter, launch, restart, controller, stale-recovery, and integration regressions; the complete `make check` suite; optimized binary/library/plugin installation; and installed binary version `agent-doc 0.35.274`. The latest completed CI run on `main` was green before this push; the new release tag is pushed and its workflows are now eligible to run.
+<!-- agent:boundary:b2dd7a9b:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ⏭️ do [#harnessresumemap]
 <!-- /agent:queue -->
 
 ## Notes
@@ -308,7 +318,6 @@ The broader #harnessresumemap backlog item remains queued: the requested Claude-
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#harnessresumemap] Implement a harness-keyed resume map with claude, codex, and opencode entries; each launch or restart must read only the active harness key, and legacy scalar resume values must migrate only into the document active harness. Add cross-harness restart and compatibility regressions.
 <!-- /agent:backlog -->
 
 ## Review

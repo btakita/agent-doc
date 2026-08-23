@@ -11,7 +11,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -167,10 +167,10 @@ The remaining Coder gap is unchanged and still real: `session set` tells agent-d
 ## Pending / Not Built
 
 <!-- agent:queue priority go -->
-- 🚧 Should we have an agent-doc command that associates the tmux session with the agent-doc project? If yes, this should work both locally and remotely (e.g. Coder environments).
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
+- [ ] [#retainconv] respond/finalize retained a capture as "editor state projection has not converged" while the SAME cycle logged live_editors=1 delivery_converged=true delivery_version=14, and the visible write plus all tracked-work mutations had already landed on disk (19404 bytes == crdt hash 398373016fd0). A bare `agent-doc commit` cleared it instantly with "repaired committed historical committed_capture snapshot drift". Observed 2026-08-23, cycle-1787510294962, agent-doc 0.35.275, JB idea pid 2077735 live, no replica storm (6 deregisters in 4000 log lines). Surviving shape of the needs_operator latch class fixed in a739c20b6: make the retention decision read the same delivery_converged signal the ops log reports, or self-resume via the commit path instead of latching.
 - [ ] [#coder1] Phase 1 — terminal-host environment classification (CODER_* / DISPLAY / SSH_CONNECTION / tmux presence) + `agent-doc env --json`. VERIFY the real Coder env var names, the JB remote-backend probe, and vscode.env.remoteName against a live workspace before landing. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder2] Phase 2 — headless tmux bootstrap: `agent-doc tmux ensure <FILE>` (idempotent detached new-session) and rewrite ensure_inside_tmux (agent-doc-start-io/src/lib.rs:934) to auto-start + re-exec into the pane instead of bailing. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder3] Phase 3 — JetBrains IDE-hosted terminal: open/reuse an `agent-doc` tab via TerminalToolWindowManager, run the attach command, dialog fallback with a Copy action. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md

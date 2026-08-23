@@ -2,6 +2,42 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.277
+
+- **Fix: a stray keystroke on a component-marker line no longer wedges the
+  document (`#markertrailingtypo`).**
+
+`repair_welded_queue_close_marker` handles operator text welded BEFORE a marker
+and explicitly declines when there is also text after it. Nothing handled the
+trailing-only case, so four characters appended to a close marker made
+`structural_corruption_reason` return
+`non_standalone_component_marker:<name>:close:<line>`, every write path refuse,
+and — because the poisoned copy also sits in the durable intent — every
+reconnect re-fail identically. Observed 2026-08-23 on `tasks/software/tsift.md`:
+an operator reached for their tmux prefix (`Ctrl+B`) while focused in the IDE,
+where it is toggle-bold, leaving `<!-- /agent:queue -->****`.
+
+Trailing text after a well-formed, line-leading marker is unambiguous — it is
+already on the far side of the marker — so it is now split onto its own line,
+byte-for-byte, and healed at the same `heal_welded_scaffolding` seam as the
+other scaffolding repairs. Text BEFORE a marker stays fail-closed: which bytes
+are the operator's and which are scaffolding is a guess, and guessing there
+loses operator text.
+
+- **Fix: a refused editor save no longer logs as ordinary progress
+  (`#savependingopaque`).**
+
+`editor_projection_persistence_pending` reported `operator_action=none` for
+every outcome, discarding the diagnosis the save request had just produced. "In
+flight" and "every registered endpoint REFUSED this save" logged identically. On
+the same document that produced 716 iterations at ~1/s, each with
+`endpoints_found=1 endpoints_notified=0` and an explicit `IPC receipt rejected`,
+while `session-check` correctly reported that the controller owned the next
+closeout attempt — an attempt that could not succeed. The line now carries
+`save_diagnosis=` and raises `operator_action=inspect_editor_endpoint` when
+delivery failed to every endpoint. The no-force-disk contract is unchanged; only
+the operator's ability to tell a spin from progress is.
+
 ## 0.35.276
 
 - **Fix: a deferred write no longer latches `needs_operator` (`#retainconv`).**

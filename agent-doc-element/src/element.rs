@@ -1711,6 +1711,73 @@ pub fn repair_welded_queue_close_marker(doc: &str) -> Option<String> {
     (changed && structural_corruption_reason(&repaired).is_none()).then_some(repaired)
 }
 
+/// Split operator text that got appended AFTER a component marker back onto its
+/// own line (`#markertrailingtypo`).
+///
+/// [`repair_welded_queue_close_marker`] handles text welded BEFORE a marker and
+/// explicitly bails when there is also text after it. Nothing handled the
+/// trailing-only case, so a single stray keystroke on a marker line wedged the
+/// entire session: `structural_corruption_reason` returns
+/// `non_standalone_component_marker:<name>:<kind>:line<n>`, every write refuses,
+/// and — because the poisoned copy also lives in the durable intent — every
+/// reconnect re-fails identically. Observed 2026-08-23 on
+/// `tasks/software/tsift.md`: an operator meant to press their tmux prefix
+/// (`Ctrl+B`) and hit it in the IDE instead, where it is *toggle bold*, leaving
+/// `<!-- /agent:queue -->****`. Four characters, and the document could not be
+/// written by any path.
+///
+/// The two sides are not symmetric in risk, which is why only this one repairs:
+///
+/// - Text BEFORE a marker means the operator's line and binary scaffolding have
+///   been merged into one line, and which bytes belong to which is a guess.
+///   Fail closed — that stays [`repair_welded_queue_close_marker`]'s narrow,
+///   evidence-gated job.
+/// - Text AFTER a well-formed, line-leading marker is unambiguous: it is already
+///   on the far side of the marker, so moving it to the next line changes which
+///   *line* it sits on and nothing else. The bytes are preserved verbatim; this
+///   never deletes operator text.
+///
+/// Returns `None` when no marker carries a trailing artifact, so sound documents
+/// are never rewritten.
+pub fn repair_trailing_text_after_component_marker(doc: &str) -> Option<String> {
+    let components = parse(doc).ok()?;
+    // Collect every marker, then apply strictly back-to-front so each earlier
+    // offset stays valid against the growing string.
+    let mut markers: Vec<usize> = components
+        .iter()
+        .flat_map(|component| [component.open_start, component.close_start])
+        .collect();
+    markers.sort_unstable();
+
+    let mut repaired = doc.to_string();
+    let mut changed = false;
+    for marker_start in markers.into_iter().rev() {
+        let marker_end = find_comment_end(repaired.as_bytes(), marker_start)?;
+        let line_start = repaired[..marker_start]
+            .rfind('\n')
+            .map_or(0, |position| position + 1);
+        let line_end = repaired[marker_end..]
+            .find('\n')
+            .map_or(repaired.len(), |relative| marker_end + relative);
+        // A marker that does not lead its own line is the ambiguous case above.
+        // The final `structural_corruption_reason` gate would reject such a
+        // half-repair anyway; this early-out states the intent and keeps the
+        // function from rewriting a line it has no business touching.
+        if !repaired[line_start..marker_start].trim().is_empty() {
+            continue;
+        }
+        let trailing = repaired[marker_end..line_end].trim();
+        if trailing.is_empty() {
+            continue;
+        }
+        let replacement = format!("\n{trailing}");
+        repaired.replace_range(marker_end..line_end, &replacement);
+        changed = true;
+    }
+
+    (changed && structural_corruption_reason(&repaired).is_none()).then_some(repaired)
+}
+
 /// Detect structural corruption that must never be adopted as a snapshot base
 /// (`#dupcontent`). Returns `Some(reason)` when the document is corrupt:
 /// - a parse failure (mismatched / unclosed markers),
@@ -3407,6 +3474,85 @@ Fix applied to skip non-agent <!-- sequences.
             structural_corruption_reason(welded_open).as_deref(),
             Some("non_standalone_component_marker:queue:open:line1")
         );
+    }
+
+    /// `#markertrailingtypo` — the 2026-08-23 `tsift.md` wedge.
+    ///
+    /// The operator meant to press their tmux prefix and hit `Ctrl+B` in the IDE,
+    /// where it is toggle-bold. Four characters on the close-marker line made
+    /// every write path refuse the document.
+    #[test]
+    fn a_stray_keystroke_after_a_close_marker_is_split_off_not_refused() {
+        let typo = concat!(
+            "<!-- agent:queue priority go -->\n",
+            "- release + publish + install\n",
+            "<!-- /agent:queue -->****\n",
+        );
+        assert_eq!(
+            structural_corruption_reason(typo).as_deref(),
+            Some("non_standalone_component_marker:queue:close:line3"),
+            "precondition: this is the shape that wedged the session"
+        );
+
+        let repaired =
+            repair_trailing_text_after_component_marker(typo).expect("trailing typo must repair");
+        assert_eq!(
+            repaired,
+            concat!(
+                "<!-- agent:queue priority go -->\n",
+                "- release + publish + install\n",
+                "<!-- /agent:queue -->\n",
+                "****\n",
+            )
+        );
+        assert_eq!(structural_corruption_reason(&repaired), None);
+        // Lossless: the operator's bytes survive, they just move off the marker.
+        assert!(repaired.contains("****"));
+    }
+
+    /// The open marker has the same failure and the same unambiguous fix — the
+    /// trailing text is already inside the component, so it becomes a body line.
+    #[test]
+    fn a_stray_keystroke_after_an_open_marker_is_split_off_too() {
+        let typo = "<!-- agent:queue -->**\n- do [#x] a prompt\n<!-- /agent:queue -->\n";
+        assert!(structural_corruption_reason(typo).is_some());
+
+        let repaired =
+            repair_trailing_text_after_component_marker(typo).expect("trailing typo must repair");
+        assert_eq!(
+            repaired,
+            "<!-- agent:queue -->\n**\n- do [#x] a prompt\n<!-- /agent:queue -->\n"
+        );
+        assert_eq!(structural_corruption_reason(&repaired), None);
+    }
+
+    /// Text BEFORE a marker stays fail-closed: which bytes are the operator's and
+    /// which are scaffolding is a guess, and guessing there loses operator text.
+    ///
+    /// The second case is the one that matters — leading AND trailing text on one
+    /// line, exactly what `repair_welded_queue_close_marker` declines. A careless
+    /// implementation repairs the trailing half and leaves an ambiguous line
+    /// half-rewritten; this must decline outright.
+    #[test]
+    fn text_welded_before_a_marker_is_not_touched_by_the_trailing_repair() {
+        let welded = "<!-- agent:queue -->\n- do [#x] complete prompt<!-- /agent:queue -->\n";
+        assert_eq!(repair_trailing_text_after_component_marker(welded), None);
+
+        let welded_both_sides =
+            "<!-- agent:queue -->\n- do [#x] complete prompt<!-- /agent:queue -->****\n";
+        assert_eq!(
+            repair_trailing_text_after_component_marker(welded_both_sides),
+            None,
+            "an ambiguous line must not be half-repaired into a different wedge"
+        );
+    }
+
+    /// A sound document must never be rewritten — this repair runs on every
+    /// durable-intent seam.
+    #[test]
+    fn a_sound_document_is_left_byte_identical() {
+        let sound = "<!-- agent:queue -->\n- do [#x] a prompt\n<!-- /agent:queue -->\n\n**bold**\n";
+        assert_eq!(repair_trailing_text_after_component_marker(sound), None);
     }
 
     #[test]

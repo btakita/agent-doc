@@ -1332,12 +1332,14 @@ fn canonical_editor_projection_is_persisted(
             delivery_converged,
         )
     );
+    let mut save_diagnosis = "native_save_gate_not_ready".to_string();
     if ready_for_native_save {
         let outcome = agent_doc_crdt_relay_io::request_native_save_for_current_projection(
             path,
             &agent_doc_hash::content_hash(canonical),
             canonical.len(),
         )?;
+        save_diagnosis = outcome.diagnosis();
         agent_doc_ops_log_io::log_op(
             path,
             &format!(
@@ -1370,10 +1372,29 @@ fn canonical_editor_projection_is_persisted(
             return Ok(true);
         }
     }
+    // `#savependingopaque`: this line used to report `operator_action=none` for
+    // every outcome, discarding the diagnosis the request had just produced. So
+    // "every registered endpoint REFUSED the save" and "the save is in flight"
+    // logged identically, and a spin was indistinguishable from progress.
+    // Observed 2026-08-23 on `tasks/software/tsift.md`: 716 iterations at ~1/s,
+    // `endpoints_found=1 endpoints_notified=0` with an explicit
+    // `IPC receipt rejected` every time, while `session-check` told the operator
+    // the controller owned the next closeout attempt — true, and useless, because
+    // that attempt could not succeed. Naming the failure does not change the
+    // no-force-disk contract: a retained write still commits itself once
+    // delivery converges, and disk fallback remains forbidden. It changes only
+    // whether the operator can tell the two states apart.
+    let operator_action = if save_diagnosis.starts_with("delivery_failed_to_all")
+        || save_diagnosis == "no_live_registration"
+    {
+        "inspect_editor_endpoint"
+    } else {
+        "none"
+    };
     agent_doc_ops_log_io::log_op(
         path,
         &format!(
-            "editor_projection_persistence_pending file={} source={} content_hash={} driver=editor_native_save operator_action=none disk_write=false",
+            "editor_projection_persistence_pending file={} source={} content_hash={} driver=editor_native_save save_diagnosis={save_diagnosis} operator_action={operator_action} disk_write=false",
             path.display(),
             source,
             agent_doc_hash::content_hash(canonical),
@@ -3827,6 +3848,13 @@ fn heal_welded_boundary(content: &str) -> Option<String> {
 fn heal_welded_scaffolding(content: &str) -> Option<String> {
     let mut repaired = agent_doc_element::element::repair_welded_queue_close_marker(content)
         .unwrap_or_else(|| content.to_string());
+    // `#markertrailingtypo`: a stray keystroke landing after a marker fails the
+    // same structural gate as welded scaffolding and, per this function's own
+    // rule, has to be healed at every durable-intent seam or the poisoned copy
+    // in `state.db` re-fails on every reconnect. Runs after the welded-prefix
+    // repair, which declines any line that also has a trailing artifact.
+    repaired = agent_doc_element::element::repair_trailing_text_after_component_marker(&repaired)
+        .unwrap_or(repaired);
     repaired = heal_welded_boundary(&repaired).unwrap_or(repaired);
     (repaired != content).then_some(repaired)
 }

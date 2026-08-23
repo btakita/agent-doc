@@ -20,7 +20,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -266,12 +266,24 @@ Claude submissions now send prompt text and Enter as separate tmux commands, pre
 - Release and CI workflows started; Book workflow already passed
 
 Pre-existing `AGENTS.md` and `.agent/` changes remain untouched. Retry **Run Agent Doc** on `backend.md`.
+
+### Re: Restart Agent when switching Claude to Codex
+
+Fixed and released in agent-doc 0.35.271 as commit 9dd93fbf6 and tag v0.35.271.
+
+Restart Agent now treats a harness change as a fresh-harness launch. The supervisor drops the Claude child, starts Codex without trying to resume an unavailable Codex session ID, and automatically submits the agent-doc prompt. This removes the Claude resume/start-fresh chooser.
+
+I installed the full 0.35.271 release and restarted the live backend.md agent. The pane now shows Codex gpt-5.6-sol, the UserPromptSubmit hook preparing the agent-doc cycle, and Working. Session state reports harness=codex, actor=busy, restart_count=1, and auto_trigger_sent; the Claude chooser is gone.
+
+This release also hardens Codex Stop closeout after a cycle was already committed and makes fresh cycle IDs monotonic when two boundaries occur in the same millisecond. The earlier Claude prompt-submission and JetBrains read-action fixes remain installed in this release; restart a running JetBrains IDE to activate the updated plugin generation.
+
+Verification passed: targeted regressions and the full make check suite. The latest PyPI workflow failure is external to these fixes: PyPI reports that the agent-doc project has reached its 10 GB storage quota.
 <!-- agent:boundary:0d0ed28d:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#harnessresumemap]
+- 🚧 do [#harnessresumemap]
 <!-- /agent:queue -->
 
 ## Notes
@@ -282,7 +294,7 @@ Pre-existing `AGENTS.md` and `.agent/` changes remain untouched. Retry **Run Age
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#harnessresumemap] Implement a harness-keyed resume map with claude, codex, and opencode entries; each launch or restart must read only the active harness key, and legacy scalar resume values must migrate only into the document active harness. Add cross-harness restart and compatibility regressions.
+- [ ] 🚧 [#harnessresumemap] Implement a harness-keyed resume map with claude, codex, and opencode entries; each launch or restart must read only the active harness key, and legacy scalar resume values must migrate only into the document active harness. Add cross-harness restart and compatibility regressions.
 <!-- /agent:backlog -->
 
 ## Review

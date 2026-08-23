@@ -65,7 +65,18 @@ Implemented the authenticated testimonial manager at `/admin/testimonials` and c
 - Updated the lending-portal PRD and added regression coverage for migration seeding, private defaults, URL validation, escaped dynamic rendering, empty-public-set behavior, admin CRUD routes, and portal navigation.
 
 Verification passed: the focused testimonial/homepage tests, full `make check`, `git diff --check`, and an in-memory SQLite application of migration `0145` (`public|6`). This repository currently exposes no GitHub Actions workflow runs to inspect. Pre-existing `AGENTS.md` and `.agent/` worktree changes were preserved and excluded from the feature commit.
-<!-- agent:boundary:5d64b1d7:equityfundingsource -->
+
+### Re: Staging deployment — gpt-5
+
+Deployed synced EFS `main` commit `2c4c63ef` to the default Cloudflare staging environment. The isolated `[env.production]` environment was not touched.
+
+- Staging Worker version: `6652bd06-b6cb-434c-89a7-9a2896462154`.
+- Live URL: `https://equityfundingsource.brian-takita.workers.dev`.
+- Applied additive D1 migration `0145_testimonials.sql` to staging database `280e1539-b940-4c59-8988-fbed63c12ac0`; no migrations remain pending, and the table contains the six intended public seed testimonials.
+- Verification passed: `make check` completed with 2,308 tests and zero failures; the homepage returns 200 and renders seeded reviewer names; `/admin/testimonials` returns the expected 303 redirect to admin login for an unauthenticated request.
+- The pre-deploy Time Travel bookmark was current. No application source commit or push was needed, and the pre-existing local `AGENTS.md` / `.agent/` changes remain untouched.
+- Refreshed the installed agent-doc tooling to `0.35.272` before the deployment, resolving the stale-install warning from preflight.
+<!-- agent:boundary:21d49809:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
@@ -74,7 +85,6 @@ Verification passed: the focused testimonial/homepage tests, full `make check`, 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#qhh8] deploy to staging
 <!-- /agent:backlog -->
 
 ## Review

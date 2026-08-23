@@ -2,6 +2,21 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.267
+
+- **Fix: serialized editor writes await their prompt lazy-delivery receipt.**
+
+When a CLI mutation has already advanced canonical CRDT authority but the first
+write receipt says editor delivery is still pending, the serialized caller now
+subscribes to that exact projection through the existing bounded convergence
+deadline. A prompt editor acknowledgement continues the same command through
+native-save and disk proof instead of returning a false retained-write failure.
+The native-save effect awaits its exact asynchronous disk receipt within the same
+bounded projection deadline instead of racing it with one immediate read. An
+advancing editor cut or genuinely missing acknowledgement leaves the original
+target durably retained and fails closed without rewriting disk or substituting
+the newer editor cut for the captured intent.
+
 ## 0.35.266
 
 - **Fix: retained Compact Exchange settles through editor save authority, and

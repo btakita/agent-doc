@@ -991,6 +991,54 @@ fn atomic_write_rebased_through_authority_inner(
     result
 }
 
+/// Give a serialized, already-accepted CRDT write one bounded foreground chance
+/// to observe the editor delivery that it just caused.
+///
+/// `apply_canonical_replace_if_attached` intentionally returns a retained receipt
+/// as soon as lazy delivery owns the next transition. A top-level CLI mutation is
+/// nevertheless still in flight at that point. Returning its retained refusal
+/// before the matching projection subscription changes turns an ordinary editor
+/// ACK a few milliseconds later into a false command failure. The subscription
+/// remains fail-closed: an advancing editor cut returns immediately while the
+/// original target stays retained, and a target that never converges exhausts
+/// the existing projection deadline and remains retained.
+fn await_serialized_atomic_write_projection(
+    path: &Path,
+    target_hash: &str,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    let mut projection_observation = ProjectionObservationState::default();
+    loop {
+        let current = observe_live_editor_authority_after_model_ensure(
+            path,
+            "serialized_atomic_write_projection_wait",
+        )?;
+        let agent_doc_crdt_relay_io::CurrentText::Current {
+            ref text,
+            live_editors,
+            delivery_converged,
+            delivery_version,
+            ..
+        } = current
+        else {
+            return Ok(current);
+        };
+        if agent_doc_hash::content_hash(text) != target_hash || delivery_converged {
+            return Ok(current);
+        }
+        if projection_observation.wait_for_delivery_change(DeliveryChangeWait {
+            file: path,
+            source: "serialized_atomic_write_projection_wait",
+            live_editors,
+            delivery_version,
+            signal_immediately: false,
+            max_wait_ms: None,
+        })? == ProjectionObservationWait::ForegroundDeadline
+        {
+            return Ok(current);
+        }
+    }
+}
+
 fn atomic_write_rebased_through_authority_body(
     path: &Path,
     projection_base: &str,
@@ -1032,28 +1080,54 @@ fn atomic_write_rebased_through_authority_body(
                 break;
             };
 
-            if !relay_write.delivery_converged {
+            let current = if relay_write.delivery_converged {
+                observe_live_editor_authority_after_model_ensure(
+                    path,
+                    "serialized_atomic_write_projection",
+                )?
+            } else {
+                await_serialized_atomic_write_projection(path, &relay_write.content_hash)?
+            };
+            if !relay_write.delivery_converged
+                && !matches!(
+                    &current,
+                    agent_doc_crdt_relay_io::CurrentText::Current {
+                        text,
+                        delivery_converged: true,
+                        ..
+                    } if agent_doc_hash::content_hash(text) == relay_write.content_hash
+                )
+            {
                 return Err(retained_refusal(
                     path,
                     format!(
-                        "serialized_atomic_write: binary-owned write for {} remains retained while the editor projection converges (content_hash={}); the same intent resumes when the controller derives settlement and closeout continuation from the live projection. Do not recapture or rerun finalize/write --commit, and do not force disk",
+                        "serialized_atomic_write: binary-owned write for {} remains retained while its exact editor projection converges (content_hash={}); the same intent resumes when the controller derives settlement and closeout continuation from the live projection. Do not recapture or rerun finalize/write --commit, and do not force disk",
                         path.display(),
                         relay_write.content_hash,
                     ),
                 ));
             }
-
-            let current = observe_live_editor_authority_after_model_ensure(
-                path,
-                "serialized_atomic_write_projection",
-            )?;
             match current {
+                agent_doc_crdt_relay_io::CurrentText::Current {
+                    text,
+                    delivery_converged: false,
+                    ..
+                } if agent_doc_hash::content_hash(&text) == relay_write.content_hash => {
+                    return Err(retained_refusal(
+                        path,
+                        format!(
+                            "serialized_atomic_write: binary-owned write for {} remains retained while the editor projection converges (content_hash={}); the same intent resumes when the controller derives settlement and closeout continuation from the live projection. Do not recapture or rerun finalize/write --commit, and do not force disk",
+                            path.display(),
+                            relay_write.content_hash,
+                        ),
+                    ));
+                }
                 agent_doc_crdt_relay_io::CurrentText::Current {
                     text,
                     delivery_converged: true,
                     ..
                 } if agent_doc_hash::content_hash(&text) == relay_write.content_hash => {
-                    if !canonical_editor_projection_is_persisted(
+                    if !await_canonical_editor_projection_persisted(
                         path,
                         &text,
                         "serialized_atomic_write_projection",
@@ -1280,6 +1354,62 @@ fn canonical_editor_projection_is_persisted(
             agent_doc_hash::content_hash(canonical),
         ),
     );
+    Ok(false)
+}
+
+/// Await the exact disk receipt for a native save requested from an editor that
+/// already owns a delivery-converged canonical projection.
+///
+/// The persist-current IPC acknowledgement means the editor accepted the save
+/// effect; its filesystem projection can follow a few milliseconds later. A
+/// single immediate disk read therefore races the effect it just requested.
+/// Keep the wait bounded by the existing projection-observation deadline and
+/// abort immediately if canonical editor authority advances to a different cut.
+fn await_canonical_editor_projection_persisted(
+    path: &Path,
+    canonical: &str,
+    source: &str,
+) -> Result<bool> {
+    if canonical_editor_projection_is_persisted(path, canonical, source)? {
+        return Ok(true);
+    }
+    let started = std::time::Instant::now();
+    let mut backoff_ms = CRDT_PROJECTION_FALLBACK_BACKOFF_INITIAL_MS;
+    while started.elapsed()
+        < std::time::Duration::from_millis(CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS)
+    {
+        std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+        let agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            live_editors,
+            delivery_converged,
+            ..
+        } = observe_live_editor_authority_after_model_ensure(
+            path,
+            "editor_projection_native_save_wait",
+        )?
+        else {
+            return Ok(false);
+        };
+        if !editor_save_authority_is_sufficient(&text, canonical, live_editors, delivery_converged)
+        {
+            return Ok(false);
+        }
+        if canonical_disk_projection_is_exact(path, canonical) {
+            agent_doc_ops_log_io::log_op(
+                path,
+                &format!(
+                    "editor_projection_native_save_receipt file={} source={} content_hash={} wait_ms={} canonical_disk_exact=true",
+                    path.display(),
+                    source,
+                    agent_doc_hash::content_hash(canonical),
+                    started.elapsed().as_millis(),
+                ),
+            );
+            return Ok(true);
+        }
+        backoff_ms = CRDT_PROJECTION_FALLBACK_BACKOFF_POLICY.next_ms(backoff_ms, false);
+    }
     Ok(false)
 }
 
@@ -9055,17 +9185,9 @@ mod tests {
             .expect("editor replica should attach");
         let ack = project_next_crdt_delivery(file.clone(), identity);
 
-        let err = atomic_write_through_authority(&file, target).unwrap_err();
-        assert!(err.to_string().contains("remains retained"));
+        atomic_write_through_authority(&file, target)
+            .expect("a prompt editor projection should complete the serialized write");
         ack.join().unwrap();
-        assert!(
-            settle_retained_non_capture_projection_through_authority(
-                &file,
-                "serialized_atomic_write_after_projection_ack_test",
-            )
-            .unwrap(),
-            "the asynchronous exact projection receipt should settle the retained write",
-        );
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
         let current = match agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap() {
@@ -9082,14 +9204,14 @@ mod tests {
         assert_eq!(current, target);
         assert!(
             pending_document_write(&file).is_none(),
-            "native disk-save proof must retire the matching write intent",
+            "the same serialized command must retire its matching write intent",
         );
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(log.contains("retained_non_capture_projection_settled"));
+        assert!(log.contains("serialized_atomic_write_projection_wait"));
     }
 
     #[test]
-    fn cas_atomic_write_retains_the_captured_target_after_one_submit() {
+    fn cas_atomic_write_settles_the_captured_target_after_one_submit() {
         let baseline = "# Session\n\nbody\n";
         let target = "# Session\n\nbody\n\n### Re: once\n\nApplied once.\n";
         let (dir, file, _canonical) = temp_doc(baseline);
@@ -9100,13 +9222,15 @@ mod tests {
             .expect("editor replica should attach");
         let ack = project_next_crdt_delivery(file.clone(), identity);
 
-        let error =
-            atomic_write_if_current_through_authority(&file, target, baseline, "cas_single_submit")
-                .expect_err("the foreground boundary should retain until editor settlement");
-        assert!(error.to_string().contains("remains retained"));
+        atomic_write_if_current_through_authority(&file, target, baseline, "cas_single_submit")
+            .expect("the foreground boundary should await prompt editor settlement");
         ack.join().unwrap();
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
+        assert!(
+            pending_document_write(&file).is_none(),
+            "same-command settlement must retire the captured target",
+        );
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         let relay_writes = log
             .lines()
@@ -9122,7 +9246,7 @@ mod tests {
     }
 
     #[test]
-    fn serialized_atomic_write_rebases_post_proof_editor_advance_exactly_once() {
+    fn serialized_atomic_write_preserves_post_settlement_editor_advance() {
         let baseline = concat!(
             "# Session\n\n",
             "<!-- agent:backlog -->\n- [ ] existing #existing\n<!-- /agent:backlog -->\n\n",
@@ -9146,9 +9270,10 @@ mod tests {
             .expect("editor replica should attach");
 
         let ack = project_next_crdt_delivery(file.clone(), identity);
-        let err = atomic_write_through_authority(&file, &target).unwrap_err();
-        assert!(err.to_string().contains("remains retained"));
+        atomic_write_through_authority(&file, &target)
+            .expect("the prompt editor receipt should settle the serialized target");
         ack.join().unwrap();
+        assert!(pending_document_write(&file).is_none());
         agent_doc_crdt_relay_io::with_hub(&file, |hub| {
             let current = hub.canonical_text();
             let operator = current.replace(
@@ -9173,12 +9298,12 @@ mod tests {
         };
         std::fs::write(&file, &operator_cut).expect("simulate the operator's native save");
         assert!(
-            settle_retained_non_capture_projection_through_authority(
+            !settle_retained_non_capture_projection_through_authority(
                 &file,
                 "serialized_atomic_write_post_receipt_operator_save_test",
             )
             .unwrap(),
-            "the exact native-save projection should settle without resubmitting the response",
+            "the completed serialized write must not leave retained lineage to replay",
         );
 
         let disk = std::fs::read_to_string(&file).unwrap();
@@ -9197,7 +9322,7 @@ mod tests {
         assert_eq!(canonical.matches("### Re: Haiven load test").count(), 1);
         assert_eq!(canonical.matches("#haivensharreg").count(), 1);
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(log.contains("retained_non_capture_response_projection_settled"));
+        assert!(log.contains("serialized_atomic_write_projection_wait"));
         assert!(!log.contains("action=rebase_same_intent"));
     }
 

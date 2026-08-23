@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-status-io"
-version = "0.35.266"
+version = "0.35.267"
 edition = "2024"
 description = "Status component writeback adapters for agent-doc"
 license = "MIT"
@@ -11,12 +11,12 @@ publish = false
 name = "agent_doc_status_io"
 
 [dependencies]
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.266" }
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.266" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.266" }
-agent-doc-markdown-lossless = { path = "../agent-doc-markdown-lossless", version = "0.35.266" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.266" }
-agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.35.266" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.267" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.267" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.267" }
+agent-doc-markdown-lossless = { path = "../agent-doc-markdown-lossless", version = "0.35.267" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.267" }
+agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.35.267" }
 anyhow = "1"
 
 [dev-dependencies]

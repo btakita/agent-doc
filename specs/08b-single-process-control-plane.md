@@ -293,6 +293,17 @@ its own blocking mailbox. The cross-process advisory `flock` remains only a
 foreign-process backstop. This removes the in-process supervisor/finalize
 interleave at the root.
 
+A serialized CLI mutation that has already advanced canonical CRDT authority
+does not fail merely because its lazy editor-delivery projection was pending in
+the first receipt. The serialized caller subscribes to that exact target's
+delivery transition through the established bounded projection deadline. If the
+editor acknowledges the target, the same call continues through native-save and
+disk proof, awaiting the exact asynchronous disk receipt within the same bounded
+projection deadline. If the editor cut advances before that exact proof, or the
+target remains unacknowledged, the original durable intent stays retained and
+the command fails closed without a disk write, recapture, or substitution of the
+newer editor cut for the captured target.
+
 This shipped through the `AGENT_DOC_WRITE_AUTHORITY` rollback flag ladder
 (`off → shadow → dual-write → authority → removed`). At the removal rung the
 flag, the `WriteAuthorityGate` enum, and the bare-`atomic_write` `off` bypass

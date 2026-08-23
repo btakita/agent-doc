@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 01a02bfa-7c55-73b2-80ff-0db00d81d1bb
+resume: 01a02c75-10ac-7543-bb6a-bd84116e808e
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -251,11 +251,27 @@ A red/green contract test, `realtime_workflow_spec_documents_retained_closeout_t
 > **Queue prompt:** Is the transition table documented in the specs?
 
 Yes. It is now documented in `specs/14-realtime-workflow.md` under **Retained closeout transition table**, with all six state/evidence/transition rows pinned by `realtime_workflow_spec_documents_retained_closeout_transition_table`. Public source commit `c21797d2b` is pushed; full `make check` and `make install-full` passed. The exchange is large, but I did not compact while this queue head was active.
+
+### Re: Response
+
+Fixed and released as agent-doc `0.35.270`.
+
+Claude submissions now send prompt text and Enter as separate tmux commands, preventing the load-sensitive race that left `/agent-doc …backend.md` stranded in the composer.
+
+- Commit: `90c0bee56`
+- Tag: `v0.35.270`
+- Installed locally, including native library
+- `make check` passed
+- Focused transport tests passed
+- Release and CI workflows started; Book workflow already passed
+
+Pre-existing `AGENTS.md` and `.agent/` changes remain untouched. Retry **Run Agent Doc** on `backend.md`.
 <!-- agent:boundary:0d0ed28d:agent-doc-bugs2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#harnessresumemap]
 <!-- /agent:queue -->
 
 ## Notes

@@ -8184,6 +8184,7 @@ fn pure_codex_thread_does_not_inherit_orchard_agent_doc_work() {
             doc_path: document.display().to_string(),
             last_turn_id: "turn-a".into(),
             last_prompt: format!("agent-doc {}", document.display()),
+            last_prompt_cycle: None,
             last_auto_queue_head: None,
             last_context_clear_at: None,
             updated_at: 1,

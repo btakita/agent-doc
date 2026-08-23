@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.268
+
+- **Fix: Codex Stop retires prompt debt settled by its owning closeout cycle.**
+
+Codex prompt tracking now records the closeout cycle ID and whether the cycle was
+open when the prompt arrived. After that exact cycle captures a response and
+commits, the Stop hook clears the binding instead of treating a shortened console
+handoff as a second unpersisted response. Prompts first observed after commit
+remain fresh work and continue to fail closed. Existing bindings receive a strict
+timestamp-ordered compatibility check so already-running sessions can settle
+after upgrading.
+
 ## 0.35.267
 
 - **Fix: serialized editor writes await their prompt lazy-delivery receipt.**

@@ -495,6 +495,9 @@ fn active_session_prompt_requires_writeback(
             let Some(prompt) = prompt_writeback_debt(state, &input.turn_id) else {
                 return Ok(None);
             };
+            if committed_cycle_settled_prompt_debt(file, state)? {
+                return Ok(None);
+            }
             let content = current_document_content(file, "codex_stop_same_turn_prompt_debt")?;
             if agent_doc_turn::closeout_signal::exchange_contains_prompt_line(&content, prompt) {
                 return Ok(None);
@@ -515,6 +518,24 @@ fn active_session_prompt_requires_writeback(
             prompt = first_nonempty_prompt_line(&prompt),
         ),
     }))
+}
+
+fn committed_cycle_settled_prompt_debt(file: &Path, state: &SessionState) -> Result<bool> {
+    let Some(cycle) = agent_doc_cycle_state_io::load(file)? else {
+        return Ok(false);
+    };
+    if cycle.phase.as_str() != "committed" || cycle.response_sha256.is_none() {
+        return Ok(false);
+    }
+    if let Some(observed) = state.last_prompt_cycle.as_ref() {
+        return Ok(observed.was_open && observed.cycle_id == cycle.cycle_id);
+    }
+
+    // Backward-compatible proof for bindings written before
+    // `last_prompt_cycle` existed. Strict inequalities avoid treating a prompt
+    // registered at or after the terminal event as settled; new bindings use
+    // the phase-fenced observation above and do not depend on wall-clock time.
+    Ok(cycle.started_at <= state.updated_at && state.updated_at < cycle.updated_at)
 }
 
 fn park_state_across_roots(
@@ -3303,6 +3324,7 @@ Reviewed the gated items.\n\
                 last_prompt: "/clear".to_string(),
                 last_auto_queue_head: None,
                 last_context_clear_at: Some(compaction_ts),
+                last_prompt_cycle: None,
                 updated_at: compaction_ts,
             },
         )
@@ -3423,6 +3445,7 @@ Reviewed the gated items.\n\
                 last_prompt: format!("agent-doc {}", doc.display()),
                 last_auto_queue_head: Some("do #fix1".to_string()),
                 last_context_clear_at: None,
+                last_prompt_cycle: None,
                 updated_at: 20,
             },
         )
@@ -3472,6 +3495,7 @@ Reviewed the gated items.\n\
                 last_prompt: format!("agent-doc {}", doc.display()),
                 last_auto_queue_head: Some("do #fix1".to_string()),
                 last_context_clear_at: None,
+                last_prompt_cycle: None,
                 updated_at: 20,
             },
         )
@@ -3517,6 +3541,7 @@ Reviewed the gated items.\n\
                 last_prompt: format!("agent-doc {}", doc.display()),
                 last_auto_queue_head: Some("do #fix1".to_string()),
                 last_context_clear_at: None,
+                last_prompt_cycle: None,
                 updated_at: 20,
             },
         )
@@ -3567,6 +3592,122 @@ Reviewed the gated items.\n\
                 assert!(stop_reason.contains("cycle is still open"));
             }
             other => panic!("expected stop response, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stop_retires_prompt_debt_when_its_observed_open_cycle_commits() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        let original = fs::read_to_string(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        track_doc(&dir, &doc, "turn-1");
+        apply_user_prompt_submit(&UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            prompt: "Also fix the recurring queue item.".to_string(),
+        })
+        .unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(&original),
+            Some(&original),
+            "response-sha",
+            None,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+
+        let root = project_root_for(dir.path()).unwrap();
+        let tracked = load_state(&root, "codex-session").unwrap().unwrap();
+        assert_eq!(
+            tracked
+                .last_prompt_cycle
+                .as_ref()
+                .map(|cycle| cycle.was_open),
+            Some(true),
+            "{tracked:?}"
+        );
+        assert!(
+            committed_cycle_settled_prompt_debt(&doc, &tracked).unwrap(),
+            "{tracked:?}"
+        );
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Short console handoff after finalize.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert!(
+            matches!(response, StopResponse::Continue { continue_: true }),
+            "{response:?}"
+        );
+        let state = load_state(&root, "codex-session").unwrap().unwrap();
+        assert!(state.last_prompt.is_empty());
+        assert!(state.last_turn_id.is_empty());
+    }
+
+    #[test]
+    fn stop_blocks_prompt_debt_observed_after_cycle_committed() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        let original = fs::read_to_string(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "turn-2");
+        apply_user_prompt_submit(&UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-2".to_string(),
+            cwd: dir.path().display().to_string(),
+            prompt: "A genuinely new prompt after closeout.".to_string(),
+        })
+        .unwrap();
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-2".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Unpersisted answer.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        match response {
+            StopResponse::Block { reason, .. } => {
+                assert!(
+                    reason.contains("A genuinely new prompt after closeout"),
+                    "{reason}"
+                );
+                assert!(reason.contains("binary-owned write boundary"), "{reason}");
+            }
+            other => panic!("expected prompt-debt block, got {other:?}"),
         }
     }
 

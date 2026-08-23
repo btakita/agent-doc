@@ -84,7 +84,29 @@ pub struct SessionState {
     pub last_auto_queue_head: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_context_clear_at: Option<u64>,
+    /// Cycle authority observed when `last_prompt` entered this exact Codex
+    /// thread binding. A later terminal transition of the same cycle proves
+    /// that the prompt's response already crossed the closeout boundary;
+    /// observing an already-terminal cycle means the prompt is newer and must
+    /// start another cycle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_prompt_cycle: Option<PromptCycleObservation>,
     pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PromptCycleObservation {
+    pub cycle_id: String,
+    pub was_open: bool,
+}
+
+fn prompt_cycle_observation(file: &Path) -> Result<Option<PromptCycleObservation>> {
+    Ok(
+        agent_doc_cycle_state_io::load(file)?.map(|cycle| PromptCycleObservation {
+            was_open: cycle.is_open(),
+            cycle_id: cycle.cycle_id,
+        }),
+    )
 }
 
 /// Whether the exact Codex turn still owes a document writeback.
@@ -118,6 +140,7 @@ pub fn parked_session_state(state: &SessionState, updated_at: u64) -> SessionSta
         last_prompt: String::new(),
         last_auto_queue_head: None,
         last_context_clear_at: state.last_context_clear_at,
+        last_prompt_cycle: None,
         updated_at,
     }
 }
@@ -184,6 +207,7 @@ pub fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
     }
 
     let now = now_secs();
+    let last_prompt_cycle = prompt_cycle_observation(&doc_path)?;
     let last_context_clear_at = if prompt_requests_clear(&input.prompt) {
         Some(now)
     } else {
@@ -198,6 +222,7 @@ pub fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
         last_prompt: input.prompt.clone(),
         last_auto_queue_head: None,
         last_context_clear_at,
+        last_prompt_cycle,
         updated_at: now,
     };
     for root in roots {
@@ -435,6 +460,7 @@ pub fn record_external_prompt_for_file(file: &Path, session_id: &str, prompt: &s
         last_prompt: prompt.to_string(),
         last_auto_queue_head: None,
         last_context_clear_at: prompt_requests_clear(prompt).then(now_secs),
+        last_prompt_cycle: prompt_cycle_observation(&canonical)?,
         updated_at: now_secs(),
     };
     for root in project_roots_for(&canonical) {
@@ -887,6 +913,7 @@ agent-doc {}\n",
                 last_prompt: format!("agent-doc {}", doc.display()),
                 last_auto_queue_head: None,
                 last_context_clear_at: None,
+                last_prompt_cycle: None,
                 updated_at: 10,
             },
         )
@@ -900,6 +927,7 @@ agent-doc {}\n",
                 last_prompt: "/clear".to_string(),
                 last_auto_queue_head: None,
                 last_context_clear_at: Some(20),
+                last_prompt_cycle: None,
                 updated_at: 20,
             },
         )
@@ -932,6 +960,7 @@ agent-doc {}\n",
                 last_prompt: "/clear".to_string(),
                 last_auto_queue_head: None,
                 last_context_clear_at: Some(20),
+                last_prompt_cycle: None,
                 updated_at: 20,
             },
         )

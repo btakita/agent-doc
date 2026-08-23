@@ -58,6 +58,15 @@ Regression coverage must include the full follow-up lifecycle: a routed dispatch
 
 The Codex stop hook does not replace the documented `finalize` / `write --commit` + `session-check` path. It is a backstop for the exact Codex `session_id` that `UserPromptSubmit` durably bound to the document. When Codex reaches `Stop` with an open bound `agent-doc` cycle, the binary validates `last_assistant_message` before replay. A single assistant closeout may be captured into the existing pending/capture ledger and replayed through the normal recover/write/commit path automatically. Transcript-shaped payloads such as full `agent:exchange` dumps, prompt-target lines, or repeated response headings must not enter the replay ledger; they are captured only as diagnostics and the hook blocks or fails closed instead. If `last_assistant_message` is empty because a tool-only/authentication step ended the turn before the assistant emitted the final closeout, the hook must also fail closed, save a diagnostic record with the tracked prompt, and require the normal `finalize` / `session-check` recovery path. If the exact session has no tracked binding, the hook is a no-op even when another document in the project has a durable queue marker. If the validated auto-close succeeds, `session-check` should be green and the tracked hook state should be cleared.
 
+Prompt writeback debt is cycle-scoped. `UserPromptSubmit` records the cycle ID and
+whether that cycle was open when it observed the prompt. Once that same cycle has
+a captured response and reaches `committed`, the Stop hook must retire the prompt
+debt even when a shortened console handoff does not repeat the prompt text. A
+prompt first observed after the cycle is terminal remains new work and must still
+block until it crosses a binary-owned response boundary. Legacy bindings without
+the cycle observation may use strict cycle start / prompt observation / commit
+timestamp ordering as compatibility proof.
+
 After a cycle is committed, a visible queue line is not by itself proof that the
 same turn still owes document work. Frontmatter `queue: stop` explicitly parks
 that head, so the Stop hook must agree with `session-check`'s

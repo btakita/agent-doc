@@ -63,7 +63,10 @@ whether that cycle was open when it observed the prompt. Once that same cycle ha
 a captured response and reaches `committed`, the Stop hook must retire the prompt
 debt even when a shortened console handoff does not repeat the prompt text. A
 prompt first observed after the cycle is terminal remains new work and must still
-block until it crosses a binary-owned response boundary. Legacy bindings without
+cross a binary-owned response boundary. When that exact-thread prompt has a
+replayable Stop payload, the hook must mint a fresh cycle from `HEAD` before it
+captures the payload, then drive the normal write/commit path. It must never
+attach a new response capture to the preceding terminal cycle. Legacy bindings without
 the cycle observation may use strict cycle start / prompt observation / commit
 timestamp ordering as compatibility proof.
 

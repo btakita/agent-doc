@@ -21,10 +21,17 @@ pub struct ChildLaunchPlan {
     pub arm_stale_ctrl_d_suppression: bool,
 }
 
-pub fn child_launch_plan(first_run: bool, auto_trigger_next_launch: bool) -> ChildLaunchPlan {
+pub fn child_launch_plan(
+    first_run: bool,
+    auto_trigger_next_launch: bool,
+    fresh_harness_switch: bool,
+) -> ChildLaunchPlan {
     ChildLaunchPlan {
-        restart_requested: !first_run,
-        auto_trigger: auto_trigger_next_launch || !first_run,
+        // A harness switch has no compatible conversation lineage to resume.
+        // It is an explicitly-authorized fresh launch even though it occurs on
+        // a replacement-loop iteration.
+        restart_requested: !first_run && !fresh_harness_switch,
+        auto_trigger: auto_trigger_next_launch || !first_run || fresh_harness_switch,
         // A pre-first-prompt Ctrl+D is stale on EVERY launch, so this is unconditional.
         arm_stale_ctrl_d_suppression: true,
     }
@@ -72,7 +79,7 @@ mod tests {
     #[test]
     fn child_launch_plan_separates_fresh_args_from_auto_trigger() {
         assert_eq!(
-            child_launch_plan(true, false),
+            child_launch_plan(true, false, false),
             ChildLaunchPlan {
                 restart_requested: false,
                 auto_trigger: false,
@@ -81,7 +88,7 @@ mod tests {
             "initial supervisor launch should open the harness without typing agent-doc"
         );
         assert_eq!(
-            child_launch_plan(false, false),
+            child_launch_plan(false, false, false),
             ChildLaunchPlan {
                 restart_requested: true,
                 auto_trigger: true,
@@ -90,13 +97,22 @@ mod tests {
             "replacement launch must re-submit the owning document"
         );
         assert_eq!(
-            child_launch_plan(true, true),
+            child_launch_plan(true, true, false),
             ChildLaunchPlan {
                 restart_requested: false,
                 auto_trigger: true,
                 arm_stale_ctrl_d_suppression: true,
             },
             "fresh restart still needs to re-submit agent-doc after the new prompt"
+        );
+        assert_eq!(
+            child_launch_plan(false, false, true),
+            ChildLaunchPlan {
+                restart_requested: false,
+                auto_trigger: true,
+                arm_stale_ctrl_d_suppression: true,
+            },
+            "a harness switch must fresh-spawn and re-submit without entering exact-resume admission",
         );
     }
 
@@ -108,7 +124,7 @@ mod tests {
         for first_run in [false, true] {
             for auto_trigger in [false, true] {
                 assert!(
-                    child_launch_plan(first_run, auto_trigger).arm_stale_ctrl_d_suppression,
+                    child_launch_plan(first_run, auto_trigger, false).arm_stale_ctrl_d_suppression,
                     "launch (first_run={first_run}, auto_trigger={auto_trigger}) must arm stale-Ctrl+D suppression"
                 );
             }

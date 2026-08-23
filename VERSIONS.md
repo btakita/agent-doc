@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.271
+
+- **Fix: post-commit Codex Stop captures now open their owning cycle first.**
+
+When an exact Codex thread observes a new prompt after the preceding document
+cycle committed, a replayable Stop payload now mints a fresh, monotonic cycle ID
+before response capture and drives the normal repair/write/commit path. The new
+capture can no longer be orphaned behind the terminal predecessor, including when
+both lifecycle edges occur in the same clock millisecond.
+
+- **Fix: Restart Agent harness switches now launch the selected harness fresh.**
+
+When a busy supervisor re-resolves from Claude to Codex (or another different
+harness), the replacement iteration now bypasses same-harness exact-resume
+admission, spawns the selected harness fresh, and re-submits the owning agent-doc
+command after its prompt appears. It no longer advances actor state to Codex and
+then strands the pane at Claude's resume/fresh-start menu.
+
 ## 0.35.270
 
 - **Fix: Claude routed prompts split composer insertion from submission.**

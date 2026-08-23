@@ -1076,6 +1076,7 @@ pub fn run_with_reap_policy_and_resume(
     let mut child_launch_count: u32 = 0;
     let _actor_context = agent_doc_run_context_io::actor_context(canonical.clone());
     let supervisor_exit_reason = loop {
+        let mut fresh_harness_switch = false;
         if child_launch_count > 0 {
             let restart_reason = if first_run {
                 "restart_fresh_spawn"
@@ -1121,6 +1122,7 @@ pub fn run_with_reap_policy_and_resume(
                                 &restart_spec.harness.binary,
                             ) =>
                         {
+                            fresh_harness_switch = true;
                             let old_harness = harness.binary.clone();
                             let new_harness = restart_spec.harness.binary.clone();
                             harness = restart_spec.harness.clone();
@@ -1312,7 +1314,8 @@ pub fn run_with_reap_policy_and_resume(
         // Build args for this iteration from the document's exact conversation
         // lineage. The hook/controller projection is observed once at this child
         // lifecycle edge; there is no polling and no global "latest" selector.
-        let launch_plan = child_launch_plan(first_run, auto_trigger_next_launch);
+        let launch_plan =
+            child_launch_plan(first_run, auto_trigger_next_launch, fresh_harness_switch);
         auto_trigger_next_launch = false;
         let auto_trigger = launch_plan.auto_trigger;
         let args = if launch_plan.restart_requested {

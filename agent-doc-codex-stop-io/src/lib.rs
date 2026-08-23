@@ -249,8 +249,13 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             )? {
                 return Ok(response);
             }
-            if let Some(response) = active_session_prompt_requires_writeback(&file, &state, input)?
-            {
+            if let Some(response) = active_session_prompt_requires_writeback(
+                &file,
+                &cleanup_roots,
+                &loaded_root,
+                &state,
+                input,
+            )? {
                 return Ok(response);
             }
             settle_session_binding(&file, &cleanup_roots, &loaded_root, &state)?;
@@ -486,6 +491,8 @@ fn committed_prompt_diff_stop_response(file: &Path, reason: &str) -> Result<Opti
 
 fn active_session_prompt_requires_writeback(
     file: &Path,
+    roots: &[PathBuf],
+    loaded_root: &Path,
     state: &SessionState,
     input: &StopInput,
 ) -> Result<Option<StopResponse>> {
@@ -505,6 +512,37 @@ fn active_session_prompt_requires_writeback(
             prompt.to_string()
         }
     };
+
+    if !input.stop_hook_active
+        && agent_doc_flow_io::closeout::cycle_already_committed(file).is_some()
+        && matches!(
+            agent_doc_template::replay_guard::classify_replay_payload(
+                &input.last_assistant_message
+            ),
+            agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(_)
+        )
+    {
+        match attempt_stop_closeout(file, state, input)? {
+            StopCloseAttempt::Closed => {
+                settle_session_binding(file, roots, loaded_root, state)?;
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    "codex_stop_post_commit_prompt_auto_closed source=exact_thread_prompt_debt",
+                );
+                return Ok(Some(StopResponse::Continue { continue_: true }));
+            }
+            StopCloseAttempt::StillOpen { note } => {
+                return Ok(Some(StopResponse::Block {
+                    decision: "block",
+                    reason: format!(
+                        "agent-doc Stop hook opened a fresh cycle for post-commit prompt work in {disp}, then retained the response under that cycle but could not finish closeout.{note} Do not recapture the response or rerun finalize/write. Run `agent-doc session-check {disp}` and let the binary-owned keyed retry finish.",
+                        disp = file.display(),
+                    ),
+                }));
+            }
+            StopCloseAttempt::NotPossible => {}
+        }
+    }
     let capture_note = if input.stop_hook_active {
         String::new()
     } else {
@@ -1031,6 +1069,7 @@ fn attempt_stop_closeout(
         payload,
         agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(_)
     );
+    reopen_terminal_cycle_before_stop_capture(file, &payload)?;
     let has_bypassed_patchback =
         agent_doc_session_check_io::detect_bypassed_response_write(file)?.is_some();
     if !has_response && !has_bypassed_patchback {
@@ -1181,6 +1220,50 @@ fn attempt_stop_closeout(
     }
     agent_doc_ops_log_io::log_op(file, "codex_stop_auto_close_success");
     Ok(StopCloseAttempt::Closed)
+}
+
+fn reopen_terminal_cycle_before_stop_capture(
+    file: &Path,
+    payload: &agent_doc_template::replay_guard::ReplayPayloadClassification<'_>,
+) -> Result<()> {
+    let agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) =
+        payload
+    else {
+        return Ok(());
+    };
+    let Some(previous_cycle_id) = agent_doc_flow_io::closeout::cycle_already_committed(file) else {
+        return Ok(());
+    };
+    let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
+        anyhow::bail!(
+            "post-commit Stop closeout cannot mint a fresh capture cycle without a HEAD baseline"
+        );
+    };
+    if agent_doc_turn::response_replay::response_materialized_in_content(response.as_ref(), &head) {
+        anyhow::bail!(
+            "post-commit Stop payload is already materialized in HEAD; refusing to capture it under the terminal cycle"
+        );
+    }
+
+    let reopened = agent_doc_cycle_state_io::start_preflight(file, Some(&head), Some(&head))?;
+    anyhow::ensure!(
+        reopened.cycle_id != previous_cycle_id,
+        "post-commit Stop closeout failed to mint a fresh cycle: terminal cycle {} was reused",
+        previous_cycle_id
+    );
+    anyhow::ensure!(
+        agent_doc_flow_io::closeout::cycle_already_committed(file).is_none(),
+        "post-commit Stop closeout minted cycle {} but the closeout projection remained terminal",
+        reopened.cycle_id
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "codex_stop_post_commit_prompt_cycle_reopened previous_cycle_id={} cycle_id={} source=replayable_stop_payload",
+            previous_cycle_id, reopened.cycle_id
+        ),
+    );
+    Ok(())
 }
 
 fn capture_assistant_text(file: &Path, state: &SessionState, input: &StopInput) -> String {
@@ -1711,7 +1794,7 @@ Done.\n\
     }
 
     #[test]
-    fn ordinary_same_thread_followup_after_clean_closeout_requires_document_writeback() {
+    fn ordinary_same_thread_followup_after_clean_closeout_auto_closes_fresh_cycle() {
         let dir = setup_project();
         let doc = write_template_doc(&dir);
         init_git_repo(dir.path(), &doc);
@@ -1726,6 +1809,7 @@ Done.\n\
         })
         .unwrap();
         assert_eq!(first_stop, StopResponse::Continue { continue_: true });
+        let first_cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
 
         let prompt = "Why did you not acknowledge this in the agent document?";
         apply_user_prompt_submit(&UserPromptSubmitInput {
@@ -1744,13 +1828,24 @@ Done.\n\
             stop_hook_active: false,
         })
         .unwrap();
-        match followup_stop {
-            StopResponse::Block { reason, .. } => {
-                assert!(reason.contains("binary-owned write boundary"), "{reason}");
-                assert!(reason.contains(prompt), "{reason}");
-            }
-            other => panic!("expected same-thread follow-up writeback block, got {other:?}"),
-        }
+        assert_eq!(
+            followup_stop,
+            StopResponse::Continue { continue_: true },
+            "same-thread follow-up should cross the binary-owned write boundary automatically"
+        );
+        let followup_cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(followup_cycle.phase.as_str(), "committed");
+        assert_ne!(followup_cycle.cycle_id, first_cycle.cycle_id);
+        assert!(
+            fs::read_to_string(&doc)
+                .unwrap()
+                .contains("I only acknowledged it in chat."),
+            "follow-up response was not persisted in the agent document"
+        );
+        let capture = agent_doc_capture_io::load_by_id(&doc, &followup_cycle.cycle_id)
+            .unwrap()
+            .expect("follow-up capture under fresh cycle");
+        assert_eq!(capture.cycle_id, followup_cycle.cycle_id);
     }
 
     #[test]
@@ -3668,11 +3763,14 @@ Reviewed the gated items.\n\
     }
 
     #[test]
-    fn stop_blocks_prompt_debt_observed_after_cycle_committed() {
+    fn stop_reopens_and_closes_prompt_debt_observed_after_cycle_committed() {
         let dir = setup_project();
-        let doc = write_doc(&dir);
+        let doc = write_template_doc(&dir);
+        init_git_repo(dir.path(), &doc);
         let original = fs::read_to_string(&doc).unwrap();
-        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        let previous =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original))
+                .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -3699,16 +3797,30 @@ Reviewed the gated items.\n\
         })
         .unwrap();
 
-        match response {
-            StopResponse::Block { reason, .. } => {
-                assert!(
-                    reason.contains("A genuinely new prompt after closeout"),
-                    "{reason}"
-                );
-                assert!(reason.contains("binary-owned write boundary"), "{reason}");
-            }
-            other => panic!("expected prompt-debt block, got {other:?}"),
-        }
+        assert!(
+            matches!(response, StopResponse::Continue { continue_: true }),
+            "{response:?}"
+        );
+        assert!(
+            fs::read_to_string(&doc)
+                .unwrap()
+                .contains("Unpersisted answer."),
+            "post-commit response was not written"
+        );
+        let closed = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(closed.phase.as_str(), "committed");
+        assert_ne!(closed.cycle_id, previous.cycle_id);
+        let capture = agent_doc_capture_io::load_by_id(&doc, &closed.cycle_id)
+            .unwrap()
+            .expect("fresh cycle capture");
+        assert_eq!(capture.cycle_id, closed.cycle_id);
+        assert!(capture.response_body.contains("Unpersisted answer."));
+        assert!(
+            agent_doc_capture_io::load_by_id(&doc, &previous.cycle_id)
+                .unwrap()
+                .is_none(),
+            "the new response must not be captured under the terminal predecessor"
+        );
     }
 
     #[test]

@@ -1139,15 +1139,15 @@ pub fn start_preflight_with_task(
 ) -> Result<CycleState> {
     let now = now_secs();
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let prior = load(file).ok().flatten();
     // `#queueskip`: carry forward the skipped-head accumulator so a head marked
     // skippable in a prior cycle stays skipped until it is consumed or removed
     // (preflight recomputes/clears it each cycle). Without this the flag would
     // reset every cycle and the dead head would be re-dispatched on alternating
     // cycles instead of staying skipped.
-    let carried_skipped_queue_head_ids = load(file)
-        .ok()
-        .flatten()
-        .map(|prior| prior.skipped_queue_head_ids)
+    let carried_skipped_queue_head_ids = prior
+        .as_ref()
+        .map(|prior| prior.skipped_queue_head_ids.clone())
         .unwrap_or_default();
     // `#preflightinbinary`: a second preflight inside the same open turn is a
     // re-entry, not a new turn — see `reusable_by_reentrant_preflight`. Keep the
@@ -1155,9 +1155,8 @@ pub fn start_preflight_with_task(
     // rather than returning the stored state: the contract must reflect facts
     // recorded since the turn opened (acks, queue heads, hashes), so a re-entry
     // that replayed the opening snapshot would report a stale document.
-    let reentrant = load(file)
-        .ok()
-        .flatten()
+    let reentrant = prior
+        .as_ref()
         .filter(|open| open.reusable_by_reentrant_preflight(0, now, STALLED_CYCLE_RESOLVE_SECS));
     if let Some(open) = reentrant.as_ref() {
         eprintln!(
@@ -1172,7 +1171,12 @@ pub fn start_preflight_with_task(
         cycle_id: reentrant
             .as_ref()
             .map(|open| open.cycle_id.clone())
-            .unwrap_or_else(|| format!("cycle-{}", now_millis())),
+            .unwrap_or_else(|| {
+                fresh_cycle_id_at(
+                    prior.as_ref().map(|state| state.cycle_id.as_str()),
+                    now_millis(),
+                )
+            }),
         file: canonical.display().to_string(),
         phase,
         last_event: "preflight_started".to_string(),
@@ -1227,6 +1231,16 @@ pub fn start_preflight_with_task(
     append_closeout_projection_event(file, &state, CloseoutProjectionEvent::PreflightStarted)?;
     append_phase_event_to_session_log(file, &state, file_content);
     Ok(state)
+}
+
+fn fresh_cycle_id_at(previous_cycle_id: Option<&str>, now_millis: u128) -> String {
+    let prior_millis = previous_cycle_id
+        .and_then(|cycle_id| cycle_id.strip_prefix("cycle-"))
+        .and_then(|value| value.parse::<u128>().ok());
+    let next_millis = prior_millis
+        .map(|prior| now_millis.max(prior.saturating_add(1)))
+        .unwrap_or(now_millis);
+    format!("cycle-{next_millis}")
 }
 
 /// Record (or overwrite) the runnable `agent:queue` heads that were active at
@@ -4718,6 +4732,12 @@ mod reentrant_preflight_tests {
     fn a_committed_cycle_is_not_reused() {
         let committed = state(CyclePhase::Committed, 1_000);
         assert!(!committed.reusable_by_reentrant_preflight(0, 1_005, STALLED_CYCLE_RESOLVE_SECS));
+    }
+
+    #[test]
+    fn a_fresh_cycle_id_advances_when_the_clock_millisecond_is_reused() {
+        assert_eq!(fresh_cycle_id_at(Some("cycle-1000"), 1000), "cycle-1001");
+        assert_eq!(fresh_cycle_id_at(Some("cycle-1001"), 1000), "cycle-1002");
     }
 
     /// Once a response exists, the cycle is durable recovery evidence. Reusing

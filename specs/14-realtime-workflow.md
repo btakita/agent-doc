@@ -51,6 +51,28 @@ provide a bounded agent-response candidate, but the hot path must still merge
 that candidate into the latest source-of-truth document. A snapshot must never
 be load-bearing for deciding what operator-visible state should survive.
 
+## Retained closeout transition table
+
+Retained Compact completion, cycle-scoped queue acknowledgement, and serialized
+editor delivery share one rule: only exact, current authority proof may advance
+the operation. Durable payloads remain available for audit and recovery after
+their transition window closes, but they do not grant authority over later
+operator edits.
+
+| State | Required evidence | Transition |
+| --- | --- | --- |
+| Retained compact; editor target equals disk | Exact canonical editor and disk hash equality | Checkpoint, commit, and settle |
+| Retained compact; target delivered but disk stale | Exact live editor target, delivery convergence, and native-save receipt | Re-observe editor/disk equality, then checkpoint, commit, and settle |
+| Open exact closeout capture | Matching cycle identity and nonterminal phase | May project the answered free-text queue strike |
+| Terminal or mismatched capture | Committed/terminal proof or a different cycle identity | Preserve the durable response payload, but expose no queue-strike target |
+| Serialized target awaiting delivery/save | Exact delivery and disk receipt within the bounded deadline | Complete the same serialized command |
+| Serialized target missing or authority advances | Deadline expiry or a different canonical hash | Preserve the original retained intent and fail closed |
+
+No terminal response may answer an identical recurring queue command introduced
+for a later task. Native save is an external editor-authority effect after exact
+visible delivery, never an admission-time disk write. Turn commit eligibility is
+defined separately by [Turn Lifecycle Authority](15-turn-lifecycle.md).
+
 ## Prompt-to-response acknowledgement
 
 `agent-doc-diff` owns the policy that associates an operator prompt with an

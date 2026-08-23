@@ -972,6 +972,23 @@ fn realtime_workflow_spec_keeps_merge_and_commit_lifecycles_distinct() {
 }
 
 #[test]
+fn realtime_workflow_spec_documents_retained_closeout_transition_table() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let realtime = fs::read_to_string(root.join("specs/14-realtime-workflow.md")).unwrap();
+
+    assert!(
+        realtime.contains("## Retained closeout transition table")
+            && realtime.contains("Retained compact; editor target equals disk")
+            && realtime.contains("Retained compact; target delivered but disk stale")
+            && realtime.contains("Open exact closeout capture")
+            && realtime.contains("Terminal or mismatched capture")
+            && realtime.contains("Serialized target awaiting delivery/save")
+            && realtime.contains("Serialized target missing or authority advances"),
+        "realtime workflow spec must publish the retained closeout state/evidence/transition matrix"
+    );
+}
+
+#[test]
 fn realtime_workflow_spec_pins_stale_tool_host_fail_closed() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let realtime = fs::read_to_string(root.join("specs/14-realtime-workflow.md")).unwrap();

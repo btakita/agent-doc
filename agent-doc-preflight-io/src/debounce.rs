@@ -151,6 +151,43 @@ where
                 }
             }
             SettleAction::Defer { reason } => {
+                // The delivery frontier can converge between the observation above and
+                // this deadline decision. Failing from the stale sample turns a healthy
+                // final ACK into an operator-visible preflight error. Re-read the
+                // authority exactly once at the defer boundary; this stays fail-closed
+                // for a genuinely stalled frontier while admitting convergence that
+                // already happened.
+                let boundary_observation =
+                    observe(file, "preflight_visible_mutation_defer_boundary");
+                if boundary_observation.ready {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "preflight_visible_mutation_defer_boundary_converged file={} prior_state={} final_state={}",
+                            file.display(),
+                            observation.state,
+                            boundary_observation.state,
+                        ),
+                    );
+                    return Ok(());
+                }
+                if reason == SettleDeferReason::NoProgress
+                    && boundary_observation.text.is_some()
+                    && boundary_observation.text != last_observed
+                {
+                    last_progress = Instant::now();
+                    last_observed = boundary_observation.text.clone();
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "preflight_visible_mutation_defer_boundary_progress file={} state={}",
+                            file.display(),
+                            boundary_observation.state,
+                        ),
+                    );
+                    wait_one_settle_slice(file, boundary_observation.state, poll);
+                    continue;
+                }
                 let waited = match reason {
                     SettleDeferReason::NoProgress => timers.stalled_for,
                     SettleDeferReason::ProgressCeiling => timers.total_elapsed,
@@ -160,17 +197,17 @@ where
                     &format!(
                         "preflight_visible_mutation_deferred_lazily_current file={} state={} timeout_ms={} error={}",
                         file.display(),
-                        observation.state,
+                        boundary_observation.state,
                         waited.as_millis(),
-                        observation.error.as_deref().unwrap_or("none")
+                        boundary_observation.error.as_deref().unwrap_or("none")
                     ),
                 );
                 anyhow::bail!(
                     "preflight deferred for {}: Lazily current authority remained {} for {}ms; retry after the current transition settles{}",
                     file.display(),
-                    observation.state,
+                    boundary_observation.state,
                     waited.as_millis(),
-                    observation
+                    boundary_observation
                         .error
                         .as_deref()
                         .map(|error| format!(" ({error})"))
@@ -419,5 +456,40 @@ mod tests {
             message.contains("delivery_pending") && message.contains("preflight deferred"),
             "a wedged transition must still fail closed with its reason: {message}"
         );
+    }
+
+    /// A delivery ACK can land after the last ordinary observation but before
+    /// the no-progress decision is reported. The defer boundary must observe
+    /// that convergence instead of failing from the stale pending sample.
+    #[test]
+    fn preflight_mutation_wait_accepts_convergence_at_the_defer_boundary() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let observations = Cell::new(0usize);
+
+        let outcome = wait_for_lazily_current_before_mutation_with_effects(
+            &doc,
+            Duration::ZERO,
+            |_file, source| {
+                let n = observations.get();
+                observations.set(n + 1);
+                if source == "preflight_visible_mutation_defer_boundary" {
+                    converged()
+                } else {
+                    assert_eq!(
+                        n, 0,
+                        "only the initial pending sample should precede the boundary"
+                    );
+                    pending("frozen", 1)
+                }
+            },
+            |_file, _reason, _targets| Ok(()),
+        );
+
+        assert!(
+            outcome.is_ok(),
+            "convergence already visible at the defer boundary must be admitted: {outcome:?}"
+        );
+        assert_eq!(observations.get(), 2);
     }
 }

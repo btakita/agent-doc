@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.272
+
+- **Fix: preflight rechecks delivery convergence at the defer boundary.**
+
+When the editor acknowledgement lands between preflight's last ordinary
+`delivery_pending` observation and its no-progress decision, preflight now reads
+Lazily current authority one final time before failing. Already-visible
+convergence succeeds, newly visible progress resets only the no-progress budget,
+and a genuinely stalled frontier or absolute progress ceiling still fails closed.
+
 ## 0.35.271
 
 - **Fix: post-commit Codex Stop captures now open their owning cycle first.**

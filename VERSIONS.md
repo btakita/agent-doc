@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.275
+
+- **Fix: a later committed cycle retires Codex prompt debt.**
+
+When UserPromptSubmit observed an already-terminal predecessor but the response
+was subsequently admitted and committed under a newer cycle, Codex Stop kept
+pinning the prompt to the predecessor id and repeated the false "has not crossed
+the binary-owned write boundary" block. Stop now accepts the newer committed
+cycle's temporal proof and parks the exact-turn binding without resubmitting the
+already-persisted response.
+
 ## 0.35.274
 
 - **Fix: conversation resume state is isolated by harness.**

@@ -566,13 +566,19 @@ fn committed_cycle_settled_prompt_debt(file: &Path, state: &SessionState) -> Res
         return Ok(false);
     }
     if let Some(observed) = state.last_prompt_cycle.as_ref() {
-        return Ok(observed.was_open && observed.cycle_id == cycle.cycle_id);
+        if observed.cycle_id == cycle.cycle_id {
+            return Ok(observed.was_open);
+        }
+        // The prompt may have been admitted into a later cycle after the hook
+        // observed a terminal predecessor. A committed response from that later
+        // cycle settles the debt when its entire lifecycle is newer than the
+        // prompt binding. Do not pin the debt forever to the predecessor id.
+        return Ok(state.updated_at <= cycle.started_at && state.updated_at < cycle.updated_at);
     }
 
     // Backward-compatible proof for bindings written before
     // `last_prompt_cycle` existed. Strict inequalities avoid treating a prompt
-    // registered at or after the terminal event as settled; new bindings use
-    // the phase-fenced observation above and do not depend on wall-clock time.
+    // registered at or after the terminal event as settled.
     Ok(cycle.started_at <= state.updated_at && state.updated_at < cycle.updated_at)
 }
 
@@ -3753,6 +3759,98 @@ Reviewed the gated items.\n\
         })
         .unwrap();
 
+        assert!(
+            matches!(response, StopResponse::Continue { continue_: true }),
+            "{response:?}"
+        );
+        let state = load_state(&root, "codex-session").unwrap().unwrap();
+        assert!(state.last_prompt.is_empty());
+        assert!(state.last_turn_id.is_empty());
+    }
+
+    #[test]
+    fn stop_retires_prompt_debt_when_a_later_cycle_commits() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        let original = fs::read_to_string(&doc).unwrap();
+        let predecessor =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original))
+                .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "turn-1");
+        apply_user_prompt_submit(&UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            prompt: "Also fix the later queued implementation.".to_string(),
+        })
+        .unwrap();
+
+        let later =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original))
+                .unwrap();
+        assert_ne!(later.cycle_id, predecessor.cycle_id);
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(&original),
+            Some(&original),
+            "response-sha",
+            None,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+
+        let root = project_root_for(dir.path()).unwrap();
+        let mut tracked = load_state(&root, "codex-session").unwrap().unwrap();
+        let committed = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            tracked
+                .last_prompt_cycle
+                .as_ref()
+                .map(|cycle| cycle.cycle_id.as_str()),
+            Some(predecessor.cycle_id.as_str()),
+            "{tracked:?}"
+        );
+        assert_eq!(committed.cycle_id, later.cycle_id);
+        // Keep the ordering deterministic even when the test's transitions all
+        // occur inside one wall-clock second.
+        tracked.updated_at = committed.started_at.saturating_sub(1);
+        assert!(
+            committed_cycle_settled_prompt_debt(&doc, &tracked).unwrap(),
+            "{tracked:?} {committed:?}"
+        );
+
+        save_state(&root, &tracked).unwrap();
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Short console handoff after finalize.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
         assert!(
             matches!(response, StopResponse::Continue { continue_: true }),
             "{response:?}"

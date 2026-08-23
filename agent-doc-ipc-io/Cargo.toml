@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-ipc-io"
-version = "0.35.274"
+version = "0.35.275"
 edition = "2024"
 description = "Socket and file-signal IPC adapters for agent-doc editor integrations"
 license = "MIT"
@@ -16,8 +16,8 @@ name = "agent_doc_ipc_io"
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.35.274" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.274" }
+agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.35.275" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.275" }
 anyhow = "1"
 interprocess = { version = "2", default-features = false }
 serde_json = "1"

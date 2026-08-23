@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-template"
-version = "0.35.268"
+version = "0.35.269"
 edition = "2024"
 description = "Pure template-mode patch parsing, repair, and component mutation policy for agent-doc"
 license = "MIT"
@@ -11,10 +11,10 @@ publish = false
 name = "agent_doc_template"
 
 [dependencies]
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.268" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.268" }
-agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.35.268" }
-agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.268" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.269" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.269" }
+agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.35.269" }
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.269" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["v4"] }

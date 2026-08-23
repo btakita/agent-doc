@@ -48,12 +48,22 @@ for target in "${targets[@]}"; do
         *)
             echo "refusing out-of-scope build cleanup target: $target" >&2
             exit 1
-            ;;
-    esac
-    size_kib="$(du -sk "$target" 2>/dev/null | awk '{print $1}')"
-    reclaimed_kib=$((reclaimed_kib + ${size_kib:-0}))
-    rm -rf -- "$target"
-    removed=$((removed + 1))
+    ;;
+  esac
+  size_kib="$(du -sk "$target" 2>/dev/null | awk '{print $1}')"
+  reclaimed_kib=$((reclaimed_kib + ${size_kib:-0}))
+  cleanup_dir="$(mktemp -d "$repo_root/.agent-doc-build-cleanup.XXXXXX")"
+  staged_target="$cleanup_dir/payload"
+  if ! mv -- "$target" "$staged_target"; then
+    rm -rf -- "$cleanup_dir"
+    echo "failed to detach build artifact path before cleanup: $target" >&2
+    exit 1
+  fi
+  if ! rm -rf -- "$cleanup_dir"; then
+    echo "failed to remove detached build artifact generation: $cleanup_dir" >&2
+    exit 1
+  fi
+  removed=$((removed + 1))
 done
 
 echo "Removed $removed repo-owned build artifact path(s); reclaimed approximately $((reclaimed_kib / 1024)) MiB."

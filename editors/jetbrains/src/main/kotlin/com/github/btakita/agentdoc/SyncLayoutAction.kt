@@ -6,6 +6,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
@@ -23,8 +24,11 @@ import javax.swing.SwingUtilities
 internal object AgentDocSessionFiles {
     fun isSessionDocument(file: VirtualFile): Boolean {
         if (!file.name.endsWith(".md")) return false
-        val document = FileDocumentManager.getInstance().getDocument(file) ?: return false
-        return isAgentDocDocumentTextUtil(document.charsSequence)
+        return ReadAction.compute<Boolean, RuntimeException> {
+            val document = FileDocumentManager.getInstance().getDocument(file)
+                ?: return@compute false
+            isAgentDocDocumentTextUtil(document.charsSequence)
+        }
     }
 }
 

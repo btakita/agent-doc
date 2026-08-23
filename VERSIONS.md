@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.269
+
+- **Fix: JetBrains editor-focus session classification now owns model read access
+  (plugin 0.2.356).**
+
+The split-editor focus listener can run directly on IntelliJ's AWT event-dispatch
+thread without an implicit read permit. Its shared agent-doc session classifier
+now wraps both `FileDocumentManager.getDocument` and live document-text access in
+an explicit `ReadAction`, preventing `RuntimeExceptionWithAttachments` from
+aborting focus reconciliation or interfering with Run Agent Doc dispatch. A
+regression test pins the read-action boundary around both model reads.
+
+Release cleanup now atomically detaches each repo-owned build tree before removing
+that detached generation. A concurrent Cargo writer can recreate a fresh
+`target/` without racing `rm -rf` inside the generation being reaped, so a
+successful release install no longer ends with a spurious `Directory not empty`
+failure. The cleanup suite exercises this with a live concurrent writer.
+
 ## 0.35.268
 
 - **Fix: Codex Stop retires prompt debt settled by its owning closeout cycle.**

@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-gc-io"
-version = "0.35.268"
+version = "0.35.269"
 edition = "2024"
 description = "Garbage collection IO boundary for agent-doc"
 license = "MIT"
@@ -11,12 +11,12 @@ publish = false
 name = "agent_doc_gc_io"
 
 [dependencies]
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.268" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.268" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.268" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.268" }
-agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.268" }
-agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.268" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.269" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.269" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.269" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.269" }
+agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.269" }
+agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.269" }
 anyhow = "1"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }
 

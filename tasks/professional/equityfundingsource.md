@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-resume: 01a02b41-5f63-7de1-8b6b-6fa21db0bd66
+resume: 01a02c60-f012-7a20-be27-33f27d223dc1
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -51,7 +51,21 @@ Deployed synced `main` commit `94b1c681` to the isolated Cloudflare `[env.produc
 - No application commit or push was needed: `94b1c681` was already committed, pushed, and synchronized with `origin/main`. Unrelated local `AGENTS.md` / `.agent/` changes were preserved untouched.
 
 This was not a repeat of the older completed deployment: the previously active production version predated ten homepage commits now included in `94b1c681`.
-<!-- agent:boundary:d69a65b0:equityfundingsource -->
+
+> **Queue prompt:** Please provide an admin interface to edit + add + remove testimonials. Note that EFS will collect private testimonials from clients.
+
+### Re: Testimonial administration — gpt-5
+
+Implemented the authenticated testimonial manager at `/admin/testimonials` and committed it as EFS `2c4c63ef`.
+
+- Admins can add, edit, order, publish, keep private, and permanently remove testimonials through new admin-only CRUD APIs.
+- Newly collected client testimonials default to **Private — admins only**. Only an explicit **Public homepage** selection makes a record eligible for public rendering; if no public records remain, the homepage omits the testimonial section instead of exposing private or fallback content.
+- D1 migration `0145_testimonials.sql` creates the privacy-aware data model and seeds the six existing approved Google/Yelp reviews as public records, preserving their order and complete copy.
+- The homepage now reads public testimonials from D1, supports per-testimonial ratings and paragraphs, validates optional source URLs as HTTP(S), and HTML-escapes admin-authored content.
+- Updated the lending-portal PRD and added regression coverage for migration seeding, private defaults, URL validation, escaped dynamic rendering, empty-public-set behavior, admin CRUD routes, and portal navigation.
+
+Verification passed: the focused testimonial/homepage tests, full `make check`, `git diff --check`, and an in-memory SQLite application of migration `0145` (`public|6`). This repository currently exposes no GitHub Actions workflow runs to inspect. Pre-existing `AGENTS.md` and `.agent/` worktree changes were preserved and excluded from the feature commit.
+<!-- agent:boundary:5d64b1d7:equityfundingsource -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->

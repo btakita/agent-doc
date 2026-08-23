@@ -923,6 +923,11 @@ balanced component markers, and at most one live exchange boundary marker.
   the delivery projection, preserves the pending continuation, and emits the
   durable converged/wake edge only after delivery converges. Detached or
   unobserved delivery retains the ordinary authority-plus-disk settlement path.
+- Retained Compact completion does not require disk to equal the already
+  delivery-converged editor authority before acting. The completion Effect asks
+  that exact editor revision to perform its native save, then re-observes
+  authority and disk equality before checkpoint, commit, and the durable
+  compact-settled receipt. Compact admission itself never issues this save.
 - A replacement controller observes the already-retained registered editor/CRDT
   projection as the `AwaitingDelivery` transition's activation Effect. The
   controller listener is bound before restored liveness publishes

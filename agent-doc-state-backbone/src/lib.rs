@@ -1411,6 +1411,20 @@ impl DocumentStateProjection {
             })
     }
 
+    /// Return the captured response that may still project queue strikes.
+    ///
+    /// Queue strike projection is an open-cycle closeout effect. A terminal
+    /// capture remains durable for audit and recovery, but it no longer owns
+    /// queue text typed after that cycle committed. Requiring exact cycle
+    /// identity also prevents a stale capture from crossing a later admission.
+    pub fn active_captured_response_for_queue_strike(&self) -> Option<&CapturedResponseProjection> {
+        let capture = self.closeout.captured_response.as_ref()?;
+        (self.closeout.phase.is_some_and(CyclePhase::is_open)
+            && self.closeout.cycle_id.as_deref() == Some(capture.cycle_id.as_str())
+            && !self.captured_response_terminally_proven(capture))
+        .then_some(capture)
+    }
+
     pub fn retained_captured_response_write(&self) -> Option<&DocumentWriteIntentProjection> {
         let retains_capture = |pending: &&DocumentWriteIntentProjection| {
             pending
@@ -9222,6 +9236,40 @@ mod tests {
                 phase: CyclePhase::Committed,
             }),
             "a fast terminal cycle still proves that admission occurred"
+        );
+    }
+
+    #[test]
+    fn queue_strike_capture_is_owned_only_by_its_open_closeout_cycle() {
+        let mut projection = DocumentStateProjection::new("doc");
+        projection.closeout.cycle_id = Some("cycle-1".into());
+        projection.closeout.phase = Some(CyclePhase::ResponseCaptured);
+        projection.closeout.captured_response = Some(CapturedResponseProjection {
+            cycle_id: "cycle-1".into(),
+            capture_id: "capture-1".into(),
+            response_sha256: "response-1".into(),
+            response_body: "response".into(),
+            intent_body: None,
+            mutation_plan_json: None,
+            file_hash: None,
+            snapshot_hash: None,
+            baseline_content: Some("- deploy to staging\n".into()),
+        });
+
+        assert_eq!(
+            projection
+                .active_captured_response_for_queue_strike()
+                .map(|capture| capture.capture_id.as_str()),
+            Some("capture-1"),
+            "the current open cycle must still consume its answered command"
+        );
+
+        projection.closeout.phase = Some(CyclePhase::Committed);
+        assert!(
+            projection
+                .active_captured_response_for_queue_strike()
+                .is_none(),
+            "a terminal capture must not strike a recurring command typed later"
         );
     }
 

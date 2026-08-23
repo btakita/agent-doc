@@ -2909,6 +2909,13 @@ impl RetainedWriteSettleSink {
         {
             Ok(settled_hash) => settled_hash,
             Err(error) => {
+                agent_doc_ops_log_io::log_op(
+                    &self.project_root,
+                    &format!(
+                        "compact_projection_completion_deferred document_hash={document_hash} continuation_id={} error={error:#}",
+                        continuation.continuation_id,
+                    ),
+                );
                 eprintln!(
                     "[controller] compact projection completion failed for {document_hash}: {error:#}"
                 );
@@ -3500,10 +3507,15 @@ impl ControllerDocumentGraphs {
                 let Some(observation) = authority.observe(ctx, key).flatten() else {
                     return AnsweredFreeTextQueueStrikeProjection::default();
                 };
-                let Some(captured) = durable_projection
-                    .observe(ctx, key)
-                    .flatten()
-                    .and_then(|document| document.closeout.captured_response)
+                let Some(captured) =
+                    durable_projection
+                        .observe(ctx, key)
+                        .flatten()
+                        .and_then(|document| {
+                            document
+                                .active_captured_response_for_queue_strike()
+                                .cloned()
+                        })
                 else {
                     return AnsweredFreeTextQueueStrikeProjection::default();
                 };
@@ -14654,6 +14666,56 @@ revised operator request
         );
         assert!(projected.contains("queue: start"));
         assert!(projected.contains("- do [#production-deploy]"));
+
+        let terminal_events = [
+            agent_doc_state_backbone::StateEvent::new(
+                "write-applied-free-text",
+                agent_doc_state_backbone::StateFact::WriteApplied {
+                    document_hash: document_hash.clone(),
+                    cycle_id: "cycle-1".to_string(),
+                    patch_id: Some("patch-free-text".to_string()),
+                    file_hash: None,
+                    snapshot_hash: None,
+                },
+            ),
+            agent_doc_state_backbone::StateEvent::new(
+                "commit-observed-free-text",
+                agent_doc_state_backbone::StateFact::CommitObserved {
+                    document_hash: document_hash.clone(),
+                    cycle_id: "cycle-1".to_string(),
+                    commit: "commit-free-text".to_string(),
+                    file_hash: None,
+                    snapshot_hash: None,
+                },
+            ),
+        ];
+        for event in terminal_events {
+            append_state_event(dir.path(), &event).unwrap();
+            runtime.apply_state_event(&event).unwrap();
+        }
+
+        let recurring = projected.replacen(
+            "<!-- /agent:queue -->",
+            "- staging deploy\n<!-- /agent:queue -->",
+            1,
+        );
+        std::fs::write(&canonical, &recurring).unwrap();
+        runtime
+            .document_queue_authority_observe(&document_hash, &canonical, recurring)
+            .unwrap();
+        let stale_strike = runtime
+            .document_graphs
+            .current_answered_free_text_strike(&document_hash);
+        assert!(
+            !stale_strike.has_target(),
+            "a terminal capture must not project a strike onto a later recurring command: {stale_strike:?}"
+        );
+        let after_recurring = std::fs::read_to_string(&canonical).unwrap();
+        assert_eq!(
+            after_recurring.matches("- staging deploy\n").count(),
+            1,
+            "the later recurring command must remain pending"
+        );
     }
 
     /// `#layoutconvergencelane`: helpers for the convergence-lane independence

@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-prompt-contract"
-version = "0.35.265"
+version = "0.35.266"
 edition = "2024"
 description = "Prompt contract detection and requirement counting policy for agent-doc"
 license = "MIT"
@@ -11,9 +11,9 @@ publish = false
 name = "agent_doc_prompt_contract"
 
 [dependencies]
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.265" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.265" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.265" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.266" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.266" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.266" }
 anyhow = "1"
 indexmap = { version = "2", features = ["serde"] }
 

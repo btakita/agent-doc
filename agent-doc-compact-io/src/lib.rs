@@ -1142,16 +1142,37 @@ pub fn complete_retained_projection(
 ) -> Result<String> {
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
         let effects = runtime_effects()?;
-        let mut authority =
-            effects.current_document_content(file, "compact_projection_completion_authority")?;
-        let disk = std::fs::read_to_string(file)
-            .with_context(|| format!("failed to read disk projection for {}", file.display()))?;
-        anyhow::ensure!(
-            authority == disk,
-            "compact projection is not converged: authority hash {} differs from disk hash {}",
-            agent_doc_hash::content_hash(&authority),
-            agent_doc_hash::content_hash(&disk),
-        );
+        let settle_editor_projection = |source: &str| -> Result<String> {
+            let mut authority = effects.current_document_content(file, source)?;
+            let mut disk = std::fs::read_to_string(file).with_context(|| {
+                format!("failed to read disk projection for {}", file.display())
+            })?;
+            if authority != disk {
+                anyhow::ensure!(
+                    agent_doc_document_realtime_io::settle_live_editor_projection_through_authority(
+                        file, source,
+                    )?,
+                    "compact projection is awaiting the live editor native-save receipt: authority hash {} differs from disk hash {}",
+                    agent_doc_hash::content_hash(&authority),
+                    agent_doc_hash::content_hash(&disk),
+                );
+                authority = effects.current_document_content(file, source)?;
+                disk = std::fs::read_to_string(file).with_context(|| {
+                    format!(
+                        "failed to read settled disk projection for {}",
+                        file.display()
+                    )
+                })?;
+            }
+            anyhow::ensure!(
+                authority == disk,
+                "compact projection is not converged after native-save settlement: authority hash {} differs from disk hash {}",
+                agent_doc_hash::content_hash(&authority),
+                agent_doc_hash::content_hash(&disk),
+            );
+            Ok(authority)
+        };
+        let mut authority = settle_editor_projection("compact_projection_completion_authority")?;
 
         let mut targets = CompactDocumentTargets {
             live: live_content.to_string(),
@@ -1186,22 +1207,13 @@ pub fn complete_retained_projection(
                         file.display()
                     )
                 })?;
-                authority = effects.current_document_content(
-                    file,
-                    "compact_projection_completion_replayed_authority",
-                )?;
-                let replayed_disk = std::fs::read_to_string(file).with_context(|| {
-                    format!(
-                        "failed to read replayed disk projection for {}",
-                        file.display()
-                    )
-                })?;
+                authority =
+                    settle_editor_projection("compact_projection_completion_replayed_authority")?;
                 anyhow::ensure!(
-                    authority == targets.live && replayed_disk == targets.live,
-                    "compact projection replay is not converged: target hash {} authority hash {} disk hash {}",
+                    authority == targets.live,
+                    "compact projection replay is not converged: target hash {} authority hash {}",
                     replay_hash,
                     agent_doc_hash::content_hash(&authority),
-                    agent_doc_hash::content_hash(&replayed_disk),
                 );
             }
         }
@@ -5644,6 +5656,34 @@ mod tests {
         })
     }
 
+    fn start_exact_native_save_listener(
+        root: &Path,
+        file: &Path,
+        content: &str,
+    ) -> std::thread::JoinHandle<()> {
+        let root = root.to_path_buf();
+        let file = file.to_string_lossy().into_owned();
+        let content = content.to_string();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::thread::spawn(move || {
+            let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
+                let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
+                if payload.get("type").and_then(|value| value.as_str()) != Some("persist_current") {
+                    return None;
+                }
+                let patch_id = payload
+                    .get("patch_id")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("unknown");
+                std::fs::write(&file, &content).ok()?;
+                Some(
+                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                        .to_string(),
+                )
+            });
+        })
+    }
+
     #[test]
     fn compact_with_commit_retains_projection_without_requesting_an_editor_save() {
         // A buffer-only editor has not projected the compacted revision to
@@ -5730,7 +5770,6 @@ mod tests {
             } if live_content.contains("Compacted summary.")
                 && committed_content.contains("Compacted summary.")
         )));
-
         let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("compact_projection_retained")
@@ -5768,6 +5807,77 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some(live),
+        );
+    }
+
+    #[test]
+    fn retained_projection_completion_native_saves_converged_editor_authority() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        git(root, &["init", "-q"]);
+
+        let file = root.join("session.md");
+        let old = concat!(
+            "---\nagent_doc_session: compact-save\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "Old status.\n",
+            "<!-- /agent:status -->\n",
+        );
+        let compacted = old.replace("Old status.", "Compacted status.");
+        fs::write(&file, old).unwrap();
+        let mut editor =
+            CompactTestEditorBuffer::attach(&file, COMPACT_TEST_EDITOR_ID, old).unwrap();
+        let _listener = start_exact_native_save_listener(root, &file, &compacted);
+        crate::test_support::wait_for_live_prompt_drift_listener(root);
+
+        editor.publish(&file, &compacted).unwrap();
+        let delivery_converged = (0..100).any(|_| {
+            let converged = matches!(
+                agent_doc_crdt_relay_io::current_text_for_file(&file),
+                Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                    ref text,
+                    delivery_converged: true,
+                    ..
+                }) if text == &compacted
+            );
+            if !converged {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            converged
+        });
+        assert!(
+            delivery_converged,
+            "editor delivery must converge in the fixture"
+        );
+        fs::write(&file, old).unwrap();
+        record_compact_lazily_projection(&file, &compacted, false).unwrap();
+
+        let settled_hash =
+            complete_retained_projection(&file, &compacted, &compacted, Some("status"), false)
+                .unwrap_or_else(|error| {
+                    let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log"))
+                        .unwrap_or_default();
+                    panic!("retained completion failed: {error:#}\n{ops_log}")
+                });
+
+        assert_eq!(settled_hash, agent_doc_hash::content_hash(&compacted));
+        assert_eq!(fs::read_to_string(&file).unwrap(), compacted);
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&file)
+                .unwrap()
+                .as_deref(),
+            Some(compacted.as_str()),
+        );
+        let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("editor_projection_native_save_requested")
+                && ops_log.contains("live_editor_projection_settled"),
+            "retained completion must drive the editor save authority before checkpointing:\n{ops_log}"
         );
     }
 

@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.266
+
+- **Fix: retained Compact Exchange settles through editor save authority, and
+  terminal responses cannot consume later recurring queue commands.**
+
+When a retained compact target is already visible and delivery-converged in an
+attached editor but disk still contains the older revision, the completion
+effect now requests a native save for that exact editor projection and
+re-observes editor/disk equality before checkpointing or committing. Compact
+admission remains retain-first and never saves ahead of visible delivery, while
+deferred completion errors are persisted in the operations log.
+
+Answered free-text strikes now derive from the captured response only while its
+exact closeout cycle is open. The durable response payload remains available for
+audit and recovery after commit, but cannot immediately strike an identical
+recurring command typed for a later task. The current cycle still consumes its
+own answered recurring command normally.
+
 ## 0.35.265
 
 - **Fix: retained CRDT validation and idle projection stay bounded and stop

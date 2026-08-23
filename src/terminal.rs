@@ -9,6 +9,10 @@
 //!   2. Scan the durable registry for any live pane belonging to this project; reuse its session.
 //!   3. Default session name `"0"`.
 //! - `tmux_session` frontmatter field is deprecated and never consulted during resolution.
+//! - When no live session is found, the session name falls back to the project
+//!   `tmux_session` binding in `.agent-doc/config.toml` before the `"0"` default,
+//!   so `agent-doc session set <name>` also governs cold-start bootstrap (the
+//!   only path available when no tmux server is running yet).
 //! - If the resolved session already has an attached client → no-op (no duplicate terminals).
 //! - If the session exists but is detached → open a terminal to re-attach.
 //! - If no session found → create a new one via `tmux new-session -A -s <name>`.
@@ -31,8 +35,10 @@
 //! - resolve_terminal_from_config: config has `command` template → `{tmux_command}` replaced correctly
 //! - resolve_terminal_no_config_no_env: no config, no `$TERMINAL` → error containing "No terminal configured"
 //! - classify_session_target: `SessionTarget::Create` variant matches correctly
-//! - resolve_session_name_defaults_to_zero: file with `tmux_session: custom` frontmatter, no flag → returns "0"
+//! - resolve_session_name_defaults_to_zero: no flag, no project binding → returns "0"
 //! - resolve_session_name_uses_explicit_flag: explicit flag "correct" → returns "correct" ignoring frontmatter
+//! - resolve_session_name_prefers_project_binding: no flag, project binding "ws" → returns "ws"
+//! - resolve_session_name_explicit_beats_project_binding: flag "correct" + binding "ws" → returns "correct"
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -171,14 +177,24 @@ fn launch_terminal(cfg: &agent_doc_config::Config, session_name: &str) -> Result
 
 /// Resolve the tmux session name from (in order):
 /// 1. Explicit --session flag
-/// 2. Default "0"
+/// 2. Project `tmux_session` binding in `.agent-doc/config.toml`
+///    (written by `agent-doc session set`, auto-rebound by `start` when the
+///    configured session is dead)
+/// 3. Default "0"
 ///
-/// Note: `tmux_session` frontmatter is deprecated and no longer consulted.
+/// Note: `tmux_session` frontmatter is deprecated and no longer consulted — the
+/// unused `_file` parameter is what makes that structurally true.
 fn resolve_session_name(_file: &Path, explicit: Option<&str>) -> Result<String> {
-    if let Some(name) = explicit {
-        return Ok(name.to_string());
-    }
-    Ok("0".to_string())
+    Ok(resolve_session_name_from(
+        explicit,
+        agent_doc_project_config_io::project_tmux_session().as_deref(),
+    ))
+}
+
+/// Pure precedence for [`resolve_session_name`]: explicit flag, then the project
+/// binding, then the `"0"` fallback.
+fn resolve_session_name_from(explicit: Option<&str>, configured: Option<&str>) -> String {
+    explicit.or(configured).unwrap_or("0").to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -344,20 +360,33 @@ mod tests {
         }
     }
 
-    /// Regression: resolve_session_name must default to "0", never read frontmatter.
+    /// Regression: with no flag and no project binding the name is "0".
+    /// Frontmatter is never consulted.
     #[test]
     fn resolve_session_name_defaults_to_zero() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let doc = tmp.path().join("test.md");
-        // File with tmux_session set to a non-default value
-        std::fs::write(&doc, "---\ntmux_session: custom-session\n---\n").unwrap();
-
-        // With no explicit session, should return "0" regardless of frontmatter
-        let name = resolve_session_name(&doc, None).unwrap();
+        let name = resolve_session_name_from(None, None);
         assert_eq!(
             name, "0",
-            "should default to '0', not read frontmatter tmux_session"
+            "should default to '0' when nothing is configured"
         );
+    }
+
+    /// The project `tmux_session` binding governs cold-start bootstrap, which is
+    /// the only path available when no tmux server is running yet.
+    #[test]
+    fn resolve_session_name_prefers_project_binding() {
+        let name = resolve_session_name_from(None, Some("workspace"));
+        assert_eq!(
+            name, "workspace",
+            "project tmux_session binding should beat the '0' fallback"
+        );
+    }
+
+    /// An explicit `--session` flag still wins over the project binding.
+    #[test]
+    fn resolve_session_name_explicit_beats_project_binding() {
+        let name = resolve_session_name_from(Some("correct"), Some("workspace"));
+        assert_eq!(name, "correct", "explicit flag should take precedence");
     }
 
     /// Regression: resolve_session_name with explicit flag should use it directly.

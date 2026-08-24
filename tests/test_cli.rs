@@ -18893,6 +18893,39 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             );
         }
     }
+    // `#qtypeclobber`: `decide_watch_action` decides on an operator-edit-in-flight
+    // fact that its only production caller used to hardcode as `false`, so
+    // `DeferForEditSettle` was unreachable and every disk change reconciled
+    // straight through — including the rebuild-from-disk branch that
+    // re-bootstraps live editor buffers and reverts unsaved operator keystrokes.
+    // The routing tests inject the fact, so only a source guard can hold the
+    // production caller to publishing the real one.
+    let relay_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-crdt-relay-io/src/lib.rs")).unwrap();
+    let relay_io_production = relay_io
+        .split_once("\n#[cfg(test)]\nmod tests {")
+        .map(|(before, _)| before.to_string())
+        .unwrap_or_else(|| relay_io.clone());
+    assert!(
+        relay_io_production
+            .contains("agent_doc_reliable_sync_io::plane_document_in_flight_for_path(file)"),
+        "route_disk_change_signal must publish the reliable-sync plane's operator-edit-in-flight fact"
+    );
+    for forbidden_snippet in [
+        "decide_watch_action(delivery, authority, false)",
+        "decide_watch_action(delivery, authority, true)",
+    ] {
+        assert!(
+            !relay_io_production.contains(forbidden_snippet),
+            "the watch-action policy must be fed a live fact, not a constant: {forbidden_snippet}"
+        );
+    }
+    assert!(
+        !relay_io_production.contains(
+            "WatchAction::ReconcileIntoCanonical | WatchAction::DeferForEditSettle"
+        ),
+        "a deferred reconcile must not take the same apply path as a settled one"
+    );
     let realtime_io =
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
     for required_snippet in [

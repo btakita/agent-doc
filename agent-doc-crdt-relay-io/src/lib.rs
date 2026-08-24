@@ -3847,17 +3847,64 @@ fn signal_crdt_replica_event_counting_inner(
 /// Lazily current state in that same serialized transition. No filesystem signal
 /// or supervisor poll participates in the hot path.
 pub fn route_disk_change_signal(file: &Path, delivery: &WatchDelivery) -> Result<WatchAction> {
-    let authority = authority_for_file(&file.display().to_string());
+    route_disk_change_signal_with(file, delivery, editor_edit_in_flight_for_file)
+}
+
+/// The live operator-edit-in-flight fact [`decide_watch_action`] decides on: is
+/// any live, open editor holding unsynced edits (`edit_epoch > synced_epoch`)
+/// for this document? This is the reliable-sync plane's own signal
+/// (`plane_document_in_flight_for_path`), i.e. the exact predicate the policy's
+/// doc names.
+///
+/// `#qtypeclobber`: the policy's only production call site used to pass a
+/// hardcoded `false`, so [`WatchAction::DeferForEditSettle`] was unreachable and
+/// nothing published the fact the policy decides on. Every disk change
+/// reconciled straight through — including the
+/// [`DiskChangeOutcome::RebuiltFromDisk`] branch, which re-bootstraps every live
+/// editor buffer from disk and therefore reverts operator keystrokes that the
+/// editor has not saved yet.
+fn editor_edit_in_flight_for_file(file: &str) -> bool {
+    agent_doc_reliable_sync_io::plane_document_in_flight_for_path(file).unwrap_or(false)
+}
+
+/// [`route_disk_change_signal`] with the operator-edit-in-flight fact injected,
+/// so the routing decision is testable without a live reliable-sync plane.
+pub fn route_disk_change_signal_with(
+    file: &Path,
+    delivery: &WatchDelivery,
+    editor_edit_in_flight: impl Fn(&str) -> bool,
+) -> Result<WatchAction> {
+    let file_string = file.display().to_string();
+    let authority = authority_for_file(&file_string);
     // Lazily owns edit settlement; the controller serializes this transition.
-    let action = decide_watch_action(delivery, authority, false);
-    if matches!(
-        action,
-        WatchAction::ReconcileIntoCanonical | WatchAction::DeferForEditSettle
-    ) {
-        let on_disk = std::fs::read_to_string(file).with_context(|| {
-            format!("failed to read disk text for reconcile {}", file.display())
-        })?;
-        let _ = apply_disk_change_for_file(file, &on_disk)?;
+    let action = decide_watch_action(delivery, authority, editor_edit_in_flight(&file_string));
+    match action {
+        WatchAction::ReconcileIntoCanonical => {
+            let on_disk = std::fs::read_to_string(file).with_context(|| {
+                format!("failed to read disk text for reconcile {}", file.display())
+            })?;
+            let _ = apply_disk_change_for_file(file, &on_disk)?;
+        }
+        // `#qtypeclobber`: honor the deferral instead of reconciling anyway.
+        // Applying here is what reverts operator text: `apply_disk_change`
+        // rebuilds canonical from disk for any change the additive delta cannot
+        // express and flags every live replica for a replace-capable
+        // re-bootstrap, overwriting the very buffer that is still settling. The
+        // deferred bytes are not dropped — the watch daemon retains the external
+        // disk change as a Lazily user-decision candidate before routing, and a
+        // later settled delivery re-decides into `ReconcileIntoCanonical`.
+        WatchAction::DeferForEditSettle => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_disk_change_reconcile_deferred file={} authority=multi_replica                      reason=editor_edit_in_flight (#qtypeclobber)",
+                    file.display(),
+                ),
+            );
+        }
+        // Detached: disk is already the authority and the baseline-wins load
+        // path owns it. Nothing to reconcile against.
+        WatchAction::ApplyAsDiskAuthority | WatchAction::None => {}
     }
     Ok(action)
 }
@@ -6648,5 +6695,68 @@ mod tests {
         let (_dir, file) = temp_doc("route-echo.md");
         let action = route_disk_change_signal(&file, &WatchDelivery::SelfWriteEcho).unwrap();
         assert_eq!(action, WatchAction::None);
+    }
+
+    /// `#qtypeclobber`: the survival property, not just the routing verdict.
+    /// A disk change that the additive delta cannot express makes
+    /// `apply_disk_change` rebuild canonical from disk and re-bootstrap every
+    /// live editor buffer. While an operator edit is in flight that rebuild is
+    /// exactly what reverts their keystrokes, so the reconcile must be deferred
+    /// and the canonical text left untouched.
+    #[test]
+    fn route_signal_defers_reconcile_and_preserves_editor_text_while_operator_edit_in_flight() {
+        let (_dir, file) = temp_doc("route-defer.md");
+        let editor_text = "# Plan\n\nGOOD\nOPERATOR-KEYSTROKES\n";
+        std::fs::write(&file, editor_text).unwrap();
+        let file_str = file.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        register_replica_for_file(&file, "intellij:route-defer")
+            .unwrap()
+            .expect("live editor should register with the relay");
+
+        // Something else rewrites the file out of band, dropping the operator's
+        // still-unsaved line.
+        std::fs::write(&file, "# Plan\n\nGOOD\n").unwrap();
+
+        let action = route_disk_change_signal_with(
+            &file,
+            &WatchDelivery::Change { generation: 1 },
+            |_| true,
+        )
+        .unwrap();
+        assert_eq!(action, WatchAction::DeferForEditSettle);
+        let current = current_text_for_file(&file).unwrap();
+        assert!(
+            matches!(current, CurrentText::Current { ref text, .. } if text == editor_text),
+            "a deferred reconcile must not overwrite the live editor buffer: {current:?}"
+        );
+    }
+
+    /// The other half of the property: once the operator edit settles, the same
+    /// delivery reconciles. A defer that never resolves would strand disk state.
+    #[test]
+    fn route_signal_reconciles_once_operator_edit_settles() {
+        let (_dir, file) = temp_doc("route-settled.md");
+        std::fs::write(&file, "# Plan\n\nGOOD\nCORRUPT-BLOCK\n").unwrap();
+        let file_str = file.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        register_replica_for_file(&file, "intellij:route-settled")
+            .unwrap()
+            .expect("live editor should register with the relay");
+
+        std::fs::write(&file, "# Plan\n\nGOOD\n").unwrap();
+
+        let action = route_disk_change_signal_with(
+            &file,
+            &WatchDelivery::Change { generation: 1 },
+            |_| false,
+        )
+        .unwrap();
+        assert_eq!(action, WatchAction::ReconcileIntoCanonical);
+        let current = current_text_for_file(&file).unwrap();
+        assert!(
+            matches!(current, CurrentText::Current { ref text, .. } if text == "# Plan\n\nGOOD\n"),
+            "a settled reconcile must adopt the disk change: {current:?}"
+        );
     }
 }

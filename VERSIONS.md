@@ -2,6 +2,38 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.278
+
+- **Fix: a disk-change reconcile no longer reverts operator keystrokes that are
+  still in flight (`#qtypeclobber`).**
+
+`decide_watch_action` decides where a settled disk change goes, and one of its
+three inputs is whether a live editor is holding unsynced operator edits
+(`edit_epoch > synced_epoch`). Its only production caller passed a hardcoded
+`false`, so `WatchAction::DeferForEditSettle` was unreachable: nothing ever
+published the fact the policy decides on, and its tests exercised a branch
+production could not reach. Worse, the caller applied the reconcile for
+`DeferForEditSettle` on the same line as `ReconcileIntoCanonical`, so honoring
+the deferral would have changed nothing anyway.
+
+That matters because `apply_disk_change` is not additive-only. A change the CRDT
+delta cannot express rebuilds canonical from disk and flags every live replica
+for a replace-capable re-bootstrap — which overwrites the editor buffer with disk
+text. Run while the operator is mid-edit, that is exactly the reported symptom:
+keystrokes typed into `agent:queue` disappear.
+
+`route_disk_change_signal` now publishes the reliable-sync plane's own
+`plane_document_in_flight_for_path` fact, and a deferred reconcile no longer
+applies. The deferred bytes are not dropped: the watch daemon already retains an
+external disk change as a Lazily user-decision candidate before routing, and a
+later settled delivery re-decides into `ReconcileIntoCanonical`.
+
+The routing tests inject the fact, so a source guard in `tests/test_cli.rs` holds
+the production caller to publishing the real one and to keeping the deferred and
+settled apply paths distinct. The survival test was mutation-checked red: with
+the apply restored under `DeferForEditSettle`, the operator's line is gone from
+the canonical text.
+
 ## 0.35.277
 
 - **Fix: a stray keystroke on a component-marker line no longer wedges the

@@ -135,7 +135,6 @@ One thing the regeneration surfaced: this repo's own `.opencode/commands/` was t
 **Publish is not yet proven.** [Release run 32661754044](https://github.com/btakita/tsift/actions/runs/32661754044) is in progress, currently in `verify release inputs`. The previous release took ~31 minutes end to end, so I am not holding this cycle open for it — the local evidence above is what this response rests on. I have a watch armed on the run's job results and will report the three publication facts when it lands: the GitHub Release with Linux/macOS-ARM/Windows archives plus `.sha256` files, all 26 crates on crates.io via OIDC trusted publishing, and `opencode-tsift@0.1.82` on npm. If a publish job fails, the crates.io step skips versions that already exist, so a re-run resumes rather than restarting.
 
 Leaving the queue head pinned until that proof is in.
-
 ### Re: Fix the open tsift issues — opus-5
 
 > **Queue prompt:**
@@ -276,14 +275,88 @@ head — the crates.io job alone ran about 25 minutes after the other six finish
 Two follow-ups are in the backlog: `communities` and `path` are the two workspace
 commands #graphfed did not reach, and `cargo install --locked` warns about a
 yanked transitive `spin v0.9.8`.
+
+### Re: do [#wsfedrest] and [#spinyank] — opus-5
+
+> **Queue prompt:**
+>
+> do [#wsfedrest]
+
+> **Queue prompt:**
+>
+> do [#spinyank]
+
+Both done and pushed as `07b17d5`.
+
+**#wsfedrest.** I filed this as a three-way decision, and working it turned out
+to make the choice for me. `communities` and `path` needed *different* answers
+than `explain`/`graph` did, but one fact settles both: **a scoped index carries
+only its own call edges.**
+
+For `communities`, that means there is no such thing as a cross-scope community
+— so running detection per scope and reporting each is not an approximation of a
+whole-workspace answer, it *is* the answer. That reframing is what made this
+worth building rather than documenting: I had assumed federating `communities`
+would mean merging graphs and losing fidelity, and it does not. It federates by
+concatenation. `--json` returns `{"scopes": [...]}` with one document per scope;
+human output labels each with a `scope <id>:` header.
+
+For `path`, the same fact points the other way. A path between symbols in two
+scopes does not exist to be found, because no edge could cross. So `path`
+resolves **both** endpoints: same scope runs there, different scopes is a precise
+refusal naming both. That matters more than it sounds — federating it naively
+would have returned an empty result, which reads as "no path in a graph
+containing both symbols". That is a different and false claim.
+
+```
+$ tsift communities .                    # was: exit 1, requires --scope
+scope alpha:
+Communities (2 nodes, 1 edges, 3 iterations, Q=0.0000)
+  [1] 2 members (Q=0.0000):
+    alpha_helper
+    alpha_main
+
+scope beta:
+Communities (0 nodes, 0 edges, 0 iterations, Q=0.0000)
+
+$ tsift path alpha_main beta_func .
+Error: `alpha_main` resolves in scope `alpha` and `beta_func` in scope `beta`.
+A scoped index holds only its own call edges, so no path between them exists to
+find. Query one scope with `--scope <scope>`.
+```
+
+No read-only graph command now demands a scope the caller does not have. Both
+also take `--federated` explicitly. I dropped the third option in my own backlog
+text — documenting the requirement in the generated block — because it is no
+longer true, and a block that describes a limitation the code does not have is
+the drift `#wsinit` exists to prevent.
+
+**#spinyank.** The yanked pin was `spin v0.9.8`, reached through `multer` →
+`async-graphql` → `surrealdb-core` → `tsift-surrealdb`. `0.9.9` is unyanked in
+the same minor series, so it satisfies `multer`'s `^0.9` as a drop-in. Repinned;
+the `cargo install --locked` warning is gone.
+
+While there I audited the whole lockfile rather than just the one crate — all
+638 registry entries queried against crates.io, none yanked. That is worth
+having said explicitly: the warning only names the crate that happens to be
+compiled, so "the warning stopped" would not have proven the rest of the tree.
+
+**Verification.** `make check` green: 67 suites, 1766 passed, 0 failed, clippy
+`-D warnings` clean. `cargo install --path . --locked` with no yank warning, and
+the live repro above ran against the installed binary. Two lib tests that
+asserted the old fail-closed contract now assert the new one; the CLI-level
+fail-closed case list is empty enough that its remaining assertion is about
+`path`'s cross-scope refusal specifically. Spec updated in
+`search-navigation.md`; `VERSIONS.md` carries both under a fresh `## Unreleased`.
+
+Both changes sit unreleased on top of `v0.1.83`. Say the word if you want them
+cut as `0.1.84`, or leave them to ride along with the next batch.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#wsfedrest]
-- do [#spinyank]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -292,8 +365,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#wsfedrest] `communities` and `path` still fail closed at a workspace root with no shared root index. #graphfed gave `explain`/`graph` symbol-driven scope resolution; neither of these has a single symbol to resolve from (`communities` reads the whole index, `path` spans two symbols whose scopes may differ). Decide: federate `communities` per scope and merge, resolve `path` only when both endpoints land in one scope, or document the requirement in the generated Code Navigation block so the recommendation and the capability agree.
-- [ ] [#spinyank] `cargo install --locked` warns that `spin v0.9.8` in Cargo.lock is yanked from crates.io. Harmless today, but a fresh `--locked` build of a published tag will keep warning. Refresh the transitive pin and re-run `make check`.
 <!-- /agent:backlog -->
 
 ## Review

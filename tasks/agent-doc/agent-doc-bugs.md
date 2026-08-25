@@ -229,6 +229,18 @@ The numerous `agent-doc start --route-owned --route-owned-reap-policy keep-alive
 The controllers displaying `--handoff-state preparing` are not actually stuck—the launch argument is immutable, while controller state records them as stable.
 
 I only diagnosed this; I did not kill processes or modify code.
+
+### Re: background process and editor-write failures — gpt-5
+
+Fixed and installed.
+
+The `zsh` thrash came from leaked isolated-tmux CLI-test shells. A failed/panicked test could skip its end-of-test cleanup, leaving a shell alive after its temporary working directory was deleted; prompt initialization then spun at roughly one full core. I terminated the hot/leaked shells, removed 35 dead test socket artifacts, and added an RAII + parent-death watchdog so panic, cancellation, and test-runner death all tear down the isolated tmux server. The outside-tmux regression tests now always clear inherited tmux identity and cannot create panes in the real tmux server.
+
+The background `agent-doc` processes were a mix of intentional one-document keep-alive supervisors/controllers and four stale supervisors still executing the deleted pre-fix binary. The real controller churn was an unconditional live-document frontmatter read on every 500 ms idle-watch tick. That read is now revision-gated, with a 60-second fail-safe reconciliation. I used the supported idle-gated shutdown on the four stale supervisors (`tsift`, `lazily`, `backend`, and `fpe`); their owning panes resumed them on the installed binary. Their settled CPU is 0.4–0.6% each, the root controller fell from about 16% to 1.8%, and the Haiven controller from about 7.6% to 3.3%. No hot leaked `zsh` remains. Healthy current supervisors/controllers remain because they own live sessions.
+
+The `contracts.md` Compact Exchange/File Cache Conflict was recovered through the owning editor authority without a forced disk overwrite; the stranded visible write is no longer being treated as deferred work.
+
+Regression coverage passes, all six CLI start tests pass, full `make check` passes, and the latest CI run is green. The installed binary contains subrepo commit `ae03141b5` (`fix: stop idle controller and tmux test churn`); the superproject pointer is committed as `16b0b2d59`.
 <!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 

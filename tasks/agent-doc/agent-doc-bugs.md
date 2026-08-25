@@ -212,6 +212,23 @@ agent-doc commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contra
 ```
 
 Do not rerun Compact Exchange.
+
+### Re: Response
+
+Two independent problems are happening:
+
+| Cause | Evidence | Impact |
+|---|---|---|
+| Leaked CLI test tmux panes | `zsh` PIDs `2109942` and `2174521` run from deleted `/tmp/.tmp*` directories; one is in leaked `agent-doc-start-test-*`, the other escaped into main pane `%39` | ~2 full CPU cores for eight hours |
+| Idle-watch polling/log spam | Each supervisor resolves frontmatter through the controller every 500 ms, even when unchanged | Controllers use ~16% CPU combined and write ~600 KB/s |
+
+The zsh processes retain deleted Powerlevel10k/gitstatus FIFOs and child shells. With their working directories deleted, the prompt/mise integration enters a user-space hot loop. The test cleanup in [test_cli.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/tests/test_cli.rs:31178) is best-effort—`tmux kill-server` is neither guarded nor verified—so interruption/racing leaves the tmux shell behind. Another non-spinning leaked test server confirms this is systemic.
+
+The numerous `agent-doc start --route-owned --route-owned-reap-policy keep-alive` processes are mostly intentional supervisors for active documents. However, [idle_watch.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-start-runtime-io/src/idle_watch.rs:2066) performs an unconditional full authority read for agent-frontmatter detection on every 500 ms tick. That floods `ops.log` with `controller_crdt_current_text` and `realtime_doc_resolve`; the root and Haiven logs are already roughly 49 MB and 32 MB.
+
+The controllers displaying `--handoff-state preparing` are not actually stuck—the launch argument is immutable, while controller state records them as stable.
+
+I only diagnosed this; I did not kill processes or modify code.
 <!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 

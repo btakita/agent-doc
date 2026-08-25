@@ -255,7 +255,8 @@ Fixed, installed, and committed.
 - Focused tests and full `make check` pass; latest CI is green.
 
 Commits: `ae03141b5` in agent-doc and `16b0b2d59` in the superproject. The remaining background `agent-doc` processes are healthy one-per-document supervisors/controllers for live sessions, not leaked workers.
-<!-- agent:boundary:1b85b380 -->
+❯ Understood. My claim that `contracts.md` was safely recovered was incorrect—the committed response was deleted. I won’t touch `contracts.md` while you reinstate it.
+<!-- agent:boundary:64a22d63:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--

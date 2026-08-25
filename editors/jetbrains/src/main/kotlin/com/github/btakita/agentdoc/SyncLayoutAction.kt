@@ -308,15 +308,16 @@ class SyncLayoutAction : AnAction() {
          * any action (e.g. ClaimAction calls this after claiming).
          * Runs on a background thread — safe to call from EDT.
          */
-        fun syncLayout(
-            project: com.intellij.openapi.project.Project,
-            notify: Boolean = true,
-            noAutostart: Boolean = false,
-            callerKind: String? = null,
-        ) {
+    fun syncLayout(
+        project: com.intellij.openapi.project.Project,
+        notify: Boolean = true,
+        noAutostart: Boolean = false,
+        callerKind: String? = null,
+        terminalPrepared: Boolean = false,
+    ) {
             if (!SwingUtilities.isEventDispatchThread()) {
                 ApplicationManager.getApplication().invokeLater {
-                    syncLayout(project, notify, noAutostart, callerKind)
+                syncLayout(project, notify, noAutostart, callerKind, terminalPrepared)
                 }
                 return
             }
@@ -343,7 +344,7 @@ class SyncLayoutAction : AnAction() {
             )
             // IDEA component state is captured on the EDT exactly once. The
             // controller/socket work below owns the background portion.
-            val editorLayout = absolutizeEditorLayout(
+        val editorLayout = absolutizeEditorLayout(
                 projectRoot,
                 normalizeEditorLayout(
                     basePath,
@@ -356,9 +357,38 @@ class SyncLayoutAction : AnAction() {
                             .toSet(),
                     ),
                 ),
-            )
+        )
 
-            Thread {
+        if (!terminalPrepared && !noAutostart) {
+            val relativeFocusedFile = java.io.File(projectRoot).toPath()
+                .relativize(java.io.File(focusedFile).toPath())
+                .toString()
+            IdeTerminalCoordinator.ensureAndAttach(
+                project = project,
+                cwd = projectRoot,
+                relativePath = relativeFocusedFile,
+                onReady = {
+                    syncLayout(
+                        project = project,
+                        notify = notify,
+                        noAutostart = noAutostart,
+                        callerKind = callerKind,
+                        terminalPrepared = true,
+                    )
+                },
+                onFailure = { message ->
+                    if (notify) {
+                        TerminalUtil.notifyError(
+                            project,
+                            "Failed to prepare agent-doc tmux session: $message",
+                        )
+                    }
+                },
+            )
+            return
+        }
+
+        Thread {
                 try {
                     val columns = buildSyncColumns(
                         visibleMdFiles,

@@ -324,9 +324,9 @@ guidance.
   a second session for a document that is already owned.
 - For a cold document, session resolution is explicit `--session`, then project
   `tmux_session`, then `0`.
-- Human output reports the session, pane, attach command, and whether the
-  session was created. `--json` additionally reports the resolution source and
-  any registered document pane.
+- Human output reports the session, pane, attach command, creation state, and
+  whether a tmux client is already attached. `--json` additionally reports the
+  resolution source and any registered document pane.
 - `agent-doc start <FILE>` uses the same operation outside tmux, provisions a
   pane when necessary, and re-executes the original lifecycle flags inside that
   pane. A host without tmux fails closed with workspace-image guidance from the

@@ -29,6 +29,7 @@ pub struct TmuxEnsureOutcome {
     pub pane_id: String,
     pub attach_command: String,
     pub created: bool,
+    pub attached: bool,
     pub resolution: String,
     pub document_pane: Option<String>,
 }
@@ -300,6 +301,7 @@ fn tmux_ensure_outcome(
         || "tmux".to_string(),
         |socket| format!("tmux -L {} -f /dev/null", shell_escape(socket)),
     );
+    let attached = is_session_attached(tmux, &session_name);
     TmuxEnsureOutcome {
         attach_command: format!(
             "{tmux_prefix} attach-session -t {}",
@@ -308,9 +310,19 @@ fn tmux_ensure_outcome(
         session_name,
         pane_id,
         created,
+        attached,
         resolution: resolution.to_string(),
         document_pane,
     }
+}
+
+fn is_session_attached(tmux: &tmux_router::Tmux, session_name: &str) -> bool {
+    tmux.cmd()
+        .args(["list-clients", "-t", session_name, "-F", "#{client_name}"])
+        .output()
+        .is_ok_and(|output| {
+            output.status.success() && !String::from_utf8_lossy(&output.stdout).trim().is_empty()
+        })
 }
 
 fn start_reexec_command(
@@ -1995,6 +2007,8 @@ mod tests {
 
         assert!(first.created);
         assert!(!second.created);
+        assert!(!first.attached);
+        assert!(!second.attached);
         assert_eq!(first.session_name, "headless");
         assert_eq!(first.session_name, second.session_name);
         assert_eq!(first.pane_id, second.pane_id);

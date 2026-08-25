@@ -13,6 +13,7 @@ pub fn ensure(file: &Path, session: Option<&str>, json: bool) -> Result<()> {
                 "pane_id": outcome.pane_id,
                 "attach_command": outcome.attach_command,
                 "created": outcome.created,
+                "attached": outcome.attached,
                 "resolution": outcome.resolution,
                 "document_pane": outcome.document_pane,
             }))?
@@ -21,6 +22,7 @@ pub fn ensure(file: &Path, session: Option<&str>, json: bool) -> Result<()> {
         println!("session: {}", outcome.session_name);
         println!("pane: {}", outcome.pane_id);
         println!("created: {}", outcome.created);
+        println!("attached: {}", outcome.attached);
         println!("attach: {}", outcome.attach_command);
     }
     Ok(())

@@ -23,6 +23,7 @@ repositories {
 dependencies {
     intellijPlatform {
         intellijIdeaCommunity(providers.gradleProperty("platformVersion").get())
+        bundledPlugin("org.jetbrains.plugins.terminal")
     }
     // S5: the canonical lazily reactive StateGraphMirror. In the monorepo the
     // composite build in settings.gradle.kts substitutes this with the sibling

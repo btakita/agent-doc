@@ -397,6 +397,7 @@ object TerminalUtil {
         onComplete: (() -> Unit)? = null,
         attempt: RunAgentDocAttemptLedger.Attempt? = null,
         commandPreAcquired: Boolean = false,
+        terminalPrepared: Boolean = false,
         resolved: Pair<String, String>? = null,
     ) {
         // `#jbedtledger`: `resolveProject` crosses the FFI boundary. Callers that
@@ -456,6 +457,44 @@ object TerminalUtil {
                     return
                 }
             }
+        }
+
+        if (!terminalPrepared) {
+            attempt?.recordIfCurrent("tmux_ensure_start")
+            try {
+                IdeTerminalCoordinator.ensureAndAttach(
+                    project = project,
+                    cwd = cwd,
+                    relativePath = relativePath,
+                    onReady = {
+                        attempt?.recordIfCurrent("tmux_ensure_ready")
+                        sendToTerminal(
+                            project = project,
+                            file = file,
+                            onComplete = onComplete,
+                            attempt = attempt,
+                            commandPreAcquired = true,
+                            terminalPrepared = true,
+                            resolved = cwd to relativePath,
+                        )
+                    },
+                    onFailure = { message ->
+                        editorCommandRegistry.complete(routeKey, EditorCommandKind.RUN_AGENT_DOC)
+                        attempt?.finishIfCurrent("tmux_ensure_failed", error = message)
+                        onComplete?.invoke()
+                        notifyError(project, "Failed to prepare agent-doc tmux session: $message")
+                    },
+                )
+            } catch (failure: Throwable) {
+                editorCommandRegistry.complete(routeKey, EditorCommandKind.RUN_AGENT_DOC)
+                attempt?.finishIfCurrent(
+                    "tmux_ensure_failed",
+                    error = failure.message ?: failure.javaClass.simpleName,
+                )
+                onComplete?.invoke()
+                notifyError(project, "Failed to prepare agent-doc tmux session: ${failure.message}")
+            }
+            return
         }
 
         // is_busy guard removed: no production code sets the status signals,

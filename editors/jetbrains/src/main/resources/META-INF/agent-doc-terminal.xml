@@ -1,0 +1,3 @@
+<idea-plugin>
+    <!-- The dependency is optional; terminal API use is guarded at runtime. -->
+</idea-plugin>

@@ -55,6 +55,10 @@ agent-doc run session.md
 
 The typical edit cycle: write in your editor, trigger `agent-doc route --dispatch-only --plain-trigger --wait-for-ready 60 <file>` via a hotkey, and agent-doc dispatches the plain `agent-doc <file>` reopen into the right pane. Route observes Lazily current/typing state before it admits document work, and editor-triggered routing gives slow-starting supervisors a longer readiness window before surfacing a startup error. During that readiness window, route owns the pane input window, so supervisor queue drains and context-reset `/clear` / `/new` recovery wait instead of interleaving into the composer. That editor path always stays a bounded reopen send; it does not restart Codex just because the previous prompt was `/clear`.
 
+For Coder, JetBrains Gateway, and VS Code Remote SSH setup, including terminal
+host precedence and headless failure behavior, see the
+[Coder workspace terminal runbook](runbooks/coder-workspace.md).
+
 ## Feature Taxonomy
 
 agent-doc has a broad feature surface because the README doubles as a user guide and capability ledger. The reader-facing overview is grouped by workflow layer here; the exhaustive feature catalog is kept near the bottom so installation, architecture, editor setup, and security stay easy to scan.

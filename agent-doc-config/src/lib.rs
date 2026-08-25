@@ -24,7 +24,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use agent_doc_frontmatter::frontmatter::{CodexNetworkAccess, FreeTextExecutionMode};
+use agent_doc_frontmatter::frontmatter::{
+    CodexNetworkAccess, FreeTextExecutionMode, TerminalHostPreference,
+};
 use agent_doc_model_tier::ModelConfig;
 
 pub mod env;
@@ -111,12 +113,21 @@ pub struct Config {
     pub model: ModelConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Global terminal presentation policy. Project terminal configuration uses the
+/// equivalent project-owned schema in `agent-doc-frontmatter`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalConfig {
-    /// Command template to launch a terminal.
-    /// `{tmux_command}` is replaced with the tmux attach/create command.
-    /// Example: `wezterm start -- {tmux_command}`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<TerminalHostPreference>,
+    /// External-terminal command template. `{tmux_command}` is substituted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+    /// Whether a missing tmux session may be created automatically. Defaults true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_start_tmux: Option<bool>,
+    /// IDE attach command template. `{session}` and `{tmux_command}` are substituted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attach_command: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -203,6 +214,34 @@ agent_doc_free_text_execution = "queue"
         assert_eq!(
             alias.agent_doc_free_text_execution,
             Some(FreeTextExecutionMode::Goal)
+        );
+    }
+
+    #[test]
+    fn test_terminal_policy_deserialization() {
+        let cfg: Config = toml::from_str(
+            r#"
+[terminal]
+host = "ide"
+command = "wezterm start -- {tmux_command}"
+auto_start_tmux = false
+attach_command = "tmux attach-session -t {session}"
+"#,
+        )
+        .unwrap();
+        let terminal = cfg.terminal.expect("terminal config");
+        assert_eq!(
+            terminal.host,
+            Some(agent_doc_frontmatter::frontmatter::TerminalHostPreference::Ide)
+        );
+        assert_eq!(
+            terminal.command.as_deref(),
+            Some("wezterm start -- {tmux_command}")
+        );
+        assert_eq!(terminal.auto_start_tmux, Some(false));
+        assert_eq!(
+            terminal.attach_command.as_deref(),
+            Some("tmux attach-session -t {session}")
         );
     }
 

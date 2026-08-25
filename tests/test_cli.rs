@@ -1970,6 +1970,7 @@ fn test_cli_tmux_ensure_help_exposes_headless_bootstrap_contract() {
         .success()
         .stdout(predicate::str::contains("<FILE>"))
         .stdout(predicate::str::contains("--session"))
+        .stdout(predicate::str::contains("--ide-terminal"))
         .stdout(predicate::str::contains("--json"));
 }
 

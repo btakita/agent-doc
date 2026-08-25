@@ -198,6 +198,10 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
         include_str!("../runbooks/harness-invocation.md"),
     ),
     (
+        "coder-workspace.md",
+        include_str!("../runbooks/coder-workspace.md"),
+    ),
+    (
         "dynamic-context.md",
         include_str!("../runbooks/dynamic-context.md"),
     ),

@@ -354,44 +354,55 @@ env: {
 }
 
 async function prepareIdeTerminal(cwd: string, relativePath: string): Promise<void> {
-const output = await runCli(['tmux', 'ensure', relativePath, '--json'], cwd, { timeoutMs: 10_000 });
-const receipt = parseTmuxEnsureReceipt(output);
-const existing = vscode.window.terminals.find(
-(terminal) => terminal.name === 'agent-doc' && terminal.exitStatus === undefined,
-);
-const decision = decideIdeTerminalAttach(receipt.attached, existing !== undefined);
-console.log(
-`[agent-doc/terminal-host] vscode_remote_name=${vscode.env.remoteName ?? 'local'} `
-+ `session=${receipt.sessionName} pane=${receipt.paneId} created=${receipt.created} decision=${decision}`,
-);
+    const output = await runCli(
+        ['tmux', 'ensure', relativePath, '--json', '--ide-terminal'],
+        cwd,
+        { timeoutMs: 10_000 },
+    );
+    const receipt = parseTmuxEnsureReceipt(output);
+    const existing = vscode.window.terminals.find(
+        (terminal) => terminal.name === 'agent-doc' && terminal.exitStatus === undefined,
+    );
+    const decision = decideIdeTerminalAttach(
+        receipt.terminalHost,
+        receipt.attached,
+        existing !== undefined,
+    );
+    console.log(
+        `[agent-doc/terminal-host] vscode_remote_name=${vscode.env.remoteName ?? 'local'} `
+        + `session=${receipt.sessionName} pane=${receipt.paneId} created=${receipt.created} `
+        + `host=${receipt.terminalHost} decision=${decision} reason=${receipt.terminalHostReason}`,
+    );
 
-try {
-switch (decision) {
-case IdeTerminalAttachDecision.NoopExternalAttached:
-return;
-case IdeTerminalAttachDecision.FocusExisting:
-existing?.show(false);
-return;
-case IdeTerminalAttachDecision.AttachExisting:
-existing?.show(false);
-existing?.sendText(receipt.attachCommand, true);
-return;
-case IdeTerminalAttachDecision.CreateAndAttach: {
-const terminal = vscode.window.createTerminal({ name: 'agent-doc', cwd });
-terminal.show(false);
-terminal.sendText(receipt.attachCommand, true);
-return;
-}
-}
-} catch (err: any) {
-const action = await vscode.window.showWarningMessage(
-`VS Code terminal could not open: ${err.message}. Attach manually: ${receipt.attachCommand}`,
-'Copy command',
-);
-if (action === 'Copy command') {
-await vscode.env.clipboard.writeText(receipt.attachCommand);
-}
-}
+    try {
+        switch (decision) {
+        case IdeTerminalAttachDecision.NoopExternalAttached:
+            return;
+        case IdeTerminalAttachDecision.NoopConfiguredHost:
+            return;
+        case IdeTerminalAttachDecision.FocusExisting:
+            existing?.show(false);
+            return;
+        case IdeTerminalAttachDecision.AttachExisting:
+            existing?.show(false);
+            existing?.sendText(receipt.attachCommand, true);
+            return;
+        case IdeTerminalAttachDecision.CreateAndAttach: {
+            const terminal = vscode.window.createTerminal({ name: 'agent-doc', cwd });
+            terminal.show(false);
+            terminal.sendText(receipt.attachCommand, true);
+            return;
+        }
+        }
+    } catch (err: any) {
+        const action = await vscode.window.showWarningMessage(
+            `VS Code terminal could not open: ${err.message}. Attach manually: ${receipt.attachCommand}`,
+            'Copy command',
+        );
+        if (action === 'Copy command') {
+            await vscode.env.clipboard.writeText(receipt.attachCommand);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

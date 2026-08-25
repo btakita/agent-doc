@@ -3084,6 +3084,9 @@ enum TmuxAction {
         /// Emit structured JSON
         #[arg(long)]
         json: bool,
+        /// Report that an IDE terminal endpoint is available to host the session
+        #[arg(long)]
+        ide_terminal: bool,
     },
 }
 
@@ -4145,7 +4148,8 @@ fn try_main() -> anyhow::Result<()> {
                 file,
                 session,
                 json,
-            } => tmux_cmd::ensure(&file, session.as_deref(), json),
+                ide_terminal,
+            } => tmux_cmd::ensure(&file, session.as_deref(), json, ide_terminal),
         },
         Commands::Run {
             file,

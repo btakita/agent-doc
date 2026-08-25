@@ -120,6 +120,17 @@ pub enum CodexNetworkAccess {
     Disabled,
 }
 
+/// Operator preference for where the project tmux client is presented.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TerminalHostPreference {
+    #[default]
+    Auto,
+    External,
+    Ide,
+    None,
+}
+
 /// Canonical queue activation control (`#queue-state-unify`).
 ///
 /// The `queue:` frontmatter key subsumes the deprecated `queue_active:` boolean
@@ -465,6 +476,10 @@ pub struct Frontmatter {
     /// Will be removed in a future version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tmux_session: Option<String>,
+    /// Per-document terminal-host override. Project and global terminal config are
+    /// consulted when this is omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_host: Option<TerminalHostPreference>,
     /// **Deprecated.** Use `agent_doc_format` + `agent_doc_write` instead.
     /// Kept for backward compatibility. Values: "append", "template", "stream".
     /// Serialized as `agent_doc_mode` in YAML; reads legacy `response_mode` and shorthand `mode` via aliases.
@@ -2406,13 +2421,13 @@ mod tests {
 
     #[test]
     fn parse_all_fields() {
-        let content =
-            "---\nsession: abc-123\nagent: claude\nmodel: opus\nbranch: main\n---\nBody\n";
+        let content = "---\nsession: abc-123\nagent: claude\nmodel: opus\nbranch: main\nterminal_host: external\n---\nBody\n";
         let (fm, body) = parse(content).unwrap();
         assert_eq!(fm.session.as_deref(), Some("abc-123"));
         assert_eq!(fm.agent.as_deref(), Some("claude"));
         assert_eq!(fm.model.as_deref(), Some("opus"));
         assert_eq!(fm.branch.as_deref(), Some("main"));
+        assert_eq!(fm.terminal_host, Some(TerminalHostPreference::External));
         assert!(body.contains("Body"));
     }
 
@@ -2832,6 +2847,7 @@ mod tests {
             opencode_model: None,
             branch: Some("dev".to_string()),
             tmux_session: None,
+            terminal_host: None,
             mode: None,
             format: None,
             write_mode: None,

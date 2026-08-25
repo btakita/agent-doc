@@ -15,6 +15,7 @@ Frontmatter fields:
 - `codex_model`: Per-harness model override for Codex sessions. Takes precedence over `model` when running under Codex.
 - `opencode_model`: Per-harness model override for OpenCode sessions. Takes precedence over `model` when running under OpenCode.
 - `branch`: Reserved for branch tracking
+- `terminal_host`: Terminal presentation override — `auto`, `ide`, `external`, or `none`. Resolution then falls back to project and global `[terminal].host`; it does not name the tmux session.
 - `agent_args`: Additional CLI arguments for the active agent process (space-separated string)
 - `claude_args`: Additional CLI arguments for the `claude` process (space-separated string, see §6.1)
 - `codex_args`: Additional CLI arguments for the `codex` process (space-separated string, see §6.1)

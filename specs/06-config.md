@@ -119,6 +119,29 @@ Fields:
 
 **Auto-sync:** When the configured `tmux_session` is dead (session no longer exists), the route path falls back to `current_tmux_session()` and auto-updates `config.toml` with the new session name. This prevents stale config after session destruction.
 
+## Terminal host policy
+
+Terminal presentation is configured by an optional `[terminal]` table in global
+or project config:
+
+- `host = "auto" | "ide" | "external" | "none"` selects the presentation host.
+- `command` is an external-terminal template with `{tmux_command}` substitution.
+- `auto_start_tmux` defaults to `true`; `false` refuses to create a missing
+  session but still permits attachment to an existing one.
+- `attach_command` is the IDE attach template and supports `{session}` and
+  `{tmux_command}` substitution.
+
+Document frontmatter `terminal_host` overrides the project host, which overrides
+the global host. Project values for the other fields override global values.
+Session naming is deliberately absent from `[terminal]`: the sole project
+binding remains top-level `tmux_session`, managed by `agent-doc session set`.
+
+The pure resolver consumes config plus typed environment observations. An
+already-attached live session resolves to no presentation action. Otherwise,
+`auto` selects an available IDE before an external terminal. Explicitly choosing
+an unavailable host fails closed; in particular, a headless Coder backend cannot
+silently satisfy `external` by choosing an IDE or attempting a local display.
+
 ## Opt-in Document Gate
 
 A plain `.md` is **not** auto-converted into an agent-doc session. `route`, `run`, and `start` fail closed before injecting `agent_doc_session:` frontmatter unless the document opts in. The pure predicate `agent_doc_frontmatter::project_config::is_agent_doc_document(rel_path, content, config)` (FFI: `agent_doc_is_session_document(path)`) returns true when ANY of:

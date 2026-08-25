@@ -317,16 +317,22 @@ guidance.
 
 ## tmux ensure
 
-`agent-doc tmux ensure <FILE> [--session NAME] [--json]`
+`agent-doc tmux ensure <FILE> [--session NAME] [--ide-terminal] [--json]`
 
 - Ensures one detached tmux session exists for the document and is safe to call
   repeatedly. An already-live registry target wins so the command never starts
   a second session for a document that is already owned.
 - For a cold document, session resolution is explicit `--session`, then project
   `tmux_session`, then `0`.
-- Human output reports the session, pane, attach command, creation state, and
-  whether a tmux client is already attached. `--json` additionally reports the
-  resolution source and any registered document pane.
+- Human output reports the session, pane, attach command, creation state,
+  resolved terminal host and reason, and whether a tmux client is already
+  attached. `--json` additionally reports `terminal_host`,
+  `terminal_host_reason`, `auto_start_tmux`, the session-resolution source, and
+  any registered document pane. `--ide-terminal` is a typed observation from an
+  IDE integration, not a host override.
+- The receipt is the sole plugin policy input. Plugins focus an already-matching
+  terminal, reuse or create an IDE terminal only for a detached session whose
+  resolved host is `ide`, and perform no presentation for `external` or `none`.
 - `agent-doc start <FILE>` uses the same operation outside tmux, provisions a
   pane when necessary, and re-executes the original lifecycle flags inside that
   pane. A host without tmux fails closed with workspace-image guidance from the

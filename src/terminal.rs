@@ -41,18 +41,31 @@
 //! - resolve_session_name_explicit_beats_project_binding: flag "correct" + binding "ws" → returns "correct"
 
 use anyhow::{Context, Result};
+use std::collections::BTreeMap;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use tmux_router::Tmux;
+
+use agent_doc_config::terminal_host::{
+    ResolvedTerminalHost, ResolvedTerminalPolicy, TerminalSessionState, resolve_terminal_policy,
+};
 
 /// Run the terminal command: ensure tmux session exists, launch terminal if needed.
 pub fn run(file: &Path, session_name: Option<&str>) -> Result<()> {
     let tmux = Tmux::default();
-    let cfg = agent_doc_config::load()?;
 
     // Step 1: Resolve the target session
     let target = resolve_target_session(&tmux, file, session_name)?;
+    let session_state = match &target {
+        SessionTarget::Attached(_) => TerminalSessionState::Attached,
+        SessionTarget::Detached(_) => TerminalSessionState::Detached,
+        SessionTarget::Create(_) => TerminalSessionState::Missing,
+    };
+    let policy = terminal_policy_for_file(&tmux, file, session_state)?;
+    if let Some(failure) = policy.failure.as_deref() {
+        anyhow::bail!("{failure}");
+    }
 
     match target {
         SessionTarget::Attached(name) => {
@@ -67,11 +80,17 @@ pub fn run(file: &Path, session_name: Option<&str>) -> Result<()> {
                 "[terminal] session '{}' exists but is detached — opening terminal to attach",
                 name
             );
-            launch_terminal(&cfg, &name)
+            launch_resolved_terminal(&policy, &name)
         }
         SessionTarget::Create(name) => {
+            if !policy.auto_start_tmux {
+                anyhow::bail!(
+                    "tmux session '{}' is absent and terminal auto-start is disabled; start it manually, then retry",
+                    name
+                );
+            }
             eprintln!("[terminal] no active session found — creating '{}'", name);
-            launch_terminal(&cfg, &name)
+            launch_resolved_terminal(&policy, &name)
         }
     }
 }
@@ -166,13 +185,76 @@ fn pane_session_name(tmux: &Tmux, pane_id: &str) -> Option<String> {
 // Terminal launch
 // ---------------------------------------------------------------------------
 
-/// Build the tmux command and launch the configured terminal emulator.
-fn launch_terminal(cfg: &agent_doc_config::Config, session_name: &str) -> Result<()> {
+/// Build the tmux command and launch the resolved external terminal emulator.
+fn launch_resolved_terminal(policy: &ResolvedTerminalPolicy, session_name: &str) -> Result<()> {
+    match policy.host {
+        ResolvedTerminalHost::External => {}
+        ResolvedTerminalHost::Ide => anyhow::bail!(
+            "terminal host resolved to IDE; run the document from the registered editor terminal endpoint"
+        ),
+        ResolvedTerminalHost::None => {
+            anyhow::bail!("No terminal host available: {}", policy.reason)
+        }
+    }
     let tmux_command = format!("tmux new-session -A -s {}", shell_escape(session_name));
-    let terminal_cmd = resolve_terminal_command(cfg, &tmux_command)?;
+    let terminal_cmd = resolve_terminal_command(policy.command.as_deref(), &tmux_command)?;
 
     eprintln!("[terminal] launching: {}", terminal_cmd);
     spawn_terminal(&terminal_cmd)
+}
+
+fn terminal_policy_for_file(
+    tmux: &Tmux,
+    file: &Path,
+    session_state: TerminalSessionState,
+) -> Result<ResolvedTerminalPolicy> {
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_with_source(
+        file,
+        "terminal-command-policy",
+    )
+    .with_context(|| format!("failed to resolve terminal policy from {}", file.display()))?
+    .into_content();
+    let (document, _) = agent_doc_frontmatter::frontmatter::parse(&content)
+        .with_context(|| format!("failed to parse terminal policy from {}", file.display()))?;
+    let project = agent_doc_project_config_io::load_project_for_doc(file);
+    let global = agent_doc_config::load()?;
+    let env: BTreeMap<String, String> = std::env::vars().collect();
+    let tmux_installed = tmux
+        .cmd()
+        .arg("-V")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    let report = agent_doc_config::terminal_host::classify(
+        &env,
+        tmux_installed,
+        tmux_installed && tmux.running(),
+    );
+    let command_available = project
+        .terminal
+        .as_ref()
+        .and_then(|config| config.command.as_deref())
+        .is_some_and(|command| !command.trim().is_empty())
+        || global
+            .terminal
+            .as_ref()
+            .and_then(|config| config.command.as_deref())
+            .is_some_and(|command| !command.trim().is_empty())
+        || std::env::var("TERMINAL").is_ok_and(|terminal| !terminal.trim().is_empty());
+    let external_available =
+        agent_doc_config::terminal_host::external_host_available(&report, command_available);
+
+    Ok(resolve_terminal_policy(
+        document.terminal_host,
+        project.terminal.as_ref(),
+        global.terminal.as_ref(),
+        report.resolved_terminal_host,
+        false,
+        external_available,
+        session_state,
+    ))
 }
 
 /// Resolve the tmux session name from (in order):
@@ -224,10 +306,8 @@ fn is_session_attached(tmux: &Tmux, session: &str) -> bool {
 /// 1. `[terminal] command` in config.toml
 /// 2. `$TERMINAL` env var (used as: `$TERMINAL -e {tmux_command}`)
 /// 3. Error with instructions
-fn resolve_terminal_command(cfg: &agent_doc_config::Config, tmux_command: &str) -> Result<String> {
-    if let Some(ref terminal) = cfg.terminal
-        && let Some(ref cmd_template) = terminal.command
-    {
+fn resolve_terminal_command(command: Option<&str>, tmux_command: &str) -> Result<String> {
+    if let Some(cmd_template) = command {
         let resolved = cmd_template.replace("{tmux_command}", tmux_command);
         return Ok(resolved);
     }
@@ -329,21 +409,18 @@ mod tests {
 
     #[test]
     fn resolve_terminal_from_config() {
-        let cfg = agent_doc_config::Config {
-            terminal: Some(agent_doc_config::TerminalConfig {
-                command: Some("wezterm start -- {tmux_command}".to_string()),
-            }),
-            ..Default::default()
-        };
-        let result = resolve_terminal_command(&cfg, "tmux new-session -A -s 0").unwrap();
+        let result = resolve_terminal_command(
+            Some("wezterm start -- {tmux_command}"),
+            "tmux new-session -A -s 0",
+        )
+        .unwrap();
         assert_eq!(result, "wezterm start -- tmux new-session -A -s 0");
     }
 
     #[test]
     fn resolve_terminal_no_config_no_env() {
-        let cfg = agent_doc_config::Config::default();
         let _terminal = EnvGuard::unset("TERMINAL");
-        let result = resolve_terminal_command(&cfg, "tmux new-session -A -s 0");
+        let result = resolve_terminal_command(None, "tmux new-session -A -s 0");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("No terminal configured"), "got: {}", err);

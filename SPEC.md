@@ -63,6 +63,11 @@ retained state.
 Individual specs are in `specs/`. This file is the index.
 
 Notable invariants:
+- Terminal presentation and tmux session ownership are separate. The binary
+  purely resolves document/project/global host policy against typed environment
+  observations, and editor plugins consume its receipt. An attached client wins;
+  `auto` prefers an available IDE over an external terminal; explicit unavailable
+  hosts fail closed. Project `tmux_session` remains the only session-name setting.
 - Prompt provenance normalization preserves Markdown quote structure: it never
 rewrites `> ...` as `❯ > ...`. Marker-only projection envelopes and restored
 quoted prompts already adjacent to their response are semantic diagnostics, not

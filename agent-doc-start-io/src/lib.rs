@@ -1,5 +1,9 @@
 //! Start command runtime I/O for agent-doc.
 
+use agent_doc_config::terminal_host::{
+    ResolvedTerminalHost, ResolvedTerminalPolicy, TerminalHostReport, TerminalSessionState,
+    external_host_available, resolve_terminal_policy,
+};
 use agent_doc_controller::status::LaunchMode;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_run_context_io::AgentDocContextExt;
@@ -32,6 +36,9 @@ pub struct TmuxEnsureOutcome {
     pub attached: bool,
     pub resolution: String,
     pub document_pane: Option<String>,
+    pub terminal_host: ResolvedTerminalHost,
+    pub terminal_host_reason: String,
+    pub auto_start_tmux: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,13 +57,32 @@ pub fn ensure_tmux_session(
     explicit_session: Option<&str>,
 ) -> Result<TmuxEnsureOutcome> {
     let tmux = tmux_for_environment();
-    ensure_tmux_session_with(&tmux, file, explicit_session)
+    ensure_tmux_session_with_ide(&tmux, file, explicit_session, false)
+}
+
+/// IDE-originated ensure. The boolean is a capability observation, not a host
+/// override: frontmatter and project/global config still own host selection.
+pub fn ensure_tmux_session_for_ide(
+    file: &Path,
+    explicit_session: Option<&str>,
+) -> Result<TmuxEnsureOutcome> {
+    let tmux = tmux_for_environment();
+    ensure_tmux_session_with_ide(&tmux, file, explicit_session, true)
 }
 
 pub fn ensure_tmux_session_with(
     tmux: &tmux_router::Tmux,
     file: &Path,
     explicit_session: Option<&str>,
+) -> Result<TmuxEnsureOutcome> {
+    ensure_tmux_session_with_ide(tmux, file, explicit_session, false)
+}
+
+fn ensure_tmux_session_with_ide(
+    tmux: &tmux_router::Tmux,
+    file: &Path,
+    explicit_session: Option<&str>,
+    ide_available: bool,
 ) -> Result<TmuxEnsureOutcome> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -73,6 +99,15 @@ pub fn ensure_tmux_session_with(
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
 
     if let Some(target) = live_registry_target(tmux, &project_root, &canonical)? {
+        let state = if is_session_attached(tmux, &target.session_name) {
+            TerminalSessionState::Attached
+        } else {
+            TerminalSessionState::Detached
+        };
+        let policy = terminal_policy_for_file(&canonical, &report, ide_available, state)?;
+        if let Some(failure) = policy.failure.as_deref() {
+            anyhow::bail!("{failure}");
+        }
         return Ok(tmux_ensure_outcome(
             tmux,
             target.session_name,
@@ -80,14 +115,35 @@ pub fn ensure_tmux_session_with(
             false,
             "live_registry",
             target.document_match.then_some(target.pane_id),
+            &policy,
         ));
     }
 
     let configured = agent_doc_project_config_io::load_project_for_doc(&canonical).tmux_session;
     let (session_name, resolution) =
         resolve_tmux_session_name(explicit_session, configured.as_deref())?;
+    let session_exists = tmux.session_exists(&session_name);
+    let state = if session_exists {
+        if is_session_attached(tmux, &session_name) {
+            TerminalSessionState::Attached
+        } else {
+            TerminalSessionState::Detached
+        }
+    } else {
+        TerminalSessionState::Missing
+    };
+    let policy = terminal_policy_for_file(&canonical, &report, ide_available, state)?;
+    if let Some(failure) = policy.failure.as_deref() {
+        anyhow::bail!("{failure}");
+    }
+    if !session_exists && !policy.auto_start_tmux {
+        anyhow::bail!(
+            "tmux session '{}' is absent and terminal auto-start is disabled; start it manually, then retry",
+            session_name
+        );
+    }
     let mut created = false;
-    let pane_id = if tmux.session_exists(&session_name) {
+    let pane_id = if session_exists {
         first_session_pane(tmux, &session_name)?
     } else {
         match tmux.new_session(&session_name, &project_root) {
@@ -110,6 +166,7 @@ pub fn ensure_tmux_session_with(
         created,
         resolution,
         None,
+        &policy,
     ))
 }
 
@@ -207,9 +264,7 @@ fn tmux_for_environment() -> tmux_router::Tmux {
     }
 }
 
-fn terminal_host_report(
-    tmux: &tmux_router::Tmux,
-) -> agent_doc_config::terminal_host::TerminalHostReport {
+fn terminal_host_report(tmux: &tmux_router::Tmux) -> TerminalHostReport {
     let env: BTreeMap<String, String> = std::env::vars().collect();
     let tmux_installed = tmux
         .cmd()
@@ -224,6 +279,46 @@ fn terminal_host_report(
         tmux_installed,
         tmux_installed && tmux.running(),
     )
+}
+
+fn terminal_policy_for_file(
+    file: &Path,
+    report: &TerminalHostReport,
+    ide_available: bool,
+    session_state: TerminalSessionState,
+) -> Result<ResolvedTerminalPolicy> {
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_with_source(
+        file,
+        "start-terminal-policy",
+    )
+    .with_context(|| format!("failed to resolve terminal policy from {}", file.display()))?
+    .into_content();
+    let (document, _) = frontmatter::parse(&content)
+        .with_context(|| format!("failed to parse terminal policy from {}", file.display()))?;
+    let project = agent_doc_project_config_io::load_project_for_doc(file);
+    let global = agent_doc_config::load()?;
+    let command_available = project
+        .terminal
+        .as_ref()
+        .and_then(|config| config.command.as_deref())
+        .is_some_and(|command| !command.trim().is_empty())
+        || global
+            .terminal
+            .as_ref()
+            .and_then(|config| config.command.as_deref())
+            .is_some_and(|command| !command.trim().is_empty())
+        || std::env::var("TERMINAL").is_ok_and(|terminal| !terminal.trim().is_empty());
+    let external_available = external_host_available(report, command_available);
+
+    Ok(resolve_terminal_policy(
+        document.terminal_host,
+        project.terminal.as_ref(),
+        global.terminal.as_ref(),
+        report.resolved_terminal_host,
+        ide_available,
+        external_available,
+        session_state,
+    ))
 }
 
 fn live_registry_target(
@@ -296,23 +391,36 @@ fn tmux_ensure_outcome(
     created: bool,
     resolution: &str,
     document_pane: Option<String>,
+    policy: &ResolvedTerminalPolicy,
 ) -> TmuxEnsureOutcome {
     let tmux_prefix = tmux.server_socket.as_deref().map_or_else(
         || "tmux".to_string(),
         |socket| format!("tmux -L {} -f /dev/null", shell_escape(socket)),
     );
     let attached = is_session_attached(tmux, &session_name);
+    let default_attach_command = format!(
+        "{tmux_prefix} attach-session -t {}",
+        shell_escape(&session_name)
+    );
+    let attach_command = policy.attach_command.as_deref().map_or_else(
+        || default_attach_command.clone(),
+        |template| {
+            template
+                .replace("{session}", &shell_escape(&session_name))
+                .replace("{tmux_command}", &default_attach_command)
+        },
+    );
     TmuxEnsureOutcome {
-        attach_command: format!(
-            "{tmux_prefix} attach-session -t {}",
-            shell_escape(&session_name)
-        ),
+        attach_command,
         session_name,
         pane_id,
         created,
         attached,
         resolution: resolution.to_string(),
         document_pane,
+        terminal_host: policy.host,
+        terminal_host_reason: policy.reason.clone(),
+        auto_start_tmux: policy.auto_start_tmux,
     }
 }
 
@@ -2014,6 +2122,65 @@ mod tests {
         assert_eq!(first.pane_id, second.pane_id);
         assert_eq!(tmux.list_session_panes("headless").len(), 1);
         assert!(first.attach_command.contains("attach-session -t headless"));
+    }
+
+    #[test]
+    fn ide_tmux_ensure_uses_project_attach_template() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            r#"
+[terminal]
+host = "ide"
+attach_command = "custom-attach --session {session} --command {tmux_command}"
+"#,
+        )
+        .unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "---\nagent_doc_session: ide-policy\n---\n").unwrap();
+        let socket = format!("agent-doc-ensure-{}", uuid::Uuid::new_v4());
+        let tmux = tmux_router::tmux::IsolatedTmux::new(&socket);
+
+        let outcome = ensure_tmux_session_with_ide(&tmux, &file, Some("ide-policy"), true)
+            .expect("IDE ensure must use the binary-owned policy");
+
+        assert_eq!(outcome.terminal_host, ResolvedTerminalHost::Ide);
+        assert!(
+            outcome
+                .attach_command
+                .starts_with("custom-attach --session ide-policy --command tmux -L")
+        );
+        assert!(
+            outcome
+                .attach_command
+                .contains("attach-session -t ide-policy")
+        );
+    }
+
+    #[test]
+    fn tmux_ensure_respects_disabled_auto_start() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            r#"
+[terminal]
+host = "none"
+auto_start_tmux = false
+"#,
+        )
+        .unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "---\nagent_doc_session: manual-tmux\n---\n").unwrap();
+        let socket = format!("agent-doc-ensure-{}", uuid::Uuid::new_v4());
+        let tmux = tmux_router::tmux::IsolatedTmux::new(&socket);
+
+        let error = ensure_tmux_session_with_ide(&tmux, &file, Some("manual-tmux"), true)
+            .expect_err("missing session must not be created");
+
+        assert!(error.to_string().contains("auto-start is disabled"));
+        assert!(!tmux.session_exists("manual-tmux"));
     }
 
     #[test]

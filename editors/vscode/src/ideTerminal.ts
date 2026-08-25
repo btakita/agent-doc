@@ -6,10 +6,14 @@ export interface TmuxEnsureReceipt {
     attachCommand: string;
     created: boolean;
     attached: boolean;
+    terminalHost: string;
+    terminalHostReason: string;
+    autoStartTmux: boolean;
 }
 
 export enum IdeTerminalAttachDecision {
     NoopExternalAttached = 'noop_external_attached',
+    NoopConfiguredHost = 'noop_configured_host',
     FocusExisting = 'focus_existing',
     AttachExisting = 'attach_existing',
     CreateAndAttach = 'create_and_attach',
@@ -23,6 +27,9 @@ export function parseTmuxEnsureReceipt(raw: string): TmuxEnsureReceipt {
         || typeof value.attach_command !== 'string'
         || typeof value.created !== 'boolean'
         || typeof value.attached !== 'boolean'
+        || typeof value.terminal_host !== 'string'
+        || typeof value.terminal_host_reason !== 'string'
+        || typeof value.auto_start_tmux !== 'boolean'
     ) {
         throw new Error('tmux ensure returned an invalid receipt');
     }
@@ -32,11 +39,15 @@ export function parseTmuxEnsureReceipt(raw: string): TmuxEnsureReceipt {
         attachCommand: value.attach_command,
         created: value.created,
         attached: value.attached,
+        terminalHost: value.terminal_host,
+        terminalHostReason: value.terminal_host_reason,
+        autoStartTmux: value.auto_start_tmux,
     };
 }
 
 export function decideIdeTerminalAttach(
-    sessionAttached: boolean,
+terminalHost: string,
+sessionAttached: boolean,
     existingTerminalAlive: boolean,
 ): IdeTerminalAttachDecision {
     if (sessionAttached && existingTerminalAlive) {
@@ -44,6 +55,9 @@ export function decideIdeTerminalAttach(
     }
     if (sessionAttached) {
         return IdeTerminalAttachDecision.NoopExternalAttached;
+    }
+    if (terminalHost !== 'ide') {
+        return IdeTerminalAttachDecision.NoopConfiguredHost;
     }
     if (existingTerminalAlive) {
         return IdeTerminalAttachDecision.AttachExisting;

@@ -22,6 +22,12 @@ session_path = ".id"
 [agents.opencode]
 command = "opencode"
 args = ["run"]
+
+[terminal]
+host = "auto"
+auto_start_tmux = true
+# command = "wezterm start -- {tmux_command}"
+# attach_command = "tmux attach-session -t {session}"
 ```
 
 ## Fields
@@ -34,6 +40,10 @@ args = ["run"]
 | `args` | Arguments passed before the prompt |
 | `result_path` | JSON path to extract the response text |
 | `session_path` | JSON path to extract the session ID |
+| `[terminal].host` | Terminal presentation host: `auto`, `ide`, `external`, or `none` |
+| `[terminal].command` | External-terminal command template; supports `{tmux_command}` |
+| `[terminal].auto_start_tmux` | Allow creation of a missing tmux session (default `true`) |
+| `[terminal].attach_command` | IDE attach template; supports `{session}` and `{tmux_command}` |
 
 ## Resolution order
 
@@ -57,6 +67,13 @@ opencode_model: zai/glm-5
 ```
 
 These override the config file for that specific document.
+
+`terminal_host: auto|ide|external|none` may also be set in document
+frontmatter. Its precedence is document, project, global, then `auto`. The other
+terminal fields use project then global precedence. Terminal configuration does
+not contain a session name: use project `tmux_session` / `agent-doc session set`.
+See the [Coder workspace terminal runbook](../../runbooks/coder-workspace.md) for
+remote IDE setup and headless failure behavior.
 
 To dogfood Agent Doc itself, opt a document into actionable failure prompts:
 
@@ -151,6 +168,7 @@ Location: `.agent-doc/config.toml` (relative to project root).
 | Field | Description |
 |-------|-------------|
 | `tmux_session` | Tmux session name bound to this project |
+| `[terminal]` | Project terminal policy; the same fields as global `[terminal]` except session naming remains top-level `tmux_session` |
 | `agent_doc_auto_compact` | Line threshold for automatic compaction opt-in |
 | `agent_doc_supervisor_stderr_log` | Supervisor stderr log path. Relative paths resolve from the project root; absolute paths are used as written. Defaults to `.agent-doc/logs/supervisor-stderr.log` |
 | `documents.include` | Project-relative globs for session document opt-in |

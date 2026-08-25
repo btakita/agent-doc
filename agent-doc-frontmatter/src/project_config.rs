@@ -24,7 +24,26 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::frontmatter::{FreeTextExecutionMode, Frontmatter, PendingCaptureGuardMode};
+use crate::frontmatter::{
+    FreeTextExecutionMode, Frontmatter, PendingCaptureGuardMode, TerminalHostPreference,
+};
+
+/// Project terminal presentation policy. The project `tmux_session` binding
+/// remains the only session-name setting.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectTerminalConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<TerminalHostPreference>,
+    /// External-terminal command template. `{tmux_command}` is substituted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// Whether a missing tmux session may be created automatically. Defaults true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_start_tmux: Option<bool>,
+    /// IDE attach command template. `{session}` and `{tmux_command}` are substituted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attach_command: Option<String>,
+}
 
 /// Guard modes for `[guards]` in `.agent-doc/config.toml`.
 ///
@@ -299,6 +318,9 @@ pub struct ProjectConfig {
     /// Target tmux session name for this project.
     #[serde(default)]
     pub tmux_session: Option<String>,
+    /// Project terminal policy. Session naming stays in `tmux_session` above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<ProjectTerminalConfig>,
     /// Explicit opt-in for automatic compaction/reload policies.
     /// Session-accretion heuristics never compact by themselves; omit to disable.
     #[serde(default, alias = "auto_compact")]
@@ -562,6 +584,32 @@ fn glob_match_segment(pattern: &str, text: &str) -> bool {
 #[cfg(test)]
 mod guard_resolution_tests {
     use super::*;
+
+    #[test]
+    fn project_terminal_policy_deserializes_without_a_second_session_name() {
+        let cfg = parse_project_toml(
+            r#"
+tmux_session = "project-session"
+
+[terminal]
+host = "external"
+command = "kitty -- {tmux_command}"
+auto_start_tmux = true
+attach_command = "tmux attach-session -t {session}"
+"#,
+        )
+        .expect("project terminal policy must parse");
+
+        assert_eq!(cfg.tmux_session.as_deref(), Some("project-session"));
+        let terminal = cfg.terminal.expect("terminal config");
+        assert_eq!(terminal.host, Some(TerminalHostPreference::External));
+        assert_eq!(terminal.command.as_deref(), Some("kitty -- {tmux_command}"));
+        assert_eq!(terminal.auto_start_tmux, Some(true));
+        assert_eq!(
+            terminal.attach_command.as_deref(),
+            Some("tmux attach-session -t {session}")
+        );
+    }
 
     /// `#guardkeyalias`: the frontmatter spelling of each guard must parse in
     /// `[guards]` and round-trip back out as the canonical short key, so the

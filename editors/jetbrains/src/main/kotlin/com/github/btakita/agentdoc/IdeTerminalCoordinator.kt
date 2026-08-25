@@ -17,10 +17,14 @@ internal data class IdeTerminalEnsureOutcome(
     val attachCommand: String,
     val created: Boolean,
     val attached: Boolean,
+    val terminalHost: String,
+    val terminalHostReason: String,
+    val autoStartTmux: Boolean,
 )
 
 internal enum class IdeTerminalAttachDecision {
     NOOP_EXTERNAL_ATTACHED,
+    NOOP_CONFIGURED_HOST,
     FOCUS_EXISTING,
     ATTACH_EXISTING,
     CREATE_AND_ATTACH,
@@ -34,15 +38,20 @@ internal fun parseIdeTerminalEnsureOutcome(json: String): IdeTerminalEnsureOutco
         attachCommand = value.get("attach_command").asString,
         created = value.get("created").asBoolean,
         attached = value.get("attached").asBoolean,
+        terminalHost = value.get("terminal_host").asString,
+        terminalHostReason = value.get("terminal_host_reason").asString,
+        autoStartTmux = value.get("auto_start_tmux").asBoolean,
     )
 }
 
 internal fun decideIdeTerminalAttach(
+    terminalHost: String,
     sessionAttached: Boolean,
     existingTabAlive: Boolean,
 ): IdeTerminalAttachDecision = when {
     sessionAttached && existingTabAlive -> IdeTerminalAttachDecision.FOCUS_EXISTING
     sessionAttached -> IdeTerminalAttachDecision.NOOP_EXTERNAL_ATTACHED
+    terminalHost != "ide" -> IdeTerminalAttachDecision.NOOP_CONFIGURED_HOST
     existingTabAlive -> IdeTerminalAttachDecision.ATTACH_EXISTING
     else -> IdeTerminalAttachDecision.CREATE_AND_ATTACH
 }
@@ -67,7 +76,7 @@ internal object IdeTerminalCoordinator {
             val result = try {
                 val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
                 SyncLayoutAction.runCommandWithTimeout(
-                    listOf(agentDoc, "tmux", "ensure", relativePath, "--json"),
+                    listOf(agentDoc, "tmux", "ensure", relativePath, "--json", "--ide-terminal"),
                     cwd,
                     ENSURE_TIMEOUT_MS,
                 )
@@ -99,8 +108,9 @@ internal object IdeTerminalCoordinator {
 
                 try {
                     val existingAlive = IdeTerminalHost.hasLiveAgentDocTab(project)
-                    when (decideIdeTerminalAttach(outcome.attached, existingAlive)) {
+                    when (decideIdeTerminalAttach(outcome.terminalHost, outcome.attached, existingAlive)) {
                         IdeTerminalAttachDecision.NOOP_EXTERNAL_ATTACHED -> Unit
+                        IdeTerminalAttachDecision.NOOP_CONFIGURED_HOST -> Unit
                         IdeTerminalAttachDecision.FOCUS_EXISTING ->
                             IdeTerminalHost.focusExisting(project)
                         IdeTerminalAttachDecision.ATTACH_EXISTING ->

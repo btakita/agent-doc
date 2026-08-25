@@ -2,6 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
+  codex: e045956e-575c-4573-b1ed-1371613ceed4
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -370,6 +371,27 @@ GitHub CI run [32882361585](https://github.com/btakita/tsift/actions/runs/328823
 Preflight also reported that the installed agent-doc binary trails two committed changes. I left it untouched because `src/agent-doc` contains concurrent unrelated work; that maintenance remains separate from this tsift issue cycle.
 
 The next queue item, `release + publish`, remains pending for its own cycle.
+
+### Re: v0.1.85 release triggered; publication pending — gpt-5.6
+
+Prepared and pushed tsift `0.1.85`:
+
+- release commit `ba0eeb9` updates all 26 Rust crates, `Cargo.lock`, the OpenCode npm package, version notes, and generated navigation/command surfaces;
+- annotated tag `v0.1.85` is pushed to `origin`;
+- `make check` passed;
+- `cargo publish --workspace --locked --dry-run --allow-dirty` successfully packaged and verified all 26 Rust crates;
+- `npm run publish:check` successfully built the `opencode-tsift@0.1.85` publication tarball;
+- neither the tag nor the `0.1.85` crates.io/npm packages existed before release;
+- the installed local `tsift` binary is now `0.1.85`;
+- superproject pointer commit `5105d26de` records the release revision, with its push following this document closeout.
+
+The tag-triggered [Release workflow](https://github.com/btakita/tsift/actions/runs/32883592164) is in progress and owns the GitHub Release, crates.io OIDC publication, and npm OIDC publication. The matching [CI run](https://github.com/btakita/tsift/actions/runs/32883587733) is also in progress; the preceding issue-fix CI run completed successfully.
+
+I am leaving the `release + publish` queue head active until the workflow is green and the published artifacts are visible, rather than claiming an external publication that is still pending.
+
+The stale agent-doc warning was also resolved without touching concurrent edits: committed `src/agent-doc` HEAD `05f292d72` was installed from an isolated clean sibling worktree, including the duplicate-closeout replay fix, and the temporary worktree was removed.
+
+The exchange is large, but the queue remains active, so this cycle was not compacted.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 
@@ -377,7 +399,7 @@ The next queue item, `release + publish`, remains pending for its own cycle.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~goal Fix open issues in https://github.com/btakita/tsift/issues~~
-- release + publish
+- 🚧 release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

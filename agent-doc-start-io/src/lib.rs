@@ -98,6 +98,13 @@ fn ensure_tmux_session_with_ide(
         .or_else(|| agent_doc_project_config_io::project_root_for_doc(&canonical))
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
 
+    let reconciled_server_before_lookup = if tmux.running() {
+        reconcile_tmux_server_identity(tmux, &project_root)?;
+        true
+    } else {
+        false
+    };
+
     if let Some(target) = live_registry_target(tmux, &project_root, &canonical)? {
         let state = if is_session_attached(tmux, &target.session_name) {
             TerminalSessionState::Attached
@@ -158,6 +165,9 @@ fn ensure_tmux_session_with_ide(
             Err(error) => return Err(error),
         }
     };
+    if !reconciled_server_before_lookup {
+        reconcile_tmux_server_identity(tmux, &project_root)?;
+    }
 
     Ok(tmux_ensure_outcome(
         tmux,
@@ -168,6 +178,22 @@ fn ensure_tmux_session_with_ide(
         None,
         &policy,
     ))
+}
+
+fn reconcile_tmux_server_identity(tmux: &tmux_router::Tmux, project_root: &Path) -> Result<()> {
+    let outcome = agent_doc_session_registry_io::tmux_server::reconcile_tmux_server_identity_in(
+        project_root,
+        tmux,
+    )?;
+    if outcome.server_replaced {
+        let stale_editor_sockets_removed =
+            agent_doc_ipc_io::prune_stale_editor_sockets(project_root)?;
+        eprintln!(
+            "[tmux-server] replacement detected; removed {} stale registry row(s) and {} stale editor socket(s)",
+            outcome.stale_rows_removed, stale_editor_sockets_removed
+        );
+    }
+    Ok(())
 }
 
 /// From a non-tmux `agent-doc start`, create/reuse the project session and

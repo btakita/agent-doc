@@ -2205,6 +2205,7 @@ dependencies = [
  "agent-doc-harness",
  "agent-doc-hash",
  "agent-doc-hooks-io",
+ "agent-doc-ipc-io",
  "agent-doc-log-time",
  "agent-doc-model-tier",
  "agent-doc-ops-log-io",

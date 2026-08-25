@@ -63,6 +63,14 @@ use std::time::Duration;
 pub mod editor_target;
 
 const SOCKET_FILENAME_PREFIX: &str = "ipc";
+const LEGACY_SOCKET_FILENAME_PREFIX: &str = "agent-doc";
+
+/// Optional project-specific directory for editor AF_UNIX sockets.
+///
+/// Coder volumes backed by 9p or a network filesystem may persist
+/// `.agent-doc` while refusing AF_UNIX binds. Point this at a short, local,
+/// project-specific runtime directory in that environment.
+pub const AGENT_DOC_SOCKET_DIR_ENV: &str = "AGENT_DOC_SOCKET_DIR";
 
 /// Best-effort transport marker logger used by the listener.
 pub type OpsLogger = fn(&Path, &str);
@@ -162,10 +170,25 @@ pub fn socket_path(project_root: &Path) -> PathBuf {
     socket_path_for_pid(project_root, u64::from(std::process::id()))
 }
 
+pub fn socket_directory(project_root: &Path) -> PathBuf {
+    socket_directory_with_override(
+        project_root,
+        std::env::var_os(AGENT_DOC_SOCKET_DIR_ENV).as_deref(),
+    )
+}
+
+fn socket_directory_with_override(
+    project_root: &Path,
+    override_dir: Option<&std::ffi::OsStr>,
+) -> PathBuf {
+    override_dir
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| project_root.join(".agent-doc"))
+}
+
 pub fn socket_path_for_pid(project_root: &Path, pid: u64) -> PathBuf {
-    project_root
-        .join(".agent-doc")
-        .join(format!("{SOCKET_FILENAME_PREFIX}-{pid}.sock"))
+    socket_directory(project_root).join(format!("{SOCKET_FILENAME_PREFIX}-{pid}.sock"))
 }
 
 /// Check if a socket listener is active.
@@ -189,7 +212,7 @@ pub fn is_listener_active(project_root: &Path) -> bool {
 /// live listener behind it as of this call. The caller's own pid is excluded so a
 /// process never fans out to itself.
 pub fn discover_listening_editor_pids(project_root: &Path) -> Vec<u64> {
-    let dir = project_root.join(".agent-doc");
+    let dir = socket_directory(project_root);
     let entries = match std::fs::read_dir(&dir) {
         Ok(entries) => entries,
         // Never swallow: a project root without a readable .agent-doc cannot be
@@ -220,6 +243,62 @@ pub fn discover_listening_editor_pids(project_root: &Path) -> Vec<u64> {
     pids.sort_unstable();
     pids.dedup();
     pids
+}
+
+/// Remove editor endpoint sockets that no longer have a listening process.
+///
+/// This is used after a durable tmux-server identity mismatch, when a Coder
+/// workspace restart may have preserved the project volume but killed every
+/// process that owned its endpoint. Live endpoints are retained, so restarting
+/// tmux alone cannot disconnect an editor that survived the restart.
+pub fn prune_stale_editor_sockets(project_root: &Path) -> Result<usize> {
+    let dir = socket_directory(project_root);
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(0),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("read editor socket directory {}", dir.display()));
+        }
+    };
+    let own_pid = u64::from(std::process::id());
+    let mut removed = 0;
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        let Some(name) = entry.file_name().to_str().map(ToOwned::to_owned) else {
+            continue;
+        };
+        let pid = [SOCKET_FILENAME_PREFIX, LEGACY_SOCKET_FILENAME_PREFIX]
+            .into_iter()
+            .find_map(|prefix| {
+                name.strip_prefix(&format!("{prefix}-"))?
+                    .strip_suffix(".sock")?
+                    .parse::<u64>()
+                    .ok()
+            });
+        let Some(pid) = pid else {
+            continue;
+        };
+        if pid == own_pid {
+            continue;
+        }
+
+        let existed = path.exists();
+        let live = if name.starts_with(&format!("{SOCKET_FILENAME_PREFIX}-")) {
+            is_listener_active_for_pid(project_root, pid)
+        } else {
+            false
+        };
+        if !live && existed {
+            if path.exists() {
+                std::fs::remove_file(&path)
+                    .with_context(|| format!("remove stale editor socket {}", path.display()))?;
+            }
+            removed += 1;
+        }
+    }
+    Ok(removed)
 }
 
 pub fn is_listener_active_for_pid(project_root: &Path, pid: u64) -> bool {
@@ -1022,14 +1101,24 @@ where
 
     // Ensure parent directory exists
     if let Some(parent) = sock_path.parent() {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "create editor IPC socket directory {} (set {AGENT_DOC_SOCKET_DIR_ENV} to a writable local project-specific directory if .agent-doc is on a filesystem without AF_UNIX support)",
+                parent.display()
+            )
+        })?;
     }
 
     eprintln!("[ipc-socket] listening on {:?}", sock_path);
 
     let name = sock_path.clone().to_fs_name::<GenericFilePath>()?;
     let opts = ListenerOptions::new().name(name);
-    let listener = opts.create_sync()?;
+    let listener = opts.create_sync().with_context(|| {
+        format!(
+            "bind editor IPC socket {}: this directory may not support AF_UNIX sockets; set {AGENT_DOC_SOCKET_DIR_ENV} to a writable local project-specific directory",
+            sock_path.display()
+        )
+    })?;
 
     // Handle each connection on its own thread so a slow/blocking apply handler
     // can never stall the accept loop and pile up connections in the socket
@@ -1310,13 +1399,53 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::io::Read as _;
-    use std::thread;
-    use std::time::{Duration, Instant};
+use super::*;
+use std::io::Read as _;
+use std::thread;
+use std::time::{Duration, Instant};
 
-    #[test]
-    fn connect_watchdog_returns_before_a_wedged_connect_finishes() {
+#[test]
+fn socket_directory_override_moves_editor_endpoint_off_project_storage() {
+    let root = Path::new("/workspace/project");
+    let override_dir = std::ffi::OsStr::new("/run/user/1000/agent-doc-project");
+    assert_eq!(
+        socket_directory_with_override(root, Some(override_dir)),
+        Path::new("/run/user/1000/agent-doc-project")
+    );
+    assert_eq!(
+        socket_directory_with_override(root, None),
+        Path::new("/workspace/project/.agent-doc")
+    );
+}
+
+#[test]
+fn stale_editor_socket_from_dead_process_is_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let socket_dir = dir.path().join(".agent-doc");
+    std::fs::create_dir_all(&socket_dir).unwrap();
+    let stale = socket_dir.join("ipc-4294967294.sock");
+    std::fs::write(&stale, b"").unwrap();
+
+    assert_eq!(prune_stale_editor_sockets(dir.path()).unwrap(), 1);
+    assert!(!stale.exists());
+}
+
+#[test]
+fn socket_creation_failure_names_the_local_override_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let blocked_root = dir.path().join("not-a-directory");
+    std::fs::write(&blocked_root, b"file").unwrap();
+
+    let error = start_listener(&blocked_root, |_| None)
+        .expect_err("a file cannot contain the .agent-doc socket directory");
+    let message = format!("{error:#}");
+    assert!(message.contains(AGENT_DOC_SOCKET_DIR_ENV), "{message}");
+    assert!(message.contains("AF_UNIX"), "{message}");
+    assert!(message.contains("project-specific directory"), "{message}");
+}
+
+#[test]
+fn connect_watchdog_returns_before_a_wedged_connect_finishes() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("wedged-connect.sock");
         let started = Instant::now();

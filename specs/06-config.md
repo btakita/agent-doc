@@ -28,6 +28,15 @@ Space-separated string. Codex-only alias for explicit Codex session configuratio
 Additional CLI arguments passed to the `opencode` process when spawned by `agent-doc start`.
 Space-separated string. OpenCode-only alias for explicit OpenCode session configuration.
 
+## AGENT_DOC_SOCKET_DIR
+
+Optional environment override for editor endpoint sockets. By default the IDE
+listener binds `<project_root>/.agent-doc/ipc-<pid>.sock`. Coder workspaces whose
+persistent project volume is backed by 9p or another filesystem without
+`AF_UNIX` support must set `AGENT_DOC_SOCKET_DIR` to a writable, local,
+project-specific runtime directory. Listener startup fails immediately with
+this recovery instruction when the selected directory cannot host the socket.
+
 ## codex_network_access
 
 Explicit Codex network policy for agent-doc-launched sessions.

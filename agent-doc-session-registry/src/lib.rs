@@ -11,6 +11,8 @@ use tmux_router::registry::{
 };
 use tmux_router::{Registry, RegistryEntry};
 
+pub mod tmux_server;
+
 #[derive(Debug, Clone, Copy)]
 pub struct RegistryEntryFields<'a> {
     pub session_id: &'a str,

@@ -21,6 +21,7 @@ agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.279" }
 agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.279" }
 agent-doc-hooks-io = { path = "../agent-doc-hooks-io", version = "0.35.279" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.279" }
 agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.279" }
 agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.35.279" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.279" }

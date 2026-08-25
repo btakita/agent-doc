@@ -16,6 +16,7 @@ pub use agent_doc_session_registry::{
 
 pub mod dispatch_registry;
 pub mod registration;
+pub mod tmux_server;
 
 pub const SESSIONS_FILE: &str = ".agent-doc/state.db";
 

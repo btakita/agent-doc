@@ -275,6 +275,21 @@ Verification: full `make check` passed; latest CI is green.
 Commits: `c10c642be` in agent-doc, outer pointer `ecde90942`.
 
 I intentionally did not install/recycle the binary because your Claude-owned contracts session is active. Once it finishes, the remaining step is installing the fixed binary and recycling controllers.
+
+### Re: Response
+
+Installed and recycled successfully.
+
+- Installed commit `c10c642be` as agent-doc `0.35.279`.
+- Recycled 4 controllers and marked 12 supervisors.
+- Reaped the remaining private-only handoff controllers and restarted them cleanly.
+- Public controllers are healthy for root, `haiven-dev`, and `boost-client`; no stranded handoff sockets remain.
+- Old nested `haiven-contracts` controller is stopped and will lazy-start when needed.
+- `contracts.md` was not written, committed, repaired, or otherwise modified.
+- zsh processes are idle; current controller CPU is low active-session usage, not thrashing.
+- Preserved all five concurrent unstaged `src/agent-doc` edits.
+- Removed the isolated installation worktree.
+- Updated the JetBrains plugin in four installed IDEs; restart running IDEs to load it.
 <!-- agent:boundary:64a22d63:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

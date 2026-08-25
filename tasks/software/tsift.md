@@ -1,8 +1,8 @@
 ---
 agent_doc_session: tsift-v0.1
 resume:
-  claude: e045956e-575c-4573-b1ed-1371613ceed4
-agent: claude
+  claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -17,7 +17,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -351,12 +351,33 @@ fail-closed case list is empty enough that its remaining assertion is about
 
 Both changes sit unreleased on top of `v0.1.83`. Say the word if you want them
 cut as `0.1.84`, or leave them to ride along with the next batch.
+
+### Re: Fix open tsift issues #11–#13 — gpt-5.6
+
+> **Queue prompt:**
+> goal Fix open issues in https://github.com/btakita/tsift/issues
+
+Implemented, committed, and pushed `349e4a0` (`fix: preserve rewrite scope and raw-read intent`), with closing references for #11, #12, and #13.
+
+- #11: `git show <rev>:<path>` is now recognized as a blob/tree object read and declines rewrite with a specific recovery message instead of producing an invalid diff-digest revision.
+- #12: git diff/show/log path filters are preserved as repeatable `diff-digest --pathspec` values, while the positional codebase remains a validated directory. Working-tree, cached, and revision collection all apply the filters, and reports expose the active pathspecs.
+- #13: raw-read routing now covers `cat`/`bat`/`less`, explicit `head`/`tail` windows, and `sed -n A,Bp`; small explicit source windows retain their exact ranges; recognized session transcripts and generic logs route to their bounded digests; `~/...` paths expand before classification; and declined rewrites explain the concrete reason.
+
+Specs, generated Code Navigation surfaces, unit coverage, and deterministic SimWorld expectations were updated. Verification passed focused rewrite/diff-digest/CLI/simulation tests and the final post-regeneration `make check`. The rebuilt `tsift 0.1.84` was installed and exercised live: a two-path git diff retained two pathspecs, a scoped digest reported exactly one file, blob selectors and non-directory roots failed explicitly, and `head -20` produced an exact 20-line source window.
+
+GitHub CI run [32882361585](https://github.com/btakita/tsift/actions/runs/32882361585) was queued at closeout; the preceding CI run was green. The exchange is large, but the queue is actively draining, so this cycle was not compacted.
+
+Preflight also reported that the installed agent-doc binary trails two committed changes. I left it untouched because `src/agent-doc` contains concurrent unrelated work; that maintenance remains separate from this tsift issue cycle.
+
+The next queue item, `release + publish`, remains pending for its own cycle.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~goal Fix open issues in https://github.com/btakita/tsift/issues~~
+- release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

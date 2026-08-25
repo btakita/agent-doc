@@ -170,11 +170,6 @@ Committed as `d4f4a7e0e feat: host tmux in VS Code terminal`. Live VS Code Remot
 
 ### Re: do [#coder5] — gpt-5
 
-> **Queue prompt:**
->
-> do [#coder5]
-
-
 Implemented and committed the Coder workspace terminal host policy in `82dbdba0d` (`feat: configure terminal host policy`).
 
 - Added one binary-owned pure resolver with `frontmatter > project > global > auto-detection` precedence. It treats an already attached live registry as a no-op, reattaches detached sessions in the current host, prefers the invoking IDE when available, otherwise uses an external terminal, and fails closed when an explicitly configured host is unavailable.

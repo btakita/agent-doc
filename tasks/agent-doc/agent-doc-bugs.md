@@ -146,6 +146,32 @@ Verification passed:
 - Live CLI receipt for the current external session reported `attached=true`, `created=false`, and the registered pane, proving the IDE no-op branch receives the required authority fact.
 
 Committed as `bec955e6e feat: host tmux in JetBrains terminal`. Live GUI tab behavior remains for the dedicated `#coder7` operator-verification phase.
+
+### Re: do [#coder4] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#coder4]
+
+
+Implemented Phase 4 VS Code IDE-hosted tmux parity.
+
+- Added a typed `tmux ensure --json` receipt parser and pure terminal-host decision table. VS Code leaves externally attached sessions alone, focuses a live `agent-doc` terminal, reuses a detached live terminal, or creates one with `window.createTerminal({ name: 'agent-doc', cwd })` and sends the binary-provided attach command.
+- Wired both serialized `Run Agent Doc` and autostarting manual layout sync through the same ensure path. Passive `no_autostart=true` surface observations remain launch-free.
+- Terminal API failures preserve route dispatch and show the exact attach command with a Copy action. CLI ensure failures remain fail-closed before dispatch.
+- Every VS Code CLI subprocess now forwards the opaque `vscode.env.remoteName` as `AGENT_DOC_VSCODE_REMOTE_NAME`, allowing the shared terminal-host classifier and diagnostics to identify Remote SSH/code-server-style IDE hosts without serializing credentials.
+- Added unit coverage, documented the behavior, and registered `ide_hosted_tmux_v1` in the shared Rust/editor capability vocabulary and parity matrix. JetBrains is conditional because its Terminal plugin is optional; VS Code is supported.
+
+Verification passed:
+
+- `npm test` — 175 passed.
+- `npm run check-types` and `npm run bundle` — passed.
+- Focused Rust plugin-feature conformance test — passed.
+- `make check` — 9,047 passed, 253 skipped; docs and all formal models passed.
+- Live `tmux ensure` resolved the current session through `live_registry` with `attached=true`, `created=false`, pane `%0`.
+- Simulated `vscode.env.remoteName=ssh-remote+agent-loop` classified `resolved_terminal_host=ide` with the opaque remote name retained in diagnostics.
+
+Committed as `d4f4a7e0e feat: host tmux in VS Code terminal`. Live VS Code Remote SSH GUI behavior remains for the dedicated `#coder7` operator-verification phase.
 <!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 
@@ -158,14 +184,13 @@ Committed as `bec955e6e feat: host tmux in JetBrains terminal`. Live GUI tab beh
 - ~~do [#coder1]~~
 - ~~do [#coder2]~~
 - ~~do [#coder3]~~
-- do [#coder4]
+- ~~do [#coder4]~~
 - do [#coder5]
 - do [#coder6]
 - do [#coder7]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#coder4] Phase 4 — VS Code IDE-hosted terminal: window.createTerminal/sendText parity, reuse live terminals, report vscode.env.remoteName in diagnostics, update editors/plugin-parity.tsv. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder5] Phase 5 — `[terminal] host/auto_start_tmux/attach_command` config + `terminal_host:` frontmatter override + pure resolution function shared by CLI and both plugins + runbooks/coder-workspace.md. Do NOT add a `[terminal] session` key — reuse the existing project `tmux_session` binding owned by `agent-doc session set`. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder6] Phase 6 — workspace restart resilience: record tmux server identity, GC stale registry rows + orphaned .sock files on server-identity mismatch, guard AF_UNIX-incapable project-root filesystems. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder7] [operator-verify] Phase 7 — live Coder workspace validation matrix (JB Gateway cold start, VS Code Remote-SSH cold start, both IDEs attached at once, workspace stop/start, image without tmux). Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md

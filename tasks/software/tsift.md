@@ -427,6 +427,19 @@ Not yet.
 - GitHub Release `v0.1.85`, crates.io `tsift@0.1.85`, and npm `opencode-tsift@0.1.85` are not visible yet.
 
 The agent-doc release queue remains open.
+
+### Re: Fix open tsift issue #14 — gpt-5
+
+Closed [tsift issue #14](https://github.com/btakita/tsift/issues/14) with pushed commit `50bcaa0` (`Fixes #14`). The fix:
+
+- recognizes canonical Claude/Codex transcript paths and captured `.output.txt` / `.log.txt` logs during bounded read rewrites;
+- admits an explicit recognized JSONL transcript into `session-review` with `explicit_target` provenance and fails nonzero for ordinary JSONL;
+- excludes Markdown structure from ordinary/federated search Symbol matches while preserving explicit Markdown facet searches and navigation;
+- requests Claude CLI JSON output, persists measured uncached/cache-created/cache-read input plus output usage, and prints per-file extraction progress on stderr.
+
+Verification is green: focused regression tests, workspace-wide `make check` (clippy with warnings denied, all Rust tests/doctests, OpenCode npm tests and package dry-run), `cargo install --path . --locked`, and live installed-CLI checks. A current Codex transcript rewrote to `session-digest`; direct review matched one Codex session via `explicit_target`; plain search omitted Markdown symbols while `--lang markdown` still returned them. The latest GitHub `CI` and 0.1.85 `Release` workflows both succeeded.
+
+The superproject pointer is committed as `ff30185f5`. The remaining queued release/publish item will release these fixes as the next tsift version. The Exchange is large, so this closeout keeps the response to the implementation and proof.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 

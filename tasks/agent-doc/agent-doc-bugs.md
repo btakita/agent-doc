@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a03706-bebb-7880-a611-6cb25e59b290
+  codex: 01a03734-3b32-7d33-acc6-84fa83826114
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -83,6 +83,32 @@ Verification passed: the full `agent-doc-preflight-io` test suite, `make check`,
 The three recorded fpe.md conflicts were real, but the evidence points to a stale loaded IntelliJ plugin generation: the IDE still had fpe.md open while the old bridge reported detached authority, allowing disk changes behind the dirty buffer. This was not caused by fpe.md content.
 
 I installed the verified binary/library and JetBrains package into every detected IDE root, including IntelliJ IDEA 2026.1. That activates the relay-side in-flight-edit guard and the new durable-liveness disk-write fence. The running IDE must still be restarted to load the new Kotlin package generation; native-library reload cannot replace that code. I did not force the restart because fpe.md has an active session/possibly unsaved buffer. Save or preserve that buffer, then restart IntelliJ IDEA 2026.1 before continuing edits in fpe.md.
+
+### Re: do [#coder1] — gpt-5
+
+Implemented Phase 1 terminal-host detection and released it in agent-doc 0.35.279.
+
+- Added a pure `TerminalHostEnv` classifier in `agent-doc-config`. It reports Coder workspace presence, an authoritative remote-IDE observation, display/SSH availability, tmux installation and server state, then resolves `ide`, `external`, or `none` with an explicit reason.
+- Added `agent-doc env` and `agent-doc env --json`; tmux is probed once at the command boundary and the classifier remains deterministic and unit-testable.
+- Coder detection uses the current agent's explicit `CODER=true` and workspace identity variables, while deliberately ignoring `CODER_AGENT_TOKEN`. The variable names were checked against Coder's current agent source: https://raw.githubusercontent.com/coder/coder/main/agent/agent.go
+- VS Code is bridged through `vscode.env.remoteName`, whose value is extension-defined and absent without a remote extension host: https://code.visualstudio.com/api/references/vscode-api
+- JetBrains is bridged through the current `IdeProductMode.isBackend` API, not a guessed environment flag: https://plugins.jetbrains.com/docs/intellij/api-notable-list-2025.html and https://plugins.jetbrains.com/docs/intellij/split-mode-and-remote-development.html
+- Covered laptop display, Coder plus VS Code Remote, SSH, missing tmux, and token-only false-positive cases. The CLI integration test also validates the JSON schema.
+- On this host, `agent-doc env --json` resolves `external`: display present, tmux installed/running, no Coder or remote-IDE signal. A live Coder workspace was not available here, so the exact Coder signals were verified against the authoritative source and exercised deterministically in tests.
+
+### Re: Compact Exchange and File Cache Conflict — gpt-5
+
+Fixed the shared authority race behind both failures and released it in agent-doc 0.35.279.
+
+The File Cache Conflict was caused by an editor replica registering and allocating its routed CRDT model before the separately scheduled reliable-sync `Open` frame arrived. Controller/write adapters looked only at durable liveness during that gap, falsely classified the document as editor-absent, wrote to disk, and detached authority while the JetBrains buffer still held unpublished text. Compact Exchange then encountered the stranded lazy-delivery projection and emitted an inapplicable response-cycle recovery message.
+
+- All controller, write, and convergence paths now use the relay-owned authority predicate: either a routed allocated CRDT model or durable reliable-sync liveness proves editor attachment. A registered replica therefore bridges the delayed-`Open` window and disk fallback is forbidden.
+- Added regressions for process-scoped replica registration across delayed liveness and for the write path never selecting disk during that gap.
+- Compact pre-write projection refusals now use the central retained-projection ownership model. Their remedy says to retry the same mutation after the editor observes the base and explicitly forbids `commit`, `write --commit`, or forced disk recovery when no response-cycle write owns the projection.
+- Added compact and ownership-guard regressions, plus updated the realtime and command specifications.
+- `make check` passes in full, `git diff --check` passes, version sync passes, and 0.35.279 is installed locally. Commit `d9a596599` is on `main`; tag `v0.35.279` is published. GitHub CI and Release were triggered.
+
+For `contracts.md`, the original Compact Exchange target remains safely retained by continuation `compact-projection-966ee7b4087795d9d5f0669817d206a37f284349ffdd4dbe6f8d277d9bd44f77-f5ac0a17-c77a-406b-824b-a87ab52e516a`; the corrected command returned that same continuation without rewriting. The editor is currently detached, so settlement awaits editor reconnection. I did not retry the compact or force a disk write, preserving the editor-owned content and avoiding another File Cache Conflict.
 <!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 
@@ -92,10 +118,16 @@ I installed the verified binary/library and JetBrains package into every detecte
 ## Pending / Not Built
 
 <!-- agent:queue priority go -->
+- ~~do [#coder1]~~
+- do [#coder2]
+- do [#coder3]
+- do [#coder4]
+- do [#coder5]
+- do [#coder6]
+- do [#coder7]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#coder1] Phase 1 — terminal-host environment classification (CODER_* / DISPLAY / SSH_CONNECTION / tmux presence) + `agent-doc env --json`. VERIFY the real Coder env var names, the JB remote-backend probe, and vscode.env.remoteName against a live workspace before landing. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder2] Phase 2 — headless tmux bootstrap: `agent-doc tmux ensure <FILE>` (idempotent detached new-session) and rewrite ensure_inside_tmux (agent-doc-start-io/src/lib.rs:934) to auto-start + re-exec into the pane instead of bailing. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder3] Phase 3 — JetBrains IDE-hosted terminal: open/reuse an `agent-doc` tab via TerminalToolWindowManager, run the attach command, dialog fallback with a Copy action. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder4] Phase 4 — VS Code IDE-hosted terminal: window.createTerminal/sendText parity, reuse live terminals, report vscode.env.remoteName in diagnostics, update editors/plugin-parity.tsv. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md

@@ -167,6 +167,21 @@ Verification passed:
 - Simulated `vscode.env.remoteName=ssh-remote+agent-loop` classified `resolved_terminal_host=ide` with the opaque remote name retained in diagnostics.
 
 Committed as `d4f4a7e0e feat: host tmux in VS Code terminal`. Live VS Code Remote SSH GUI behavior remains for the dedicated `#coder7` operator-verification phase.
+
+### Re: do [#coder5] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#coder5]
+
+
+Implemented and committed the Coder workspace terminal host policy in `82dbdba0d` (`feat: configure terminal host policy`).
+
+- Added one binary-owned pure resolver with `frontmatter > project > global > auto-detection` precedence. It treats an already attached live registry as a no-op, reattaches detached sessions in the current host, prefers the invoking IDE when available, otherwise uses an external terminal, and fails closed when an explicitly configured host is unavailable.
+- Kept the existing project `tmux_session` as the sole session-name authority; no second terminal session field was added.
+- Added project/global terminal policy configuration, custom attach templates, `auto_start_tmux`, strict IDE receipt fields, and IDE-origin signaling for VS Code and JetBrains.
+- Added the Coder workspace runbook and managed harness mirrors, including image prerequisites, JetBrains Gateway, VS Code Remote SSH, attached-client behavior, and diagnostics.
+- Verified Rust policy/start tests, CLI tests, VS Code tests/typecheck/bundle, JetBrains tests/plugin build, architecture guards, managed documentation mirrors, and a final full `make check` (9,056 tests passed).
 <!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 
@@ -180,13 +195,12 @@ Committed as `d4f4a7e0e feat: host tmux in VS Code terminal`. Live VS Code Remot
 - ~~do [#coder2]~~
 - ~~do [#coder3]~~
 - ~~do [#coder4]~~
-- do [#coder5]
+- ~~do [#coder5]~~
 - do [#coder6]
 - do [#coder7]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#coder5] Phase 5 — `[terminal] host/auto_start_tmux/attach_command` config + `terminal_host:` frontmatter override + pure resolution function shared by CLI and both plugins + runbooks/coder-workspace.md. Do NOT add a `[terminal] session` key — reuse the existing project `tmux_session` binding owned by `agent-doc session set`. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder6] Phase 6 — workspace restart resilience: record tmux server identity, GC stale registry rows + orphaned .sock files on server-identity mismatch, guard AF_UNIX-incapable project-root filesystems. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder7] [operator-verify] Phase 7 — live Coder workspace validation matrix (JB Gateway cold start, VS Code Remote-SSH cold start, both IDEs attached at once, workspace stop/start, image without tmux). Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 <!-- /agent:backlog -->

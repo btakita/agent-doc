@@ -1813,6 +1813,18 @@ pub trait EditorConvergenceEffects {
         Ok(None)
     }
 
+    /// Observe the typed realtime authority immediately before authorizing a
+    /// detached disk write. Only `Detached` permits that write; every
+    /// controller-owned or indeterminate state blocks it.
+    fn observe_editor_authority_for_disk_write(
+        &self,
+        file: &Path,
+        source: &str,
+    ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+        let _ = (file, source);
+        Ok(agent_doc_crdt_relay_io::CurrentText::Detached)
+    }
+
     fn apply_canonical_replace_if_attached(
         &self,
         file: &Path,
@@ -2828,8 +2840,25 @@ fn try_detached_disk_write(
     source: &str,
     reason: &str,
 ) -> Result<bool> {
-    let editor_attached = live_editor_attached(file);
-    if editor_authority_blocks_disk_write(editor_attached) {
+    let authority = effects.observe_editor_authority_for_disk_write(file, source)?;
+    if !matches!(authority, agent_doc_crdt_relay_io::CurrentText::Detached) {
+        let status = match authority {
+            agent_doc_crdt_relay_io::CurrentText::Detached => "detached",
+            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
+                "editor_attached_model_missing"
+            }
+            agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => "editor_sync_pending",
+            agent_doc_crdt_relay_io::CurrentText::Current { .. } => "current",
+        };
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{source}_writeback file={} transport=blocked reason={} authority={} action=retain_without_disk_write",
+                file.display(),
+                reason,
+                status,
+            ),
+        );
         return Ok(false);
     }
 
@@ -4495,6 +4524,10 @@ mod tests {
 
     struct RetainedCrdtConvergenceEffects;
 
+    struct ControllerOwnedWithoutEndpointEffects {
+        authority: agent_doc_crdt_relay_io::CurrentText,
+    }
+
     struct PublishedBufferConvergenceEffects {
         content: String,
     }
@@ -4625,6 +4658,76 @@ mod tests {
             _source: &str,
         ) -> Result<()> {
             panic!("retained CRDT convergence must not enter the legacy write path")
+        }
+    }
+
+    impl EditorConvergenceEffects for ControllerOwnedWithoutEndpointEffects {
+        fn atomic_write(&self, _file: &Path, _content: &str) -> Result<()> {
+            panic!("controller-owned authority must not fall through to disk")
+        }
+
+        fn observe_editor_authority_for_disk_write(
+            &self,
+            _file: &Path,
+            _source: &str,
+        ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+            Ok(self.authority.clone())
+        }
+
+        fn guard_visible_write_expected_current(
+            &self,
+            _file: &Path,
+            _source: &str,
+            _expected_current: &str,
+        ) -> Result<()> {
+            panic!("controller-owned authority must not enter the disk guard")
+        }
+
+        fn atomic_write_if_current(
+            &self,
+            _file: &Path,
+            _content: &str,
+            _expected_current: &str,
+            _source: &str,
+        ) -> Result<()> {
+            panic!("controller-owned authority must not enter the disk write")
+        }
+    }
+
+    #[test]
+    fn detached_disk_write_requires_explicit_detached_authority() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let current = "# Session\n\nCurrent.\n";
+        let target = "# Session\n\nTarget.\n";
+        fs::write(&doc, current).unwrap();
+
+        let controller_owned_states = [
+            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica,
+            agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
+            agent_doc_crdt_relay_io::CurrentText::Current {
+                text: current.to_string(),
+                live_editors: 0,
+                delivery_converged: false,
+                delivery_version: 7,
+                semantics: None,
+            },
+        ];
+        for authority in controller_owned_states {
+            let effects = ControllerOwnedWithoutEndpointEffects { authority };
+            assert!(
+                !try_detached_disk_write(
+                    &effects,
+                    &doc,
+                    current,
+                    target,
+                    "pending_write",
+                    "no_listener",
+                )
+                .unwrap()
+            );
+            assert_eq!(fs::read_to_string(&doc).unwrap(), current);
         }
     }
 

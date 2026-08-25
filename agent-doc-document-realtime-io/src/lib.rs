@@ -764,6 +764,14 @@ impl agent_doc_write_converge_io::EditorConvergenceEffects for RuntimeWriteConve
         observe_fresh_lazily_current_text(file, source)
     }
 
+    fn observe_editor_authority_for_disk_write(
+        &self,
+        file: &Path,
+        source: &str,
+    ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+        observe_live_editor_authority(file, source)
+    }
+
     fn apply_canonical_replace_if_attached(
         &self,
         file: &Path,

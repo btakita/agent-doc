@@ -13507,14 +13507,19 @@ fn reliable_sync_status_reports_file_live(
     status: &ControllerReliableSyncStatusResponse,
     document_hash: &str,
 ) -> bool {
-    status
-        .plane_live_docs
-        .iter()
-        .any(|hash| hash == document_hash)
+    !status.allocated_model_projection_complete
+        || status
+            .plane_live_docs
+            .iter()
+            .any(|hash| hash == document_hash)
         || status
             .registrations
             .iter()
             .any(|registration| registration.document_hash == document_hash)
+        || status
+            .allocated_model_docs
+            .iter()
+            .any(|hash| hash == document_hash)
 }
 
 /// Default-on liveness authority with a durable cold path. The hot path is one
@@ -13570,12 +13575,18 @@ pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
 pub fn crdt_authority_for_file(
     file: &str,
 ) -> agent_doc_document_realtime::crdt_authority::CrdtAuthority {
-    agent_doc_crdt_relay_io::crdt_authority_for_file(Path::new(file))
+    let file = Path::new(file);
+    let local = agent_doc_crdt_relay_io::crdt_authority_for_file(file);
+    if local.editor_attached() || reliable_sync_editor_live_for_file(file) {
+        agent_doc_document_realtime::crdt_authority::CrdtAuthority::MultiReplica
+    } else {
+        agent_doc_document_realtime::crdt_authority::CrdtAuthority::GitAuthoritative
+    }
 }
 
-/// Status response for the `reliable_sync_status` diagnostic RPC. The Lazily
-/// reliable-sync projection is the sole live-editor authority; no filesystem
-/// live-buffer model participates in this response.
+/// Status response for the `reliable_sync_status` diagnostic RPC. Lazily
+/// liveness and the controller-local canonical model are the two reactive
+/// inputs; no filesystem live-buffer model participates in this response.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ControllerReliableSyncStatusResponse {
     /// Document hashes the plane derives as open (from pushed liveness frames).
@@ -13587,6 +13598,18 @@ pub struct ControllerReliableSyncStatusResponse {
     /// Live editor identity/version/capability registrations carried on the same
     /// monotone reliable-sync channel as open/close state.
     pub registrations: Vec<agent_doc_reliable_sync_io::liveness::EditorRegistration>,
+    /// Controller-local canonical models that still own document authority.
+    ///
+    /// This is deliberately independent of endpoint registration: delivery can
+    /// disappear briefly while the model remains live.
+    #[serde(default)]
+    pub allocated_model_docs: Vec<String>,
+    /// Whether `allocated_model_docs` is an authoritative complete projection.
+    /// A new client speaking to an older controller observes the default false
+    /// and therefore fails closed instead of treating the missing field as an
+    /// empty model registry.
+    #[serde(default)]
+    pub allocated_model_projection_complete: bool,
     /// Volatile in-process registry, retained as a diagnostic only.
     pub registry_open_docs: Vec<String>,
     /// Per open document: the live editor pids the plane sees.
@@ -13598,6 +13621,9 @@ pub struct ControllerReliableSyncStatusResponse {
 fn handle_reliable_sync_status(
     _bootstrap: &ControllerBootstrap,
 ) -> Result<ControllerReliableSyncStatusResponse> {
+    // Read the model registry before the liveness plane, matching the relay
+    // authority lock order used by `crdt_authority_for_file`.
+    let allocated_model_docs = agent_doc_crdt_relay_io::allocated_routed_relay_document_hashes();
     let plane = controller_liveness_plane().lock();
     let projection = plane.projection();
     let plane_open = projection.open_docs();
@@ -13645,6 +13671,8 @@ fn handle_reliable_sync_status(
         plane_open_paths,
         plane_live_docs: plane_live.into_iter().collect(),
         registrations,
+        allocated_model_docs,
+        allocated_model_projection_complete: true,
         registry_open_docs: registry_open.into_iter().collect(),
         per_doc_pids,
     })
@@ -29820,7 +29848,7 @@ mod tests {
             reliable_sync_open_request_for_pid("docwire-status", status_pid),
         )
         .expect("fold");
-        let status = handle_reliable_sync_status(&bootstrap).expect("status ok");
+        let mut status = handle_reliable_sync_status(&bootstrap).expect("status ok");
         assert!(
             status
                 .plane_open_docs
@@ -29861,6 +29889,46 @@ mod tests {
                 ),
             "this document must project without a registration oracle; got {:?}",
             status.registrations
+        );
+        status.allocated_model_projection_complete = false;
+        assert!(
+            reliable_sync_status_reports_file_live(&status, "rolling-upgrade-unknown"),
+            "a response from an older controller that lacks model allocation evidence must fail closed"
+        );
+    }
+
+    #[test]
+    fn reliable_sync_status_keeps_allocated_controller_model_authoritative_without_endpoint() {
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("model-owned.md");
+        std::fs::write(&doc, "# Model-owned document\n").unwrap();
+        let document_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        assert_eq!(document_hash, agent_doc_hash::document_id_for_path(&doc));
+
+        // Allocate the controller-local model without publishing any reliable-
+        // sync endpoint registration. This is the transient gap that previously
+        // let a short-lived CLI process demote the document to disk authority.
+        agent_doc_crdt_relay_io::seed_embedded_relay_for_file(&doc).unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: dir.path().to_path_buf(),
+            socket_path: socket_path(dir.path()),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: current_binary_identity().ok(),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+
+        let status = handle_reliable_sync_status(&bootstrap).expect("status ok");
+        assert!(status.allocated_model_docs.contains(&document_hash));
+        assert!(
+            reliable_sync_status_reports_file_live(&status, &document_hash),
+            "an allocated controller model must block disk authority even while endpoint liveness is absent"
         );
     }
 

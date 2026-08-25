@@ -1993,6 +1993,56 @@ mod tests {
     }
 
     #[test]
+    fn backlog_clear_and_add_transaction_preserves_queue_and_exchange_bytes() {
+        let (tmp, doc) = setup_test_dir();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let queue = concat!(
+            "free-text queue context that is not a checklist\n",
+            "❯ preserve the ontology follow-up #ontology\n",
+        );
+        let exchange = concat!(
+            "❯ migrate servers to communities #svrcommmigrate\n",
+            "### Re: migrate servers to communities — agent\n\n",
+            "The committed response body must remain byte-for-byte intact.\n",
+        );
+        let initial = format!(
+            "---\nagent_doc_session: test\n---\n\n\
+<!-- agent:pending -->\n\
+- [ ] [#olditem] Old backlog state\n\
+<!-- /agent:pending -->\n\n\
+<!-- agent:queue -->\n{queue}\
+<!-- /agent:queue -->\n\n\
+<!-- agent:exchange -->\n{exchange}\
+<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, initial).unwrap();
+
+        with_test_effects(|| {
+            with_pending_write_transaction(&doc, || {
+                clear(&doc)?;
+                add(&doc, "id=newitem Replacement backlog state", false)
+            })
+        })
+        .unwrap();
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("[#newitem] Replacement backlog state"));
+        assert!(!content.contains("[#olditem]"));
+        assert!(
+            content.contains(&format!(
+                "<!-- agent:queue -->\n{queue}<!-- /agent:queue -->"
+            )),
+            "queue bytes changed during backlog-only transaction:\n{content}"
+        );
+        assert!(
+            content.contains(&format!(
+                "<!-- agent:exchange -->\n{exchange}<!-- /agent:exchange -->"
+            )),
+            "exchange bytes changed during backlog-only transaction:\n{content}"
+        );
+    }
+
+    #[test]
     fn done_noops_when_item_was_already_archived() {
         let (_tmp, doc) = doc_with_pending_and_archive(
             "- [ ] [#keep1] Keep backlog item\n",

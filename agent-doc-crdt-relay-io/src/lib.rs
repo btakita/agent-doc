@@ -575,6 +575,23 @@ fn hub_is_allocated(document_hash: &str) -> bool {
     hub_registry().lock().contains_key(document_hash)
 }
 
+/// Document hashes whose controller-local canonical relay model is allocated.
+///
+/// Short-lived clients cannot inspect the controller process's hub registry
+/// directly. The controller includes this projection in its liveness response
+/// so a transient editor-endpoint gap cannot be mistaken for proof that the
+/// document is detached and therefore safe to overwrite on disk.
+pub fn allocated_routed_relay_document_hashes() -> Vec<String> {
+    let routes = embedded_relay_route_registry().lock().clone();
+    let hubs = hub_registry().lock();
+    let mut hashes = routes
+        .into_iter()
+        .filter(|hash| hubs.contains_key(hash))
+        .collect::<Vec<_>>();
+    hashes.sort();
+    hashes
+}
+
 /// Explicit in-process relay routes used when the controller and model share a
 /// process but a replica has not allocated its hub yet (notably missing-replica
 /// recovery simulations). This is process state, not a durable authority.

@@ -229,6 +229,7 @@ pub fn queue_head_removal_decision(
 pub fn free_text_queue_head_provenance_decision(
     active_free_text_queue_heads: &[String],
     content: &str,
+    current_cycle_response: Option<&str>,
 ) -> Option<FreeTextQueueHeadProvenanceDecision> {
     if content.contains("<!-- no-free-text-queue-head-guard -->") {
         return Some(FreeTextQueueHeadProvenanceDecision {
@@ -240,14 +241,15 @@ pub fn free_text_queue_head_provenance_decision(
         });
     }
 
-    let Ok(components) = element::parse(content) else {
+    if element::parse(content).is_err() {
         return None;
-    };
-    let exchange_text: String = components
-        .iter()
-        .find(|component| component.name == "exchange")
-        .map(|component| component.content(content).to_string())
-        .unwrap_or_default();
+    }
+    // A response from an older exchange turn is not evidence that THIS cycle
+    // consumed a recorded queue head. In particular, two prompts may share a
+    // distinctive id while asking different questions. Closeout callers must
+    // therefore provide the response captured for the active cycle; absence of
+    // that evidence fails closed instead of searching the exchange history.
+    let current_cycle_response = current_cycle_response.unwrap_or_default();
     let mut unresolved = Vec::new();
     let mut response_proven_removed = Vec::new();
     let mut completed_residue = Vec::new();
@@ -263,7 +265,11 @@ pub fn free_text_queue_head_provenance_decision(
         {
             continue;
         }
-        if queue_heads::free_text_queue_head_is_completed_residue(content, &exchange_text, &head) {
+        if queue_heads::free_text_queue_head_is_completed_residue(
+            content,
+            current_cycle_response,
+            &head,
+        ) {
             completed_residue.push(head);
             continue;
         }
@@ -273,8 +279,8 @@ pub fn free_text_queue_head_provenance_decision(
         if queue_heads::committed_queue_contains_free_text_head(content, &head) {
             continue;
         }
-        if queue_response::free_text_head_answered_by_response(&exchange_text, &head)
-            || response_head_plausibly_answers(&exchange_text, &head)
+        if queue_response::free_text_head_answered_by_response(current_cycle_response, &head)
+            || response_head_plausibly_answers(current_cycle_response, &head)
         {
             response_proven_removed.push(head);
             continue;
@@ -489,7 +495,22 @@ mod tests {
             "deploy".to_string(),
         ];
 
-        let decision = free_text_queue_head_provenance_decision(&heads, content).unwrap();
+        let current_response = concat!(
+            "### Re: answered but still queued\n\n",
+            "> **Queue prompt:**\n>\n> answered but still queued\n\n",
+            "Answered.\n\n",
+            "### Re: removed with echo\n\n",
+            "> **Queue prompt:**\n>\n> removed with echo\n\n",
+            "Answered.\n\n",
+            "### Re: removed by heading\n\n",
+            "Removed by heading.\n\n",
+            "### Re: deploy\n\n",
+            "> **Queue prompt:**\n>\n> deploy\n\n",
+            "Deployment completed.\n",
+        );
+        let decision =
+            free_text_queue_head_provenance_decision(&heads, content, Some(current_response))
+                .unwrap();
 
         assert!(!decision.suppressed);
         assert!(!decision.bare_heading_residue);
@@ -516,7 +537,7 @@ mod tests {
             "🚧 missing response".to_string(),
         ];
 
-        let decision = free_text_queue_head_provenance_decision(&heads, &content).unwrap();
+        let decision = free_text_queue_head_provenance_decision(&heads, &content, None).unwrap();
 
         assert_eq!(decision.unresolved, vec!["missing response".to_string()]);
         assert!(decision.response_proven_removed.is_empty());
@@ -528,6 +549,7 @@ mod tests {
         let decision = free_text_queue_head_provenance_decision(
             &["missing response".to_string()],
             "<!-- no-free-text-queue-head-guard -->\n\n### Re: answered\n",
+            None,
         )
         .unwrap();
 
@@ -543,6 +565,7 @@ mod tests {
         let decision = free_text_queue_head_provenance_decision(
             &["missing response".to_string()],
             "<!-- no-free-text-queue-head-guard -->\n\n###\n",
+            None,
         )
         .unwrap();
 
@@ -557,9 +580,41 @@ mod tests {
             free_text_queue_head_provenance_decision(
                 &["missing response".to_string()],
                 "<!-- agent:queue -->\n- missing close\n",
+                None,
             ),
             None
         );
+    }
+
+    #[test]
+    fn older_response_with_same_id_cannot_prove_current_queue_head_removed() {
+        let content = concat!(
+            "<!-- agent:queue -->\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: do [#cibasepublish]\n\n",
+            "The base-image publish task was completed.\n\n",
+            "### Re: unrelated closeout\n\n",
+            "The active cycle has no drainable work.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current_response = concat!(
+            "### Re: unrelated closeout\n\n",
+            "The active cycle has no drainable work.\n",
+        );
+
+        let decision = free_text_queue_head_provenance_decision(
+            &["Can we complete [#cibasepublish]?".to_string()],
+            content,
+            Some(current_response),
+        )
+        .unwrap();
+
+        assert_eq!(
+            decision.unresolved,
+            vec!["Can we complete [#cibasepublish]?".to_string()]
+        );
+        assert!(decision.response_proven_removed.is_empty());
+        assert!(decision.completed_residue.is_empty());
     }
 
     #[test]

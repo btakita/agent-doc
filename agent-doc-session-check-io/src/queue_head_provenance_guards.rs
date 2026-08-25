@@ -197,10 +197,18 @@ pub fn check_free_text_queue_head_provenance(
         return Ok(GuardResult::None);
     }
     let content = rc.doc_content();
+    let closeout = agent_doc_cycle_state_io::load_closeout_projection(file)?;
+    let current_cycle_response = closeout
+        .as_ref()
+        .filter(|projection| projection.matches_cycle(&state.cycle_id))
+        .and_then(|projection| projection.captured_response.as_ref())
+        .filter(|capture| capture.cycle_id == state.cycle_id)
+        .map(|capture| capture.response_body.as_str());
     let Some(decision) =
         agent_doc_queue::queue_closeout_guard::free_text_queue_head_provenance_decision(
             &state.active_free_text_queue_heads,
             &content,
+            current_cycle_response,
         )
     else {
         return Ok(GuardResult::None);
@@ -256,7 +264,7 @@ pub fn check_free_text_queue_head_provenance(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "free_text_queue_head_provenance_proof file={} removed={} proof_source=committed_response",
+                "free_text_queue_head_provenance_proof file={} removed={} proof_source=current_cycle_captured_response",
                 file.display(),
                 heads_text
             ),
@@ -358,6 +366,28 @@ mod tests {
         rc
     }
 
+    fn record_current_cycle_response(doc: &Path, response_body: &str) {
+        let state = agent_doc_cycle_state_io::load_with_closeout_projection(doc)
+            .unwrap()
+            .expect("queue-guard fixture should have cycle state");
+        let response_sha256 = agent_doc_hash::content_hash(response_body);
+        agent_doc_cycle_state_io::append_response_captured_body(
+            doc,
+            agent_doc_cycle_state_io::CapturedResponseFactInput {
+                cycle_id: &state.cycle_id,
+                capture_id: "queue-guard-unit-capture",
+                response_sha256: &response_sha256,
+                response_body,
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: None,
+            },
+        )
+        .unwrap();
+    }
+
     fn ops_log(root: &Path) -> String {
         fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default()
     }
@@ -433,6 +463,14 @@ mod tests {
         );
         let doc = make_doc(tmp.path(), preflight);
         mark_cycle_committed(&doc, preflight, committed);
+        record_current_cycle_response(
+            &doc,
+            concat!(
+                "### Re: Please explain the churn\n\n",
+                "> **Queue prompt:**\n>\n> Please explain the churn\n\n",
+                "The churn comes from stale queue convergence.\n",
+            ),
+        );
 
         let rc = cycle_context(&doc, committed);
         assert!(
@@ -446,7 +484,7 @@ mod tests {
         assert!(
             log.contains("free_text_queue_head_provenance_proof")
                 && log.contains("Please explain the churn")
-                && log.contains("proof_source=committed_response"),
+                && log.contains("proof_source=current_cycle_captured_response"),
             "free-text removal proof should name the head and source:\n{log}"
         );
     }
@@ -471,6 +509,14 @@ mod tests {
         );
         let doc = make_doc(tmp.path(), committed);
         mark_cycle_committed(&doc, committed, committed);
+        record_current_cycle_response(
+            &doc,
+            concat!(
+                "### Re: explain the queue churn -- gpt-5\n\n",
+                "> **Queue prompt:**\n>\n> explain the queue churn\n\n",
+                "The churn comes from stale convergence.\n",
+            ),
+        );
 
         let rc = cycle_context(&doc, committed);
         match check_free_text_queue_head_provenance(&doc, &rc).unwrap() {

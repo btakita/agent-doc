@@ -797,6 +797,28 @@ mod tests {
         .unwrap();
         doc
     }
+
+    fn record_current_cycle_response(doc: &Path, response_body: &str) {
+        let state = agent_doc_cycle_state_io::load_with_closeout_projection(doc)
+            .unwrap()
+            .expect("queue-guard fixture should have cycle state");
+        let response_sha256 = agent_doc_hash::content_hash(response_body);
+        agent_doc_cycle_state_io::append_response_captured_body(
+            doc,
+            agent_doc_cycle_state_io::CapturedResponseFactInput {
+                cycle_id: &state.cycle_id,
+                capture_id: "queue-guard-test-capture",
+                response_sha256: &response_sha256,
+                response_body,
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: None,
+            },
+        )
+        .unwrap();
+    }
     // `#queue-clear-unrun-items` — committed doc with the six sampleorders
     // heads removed from the queue while their backlog items stay open, the
     // convqa head consumed/done. Recorded preflight heads = all six.
@@ -6419,6 +6441,15 @@ Body\n\
             agent_doc_ops_log_io::log_op,
         )
         .unwrap();
+        let current_response = format!(
+            concat!(
+                "### Re: queue closeout — gpt-5\n\n",
+                "> **Queue prompt:**\n>\n> {head}\n\n",
+                "The completed queue item now has durable exchange history.\n",
+            ),
+            head = head,
+        );
+        record_current_cycle_response(&doc, &current_response);
 
         let rc = agent_doc_run_context_io::cycle_context(doc.clone());
         rc.set_doc_content(with_echo);
@@ -6429,6 +6460,64 @@ Body\n\
             ),
             "committed queue-prompt echo proves the consumed free-text head"
         );
+    }
+
+    #[test]
+    fn free_text_queue_head_guard_rejects_older_response_with_same_id() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let head = "Can we complete [#cibasepublish]?";
+        let with_head = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: do [#cibasepublish]\n\n",
+                "The base-image publish task was completed.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue auto -->\n- {head}\n<!-- /agent:queue -->\n",
+            ),
+            head = head,
+        );
+        let doc = init_committed_doc_for_queue_guard(tmp.path(), &with_head);
+
+        let current_response = concat!(
+            "### Re: unrelated closeout\n\n",
+            "The active cycle has no drainable work.\n",
+        );
+        let without_head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: do [#cibasepublish]\n\n",
+            "The base-image publish task was completed.\n\n",
+            "### Re: unrelated closeout\n\n",
+            "The active cycle has no drainable work.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, without_head).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            without_head,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        record_current_cycle_response(&doc, current_response);
+
+        let rc = agent_doc_run_context_io::cycle_context(doc.clone());
+        rc.set_doc_content(without_head.to_string());
+        match check_free_text_queue_head_provenance(&doc, &rc).unwrap() {
+            GuardResult::Error(message) => {
+                assert!(message.contains("cibasepublish"), "got: {message}");
+            }
+            GuardResult::Warn(lines) => {
+                let message = lines.join("\n");
+                assert!(message.contains("cibasepublish"), "got: {message}");
+            }
+            GuardResult::None => {
+                panic!("an older same-id response must not prove this cycle's head")
+            }
+        }
     }
     #[test]
     fn free_text_queue_head_guard_passes_when_head_still_queued() {

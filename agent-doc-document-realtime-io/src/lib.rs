@@ -3024,6 +3024,42 @@ pub fn apply_canonical_replace_if_attached(
                             source,
                         )?;
 
+                        // Delivery-worker freshness gates new canonical
+                        // mutations, not an already-satisfied projection. A
+                        // stale worker cannot lose bytes when canonical
+                        // authority, delivery state, and disk all prove the
+                        // exact target and this branch performs no write.
+                        if delivery_converged
+                            && effective_target == relay_text
+                            && canonical_disk_projection_is_exact(file, &effective_target)
+                            && delivery_convergence_is_editor_visible(
+                                live_editors,
+                                durable_visible_write_content_proves_target(
+                                    file,
+                                    &effective_target,
+                                ),
+                            )
+                        {
+                            reconcile_deferred_write_to_canonical_cut_if_needed(
+                                file,
+                                &effective_target,
+                                source,
+                            )?;
+                            let relay_write =
+                                projected_noop_relay_write(&effective_target, live_editors);
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "{source}_crdt_relay_exact_noop file={} content_hash={} live_editors={} delivery_converged=true action=skip_compare_and_swap wait_ms={}",
+                                    file.display(),
+                                    relay_write.content_hash,
+                                    live_editors,
+                                    started.elapsed().as_millis(),
+                                ),
+                            );
+                            return Ok(Some(relay_write));
+                        }
+
                         // Buffer authority and delivery health are separate:
                         // keep the live IDE PID as the disk fence, but do not
                         // issue a canonical delivery to a component whose
@@ -3128,37 +3164,6 @@ pub fn apply_canonical_replace_if_attached(
                                     file.display(),
                                     relay_write.content_hash,
                                     live_editors,
-                                ),
-                            );
-                            return Ok(Some(relay_write));
-                        }
-
-                        if delivery_converged
-                            && effective_target == relay_text
-                            && canonical_disk_projection_is_exact(file, &effective_target)
-                            && delivery_convergence_is_editor_visible(
-                                live_editors,
-                                durable_visible_write_content_proves_target(
-                                    file,
-                                    &effective_target,
-                                ),
-                            )
-                        {
-                            reconcile_deferred_write_to_canonical_cut_if_needed(
-                                file,
-                                &effective_target,
-                                source,
-                            )?;
-                            let relay_write =
-                                projected_noop_relay_write(&effective_target, live_editors);
-                            agent_doc_ops_log_io::log_op(
-                                file,
-                                &format!(
-                                    "{source}_crdt_relay_exact_noop file={} content_hash={} live_editors={} delivery_converged=true action=skip_compare_and_swap wait_ms={}",
-                                    file.display(),
-                                    relay_write.content_hash,
-                                    live_editors,
-                                    started.elapsed().as_millis(),
                                 ),
                             );
                             return Ok(Some(relay_write));
@@ -10124,6 +10129,41 @@ mod tests {
             .expect("the exact target must remain retained");
         assert_eq!(pending.target_content, target);
         assert_eq!(pending.reason, "editor_delivery_worker_stale");
+    }
+
+    #[test]
+    fn stale_delivery_worker_accepts_exact_saved_canonical_noop() {
+        let baseline = "# Session\n\nvesting question\n";
+        let target = "# Session\n\nvesting question\n\nagent response\n";
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-stale-delivery-worker-exact-noop";
+        seed_reliable_sync_open_without_registration(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            hub.apply_local(client_id, 0, baseline.chars().count() as u32, target)
+                .unwrap();
+        })
+        .unwrap();
+        std::fs::write(&file, target).expect("simulate the editor's exact native save");
+
+        let receipt = apply_canonical_replace_if_attached(
+            &file,
+            baseline,
+            target,
+            "stale_delivery_worker_exact_noop_test",
+        )
+        .expect("an exact saved canonical projection must settle as a no-op");
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
+        let receipt = receipt.expect("attached canonical authority should return a receipt");
+        assert!(!receipt.applied);
+        assert_eq!(receipt.update_bytes, 0);
+        assert_eq!(receipt.targets, 0);
+        assert!(receipt.delivery_converged);
+        assert_eq!(receipt.content_hash, agent_doc_hash::content_hash(target));
+        assert!(pending_document_write(&file).is_none());
     }
 
     #[test]

@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.280
+
+- **Fix: an already-saved canonical response no longer stalls behind a stale
+  editor-delivery worker (`#staledeliverydurablenoop`).**
+
+Closeout now accepts an exact no-write receipt when canonical authority already
+equals the response target, delivery is converged, and disk contains those same
+bytes. Delivery-worker freshness still fails closed before every new canonical
+mutation, and any missing or differing proof retains the target without writing
+disk. This lets `write_applied` turns reach their existing commit boundary after
+the editor saved the response but its registration heartbeat disappeared.
+
 ## 0.35.279
 
 - **Fix: registered editor replicas can no longer be misclassified as detached

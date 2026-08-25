@@ -39,6 +39,12 @@ exactly-once identity rather than computed state (`#preflightreactive`).
   through `didChange`. The LSP PID is registered with the controller's
   process-exit watcher so a crash cannot strand editor authority.
 - The document write state machine is `IntentCaptured -> CanonicalApplied -> ReplicaAccepted -> ReplicaVisible -> DiskProjected -> Committed`. A transition may advance only one edge after its matching proof, duplicate/reordered events are idempotent, endpoint churn is a self-loop, and no recovery command may skip an edge or reconstruct intent from a projection. Queue deletion uses the same rule: the exact Lazily authority shape is the compare-and-swap base, so a missing historical queue item is deletion—not an input to union/replay.
+- A stale editor-delivery worker blocks new canonical mutations but not an
+  already-satisfied projection (`#staledeliverydurablenoop`). When canonical
+  authority already equals the target, delivery is converged, and disk exactly
+  equals that same target, closeout accepts a no-write projected receipt and
+  continues toward commit. Any missing or differing proof retains the target
+  and fails closed without writing disk.
 - When a retained operation observes live editor authority that differs from
 disk, its recovery owner must request the editor's typed `save_document`
 transition and prove that exact authority revision on disk before settlement or

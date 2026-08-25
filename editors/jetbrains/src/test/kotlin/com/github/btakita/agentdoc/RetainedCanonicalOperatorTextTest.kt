@@ -1,7 +1,6 @@
 package com.github.btakita.agentdoc
 
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
@@ -15,11 +14,26 @@ import org.junit.Test
  */
 class RetainedCanonicalOperatorTextTest {
     @Test
-    fun `a live buffer past its published shadow is holding operator text`() {
-        assertTrue(
-            retainedCanonicalWouldClobberOperatorTextUtil(
+    fun `a live buffer is published when retained canonical is its exact shadow`() {
+        val shadow = "# doc\n\nlast published state\n"
+        assertEquals(
+            RetainedRegistrationProjectionAction.PublishOperatorBuffer,
+            retainedRegistrationProjectionActionUtil(
+                publishedShadow = shadow,
+                bufferText = "$shadow\ndo the thing I just typed\n",
+                canonicalText = shadow,
+            ),
+        )
+    }
+
+    @Test
+    fun `three divergent generations hold without overwriting the operator`() {
+        assertEquals(
+            RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+            retainedRegistrationProjectionActionUtil(
                 publishedShadow = "# doc\n\nlast published state\n",
                 bufferText = "# doc\n\nlast published state\n\ndo the thing I just typed\n",
+                canonicalText = "# doc\n\na different remote generation\n",
             ),
         )
     }
@@ -29,10 +43,12 @@ class RetainedCanonicalOperatorTextTest {
         // The shadow map is in-memory and does not survive a restart. Without it
         // the buffer is a stale reconstruction and canonical must win — the
         // behaviour this guard must not regress.
-        assertFalse(
-            retainedCanonicalWouldClobberOperatorTextUtil(
+        assertEquals(
+            RetainedRegistrationProjectionAction.ApplyCanonical,
+            retainedRegistrationProjectionActionUtil(
                 publishedShadow = null,
                 bufferText = "# doc\n\nanything at all\n",
+                canonicalText = "# doc\n\ncontroller state\n",
             ),
         )
     }
@@ -40,10 +56,12 @@ class RetainedCanonicalOperatorTextTest {
     @Test
     fun `a buffer that still matches its shadow published everything it has`() {
         val text = "# doc\n\nconverged\n"
-        assertFalse(
-            retainedCanonicalWouldClobberOperatorTextUtil(
+        assertEquals(
+            RetainedRegistrationProjectionAction.ApplyCanonical,
+            retainedRegistrationProjectionActionUtil(
                 publishedShadow = text,
                 bufferText = text,
+                canonicalText = "# doc\n\nnew controller response\n",
             ),
         )
     }
@@ -52,10 +70,12 @@ class RetainedCanonicalOperatorTextTest {
     fun `unknown buffer text is not divergence`() {
         // A closed or unreadable document proves nothing, and guessing "diverged"
         // would strand every retained projection behind a document nobody has open.
-        assertFalse(
-            retainedCanonicalWouldClobberOperatorTextUtil(
+        assertEquals(
+            RetainedRegistrationProjectionAction.ApplyCanonical,
+            retainedRegistrationProjectionActionUtil(
                 publishedShadow = "# doc\n",
                 bufferText = null,
+                canonicalText = "# doc\n\ncontroller response\n",
             ),
         )
     }

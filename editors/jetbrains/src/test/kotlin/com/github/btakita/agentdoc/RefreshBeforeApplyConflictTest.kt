@@ -174,10 +174,13 @@ class RefreshBeforeApplyConflictTest {
             )
         )
         val forwarderFor = functionBody(crdtReplica, "private fun forwarderFor(")
+        val finalizeRegistration =
+            functionBody(crdtReplica, "private fun finalizeRegistrationProjection(")
         assertTrue(
             "a raced editor cut must be rejected before the controller bootstrap is projected",
             forwarderFor.contains("editorBufferText(filePath) != expectedEditorTextAtSwap") &&
-                forwarderFor.contains("retainCanonicalProjectionAfterRegistration(filePath, forwarder)") &&
+                forwarderFor.contains("finalizeRegistrationProjection(") &&
+                finalizeRegistration.contains("retainCanonicalProjectionAfterRegistration(filePath, forwarder)") &&
                 !forwarderFor.contains("forwarder.ensureEditorText(initialEditorText)"),
         )
         assertTrue(

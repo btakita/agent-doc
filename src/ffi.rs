@@ -3034,6 +3034,42 @@ pub unsafe extern "C" fn agent_doc_ensure_controller_running(project_root: *cons
     }
 }
 
+/// Wait for an in-progress controller handoff to publish a connectable replacement.
+///
+/// This is deliberately not a launch API. The editor calls it only after an
+/// idempotent operator command loses its transport to a reset/EOF, then replays
+/// the exact same command ID at most once.
+///
+/// Returns `1` when a controller is connectable on return, `0` when the handoff
+/// did not publish one within its bounded wait, and `-1` on a bad argument.
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_wait_for_controller_replacement(
+    project_root: *const c_char,
+) -> c_int {
+    let Ok(project_root) = (unsafe { required_ffi_string(project_root, "project_root") }) else {
+        return -1;
+    };
+    let project_root = Path::new(&project_root);
+    match agent_doc_controller_io::project_controller::wait_for_controller_replacement(project_root)
+    {
+        Ok(()) => 1,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "ffi_wait_for_controller_replacement_failed project_root={} error={err:#}",
+                    project_root.display()
+                ),
+            );
+            0
+        }
+    }
+}
+
 /// Focus the actor pane for a document through the Project Controller.
 ///
 /// This centralizes pane selection behind the controller so JetBrains does not

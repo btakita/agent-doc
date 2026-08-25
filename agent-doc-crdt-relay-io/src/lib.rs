@@ -927,8 +927,20 @@ fn with_hub_seeded_from_file<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T)
         return Ok(result);
     }
     if let Some(projection) = retained_canonical_projections().observe(&hash) {
-        let recovered =
+        let mut recovered =
             RelayHub::from_retained_canonical_projection(CANONICAL_CLIENT_ID, &projection)?;
+        // An empty, fully committed hub is evicted while the editor is detached.
+        // A direct disk-authority write can then commit a newer generation without
+        // a live hub to advance this retained projection. Reattachment must compare
+        // the retained generation with durable state before publishing either one;
+        // otherwise the older projection can causally overwrite the newer commit.
+        let on_disk = std::fs::read_to_string(file).map_err(|e| {
+            anyhow::anyhow!(
+                "failed to reconcile retained relay hub from {}: {e}",
+                file.display()
+            )
+        })?;
+        recovered.reconcile_canonical_against_baseline(&on_disk)?;
         let handle = hub_handle_or_insert_with(&hash, || recovered);
         let mut hub = handle.lock();
         let result = f(&mut hub);
@@ -5212,6 +5224,37 @@ mod tests {
             !hub_is_allocated_for_test(&document_hash),
             "a late duplicate deregistration must not recreate the hub"
         );
+    }
+
+    #[test]
+    fn detached_disk_commit_supersedes_evicted_retained_projection_on_recontact() {
+        let (_dir, doc) = temp_doc("hub-detached-commit.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let document_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let identity = "intellij:hub-detached-commit";
+
+        register_replica_for_file(&doc, identity)
+            .unwrap()
+            .expect("the live editor should attach");
+        let retained = with_hub(&doc, |hub| hub.canonical_text()).unwrap();
+        assert!(deregister_replica_for_file(&doc, identity).unwrap());
+        assert!(
+            !hub_is_allocated_for_test(&document_hash),
+            "an empty hub already matching disk should be evicted"
+        );
+
+        let detached_commit = format!("{retained}\nnewer detached response\n");
+        std::fs::write(&doc, &detached_commit).unwrap();
+
+        register_replica_for_file(&doc, "intellij:hub-detached-commit-recontact")
+            .unwrap()
+            .expect("re-contact should attach to the durable generation");
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), detached_commit);
+            assert_ne!(hub.canonical_text(), retained);
+        })
+        .unwrap();
     }
 
     #[test]

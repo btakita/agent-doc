@@ -10071,6 +10071,18 @@ pub fn ensure_controller_running(project_root: &Path, launch_mode: LaunchMode) -
     Ok(())
 }
 
+/// Wait for the controller socket to become connectable after a handoff drop.
+///
+/// Unlike [`ensure_controller_running`], this never launches or adopts a
+/// competing controller. It is the narrow readiness primitive used when an
+/// idempotent command lost its transport during an already-authorized recycle.
+pub fn wait_for_controller_replacement(project_root: &Path) -> Result<()> {
+    let stream =
+        wait_for_controller_path_with_timeout(&socket_path(project_root), HANDOFF_CONNECT_WAIT)?;
+    drop(stream);
+    Ok(())
+}
+
 fn active_public_controller_blocks_public_launch(project_root: &Path) -> Option<ControllerStatus> {
     let active_status = status(project_root).ok()?;
     let current_binary = current_binary_identity().ok();

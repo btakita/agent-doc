@@ -2,6 +2,37 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.281
+
+- **Fix: controller reattachment can no longer publish an older retained CRDT
+  projection over a newer detached response commit.**
+
+When the last editor member detached, agent-doc could evict a fully committed
+hub while retaining its canonical projection. A response written directly to
+disk during that gap advanced durable state but not the evicted projection, so
+the next editor registration reconstructed the older generation and made the
+response appear late or out of order. Reattachment now reconciles every retained
+projection against disk before publishing it; a regression covers an evicted
+hub followed by a detached commit and recontact.
+
+- **Fix: JetBrains registration preserves live operator text by causal base,
+  rather than applying a retained canonical snapshot unconditionally.**
+
+Registration now distinguishes three cases: a restarted/converged buffer adopts
+canonical, a live buffer whose canonical exactly equals its published shadow is
+forwarded as a local delta, and three-way divergence refuses the replacement
+without touching the editor. This removes the contradictory path that logged
+"keeping the buffer" and then immediately queued the stale controller bootstrap
+over it.
+
+- **Fix: Run Agent Doc survives the connection-reset window during controller
+  recycle.**
+
+The JetBrains command-plane route keeps one stable command ID and request, waits
+for the already-authorized replacement controller without launching a competitor,
+and replays that exact idempotent operation once after reset, EOF, or broken pipe.
+Semantic failures and a second transport loss remain terminal.
+
 ## 0.35.280
 
 - **Fix: an already-saved canonical response no longer stalls behind a stale

@@ -417,6 +417,12 @@ interface AgentDocLib : Library {
      */
     fun agent_doc_ensure_controller_running(project_root: String): Int
 
+    /**
+     * Wait for an already-authorized recycle to publish a connectable controller.
+     * This never launches a controller and exists only for one-shot idempotent replay.
+     */
+    fun agent_doc_wait_for_controller_replacement(project_root: String): Int
+
     /** Controller-backed `admin queue pause|resume|drain --json` wrapper. */
     fun agent_doc_admin_queue_control_json(
         project_root: String?,

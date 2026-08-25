@@ -2483,6 +2483,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return null
         }
         clearRegisterFailure(filePath)
+        val publishedShadowAtRegistration = shadows[filePath]
+        val bufferTextAtRegistration = editorBufferText(filePath) ?: initialEditorText
+        val retainedProjectionAction =
+            if (forwarder.canonicalProjectionRetained) {
+                retainedRegistrationProjectionActionUtil(
+                    publishedShadow = publishedShadowAtRegistration,
+                    bufferText = bufferTextAtRegistration,
+                    canonicalText = forwarder.replicaText(),
+                )
+            } else {
+                RetainedRegistrationProjectionAction.ApplyCanonical
+            }
         if (forwarder.canonicalProjectionRetained) {
             // Controller state survives an IDEA/plugin restart; this local set
             // does not. Restore the fail-closed baseline before any whole-editor
@@ -2508,26 +2520,43 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             // The live buffer, not the caller's captured cut: this decides whether
             // operator text is about to be destroyed, so it must read what the
             // operator can currently see.
-            val bufferText = editorBufferText(filePath) ?: initialEditorText
-            val publishedShadow = shadows[filePath]
-            if (retainedCanonicalWouldClobberOperatorTextUtil(publishedShadow, bufferText)) {
-                log.warn(
-                    "[crdt-replica] registration retained a controller canonical projection for " +
-                        "${File(filePath).name} while the buffer holds unpublished operator text; " +
-                        "keeping the buffer and forwarding it as a local delta. " +
-                        "shadow_hash=${contentHash(publishedShadow!!)} " +
-                        "buffer_hash=${contentHash(bufferText!!)} " +
-                        "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
-                )
-                // Do NOT arm the retained-canonical suppression. The ordinary
-                // local-delta path owns this text and must publish it.
-                retainedCanonicalProjectionPaths.remove(filePath)
-            } else {
-                retainedCanonicalProjectionPaths.add(filePath)
-                log.info(
-                    "[crdt-replica] registration retained the controller canonical projection for " +
-                        "${File(filePath).name}; canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
-                )
+            when (retainedProjectionAction) {
+                RetainedRegistrationProjectionAction.ApplyCanonical -> {
+                    retainedCanonicalProjectionPaths.add(filePath)
+                    log.info(
+                        "[crdt-replica] registration retained the controller canonical projection for " +
+                            "${File(filePath).name}; canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
+                    )
+                }
+
+                RetainedRegistrationProjectionAction.PublishOperatorBuffer -> {
+                    log.warn(
+                        "[crdt-replica] registration retained the exact published shadow for " +
+                            "${File(filePath).name} while the live buffer holds unpublished operator text; " +
+                            "publishing the buffer from that proven base. " +
+                            "shadow_hash=${contentHash(publishedShadowAtRegistration!!)} " +
+                            "buffer_hash=${contentHash(bufferTextAtRegistration!!)} " +
+                            "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
+                    )
+                    retainedCanonicalProjectionPaths.remove(filePath)
+                }
+
+                RetainedRegistrationProjectionAction.HoldOperatorBuffer -> {
+                    // There are three distinct generations and no proven rebase:
+                    // the last published shadow, the live editor, and canonical.
+                    // Refuse this endpoint before the swap. A later refresh can
+                    // retry from a fresh cut, but this registration may not choose
+                    // one generation by overwriting another.
+                    log.warn(
+                        "[crdt-replica] refusing ambiguous retained projection for ${File(filePath).name}; " +
+                            "the live operator buffer was not derived from this canonical generation. " +
+                            "shadow_hash=${contentHash(publishedShadowAtRegistration!!)} " +
+                            "buffer_hash=${contentHash(bufferTextAtRegistration!!)} " +
+                            "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
+                    )
+                    forwarder.deregister()
+                    return cached
+                }
             }
         }
         if (bootstrapFromControllerCanonical) {
@@ -2560,11 +2589,23 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         if (replaceCached && cached != null) {
             if (forwarders.replace(filePath, cached, forwarder)) {
-                cached.deregister()
                 log.info(
                     "[crdt-replica] atomically replaced cached forwarder for ${File(filePath).name}",
                 )
-                retainCanonicalProjectionAfterRegistration(filePath, forwarder)
+                if (
+                    !finalizeRegistrationProjection(
+                        filePath = filePath,
+                        forwarder = forwarder,
+                        action = retainedProjectionAction,
+                        publishedShadow = publishedShadowAtRegistration,
+                        bufferText = bufferTextAtRegistration,
+                    )
+                ) {
+                    forwarders.replace(filePath, forwarder, cached)
+                    forwarder.deregister()
+                    return cached
+                }
+                cached.deregister()
                 return forwarder
             }
             // The manager worker is serialized, but preserve a concurrently
@@ -2578,9 +2619,73 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return existing
         }
         log.info("[crdt-replica] attached ${File(filePath).name} as $identity")
-        retainCanonicalProjectionAfterRegistration(filePath, forwarder)
+        if (
+            !finalizeRegistrationProjection(
+                filePath = filePath,
+                forwarder = forwarder,
+                action = retainedProjectionAction,
+                publishedShadow = publishedShadowAtRegistration,
+                bufferText = bufferTextAtRegistration,
+            )
+        ) {
+            forwarders.remove(filePath, forwarder)
+            forwarder.deregister()
+            return null
+        }
         return forwarder
     }
+
+    /** Complete the causal projection decision only after this endpoint owns the map slot. */
+    private fun finalizeRegistrationProjection(
+        filePath: String,
+        forwarder: CrdtReplicaForwarder,
+        action: RetainedRegistrationProjectionAction,
+        publishedShadow: String?,
+        bufferText: String?,
+    ): Boolean =
+        when (action) {
+            RetainedRegistrationProjectionAction.ApplyCanonical -> {
+                retainCanonicalProjectionAfterRegistration(filePath, forwarder)
+                true
+            }
+
+            RetainedRegistrationProjectionAction.PublishOperatorBuffer -> {
+                // Recheck all three facts at the publication edge. Registration
+                // may block while the operator continues typing; only the exact
+                // captured buffer may be emitted from the exact captured base.
+                if (
+                    publishedShadow == null ||
+                    bufferText == null ||
+                    shadows[filePath] != publishedShadow ||
+                    editorBufferText(filePath) != bufferText ||
+                    forwarder.replicaText() != publishedShadow
+                ) {
+                    log.warn(
+                        "[crdt-replica] retained projection publication raced for ${File(filePath).name}; " +
+                            "leaving the operator buffer untouched and retrying registration",
+                    )
+                    false
+                } else {
+                    forwarder.ensureEditorText(bufferText)
+                    if (forwarder.replicaText() != bufferText) {
+                        false
+                    } else {
+                        shadows[filePath] = bufferText
+                        retainedCanonicalProjectionPaths.remove(filePath)
+                        if (!forwarder.projectVisibleState(bufferText)) {
+                            requestRemoteDrain(filePath, "registration-operator-buffer-projection-retry")
+                        }
+                        log.info(
+                            "[crdt-replica] published retained live buffer for ${File(filePath).name}; " +
+                                "buffer_hash=${contentHash(bufferText)} driver=proven-shadow-local-delta",
+                        )
+                        true
+                    }
+                }
+            }
+
+            RetainedRegistrationProjectionAction.HoldOperatorBuffer -> false
+        }
 
     /**
      * Registration is controller -> editor projection only. A pre-existing
@@ -3248,6 +3353,31 @@ internal fun isAgentDocDocumentTextUtil(text: CharSequence): Boolean =
  * Unknown buffer text is not divergence: without both facts this returns false
  * and the historical fail-closed adoption stands.
  */
+internal enum class RetainedRegistrationProjectionAction {
+    ApplyCanonical,
+    PublishOperatorBuffer,
+    HoldOperatorBuffer,
+}
+
+/**
+ * Decide registration direction from causal facts, not wall-clock arrival.
+ *
+ * A live buffer can be published only when canonical is exactly the in-memory
+ * shadow it was derived from. If all three generations differ, registration
+ * must hold instead of selecting one by destructive whole-document projection.
+ */
+internal fun retainedRegistrationProjectionActionUtil(
+    publishedShadow: String?,
+    bufferText: String?,
+    canonicalText: String?,
+): RetainedRegistrationProjectionAction =
+    when {
+        publishedShadow == null || bufferText == null || publishedShadow == bufferText ->
+            RetainedRegistrationProjectionAction.ApplyCanonical
+        canonicalText == publishedShadow -> RetainedRegistrationProjectionAction.PublishOperatorBuffer
+        else -> RetainedRegistrationProjectionAction.HoldOperatorBuffer
+    }
+
 internal fun retainedCanonicalWouldClobberOperatorTextUtil(
     publishedShadow: String?,
     bufferText: String?,

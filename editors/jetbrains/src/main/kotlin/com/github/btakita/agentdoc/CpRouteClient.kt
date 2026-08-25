@@ -529,25 +529,36 @@ internal object CpRouteClient {
                 commandId = commandId,
                 controllerCommand = ProjectControllerCommand.EditorCommandSubmitAsync.token,
             )
-        return try {
-            val accepted = sendAcceptedCommandSubmitToSocket(
-                socket,
-                request,
-                commandId,
-                EditorCommandName.EditorRoute.token,
-            )
-            if (accepted.exitCode != 0) {
-                accepted
-            } else {
-                awaitCommandSubmitTerminal(
-                    socket = socket,
-                    filePath = filePath,
-                    commandId = commandId,
-                    timeoutMs = waitForReadySeconds * 1000 + COMMAND_COMPLETION_GRACE_MS,
-                    commandName = EditorCommandName.EditorRoute.token,
+            return try {
+                replayIdempotentControllerCommandOnce(
+                    operation = {
+                        val accepted = sendAcceptedCommandSubmitToSocket(
+                            socket,
+                            request,
+                            commandId,
+                            EditorCommandName.EditorRoute.token,
+                        )
+                        if (accepted.exitCode != 0) {
+                            accepted
+                        } else {
+                            awaitCommandSubmitTerminal(
+                                socket = socket,
+                                filePath = filePath,
+                                commandId = commandId,
+                                timeoutMs = waitForReadySeconds * 1000 + COMMAND_COMPLETION_GRACE_MS,
+                                commandName = EditorCommandName.EditorRoute.token,
+                            )
+                        }
+                    },
+                    waitForReplacement = { waitForControllerReplacement(projectRoot) },
+                    onReplay = { drop ->
+                        log.warn(
+                            "[route] controller handoff dropped editor_route command_id=$commandId; " +
+                                "replaying the same idempotent request once after replacement readiness: ${drop.message}",
+                        )
+                    },
                 )
-            }
-        } catch (e: Exception) {
+            } catch (e: Exception) {
             log.warn("[route] command-plane editor_route request failed via ${socket.path}: ${e.message}")
                 CpEditorRouteResult(
                     exitCode = 1,
@@ -1151,6 +1162,54 @@ private const val TURN_AUTHORITY_RECONNECT_MAX_MS = 5_000L
             cause = cause.cause
         }
         return false
+    }
+
+    /** A connected command transport was cut by a controller handoff. */
+    internal fun isReplaySafeControllerHandoffDrop(e: Throwable): Boolean {
+        var cause: Throwable? = e
+        while (cause != null) {
+            if (cause is java.io.EOFException) return true
+            val message = cause.message?.lowercase()
+            if (
+                message != null &&
+                (message.contains("connection reset") ||
+                    message.contains("connection aborted") ||
+                    message.contains("broken pipe") ||
+                    message.contains("returned an empty response") ||
+                    message.contains("unexpected eof"))
+            ) {
+                return true
+            }
+            cause = cause.cause
+        }
+        return false
+    }
+
+    /**
+     * Replay one stable command ID after a handoff-only transport loss.
+     * Semantic failures and a second transport loss remain terminal.
+     */
+    internal fun <T> replayIdempotentControllerCommandOnce(
+        operation: () -> T,
+        waitForReplacement: () -> Boolean,
+        onReplay: (Throwable) -> Unit = {},
+    ): T =
+        try {
+            operation()
+        } catch (first: Exception) {
+            if (!isReplaySafeControllerHandoffDrop(first) || !waitForReplacement()) throw first
+            onReplay(first)
+            operation()
+        }
+
+    private fun waitForControllerReplacement(projectRoot: String): Boolean {
+        val lib = AgentDocLib.get() ?: return false
+        return try {
+            lib.agent_doc_wait_for_controller_replacement(projectRoot) == 1
+        } catch (linkError: Throwable) {
+            log.warn("[route] wait-for-controller-replacement unavailable: ${linkError.message}")
+            false
+        }
     }
 
     private fun sendRequestDataToSocket(socket: File, request: JsonObject): JsonObject {

@@ -290,6 +290,30 @@ Installed and recycled successfully.
 - Preserved all five concurrent unstaged `src/agent-doc` edits.
 - Removed the isolated installation worktree.
 - Updated the JetBrains plugin in four installed IDEs; restart running IDEs to load it.
+
+### Re: Response
+
+Fixed, installed, and recycled.
+
+Root cause: deduplicated durable state events were still reapplied to the live projection, repeatedly waking the captured-finalize worker and causing the background agent-doc/zsh churn.
+
+Changes:
+
+- Duplicate events now produce no reactive wake.
+- Added a regression test for replayed finalize events.
+- Installed agent-doc `0.35.279` on new inode `95839285`.
+- Recycled 5 controllers and marked all 12 supervisors.
+- Haiven controller is stable at generation 746.
+- Event counts remained unchanged across a 12-second sample; the loop is stopped.
+- Did not run any document command against `contracts.md`.
+- Preserved the five unrelated concurrent source edits.
+
+Commits:
+
+- `05f292d72` — `fix: suppress duplicate closeout wake replay`
+- `8c059bf9b` — submodule pointer update
+
+Verification passed: focused regression test, controller-io suite, formatting, full `make check`, and latest CI status.
 <!-- agent:boundary:64a22d63:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
-  codex: e045956e-575c-4573-b1ed-1371613ceed4
+  codex: 01a03a06-793c-7d10-967f-054a4de7e303
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -417,6 +417,16 @@ The exchange remains large, but the active queue is draining, so it was not comp
 Release verification is still running. Tag/version validation passed; full CI is active, with package, GitHub Release, crates.io, and npm publication still pending.
 
 The continuation response committed successfully, session-check passed, and the document commit was pushed. The queue remains active for another verification cycle.
+
+### Re: Response
+
+Not yet.
+
+- CI and release verification passed.
+- Three platform builds are still running in the [Release workflow](https://github.com/btakita/tsift/actions/runs/32883592164).
+- GitHub Release `v0.1.85`, crates.io `tsift@0.1.85`, and npm `opencode-tsift@0.1.85` are not visible yet.
+
+The agent-doc release queue remains open.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 

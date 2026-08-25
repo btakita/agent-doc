@@ -180,11 +180,6 @@ Implemented and committed the Coder workspace terminal host policy in `82dbdba0d
 
 ### Re: do [#coder6] — gpt-5
 
-> **Queue prompt:**
->
-> do [#coder6]
-
-
 Implemented Phase 6 workspace restart resilience and committed it as `703ba9e3f fix: reconcile tmux server restarts`.
 
 - Persisted the tmux server PID plus start time alongside the project registry. Every start path now reconciles that lifetime before trusting a pane row; when a replacement server is detected, all prior-server registry rows are cleared under the registry lock before routing continues.

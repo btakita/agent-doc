@@ -126,6 +126,31 @@ Verification passed:
 - `cargo test --test test_cli test_cli_tmux_ensure_help_exposes_headless_bootstrap_contract -- --nocapture` — passed.
 - Isolated live invocation called `tmux ensure` twice and returned the same pane with `created=true` then `created=false`.
 - Rustfmt check passed for all changed Rust production files.
+
+### Re: do [#coder3] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#coder3]
+
+
+Implemented Phase 3 JetBrains IDE-hosted tmux.
+
+- Extended the `tmux ensure` receipt with authoritative attached-client state. A live registered external session with an attached client remains a no-op, while a detached or newly-created session is eligible for IDE attachment.
+- Added the optional JetBrains Terminal integration. It opens one `agent-doc` tab with `TerminalToolWindowManager`, reuses and focuses a live tab, and executes the binary-provided attach command.
+- Wired both `Run Agent Doc` and autostarting `Sync Tmux Layout` through the same headless ensure operation before controller dispatch. Run preparation participates in the existing per-document command state, so repeated clicks coalesce instead of racing session creation.
+- Declared `org.jetbrains.plugins.terminal` as an optional bundled dependency. A missing/disabled Terminal plugin or terminal API failure produces a notification containing the exact attach command and a Copy action; route dispatch remains available.
+- Added pure receipt/host-decision tests and documented the integration contract.
+
+Verification passed:
+
+- `make check` — 9,047 passed, 253 skipped; docs and formal models passed.
+- `./gradlew test` — full JetBrains plugin suite passed.
+- `./gradlew test buildPlugin` — plugin packaging passed.
+- `cargo test -p agent-doc-start-io` — 11 passed.
+- Live CLI receipt for the current external session reported `attached=true`, `created=false`, and the registered pane, proving the IDE no-op branch receives the required authority fact.
+
+Committed as `bec955e6e feat: host tmux in JetBrains terminal`. Live GUI tab behavior remains for the dedicated `#coder7` operator-verification phase.
 <!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 
@@ -137,7 +162,7 @@ Verification passed:
 <!-- agent:queue priority go -->
 - ~~do [#coder1]~~
 - ~~do [#coder2]~~
-- do [#coder3]
+- ~~do [#coder3]~~
 - do [#coder4]
 - do [#coder5]
 - do [#coder6]
@@ -145,7 +170,6 @@ Verification passed:
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#coder3] Phase 3 — JetBrains IDE-hosted terminal: open/reuse an `agent-doc` tab via TerminalToolWindowManager, run the attach command, dialog fallback with a Copy action. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder4] Phase 4 — VS Code IDE-hosted terminal: window.createTerminal/sendText parity, reuse live terminals, report vscode.env.remoteName in diagnostics, update editors/plugin-parity.tsv. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder5] Phase 5 — `[terminal] host/auto_start_tmux/attach_command` config + `terminal_host:` frontmatter override + pure resolution function shared by CLI and both plugins + runbooks/coder-workspace.md. Do NOT add a `[terminal] session` key — reuse the existing project `tmux_session` binding owned by `agent-doc session set`. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder6] Phase 6 — workspace restart resilience: record tmux server identity, GC stale registry rows + orphaned .sock files on server-identity mismatch, guard AF_UNIX-incapable project-root filesystems. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md

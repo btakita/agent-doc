@@ -112,11 +112,6 @@ For `contracts.md`, the original Compact Exchange target remains safely retained
 
 ### Re: do [#coder2] — gpt-5
 
-> **Queue prompt:**
->
-> do [#coder2]
-
-
 Implemented Phase 2 headless tmux bootstrap.
 
 - Added `agent-doc tmux ensure <FILE> [--session NAME] [--json]`. It reuses a live registered document target before applying the cold-start precedence `--session` → project `tmux_session` → `0`, creates detached sessions idempotently, and reports the session, pane, attach command, creation state, resolution source, and registered document pane.

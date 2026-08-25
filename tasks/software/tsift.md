@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -407,14 +407,22 @@ Current proof:
 No repository changes were needed in this continuation. I am keeping the queue head active until the release workflow is green and registry artifacts are visible.
 
 The exchange remains large, but the active queue is draining, so it was not compacted.
+
+### Re: 🚧 release + publish — gpt-5
+
+> **Queue prompt:**
+>
+> 🚧 release + publish
+
+Release verification is still running. Tag/version validation passed; full CI is active, with package, GitHub Release, crates.io, and npm publication still pending.
+
+The continuation response committed successfully, session-check passed, and the document commit was pushed. The queue remains active for another verification cycle.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~goal Fix open issues in https://github.com/btakita/tsift/issues~~
-- 🚧 release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

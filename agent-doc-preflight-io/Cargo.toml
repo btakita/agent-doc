@@ -37,6 +37,7 @@ agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.35.2
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.278" }
 agent-doc-memory = { path = "../agent-doc-memory", version = "0.35.278" }
 agent-doc-memory-io = { path = "../agent-doc-memory-io", version = "0.35.278" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.278" }
 agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.35.278" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.278" }
 agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.278" }
@@ -65,5 +66,4 @@ ureq = { version = "3", features = ["json"] }
 
 [dev-dependencies]
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.278", features = ["test-support"] }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.278" }
 tempfile = "3"

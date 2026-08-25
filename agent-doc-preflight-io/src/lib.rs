@@ -3833,7 +3833,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
             }
             // Persist to file + snapshot (skip the raw disk write behind a live
             // editor; #fccqueue routes the queue shape through IPC convergence).
-            persist_queue_maintenance_doc(
+            current_content = persist_queue_maintenance_doc(
                 file,
                 &current_content,
                 &authority_baseline,
@@ -4255,7 +4255,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
 
     // Persist file mutations.
     if mutated {
-        persist_queue_maintenance_doc(
+        current_content = persist_queue_maintenance_doc(
             file,
             &current_content,
             &authority_baseline,
@@ -4678,48 +4678,64 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
     // than discarding the enqueue. This is not a force-disk escape hatch: it is
     // the identical helper the accompanying backlog mutation already ran, so it
     // converges against a live buffer exactly as that write does.
-    if let Err(primary_err) = persist_queue_maintenance_doc(
+    let persisted_content = match persist_queue_maintenance_doc(
         file,
         &current_content,
         &content,
         project_root.as_deref(),
         "actionable_backlog_sync",
     ) {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "queue_actionable_backlog_sync_persist_fallback file={} reason={} (#queueatcreate)",
-                file.display(),
-                primary_err
-            ),
-        );
-        // NOTE: this uses the tracked-work write path, which reads its IO
-        // through a thread-local effects scope. Callers must run this function
-        // inside `with_backlog_command_effects` (the write runtime does), or the
-        // fallback fails with "backlog command write effects are not installed"
-        // — which reads like an authority failure but is purely structural.
-        agent_doc_element_backlog_io::backlog_cmd::apply_document_rewrite(
-            file,
-            "actionable_backlog_sync_fallback",
-            |live| {
-                // Recompute against the live document: the primary attempt may
-                // have observed a different image, and the backlog write that
-                // created these ids already landed there.
-                agent_doc_queue::backlog_sync::enqueue_actionable_ids_in_content(
-                    live,
-                    &backlog_ids,
-                    placement,
-                )
-            },
-        )
-        .with_context(|| {
-            format!(
-                "same-cycle actionable backlog enqueue failed on both the queue-maintenance path ({primary_err}) \
-                 and the tracked-work fallback"
+        Ok(persisted) => persisted,
+        Err(primary_err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_actionable_backlog_sync_persist_fallback file={} reason={} (#queueatcreate)",
+                    file.display(),
+                    primary_err
+                ),
+            );
+            // NOTE: this uses the tracked-work write path, which reads its IO
+            // through a thread-local effects scope. Callers must run this function
+            // inside `with_backlog_command_effects` (the write runtime does), or the
+            // fallback fails with "backlog command write effects are not installed"
+            // — which reads like an authority failure but is purely structural.
+            agent_doc_element_backlog_io::backlog_cmd::apply_document_rewrite(
+                file,
+                "actionable_backlog_sync_fallback",
+                |live| {
+                    // Recompute against the live document: the primary attempt may
+                    // have observed a different image, and the backlog write that
+                    // created these ids already landed there.
+                    agent_doc_queue::backlog_sync::enqueue_actionable_ids_in_content(
+                        live,
+                        &backlog_ids,
+                        placement,
+                    )
+                },
             )
-        })?;
-    }
-    adopt_edited_queue_head_into_snapshot(file, &current_content);
+            .with_context(|| {
+                format!(
+                    "same-cycle actionable backlog enqueue failed on both the queue-maintenance path ({primary_err}) \
+                     and the tracked-work fallback"
+                )
+            })?;
+            match current_text_via_preflight_authority_retrying(
+                file,
+                "actionable_backlog_sync_fallback_observe",
+            )? {
+                Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => text,
+                Some(agent_doc_crdt_relay_io::CurrentText::Detached) | None => {
+                    std::fs::read_to_string(file)?
+                }
+                Some(
+                    agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+                    | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
+                ) => current_content.clone(),
+            }
+        }
+    };
+    adopt_edited_queue_head_into_snapshot(file, &persisted_content);
     eprintln!(
         "[write] queue: {} {} same-cycle actionable backlog id(s) into active go queue",
         placement.log_verb(),
@@ -4821,30 +4837,36 @@ fn queue_maintenance_head_label(current: &agent_doc_crdt_relay_io::CurrentText) 
     }
 }
 
-fn guard_queue_maintenance_expected_current(
+fn rebase_queue_maintenance_target(
     file: &Path,
     source: &str,
     expected_current: &str,
+    content: &str,
     current: &str,
-) -> Result<()> {
+) -> Result<String> {
     if current == expected_current {
-        return Ok(());
+        return Ok(content.to_string());
     }
+    let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(expected_current).encode_state();
+    let rebased = agent_doc_merge::crdt::merge_by_component(Some(&base_state), content, current)
+        .with_context(|| {
+            format!("{source}: failed to rebase queue maintenance over the live Lazily head")
+        })?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "queue_maintenance_compare_and_swap_blocked source={source} outcome=head_advanced \
-             expected_hash={} current_hash={} expected_len={} current_len={} \
-             recovery=retry_from_live_head",
+            "queue_maintenance_rebased source={source} outcome=head_advanced_preserved \
+             expected_hash={} current_hash={} rebased_hash={} expected_len={} current_len={} \
+             rebased_len={} recovery=component_crdt",
             agent_doc_hash::content_hash(expected_current),
             agent_doc_hash::content_hash(current),
+            agent_doc_hash::content_hash(&rebased),
             expected_current.len(),
             current.len(),
+            rebased.len(),
         ),
     );
-    anyhow::bail!(
-        "{source}: Lazily head advanced during queue maintenance; retry from the live head"
-    )
+    Ok(rebased)
 }
 
 /// `#ensurereplicagen` — drive the model-ensure transition through whichever
@@ -4947,7 +4969,7 @@ pub(crate) fn persist_queue_maintenance_doc(
     expected_current: &str,
     project_root: Option<&Path>,
     source: &str,
-) -> Result<()> {
+) -> Result<String> {
     let _ = project_root;
     // `#qdonestrike-durable`: a not-ready editor head must not silently discard the
     // maintenance plan. Queue maintenance is idempotent and recomputed every
@@ -5012,7 +5034,12 @@ pub(crate) fn persist_queue_maintenance_doc(
     }
     match current {
         agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => {
-            guard_queue_maintenance_expected_current(file, source, expected_current, &text)?;
+            // `#qtypeclobber`: queue maintenance is a structural successor, not
+            // a whole-document replacement. The editor may publish even a few
+            // bytes after preflight captured `expected_current`; rebase the
+            // candidate over that exact live cut, then CAS the rebased cut.
+            let rebased =
+                rebase_queue_maintenance_target(file, source, expected_current, content, &text)?;
             // `#ensurereplicagen`: the write is the symmetric half of the read
             // fix above and must land in the hub-owning process too.
             // `apply_cp_write_for_file` is process-local: with no hub in this
@@ -5024,17 +5051,12 @@ pub(crate) fn persist_queue_maintenance_doc(
             // that no retry can ever satisfy. Route through the controller, whose
             // model is the real current.
             let write = if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
-                agent_doc_crdt_relay_io::apply_cp_write_for_file(
-                    file,
-                    expected_current,
-                    content,
-                    source,
-                )?
+                agent_doc_crdt_relay_io::apply_cp_write_for_file(file, &text, &rebased, source)?
             } else {
                 agent_doc_controller_io::project_controller::apply_cp_write_via_controller_model_for_doc(
                     file,
-                    expected_current,
-                    content,
+                    &text,
+                    &rebased,
                     source,
                 )?
             };
@@ -5042,8 +5064,26 @@ pub(crate) fn persist_queue_maintenance_doc(
                 write.is_some(),
                 "{source}: attached Lazily write was not applied"
             );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "write_authority action=compare_and_swap authority=lazily surface=queue_maintenance source={source} len={}",
+                    rebased.len()
+                ),
+            );
+            Ok(rebased)
         }
         agent_doc_crdt_relay_io::CurrentText::Detached => {
+            // A detached relay observation is not permission to replace a file
+            // behind an IDE whose durable process/file liveness is still
+            // present. That stamp-only rewrite is the direct cause of
+            // JetBrains File Cache Conflict dialogs.
+            anyhow::ensure!(
+                !agent_doc_controller_io::project_controller::reliable_sync_editor_live_for_file(
+                    file
+                ),
+                "{source}: refusing detached queue-maintenance disk write while durable editor liveness remains"
+            );
             let disk = std::fs::read_to_string(file)?;
             anyhow::ensure!(
                 disk == expected_current || disk == content,
@@ -5053,20 +5093,20 @@ pub(crate) fn persist_queue_maintenance_doc(
                 std::fs::write(file, content)
                     .with_context(|| format!("{source}: failed to write {}", file.display()))?;
             }
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "write_authority action=compare_and_swap authority=lazily surface=queue_maintenance source={source} len={}",
+                    content.len()
+                ),
+            );
+            Ok(content.to_string())
         }
         agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
         | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
             anyhow::bail!("{source}: Lazily editor head is not ready for queue maintenance")
         }
     }
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "write_authority action=compare_and_swap authority=lazily surface=queue_maintenance source={source} len={}",
-            content.len()
-        ),
-    );
-    Ok(())
 }
 
 /// Update the recovery baseline after the Lazily compare-and-swap succeeds.
@@ -6579,7 +6619,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_queue_maintenance_cas_preserves_live_multi_adds_and_records_recovery() {
+    fn stale_queue_maintenance_rebases_over_live_multi_adds_and_three_typed_bytes() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let disk_content = concat!(
@@ -6594,10 +6634,12 @@ mod tests {
             disk_content.replace("- do [#old]\n", "- do [#old]\n- do [#fresh-one]\n");
         let (identity, replica) =
             publish_test_live_buffer(&doc, "preflight-stale-cas-test", &observed_first);
-        let live_all = observed_first.replace(
-            "- do [#fresh-one]\n",
-            "- do [#fresh-one]\n- do [#fresh-two]\n- do [#fresh-three]\n",
-        );
+        let live_all = observed_first
+            .replace(
+                "- do [#fresh-one]\n",
+                "- do [#fresh-one]\n- do [#fresh-two]\n- do [#fresh-three]\n",
+            )
+            .replace("Done.\n", "Donexyz.\n");
         let replica_text = replica.text();
         replica.apply_local_edit(0, replica_text.len() as u32, &live_all);
         agent_doc_crdt_relay_io::relay_replica_update_for_file(
@@ -6609,17 +6651,18 @@ mod tests {
         .expect("test editor should publish the newer complete live buffer");
 
         let stale_target = observed_first.replace("queue_active: false", "queue_active: true");
-        let error = persist_queue_maintenance_doc(
+        let applied = persist_queue_maintenance_doc(
             &doc,
             &stale_target,
             &observed_first,
             None,
             "qeditrace_test",
         )
-        .expect_err("stale maintenance must fail closed");
-        assert!(
-            format!("{error:#}").contains("retry from the live head"),
-            "failure must name the recovery: {error:#}"
+        .expect("stale maintenance should rebase over the live head");
+        let expected = live_all.replace("queue_active: false", "queue_active: true");
+        assert_eq!(
+            applied, expected,
+            "the returned maintenance cut must be the exact rebased canonical"
         );
 
         let current =
@@ -6627,13 +6670,16 @@ mod tests {
                 agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => text,
                 other => panic!("expected embedded Lazily authority, got {other:?}"),
             };
-        assert_eq!(current, live_all, "stale maintenance mutated the live head");
+        assert_eq!(
+            current, expected,
+            "maintenance must preserve all live queue additions and the exact three typed bytes"
+        );
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("queue_maintenance_compare_and_swap_blocked")
-                && ops_log.contains("outcome=head_advanced")
-                && ops_log.contains("recovery=retry_from_live_head"),
-            "stale maintenance needs a durable recovery artifact:\n{ops_log}"
+            ops_log.contains("queue_maintenance_rebased")
+                && ops_log.contains("outcome=head_advanced_preserved")
+                && ops_log.contains("recovery=component_crdt"),
+            "stale maintenance needs a durable rebase artifact:\n{ops_log}"
         );
     }
 

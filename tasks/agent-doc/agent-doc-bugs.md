@@ -129,11 +129,6 @@ Verification passed:
 
 ### Re: do [#coder3] — gpt-5
 
-> **Queue prompt:**
->
-> do [#coder3]
-
-
 Implemented Phase 3 JetBrains IDE-hosted tmux.
 
 - Extended the `tmux ensure` receipt with authoritative attached-client state. A live registered external session with an attached client remains a no-op, while a detached or newly-created session is eligible for IDE attachment.

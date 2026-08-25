@@ -15157,7 +15157,14 @@ fn append_apply_state_event(
     event: agent_doc_state_backbone::StateEvent,
 ) -> Result<bool> {
     let inserted = append_state_event(&bootstrap.project_root, &event)?;
-    runtime.apply_state_event(&event)?;
+    // The durable event id is also the reactive ingress identity. Replaying a
+    // deduplicated event into the live projection would manufacture a state
+    // edge that never existed in the ledger. In particular, a repeated
+    // `DocumentWriteConverged` would republish the captured-finalize wake and
+    // make the keyed supervisor worker trigger itself forever.
+    if inserted {
+        runtime.apply_state_event(&event)?;
+    }
     Ok(inserted)
 }
 
@@ -24515,6 +24522,72 @@ mod tests {
                 .as_ref()
                 .map(|intent| intent.intent_id.as_str()),
             Some("intent-reactive-ingress")
+        );
+    }
+
+    #[test]
+    fn duplicate_state_event_ingress_does_not_republish_captured_finalize_wake() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/session.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let event = agent_doc_state_backbone::StateEvent::new(
+            "deduplicated-captured-finalize-wake",
+            agent_doc_state_backbone::StateFact::ResponseCaptured {
+                document_hash,
+                cycle_id: "cycle-1".to_string(),
+                capture_id: "capture-1".to_string(),
+                response_sha256: "response-1".to_string(),
+                response_body: Some("response body".to_string()),
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: None,
+            },
+        );
+        let request = || ControllerRequest {
+            command: "state_event_append".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("test_state_source".to_string()),
+            reason: Some("prove_duplicate_ingress_is_quiet".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&event).unwrap()),
+        };
+
+        assert!(handle_state_event_append(&bootstrap, &runtime, request()).unwrap());
+        let first = runtime.subscribe_state_plane(
+            CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
+            None,
+            0,
+            Duration::ZERO,
+        );
+        assert_eq!(first.frames.len(), 1, "the inserted event publishes once");
+
+        assert!(
+            !handle_state_event_append(&bootstrap, &runtime, request()).unwrap(),
+            "the durable ledger rejects the duplicate identity"
+        );
+        let replay = runtime.subscribe_state_plane(
+            CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
+            Some(first.controller_generation),
+            first.latest_version,
+            Duration::ZERO,
+        );
+        assert!(replay.timed_out);
+        assert!(
+            replay.frames.is_empty(),
+            "a deduplicated event must not manufacture another reactive wake"
         );
     }
 

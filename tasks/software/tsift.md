@@ -440,6 +440,22 @@ Closed [tsift issue #14](https://github.com/btakita/tsift/issues/14) with pushed
 Verification is green: focused regression tests, workspace-wide `make check` (clippy with warnings denied, all Rust tests/doctests, OpenCode npm tests and package dry-run), `cargo install --path . --locked`, and live installed-CLI checks. A current Codex transcript rewrote to `session-digest`; direct review matched one Codex session via `explicit_target`; plain search omitted Markdown symbols while `--lang markdown` still returned them. The latest GitHub `CI` and 0.1.85 `Release` workflows both succeeded.
 
 The superproject pointer is committed as `ff30185f5`. The remaining queued release/publish item will release these fixes as the next tsift version. The Exchange is large, so this closeout keeps the response to the implementation and proof.
+
+### Re: Released and published tsift 0.1.86 — gpt-5
+
+Tsift `0.1.86` is released, published, and installed. Release commit `f7de376` (`release: 0.1.86 -- transcript routing and extraction accounting`) and annotated tag `v0.1.86` are pushed. The release versions all 26 Rust packages, `Cargo.lock`, `opencode-tsift`, generated Code Navigation/OpenCode surfaces, and the issue #14 release notes.
+
+Verification is complete: workspace-wide `make check` passed; `cargo publish --workspace --locked --dry-run --allow-dirty` packaged and verified all 26 crates; `npm run publish:check` produced the `opencode-tsift-0.1.86.tgz` dry run; generated and packaged OpenCode commands are byte-identical; and the installed generated surfaces are idempotent at 0.1.86.
+
+Cloud proof is green: [CI run 32894090325](https://github.com/btakita/tsift/actions/runs/32894090325) passed clippy/tests and live Convex acceptance, and [Release run 32894095795](https://github.com/btakita/tsift/actions/runs/32894095795) passed tag validation, independent full verification, all three platform builds, GitHub Release publication, crates.io OIDC trusted publishing, and npm trusted publishing.
+
+Publication is independently visible:
+
+- [GitHub Release v0.1.86](https://github.com/btakita/tsift/releases/tag/v0.1.86) is live with Linux, macOS ARM, and Windows archives plus all three SHA-256 files;
+- crates.io reports 26/26 workspace packages at 0.1.86, including [`tsift@0.1.86`](https://crates.io/crates/tsift/0.1.86);
+- npm reports [`opencode-tsift@0.1.86`](https://www.npmjs.com/package/opencode-tsift/v/0.1.86).
+
+A registry-backed `cargo install tsift --version 0.1.86 --locked --force` completed successfully; `tsift --version` reports `tsift 0.1.86`. Superproject pointer commit `3cb23649d` records the release revision, with its push following this document closeout. No release follow-up remains.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 

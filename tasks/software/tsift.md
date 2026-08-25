@@ -392,6 +392,21 @@ I am leaving the `release + publish` queue head active until the workflow is gre
 The stale agent-doc warning was also resolved without touching concurrent edits: committed `src/agent-doc` HEAD `05f292d72` was installed from an isolated clean sibling worktree, including the duplicate-closeout replay fix, and the temporary worktree was removed.
 
 The exchange is large, but the queue remains active, so this cycle was not compacted.
+
+### Re: v0.1.85 release verification still running — gpt-5.6
+
+The tag-triggered [Release workflow](https://github.com/btakita/tsift/actions/runs/32883592164) remains in progress.
+
+Current proof:
+
+- checkout, Rust setup, and exact `v0.1.85` tag-to-manifest validation passed;
+- the workflow's full CI suite is running;
+- crate package-file verification and the OpenCode npm publish dry run are pending behind that gate;
+- build, GitHub Release, crates.io OIDC publish, and npm OIDC publish jobs have not yet reached terminal success.
+
+No repository changes were needed in this continuation. I am keeping the queue head active until the release workflow is green and registry artifacts are visible.
+
+The exchange remains large, but the active queue is draining, so it was not compacted.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 

@@ -13,9 +13,358 @@ use agent_doc_supervisor::{
 };
 use agent_doc_supervisor_process_io::{SupervisorLaunchLog, SupervisorStderrRedirect};
 use anyhow::{Context, Result};
+use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::time::Duration;
+
+/// Optional tmux socket override used by headless integrations and isolated tests.
+pub const AGENT_DOC_TMUX_SOCKET_ENV: &str = "AGENT_DOC_TMUX_SOCKET";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TmuxEnsureOutcome {
+    pub session_name: String,
+    pub pane_id: String,
+    pub attach_command: String,
+    pub created: bool,
+    pub resolution: String,
+    pub document_pane: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LiveRegistryTarget {
+    session_name: String,
+    pane_id: String,
+    document_match: bool,
+}
+
+/// Ensure the project has one tmux session without requiring a TTY.
+///
+/// A live project registry entry wins over every cold-start name. Otherwise the
+/// explicit name, project binding, and `0` fallback are consulted in that order.
+pub fn ensure_tmux_session(
+    file: &Path,
+    explicit_session: Option<&str>,
+) -> Result<TmuxEnsureOutcome> {
+    let tmux = tmux_for_environment();
+    ensure_tmux_session_with(&tmux, file, explicit_session)
+}
+
+pub fn ensure_tmux_session_with(
+    tmux: &tmux_router::Tmux,
+    file: &Path,
+    explicit_session: Option<&str>,
+) -> Result<TmuxEnsureOutcome> {
+    if !file.exists() {
+        anyhow::bail!("file not found: {}", file.display());
+    }
+
+    let report = terminal_host_report(tmux);
+    if !report.classification.tmux_installed {
+        anyhow::bail!("{}", report.reason);
+    }
+
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
+        .or_else(|| agent_doc_project_config_io::project_root_for_doc(&canonical))
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+
+    if let Some(target) = live_registry_target(tmux, &project_root, &canonical)? {
+        return Ok(tmux_ensure_outcome(
+            tmux,
+            target.session_name,
+            target.pane_id.clone(),
+            false,
+            "live_registry",
+            target.document_match.then_some(target.pane_id),
+        ));
+    }
+
+    let configured = agent_doc_project_config_io::load_project_for_doc(&canonical).tmux_session;
+    let (session_name, resolution) =
+        resolve_tmux_session_name(explicit_session, configured.as_deref())?;
+    let mut created = false;
+    let pane_id = if tmux.session_exists(&session_name) {
+        first_session_pane(tmux, &session_name)?
+    } else {
+        match tmux.new_session(&session_name, &project_root) {
+            Ok(pane_id) => {
+                created = true;
+                pane_id
+            }
+            Err(_error) if tmux.session_exists(&session_name) => {
+                // Another concurrent ensure won the create race.
+                first_session_pane(tmux, &session_name)?
+            }
+            Err(error) => return Err(error),
+        }
+    };
+
+    Ok(tmux_ensure_outcome(
+        tmux,
+        session_name,
+        pane_id,
+        created,
+        resolution,
+        None,
+    ))
+}
+
+/// From a non-tmux `agent-doc start`, create/reuse the project session and
+/// submit the same start request inside a pane. `None` means no bootstrap was
+/// needed because this process is already inside tmux.
+pub fn bootstrap_start_inside_tmux_if_needed(
+    file: &Path,
+    force: bool,
+    route_owned: bool,
+    route_owned_reap_policy: agent_doc_supervisor::route_owned::RouteOwnedReapPolicy,
+    resume: Option<&agent_doc_harness::ResumeRequest>,
+) -> Result<Option<TmuxEnsureOutcome>> {
+    if agent_doc_tmux_io::in_tmux() {
+        return Ok(None);
+    }
+
+    prepare_start_document_for_tmux_bootstrap(file)?;
+    let outcome = ensure_tmux_session(file, None)?;
+    if outcome.document_pane.is_some() && !force {
+        eprintln!(
+            "[start] {} already has a live supervisor in pane {}; session '{}' reused",
+            file.display(),
+            outcome.document_pane.as_deref().unwrap_or(&outcome.pane_id),
+            outcome.session_name,
+        );
+        return Ok(Some(outcome));
+    }
+
+    let tmux = tmux_for_environment();
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
+        .or_else(|| agent_doc_project_config_io::project_root_for_doc(&canonical))
+        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let pane_id = if outcome.created {
+        outcome.pane_id.clone()
+    } else {
+        tmux.new_window(&outcome.session_name, &project_root)
+            .with_context(|| {
+                format!(
+                    "failed to provision a start pane in tmux session {}",
+                    outcome.session_name
+                )
+            })?
+    };
+    let command = start_reexec_command(file, force, route_owned, route_owned_reap_policy, resume)?;
+    tmux.send_keys(&pane_id, &command)
+        .with_context(|| format!("failed to re-exec agent-doc start in pane {pane_id}"))?;
+    eprintln!(
+        "[start] dispatched into tmux session '{}' pane {}; attach with: {}",
+        outcome.session_name, pane_id, outcome.attach_command,
+    );
+    Ok(Some(outcome))
+}
+
+/// Validate document admission and persist a missing session identity before an
+/// outside-tmux caller hands the full start lifecycle to a tmux pane.
+///
+/// The inner start admission repeats these reads through the authoritative
+/// model. This narrow outer pass exists so invalid documents fail synchronously
+/// and generated identities are durable before the dispatching process exits.
+fn prepare_start_document_for_tmux_bootstrap(file: &Path) -> Result<()> {
+    if !file.exists() {
+        anyhow::bail!("file not found: {}", file.display());
+    }
+
+    let _ = agent_doc_run_io::repair_document_frontmatter_on_disk(file);
+    let start_document = resolve_start_admission_document(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = start_document.content;
+    agent_doc_frontmatter_io::session::require_agent_doc_document(&content, file)?;
+    let (updated_content, _) =
+        agent_doc_frontmatter_io::session::ensure_session_for_file(&content, file)?;
+    if updated_content == content {
+        return Ok(());
+    }
+    if start_document
+        .authority
+        .needs_post_start_document_model_ensure()
+    {
+        anyhow::bail!(
+            "cannot change the session UUID for {} while editor authority is attached but the live document model is unavailable; save or reload the editor buffer, then retry start",
+            file.display()
+        );
+    }
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, &updated_content)
+        .with_context(|| format!("failed to write {}", file.display()))
+}
+
+fn tmux_for_environment() -> tmux_router::Tmux {
+    tmux_router::Tmux {
+        server_socket: std::env::var(AGENT_DOC_TMUX_SOCKET_ENV)
+            .ok()
+            .filter(|socket| !socket.trim().is_empty()),
+    }
+}
+
+fn terminal_host_report(
+    tmux: &tmux_router::Tmux,
+) -> agent_doc_config::terminal_host::TerminalHostReport {
+    let env: BTreeMap<String, String> = std::env::vars().collect();
+    let tmux_installed = tmux
+        .cmd()
+        .arg("-V")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    agent_doc_config::terminal_host::classify(
+        &env,
+        tmux_installed,
+        tmux_installed && tmux.running(),
+    )
+}
+
+fn live_registry_target(
+    tmux: &tmux_router::Tmux,
+    project_root: &Path,
+    canonical_file: &Path,
+) -> Result<Option<LiveRegistryTarget>> {
+    let registry = agent_doc_session_registry_io::load_in(project_root)?;
+    let mut targets = registry
+        .values()
+        .filter(|entry| tmux.pane_alive(&entry.pane))
+        .filter_map(|entry| {
+            let session_name = tmux
+                .pane_session(&entry.pane)
+                .ok()
+                .filter(|name| !name.is_empty())?;
+            let entry_path = Path::new(&entry.file);
+            let entry_path = if entry_path.is_absolute() {
+                entry_path.to_path_buf()
+            } else {
+                project_root.join(entry_path)
+            };
+            let entry_path = std::fs::canonicalize(&entry_path).unwrap_or(entry_path);
+            Some(LiveRegistryTarget {
+                session_name,
+                pane_id: entry.pane.clone(),
+                document_match: !entry.file.is_empty() && entry_path == canonical_file,
+            })
+        })
+        .collect::<Vec<_>>();
+    targets.sort_by_key(|target| {
+        (
+            !target.document_match,
+            target.session_name.clone(),
+            target.pane_id.clone(),
+        )
+    });
+    Ok(targets.into_iter().next())
+}
+
+fn resolve_tmux_session_name(
+    explicit: Option<&str>,
+    configured: Option<&str>,
+) -> Result<(String, &'static str)> {
+    let (name, resolution) = if let Some(explicit) = explicit {
+        (explicit, "explicit")
+    } else if let Some(configured) = configured {
+        (configured, "project_config")
+    } else {
+        ("0", "default")
+    };
+    let name = name.trim();
+    if name.is_empty() {
+        anyhow::bail!("tmux session name must not be empty");
+    }
+    Ok((name.to_string(), resolution))
+}
+
+fn first_session_pane(tmux: &tmux_router::Tmux, session_name: &str) -> Result<String> {
+    tmux.list_session_panes(session_name)
+        .into_iter()
+        .next()
+        .with_context(|| format!("tmux session {session_name} exists but has no live pane"))
+}
+
+fn tmux_ensure_outcome(
+    tmux: &tmux_router::Tmux,
+    session_name: String,
+    pane_id: String,
+    created: bool,
+    resolution: &str,
+    document_pane: Option<String>,
+) -> TmuxEnsureOutcome {
+    let tmux_prefix = tmux.server_socket.as_deref().map_or_else(
+        || "tmux".to_string(),
+        |socket| format!("tmux -L {} -f /dev/null", shell_escape(socket)),
+    );
+    TmuxEnsureOutcome {
+        attach_command: format!(
+            "{tmux_prefix} attach-session -t {}",
+            shell_escape(&session_name)
+        ),
+        session_name,
+        pane_id,
+        created,
+        resolution: resolution.to_string(),
+        document_pane,
+    }
+}
+
+fn start_reexec_command(
+    file: &Path,
+    force: bool,
+    route_owned: bool,
+    route_owned_reap_policy: agent_doc_supervisor::route_owned::RouteOwnedReapPolicy,
+    resume: Option<&agent_doc_harness::ResumeRequest>,
+) -> Result<String> {
+    let executable =
+        std::env::current_exe().context("failed to resolve the agent-doc executable")?;
+    let mut args = vec![
+        shell_escape_os(executable.as_os_str()),
+        "start".to_string(),
+        shell_escape_os(file.as_os_str()),
+    ];
+    if force {
+        args.push("--force".to_string());
+    }
+    match resume {
+        None => args.push("--fresh".to_string()),
+        Some(agent_doc_harness::ResumeRequest::Latest) => {}
+        Some(agent_doc_harness::ResumeRequest::Id(id)) => {
+            args.push("--resume".to_string());
+            args.push(shell_escape(id));
+        }
+    }
+    if route_owned {
+        args.push("--route-owned".to_string());
+        args.push("--route-owned-reap-policy".to_string());
+        args.push(route_owned_reap_policy.to_string());
+    }
+    Ok(args.join(" "))
+}
+
+fn shell_escape_os(value: &OsStr) -> String {
+    shell_escape(&value.to_string_lossy())
+}
+
+fn shell_escape(value: &str) -> String {
+    if !value.is_empty()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'/' | b'_' | b'-' | b'.' | b':' | b'@' | b'%' | b'+' | b'='
+                )
+        })
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
 
 /// Char-boundary-safe 8-char session prefix for logs and status lines.
 ///
@@ -605,7 +954,7 @@ fn prepare_start_runtime_with_admission(
     };
     report_harness_resolution(&fm, &global_config, &harness, &mut session_log, route_owned);
 
-    ensure_inside_tmux()?;
+    ensure_inside_tmux(file)?;
     let tmux = tmux_router::Tmux::default_server();
     let pane_id = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux)
         .context("failed to query current tmux pane")?;
@@ -931,29 +1280,17 @@ fn report_harness_resolution(
     }
 }
 
-fn ensure_inside_tmux() -> Result<()> {
+fn ensure_inside_tmux(file: &Path) -> Result<()> {
     if agent_doc_tmux_io::in_tmux() {
         return Ok(());
     }
-    let tmux_installed = std::process::Command::new("which")
-        .arg("tmux")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    if !tmux_installed {
-        let hint = if cfg!(target_os = "macos") {
-            "brew install tmux"
-        } else if cfg!(target_os = "linux") {
-            "sudo apt install tmux  # or: sudo pacman -S tmux / sudo dnf install tmux"
-        } else {
-            "Install WSL first, then: sudo apt install tmux"
-        };
-        anyhow::bail!(
-            "tmux is not installed.\n\n  Install it:\n    {}\n\n  Then start a tmux session:\n    tmux new-session -s dev",
-            hint
-        );
-    }
+    let tmux = tmux_for_environment();
+    let report = terminal_host_report(&tmux);
     anyhow::bail!(
-        "not running inside tmux — start a tmux session first:\n    tmux new-session -s dev"
+        "start for {} is still outside tmux after bootstrap: {}. Retry `agent-doc start {}`; inspect `agent-doc env --json` if the host cannot provision a pane",
+        file.display(),
+        report.reason,
+        file.display(),
     )
 }
 
@@ -1625,5 +1962,62 @@ mod tests {
         assert_eq!(entry.pane, "%26");
         assert_eq!(entry.window, "@3");
         assert_eq!(entry.supervisor_instance_id, "sup-efs");
+    }
+
+    #[test]
+    fn tmux_session_name_precedence_is_explicit_then_project_then_default() {
+        assert_eq!(
+            resolve_tmux_session_name(Some("explicit"), Some("configured")).unwrap(),
+            ("explicit".to_string(), "explicit")
+        );
+        assert_eq!(
+            resolve_tmux_session_name(None, Some("configured")).unwrap(),
+            ("configured".to_string(), "project_config")
+        );
+        assert_eq!(
+            resolve_tmux_session_name(None, None).unwrap(),
+            ("0".to_string(), "default")
+        );
+        assert!(resolve_tmux_session_name(Some("  "), None).is_err());
+    }
+
+    #[test]
+    fn tmux_ensure_is_idempotent_on_an_isolated_headless_server() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "---\nagent_doc_session: tmux-ensure\n---\n").unwrap();
+        let socket = format!("agent-doc-ensure-{}", uuid::Uuid::new_v4());
+        let tmux = tmux_router::tmux::IsolatedTmux::new(&socket);
+
+        let first = ensure_tmux_session_with(&tmux, &file, Some("headless")).unwrap();
+        let second = ensure_tmux_session_with(&tmux, &file, Some("headless")).unwrap();
+
+        assert!(first.created);
+        assert!(!second.created);
+        assert_eq!(first.session_name, "headless");
+        assert_eq!(first.session_name, second.session_name);
+        assert_eq!(first.pane_id, second.pane_id);
+        assert_eq!(tmux.list_session_panes("headless").len(), 1);
+        assert!(first.attach_command.contains("attach-session -t headless"));
+    }
+
+    #[test]
+    fn reexec_command_preserves_start_lifecycle_flags() {
+        let command = start_reexec_command(
+            Path::new("tasks/a document.md"),
+            true,
+            true,
+            agent_doc_supervisor::route_owned::RouteOwnedReapPolicy::KeepAlive,
+            Some(&agent_doc_harness::ResumeRequest::Id(
+                "conversation-id".into(),
+            )),
+        )
+        .unwrap();
+
+        assert!(command.contains("start 'tasks/a document.md'"));
+        assert!(command.contains("--force"));
+        assert!(command.contains("--resume conversation-id"));
+        assert!(command.contains("--route-owned-reap-policy keep-alive"));
     }
 }

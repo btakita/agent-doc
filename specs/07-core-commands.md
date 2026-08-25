@@ -312,8 +312,25 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   `AGENT_DOC_VSCODE_REMOTE_NAME=<vscode.env.remoteName>`; VS Code remote names
   are extension-defined and remain opaque.
 - `--json` reports the input classification, resolved host, and the reason for
-  that resolution. A host without tmux fails closed with workspace-image
-  guidance.
+that resolution. A host without tmux fails closed with workspace-image
+guidance.
+
+## tmux ensure
+
+`agent-doc tmux ensure <FILE> [--session NAME] [--json]`
+
+- Ensures one detached tmux session exists for the document and is safe to call
+  repeatedly. An already-live registry target wins so the command never starts
+  a second session for a document that is already owned.
+- For a cold document, session resolution is explicit `--session`, then project
+  `tmux_session`, then `0`.
+- Human output reports the session, pane, attach command, and whether the
+  session was created. `--json` additionally reports the resolution source and
+  any registered document pane.
+- `agent-doc start <FILE>` uses the same operation outside tmux, provisions a
+  pane when necessary, and re-executes the original lifecycle flags inside that
+  pane. A host without tmux fails closed with workspace-image guidance from the
+  shared terminal-host classifier.
 
 ## migrate
 

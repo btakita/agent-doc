@@ -92,6 +92,7 @@ mod skill;
 mod terminal;
 #[cfg(test)]
 mod test_support;
+mod tmux_cmd;
 mod tsift_graph;
 mod undo;
 mod upgrade;
@@ -1986,6 +1987,11 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Ensure a headless tmux session exists
+    Tmux {
+        #[command(subcommand)]
+        action: TmuxAction,
+    },
     /// Run a session: diff, send to agent, write response by document mode
     Run {
         /// Path to the session document
@@ -3067,6 +3073,21 @@ enum Commands {
 }
 
 #[derive(Subcommand)]
+enum TmuxAction {
+    /// Create or reuse the project's tmux session without attaching a client
+    Ensure {
+        /// Path to the session document
+        file: PathBuf,
+        /// Explicit tmux session name; live registry ownership still wins
+        #[arg(long)]
+        session: Option<String>,
+        /// Emit structured JSON
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum AdminAction {
     /// Inspect one actor and its controller receipts
     Inspect {
@@ -4119,6 +4140,13 @@ fn try_main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Env { json } => env_cmd::run(json),
+        Commands::Tmux { action } => match action {
+            TmuxAction::Ensure {
+                file,
+                session,
+                json,
+            } => tmux_cmd::ensure(&file, session.as_deref(), json),
+        },
         Commands::Run {
             file,
             branch,
@@ -4288,13 +4316,25 @@ fn try_main() -> anyhow::Result<()> {
                     }),
                 )
             };
-            agent_doc_start_runtime_io::run_with_reap_policy_and_resume(
+            if agent_doc_start_io::bootstrap_start_inside_tmux_if_needed(
                 &file,
                 force,
                 route_owned,
                 route_owned_reap_policy,
-                resume,
-            )
+                resume.as_ref(),
+            )?
+            .is_some()
+            {
+                Ok(())
+            } else {
+                agent_doc_start_runtime_io::run_with_reap_policy_and_resume(
+                    &file,
+                    force,
+                    route_owned,
+                    route_owned_reap_policy,
+                    resume,
+                )
+            }
         }
         Commands::Route {
             file,

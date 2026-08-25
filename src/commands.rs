@@ -80,6 +80,11 @@ fn all_commands() -> Vec<CommandInfo> {
         "Diagnose terminal-host capabilities and resolution",
     ));
     cmds.push(cmd(
+        "/agent-doc tmux ensure",
+        "<FILE> [--session <NAME>] [--json]",
+        "Create or reuse a detached project tmux session",
+    ));
+    cmds.push(cmd(
         "/agent-doc reset",
         "<FILE>",
         "Clear session ID and delete snapshot",

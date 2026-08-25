@@ -1963,6 +1963,17 @@ fn test_cli_env_json_reports_classification_and_reason() {
 }
 
 #[test]
+fn test_cli_tmux_ensure_help_exposes_headless_bootstrap_contract() {
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["tmux", "ensure", "--help"]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("<FILE>"))
+        .stdout(predicate::str::contains("--session"))
+        .stdout(predicate::str::contains("--json"));
+}
+
+#[test]
 fn test_sync_without_explicit_columns_fails_closed() {
     let mut cmd = agent_doc_cmd();
     cmd.arg("sync");
@@ -31163,20 +31174,26 @@ fn test_cli_route_file_not_found() {
 }
 
 #[test]
-fn test_cli_start_not_in_tmux() {
+fn test_cli_start_outside_tmux_bootstraps_a_detached_session() {
     let tmp = tempfile::TempDir::new().unwrap();
     let doc = tmp.path().join("test.md");
     std::fs::write(&doc, "---\nsession: test-123\n---\n# Test\n").unwrap();
 
+    let socket = format!("agent-doc-start-test-{}", std::process::id());
+
     let mut cmd = agent_doc_cmd();
     cmd.arg("start");
     cmd.arg(&doc);
-    // Remove TMUX env vars to simulate not being in tmux
+    cmd.env("AGENT_DOC_TMUX_SOCKET", &socket);
     cmd.env_remove("TMUX");
     cmd.env_remove("TMUX_PANE");
     cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("not running inside tmux"));
+        .success()
+        .stderr(predicate::str::contains("dispatched into tmux session"));
+
+    let _ = std::process::Command::new("tmux")
+        .args(["-L", &socket, "kill-server"])
+        .status();
 }
 
 #[test]
@@ -31288,22 +31305,33 @@ fn test_cli_start_generates_session_for_bare_file() {
     .unwrap();
     let doc = tmp.path().join("test.md");
     std::fs::write(&doc, "# No frontmatter\n").unwrap();
+    let socket = format!("agent-doc-start-bare-test-{}", std::process::id());
 
     let mut cmd = agent_doc_cmd();
     cmd.arg("start");
     cmd.arg(&doc);
+    cmd.env("AGENT_DOC_TMUX_SOCKET", &socket);
     cmd.env_remove("TMUX");
     cmd.env_remove("TMUX_PANE");
-    // start should generate the UUID first, THEN fail on tmux check
     cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("not running inside tmux"));
-    // Verify the file was updated with frontmatter before the tmux error
-    let content = std::fs::read_to_string(&doc).unwrap();
+        .success()
+        .stderr(predicate::str::contains("dispatched into tmux session"));
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let content = loop {
+        let content = std::fs::read_to_string(&doc).unwrap();
+        if content.contains("session:") || std::time::Instant::now() >= deadline {
+            break content;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
     assert!(
         content.contains("session:"),
         "start should auto-generate session UUID"
     );
+    let _ = std::process::Command::new("tmux")
+        .args(["-L", &socket, "kill-server"])
+        .status();
 }
 
 #[test]
@@ -31332,21 +31360,34 @@ fn test_cli_start_generates_session_for_null_session() {
     let doc = tmp.path().join("test.md");
     // `agent:` is an agent-doc marker, so this opts in even with a null session.
     std::fs::write(&doc, "---\nsession: null\nagent: claude\n---\n# Test\n").unwrap();
+    let socket = format!("agent-doc-start-null-test-{}", std::process::id());
 
     let mut cmd = agent_doc_cmd();
     cmd.arg("start");
     cmd.arg(&doc);
+    cmd.env("AGENT_DOC_TMUX_SOCKET", &socket);
     cmd.env_remove("TMUX");
     cmd.env_remove("TMUX_PANE");
     cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("not running inside tmux"));
-    let content = std::fs::read_to_string(&doc).unwrap();
+        .success()
+        .stderr(predicate::str::contains("dispatched into tmux session"));
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let content = loop {
+        let content = std::fs::read_to_string(&doc).unwrap();
+        if !content.contains("session: null") || std::time::Instant::now() >= deadline {
+            break content;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
     assert!(content.contains("session:"), "frontmatter should exist");
     assert!(
         !content.contains("session: null"),
         "session should no longer be null"
     );
+    let _ = std::process::Command::new("tmux")
+        .args(["-L", &socket, "kill-server"])
+        .status();
 }
 
 #[test]

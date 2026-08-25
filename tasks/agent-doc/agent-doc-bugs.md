@@ -241,6 +241,20 @@ The background `agent-doc` processes were a mix of intentional one-document keep
 The `contracts.md` Compact Exchange/File Cache Conflict was recovered through the owning editor authority without a forced disk overwrite; the stranded visible write is no longer being treated as deferred work.
 
 Regression coverage passes, all six CLI start tests pass, full `make check` passes, and the latest CI run is green. The installed binary contains subrepo commit `ae03141b5` (`fix: stop idle controller and tmux test churn`); the superproject pointer is committed as `16b0b2d59`.
+
+### Re: Response
+
+Fixed, installed, and committed.
+
+- Killed leaked tmux-test shells and removed 35 stale socket artifacts. No hot `zsh` remains.
+- Recycled four stale supervisors (`tsift`, `lazily`, `backend`, `fpe`); their panes resumed on the fixed binary.
+- Root controller CPU dropped from ~16% to 1.8%; Haiven dropped from ~7.6% to 3.3%.
+- Revision-gated the 500 ms idle-watch document read in [idle_watch.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-start-runtime-io/src/idle_watch.rs:152).
+- Added panic/parent-death cleanup for isolated tmux tests in [test_cli.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/tests/test_cli.rs:27).
+- Recovered the `contracts.md` Compact Exchange/File Cache Conflict through editor authority without forcing a disk overwrite.
+- Focused tests and full `make check` pass; latest CI is green.
+
+Commits: `ae03141b5` in agent-doc and `16b0b2d59` in the superproject. The remaining background `agent-doc` processes are healthy one-per-document supervisors/controllers for live sessions, not leaked workers.
 <!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 

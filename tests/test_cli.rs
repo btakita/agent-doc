@@ -6,11 +6,71 @@ use predicates::prelude::*;
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::Command as ProcessCommand;
+use std::process::{Child, Command as ProcessCommand, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 fn agent_doc_cmd() -> Command {
     cargo_bin_cmd!("agent-doc")
+}
+
+static ISOLATED_TMUX_SERVER_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Own an isolated tmux server for an outside-tmux CLI test.
+///
+/// The watchdog holds one end of a close-on-exec socket pair. It kills the
+/// isolated server when the test guard drops, when an assertion panics, or when
+/// the whole test process is interrupted and the other end is closed by the
+/// kernel. This keeps a detached test shell from surviving with a deleted
+/// `TempDir` as its cwd and spinning forever in prompt hooks.
+struct IsolatedTmuxServer {
+    socket: String,
+    sentinel: Option<UnixStream>,
+    watchdog: Option<Child>,
+}
+
+impl IsolatedTmuxServer {
+    fn new(label: &str) -> Self {
+        let sequence = ISOLATED_TMUX_SERVER_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let socket = format!("agent-doc-{label}-test-{}-{sequence}", std::process::id());
+        let (watchdog_stdin, sentinel) = UnixStream::pair().expect("tmux watchdog socket pair");
+        let watchdog_stdin: std::os::fd::OwnedFd = watchdog_stdin.into();
+        let watchdog = ProcessCommand::new("sh")
+            .args([
+                "-c",
+                "cat >/dev/null; socket_path=$(tmux -L \"$1\" display-message -p '#{socket_path}' 2>/dev/null); tmux -L \"$1\" kill-server >/dev/null 2>&1; if [ -n \"$socket_path\" ]; then rm -f -- \"$socket_path\"; fi",
+                "agent-doc-test-tmux-watchdog",
+                &socket,
+            ])
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .stdin(Stdio::from(watchdog_stdin))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn isolated tmux cleanup watchdog");
+        Self {
+            socket,
+            sentinel: Some(sentinel),
+            watchdog: Some(watchdog),
+        }
+    }
+
+    fn configure(&self, command: &mut Command) {
+        command.env("AGENT_DOC_TMUX_SOCKET", &self.socket);
+        command.env_remove("TMUX");
+        command.env_remove("TMUX_PANE");
+    }
+}
+
+impl Drop for IsolatedTmuxServer {
+    fn drop(&mut self) {
+        drop(self.sentinel.take());
+        if let Some(mut watchdog) = self.watchdog.take() {
+            let _ = watchdog.wait();
+        }
+    }
 }
 
 fn init_git_repo(root: &Path, tracked: &Path) {
@@ -31177,24 +31237,17 @@ fn test_cli_route_file_not_found() {
 #[test]
 fn test_cli_start_outside_tmux_bootstraps_a_detached_session() {
     let tmp = tempfile::TempDir::new().unwrap();
+    let tmux = IsolatedTmuxServer::new("start");
     let doc = tmp.path().join("test.md");
     std::fs::write(&doc, "---\nsession: test-123\n---\n# Test\n").unwrap();
-
-    let socket = format!("agent-doc-start-test-{}", std::process::id());
 
     let mut cmd = agent_doc_cmd();
     cmd.arg("start");
     cmd.arg(&doc);
-    cmd.env("AGENT_DOC_TMUX_SOCKET", &socket);
-    cmd.env_remove("TMUX");
-    cmd.env_remove("TMUX_PANE");
+    tmux.configure(&mut cmd);
     cmd.assert()
         .success()
         .stderr(predicate::str::contains("dispatched into tmux session"));
-
-    let _ = std::process::Command::new("tmux")
-        .args(["-L", &socket, "kill-server"])
-        .status();
 }
 
 #[test]
@@ -31296,6 +31349,7 @@ fn test_cli_route_generates_session_for_null_session() {
 #[test]
 fn test_cli_start_generates_session_for_bare_file() {
     let tmp = tempfile::TempDir::new().unwrap();
+    let tmux = IsolatedTmuxServer::new("start-bare");
     // Opt in via the escape hatch so the session-generation path runs under the
     // opt-in gate (#4a6p).
     std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
@@ -31306,14 +31360,11 @@ fn test_cli_start_generates_session_for_bare_file() {
     .unwrap();
     let doc = tmp.path().join("test.md");
     std::fs::write(&doc, "# No frontmatter\n").unwrap();
-    let socket = format!("agent-doc-start-bare-test-{}", std::process::id());
 
     let mut cmd = agent_doc_cmd();
     cmd.arg("start");
     cmd.arg(&doc);
-    cmd.env("AGENT_DOC_TMUX_SOCKET", &socket);
-    cmd.env_remove("TMUX");
-    cmd.env_remove("TMUX_PANE");
+    tmux.configure(&mut cmd);
     cmd.assert()
         .success()
         .stderr(predicate::str::contains("dispatched into tmux session"));
@@ -31330,14 +31381,12 @@ fn test_cli_start_generates_session_for_bare_file() {
         content.contains("session:"),
         "start should auto-generate session UUID"
     );
-    let _ = std::process::Command::new("tmux")
-        .args(["-L", &socket, "kill-server"])
-        .status();
 }
 
 #[test]
 fn test_cli_start_rejects_plain_md_without_opt_in() {
     let tmp = tempfile::TempDir::new().unwrap();
+    let tmux = IsolatedTmuxServer::new("start-reject-plain");
     let doc = tmp.path().join("notes.md");
     let original = "# Plain notes\n";
     std::fs::write(&doc, original).unwrap();
@@ -31345,8 +31394,7 @@ fn test_cli_start_rejects_plain_md_without_opt_in() {
     let mut cmd = agent_doc_cmd();
     cmd.arg("start");
     cmd.arg(&doc);
-    cmd.env_remove("TMUX");
-    cmd.env_remove("TMUX_PANE");
+    tmux.configure(&mut cmd);
     // The opt-in gate fails closed before the tmux check.
     cmd.assert()
         .failure()
@@ -31358,17 +31406,15 @@ fn test_cli_start_rejects_plain_md_without_opt_in() {
 #[test]
 fn test_cli_start_generates_session_for_null_session() {
     let tmp = tempfile::TempDir::new().unwrap();
+    let tmux = IsolatedTmuxServer::new("start-null");
     let doc = tmp.path().join("test.md");
     // `agent:` is an agent-doc marker, so this opts in even with a null session.
     std::fs::write(&doc, "---\nsession: null\nagent: claude\n---\n# Test\n").unwrap();
-    let socket = format!("agent-doc-start-null-test-{}", std::process::id());
 
     let mut cmd = agent_doc_cmd();
     cmd.arg("start");
     cmd.arg(&doc);
-    cmd.env("AGENT_DOC_TMUX_SOCKET", &socket);
-    cmd.env_remove("TMUX");
-    cmd.env_remove("TMUX_PANE");
+    tmux.configure(&mut cmd);
     cmd.assert()
         .success()
         .stderr(predicate::str::contains("dispatched into tmux session"));
@@ -31386,9 +31432,6 @@ fn test_cli_start_generates_session_for_null_session() {
         !content.contains("session: null"),
         "session should no longer be null"
     );
-    let _ = std::process::Command::new("tmux")
-        .args(["-L", &socket, "kill-server"])
-        .status();
 }
 
 #[test]

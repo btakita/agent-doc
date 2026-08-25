@@ -148,6 +148,26 @@ const IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL: std::time::Duration =
 const IDLE_WATCH_FULL_RECONCILE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 const IDLE_WATCH_ZOMBIE_REAP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
+#[derive(Debug, Default)]
+struct AgentChangeFrontmatterRefresh {
+    revision: Option<String>,
+    refreshed_at: Option<std::time::Instant>,
+}
+
+impl AgentChangeFrontmatterRefresh {
+    fn due(&self, revision: Option<&str>, now: std::time::Instant) -> bool {
+        self.revision.as_deref() != revision
+            || self.refreshed_at.is_none_or(|refreshed_at| {
+                now.duration_since(refreshed_at) >= IDLE_WATCH_FULL_RECONCILE_INTERVAL
+            })
+    }
+
+    fn record(&mut self, revision: Option<&str>, now: std::time::Instant) {
+        self.revision = revision.map(str::to_owned);
+        self.refreshed_at = Some(now);
+    }
+}
+
 struct CapturedFinalizeResumeWorker {
     key: agent_doc_repair_command_io::CapturedFinalizeResumeKey,
     result: std::sync::mpsc::Receiver<agent_doc_repair_command_io::CapturedFinalizeResumeOutcome>,
@@ -1387,6 +1407,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             });
             let mut last_full_reconcile: Option<std::time::Instant> = None;
             let mut last_zombie_reap: Option<std::time::Instant> = None;
+            let mut agent_change_frontmatter_refresh = AgentChangeFrontmatterRefresh::default();
         // `#binaryownedfinalize`: once finalize has durably captured a
         // response, this supervisor owns event-driven resumption of that exact
         // operation. A dedicated worker keeps repair/commit latency off the
@@ -2063,7 +2084,15 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // until the buffer happened to reach disk. Disk stays the fallback
                 // for a detached document, which is what the authority resolver
                 // already returns for one.
-                let agent_change_view = agent_change_restart_enabled.then(|| {
+                // `#agentfrontmatterrevisiongate`: materializing that authority is
+                // a full CRDT/controller read. Reuse the idle watch's cheap revision
+                // fingerprint so an unavailable queue authority cannot pull the same
+                // unchanged text twice a second; the periodic reconcile remains the
+                // fail-safe for a missed revision edge.
+                let agent_change_revision = revision_state.tracking().last_observed;
+                let agent_change_refresh_due = agent_change_frontmatter_refresh
+                    .due(agent_change_revision.as_deref(), now);
+                let agent_change_view = (agent_change_restart_enabled && agent_change_refresh_due).then(|| {
                     match agent_doc_document_realtime_io::try_resolve_current_document_content(
                         &path,
                         "idle_watch_agent_change_frontmatter",
@@ -2075,6 +2104,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         ),
                     }
                 });
+                if agent_change_view.is_some() {
+                    agent_change_frontmatter_refresh
+                        .record(agent_change_revision.as_deref(), now);
+                }
                 if let Some((content, authoritative_view)) = agent_change_view
                     && let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content)
                 {
@@ -4735,6 +4768,18 @@ pub(super) fn spawn_idle_queue_watch_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_change_frontmatter_refresh_is_revision_and_interval_gated() {
+        let now = std::time::Instant::now();
+        let mut refresh = AgentChangeFrontmatterRefresh::default();
+
+        assert!(refresh.due(Some("sv-1"), now));
+        refresh.record(Some("sv-1"), now);
+        assert!(!refresh.due(Some("sv-1"), now + std::time::Duration::from_secs(59)));
+        assert!(refresh.due(Some("sv-2"), now + std::time::Duration::from_secs(1)));
+        assert!(refresh.due(Some("sv-1"), now + IDLE_WATCH_FULL_RECONCILE_INTERVAL));
+    }
 
     /// `#idlewatchrevisiongate`: the memo answers only for the revision it was
     /// built from.

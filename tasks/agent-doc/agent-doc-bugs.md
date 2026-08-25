@@ -260,6 +260,21 @@ Commits: `ae03141b5` in agent-doc and `16b0b2d59` in the superproject. The remai
 ### Re: Response
 
 You’re right. I’m stopping all `agent-doc` commands against `contracts.md` immediately—no commit, session-check, reload, repair, or patch. My attempted component repair triggered further projection reverts. I won’t touch the document while you restore it.
+
+### Re: Response
+
+Implemented and committed the agent-doc fixes:
+
+- Prevented the old public controller from self-reaping during replacement startup.
+- Detached disk writes now consult durable editor authority. Controller loss cannot overwrite live document edits; only an explicit last-editor-close permits disk authority.
+- Removed four stranded/test controller processes. zsh shells are idle; the CPU usage was controller churn.
+- Preserved concurrent Claude changes and did not touch `contracts.md`.
+
+Verification: full `make check` passed; latest CI is green.
+
+Commits: `c10c642be` in agent-doc, outer pointer `ecde90942`.
+
+I intentionally did not install/recycle the binary because your Claude-owned contracts session is active. Once it finishes, the remaining step is installing the fixed binary and recycling controllers.
 <!-- agent:boundary:64a22d63:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

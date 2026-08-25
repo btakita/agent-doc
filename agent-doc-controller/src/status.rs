@@ -550,28 +550,32 @@ pub fn controller_watchdog_should_suicide(facts: ControllerWatchdogFacts) -> boo
         facts.handoff_started_at,
         facts.now,
         facts.stale_after,
-    ) || preparing_with_a_dead_predecessor(
-        facts.handoff_state,
-        facts.previous_controller_alive,
-        facts.launched_elapsed,
-        HANDOFF_PROMOTION_IN_FLIGHT_GRACE,
-    ) || preparing_without_a_handoff_clock(
-        facts.handoff_state,
-        facts.handoff_started_at,
-        facts.launched_elapsed,
-        facts.stale_after,
-    ) || handoff_replacement_is_stranded(
-        facts.is_handoff_replacement,
-        facts.handoff_replacement_socket_exists,
-        facts.launched_elapsed,
-        facts.stale_after,
-    ) || handoff_replacement_lost_its_socket(
-        facts.is_handoff_replacement,
-        facts.handoff_replacement_socket_exists,
-        facts.replacement_promotion_recorded,
-        facts.launched_elapsed,
-        facts.stale_after,
-    )
+    ) || (facts.is_handoff_replacement
+        && preparing_with_a_dead_predecessor(
+            facts.handoff_state,
+            facts.previous_controller_alive,
+            facts.launched_elapsed,
+            HANDOFF_PROMOTION_IN_FLIGHT_GRACE,
+        ))
+        || preparing_without_a_handoff_clock(
+            facts.handoff_state,
+            facts.handoff_started_at,
+            facts.launched_elapsed,
+            facts.stale_after,
+        )
+        || handoff_replacement_is_stranded(
+            facts.is_handoff_replacement,
+            facts.handoff_replacement_socket_exists,
+            facts.launched_elapsed,
+            facts.stale_after,
+        )
+        || handoff_replacement_lost_its_socket(
+            facts.is_handoff_replacement,
+            facts.handoff_replacement_socket_exists,
+            facts.replacement_promotion_recorded,
+            facts.launched_elapsed,
+            facts.stale_after,
+        )
 }
 
 /// Grace for a promotion that may already be in flight.
@@ -1805,6 +1809,23 @@ mod preparing_with_a_dead_predecessor_tests {
             Some(false),
             Duration::from_secs(10),
         )));
+    }
+
+    /// `prepare_handoff` temporarily marks the old public controller Preparing.
+    /// Its historical `previous_controller_pid` is not its handoff predecessor,
+    /// so a dead value there must not kill the still-serving public generation.
+    #[test]
+    fn a_public_controller_preparing_a_replacement_ignores_historical_predecessor() {
+        assert!(!controller_watchdog_should_suicide(
+            ControllerWatchdogFacts {
+                is_handoff_replacement: false,
+                ..facts(
+                    ControllerHandoffState::Preparing,
+                    Some(false),
+                    Duration::from_secs(10),
+                )
+            }
+        ));
     }
 
     /// The distinction that keeps this from reaping healthy controllers: after

@@ -12051,6 +12051,30 @@ agent:queue\n\
             "a controller mid-handoff (fresh handoff_started_at) must not self-terminate"
         );
     }
+
+    #[test]
+    fn self_watchdog_keeps_old_public_controller_while_replacement_prepares() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut bootstrap = preparing_runtime_bootstrap(
+            dir.path(),
+            ControllerHandoffState::Preparing,
+            Some(timestamp_secs()),
+        );
+        bootstrap.previous_controller_pid = Some(u32::MAX);
+        let runtime = runtime_for_bootstrap(bootstrap);
+
+        assert!(
+            !controller_self_watchdog_should_suicide(
+                &runtime,
+                None,
+                &socket_path(dir.path()),
+                Duration::from_secs(600),
+                Duration::from_secs(45),
+            ),
+            "the old public controller must serve until its replacement is promoted"
+        );
+    }
     #[test]
     fn self_watchdog_keeps_stable() {
         let dir = tempfile::TempDir::new().unwrap();

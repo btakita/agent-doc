@@ -837,6 +837,43 @@ pub fn load_document_projection(
     Ok(ledger.project_document(&document_hash))
 }
 
+/// Load only the newest durable current-document authority observation.
+///
+/// The ordinary cycle projection deliberately excludes this high-frequency
+/// fact stream. Disk-write admission needs its newest value during controller
+/// handoff, though: absence of a live RPC is not an editor-detach event.
+pub fn load_latest_document_authority(
+    file: &Path,
+) -> Result<Option<agent_doc_state_backbone::DocumentAuthorityProjection>> {
+    let canonical = match file.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return Ok(None),
+    };
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
+    if !agent_doc_sqlite::state_store::state_db_path(&project_root).exists() {
+        return Ok(None);
+    }
+    let document_hash = agent_doc_fs::document_state_hash(&canonical)?;
+    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+    let Some(row) = agent_doc_sqlite::state_store::load_recent_state_events_by_fact_type_from_db(
+        &conn,
+        &document_hash,
+        "document_authority_observed",
+        1,
+    )?
+    .into_iter()
+    .next() else {
+        return Ok(None);
+    };
+    let event: agent_doc_state_backbone::StateEvent = serde_json::from_str(&row.payload_json)
+        .with_context(|| format!("decode document authority event {}", row.event_id))?;
+    let mut ledger = agent_doc_state_backbone::EventLedger::new();
+    ledger.append(event);
+    Ok(ledger
+        .project_document(&document_hash)
+        .and_then(|projection| projection.document.latest_authority))
+}
+
 /// Load the newest durable agent-doc disk-write observation for `file`.
 ///
 /// This is the watcher-facing state-machine seam for self-write echo

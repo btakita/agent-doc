@@ -769,7 +769,7 @@ impl agent_doc_write_converge_io::EditorConvergenceEffects for RuntimeWriteConve
         file: &Path,
         source: &str,
     ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
-        observe_live_editor_authority(file, source)
+        observe_editor_authority_for_disk_write(file, source)
     }
 
     fn apply_canonical_replace_if_attached(
@@ -5194,6 +5194,58 @@ pub fn observe_live_editor_authority(
     Ok(current)
 }
 
+/// Resolve authority for an ordinary detached-disk write. A missing live
+/// controller/relay observation is not a detach event: retain the most recent
+/// durable editor authority until an explicit last-editor-close projection has
+/// recorded a newer disk authority.
+fn observe_editor_authority_for_disk_write(
+    file: &std::path::Path,
+    source: &str,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    let current = observe_live_editor_authority(file, source)?;
+    if !matches!(current, agent_doc_crdt_relay_io::CurrentText::Detached) {
+        return Ok(current);
+    }
+
+    let projected_authority = match agent_doc_cycle_state_io::load_latest_document_authority(file) {
+        Ok(projected_authority) => projected_authority,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "document_disk_authority_retained file={} source={} reason=authority_projection_unavailable error={}",
+                    file.display(),
+                    source,
+                    format!("{err:#}").replace('\n', " "),
+                ),
+            );
+            return Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica);
+        }
+    };
+    let Some(authority) = projected_active_editor_authority(projected_authority.as_ref()) else {
+        return Ok(current);
+    };
+
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "document_disk_authority_retained file={} source={} reason=controller_handoff_without_detach projected_authority={:?} authority_epoch={} authority_source={}",
+            file.display(),
+            source,
+            authority.authority,
+            authority.authority_epoch,
+            authority.source,
+        ),
+    );
+    Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
+}
+
+fn projected_active_editor_authority(
+    authority: Option<&agent_doc_state_backbone::DocumentAuthorityProjection>,
+) -> Option<&agent_doc_state_backbone::DocumentAuthorityProjection> {
+    authority.filter(|authority| authority.authority.editor_active())
+}
+
 fn query_live_editor_authority(
     file: &std::path::Path,
     source: &str,
@@ -7794,6 +7846,70 @@ pub fn retained_write_blocks_session_closeout(file: &Path, source: &str) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn projected_editor_authority_survives_controller_handoff_until_explicit_detach() {
+        let mut projection = agent_doc_state_backbone::DocumentStateProjection::new("doc");
+        projection.document.latest_authority =
+            Some(agent_doc_state_backbone::DocumentAuthorityProjection {
+                authority: agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+                authority_epoch: 10,
+                source: "live_editor".to_string(),
+                reason: "relay_current".to_string(),
+                content_hash: Some("editor-cut".to_string()),
+                editor_id: Some("editor-1".to_string()),
+                write_fact_ordinal: 0,
+            });
+
+        assert_eq!(
+            projected_active_editor_authority(projection.document.latest_authority.as_ref())
+                .map(|authority| authority.authority),
+            Some(agent_doc_state_backbone::DocumentAuthority::EditorRelay),
+            "temporary controller loss must not turn a retained editor cut into disk authority"
+        );
+
+        projection.document.latest_authority =
+            Some(agent_doc_state_backbone::DocumentAuthorityProjection {
+                authority: agent_doc_state_backbone::DocumentAuthority::DiskReplica,
+                authority_epoch: 11,
+                source: "last_editor_close".to_string(),
+                reason: "editor_detached".to_string(),
+                content_hash: Some("closed-cut".to_string()),
+                editor_id: None,
+                write_fact_ordinal: 0,
+            });
+        assert!(
+            projected_active_editor_authority(projection.document.latest_authority.as_ref())
+                .is_none(),
+            "an explicit newer last-editor-close projection permits detached disk authority"
+        );
+    }
+
+    #[test]
+    fn cold_state_db_editor_authority_blocks_disk_until_detach_event() {
+        let (_dir, file, _canonical) = temp_git_doc(&["operator queue edit\n"]);
+        record_document_authority(
+            &file,
+            "live_editor_before_handoff",
+            agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+            "relay_current",
+            Some(agent_doc_hash::content_hash("operator queue edit\n")),
+            Some("editor-1".to_string()),
+        );
+
+        assert_eq!(
+            observe_editor_authority_for_disk_write(&file, "handoff_writeback").unwrap(),
+            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica,
+            "controller loss is missing authority, not proof that the editor detached"
+        );
+
+        record_disk_replica_authority(&file, "last_editor_close", "operator queue edit\n");
+        assert_eq!(
+            observe_editor_authority_for_disk_write(&file, "post_close_writeback").unwrap(),
+            agent_doc_crdt_relay_io::CurrentText::Detached,
+            "a newer explicit disk projection proves the last editor closed"
+        );
+    }
 
     #[test]
     fn retained_prewrite_can_compose_successor_only_from_exact_pending_base() {

@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a03576-78a3-71a0-9477-de8a30159d56
+  codex: 01a03706-bebb-7880-a611-6cb25e59b290
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -64,6 +64,25 @@ The `fpe.md` runtime log shows why:
 The required proof event, `agent_restart_deferred reason=non_authoritative_document_view`, did not occur, so `#harnessswitchverify` stays gated. The installed JetBrains package is current (`0.2.356`), but the IDE host must be restarted to load that generation before repeating the unsaved-buffer test. Separately, preflight reports that the installed `agent-doc` binary/cdylib predates committed source change `5a69fdba7`; run `make install` before the next verification.
 
 No code change or test run was warranted for this diagnostic cycle; I updated the existing review item with the failed-proof evidence and exact retry conditions.
+
+### Re: do [#qtypeclobber] — gpt-5
+
+Fixed and closed. Queue maintenance no longer treats its stale preflight image as a whole-document replacement: it component-rebases the maintenance candidate over the latest Lazily canonical cut, then compare-and-swaps that exact rebased cut. The applied canonical—not the stale candidate—now drives later snapshot synchronization, so a prompt or even a few operator keystrokes published during preflight survive.
+
+I also fenced the detached fallback: durable editor liveness now forbids a direct disk replacement, preventing JetBrains stamp changes behind an open document. The regression recreates multiple concurrent queue additions plus the exact three typed bytes `xyz`; all survive while the maintenance mutation applies.
+
+Verification passed: the full `agent-doc-preflight-io` test suite, `make check`, release install, plugin listing, and latest GitHub Actions CI (`success`). Functional commit: `14dea7352`; required tsift instruction refresh: `eadced4b6`.
+
+### Re: fpe.md File Cache Conflicts — gpt-5
+
+> **Queue prompt:**
+>
+> do [#qtypeclobber]
+
+
+The three recorded fpe.md conflicts were real, but the evidence points to a stale loaded IntelliJ plugin generation: the IDE still had fpe.md open while the old bridge reported detached authority, allowing disk changes behind the dirty buffer. This was not caused by fpe.md content.
+
+I installed the verified binary/library and JetBrains package into every detected IDE root, including IntelliJ IDEA 2026.1. That activates the relay-side in-flight-edit guard and the new durable-liveness disk-write fence. The running IDE must still be restarted to load the new Kotlin package generation; native-library reload cannot replace that code. I did not force the restart because fpe.md has an active session/possibly unsaved buffer. Save or preserve that buffer, then restart IntelliJ IDEA 2026.1 before continuing edits in fpe.md.
 <!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 
@@ -73,13 +92,9 @@ No code change or test run was warranted for this diagnostic cycle; I updated th
 ## Pending / Not Built
 
 <!-- agent:queue priority go -->
-- ~~do [#pccv1]~~
-- ~~Restart Agent on fpe.md when switching from claude to codex restarted in claude. Note the file was not saved...only in the editor buffer. After saving, the switch seemed to work...But this is not necessarily proof of the issue.~~
-- do [#qtypeclobber]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#qtypeclobber] Operator keystrokes in `agent:queue` are reverted by queue maintenance — REMAINING HALF: the whole-document CAS. The disk-reconcile half shipped in 0.35.278: `route_disk_change_signal` (agent-doc-crdt-relay-io) now publishes the reliable-sync plane`s `plane_document_in_flight_for_path` fact instead of a hardcoded `false`, and a `DeferForEditSettle` verdict no longer takes the apply path — that path rebuilds canonical from disk and re-bootstraps every live editor buffer, which is what reverted unsaved keystrokes. Still open: `persist_queue_maintenance_doc` (agent-doc-preflight-io/src/lib.rs:4944) compare-and-swaps the WHOLE document. Corroborating but not yet diagnosed (ops.log, haiven-dev/tasks/backend.md 2026-08-23 19:22:09-13): after the CAS canonical settled at len=51275 while the baseline checkpointed at len=51278, and the next preflight opened `snap_len=51278 file_len=51275`. `adopt_edited_queue_head_into_snapshot` (agent-doc-preflight-io/src/lib.rs:5073) splices the fresh queue region into the STALE snapshot, so the baseline it writes is a text that never existed as a document — plausible source of the three bytes, unproven. `update_bytes=902210` for a 3-byte delta is real and reproduces here (264494 bytes for an 8-byte delta) but is NOT a full-text replace: `apply_canonical_replace` already peels a minimal span, so the size comes from the encoded diff. Unblocked: [#pccv1] is complete and verified. Plan: tasks/agent-doc/plan-per-component-convergence.md
 - [ ] [#coder1] Phase 1 — terminal-host environment classification (CODER_* / DISPLAY / SSH_CONNECTION / tmux presence) + `agent-doc env --json`. VERIFY the real Coder env var names, the JB remote-backend probe, and vscode.env.remoteName against a live workspace before landing. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder2] Phase 2 — headless tmux bootstrap: `agent-doc tmux ensure <FILE>` (idempotent detached new-session) and rewrite ensure_inside_tmux (agent-doc-start-io/src/lib.rs:934) to auto-start + re-exec into the pane instead of bailing. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder3] Phase 3 — JetBrains IDE-hosted terminal: open/reuse an `agent-doc` tab via TerminalToolWindowManager, run the attach command, dialog fallback with a Copy action. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md

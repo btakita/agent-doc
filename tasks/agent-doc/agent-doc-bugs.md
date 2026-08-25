@@ -109,6 +109,28 @@ The File Cache Conflict was caused by an editor replica registering and allocati
 - `make check` passes in full, `git diff --check` passes, version sync passes, and 0.35.279 is installed locally. Commit `d9a596599` is on `main`; tag `v0.35.279` is published. GitHub CI and Release were triggered.
 
 For `contracts.md`, the original Compact Exchange target remains safely retained by continuation `compact-projection-966ee7b4087795d9d5f0669817d206a37f284349ffdd4dbe6f8d277d9bd44f77-f5ac0a17-c77a-406b-824b-a87ab52e516a`; the corrected command returned that same continuation without rewriting. The editor is currently detached, so settlement awaits editor reconnection. I did not retry the compact or force a disk write, preserving the editor-owned content and avoiding another File Cache Conflict.
+
+### Re: do [#coder2] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#coder2]
+
+
+Implemented Phase 2 headless tmux bootstrap.
+
+- Added `agent-doc tmux ensure <FILE> [--session NAME] [--json]`. It reuses a live registered document target before applying the cold-start precedence `--session` → project `tmux_session` → `0`, creates detached sessions idempotently, and reports the session, pane, attach command, creation state, resolution source, and registered document pane.
+- Changed CLI `agent-doc start` outside tmux to ensure the session, provision a pane when needed, and re-exec the original start request inside tmux while preserving force, resume/fresh, route ownership, and reap-policy flags. Hosts without tmux now use the shared terminal-host classifier's workspace-image guidance.
+- Preserved the single-owner invariant: an exact live registry match is reused and does not start a second supervisor unless `--force` was explicitly requested.
+- Documented the command and bootstrap contract in `specs/07-core-commands.md`.
+
+Verification passed:
+
+- `cargo test -p agent-doc-start-io` — 11 passed.
+- `cargo test --test test_cli test_cli_start_outside_tmux_bootstraps_a_detached_session -- --nocapture` — passed.
+- `cargo test --test test_cli test_cli_tmux_ensure_help_exposes_headless_bootstrap_contract -- --nocapture` — passed.
+- Isolated live invocation called `tmux ensure` twice and returned the same pane with `created=true` then `created=false`.
+- Rustfmt check passed for all changed Rust production files.
 <!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 
@@ -119,7 +141,7 @@ For `contracts.md`, the original Compact Exchange target remains safely retained
 
 <!-- agent:queue priority go -->
 - ~~do [#coder1]~~
-- do [#coder2]
+- ~~do [#coder2]~~
 - do [#coder3]
 - do [#coder4]
 - do [#coder5]
@@ -128,7 +150,6 @@ For `contracts.md`, the original Compact Exchange target remains safely retained
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#coder2] Phase 2 — headless tmux bootstrap: `agent-doc tmux ensure <FILE>` (idempotent detached new-session) and rewrite ensure_inside_tmux (agent-doc-start-io/src/lib.rs:934) to auto-start + re-exec into the pane instead of bailing. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder3] Phase 3 — JetBrains IDE-hosted terminal: open/reuse an `agent-doc` tab via TerminalToolWindowManager, run the attach command, dialog fallback with a Copy action. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder4] Phase 4 — VS Code IDE-hosted terminal: window.createTerminal/sendText parity, reuse live terminals, report vscode.env.remoteName in diagnostics, update editors/plugin-parity.tsv. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder5] Phase 5 — `[terminal] host/auto_start_tmux/attach_command` config + `terminal_host:` frontmatter override + pure resolution function shared by CLI and both plugins + runbooks/coder-workspace.md. Do NOT add a `[terminal] session` key — reuse the existing project `tmux_session` binding owned by `agent-doc session set`. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md

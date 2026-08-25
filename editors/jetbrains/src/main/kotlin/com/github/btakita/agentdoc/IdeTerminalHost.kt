@@ -5,6 +5,8 @@ import com.intellij.ui.content.Content
 import org.jetbrains.plugins.terminal.ShellTerminalWidget
 import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 
+internal const val IDE_HOSTED_TMUX_CAPABILITY = "ide_hosted_tmux_v1"
+
 /** Thin adapter around the optional JetBrains Terminal plugin API. */
 internal object IdeTerminalHost {
     private const val TAB_NAME = "agent-doc"

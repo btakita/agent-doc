@@ -56,6 +56,10 @@ pub const CROSS_EDITOR_NATIVE_HARNESS_CAPABILITY: &str = "cross_editor_native_ha
 /// passive editor-surface observation lane must still never launch a controller.
 pub const CONTROLLER_REBOOT_SELF_HEAL_CAPABILITY: &str = "controller_reboot_self_heal_v1";
 
+/// The adapter can surface the project-owned tmux session in an IDE terminal.
+/// Conditional peers may require an optional host terminal plugin at runtime.
+pub const IDE_HOSTED_TMUX_CAPABILITY: &str = "ide_hosted_tmux_v1";
+
 /// Required capabilities for a plugin that participates in live authority.
 pub const REQUIRED_LAZILY_EDITOR_CAPABILITIES: [&str; 2] = [
     OPERATOR_TEXT_AUTHORITY_CAPABILITY,
@@ -87,17 +91,21 @@ mod tests {
         include_str!(
             "../../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt"
         ),
-        include_str!(
-            "../../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"
-        ),
-    ];
+include_str!(
+"../../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"
+),
+include_str!(
+"../../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/IdeTerminalHost.kt"
+),
+];
     const VSCODE_SOURCES: &[&str] = &[
         include_str!("../../editors/vscode/src/native.ts"),
         include_str!("../../editors/vscode/src/editorIntent.ts"),
         include_str!("../../editors/vscode/src/crossEditorHarness.ts"),
         include_str!("../../editors/vscode/src/extension.ts"),
-        include_str!("../../editors/vscode/src/crdtReplica.ts"),
-    ];
+include_str!("../../editors/vscode/src/crdtReplica.ts"),
+include_str!("../../editors/vscode/src/ideTerminal.ts"),
+];
     const ZED_SOURCES: &[&str] = &[include_str!("../../editors/zed/src/agent_doc.rs")];
 
     #[derive(Debug)]
@@ -237,8 +245,9 @@ mod tests {
             PEER_REPLICA_PULL_CAPABILITY,
             "native_hot_reload_generation_v1",
             CROSS_EDITOR_NATIVE_HARNESS_CAPABILITY,
-            CONTROLLER_REBOOT_SELF_HEAL_CAPABILITY,
-        ];
+CONTROLLER_REBOOT_SELF_HEAL_CAPABILITY,
+IDE_HOSTED_TMUX_CAPABILITY,
+];
         assert_eq!(
             rows.iter().map(|row| row.feature).collect::<Vec<_>>(),
             known_features,
@@ -251,17 +260,17 @@ mod tests {
                 ("vscode", row.vscode),
                 ("zed", row.zed),
             ];
-            if row.core == "required" {
-                assert_eq!(
-                    row.jetbrains, "supported",
-                    "JetBrains must implement required capability {}",
-                    row.feature,
-                );
-                assert_eq!(
-                    row.vscode, "supported",
-                    "VS Code must implement required capability {}",
-                    row.feature,
-                );
+if row.core == "required" {
+assert!(
+matches!(row.jetbrains, "supported" | "conditional"),
+"JetBrains must implement or conditionally host required capability {}",
+row.feature,
+);
+assert!(
+matches!(row.vscode, "supported" | "conditional"),
+"VS Code must implement or conditionally host required capability {}",
+row.feature,
+);
             } else {
                 assert_eq!(
                     row.core, "optional",

@@ -64,6 +64,11 @@ import {
     type ReplicaTextChange,
 } from './crdtReplica.js';
 import { registerReliableSyncLiveness } from './reliableSyncLiveness.js';
+import {
+decideIdeTerminalAttach,
+IdeTerminalAttachDecision,
+parseTmuxEnsureReceipt,
+} from './ideTerminal.js';
 import { DebounceCore } from '@lazily-hub/lazily-js/rateshape';
 
 // ---------------------------------------------------------------------------
@@ -315,12 +320,18 @@ function runCli(args: string[], cwd: string, options?: RunCliOptions): Promise<s
             child?.kill('SIGTERM');
         };
 
-        child = execFile(bin, args, {
-            cwd,
-            maxBuffer: 1024 * 1024,
-            timeout: options?.timeoutMs,
-            killSignal: 'SIGTERM',
-        }, (err, stdout, stderr) => {
+child = execFile(bin, args, {
+cwd,
+maxBuffer: 1024 * 1024,
+timeout: options?.timeoutMs,
+killSignal: 'SIGTERM',
+env: {
+...process.env,
+...(vscode.env.remoteName
+? { AGENT_DOC_VSCODE_REMOTE_NAME: vscode.env.remoteName }
+: {}),
+},
+}, (err, stdout, stderr) => {
             if (settled) return;
             settled = true;
             options?.signal?.removeEventListener('abort', abortHandler);
@@ -339,7 +350,48 @@ function runCli(args: string[], cwd: string, options?: RunCliOptions): Promise<s
             }
         });
         options?.signal?.addEventListener('abort', abortHandler, { once: true });
-    });
+});
+}
+
+async function prepareIdeTerminal(cwd: string, relativePath: string): Promise<void> {
+const output = await runCli(['tmux', 'ensure', relativePath, '--json'], cwd, { timeoutMs: 10_000 });
+const receipt = parseTmuxEnsureReceipt(output);
+const existing = vscode.window.terminals.find(
+(terminal) => terminal.name === 'agent-doc' && terminal.exitStatus === undefined,
+);
+const decision = decideIdeTerminalAttach(receipt.attached, existing !== undefined);
+console.log(
+`[agent-doc/terminal-host] vscode_remote_name=${vscode.env.remoteName ?? 'local'} `
++ `session=${receipt.sessionName} pane=${receipt.paneId} created=${receipt.created} decision=${decision}`,
+);
+
+try {
+switch (decision) {
+case IdeTerminalAttachDecision.NoopExternalAttached:
+return;
+case IdeTerminalAttachDecision.FocusExisting:
+existing?.show(false);
+return;
+case IdeTerminalAttachDecision.AttachExisting:
+existing?.show(false);
+existing?.sendText(receipt.attachCommand, true);
+return;
+case IdeTerminalAttachDecision.CreateAndAttach: {
+const terminal = vscode.window.createTerminal({ name: 'agent-doc', cwd });
+terminal.show(false);
+terminal.sendText(receipt.attachCommand, true);
+return;
+}
+}
+} catch (err: any) {
+const action = await vscode.window.showWarningMessage(
+`VS Code terminal could not open: ${err.message}. Attach manually: ${receipt.attachCommand}`,
+'Copy command',
+);
+if (action === 'Copy command') {
+await vscode.env.clipboard.writeText(receipt.attachCommand);
+}
+}
 }
 
 // ---------------------------------------------------------------------------
@@ -1241,9 +1293,10 @@ async function executeRunForDocument(
         controller: abortController,
         settled,
     });
-    try {
-        if (!(await ensureDocumentCleanForCommand(filePath, 'Run'))) return;
-        routeGeneration = native.recordRouteDispatchStarted(filePath, routeKey, cwd);
+try {
+if (!(await ensureDocumentCleanForCommand(filePath, 'Run'))) return;
+await prepareIdeTerminal(cwd, rel);
+routeGeneration = native.recordRouteDispatchStarted(filePath, routeKey, cwd);
         const output = await runEditorRouteViaProjectController(cwd, rel, filePath, routeKey, abortController.signal);
         native.recordRouteDispatchProven(filePath, routeGeneration, `vscode:${routeKey}`, cwd);
         // #r5at: read via the lazily-js reactive mirror (snapshot/delta over the
@@ -1880,9 +1933,12 @@ async function syncLayoutInternal(root: string, notify: boolean, noAutostart: bo
         }
     }
 
-    try {
-        const effectiveFocusFile = focusFile ?? flattenVisibleColumns(visibleColumns)[0];
-        const receipt = native.syncTmuxLayoutJson({
+try {
+const effectiveFocusFile = focusFile ?? flattenVisibleColumns(visibleColumns)[0];
+if (!noAutostart) {
+await prepareIdeTerminal(root, effectiveFocusFile);
+}
+const receipt = native.syncTmuxLayoutJson({
             projectRoot: root,
             columns: buildSyncLayoutColumns(visibleColumns),
             focus: effectiveFocusFile,

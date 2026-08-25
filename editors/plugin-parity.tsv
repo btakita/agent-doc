@@ -16,3 +16,4 @@ peer_replica_pull_v1	optional	supported	supported	staged
 native_hot_reload_generation_v1	optional	conditional	staged	staged
 cross_editor_native_harness_v1	optional	supported	supported	staged
 controller_reboot_self_heal_v1	required	supported	supported	staged
+ide_hosted_tmux_v1	required	conditional	supported	staged

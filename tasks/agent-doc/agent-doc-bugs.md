@@ -177,6 +177,27 @@ Implemented and committed the Coder workspace terminal host policy in `82dbdba0d
 - Added project/global terminal policy configuration, custom attach templates, `auto_start_tmux`, strict IDE receipt fields, and IDE-origin signaling for VS Code and JetBrains.
 - Added the Coder workspace runbook and managed harness mirrors, including image prerequisites, JetBrains Gateway, VS Code Remote SSH, attached-client behavior, and diagnostics.
 - Verified Rust policy/start tests, CLI tests, VS Code tests/typecheck/bundle, JetBrains tests/plugin build, architecture guards, managed documentation mirrors, and a final full `make check` (9,056 tests passed).
+
+### Re: do [#coder6] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#coder6]
+
+
+Implemented Phase 6 workspace restart resilience and committed it as `703ba9e3f fix: reconcile tmux server restarts`.
+
+- Persisted the tmux server PID plus start time alongside the project registry. Every start path now reconciles that lifetime before trusting a pane row; when a replacement server is detected, all prior-server registry rows are cleared under the registry lock before routing continues.
+- Added orphaned editor-socket garbage collection for current `ipc-<pid>.sock` and legacy `agent-doc-<pid>.sock` names while preserving live listeners.
+- Added `AGENT_DOC_SOCKET_DIR` so Coder workspaces backed by 9p or another non-`AF_UNIX` filesystem can place editor endpoint sockets in a writable local, project-specific runtime directory. Listener failures now report that exact recovery.
+- Added the requested pure SimWorld proof: server A rows/sockets followed by server B's first command leaves exactly one live session. The I/O tests additionally prove all old registry rows are removed and a stale dead-PID socket is deleted.
+
+Verification passed:
+
+- Affected-crate test suites passed.
+- Isolated `cargo check --workspace --all-targets` passed, confirming the earlier shared-target unresolved-import output was build-cache contention rather than a source failure.
+- Isolated full `make check` passed (`tart-9eee68ea88`).
+- Latest completed GitHub CI run `32812111461` passed both `make check` and `make tmux-ci`.
 <!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 
@@ -191,12 +212,11 @@ Implemented and committed the Coder workspace terminal host policy in `82dbdba0d
 - ~~do [#coder3]~~
 - ~~do [#coder4]~~
 - ~~do [#coder5]~~
-- do [#coder6]
+- ~~do [#coder6]~~
 - do [#coder7]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#coder6] Phase 6 — workspace restart resilience: record tmux server identity, GC stale registry rows + orphaned .sock files on server-identity mismatch, guard AF_UNIX-incapable project-root filesystems. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 - [ ] [#coder7] [operator-verify] Phase 7 — live Coder workspace validation matrix (JB Gateway cold start, VS Code Remote-SSH cold start, both IDEs attached at once, workspace stop/start, image without tmux). Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 <!-- /agent:backlog -->
 

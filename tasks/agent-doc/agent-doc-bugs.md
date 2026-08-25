@@ -2,6 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
+  codex: 01a03576-78a3-71a0-9477-de8a30159d56
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -11,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -45,6 +46,24 @@ Verification passed:
 - Latest GitHub Actions CI run: success (`32675787507`)
 
 No production source change was needed. `#qtypeclobber` is now unblocked and remains the next queued task.
+
+### Re: Restart Agent on fpe.md — gpt-5
+
+> **Queue prompt:**
+>
+> Restart Agent on fpe.md when switching from claude to codex restarted in claude. Note the file was not saved...only in the editor buffer. After saving, the switch seemed to work...But this is not necessarily proof of the issue.
+
+Correct: this is useful evidence, but it is not proof of `#harnessswitchstorm`.
+
+The `fpe.md` runtime log shows why:
+
+- At `03:45:04Z`, the controller reported `controller_crdt_replica_refusal_storm` with 25 refusals and classified the live JetBrains plugin generation as stale.
+- When Restart Agent ran, the live editor projection was unavailable (`lazily_editor_absent`), so resolution fell back to disk. The saved frontmatter still had no `agent:` value, which resolves to Claude; the log recorded `agent_restart_respec_inert ... running_harness=claude resolved_harness=claude`.
+- After the document was saved, resolution saw `agent: codex` and at `03:45:37Z` recorded `agent_restart_performed ... old_harness=claude new_harness=codex`. The session is now healthy on Codex.
+
+The required proof event, `agent_restart_deferred reason=non_authoritative_document_view`, did not occur, so `#harnessswitchverify` stays gated. The installed JetBrains package is current (`0.2.356`), but the IDE host must be restarted to load that generation before repeating the unsaved-buffer test. Separately, preflight reports that the installed `agent-doc` binary/cdylib predates committed source change `5a69fdba7`; run `make install` before the next verification.
+
+No code change or test run was warranted for this diagnostic cycle; I updated the existing review item with the failed-proof evidence and exact retry conditions.
 <!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 
@@ -55,6 +74,7 @@ No production source change was needed. `#qtypeclobber` is now unblocked and rem
 
 <!-- agent:queue priority go -->
 - ~~do [#pccv1]~~
+- ~~Restart Agent on fpe.md when switching from claude to codex restarted in claude. Note the file was not saved...only in the editor buffer. After saving, the switch seemed to work...But this is not necessarily proof of the issue.~~
 - do [#qtypeclobber]
 <!-- /agent:queue -->
 
@@ -72,7 +92,7 @@ No production source change was needed. `#qtypeclobber` is now unblocked and rem
 ## Review
 
 <!-- agent:review -->
-- [/] [#harnessswitchverify] [operator-verify] Live proof of #harnessswitchstorm on 0.35.276: switch `agent:` (codex <-> claude) in a JB-held document WITHOUT saving, hit Restart Agent, and confirm exactly ONE harness spawn plus `agent_restart_deferred reason=non_authoritative_document_view` in ops.log while the edit is unsaved. Unit + policy coverage landed (agent-doc-supervisor/src/agent_change.rs); only the live editor/pane eyeball is outstanding.
+- [/] [#harnessswitchverify] [operator-verify] #harnessswitchstorm remains unverified. The 2026-08-25 fpe.md attempt was invalidated by a stale live JetBrains plugin generation: ops.log showed controller_crdt_replica_refusal_storm (25 refusals), editor_absent/disk authority, agent_restart_respec_inert to Claude, then old_harness=claude -> new_harness=codex only after save. Unblocks after make install, restart the JetBrains IDE host, repeat the unsaved claude <-> codex switch, and prove exactly one spawn plus agent_restart_deferred reason=non_authoritative_document_view.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:review -->
 

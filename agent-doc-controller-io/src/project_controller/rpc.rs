@@ -13558,20 +13558,19 @@ pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
     }
 }
 
-/// The hot-path CRDT authority for `file` (sidecar-retirement P3/P4). The
-/// reliable-sync plane is **primary**: its `live_docs` decides `MultiReplica` /
-/// `GitAuthoritative`, and a cold process first hydrates the receiver journal plus
-/// retained sender suffix. Filesystem leases and live-buffer sidecars are not read.
-/// This is the single authority entry shared by controller and write paths.
+/// The hot-path CRDT authority for `file` (sidecar-retirement P3/P4).
+///
+/// The relay owns this policy. Durable reliable-sync liveness is its cold-start
+/// source, while an already-routed controller model is the atomic continuation of
+/// a process-scoped `replica_register`. Consulting liveness alone here used to
+/// demote that freshly registered model to Git authority when the separately
+/// scheduled `Open` frame was delayed or lost, authorizing a disk write behind the
+/// editor that had just registered. Filesystem leases and live-buffer sidecars are
+/// not read.
 pub fn crdt_authority_for_file(
     file: &str,
 ) -> agent_doc_document_realtime::crdt_authority::CrdtAuthority {
-    use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
-    if reliable_sync_editor_live_for_file(Path::new(file)) {
-        CrdtAuthority::MultiReplica
-    } else {
-        CrdtAuthority::GitAuthoritative
-    }
+    agent_doc_crdt_relay_io::crdt_authority_for_file(Path::new(file))
 }
 
 /// Status response for the `reliable_sync_status` diagnostic RPC. The Lazily
@@ -29575,6 +29574,43 @@ mod tests {
             crdt_authority_for_file("/tmp/agent-doc-authority-test/other-doc.md"),
             CrdtAuthority::GitAuthoritative
         );
+    }
+
+    #[test]
+    fn process_scoped_replica_registration_bridges_a_delayed_liveness_open() {
+        let _env = reliable_sync_env_lock();
+        use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("registered-before-open.md");
+        std::fs::write(
+            &file,
+            "---\nagent_doc_session: registered-before-open\n---\nbody\n",
+        )
+        .unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let pid = std::process::id();
+        let identity = format!("jetbrains-{pid}-registered-before-open");
+
+        assert!(
+            !reliable_sync_editor_live_for_file(&canonical),
+            "the regression requires the separately pushed Open frame to be absent"
+        );
+        agent_doc_crdt_relay_io::register_editor_replica_for_file_incremental(
+            &canonical, &identity, None, pid,
+        )
+        .unwrap()
+        .expect("the live process-scoped replica must bootstrap the routed model");
+
+        assert_eq!(
+            crdt_authority_for_file(&canonical.to_string_lossy()),
+            CrdtAuthority::MultiReplica,
+            "the routed model must bridge the liveness scheduling gap instead of authorizing disk"
+        );
+
+        agent_doc_crdt_relay_io::deregister_editor_replica_for_file(&canonical, &identity, pid)
+            .unwrap();
     }
 
     #[test]

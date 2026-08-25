@@ -52,6 +52,7 @@ mod crash_resilience;
 mod dashboard_cmd;
 mod dedupe_cmd;
 mod describe_image;
+mod env_cmd;
 mod exchange;
 mod extract;
 mod focus_effects;
@@ -1979,6 +1980,12 @@ enum McpAction {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Diagnose terminal-host capabilities and resolution
+    Env {
+        /// Emit structured JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Run a session: diff, send to agent, write response by document mode
     Run {
         /// Path to the session document
@@ -4111,6 +4118,7 @@ fn try_main() -> anyhow::Result<()> {
     let config = agent_doc_config::load()?;
 
     match cli.command {
+        Commands::Env { json } => env_cmd::run(json),
         Commands::Run {
             file,
             branch,

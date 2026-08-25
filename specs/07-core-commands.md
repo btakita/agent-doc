@@ -44,6 +44,9 @@ This file covers the lower-churn command surface that is not primarily about tmu
 - `--commit` closes compacted state through the normal binary-owned commit path. It commits only the compacted snapshot state; any unresolved post-boundary prompt left visible remains the next prompt-bearing diff for a later `agent-doc <FILE>` cycle.
 - The controller must carry that intentional split as two targets through the whole transaction. Editor-buffer flush and relay fallback repair use the live target (including unresolved input); snapshot staging and post-commit HEAD verification use the committed target. Closeout must not force a whole-buffer relay rebootstrap when the live target is already converged, and must fail closed instead of overwriting a concurrent live-editor change.
 - If compact reaches the pre-write barrier while an earlier editor delivery is retained, it may subsume that pending projection only when the typed retained state and the relay's exact canonical text prove the same base used to derive the compact successor. The successor still requires normal CRDT compare-and-swap and editor-delivery settlement. Relay drift, detached authority, and unrelated errors remain fail-closed, and this state must not prescribe `commit` or `write --commit` because no response cycle owns the earlier projection.
+- The retry guidance for that pre-write-only refusal names the compact mutation:
+  retry the same compact after editor convergence. It must not fall through to
+  generic response-cycle recovery guidance or suggest a forced disk write.
 
 ## init
 
@@ -295,6 +298,22 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
 
 - Opens an external terminal that attaches to the target tmux session, but only when another attached client does not already exist.
 - The terminal command comes from user config or `$TERMINAL`.
+
+## env
+
+`agent-doc env [--json]`
+
+- Captures process environment and tmux availability once, then delegates to the
+  pure terminal-host classifier shared with editor integrations.
+- Coder detection uses `CODER=true` and the `CODER_WORKSPACE_*` identity
+  variables. It never reads or reports `CODER_AGENT_TOKEN`.
+- IDE integrations provide authoritative observations through
+  `AGENT_DOC_JETBRAINS_PRODUCT_MODE=backend` or
+  `AGENT_DOC_VSCODE_REMOTE_NAME=<vscode.env.remoteName>`; VS Code remote names
+  are extension-defined and remain opaque.
+- `--json` reports the input classification, resolved host, and the reason for
+  that resolution. A host without tmux fails closed with workspace-image
+  guidance.
 
 ## migrate
 

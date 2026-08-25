@@ -75,6 +75,11 @@ fn all_commands() -> Vec<CommandInfo> {
         "Preview the diff that would be sent",
     ));
     cmds.push(cmd(
+        "/agent-doc env",
+        "[--json]",
+        "Diagnose terminal-host capabilities and resolution",
+    ));
+    cmds.push(cmd(
         "/agent-doc reset",
         "<FILE>",
         "Clear session ID and delete snapshot",

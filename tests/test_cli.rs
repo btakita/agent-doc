@@ -1952,6 +1952,17 @@ fn test_cli_help() {
 }
 
 #[test]
+fn test_cli_env_json_reports_classification_and_reason() {
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["env", "--json"]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("\"classification\""))
+        .stdout(predicate::str::contains("\"resolved_terminal_host\""))
+        .stdout(predicate::str::contains("\"reason\""));
+}
+
+#[test]
 fn test_sync_without_explicit_columns_fails_closed() {
     let mut cmd = agent_doc_cmd();
     cmd.arg("sync");

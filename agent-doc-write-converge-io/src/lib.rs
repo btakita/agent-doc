@@ -2801,9 +2801,12 @@ fn refuse_unproven_editor_delivery(
 }
 
 fn live_editor_attached(file: &Path) -> bool {
-    // P4: one authority function owns both the warm CRDT read and durable cold
-    // replay. The write-convergence path no longer reads plugin-owner leases.
-    agent_doc_controller_io::project_controller::reliable_sync_editor_live_for_file(file)
+    // P4: one authority function owns both the routed-model hot path and durable
+    // reliable-sync cold replay. The write-convergence path no longer reads
+    // plugin-owner leases, and a delayed liveness frame cannot authorize a disk
+    // write behind a process-scoped replica that already registered.
+    agent_doc_controller_io::project_controller::crdt_authority_for_file(&file.to_string_lossy())
+        .editor_attached()
 }
 
 fn editor_ipc_listener_active(file: &Path) -> bool {

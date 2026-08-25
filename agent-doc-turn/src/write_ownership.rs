@@ -224,11 +224,41 @@ impl RetainedWriteVerdict {
     }
 }
 
-/// The remedy every retained-write refusal appends, derived from one predicate.
+/// Which graph owns the retained projection a refusal is describing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetainedProjectionOwnership {
+    /// A response write has entered closeout, so its cycle/capture facts decide
+    /// whether the caller waits or performs the terminal commit.
+    ResponseWrite(RetainedWriteOwnership),
+    /// A mutation has not run yet. Its retained cut is only a canonical base;
+    /// response-cycle commit commands cannot own or release it.
+    PrewriteMutation,
+}
+
+/// The remedy every retained-projection refusal appends, derived from one owner.
+pub fn retained_projection_remedy(ownership: RetainedProjectionOwnership, file: &str) -> String {
+    match ownership {
+        RetainedProjectionOwnership::ResponseWrite(ownership) => {
+            retained_write_remedy_inner(ownership, file)
+        }
+        RetainedProjectionOwnership::PrewriteMutation => format!(
+            "The canonical pre-write base remains owned by the document model. Retry the same \
+             mutation after the editor replica observes that base; do NOT run `agent-doc commit \
+             {file}`, `agent-doc write --commit {file}`, or force disk because no response-cycle \
+             write owns this projection"
+        ),
+    }
+}
+
+/// The remedy every retained response-write refusal appends, derived from one predicate.
 ///
 /// `file` is the document path as the caller displays it; it is interpolated
 /// into the commands so an agent can copy them verbatim.
 pub fn retained_write_remedy(ownership: RetainedWriteOwnership, file: &str) -> String {
+    retained_projection_remedy(RetainedProjectionOwnership::ResponseWrite(ownership), file)
+}
+
+fn retained_write_remedy_inner(ownership: RetainedWriteOwnership, file: &str) -> String {
     match ownership.verdict() {
         RetainedWriteVerdict::Deferred => format!(
             "The capture is already durable and the same intent commits itself once delivery \
@@ -567,6 +597,18 @@ mod tests {
                 "must explicitly rule out `{invented}`: {remedy}"
             );
         }
+    }
+
+    #[test]
+    fn prewrite_projection_remedy_retries_the_mutation_not_response_closeout() {
+        let remedy =
+            retained_projection_remedy(RetainedProjectionOwnership::PrewriteMutation, "plan.md");
+
+        assert!(remedy.contains("Retry the same mutation"));
+        assert!(remedy.contains("no response-cycle write owns"));
+        assert!(remedy.contains("do NOT run `agent-doc commit plan.md`"));
+        assert!(!remedy.contains("Recover from the pane"));
+        assert!(!remedy.contains("STRANDED"));
     }
 
     /// `#ownershipverdictdiverges`: an uncaptured `write_applied` cycle is not

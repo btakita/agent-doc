@@ -89,7 +89,11 @@ const REFUSAL_SITES: [(&str, &str); 5] = [
 /// which a mutation probe walked straight through: deleting the call while
 /// leaving a doc comment that *mentioned* `write_ownership` kept the guard
 /// green. A guard satisfied by prose about the rule is not a guard.
-const SHARED_PREDICATE_CALLS: [&str; 2] = ["retained_write_ownership(", "retained_write_remedy("];
+const SHARED_PREDICATE_CALLS: [&str; 3] = [
+    "retained_write_ownership(",
+    "retained_write_remedy(",
+    "retained_projection_remedy(",
+];
 
 /// Constructors that BUILD a retained-write refusal the agent will read.
 ///
@@ -109,10 +113,11 @@ const RETENTION_ERROR_CONSTRUCTORS: [&str; 1] = ["await_editor_replica_no_disk_w
 /// `retained_write_remedy_for(` does NOT contain `retained_write_remedy(` as a
 /// substring, so the wrapper has to be named explicitly — matching only the bare
 /// predicate would fail every site that routes through it.
-const REMEDY_CALLS: [&str; 3] = [
+const REMEDY_CALLS: [&str; 4] = [
     "retained_write_remedy(",
     "retained_write_remedy_for(",
     "retained_write_ownership(",
+    "retained_projection_remedy(",
 ];
 
 fn workspace_root() -> PathBuf {

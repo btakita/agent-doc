@@ -28,6 +28,7 @@ use agent_doc_frontmatter::frontmatter::{CodexNetworkAccess, FreeTextExecutionMo
 use agent_doc_model_tier::ModelConfig;
 
 pub mod env;
+pub mod terminal_host;
 
 /// Execution mode for skill-level parallelism.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

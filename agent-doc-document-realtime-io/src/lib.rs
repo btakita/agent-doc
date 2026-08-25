@@ -117,11 +117,6 @@ static DOCUMENT_AUTHORITY_OBSERVATIONS: LazyLock<
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
 const CRDT_POST_PROOF_REBASE_LIMIT: usize = 3;
 
-#[cfg(test)]
-#[cfg(test)]
-const CRDT_WRITE_SETTLE_MS: u64 = 10;
-#[cfg(not(test))]
-const CRDT_WRITE_SETTLE_MS: u64 = 500;
 /// Marker every error that RETAINS its change for a later retry must carry.
 ///
 /// `#fzmutloss`: a write that fails but retains its intent must also retain the
@@ -2749,11 +2744,12 @@ pub fn apply_canonical_replace_if_attached(
         if pending_target.is_none() {
             let remaining_ms =
                 CRDT_WRITE_CONVERGENCE_TIMEOUT_MS.saturating_sub(controller_elapsed_ms);
-            let prewrite_barrier = guard_visible_write_current_transition_with_budget(
+            let prewrite_barrier = guard_visible_write_current_transition_with_policy(
                 file,
                 source,
-                CRDT_WRITE_SETTLE_MS,
                 remaining_ms.max(1),
+                true,
+                ProjectionRefusalOwnership::PrewriteBase,
             )
             .with_context(|| {
                 format!(
@@ -5575,7 +5571,13 @@ pub fn guard_visible_write_current_transition_with_budget(
     _debounce_ms: u64,
     timeout_ms: u64,
 ) -> Result<()> {
-    guard_visible_write_current_transition_with_policy(file, source, timeout_ms, true)
+    guard_visible_write_current_transition_with_policy(
+        file,
+        source,
+        timeout_ms,
+        true,
+        ProjectionRefusalOwnership::PriorWrite,
+    )
 }
 
 /// Require the post-write editor delivery projection to be visible before a
@@ -5647,6 +5649,32 @@ fn defer_visible_delivery_projection(
     delivery_version: u64,
     live_editors: usize,
 ) -> Result<()> {
+    defer_visible_delivery_projection_with_ownership(
+        file,
+        source,
+        delivery_version,
+        live_editors,
+        ProjectionRefusalOwnership::PriorWrite,
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProjectionRefusalOwnership {
+    /// A write already entered the response/closeout graph, so cycle ownership
+    /// determines whether the caller waits or finishes a terminal commit.
+    PriorWrite,
+    /// A mutation has not run yet. The retained cut is only its canonical base;
+    /// no response cycle owns it and commit/write cannot settle it.
+    PrewriteBase,
+}
+
+fn defer_visible_delivery_projection_with_ownership(
+    file: &Path,
+    source: &str,
+    delivery_version: u64,
+    live_editors: usize,
+    ownership: ProjectionRefusalOwnership,
+) -> Result<()> {
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -5669,7 +5697,17 @@ fn defer_visible_delivery_projection(
     Err(await_editor_replica_no_disk_write(format!(
         "visible document write for {} is retained by the lazy delivery projection because the editor state projection has not converged; no secondary snapshot/commit or forced disk write was attempted. {}",
         file.display(),
-        retained_write_remedy_for(file),
+        agent_doc_turn::write_ownership::retained_projection_remedy(
+            match ownership {
+                ProjectionRefusalOwnership::PriorWrite =>
+                    agent_doc_turn::write_ownership::RetainedProjectionOwnership::ResponseWrite(
+                        agent_doc_capture_io::retained_write_ownership(file),
+                    ),
+                ProjectionRefusalOwnership::PrewriteBase =>
+                    agent_doc_turn::write_ownership::RetainedProjectionOwnership::PrewriteMutation,
+            },
+            &file.display().to_string(),
+        ),
     )))
 }
 
@@ -5699,8 +5737,41 @@ mod retained_refusal_token_tests {
             "retained-delivery refusal must carry its recovery token: {rendered}"
         );
         assert!(
-            err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>().is_some(),
+            err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+                .is_some(),
             "and stay the typed retained-write error"
+        );
+    }
+
+    #[test]
+    fn prewrite_projection_refusal_retries_the_mutation_not_response_commit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "# plan\n").expect("write");
+
+        let err = defer_visible_delivery_projection_with_ownership(
+            &file,
+            "compact_document",
+            17,
+            1,
+            ProjectionRefusalOwnership::PrewriteBase,
+        )
+        .expect_err("a non-converged pre-write base must refuse");
+        let rendered = format!("{err:#}");
+
+        assert!(rendered.contains("Retry the same mutation"), "{rendered}");
+        assert!(
+            rendered.contains("no response-cycle write owns this projection"),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("Recover from the pane that OWNS this session"),
+            "a pre-write compact base must not prescribe stranded-response recovery: {rendered}"
+        );
+        assert!(
+            err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+                .is_some(),
+            "the supervisor still needs the typed state-edge recovery class"
         );
     }
 
@@ -5718,6 +5789,7 @@ fn guard_visible_write_current_transition_with_policy(
     source: &str,
     timeout_ms: u64,
     allow_missing_replica_defer: bool,
+    refusal_ownership: ProjectionRefusalOwnership,
 ) -> Result<()> {
     let start = std::time::Instant::now();
     let mut projection_observation = ProjectionObservationState::default();
@@ -5771,11 +5843,12 @@ fn guard_visible_write_current_transition_with_policy(
         }
         if start.elapsed() >= std::time::Duration::from_millis(timeout_ms) {
             if let Some((delivery_version, live_editors)) = delivery_cursor {
-                return defer_visible_delivery_projection(
+                return defer_visible_delivery_projection_with_ownership(
                     file,
                     source,
                     delivery_version,
                     live_editors,
+                    refusal_ownership,
                 );
             }
             agent_doc_ops_log_io::log_op(
@@ -5823,11 +5896,12 @@ fn guard_visible_write_current_transition_with_policy(
                 max_wait_ms: Some(remaining_ms),
             })? == ProjectionObservationWait::ForegroundDeadline
             {
-                return defer_visible_delivery_projection(
+                return defer_visible_delivery_projection_with_ownership(
                     file,
                     source,
                     delivery_version,
                     live_editors,
+                    refusal_ownership,
                 );
             }
             continue;

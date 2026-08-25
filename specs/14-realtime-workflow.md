@@ -126,6 +126,12 @@ side channel: current text lives in the Lazily/CP CRDT model, while open/close,
 sync epochs, editor identity, plugin version, and capabilities travel on the
 reliable-sync Lazily plane. No filesystem representation of live editor state
 is created or consulted.
+A routed, allocated CRDT model created by replica registration is itself
+editor-attachment proof while the separately scheduled reliable-sync `open`
+projection is delayed or being rebuilt. The controller, write convergence, and
+write runtime must use the relay-owned authority decision: disk becomes eligible
+only when both the routed model and durable editor liveness are absent. No
+adapter may independently demote that registration gap to a detached disk write.
 When a controller recycle removes server-side membership but the editor still
 holds a cached client, refresh must retire that cached client and issue a new
 registration. Every stale supervisor/controller recycle request emits that

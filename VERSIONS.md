@@ -2,6 +2,42 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.279
+
+- **Fix: registered editor replicas can no longer be misclassified as detached
+  during a reliable-liveness gap.**
+
+Replica registration allocates and routes the canonical CRDT model atomically,
+while the reliable-sync `open` frame is delivered on a separate schedule. The
+controller used only that durable liveness row to decide whether disk was
+eligible, so a delayed frame could briefly send finalize/writeback directly to
+disk behind a still-authoritative editor buffer. That divergence surfaced as a
+file-cache conflict and could strand the visible base needed by a following
+compact.
+
+The relay's existing authority policy now owns the decision everywhere: either a
+routed allocated model or durable editor liveness keeps the document
+multi-replica and disk-ineligible. Controller, convergence, and write-runtime
+adapters delegate to that shared policy. Regressions cover the registration/open
+gap at the controller and write boundaries.
+
+- **Fix: Compact pre-write refusals now prescribe the mutation they actually
+  belong to.**
+
+When Compact cannot prove that the editor observed its pre-write base and no
+response capture/cycle owns that base, its diagnostic now says to retry the same
+compact after convergence. It no longer recommends `commit` or `write --commit`,
+which cannot own or release a pre-write-only projection.
+
+- **Add: `agent-doc env --json` reports terminal-host capabilities once from the
+  binary.**
+
+The pure classifier reports Coder workspace identity, authoritative JetBrains or
+VS Code remote-mode observations, display/SSH availability, tmux availability,
+the resolved host, and an explicit reason. Coder detection uses the current
+workspace identity variables and never reads or serializes the agent token;
+VS Code remote names remain opaque because extensions define their values.
+
 ## 0.35.278
 
 - **Fix: a disk-change reconcile no longer reverts operator keystrokes that are

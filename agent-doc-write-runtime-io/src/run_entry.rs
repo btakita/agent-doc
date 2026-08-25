@@ -2344,10 +2344,14 @@ fn editor_crdt_authority_attached(file: &Path) -> bool {
         || agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached()
 }
 
-/// Whether the durable reliable-sync authority says no editor holds `file`.
-/// Relay member count cannot answer this during a transient reattach gap.
+/// Whether the shared CRDT authority says no editor holds `file`.
+///
+/// Durable reliable-sync liveness covers cold start, while a routed relay model
+/// covers the interval after a process-scoped replica registration and before its
+/// separately scheduled `Open` frame arrives. Neither signal alone is sufficient
+/// to authorize a disk write.
 fn write_path_editor_absent(file: &Path) -> bool {
-    !agent_doc_controller_io::project_controller::reliable_sync_editor_live_for_file(file)
+    !editor_crdt_authority_attached(file)
 }
 
 fn ensure_force_disk_editor_authority_ready(file: &Path) -> Result<()> {
@@ -3574,5 +3578,40 @@ mod tests {
             !write_path_editor_absent(&doc),
             "a reliable-sync reopen must cancel the IPC skip"
         );
+    }
+
+    #[test]
+    fn write_path_never_uses_disk_during_registered_replica_liveness_gap() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("registered-before-open.md");
+        fs::write(
+            &doc,
+            "---\nagent_doc_session: registered-before-open\n---\nbody\n",
+        )
+        .unwrap();
+        let canonical = doc.canonicalize().unwrap();
+        let pid = std::process::id();
+        let identity = format!("jetbrains-{pid}-write-authority-gap");
+
+        assert!(
+            !agent_doc_controller_io::project_controller::reliable_sync_editor_live_for_file(
+                &canonical,
+            ),
+            "the separately scheduled reliable-sync Open must be absent"
+        );
+        agent_doc_crdt_relay_io::register_editor_replica_for_file_incremental(
+            &canonical, &identity, None, pid,
+        )
+        .unwrap()
+        .expect("process-scoped editor registration");
+
+        assert!(
+            !write_path_editor_absent(&canonical),
+            "an allocated routed editor model must block the disk-detached write path"
+        );
+
+        agent_doc_crdt_relay_io::deregister_editor_replica_for_file(&canonical, &identity, pid)
+            .unwrap();
     }
 }

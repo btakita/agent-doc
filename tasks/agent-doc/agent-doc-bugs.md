@@ -149,11 +149,6 @@ Committed as `bec955e6e feat: host tmux in JetBrains terminal`. Live GUI tab beh
 
 ### Re: do [#coder4] — gpt-5
 
-> **Queue prompt:**
->
-> do [#coder4]
-
-
 Implemented Phase 4 VS Code IDE-hosted tmux parity.
 
 - Added a typed `tmux ensure --json` receipt parser and pure terminal-host decision table. VS Code leaves externally attached sessions alone, focuses a live `agent-doc` terminal, reuses a detached live terminal, or creates one with `window.createTerminal({ name: 'agent-doc', cwd })` and sends the binary-provided attach command.

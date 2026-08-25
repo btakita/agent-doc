@@ -193,6 +193,25 @@ Verification passed:
 - Isolated `cargo check --workspace --all-targets` passed, confirming the earlier shared-target unresolved-import output was build-cache contention rather than a source failure.
 - Isolated full `make check` passed (`tart-9eee68ea88`).
 - Latest completed GitHub CI run `32812111461` passed both `make check` and `make tmux-ci`.
+
+### Re: Response
+
+Implemented and verified:
+
+- File Cache Conflict fix released in `agent-doc 0.35.279` (`d9a596599`). CI and Release workflows passed; live session checks now report converged editor/disk authority.
+- Workspace restart resilience committed as `703ba9e3f`; outer integration commit is `202cada2b`.
+- Full isolated `make check` passed.
+- `agent-doc-bugs.md` cycle closed successfully; `coder7` remains operator-gated.
+
+`contracts.md` still has the original retained Compact Exchange continuation without a settlement receipt. Its owning pane `%29` currently contains unsent user input, so I did not inject commands, bypass pane ownership, retry compaction, or force a disk write.
+
+After handling that pending prompt in `%29`, run there:
+
+```bash
+agent-doc commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md
+```
+
+Do not rerun Compact Exchange.
 <!-- agent:boundary:1b85b380 -->
 <!-- /agent:exchange -->
 

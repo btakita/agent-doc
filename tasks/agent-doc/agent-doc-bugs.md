@@ -348,6 +348,23 @@ Verification passed:
 - Live `fpe.md` status reports a healthy supervisor, `startup_miss: none`, and a committed latest cycle.
 
 Published commits: `1252e4eaf`, `c1f579b9c`, and `d1410c31d`; tag `v0.35.286` is pushed. GitHub CI, Release, and PyPI runs for the tag are in progress.
+
+### Re: Response
+
+Completed the active `#donemdreplica` cycle and added `fpe.md` startup repair.
+
+- Released and installed agent-doc `0.35.286`; tag `v0.35.286` is pushed.
+- Fixed canonical `.md` identity being redirected to `.done.md`.
+- Fixed live-editor missing-model recovery during Run Agent Doc.
+- Made SQLite pressure persistence bounded and nonfatal.
+- Clean-worktree `make check` passed.
+- `fpe.md` reports a healthy supervisor and `startup_miss: none`.
+- Session-check passed; `#coder7` remains operator-gated.
+- CI, Release, and PyPI were in progress at last check.
+
+Restart IntelliJ once more to load JetBrains package `0.2.359`.
+
+The separate tmux auto-focus stale-window issue and the `tsift.md` Clear Session Context/duplicated-snapshot issues were not part of this active queue item and remain unresolved.
 <!-- agent:boundary:64a22d63:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

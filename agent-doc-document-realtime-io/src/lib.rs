@@ -5469,6 +5469,28 @@ fn resolve_closed_editor_disk_fallback_current_doc(
     ))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExhaustedAuthorityErrorRecovery {
+    MissingReplica,
+    ClosedEditor,
+}
+
+/// Classify an authority transport error after the bounded replica refresh has
+/// already run.
+///
+/// A live editor turns the error into the same missing-replica state as an
+/// explicit `EditorAttachedMissingReplica` observation. That shared state owns
+/// the one-shot terminal plugin rebuild. Treating the transport error as a
+/// closed-editor fallback skips that rebuild and strands the session until an
+/// operator runs `admin reload-lib` manually.
+fn exhausted_authority_error_recovery(editor_open: bool) -> ExhaustedAuthorityErrorRecovery {
+    if editor_open {
+        ExhaustedAuthorityErrorRecovery::MissingReplica
+    } else {
+        ExhaustedAuthorityErrorRecovery::ClosedEditor
+    }
+}
+
 /// Resolve live editor authority, attempting bounded document-model
 /// startup/reconciliation before returning a missing-model state to callers.
 pub fn observe_live_editor_authority_after_model_ensure(
@@ -6815,17 +6837,37 @@ fn try_resolve_current_doc_with_disk_inner(
                     e,
                 ),
             );
-            return resolve_closed_editor_disk_fallback_current_doc(
-                file,
-                disk,
-                source,
-                if require_model_ensure {
-                    "model_ensure_error"
-                } else {
-                    "editor_authority_error"
-                },
-                Some(&detail),
-            );
+            return match exhausted_authority_error_recovery(observe_editor_open(file)) {
+                ExhaustedAuthorityErrorRecovery::MissingReplica => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "realtime_doc_resolve_authority_error_reclassified file={} source={} reason=missing_replica recovery=terminal_plugin_rebuild",
+                            file.display(),
+                            source,
+                        ),
+                    );
+                    resolve_editor_unavailable_disk_read_fallback(
+                        file,
+                        disk,
+                        source,
+                        "missing_replica",
+                    )
+                }
+                ExhaustedAuthorityErrorRecovery::ClosedEditor => {
+                    resolve_closed_editor_disk_fallback_current_doc(
+                        file,
+                        disk,
+                        source,
+                        if require_model_ensure {
+                            "model_ensure_error"
+                        } else {
+                            "editor_authority_error"
+                        },
+                        Some(&detail),
+                    )
+                }
+            };
         }
     };
     match current {
@@ -8317,6 +8359,22 @@ mod tests {
             "the terminal-rebuild latch must not leak into the upstream self-heal memo"
         );
         clear_terminal_missing_replica_rebuild(file);
+    }
+
+    /// A controller transport error while the editor is still registered is
+    /// missing-replica recovery, not proof that the editor closed. This is the
+    /// branch Run Agent Doc previously skipped before telling the operator to
+    /// run `admin reload-lib` manually.
+    #[test]
+    fn live_authority_error_uses_missing_replica_rebuild_path() {
+        assert_eq!(
+            exhausted_authority_error_recovery(true),
+            ExhaustedAuthorityErrorRecovery::MissingReplica,
+        );
+        assert_eq!(
+            exhausted_authority_error_recovery(false),
+            ExhaustedAuthorityErrorRecovery::ClosedEditor,
+        );
     }
 
     /// The self-heal memo suppresses the retry loop only while the realtime

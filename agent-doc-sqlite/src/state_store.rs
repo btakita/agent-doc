@@ -1986,6 +1986,36 @@ pub fn upsert_project_runtime_state_in_db(
     Ok(())
 }
 
+/// Monotonically raise a numeric project-runtime marker in one write statement.
+///
+/// Callers that read a marker in a deferred transaction and then upgrade that
+/// transaction to a writer can receive `SQLITE_BUSY` immediately when another
+/// writer commits between those steps; SQLite's busy timeout does not repair a
+/// stale read snapshot. This single-statement owner avoids that lock-upgrade
+/// race and preserves the greatest concurrently published value.
+pub fn upsert_max_u64_project_runtime_state_in_db(
+    conn: &Connection,
+    state_key: &str,
+    candidate: u64,
+    updated_at_ms: u64,
+) -> Result<u64> {
+    let candidate = i64::try_from(candidate).context("project runtime candidate exceeds i64")?;
+    let updated_at_ms =
+        i64::try_from(updated_at_ms).context("project runtime timestamp exceeds i64")?;
+    let retained: i64 = conn.query_row(
+        "INSERT INTO project_runtime_state (state_key, payload, updated_at_ms) \
+         VALUES (?1, CAST(?2 AS TEXT), ?3) \
+         ON CONFLICT(state_key) DO UPDATE SET \
+         payload = CAST(MAX(CAST(project_runtime_state.payload AS INTEGER), \
+                            CAST(excluded.payload AS INTEGER)) AS TEXT), \
+         updated_at_ms = MAX(project_runtime_state.updated_at_ms, excluded.updated_at_ms) \
+         RETURNING CAST(payload AS INTEGER)",
+        params![state_key, candidate, updated_at_ms],
+        |row| row.get(0),
+    )?;
+    u64::try_from(retained).context("project runtime marker became negative")
+}
+
 pub fn load_project_runtime_state_from_db(
     conn: &Connection,
     state_key: &str,
@@ -6812,6 +6842,28 @@ mod tests {
             load_coordination_lease_from_db(&reopened, "queue_orphan_drain_backoff", "doc-a")?,
             Some(elapsed),
             "the claim becomes eligible exactly at the interval boundary"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn numeric_runtime_state_upsert_is_atomic_and_monotonic() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let first = open_state_db(dir.path())?;
+        let second = open_state_db(dir.path())?;
+
+        assert_eq!(
+            upsert_max_u64_project_runtime_state_in_db(&first, "pressure", 50, 1_000)?,
+            50,
+        );
+        assert_eq!(
+            upsert_max_u64_project_runtime_state_in_db(&second, "pressure", 25, 2_000)?,
+            50,
+            "a later contender must not lower the shared cooldown marker",
+        );
+        assert_eq!(
+            load_project_runtime_state_from_db(&first, "pressure")?.as_deref(),
+            Some("50"),
         );
         Ok(())
     }

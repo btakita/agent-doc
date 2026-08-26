@@ -65,6 +65,9 @@ const CONTROLLER_TURN_ADMISSION_AWAIT_MAX: Duration = Duration::from_secs(30);
 /// enough room to return their authority result and avoid an orphaned lease.
 const CONTROLLER_CLOSEOUT_COORDINATION_TIMEOUT: Duration = Duration::from_secs(15);
 const CONTROLLER_MODEL_PRESSURE_COOLDOWN: Duration = Duration::from_secs(30);
+/// The pressure marker only suppresses redundant idle reads; it is never an
+/// admission prerequisite, so state-db contention must not stall startup.
+const CONTROLLER_MODEL_PRESSURE_PERSIST_TIMEOUT: Duration = Duration::from_millis(100);
 const CONTROLLER_MODEL_PRESSURE_STATE_KEY: &str = "controller_model_pressure_deadline";
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 const PANE_LAYOUT_COMMAND_AWAIT: Duration = Duration::from_secs(30);
@@ -452,6 +455,18 @@ fn controller_model_pressure_jitter_secs(doc: &Path) -> u64 {
     u64::from_str_radix(hash.get(..2).unwrap_or("00"), 16).unwrap_or(0) % 8
 }
 
+fn log_controller_model_pressure_persist_deferred(doc: &Path, stage: &str, error: &anyhow::Error) {
+    agent_doc_ops_log_io::log_op(
+        doc,
+        &format!(
+            "controller_model_pressure_persist_deferred file={} stage={} error={}",
+            doc.display(),
+            stage,
+            format!("{error:#}").replace('\n', "\\n"),
+        ),
+    );
+}
+
 fn read_controller_model_pressure_deadline(project_root: &Path) -> Result<Option<u64>> {
     let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
     agent_doc_sqlite::state_store::load_project_runtime_state_from_db(
@@ -466,24 +481,20 @@ fn read_controller_model_pressure_deadline(project_root: &Path) -> Result<Option
 }
 
 fn record_controller_model_pressure(project_root: &Path, doc: &Path, source: &str, error: &str) {
-    let mut conn = match agent_doc_sqlite::state_store::open_state_db(project_root) {
+    let conn = match agent_doc_sqlite::state_store::open_state_db_with_timeout(
+        project_root,
+        CONTROLLER_MODEL_PRESSURE_PERSIST_TIMEOUT,
+    ) {
         Ok(conn) => conn,
         Err(err) => {
-            eprintln!("[agent-doc] failed to open state.db for controller model pressure: {err:#}");
-            return;
-        }
-    };
-    let tx = match conn.transaction() {
-        Ok(tx) => tx,
-        Err(err) => {
-            eprintln!("[agent-doc] failed to begin controller model pressure transaction: {err}");
+            log_controller_model_pressure_persist_deferred(doc, "open", &err);
             return;
         }
     };
     let now = controller_model_pressure_now_secs();
     let deadline = now.saturating_add(CONTROLLER_MODEL_PRESSURE_COOLDOWN.as_secs());
     let existing_deadline = agent_doc_sqlite::state_store::load_project_runtime_state_from_db(
-        &tx,
+        &conn,
         CONTROLLER_MODEL_PRESSURE_STATE_KEY,
     )
     .ok()
@@ -496,18 +507,19 @@ fn record_controller_model_pressure(project_root: &Path, doc: &Path, source: &st
     if existing_deadline > refresh_after {
         return;
     }
-    let retained_deadline = existing_deadline.max(deadline);
-    if let Err(err) = agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
-        &tx,
-        CONTROLLER_MODEL_PRESSURE_STATE_KEY,
-        &retained_deadline.to_string(),
-        now.saturating_mul(1000),
-    )
-    .and_then(|()| tx.commit().map_err(Into::into))
-    {
-        eprintln!("[agent-doc] failed to persist controller model pressure in state.db: {err:#}");
-        return;
-    }
+    let retained_deadline =
+        match agent_doc_sqlite::state_store::upsert_max_u64_project_runtime_state_in_db(
+            &conn,
+            CONTROLLER_MODEL_PRESSURE_STATE_KEY,
+            deadline,
+            now.saturating_mul(1000),
+        ) {
+            Ok(retained) => retained,
+            Err(err) => {
+                log_controller_model_pressure_persist_deferred(doc, "upsert", &err);
+                return;
+            }
+        };
     agent_doc_ops_log_io::log_op(
         doc,
         &format!(
@@ -23294,6 +23306,39 @@ mod tests {
             read_controller_model_pressure_deadline(dir.path()).unwrap(),
             Some(retained),
             "active state must not churn the ledger and ops.log on every retry"
+        );
+    }
+
+    #[test]
+    fn controller_model_pressure_lock_contention_is_bounded_and_nonfatal() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "# doc\n").unwrap();
+        let mut blocker = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        let tx = blocker
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+            &tx,
+            "blocking_writer",
+            "held",
+            1,
+        )
+        .unwrap();
+
+        let started = std::time::Instant::now();
+        record_controller_model_pressure(dir.path(), &doc, "locked_test", "controller busy");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "an advisory pressure marker must not inherit the 30s state-db timeout",
+        );
+        drop(tx);
+
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("controller_model_pressure_persist_deferred")
+                && ops.contains("stage=upsert"),
+            "lock contention should be diagnostic-only and recorded off stderr:\n{ops}",
         );
     }
 

@@ -179,6 +179,24 @@ fn idle_watch_document_reconcile_due(
             .is_none_or(|last| now.duration_since(last) >= IDLE_WATCH_FULL_RECONCILE_INTERVAL)
 }
 
+fn record_idle_watch_queue_observation_attempt(
+    queue_state_observed: &mut bool,
+    last_quiescent_maintenance: &mut Option<std::time::Instant>,
+    actor_ready: bool,
+    urgent_maintenance: bool,
+    now: std::time::Instant,
+) {
+    // Unavailable authority is still a completed, fail-closed observation: it
+    // cannot dispatch queue work. Treating it as "never observed" bypassed the
+    // quiescent fast path and repeated the entire state/diff pipeline every
+    // 500ms while a controller/editor was reattaching. A retained-delivery edge
+    // now rearms the attempt immediately; the 60s reconcile covers missed edges.
+    *queue_state_observed = true;
+    if actor_ready && !urgent_maintenance {
+        *last_quiescent_maintenance = Some(now);
+    }
+}
+
 struct CapturedFinalizeResumeWorker {
     key: agent_doc_repair_command_io::CapturedFinalizeResumeKey,
     result: std::sync::mpsc::Receiver<agent_doc_repair_command_io::CapturedFinalizeResumeOutcome>,
@@ -2099,14 +2117,19 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 'drain: {
                 // The head and its delivery-transition state come out of ONE
                 // authority read (`#recycletransitionwedge`).
+            record_idle_watch_queue_observation_attempt(
+                &mut queue_state_observed,
+                &mut last_quiescent_maintenance,
+                actor_ready_fast,
+                urgent_maintenance,
+                now,
+            );
             let active_transition = match active_head_observation {
                 QueueHeadObservation::Observed { head, transition } => {
                     active_head = head;
                     transition
                 }
                 QueueHeadObservation::AuthorityUnavailable => {
-                    queue_state_observed = false;
-                    last_quiescent_maintenance = None;
                     if queue_authority_unavailable_blocks_idle_tick(
                         clear_cooldown_active,
                         awaiting_clear_settle,
@@ -2123,10 +2146,6 @@ pub(super) fn spawn_idle_queue_watch_thread(
             if active_head.is_none() {
                     context_reset_in_flight = false;
                     last_context_reset_head = None;
-                }
-                queue_state_observed = true;
-                if actor_ready_fast && !urgent_maintenance {
-                    last_quiescent_maintenance = Some(now);
                 }
                 let actor_ready = actor_ready_fast;
                 let ready_busy_reason = if active_head.is_some()
@@ -4917,6 +4936,30 @@ mod tests {
             false,
             Some(observed),
             observed + IDLE_WATCH_FULL_RECONCILE_INTERVAL,
+        ));
+    }
+
+    #[test]
+    fn unavailable_queue_authority_enters_fail_closed_quiescence() {
+        let now = std::time::Instant::now();
+        let mut queue_state_observed = false;
+        let mut last_quiescent_maintenance = None;
+
+        record_idle_watch_queue_observation_attempt(
+            &mut queue_state_observed,
+            &mut last_quiescent_maintenance,
+            true,
+            false,
+            now,
+        );
+
+        assert!(queue_state_observed);
+        assert_eq!(last_quiescent_maintenance, Some(now));
+        assert!(idle_watch_fast_path_can_sleep(
+            queue_state_observed,
+            true,
+            false,
+            false,
         ));
     }
 

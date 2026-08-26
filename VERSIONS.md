@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.283
+
+- **Fix: a transiently unavailable queue authority no longer disables the idle
+watcher's quiescent fast path.**
+
+An unavailable editor/controller projection is a completed fail-closed queue
+observation: it cannot authorize dispatch. The watcher previously recorded it
+as “unseen,” causing expensive cycle-state deserialization and document diffing
+every 500 ms until authority returned. It now records a quiescent receipt and
+waits for the document-delivery edge introduced in 0.35.282, with the same
+60-second covering fallback for missed edges. This removes the remaining CPU
+loop seen during editor/controller reattachment.
+
 ## 0.35.282
 
 - **Fix: idle agent-doc sessions no longer poll the controller for unchanged

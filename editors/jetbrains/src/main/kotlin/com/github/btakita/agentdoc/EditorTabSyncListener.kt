@@ -122,13 +122,26 @@ class EditorTabSyncListener : FileEditorManagerListener {
     }
     }
 
-    internal enum class ObservationAuthority {
-        Layout,
-        DocumentSelection,
-        EditorFocus,
-        FileOpened,
-        IdeActivation,
-    }
+internal enum class ObservationAuthority {
+Layout,
+DocumentSelection,
+EditorFocus,
+FileOpened,
+IdeActivation,
+}
+
+internal enum class SelectionFocusAuthority {
+ActiveEditorSplit,
+BackgroundOrUnknownSplit;
+
+companion object {
+fun decide(
+selectionPath: String,
+activeWindowPath: String?,
+): SelectionFocusAuthority =
+if (activeWindowPath == selectionPath) ActiveEditorSplit else BackgroundOrUnknownSplit
+}
+}
 
     internal object SurfaceObservationOrdering {
         fun shouldReplace(
@@ -968,9 +981,9 @@ private data class CapturedSurface(
             }
     }
 
-    override fun selectionChanged(event: FileEditorManagerEvent) {
-        val file = event.newFile ?: return
-        val project = event.manager.project
+override fun selectionChanged(event: FileEditorManagerEvent) {
+val file = event.newFile ?: return
+val project = event.manager.project
         if (!AgentDocSessionFiles.isSessionDocument(file)) {
             // A plain Markdown/source tab can occupy one editor split while that window still
             // stands for its last agent-doc tab. Reproject the spanning layout, but never route
@@ -983,25 +996,45 @@ private data class CapturedSurface(
                     authority = ObservationAuthority.Layout,
                 ),
             )
-            log("selectionChanged: non-session file=${file.name}; spanning projection queued")
-            return
-        }
-        requestFocusProjection(project, file)
-        log("selectionChanged: newFile=${file.name}; projection queued")
+log("selectionChanged: non-session file=${file.name}; spanning projection queued")
+return
+}
+val selectionFocusAuthority =
+SelectionFocusAuthority.decide(
+selectionPath = file.path,
+activeWindowPath =
+FileEditorManagerEx.getInstanceEx(project).currentWindow?.selectedFile?.path,
+)
+val selectionOwnsFocus =
+selectionFocusAuthority == SelectionFocusAuthority.ActiveEditorSplit
+if (selectionOwnsFocus) {
+requestFocusProjection(project, file)
+log("selectionChanged: active-split newFile=${file.name}; projection queued")
+} else {
+// IDEA emits selectionChanged for tabs in editor windows that do not own
+// keyboard focus. That event is a valid spanning-layout edge, but treating
+// its file as focused redirects tmux from the operator's active split.
+log("selectionChanged: background-split newFile=${file.name}; layout-only projection queued")
+}
 
-        // Focus owns targeted session recovery. Re-forcing a full surface
-        // reconcile on every tab switch made ordinary focus navigation contend
+// Focus owns targeted session recovery. Re-forcing a full surface
+// reconcile on every tab switch made ordinary focus navigation contend
         // with layout sync and briefly expose stale extra panes.
         requestObservation(
-        PendingSurfaceObservation(
-            project = project,
-            preferredFile = file,
-            previousFile = event.oldFile,
-            forceReconcile = false,
-            authority = ObservationAuthority.DocumentSelection,
-            ),
-        )
-    }
+PendingSurfaceObservation(
+project = project,
+preferredFile = file.takeIf { selectionOwnsFocus },
+previousFile = event.oldFile.takeIf { selectionOwnsFocus },
+forceReconcile = false,
+authority =
+if (selectionOwnsFocus) {
+ObservationAuthority.DocumentSelection
+} else {
+ObservationAuthority.Layout
+},
+),
+)
+}
 
     /**
      * Re-publish the settled visible surface when IDEA becomes active. i3 workspace changes do not

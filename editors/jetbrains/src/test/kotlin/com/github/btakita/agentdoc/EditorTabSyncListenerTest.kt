@@ -623,9 +623,9 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `document selection publishes layout and retained focus state`() {
-        val source =
-            Files.readString(
+fun `document selection publishes focus only when its split is active`() {
+val source =
+Files.readString(
                 Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
                     .takeIf { Files.exists(it) }
                     ?: Paths.get(
@@ -635,11 +635,14 @@ class EditorTabSyncListenerTest {
         val selection =
             source
                 .substringAfter("override fun selectionChanged(event: FileEditorManagerEvent)")
-                .substringBefore("fun onEditorFocusGained")
-        assertTrue(selection.contains("requestObservation("))
-        assertTrue(selection.contains("requestFocusProjection(project, file)"))
-        assertFalse(selection.contains("manager.selectedFiles"))
-        assertFalse(selection.contains("collectVisibleMarkdownFiles"))
+.substringBefore("fun onEditorFocusGained")
+assertTrue(selection.contains("requestObservation("))
+assertTrue(selection.contains("requestFocusProjection(project, file)"))
+assertTrue(selection.contains("FileEditorManagerEx.getInstanceEx(project).currentWindow"))
+assertTrue(selection.contains("SelectionFocusAuthority.decide("))
+assertTrue(selection.contains("preferredFile = file.takeIf { selectionOwnsFocus }"))
+assertFalse(selection.contains("manager.selectedFiles"))
+assertFalse(selection.contains("collectVisibleMarkdownFiles"))
         assertFalse(selection.contains("CpRouteClient"))
         assertTrue(selection.contains("forceReconcile = false"))
         assertTrue(selection.contains("previousFile = event.oldFile"))
@@ -668,9 +671,34 @@ class EditorTabSyncListenerTest {
         assertFalse(focusProjection.contains("submitFocusDocumentPane("))
         assertTrue(
             focusProjection.indexOf("focusProjectionApplied(receipt.output)") <
-                focusProjection.indexOf("TmuxPaneFocusSync.recordEditorFocusIntent("),
-        )
-    }
+focusProjection.indexOf("TmuxPaneFocusSync.recordEditorFocusIntent("),
+)
+}
+
+@Test
+fun `selection focus authority rejects background split events`() {
+assertEquals(
+EditorTabSyncListener.SelectionFocusAuthority.ActiveEditorSplit,
+EditorTabSyncListener.SelectionFocusAuthority.decide(
+selectionPath = "/repo/tasks/fpe.md",
+activeWindowPath = "/repo/tasks/fpe.md",
+),
+)
+assertEquals(
+EditorTabSyncListener.SelectionFocusAuthority.BackgroundOrUnknownSplit,
+EditorTabSyncListener.SelectionFocusAuthority.decide(
+selectionPath = "/repo/tasks/left.md",
+activeWindowPath = "/repo/tasks/fpe.md",
+),
+)
+assertEquals(
+EditorTabSyncListener.SelectionFocusAuthority.BackgroundOrUnknownSplit,
+EditorTabSyncListener.SelectionFocusAuthority.decide(
+selectionPath = "/repo/tasks/fpe.md",
+activeWindowPath = null,
+),
+)
+}
 
     @Test
     fun `editor snapshot leaves project root and controller work off the EDT`() {

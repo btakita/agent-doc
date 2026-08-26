@@ -482,6 +482,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#releasepublish] release + publish
 <!-- /agent:backlog -->
 
 ## Review

@@ -365,6 +365,18 @@ Completed the active `#donemdreplica` cycle and added `fpe.md` startup repair.
 Restart IntelliJ once more to load JetBrains package `0.2.359`.
 
 The separate tmux auto-focus stale-window issue and the `tsift.md` Clear Session Context/duplicated-snapshot issues were not part of this active queue item and remain unresolved.
+
+### Re: Response
+
+Released and installed agent-doc `0.35.287` with JetBrains plugin `0.2.360`.
+
+- fpe is restored to `%37` in the right split of window `@7`; `session doctor` reports no issues.
+- Focus-only events never infer columns. An exact `actor_pane_not_visible` receipt now triggers a generation-fenced full-surface reconciliation. [Implementation](/home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt:967), [regression test](/home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/EditorTabSyncListenerTest.kt:83).
+- The tsift `/clear` retry and partial-typing queue deduplication fixes are included from commit `4977cf3a0`; their regression tests are at [context_clear.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-turn-executor-tmux/src/context_clear.rs:701) and [free_text_admission.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-queue/src/free_text_admission.rs:778). The live tsift session is healthy, though these still need operator verification.
+- Focused tests, clean `make check`, and `make install-full` passed.
+- Commits `fc921e81f` and `7713b16e5` were pushed; tag `v0.35.287` was pushed. CI, Release, and PyPI jobs were still running at the single status check.
+
+Please restart IDEA once more—the new plugin was installed after your last restart. Then selecting `fpe.md` should retain/focus its right-hand pane and automatically recover it if it was stashed.
 <!-- agent:boundary:64a22d63:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

@@ -567,7 +567,7 @@ Exchange size is large; queue draining continued without compaction while active
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -576,6 +576,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#releasepublish17] Release and publish tsift 0.1.89 containing the #17 fix at commit 303291d.
 <!-- /agent:backlog -->
 
 ## Review

@@ -1512,6 +1512,17 @@ pub struct ControllerCompactProjectionCompletion {
     pub commit: bool,
 }
 
+/// Typed receipt from the compact projection Effect.
+///
+/// Transport and native-save readiness remain `Err` and can be retried on a
+/// changed delivery frontier. A settled same-component conflict is terminal:
+/// the retained target is superseded and must be retired without mutation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ControllerCompactProjectionCompletionOutcome {
+    Settled { settled_hash: String },
+    Superseded { authoritative_hash: String },
+}
+
 pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
     fn consume_queue_prompt_force_disk(
         &self,
@@ -1566,7 +1577,7 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
     fn complete_compact_projection(
         &self,
         invocation: ControllerCompactProjectionCompletion,
-    ) -> Result<String>;
+    ) -> Result<ControllerCompactProjectionCompletionOutcome>;
 }
 
 static RUNTIME_EFFECTS: OnceLock<&'static dyn ProjectControllerRuntimeEffects> = OnceLock::new();
@@ -1671,8 +1682,15 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
     fn complete_compact_projection(
         &self,
         invocation: ControllerCompactProjectionCompletion,
-    ) -> Result<String> {
-        Ok(agent_doc_hash::content_hash(&invocation.live_content))
+    ) -> Result<ControllerCompactProjectionCompletionOutcome> {
+        if invocation.target_component.as_deref() == Some("superseded-test") {
+            return Ok(ControllerCompactProjectionCompletionOutcome::Superseded {
+                authoritative_hash: "advanced-authority".to_string(),
+            });
+        }
+        Ok(ControllerCompactProjectionCompletionOutcome::Settled {
+            settled_hash: agent_doc_hash::content_hash(&invocation.live_content),
+        })
     }
 
     fn sync_tmux_layout(
@@ -2910,10 +2928,10 @@ impl RetainedWriteSettleSink {
             target_component: continuation.target_component.clone(),
             commit: continuation.commit,
         };
-        let settled_hash = match runtime_effects()
+        let outcome = match runtime_effects()
             .and_then(|effects| effects.complete_compact_projection(invocation))
         {
-            Ok(settled_hash) => settled_hash,
+            Ok(outcome) => outcome,
             Err(error) => {
                 agent_doc_ops_log_io::log_op(
                     &self.project_root,
@@ -2928,17 +2946,41 @@ impl RetainedWriteSettleSink {
                 return false;
             }
         };
-        let event = agent_doc_state_backbone::StateEvent::new(
-            format!(
-                "compact-projection-settled:{document_hash}:{}",
-                continuation.continuation_id
-            ),
-            agent_doc_state_backbone::StateFact::DocumentCompactProjectionSettled {
-                document_hash: document_hash.to_string(),
-                continuation_id: continuation.continuation_id.clone(),
-                settled_hash,
-            },
-        );
+        let event = match outcome {
+            ControllerCompactProjectionCompletionOutcome::Settled { settled_hash } => {
+                agent_doc_state_backbone::StateEvent::new(
+                    format!(
+                        "compact-projection-settled:{document_hash}:{}",
+                        continuation.continuation_id
+                    ),
+                    agent_doc_state_backbone::StateFact::DocumentCompactProjectionSettled {
+                        document_hash: document_hash.to_string(),
+                        continuation_id: continuation.continuation_id.clone(),
+                        settled_hash,
+                    },
+                )
+            }
+            ControllerCompactProjectionCompletionOutcome::Superseded { authoritative_hash } => {
+                agent_doc_ops_log_io::log_op(
+                    &self.project_root,
+                    &format!(
+                        "compact_projection_superseded document_hash={document_hash} continuation_id={} authoritative_hash={} driver=state_projection_effect",
+                        continuation.continuation_id, authoritative_hash,
+                    ),
+                );
+                agent_doc_state_backbone::StateEvent::new(
+                    format!(
+                        "compact-projection-superseded:{document_hash}:{}",
+                        continuation.continuation_id
+                    ),
+                    agent_doc_state_backbone::StateFact::DocumentCompactProjectionSuperseded {
+                        document_hash: document_hash.to_string(),
+                        continuation_id: continuation.continuation_id.clone(),
+                        authoritative_hash,
+                    },
+                )
+            }
+        };
         if let Err(error) = append_state_event(&self.project_root, &event) {
             eprintln!(
                 "[controller] compact projection receipt append failed for {document_hash}: {error:#}"
@@ -14267,6 +14309,19 @@ revised operator request
             },
             "a repeated compact request must reuse the existing continuation instead of composing another write",
         );
+
+        projection.apply_fact(
+            &agent_doc_state_backbone::StateFact::DocumentCompactProjectionSuperseded {
+                document_hash: document_hash.to_string(),
+                continuation_id: "compact-continuation".to_string(),
+                authoritative_hash: "advanced-authority".to_string(),
+            },
+        );
+        assert_eq!(
+            compact_document_admission(Some(&projection)),
+            CompactDocumentAdmission::Execute,
+            "a terminal same-component conflict must reopen compact admission",
+        );
     }
 
     #[test]
@@ -14394,6 +14449,64 @@ revised operator request
             settled_count(),
             1,
             "replayed exact projection receipts cannot duplicate compact completion"
+        );
+    }
+
+    #[test]
+    fn settled_same_component_conflict_reactively_retires_retained_compact_once() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (file, document_hash) = retained_test_document(&dir);
+        let continuation_id = "compact-superseded";
+        let retained = agent_doc_state_backbone::StateEvent::new(
+            format!("{document_hash}:{continuation_id}"),
+            agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
+                document_hash: document_hash.clone(),
+                continuation_id: continuation_id.to_string(),
+                file: file.to_string_lossy().into_owned(),
+                live_content: "retained compact target".to_string(),
+                committed_content: "retained compact target".to_string(),
+                target_component: Some("superseded-test".to_string()),
+                commit: true,
+            },
+        );
+        append_state_event(dir.path(), &retained).unwrap();
+        runtime.apply_state_event(&retained).unwrap();
+
+        let projection = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .unwrap();
+        assert!(
+            projection.document.pending_compact_projection.is_none(),
+            "the typed terminal receipt must clear the retained effect frontier"
+        );
+        let superseded_count = || {
+            load_state_event_ledger(dir.path())
+                .unwrap()
+                .events()
+                .iter()
+                .filter(|event| {
+                    matches!(
+                        &event.fact,
+                        agent_doc_state_backbone::StateFact::DocumentCompactProjectionSuperseded {
+                            continuation_id: superseded_id,
+                            ..
+                        } if superseded_id == continuation_id
+                    )
+                })
+                .count()
+        };
+        assert_eq!(superseded_count(), 1);
+
+        runtime.document_graphs.set_projection(
+            &document_hash,
+            runtime.document_state_projection(&document_hash).unwrap(),
+        );
+        assert_eq!(
+            superseded_count(),
+            1,
+            "replaying the resolved projection cannot repeat the terminal Effect",
         );
     }
 

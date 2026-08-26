@@ -467,7 +467,9 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
     fn complete_compact_projection(
         &self,
         invocation: agent_doc_controller_io::project_controller::ControllerCompactProjectionCompletion,
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<
+        agent_doc_controller_io::project_controller::ControllerCompactProjectionCompletionOutcome,
+    > {
         agent_doc_document_realtime_io::with_controller_document_mutation(|| {
             agent_doc_compact_io::complete_retained_projection(
                 &invocation.file,

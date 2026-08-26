@@ -134,6 +134,12 @@ struct CompactDocumentTargets {
     settled: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CompactTargetRebase {
+    Rebased(CompactDocumentTargets),
+    TargetChanged,
+}
+
 struct CompactApplyOptions<'a> {
     target_component: Option<&'a str>,
     force_disk: bool,
@@ -168,7 +174,7 @@ impl CompactDocumentTargets {
     /// is the compact-owned prefix, while the live target may extend it with the
     /// latest authoritative tail. Drift inside the compact-owned region remains
     /// fail-closed.
-    fn rebase_onto_authoritative_siblings(self, authoritative: &str, target: &str) -> Result<Self> {
+    fn rebase_decision(self, authoritative: &str, target: &str) -> Result<CompactTargetRebase> {
         let intended_components = element::parse(&self.live)?;
         let committed_components = element::parse(&self.committed)?;
         let authoritative_components = element::parse(authoritative)?;
@@ -222,10 +228,7 @@ impl CompactDocumentTargets {
         if authoritative_target.attrs != intended_target.attrs
             || (!compact_owned_content_matches && !retained_exchange_supersedes_authority)
         {
-            anyhow::bail!(
-                "compact: '{}' compact-owned content changed during compaction; refusing to rebase a same-cell edit over the compacted target",
-                target
-            );
+            return Ok(CompactTargetRebase::TargetChanged);
         }
 
         let live = if retained_exchange_supersedes_authority {
@@ -236,11 +239,21 @@ impl CompactDocumentTargets {
         let committed =
             authoritative_target.replace_content(authoritative, committed_target_content);
 
-        Ok(Self {
+        Ok(CompactTargetRebase::Rebased(Self {
             live,
             committed,
             settled: self.settled,
-        })
+        }))
+    }
+
+    fn rebase_onto_authoritative_siblings(self, authoritative: &str, target: &str) -> Result<Self> {
+        match self.rebase_decision(authoritative, target)? {
+            CompactTargetRebase::Rebased(targets) => Ok(targets),
+            CompactTargetRebase::TargetChanged => anyhow::bail!(
+                "compact: '{}' compact-owned content changed during compaction; refusing to rebase a same-cell edit over the compacted target",
+                target
+            ),
+        }
     }
 
     /// Rebase an as-yet-undelivered component compact onto the latest document.
@@ -1139,7 +1152,8 @@ pub fn complete_retained_projection(
     committed_content: &str,
     target_component: Option<&str>,
     commit: bool,
-) -> Result<String> {
+) -> Result<agent_doc_controller_io::project_controller::ControllerCompactProjectionCompletionOutcome>
+{
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
         let effects = runtime_effects()?;
         let settle_editor_projection = |source: &str| -> Result<String> {
@@ -1182,7 +1196,26 @@ pub fn complete_retained_projection(
         if authority != targets.live {
             let target = target_component
                 .context("compact projection authority advanced for an inline compact target")?;
-            targets = targets.rebase_onto_authoritative_siblings(&authority, target)?;
+            targets = match targets.rebase_decision(&authority, target)? {
+                CompactTargetRebase::Rebased(targets) => targets,
+                CompactTargetRebase::TargetChanged => {
+                    let authoritative_hash = agent_doc_hash::content_hash(&authority);
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "compact_projection_target_superseded file={} target={} authoritative_hash={} driver=state_projection_effect",
+                            file.display(),
+                            target,
+                            authoritative_hash,
+                        ),
+                    );
+                    return Ok(
+                        agent_doc_controller_io::project_controller::ControllerCompactProjectionCompletionOutcome::Superseded {
+                            authoritative_hash,
+                        },
+                    );
+                }
+            };
             if authority != targets.live {
                 let authority_hash = agent_doc_hash::content_hash(&authority);
                 let replay_hash = agent_doc_hash::content_hash(&targets.live);
@@ -1244,7 +1277,11 @@ pub fn complete_retained_projection(
                 commit,
             ),
         );
-        Ok(settled_hash)
+        Ok(
+            agent_doc_controller_io::project_controller::ControllerCompactProjectionCompletionOutcome::Settled {
+                settled_hash,
+            },
+        )
     })
 }
 
@@ -5798,10 +5835,15 @@ mod tests {
         );
         fs::write(&file, live).unwrap();
 
-        let settled_hash =
+        let outcome =
             complete_retained_projection(&file, live, live, Some("status"), false).unwrap();
 
-        assert_eq!(settled_hash, agent_doc_hash::content_hash(live));
+        assert_eq!(
+            outcome,
+            agent_doc_controller_io::project_controller::ControllerCompactProjectionCompletionOutcome::Settled {
+                settled_hash: agent_doc_hash::content_hash(live),
+            }
+        );
         assert_eq!(
             agent_doc_snapshot_io::load_document_baseline(&file)
                 .unwrap()
@@ -5857,7 +5899,7 @@ mod tests {
         fs::write(&file, old).unwrap();
         record_compact_lazily_projection(&file, &compacted, false).unwrap();
 
-        let settled_hash =
+        let outcome =
             complete_retained_projection(&file, &compacted, &compacted, Some("status"), false)
                 .unwrap_or_else(|error| {
                     let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log"))
@@ -5865,7 +5907,12 @@ mod tests {
                     panic!("retained completion failed: {error:#}\n{ops_log}")
                 });
 
-        assert_eq!(settled_hash, agent_doc_hash::content_hash(&compacted));
+        assert_eq!(
+            outcome,
+            agent_doc_controller_io::project_controller::ControllerCompactProjectionCompletionOutcome::Settled {
+                settled_hash: agent_doc_hash::content_hash(&compacted),
+            }
+        );
         assert_eq!(fs::read_to_string(&file).unwrap(), compacted);
         assert_eq!(
             agent_doc_snapshot_io::load_document_baseline(&file)
@@ -5879,6 +5926,48 @@ mod tests {
                 && ops_log.contains("live_editor_projection_settled"),
             "retained completion must drive the editor save authority before checkpointing:\n{ops_log}"
         );
+    }
+
+    #[test]
+    fn retained_projection_retires_after_settled_exchange_authority_advances() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        git(root, &["init", "-q"]);
+
+        let file = root.join("session.md");
+        let retained = concat!(
+            "---\nagent_doc_session: compact-superseded\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "*Compacted exchange.*\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let authoritative =
+            retained.replace("*Compacted exchange.*", "Operator advanced exchange.");
+        fs::write(&file, &authoritative).unwrap();
+
+        let outcome =
+            complete_retained_projection(&file, retained, retained, Some("exchange"), false)
+                .expect("settled same-exchange drift is a typed terminal outcome");
+
+        assert_eq!(
+            outcome,
+            agent_doc_controller_io::project_controller::ControllerCompactProjectionCompletionOutcome::Superseded {
+                authoritative_hash: agent_doc_hash::content_hash(&authoritative),
+            }
+        );
+        assert_eq!(fs::read_to_string(&file).unwrap(), authoritative);
+        assert!(
+            agent_doc_snapshot_io::load_document_baseline(&file)
+                .unwrap()
+                .is_none(),
+            "supersession must not checkpoint or overwrite the newer authority"
+        );
+        let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("compact_projection_target_superseded"));
     }
 
     #[test]

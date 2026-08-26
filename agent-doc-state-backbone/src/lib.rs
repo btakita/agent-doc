@@ -390,6 +390,15 @@ pub enum StateFact {
         continuation_id: String,
         settled_hash: String,
     },
+    /// Terminal receipt for a retained compact whose settled authoritative
+    /// target component advanced independently. The compact effect must not
+    /// overwrite that newer content; identity matching retires only the
+    /// continuation that observed the conflict.
+    DocumentCompactProjectionSuperseded {
+        document_hash: String,
+        continuation_id: String,
+        authoritative_hash: String,
+    },
     QueueHeadSelected {
         document_hash: String,
         node_key: String,
@@ -925,6 +934,7 @@ impl StateFact {
             | Self::DocumentWriteConverged { document_hash, .. }
             | Self::DocumentCompactProjectionRetained { document_hash, .. }
             | Self::DocumentCompactProjectionSettled { document_hash, .. }
+            | Self::DocumentCompactProjectionSuperseded { document_hash, .. }
             | Self::QueueHeadSelected { document_hash, .. }
             | Self::QueueHeadDeferred { document_hash, .. }
             | Self::QueueHeadCompleted { document_hash, .. }
@@ -1020,7 +1030,8 @@ impl StateFact {
             | Self::DocumentWriteDeferred { .. }
             | Self::DocumentWriteConverged { .. }
             | Self::DocumentCompactProjectionRetained { .. }
-            | Self::DocumentCompactProjectionSettled { .. } => StateDomain::Document,
+            | Self::DocumentCompactProjectionSettled { .. }
+            | Self::DocumentCompactProjectionSuperseded { .. } => StateDomain::Document,
             Self::QueueHeadSelected { .. }
             | Self::QueueHeadDeferred { .. }
             | Self::QueueHeadCompleted { .. }
@@ -1089,6 +1100,9 @@ impl StateFact {
                 "document_compact_projection_retained"
             }
             Self::DocumentCompactProjectionSettled { .. } => "document_compact_projection_settled",
+            Self::DocumentCompactProjectionSuperseded { .. } => {
+                "document_compact_projection_superseded"
+            }
             Self::QueueHeadSelected { .. } => "queue_head_selected",
             Self::QueueHeadDeferred { .. } => "queue_head_deferred",
             Self::QueueHeadCompleted { .. } => "queue_head_completed",
@@ -1829,6 +1843,9 @@ impl DocumentStateProjection {
                     });
             }
             StateFact::DocumentCompactProjectionSettled {
+                continuation_id, ..
+            }
+            | StateFact::DocumentCompactProjectionSuperseded {
                 continuation_id, ..
             } => {
                 if self
@@ -5826,6 +5843,49 @@ pub fn transition_proof_gate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compact_supersession_retires_only_its_identity_matched_continuation() {
+        let document_hash = "doc-compact-supersession";
+        let mut projection = DocumentStateProjection::new(document_hash);
+        projection.apply_fact(&StateFact::DocumentCompactProjectionRetained {
+            document_hash: document_hash.to_string(),
+            continuation_id: "compact-current".to_string(),
+            file: "/work/sample.md".to_string(),
+            live_content: "retained live".to_string(),
+            committed_content: "retained committed".to_string(),
+            target_component: Some("exchange".to_string()),
+            commit: true,
+        });
+
+        projection.apply_fact(&StateFact::DocumentCompactProjectionSuperseded {
+            document_hash: document_hash.to_string(),
+            continuation_id: "compact-stale".to_string(),
+            authoritative_hash: "newer-authority".to_string(),
+        });
+        assert_eq!(
+            projection
+                .document
+                .pending_compact_projection
+                .as_ref()
+                .map(|pending| pending.continuation_id.as_str()),
+            Some("compact-current"),
+            "a delayed terminal receipt cannot clear a newer continuation"
+        );
+
+        let receipt = StateFact::DocumentCompactProjectionSuperseded {
+            document_hash: document_hash.to_string(),
+            continuation_id: "compact-current".to_string(),
+            authoritative_hash: "newer-authority".to_string(),
+        };
+        assert_eq!(receipt.domain(), StateDomain::Document);
+        assert_eq!(receipt.label(), "document_compact_projection_superseded");
+        projection.apply_fact(&receipt);
+        assert!(
+            projection.document.pending_compact_projection.is_none(),
+            "settled same-component authority is terminal, not a retry frontier"
+        );
+    }
 
     fn owner_at(cycle_id: &str, claimed: u64, lease: u64) -> CloseoutOwnerProjection {
         CloseoutOwnerProjection {

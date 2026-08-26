@@ -526,3 +526,4 @@
 - 2026-08-26 [#releasepublish] release + publish
 - 2026-08-26 [#2wte] Fix https://github.com/btakita/tsift/issues/16
 - 2026-08-26 [#z5tb] release + publish
+- 2026-08-26 [#fixopenissues] Please fix all open issues on [tsift](https://github.com/btakita/tsift)

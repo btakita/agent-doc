@@ -528,12 +528,46 @@ Completed queue item `[#z5tb]`: tsift 0.1.88 is released end to end.
 - Parent integration: fast-forwarded the original dirty tsift submodule checkout to `9ab262a` without altering its unrelated edits, staged only the parent gitlink, and removed the clean temporary release worktree and branch.
 
 The only workflow annotations are GitHub's Node 20 deprecation notices for third-party actions; all jobs passed. The exchange remains above the accretion threshold because the queue was active, so I did not compact it. The live JetBrains plugin is now current at 0.2.357; preflight still reports the misplaced `go` attribute and semantic-completion false-positive warning.
+
+### Re: Fix open tsift issue #17 — gpt-5
+
+> **Queue prompt:**
+>
+> Please fix all open issues on [tsift](https://github.com/btakita/tsift)
+
+Fixed the sole open tsift issue, [#17](https://github.com/btakita/tsift/issues/17), and shipped the change to `main` as commit `303291d847cb2736e37d8f2e582959ee93b94b17`. The issue is closed and `gh issue list --state open` now returns an empty list.
+
+#### Changed paths
+
+- `packages/tsift-cli/src/lib.rs` and `packages/tsift-cli/tests/exit_code.rs`: `graph` and `explain` now fail closed when a symbol belongs to multiple workspace scopes; federated `symbol-read` filters exact-case matches before any case-insensitive fallback.
+- `packages/tsift-cli/src/cli.rs` and `packages/tsift-cli/src/commands/summarize.rs`: added `--max-file-tokens` and `--force`, plus content-addressed terminal-failure skipping and reporting.
+- `packages/tsift-summarize/src/summarize.rs`: persisted too-large and unparseable-response failures, exposed detailed parser errors with a bounded response preview, and cleared failures after successful replacement.
+- `packages/tsift-status/src/status.rs`: summary percentages now use extraction candidates only, current terminal failures no longer generate automatic retry recommendations, and workspace `<root>` language gaps are reported.
+- `specs/search-navigation.md` and `VERSIONS.md`: documented the corrected contracts and #17 release note.
+
+#### Commands and verification
+
+- `cargo test -p tsift-summarize -p tsift-status -p tsift-cli` — passed.
+- `make check` — passed.
+- `cargo install --path . --locked` — passed.
+- GitHub Actions CI run [33003142143](https://github.com/btakita/tsift/actions/runs/33003142143) for commit `303291d` — completed successfully, including clippy/test and live Convex acceptance.
+- `gh issue list --state open --limit 100 --json number,title,url` — `[]`.
+
+#### Confidence
+
+High. Regression tests cover both ambiguous graph commands, the exact-case precedence failure, terminal-failure cache lifecycle and command-level skipping, candidate-only summary coverage, retry suppression, and workspace-root language coverage.
+
+#### Escalation
+
+None. Work was isolated in `/tmp/tsift-issue17-S4iQAF`; the pre-existing dirty checkout at `src/tsift` was preserved and its unrelated changes were not staged or modified. The superproject gitlink was intentionally not advanced because doing so would require disturbing that dirty checkout.
+
+Exchange size is large; queue draining continued without compaction while active. The next queued item is `release + publish`.
 <!-- agent:boundary:36d68aeb:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -541,7 +575,7 @@ https://github.com/chopratejas/headroom
 
 ## Backlog
 
-<!-- agent:backlog priority queue go -->
+<!-- agent:backlog priority queue -->
 <!-- /agent:backlog -->
 
 ## Review

@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -31,6 +31,18 @@ Prior frontmatter bug fix remains complete. New work this cycle is planning only
 Compacted content:
 - Archived 23 response topic(s): #pccv1; Restart Agent on fpe.md; do [#qtypeclobber]; 20 more
 - Prior summary/context: prior compacted content: Archived 7 response topic(s): Removing AGENTS.md instructions; Extract AGENTS.md into skills...
+
+### Re: #coder7 live Coder validation — gpt-5
+
+`#coder7` cannot be truthfully completed on this host, so I moved it to review with the exact external prerequisites instead of recording invented passes.
+
+The live matrix was not run: `agent-doc env --json` classifies this machine as a local display-backed `external` terminal host; the `coder` CLI is absent; no `CODER_*` workspace identity, Coder SSH target, or Coder client configuration is present; and VS Code is unavailable. JetBrains is installed locally, but there is no reachable Gateway-backed Coder workspace to exercise. Those conditions block all five required cases: JetBrains cold start, VS Code cold start, simultaneous dual-IDE convergence, workspace stop/start recovery, and the image-without-tmux failure path.
+
+The unblock is concrete: provide a reachable Coder workspace URL or SSH target with authentication, enable the current agent-doc plugin in the JetBrains remote backend and extension in the VS Code remote host, and provide a workspace/image variant without tmux. Then run the diagnostics from `runbooks/coder-workspace.md` and record each matrix result in `tasks/agent-doc/plan-coder-ide-hosted-tmux.md` before resolving `#coder7`.
+
+No additional backlog follow-up is needed because `#coder7` itself now retains the complete matrix and the exact external unblock conditions in review.
+
+Local repository verification passed: `make check` exited 0. The latest GitHub Actions `Agent Doc` run failed before either job acquired a runner (both jobs had zero steps), so it is an external CI-start failure rather than a code or tmux-test regression. The required `tsift init` refresh also updated the root navigation instruction block from v0.1.87 to v0.1.88.
 <!-- agent:boundary:64a22d63:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -40,16 +52,15 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:queue priority go -->
-- ⏭️ do [#coder7]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#coder7] [operator-verify] Phase 7 — live Coder workspace validation matrix (JB Gateway cold start, VS Code Remote-SSH cold start, both IDEs attached at once, workspace stop/start, image without tmux). Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.
 - [/] [#harnessswitchverify] [operator-verify] #harnessswitchstorm remains unverified. The 2026-08-25 fpe.md attempt was invalidated by a stale live JetBrains plugin generation: ops.log showed controller_crdt_replica_refusal_storm (25 refusals), editor_absent/disk authority, agent_restart_respec_inert to Claude, then old_harness=claude -> new_harness=codex only after save. Unblocks after make install, restart the JetBrains IDE host, repeat the unsaved claude <-> codex switch, and prove exactly one spawn plus agent_restart_deferred reason=non_authoritative_document_view.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:review -->

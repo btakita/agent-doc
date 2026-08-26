@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.287
+
+- **Fix: JetBrains focus now restores an authoritative pane that drifted into
+  stash (plugin 0.2.360).**
+
+The focus-only controller receipt remains non-structural, but an exact
+`actor_pane_not_visible` outcome now causes the plugin to republish IDEA's
+complete current split surface as a forced, generation-fenced reconciliation.
+The layout graph—not the focused document alone—moves the pane back and selects
+it; missing actors, stale focus generations, and inactive project windows do
+not trigger structural repair.
+
 ## 0.35.286
 
 - **Fix: completed-work archives cannot steal a live document's editor

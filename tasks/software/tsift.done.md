@@ -523,3 +523,4 @@
 - 2026-08-23 [#spinyank] `cargo install --locked` warns that `spin v0.9.8` in Cargo.lock is yanked from crates.io. Harmless today, but a fresh `--locked` build of a published tag will keep warning. Refresh the transitive pin and re-run `make check`.
 - 2026-08-25 [#fixopenissues] Please fix open issues on tsift.
 - 2026-08-26 [#fixopenissues] Fix the open issues in `tsift` https://github.com/btakita/tsift/issues.
+- 2026-08-26 [#releasepublish] release + publish

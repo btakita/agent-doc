@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a03734-3b32-7d33-acc6-84fa83826114
+  codex: 01a03e80-9266-7050-be5f-f2454606e9fd
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -314,6 +314,40 @@ Commits:
 - `8c059bf9b` — submodule pointer update
 
 Verification passed: focused regression test, controller-io suite, formatting, full `make check`, and latest CI status.
+
+### Re: do [#donemdreplica] — gpt-5
+
+Fixed, released, installed, and marked complete.
+
+The canonical document identity is now preserved across the full archive path:
+
+- Shared owner: `agent-doc-fs` owns `done_archive_candidates()` and the archive-candidate predicate.
+- JetBrains refuses a `.md -> .done.md` archive edge before moving replica/liveness identity.
+- The controller refuses and will not resolve a poisoned archive alias while the canonical `.md` still exists.
+- An independently opened canonical `.done.md` remains a valid document identity.
+- The reported private `existence-lang.done.md` clone is already absent and untracked, so cleanup was a verified no-op.
+
+I also fixed the added `fpe.md` Run Agent Doc failure. A controller transport error with a still-live editor now enters the existing missing-replica recovery state and gets the one-shot terminal plugin rebuild instead of skipping directly to the manual `admin reload-lib` refusal. The rebuild is claimed once per liveness witness, so repeated document reads do not multiply the expensive effect. The advisory controller-pressure marker now uses one atomic monotonic SQLite upsert; lock contention is capped at 100 ms, recorded in `ops.log`, and cannot stall or pollute session admission.
+
+Architecture closeout:
+
+- Invariant/owner: canonical session-path identity is owned by the shared filesystem policy; attached-editor authority is owned by the realtime resolver and never descends to disk for writes while a real editor remains live.
+- Tested transitions: canonical `.md` -> archive candidate is refused; explicit `.done.md` remains independent; editor present -> CRDT; editor absent -> disk; live editor + missing model/error -> bounded refresh -> one-shot plugin rebuild -> either current editor model or fail-closed; SQLite contenders preserve the greatest cooldown marker.
+- Reactive topology: JetBrains VFS edge -> shared identity predicate -> controller alias graph -> CRDT/disk authority. The only one-shot exception is the terminal missing-replica rebuild, latched to the realtime liveness witness.
+- Edited surfaces: filesystem policy, backlog archive delegation, controller alias/rebuild-pressure paths, realtime authority recovery, SQLite runtime-state primitive, JetBrains rename listener/tests, and JetBrains specification.
+- Operator verification/migration: agent-doc `0.35.286` and JetBrains package `0.2.359` are installed; the root controller was recycled. Restart the running IntelliJ host once to load the new Kotlin package before reproducing the archive transition. No document migration is required.
+
+Verification passed:
+
+- Focused Rust archive/controller/backlog tests.
+- JetBrains `FileRenameListenerTest`.
+- Live-authority error classification and attached-editor disk-refusal regressions.
+- Atomic/monotonic SQLite pressure test and bounded lock-contention regression.
+- Clean detached-worktree `make check`.
+- Final `make install` and controller recycle.
+- Live `fpe.md` status reports a healthy supervisor, `startup_miss: none`, and a committed latest cycle.
+
+Published commits: `1252e4eaf`, `c1f579b9c`, and `d1410c31d`; tag `v0.35.286` is pushed. GitHub CI, Release, and PyPI runs for the tag are in progress.
 <!-- agent:boundary:64a22d63:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -329,7 +363,8 @@ Verification passed: focused regression test, controller-io suite, formatting, f
 - ~~do [#coder4]~~
 - ~~do [#coder5]~~
 - ~~do [#coder6]~~
-- do [#coder7]
+- ~~do [#donemdreplica]~~
+- ⏭️ do [#coder7]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

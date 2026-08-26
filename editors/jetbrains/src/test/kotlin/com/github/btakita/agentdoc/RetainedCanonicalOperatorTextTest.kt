@@ -1,6 +1,8 @@
 package com.github.btakita.agentdoc
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -54,14 +56,49 @@ class RetainedCanonicalOperatorTextTest {
     }
 
     @Test
-    fun `a buffer that still matches its shadow published everything it has`() {
-        val text = "# doc\n\nconverged\n"
+    fun `an unacknowledged local shadow cannot authorize an older controller overwrite`() {
+        val localText = "# doc\n\noperator edit accepted only by the retiring controller\n"
+        assertEquals(
+            RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+            retainedRegistrationProjectionActionUtil(
+                publishedShadow = localText,
+                bufferText = localText,
+                canonicalText = "# doc\n\nolder replacement controller snapshot\n",
+            ),
+        )
+    }
+
+    @Test
+    fun `a replacement canonical that catches the live buffer ends the hold`() {
+        val liveBuffer = "# doc\n\noperator edit\n"
         assertEquals(
             RetainedRegistrationProjectionAction.ApplyCanonical,
             retainedRegistrationProjectionActionUtil(
-                publishedShadow = text,
-                bufferText = text,
-                canonicalText = "# doc\n\nnew controller response\n",
+                publishedShadow = "# doc\n\nolder settled projection\n",
+                bufferText = liveBuffer,
+                canonicalText = liveBuffer,
+            ),
+        )
+    }
+
+    @Test
+    fun `an ambiguous hold suppresses refresh until its retry is due`() {
+        assertFalse(
+            retainedProjectionHoldAllowsRefreshUtil(
+                holdActive = true,
+                registrationAttemptDue = false,
+            ),
+        )
+        assertTrue(
+            retainedProjectionHoldAllowsRefreshUtil(
+                holdActive = true,
+                registrationAttemptDue = true,
+            ),
+        )
+        assertTrue(
+            retainedProjectionHoldAllowsRefreshUtil(
+                holdActive = false,
+                registrationAttemptDue = false,
             ),
         )
     }

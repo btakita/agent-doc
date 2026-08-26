@@ -580,7 +580,8 @@ class TypingTrackerEdtBudgetTest {
         )
         assertTrue(
             "visible editor applies must publish complete state without an ACK sidecar",
-            source.contains("pending.effectToken.endpoint.projectVisibleState(") &&
+            source.contains("projectSettledVisibleState(") &&
+                source.contains("pending.effectToken.endpoint,") &&
                 source.contains("outcome.diskPersisted") &&
                 !source.contains("pendingRemoteAckReplays") &&
                 !source.contains("rememberPendingRemoteAcks") &&
@@ -615,7 +616,9 @@ class TypingTrackerEdtBudgetTest {
                 guardRecoveryBody.contains("replaceCached = true") &&
                 guardRecoveryBody.contains("bootstrapFromControllerCanonical = true") &&
                 guardRecoveryBody.contains("replacement.ensureEditorText(editorText)") &&
-                guardRecoveryBody.contains("replacement.projectVisibleState(editorText)"),
+                guardRecoveryBody.contains(
+                    "projectSettledVisibleState(filePath, replacement, editorText)",
+                ),
         )
         assertFalse(
             "template-guard recovery must rebuild through the replacement CRDT replica, not a direct whole-buffer adopt RPC",

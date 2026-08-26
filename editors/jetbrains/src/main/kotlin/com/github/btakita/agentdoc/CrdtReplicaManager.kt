@@ -428,6 +428,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             ::contentHash,
         )
     private val shadows = ConcurrentHashMap<String, String>()
+    // Unlike [shadows], this frontier advances only after the controller
+    // acknowledges the complete visible projection. A local CRDT mutation can
+    // update the editing baseline while its controller is retiring or its
+    // durable lineage is stale; treating that local baseline as settled lets a
+    // replacement controller project an older snapshot over operator text.
+    private val settledShadows = ConcurrentHashMap<String, String>()
     private val applyingRemote = ConcurrentHashMap.newKeySet<String>()
     private val fileContentReloadingPaths = ConcurrentHashMap.newKeySet<String>()
     private val pendingLocalEdits = ConcurrentHashMap<String, AtomicInteger>()
@@ -453,6 +459,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val remoteEditorApplyScheduled = AtomicBoolean(false)
     private val remoteEditorApplyPaths = ConcurrentHashMap.newKeySet<String>()
     private val retainedCanonicalProjectionPaths = ConcurrentHashMap.newKeySet<String>()
+    private val retainedProjectionHoldPaths = ConcurrentHashMap.newKeySet<String>()
     private val templateGuardRecoveryPaths = ConcurrentHashMap.newKeySet<String>()
     private val templateGuardRecoveryRetryPaths = ConcurrentHashMap.newKeySet<String>()
     private val templateGuardRecoveryFailureCounts = ConcurrentHashMap<String, Int>()
@@ -499,6 +506,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         remoteEditorApplies.clear()
         remoteEditorApplyPaths.clear()
         retainedCanonicalProjectionPaths.clear()
+        retainedProjectionHoldPaths.clear()
         remoteEditorEffectGenerations.clear()
         templateGuardRecoveryPaths.clear()
         templateGuardRecoveryRetryPaths.clear()
@@ -515,6 +523,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         forwarders.values.forEach { it.deregister() }
         forwarders.clear()
         shadows.clear()
+        settledShadows.clear()
         templateValidation.clear()
     }
 
@@ -1148,7 +1157,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return LocalEditorForwardResult.Retry
         }
         shadows[filePath] = editorText
-        if (!forwarders[filePath]!!.projectVisibleState(editorText)) {
+        if (!projectSettledVisibleState(filePath, forwarders[filePath]!!, editorText)) {
             requestRemoteDrain(filePath, "local-visible-projection-retry")
         }
         logSlow(
@@ -1385,7 +1394,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 if (!shouldApplyRemoteCrdtUpdateUtil(update, forwarder.clientId)) {
                     selfEchoCount++
                     val visibleText = editorBufferText(filePath) ?: expectedText
-                    if (!forwarder.projectVisibleState(visibleText)) {
+                    if (!projectSettledVisibleState(filePath, forwarder, visibleText)) {
                         requestRemoteDrain(filePath, "self-echo-projection-retry")
                     }
                     continue
@@ -1706,7 +1715,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             shadows[filePath] = editorText
             retainedCanonicalProjectionPaths.remove(filePath)
             clearTemplateGuardRecoveryBackoff(filePath)
-            if (!replacement.projectVisibleState(editorText)) {
+            if (!projectSettledVisibleState(filePath, replacement, editorText)) {
                 scheduleTemplateGuardRecoveryRetry(filePath, "template-guard-visible-proof")
             }
             log.warn(
@@ -2029,7 +2038,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     editorBufferText(filePath) == visibleText &&
                     forwarder.replicaText() == visibleText &&
                     readRawDiskText(filePath) == visibleText &&
-                    !forwarder.projectVisibleState(visibleText, true)
+                            !projectSettledVisibleState(filePath, forwarder, visibleText, true)
                 ) {
                     requestRemoteDrain(filePath, "persist-current-receipt-retry")
                 }
@@ -2140,10 +2149,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     projectionPublished =
                         projectionVisible &&
                             outcome.editorText?.let { visibleText ->
-                                pending.effectToken.endpoint.projectVisibleState(
-                                    visibleText,
-                                    outcome.diskPersisted,
-                                )
+                            projectSettledVisibleState(
+                                pending.filePath,
+                                pending.effectToken.endpoint,
+                                visibleText,
+                                outcome.diskPersisted,
+                            )
                             } == true
                     log.debug(
                         "[crdt-replica] remote editor apply completed for ${File(pending.filePath).name}; " +
@@ -2233,9 +2244,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             editorRemoteGeneration != null
         ) {
             shadows[filePath] = editorText
-            if (!forwarder.projectVisibleState(editorText)) {
-                requestRemoteDrain(filePath, "already-visible-state-projection-retry")
-            }
+                    if (!projectSettledVisibleState(filePath, forwarder, editorText)) {
+                        requestRemoteDrain(filePath, "already-visible-state-projection-retry")
+                    }
             log.info(
                 "[crdt-replica] projected an already-visible remote target for $filePath: " +
                     "editor_hash=$editorHash generation=$editorRemoteGeneration",
@@ -2274,10 +2285,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 return false
             }
             shadows[filePath] = editorText
-            if (!replacement.projectVisibleState(editorText)) {
-                retainedCanonicalProjectionPaths.add(filePath)
-                scheduleTemplateGuardRecoveryRetry(filePath, "visible-target-projection-retry")
-                return false
+                    if (!projectSettledVisibleState(filePath, replacement, editorText)) {
+                        retainedCanonicalProjectionPaths.add(filePath)
+                        scheduleTemplateGuardRecoveryRetry(filePath, "visible-target-projection-retry")
+                        return false
             }
             retainedCanonicalProjectionPaths.remove(filePath)
             log.info(
@@ -2434,6 +2445,21 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         expectedCanonicalTextAtSwap: String? = null,
     ): CrdtReplicaForwarder? {
         val cached = forwarders[filePath]
+        // A three-generation reconciliation hold is a real registration
+        // failure, even when a controller event asks for a forced refresh.
+        // Honor its exponential backoff so missing-replica notifications do
+        // not turn the fail-closed decision into a register/deregister storm.
+        val retainedProjectionHeld = retainedProjectionHoldPaths.contains(filePath)
+        val retainedProjectionRetryDue =
+            !retainedProjectionHeld || shouldAttemptRegister(filePath)
+        if (
+            !retainedProjectionHoldAllowsRefreshUtil(
+                retainedProjectionHeld,
+                retainedProjectionRetryDue,
+            )
+        ) {
+            return cached
+        }
         if (bypassRegisterBackoff) {
             // A refresh is register -> swap -> retire. Never create an authority
             // gap by deregistering the working member before its replacement has
@@ -2483,7 +2509,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return null
         }
         clearRegisterFailure(filePath)
-        val publishedShadowAtRegistration = shadows[filePath]
+        val publishedShadowAtRegistration =
+            settledShadows[filePath] ?: nativeReloadSettledShadows[filePath]
         val bufferTextAtRegistration = editorBufferText(filePath) ?: initialEditorText
         val retainedProjectionAction =
             if (forwarder.canonicalProjectionRetained) {
@@ -2511,12 +2538,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             // it was not in git, not in the CRDT, and not in the compaction
             // archive — it was simply gone.
             //
-            // The shadow separates the two cases exactly, and needs no new state:
-            // it is the last text this plugin PROVED reached canonical, and it
-            // lives in memory. A restarted IDE has none, so that path is unchanged
-            // and still fail-closed. A live IDE whose buffer has moved past its
-            // shadow is holding operator text the controller has never seen, and
-            // adopting canonical over it is data loss, not recovery.
+            // The settled shadow separates the two cases exactly: unlike the
+            // incremental editing shadow, it advances only after the controller
+            // accepts the visible projection and survives a native-generation
+            // reload in JVM memory. A restarted IDE has none, so that path is
+            // unchanged. A live IDE whose buffer moved past its settled shadow
+            // holds operator text that a replacement controller may not have
+            // seen, and adopting canonical over it is data loss, not recovery.
             // The live buffer, not the caller's captured cut: this decides whether
             // operator text is about to be destroyed, so it must read what the
             // operator can currently see.
@@ -2555,6 +2583,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                             "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"}",
                     )
                     forwarder.deregister()
+                    retainedProjectionHoldPaths.add(filePath)
+                    recordRegisterFailure(filePath, "ambiguous-retained-projection")
                     return cached
                 }
             }
@@ -2656,7 +2686,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 if (
                     publishedShadow == null ||
                     bufferText == null ||
-                    shadows[filePath] != publishedShadow ||
+                    (settledShadows[filePath] ?: nativeReloadSettledShadows[filePath]) !=
+                        publishedShadow ||
                     editorBufferText(filePath) != bufferText ||
                     forwarder.replicaText() != publishedShadow
                 ) {
@@ -2672,8 +2703,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     } else {
                         shadows[filePath] = bufferText
                         retainedCanonicalProjectionPaths.remove(filePath)
-                        if (!forwarder.projectVisibleState(bufferText)) {
-                            requestRemoteDrain(filePath, "registration-operator-buffer-projection-retry")
+                    if (!projectSettledVisibleState(filePath, forwarder, bufferText)) {
+                        requestRemoteDrain(filePath, "registration-operator-buffer-projection-retry")
                         }
                         log.info(
                             "[crdt-replica] published retained live buffer for ${File(filePath).name}; " +
@@ -2709,7 +2740,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             // replica opened, but not what the IDE buffer currently displays.
             // Publish the exact post-swap view so the controller can discharge
             // this generation's delivery receipt.
-            if (!forwarder.projectVisibleState(visibleText)) {
+            if (!projectSettledVisibleState(filePath, forwarder, visibleText)) {
                 requestRemoteDrain(filePath, "registration-visible-projection-retry")
             }
             return
@@ -2727,6 +2758,21 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             forwarder = forwarder,
             updates = emptyList(),
         )
+    }
+
+    /** Record the causal frontier only after the controller accepts visibility. */
+    private fun projectSettledVisibleState(
+        filePath: String,
+        forwarder: CrdtReplicaForwarder,
+        visibleText: String,
+        diskPersisted: Boolean = false,
+    ): Boolean {
+        val projected = forwarder.projectVisibleState(visibleText, diskPersisted)
+        if (projected) {
+            settledShadows[filePath] = visibleText
+            nativeReloadSettledShadows.remove(filePath)
+        }
+        return projected
     }
 
     private fun refreshReplicaAfterTransportLoss(
@@ -2792,6 +2838,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     private fun clearRegisterFailure(filePath: String) {
         attachFailureReasons.remove(filePath)
+        retainedProjectionHoldPaths.remove(filePath)
         registerFailureCounts.remove(filePath)
         registerRetryAfterMs.remove(filePath)
         registerRetryProjections.remove(filePath)
@@ -2815,7 +2862,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         if (
                             disposed.get() ||
                             project.isDisposed ||
-                            forwarders[filePath]?.attached == true
+                        (forwarders[filePath]?.attached == true &&
+                            !retainedProjectionHoldPaths.contains(filePath))
                         ) {
                             return@schedule
                         }
@@ -2828,7 +2876,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                             val document =
                                 FileDocumentManager.getInstance().getDocument(file)
                                     ?: return@runOnEdtNonBlocking
-                            ensureOpenDocumentReplica(file.path, document, await = false)
+                    ensureOpenDocumentReplica(
+                        file.path,
+                        document,
+                        await = false,
+                        forceRefresh = retainedProjectionHoldPaths.contains(filePath),
+                    )
                         }
                     },
                     delayMs,
@@ -2885,6 +2938,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         private val nonOperatorMutationEpochs = ConcurrentHashMap<String, AtomicLong>()
         private val nativeReloadResumeStates =
             ConcurrentHashMap<String, ReplicaResumeState>()
+        private val nativeReloadSettledShadows = ConcurrentHashMap<String, String>()
 
         fun getInstance(project: Project): CrdtReplicaManager =
             instances.getOrPut(project) {
@@ -2912,11 +2966,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }.all { it }
             if (quiesced) {
                 managers.forEach { (_, manager) ->
-                    manager.forwarders.forEach { (filePath, forwarder) ->
-                        forwarder.captureResumeState()?.let { state ->
-                            nativeReloadResumeStates[filePath] = state
-                        }
+                manager.forwarders.forEach { (filePath, forwarder) ->
+                    forwarder.captureResumeState()?.let { state ->
+                        nativeReloadResumeStates[filePath] = state
                     }
+                    manager.settledShadows[filePath]?.let { settled ->
+                        nativeReloadSettledShadows[filePath] = settled
+                    }
+                }
                 }
             }
             managers.forEach { (_, manager) -> manager.dispose() }
@@ -3339,8 +3396,9 @@ internal fun isAgentDocDocumentTextUtil(text: CharSequence): Boolean =
  * Whether adopting a retained controller canonical projection would destroy
  * operator text (`#retainedprojectionclobbersoperatortext`).
  *
- * [publishedShadow] is the last text this plugin PROVED reached canonical, held
- * in memory; [bufferText] is what the operator can currently see. The two cases
+ * [publishedShadow] is the last text this plugin PROVED reached the controller's
+ * visible projection, held in memory; [bufferText] is what the operator can
+ * currently see. The two cases
  * that reach the retained-canonical branch are opposite and must not be
  * conflated:
  *
@@ -3372,7 +3430,11 @@ internal fun retainedRegistrationProjectionActionUtil(
     canonicalText: String?,
 ): RetainedRegistrationProjectionAction =
     when {
-        publishedShadow == null || bufferText == null || publishedShadow == bufferText ->
+        // Convergence is safe and must win before the three-generation test;
+        // this is also the terminal edge for a prior ambiguity hold.
+        bufferText != null && canonicalText == bufferText ->
+            RetainedRegistrationProjectionAction.ApplyCanonical
+        publishedShadow == null || bufferText == null ->
             RetainedRegistrationProjectionAction.ApplyCanonical
         canonicalText == publishedShadow -> RetainedRegistrationProjectionAction.PublishOperatorBuffer
         else -> RetainedRegistrationProjectionAction.HoldOperatorBuffer
@@ -3382,6 +3444,11 @@ internal fun retainedCanonicalWouldClobberOperatorTextUtil(
     publishedShadow: String?,
     bufferText: String?,
 ): Boolean = publishedShadow != null && bufferText != null && publishedShadow != bufferText
+
+internal fun retainedProjectionHoldAllowsRefreshUtil(
+    holdActive: Boolean,
+    registrationAttemptDue: Boolean,
+): Boolean = !holdActive || registrationAttemptDue
 
 internal fun shouldApplyRemoteCrdtUpdateUtil(update: ReplicaRemoteUpdate, clientId: Long): Boolean =
     update.origin != clientId

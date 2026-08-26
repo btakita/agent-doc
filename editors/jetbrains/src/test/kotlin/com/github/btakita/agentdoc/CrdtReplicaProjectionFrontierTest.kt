@@ -85,7 +85,9 @@ class CrdtReplicaProjectionFrontierTest {
             "an exact registered buffer must publish the visible-state receipt",
             retainedRegistrationBody.contains("val visibleText = editorBufferText(filePath)") &&
                 retainedRegistrationBody.contains("if (visibleText == canonical)") &&
-                retainedRegistrationBody.contains("forwarder.projectVisibleState(visibleText)"),
+                retainedRegistrationBody.contains(
+                    "projectSettledVisibleState(filePath, forwarder, visibleText)",
+                ),
         )
         assertFalse(
             "a captured pre-swap editor cut must never acknowledge the replacement generation",
@@ -114,7 +116,9 @@ class CrdtReplicaProjectionFrontierTest {
         assertTrue(body.contains("forwarder.replicaText() != visibleText"))
         assertTrue(body.contains("saveDocument(document)"))
         assertTrue(body.contains("readRawDiskText(filePath) == visibleText"))
-        assertTrue(body.contains("forwarder.projectVisibleState(visibleText, true)"))
+        assertTrue(
+            body.contains("projectSettledVisibleState(filePath, forwarder, visibleText, true)"),
+        )
         assertFalse(body.contains("applyMinimalDocumentEditUtil("))
         assertFalse(body.contains("reloadFromDisk("))
     }
@@ -521,7 +525,9 @@ class CrdtReplicaProjectionFrontierTest {
         assertTrue(rebootstrapEffect.contains("expectedEditorTextAtSwap = editorText"))
         assertTrue(rebootstrapEffect.contains("bootstrapFromControllerCanonical = true"))
         assertTrue(rebootstrapEffect.indexOf("replacement.replicaText()") <
-            rebootstrapEffect.indexOf("replacement.projectVisibleState(editorText)"))
+            rebootstrapEffect.indexOf(
+                "projectSettledVisibleState(filePath, replacement, editorText)",
+            ))
         val registration = manager
             .substringAfter("private fun forwarderFor(")
             .substringBefore("private fun retainCanonicalProjectionAfterRegistration(")

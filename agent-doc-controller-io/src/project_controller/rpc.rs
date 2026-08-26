@@ -7462,6 +7462,16 @@ impl ControllerCrdtReplicaMethod {
             Self::Awareness => "replica_awareness",
         }
     }
+
+    /// A non-authoritative generation may only shed its own membership.
+    ///
+    /// Register, update, pull, projection, and awareness responses are all
+    /// process-local relay facts. Accepting them after prepare_handoff lets
+    /// an editor mistake the retiring generation for durable authority, then
+    /// lose that state when the replacement is promoted.
+    fn allowed_while_controller_non_authoritative(self) -> bool {
+        matches!(self, Self::Deregister)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -7980,6 +7990,14 @@ fn handle_crdt_replica_rpc(
         .context("CRDT replica payload missing identity")?;
     let method = payload.method;
     let method_name = method.label();
+    if bootstrap.handoff_state != ControllerHandoffState::Stable
+        && !method.allowed_while_controller_non_authoritative()
+    {
+        anyhow::bail!(
+            "CRDT replica {method_name} refused: controller not authoritative (handoff_state={:?}); retry against the promoted generation",
+            bootstrap.handoff_state
+        );
+    }
     let authority = crdt_authority_for_file(&file_arg);
     // `#replicarefusalstorm` / `#replicaendpointtakeover`: a non-agent-doc
     // markdown file (README, AGENTS, CONTRIBUTING, a draft — no `agent_doc_*`
@@ -23279,6 +23297,22 @@ mod tests {
             ControllerCrdtReplicaMethod::Awareness,
         ] {
             assert!(!replica_method_changes_realtime_steering_set(method));
+        }
+    }
+
+    #[test]
+    fn retiring_controller_accepts_only_replica_cleanup() {
+        assert!(
+            ControllerCrdtReplicaMethod::Deregister.allowed_while_controller_non_authoritative()
+        );
+        for method in [
+            ControllerCrdtReplicaMethod::Register,
+            ControllerCrdtReplicaMethod::Update,
+            ControllerCrdtReplicaMethod::Projection,
+            ControllerCrdtReplicaMethod::Pull,
+            ControllerCrdtReplicaMethod::Awareness,
+        ] {
+            assert!(!method.allowed_while_controller_non_authoritative());
         }
     }
 

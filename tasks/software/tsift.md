@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
-  codex: 01a03a6d-1abb-7ce2-a842-9c8de961293d
+  codex: 01a03e9e-2550-78e2-bd4c-da24846dd17d
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -487,12 +487,40 @@ Released tsift 0.1.87 end to end.
 - Parent integration: advanced the original dirty submodule checkout by fast-forward without altering its unrelated edits, then committed only the parent pointer as `1af2cd0ce` (`chore: update tsift to 0.1.87`). The clean temporary release worktree and branch were removed.
 
 The exchange remains above the accretion warning threshold because I did not compact during the active queue item. Preflight also still reports the installed JetBrains plugin at 0.2.356 versus expected 0.2.357; that warning did not affect the release.
+
+### Re: Agent response — tsift issue #16
+
+> **Queue prompt:**
+>
+> do [#2wte]
+
+
+Completed queue item `[#2wte]` and pushed tsift commit `d116f8c` (`fix: complete workspace root federation`) to `main`.
+
+- `init --workspace` now keeps a nested git submodule as its project root instead of escalating to the outer superproject.
+- Workspace indexing and status now include a filtered root-owned database labeled `<root>`, excluding nested scope trees, alongside per-scope databases.
+- Workspace-root search and `symbol-read` now federate across `<root>` and eligible scopes. `symbol-read --federated`, root-owned `--file`, deterministic scope resolution, and genuine ambiguity errors are covered.
+- Added regression tests plus architecture, navigation, and Unreleased documentation updates.
+
+Verification:
+
+- `make check` passed in the working checkout.
+- The exact staged patch also passed `make check` in a clean detached worktree, independently of unrelated local edits.
+- `cargo install --path . --locked` succeeded.
+- GitHub issue #16 closed automatically from the pushed commit.
+- The latest completed CI run was green; GitHub had not yet registered a run for `d116f8c` at closeout.
+
+Preflight still reports the existing environment/document warnings: installed agent-doc CLI `0.35.284` versus skill `0.35.285`, JetBrains plugin `0.2.356` versus `0.2.357`, the misplaced `go` attribute, exchange accretion, and semantic-completion false-positive risk.
+
+Queue item `[#z5tb]` (release + publish) remains next.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#2wte]~~
+- do [#z5tb]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -500,7 +528,8 @@ https://github.com/chopratejas/headroom
 
 ## Backlog
 
-<!-- agent:backlog priority queue -->
+<!-- agent:backlog priority queue go -->
+- [ ] [#z5tb] release + publish
 <!-- /agent:backlog -->
 
 ## Review

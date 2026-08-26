@@ -215,12 +215,54 @@ pub struct ContextClearSubmitRetryFacts {
     pub max_attempts: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContextClearSubmitRetryAction {
+    /// The command is still visible in a split-submit composer; retry only the
+    /// harness submit key so the draft is not duplicated.
+    SubmitKey,
+    /// Delivery produced no observable command or transition while retained
+    /// history proves the clear did not take effect. `/clear`-style commands
+    /// are idempotent, so repair the lost delivery with the full command.
+    ResendCommand,
+}
+
+impl ContextClearSubmitRetryAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SubmitKey => "submit_key",
+            Self::ResendCommand => "resend_command",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ContextClearSubmitRetryProofFacts<'a> {
+    pub action: ContextClearSubmitRetryAction,
+    pub submit_key: &'a str,
+    pub attempt: usize,
+    pub max_attempts: usize,
+    pub observation: ContextClearSubmitObservation,
+}
+
+pub fn context_clear_submit_retry_action(
+    facts: ContextClearSubmitRetryFacts,
+) -> Option<ContextClearSubmitRetryAction> {
+    if facts.attempts_sent >= facts.max_attempts {
+        return None;
+    }
+    if context_clear_submit_needs_enter_resubmit(
+        &facts.observation,
+        facts.pending_draft_enter_resubmit,
+    ) {
+        return Some(ContextClearSubmitRetryAction::SubmitKey);
+    }
+    (facts.observation.status == ContextClearSubmitStatus::Unobserved
+        && !facts.observation.command_visible)
+        .then_some(ContextClearSubmitRetryAction::ResendCommand)
+}
+
 pub fn context_clear_submit_can_enter_resubmit(facts: ContextClearSubmitRetryFacts) -> bool {
-    facts.attempts_sent < facts.max_attempts
-        && context_clear_submit_needs_enter_resubmit(
-            &facts.observation,
-            facts.pending_draft_enter_resubmit,
-        )
+    context_clear_submit_retry_action(facts) == Some(ContextClearSubmitRetryAction::SubmitKey)
 }
 
 pub fn context_clear_submit_observation_line(
@@ -258,12 +300,9 @@ pub fn context_clear_submit_resubmit_proof_line(
     file: impl Display,
     pane: &str,
     harness: &str,
-    submit_key: &str,
-    attempt: usize,
-    max_attempts: usize,
-    observation: ContextClearSubmitObservation,
+    facts: ContextClearSubmitRetryProofFacts<'_>,
 ) -> String {
-    let result = match observation.status {
+    let result = match facts.observation.status {
         ContextClearSubmitStatus::Accepted => "accepted",
         ContextClearSubmitStatus::AcceptedClearedState => "accepted_cleared_state",
         ContextClearSubmitStatus::StillVisible => "still_visible",
@@ -271,15 +310,16 @@ pub fn context_clear_submit_resubmit_proof_line(
         ContextClearSubmitStatus::CaptureFailed => "capture_failed",
     };
     format!(
-        "session_clear_submit_resubmit file={} pane={} harness={} action=submit_key key={} attempt={} max_attempts={} result={} elapsed_ms={}",
+        "session_clear_submit_resubmit file={} pane={} harness={} action={} key={} attempt={} max_attempts={} result={} elapsed_ms={}",
         file,
         pane,
         harness,
-        submit_key,
-        attempt,
-        max_attempts,
+        facts.action.as_str(),
+        facts.submit_key,
+        facts.attempt,
+        facts.max_attempts,
         result,
-        observation.elapsed.as_millis()
+        facts.observation.elapsed.as_millis()
     )
 }
 
@@ -704,6 +744,40 @@ mod tests {
                 max_attempts: 2,
             }
         ));
+        assert_eq!(
+            context_clear_submit_retry_action(ContextClearSubmitRetryFacts {
+                observation: stale_or_empty_timeout,
+                pending_draft_enter_resubmit: true,
+                attempts_sent: 0,
+                max_attempts: 2,
+            }),
+            Some(ContextClearSubmitRetryAction::ResendCommand),
+            "an unobserved clear with retained history repairs the full idempotent command"
+        );
+        assert_eq!(
+            context_clear_submit_retry_action(ContextClearSubmitRetryFacts {
+                observation: ContextClearSubmitObservation {
+                    status: ContextClearSubmitStatus::CaptureFailed,
+                    elapsed: Duration::from_millis(250),
+                    command_visible: false,
+                },
+                pending_draft_enter_resubmit: true,
+                attempts_sent: 0,
+                max_attempts: 2,
+            }),
+            None,
+            "capture failure cannot prove that a full-command resend is safe"
+        );
+        assert_eq!(
+            context_clear_submit_retry_action(ContextClearSubmitRetryFacts {
+                observation: stale_or_empty_timeout,
+                pending_draft_enter_resubmit: true,
+                attempts_sent: 2,
+                max_attempts: 2,
+            }),
+            None,
+            "full-command repair shares the bounded retry budget"
+        );
     }
 
     /// `#clearsubmitunobserved`: the reported failure. A cold-started pane has
@@ -807,13 +881,16 @@ Welcome to Claude Code
             "/tmp/doc.md",
             "%7",
             "codex",
-            "Enter",
-            2,
-            30,
-            ContextClearSubmitObservation {
-                status: ContextClearSubmitStatus::Accepted,
-                elapsed: Duration::from_millis(150),
-                command_visible: false,
+            ContextClearSubmitRetryProofFacts {
+                action: ContextClearSubmitRetryAction::SubmitKey,
+                submit_key: "Enter",
+                attempt: 2,
+                max_attempts: 30,
+                observation: ContextClearSubmitObservation {
+                    status: ContextClearSubmitStatus::Accepted,
+                    elapsed: Duration::from_millis(150),
+                    command_visible: false,
+                },
             },
         );
         assert!(retry.contains("session_clear_submit_resubmit"), "{retry}");
@@ -821,6 +898,24 @@ Welcome to Claude Code
         assert!(retry.contains("attempt=2"), "{retry}");
         assert!(retry.contains("max_attempts=30"), "{retry}");
         assert!(retry.contains("result=accepted"), "{retry}");
+
+        let repair = context_clear_submit_resubmit_proof_line(
+            "/tmp/doc.md",
+            "%7",
+            "codex",
+            ContextClearSubmitRetryProofFacts {
+                action: ContextClearSubmitRetryAction::ResendCommand,
+                submit_key: "Enter",
+                attempt: 1,
+                max_attempts: 1,
+                observation: ContextClearSubmitObservation {
+                    status: ContextClearSubmitStatus::Accepted,
+                    elapsed: Duration::from_millis(150),
+                    command_visible: false,
+                },
+            },
+        );
+        assert!(repair.contains("action=resend_command"), "{repair}");
     }
 
     #[test]

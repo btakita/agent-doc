@@ -18,15 +18,15 @@ use agent_doc_tmux_commands::tmux_submit_mode_for_harness;
 use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_turn_executor_tmux::context_clear::{
     CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES, ContextClearSubmitObservation,
-    ContextClearSubmitPollState, ContextClearSubmitRetryFacts, ContextClearSubmitStatus,
-    InterruptClearTimeoutFacts, busy_clear_already_deferred_message, busy_clear_deferred_message,
-    busy_clear_refusal_message, context_clear_command_visible_in_active_input,
-    context_clear_history_proves_cleared_state, context_clear_submit_blocked_line,
-    context_clear_submit_blocked_message, context_clear_submit_can_enter_resubmit,
+    ContextClearSubmitPollState, ContextClearSubmitRetryAction, ContextClearSubmitRetryFacts,
+    ContextClearSubmitRetryProofFacts, ContextClearSubmitStatus, InterruptClearTimeoutFacts,
+    busy_clear_already_deferred_message, busy_clear_deferred_message, busy_clear_refusal_message,
+    context_clear_command_visible_in_active_input, context_clear_history_proves_cleared_state,
+    context_clear_submit_blocked_line, context_clear_submit_blocked_message,
     context_clear_submit_observation_line, context_clear_submit_poll_status,
-    context_clear_submit_resubmit_proof_line, interrupt_clear_timeout_message,
-    operator_interrupt_key_plan, operator_interrupt_step_delay, protected_clear_refusal_message,
-    terminal_editor_command,
+    context_clear_submit_resubmit_proof_line, context_clear_submit_retry_action,
+    interrupt_clear_timeout_message, operator_interrupt_key_plan, operator_interrupt_step_delay,
+    protected_clear_refusal_message, terminal_editor_command,
 };
 use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, Tmux};
 
@@ -2131,18 +2131,34 @@ fn verify_context_clear_submit_after_delivery(
             .pending_draft_enter_resubmit();
     let max_attempts = clear_direct_submit_max_enter_resubmits();
     let mut attempts_sent = 0usize;
-    while context_clear_submit_can_enter_resubmit(ContextClearSubmitRetryFacts {
+    while let Some(retry_action) = context_clear_submit_retry_action(ContextClearSubmitRetryFacts {
         observation: final_observation,
         pending_draft_enter_resubmit: profile_allows_pending_draft_enter_resubmit,
         attempts_sent,
         max_attempts,
     }) {
         attempts_sent += 1;
-        let resubmit_phase = match ctx.initial_phase {
-            "supervisor_ipc_acceptance" => "supervisor_ipc_resubmit_acceptance",
-            _ => "direct_pane_resubmit_acceptance",
+        let resubmit_phase = match (ctx.initial_phase, retry_action) {
+            ("supervisor_ipc_acceptance", ContextClearSubmitRetryAction::SubmitKey) => {
+                "supervisor_ipc_resubmit_acceptance"
+            }
+            ("supervisor_ipc_acceptance", ContextClearSubmitRetryAction::ResendCommand) => {
+                "supervisor_ipc_command_repair_acceptance"
+            }
+            (_, ContextClearSubmitRetryAction::SubmitKey) => "direct_pane_resubmit_acceptance",
+            (_, ContextClearSubmitRetryAction::ResendCommand) => {
+                "direct_pane_command_repair_acceptance"
+            }
         };
         let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(ctx.harness);
+        let retry_text = match retry_action {
+            ContextClearSubmitRetryAction::SubmitKey => "",
+            ContextClearSubmitRetryAction::ResendCommand => ctx.command,
+        };
+        let retry_mode = match retry_action {
+            ContextClearSubmitRetryAction::SubmitKey => "clear_resubmit_submit_key",
+            ContextClearSubmitRetryAction::ResendCommand => "clear_resubmit_full_command",
+        };
         let pre_resubmit_capture_hash =
             capture_context_clear_submit_content_hash(ctx.tmux, ctx.pane);
         agent_doc_tmux_io::input_diag::log_text_submit(
@@ -2152,22 +2168,24 @@ fn verify_context_clear_submit_after_delivery(
             ),
             ctx.resubmit_source,
             &format!("pane:{}", ctx.pane),
-            "",
+            retry_text,
             Some(ctx.harness),
-            "clear_resubmit_submit_key",
+            retry_mode,
             submit_key,
         );
         if let Err(err) = agent_doc_tmux_io::send_submitted_text_for_harness_logged(
             ctx.tmux,
             ctx.pane,
-            "",
+            retry_text,
             ctx.harness,
             agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
             "sessions.send_submitted_text_for_harness",
         ) {
             eprintln!(
-                "[clear] warning: {} clear resubmit {submit_key} failed for pane {}: {err}",
-                ctx.harness, ctx.pane
+                "[clear] warning: {} clear {} failed for pane {}: {err}",
+                ctx.harness,
+                retry_action.as_str(),
+                ctx.pane
             );
         }
         let second = poll_context_clear_submit_acceptance(
@@ -2185,10 +2203,13 @@ fn verify_context_clear_submit_after_delivery(
                 ctx.file.display(),
                 ctx.pane,
                 ctx.harness,
-                submit_key,
-                attempts_sent,
-                max_attempts,
-                second,
+                ContextClearSubmitRetryProofFacts {
+                    action: retry_action,
+                    submit_key,
+                    attempt: attempts_sent,
+                    max_attempts,
+                    observation: second,
+                },
             ),
         );
         final_phase = resubmit_phase;

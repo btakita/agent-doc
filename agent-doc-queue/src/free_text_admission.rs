@@ -55,6 +55,65 @@ pub fn free_text_prompt_is_backlog_task(text: &str) -> bool {
         && agent_doc_prompt_lines::text_line_looks_like_prompt_target(&trimmed)
 }
 
+/// Match the editor race where queue maintenance admitted a partial free-text
+/// draft into backlog and the editor then projected the continued draft beside
+/// the generated `do [#id]` head. The adjacency and strict-prefix requirements
+/// keep intentionally similar, independently queued tasks distinct.
+fn adjacent_snapshot_extension_claims(
+    entries: &[crate::document_queue::QueueEntry],
+    existing_items: &[agent_doc_element_backlog::backlog::PendingItem],
+    actionable_keys: &HashSet<String>,
+) -> Vec<(String, String, String)> {
+    let mut provisional = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        let new_text = normalize_admitted_free_text(&prompt.text);
+        let new_key = crate::queue_response::normalize_for_answer_match(&new_text);
+        if new_key.is_empty() || !actionable_keys.contains(&new_key) {
+            continue;
+        }
+
+        let mut adjacent_ids = HashSet::new();
+        for neighbor in [index.checked_sub(1), index.checked_add(1)]
+            .into_iter()
+            .flatten()
+            .filter_map(|neighbor| entries.get(neighbor))
+        {
+            if let Some(id) = crate::queue_projection::queue_entry_do_id(neighbor) {
+                adjacent_ids.insert(id);
+            }
+        }
+        let mut candidates = existing_items
+            .iter()
+            .filter(|item| item.state != agent_doc_element_backlog::backlog::PendingState::Done)
+            .filter(|item| adjacent_ids.contains(&item.id.trim().to_ascii_lowercase()))
+            .filter_map(|item| {
+                let old_key = crate::queue_response::normalize_for_answer_match(&item.text);
+                (old_key.len() >= 8
+                    && new_key.len() > old_key.len()
+                    && new_key.starts_with(&old_key))
+                .then(|| (item.id.trim().to_ascii_lowercase(), new_text.clone()))
+            })
+            .collect::<Vec<_>>();
+        candidates.sort();
+        candidates.dedup();
+        if let [candidate] = candidates.as_slice() {
+            provisional.push((new_key, candidate.0.clone(), candidate.1.clone()));
+        }
+    }
+
+    let mut claims_per_id = HashMap::<String, usize>::new();
+    for (_, id, _) in &provisional {
+        *claims_per_id.entry(id.clone()).or_default() += 1;
+    }
+    provisional
+        .into_iter()
+        .filter(|(_, id, _)| claims_per_id.get(id) == Some(&1))
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FreeTextWorkPrompt {
     pub text: String,
@@ -233,8 +292,28 @@ pub fn prepare_free_text_admission(
         .find(|c| c.name == "backlog")
         .context("free-text admission: backlog component missing after ensure")?
         .clone();
-    let backlog_body = backlog.content(&current);
-    let (_, existing_items, _) = agent_doc_element_backlog::backlog::parse_items(backlog_body);
+    let original_backlog_body = backlog.content(&current).to_string();
+    let mut backlog_body = original_backlog_body.clone();
+    let (_, existing_items, _) = agent_doc_element_backlog::backlog::parse_items(&backlog_body);
+    let actionable_keys = prompts
+        .prompts
+        .iter()
+        .map(|prompt| {
+            crate::queue_response::normalize_for_answer_match(&normalize_admitted_free_text(
+                &prompt.text,
+            ))
+        })
+        .collect::<HashSet<_>>();
+    let extension_claims =
+        adjacent_snapshot_extension_claims(entries, &existing_items, &actionable_keys);
+    if !extension_claims.is_empty() {
+        let edits = extension_claims
+            .iter()
+            .map(|(_, id, text)| (id.clone(), text.clone()))
+            .collect::<Vec<_>>();
+        backlog_body = agent_doc_element_backlog::backlog::op_edit_many(&backlog_body, &edits)
+            .context("free-text admission: update continued queue draft in backlog")?;
+    }
     let mut id_by_text = HashMap::new();
     for item in existing_items {
         if item.state != agent_doc_element_backlog::backlog::PendingState::Done {
@@ -243,6 +322,9 @@ pub fn prepare_free_text_admission(
                 id_by_text.entry(key).or_insert(item.id);
             }
         }
+    }
+    for (key, id, _) in extension_claims {
+        id_by_text.insert(key, id);
     }
 
     let mut prompt_keys = Vec::new();
@@ -256,16 +338,19 @@ pub fn prepare_free_text_admission(
     }
     if !texts_to_add.is_empty() {
         let outcome = agent_doc_element_backlog::backlog::op_prepend_many_with_outcomes(
-            backlog_body,
+            &backlog_body,
             &texts_to_add,
             document_id,
             false,
         )?;
-        current = backlog.replace_content(&current, &outcome.body);
         for (text, item_outcome) in texts_to_add.iter().zip(outcome.outcomes) {
             let key = crate::queue_response::normalize_for_answer_match(text);
             id_by_text.insert(key, item_outcome.id.clone());
         }
+        backlog_body = outcome.body;
+    }
+    if backlog_body != original_backlog_body {
+        current = backlog.replace_content(&current, &backlog_body);
     }
 
     let mut unique_ids = Vec::new();
@@ -685,7 +770,109 @@ mod tests {
         assert!(!queue_entries.iter().any(|entry| matches!(
             entry,
             crate::document_queue::QueueEntry::Prompt(prompt)
-                if prompt.text == "Implement checkout setup"
+            if prompt.text == "Implement checkout setup"
         )));
+    }
+
+    #[test]
+    fn continued_queue_draft_updates_adjacent_snapshot_item_instead_of_duplicating_it() {
+        let content = concat!(
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#existing] Implement release and publish\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- 🚧 do [#existing]\n",
+            "- Implement release and publish and install\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+
+        let prepared = prepare_free_text_admission(
+            content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            false,
+            "doc-id",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(prepared.unique_ids, vec!["existing".to_string()]);
+
+        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
+        let components = agent_doc_element::element::parse(&admission.content).unwrap();
+        let backlog = components
+            .iter()
+            .find(|component| component.name == "backlog")
+            .unwrap();
+        let (_, items, _) =
+            agent_doc_element_backlog::backlog::parse_items(backlog.content(&admission.content));
+        assert_eq!(items.len(), 1, "{:#?}", items);
+        assert_eq!(items[0].id, "existing");
+        assert_eq!(items[0].text, "Implement release and publish and install");
+
+        let queue_entries = queue_entries_from_content(&admission.content);
+        assert_eq!(
+            queue_entries
+                .iter()
+                .filter_map(crate::queue_projection::queue_entry_do_id)
+                .filter(|id| id == "existing")
+                .count(),
+            1,
+            "the partial snapshot and continued draft must converge to one queue head:\n{}",
+            admission.content
+        );
+        assert!(
+            !admission
+                .content
+                .contains("- Implement release and publish and install\n")
+        );
+    }
+
+    #[test]
+    fn non_adjacent_similar_queue_draft_remains_distinct_work() {
+        let content = concat!(
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#existing] Implement release and publish\n",
+            "- [ ] [#other] Review release notes\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- 🚧 do [#existing]\n",
+            "- do [#other]\n",
+            "- Implement release and publish and install\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+
+        let prepared = prepare_free_text_admission(
+            content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            false,
+            "doc-id",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(prepared.unique_ids.len(), 1);
+        assert_ne!(prepared.unique_ids[0], "existing");
+
+        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
+        let components = agent_doc_element::element::parse(&admission.content).unwrap();
+        let backlog = components
+            .iter()
+            .find(|component| component.name == "backlog")
+            .unwrap();
+        let (_, items, _) =
+            agent_doc_element_backlog::backlog::parse_items(backlog.content(&admission.content));
+        assert_eq!(items.len(), 3, "{:#?}", items);
+        assert!(
+            items.iter().any(|item| {
+                item.id == "existing" && item.text == "Implement release and publish"
+            })
+        );
+        assert!(items.iter().any(|item| {
+            item.id != "existing" && item.text == "Implement release and publish and install"
+        }));
     }
 }

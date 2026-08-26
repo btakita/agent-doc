@@ -361,6 +361,16 @@ long-term owner of `🚧` semantics.
 | Active HEAD set changes for any reason | Move the `🚧` projection to the active HEAD set in the visible document and backup/audit projection. | Affects a turn only when that turn's active HEAD identity changed or other active-turn input changed. |
 | Edit `agent:exchange` | Preserve and merge the exchange update. | Always affects the active turn. Exchange edits are never hidden as future queue-only state, even when the same source epoch also changes non-selected queue heads. |
 
+Free-text admission must also converge the editor race where maintenance has
+already materialized a partial draft as an id-backed backlog item while the
+continued live draft appears beside that generated queue head. When the live
+free-text prompt is a strict textual continuation of the adjacent id-backed
+head's active backlog text, admission updates that same backlog item and emits
+one queue reference; it must not allocate another id or preserve the partial
+snapshot as a second head. This is an adjacency- and lineage-shaped repair, not
+global fuzzy deduplication: non-adjacent similar work and intentional repeated
+directives remain distinct.
+
 Queue crash recovery is part of the Lazily/CP current-document lineage. No
 queue-specific journal or second head set exists: absence from newer Lazily
 current may be an operator deletion and must remain absent. A genuinely unsaved queue add survives through

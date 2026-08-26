@@ -614,7 +614,15 @@ command into the authoritative session through the same canonical
   launch contract. Before contacting tmux or the supervisor, it must record a
   controller operator-command acceptance or fail with the rejected stage. Clear
   is a session-context operation only: it must not rewrite the session markdown,
-  save a snapshot, or delete live text below an `agent:boundary` marker.
+save a snapshot, or delete live text below an `agent:boundary` marker.
+Clear delivery is successful only after observable command consumption, a pane
+content transition, or proof that the pane is already in the cleared state. If
+the command remains visible in a split-submit composer, recovery may retry only
+the harness submit key. If delivery is unobserved and retained conversation
+history proves the clear did not take effect, recovery may resend the full
+idempotent clear command once within the same bounded retry budget. Capture
+failure is not resend authority, and an accepted or already-cleared observation
+must never receive another command.
   is an explicit operator action and must not fail solely because direct tmux
   evidence classifies the resolved pane as `alive-busy` or because the current
   pane command is an agent wrapper; ordinary active/status panes are allowed

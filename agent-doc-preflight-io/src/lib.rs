@@ -6619,6 +6619,47 @@ mod tests {
     }
 
     #[test]
+    fn queue_maintenance_coalesces_a_continued_draft_with_its_adjacent_snapshot_head() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n",
+            "agent_doc_write: crdt\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n### Re: prior\nDone.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue go -->\n- 🚧 do [#existing]\n<!-- /agent:queue -->\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] 🚧 [#existing] Implement release and publish\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let live_content = snapshot_content.replace(
+            "- 🚧 do [#existing]\n",
+            "- 🚧 do [#existing]\n- Implement release and publish and install\n",
+        );
+        std::fs::write(&doc, &live_content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(updated.matches("do [#existing]").count(), 1, "{updated}");
+        assert_eq!(updated.matches("[#existing]").count(), 2, "{updated}");
+        assert!(
+            updated.contains("[#existing] Implement release and publish and install"),
+            "the live continuation must replace the partial backlog snapshot:\n{updated}"
+        );
+        assert!(
+            !updated.contains("\n- Implement release and publish and install\n"),
+            "the live continuation must not survive as a second queue item:\n{updated}"
+        );
+    }
+
+    #[test]
     fn stale_queue_maintenance_rebases_over_live_multi_adds_and_three_typed_bytes() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");

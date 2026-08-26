@@ -443,6 +443,10 @@ markdown file, sync must expand that one-column projection from the project
   single provided `--col` is authoritative and must not expand from remembered
   layout state, so switching the editor away from a document like
   `tasks/software/corky.md` cannot reintroduce its stale pane as a sibling.
+- A focus-only editor projection never derives columns. When its exact effect
+  receipt says the actor pane is alive but not visible, the editor adapter must
+  generation-fence that receipt and republish its complete current surface as a
+  forced structural edge. Other focus refusals remain non-structural failures.
 - Ordinary sync/preflight/finalize recovery paths must never kill a tmux pane. When sync observes a dead pane during missing-pane repair, it may capture diagnostics and keep the dead pane retained for manual inspection, but only explicit repair surfaces such as `fix` / `resync --fix` may escalate to pane-kill cleanup.
 - `resync --fix` orphan-agent cleanup must preserve non-stash panes that are registered, live-owner-proven, or supervisor-backed in their pane-local project root even when they are absent from the current project's registry.
 - Recent repeated `missing_pane` recoveries, unresolved startup-miss state, or a `registry_rebind` closeout whose recorded successor pane is still alive and rooted to the same document all block passive `--no-autostart` cold-start.

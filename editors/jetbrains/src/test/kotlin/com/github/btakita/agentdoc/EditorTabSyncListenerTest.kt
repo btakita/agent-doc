@@ -80,6 +80,25 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `stashed focus projection requests structural layout repair only for visible drift`() {
+        assertTrue(
+            EditorTabSyncListener.focusProjectionRequiresLayoutRepair(
+                """{"idle":false,"outcome":"{\"focused\":false,\"reason\":\"actor_pane_not_visible\"}"}""",
+            ),
+        )
+        assertFalse(
+            EditorTabSyncListener.focusProjectionRequiresLayoutRepair(
+                """{"idle":false,"outcome":"{\"focused\":false,\"reason\":\"missing_actor_record\"}"}""",
+            ),
+        )
+        assertFalse(
+            EditorTabSyncListener.focusProjectionRequiresLayoutRepair(
+                """{"idle":false,"outcome":"{\"focused\":true,\"reason\":\"focused\"}"}""",
+            ),
+        )
+    }
+
+    @Test
     fun `selection event file wins over stale selected editor file`() {
         val visibleMdFiles =
             listOf(
@@ -671,9 +690,12 @@ assertFalse(selection.contains("collectVisibleMarkdownFiles"))
         assertFalse(focusProjection.contains("submitFocusDocumentPane("))
         assertTrue(
             focusProjection.indexOf("focusProjectionApplied(receipt.output)") <
-focusProjection.indexOf("TmuxPaneFocusSync.recordEditorFocusIntent("),
-)
-}
+                focusProjection.indexOf("TmuxPaneFocusSync.recordEditorFocusIntent("),
+        )
+        assertTrue(focusProjection.contains("focusProjectionRequiresLayoutRepair(receipt.output)"))
+        assertTrue(focusProjection.contains("forceReconcile = true"))
+        assertTrue(focusProjection.contains("authority = ObservationAuthority.EditorFocus"))
+    }
 
 @Test
 fun `selection focus authority rejects background split events`() {

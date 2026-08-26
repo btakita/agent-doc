@@ -100,9 +100,9 @@ class EditorTabSyncListener : FileEditorManagerListener {
      * Exact effect receipt for the retained focus-only surface. Admission is not success: install
      * the reverse-focus handoff lease only after the controller proves `select-pane`.
      */
-    internal fun focusProjectionApplied(receiptJson: String): Boolean {
-        return try {
-            val receipt = JsonParser.parseString(receiptJson).asJsonObject
+        internal fun focusProjectionApplied(receiptJson: String): Boolean {
+            return try {
+                val receipt = JsonParser.parseString(receiptJson).asJsonObject
             val outcome =
                 receipt.get("outcome")
                     ?.takeUnless { it.isJsonNull }
@@ -117,9 +117,36 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     ?: outcome
             data.get("focused")?.asBoolean == true
         } catch (_: Exception) {
-            false
+                false
+            }
         }
-    }
+
+        /**
+         * A focus-only projection cannot move panes, but its exact receipt can prove that the
+         * selected document's pane drifted into stash. Re-publish the complete editor surface in
+         * that case so the layout graph, which owns structural reconciliation, can move it back.
+         */
+        internal fun focusProjectionRequiresLayoutRepair(receiptJson: String): Boolean {
+            return try {
+                val receipt = JsonParser.parseString(receiptJson).asJsonObject
+                val outcome =
+                    receipt.get("outcome")
+                        ?.takeUnless { it.isJsonNull }
+                        ?.asString
+                        ?.let(JsonParser::parseString)
+                        ?.asJsonObject
+                        ?: return false
+                val data =
+                    outcome.get("data")
+                        ?.takeIf { it.isJsonObject }
+                        ?.asJsonObject
+                        ?: outcome
+                data.get("focused")?.asBoolean == false &&
+                    data.get("reason")?.asString == "actor_pane_not_visible"
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 
 internal enum class ObservationAuthority {
@@ -936,6 +963,33 @@ private data class CapturedSurface(
                             TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
                             log("focus projection: applied file=${file.path}")
                         } else {
+                            if (
+                                focusProjectionRequiresLayoutRepair(receipt.output) &&
+                                shouldPublishFocusProjection(
+                                    requestedGeneration = requestedGeneration,
+                                    currentGeneration = focusProjectionGeneration.get(),
+                                    projectWindowActive =
+                                        WindowManager.getInstance().getFrame(project)?.isActive ==
+                                            true,
+                                )
+                            ) {
+                                // The narrow focus projection proved that the owner pane is alive
+                                // but stashed. Capture the editor's complete current split layout
+                                // and force one structural graph edge; never infer columns from the
+                                // one-document focus payload.
+                                requestObservation(
+                                    PendingSurfaceObservation(
+                                        project = project,
+                                        preferredFile = file,
+                                        forceReconcile = true,
+                                        authority = ObservationAuthority.EditorFocus,
+                                    ),
+                                )
+                                log(
+                                    "focus projection: stashed pane; forced spanning repair " +
+                                        "file=${file.path}",
+                                )
+                            }
                             log(
                                 "focus projection: retained without pane selection " +
                                     "file=${file.path} receipt=${receipt.output}",

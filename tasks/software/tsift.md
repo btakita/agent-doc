@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -468,12 +468,32 @@ Resolved the only open issue, [#15](https://github.com/btakita/tsift/issues/15),
 Verification is complete: focused regressions pass, `make check` passes, `cargo install --path . --locked` succeeds, the installed CLI reports `tsift 0.1.86`, and GitHub CI run `32973940384` passed both live Convex acceptance and the full clippy/test suite. GitHub closed issue #15 from the pushed `Fixes #15` commit. The parent repository records the submodule update in `6e818a1c7`.
 
 The exchange remains large because the active queue requires continuity, so I did not compact it. The JetBrains plugin is still one patch behind the installed agent-doc binary (plugin 0.2.356 vs expected 0.2.357); update or reload it before relying on editor acknowledgements. `release + publish` remains the next queue item.
+
+### Re: release + publish — gpt-5.6
+
+> **Queue prompt:**
+>
+> do [#releasepublish]
+
+Released tsift 0.1.87 end to end.
+
+- Release commit: `9d20e02` (`release: 0.1.87 -- effective ignores and workspace fallback`), pushed to `main` and tagged `v0.1.87`.
+- Release content: bumped all 26 Rust workspace crates and the OpenCode npm package to 0.1.87, refreshed generated version surfaces, and promoted the issue #15 fix into the 0.1.87 release notes.
+- Local verification: `make check` passed; all 26 `cargo package --locked --allow-dirty --list` checks passed; `npm run publish:check` passed.
+- Main CI: run [32976953415](https://github.com/btakita/tsift/actions/runs/32976953415) passed, including clippy, tests, and the live Convex graph acceptance job.
+- Release workflow: run [32977817942](https://github.com/btakita/tsift/actions/runs/32977817942) passed. Its crates.io summary is `published=26 skipped=0`; npm OIDC publication and all Linux, macOS ARM, and Windows artifact jobs also passed.
+- Public artifacts: the non-draft [v0.1.87 GitHub Release](https://github.com/btakita/tsift/releases/tag/v0.1.87) contains all three platform archives and checksums; `cargo info --registry crates-io tsift@0.1.87` resolves version 0.1.87; `npm view opencode-tsift@0.1.87 version` returns 0.1.87.
+- Local installation: installed from the exact release tree with `cargo install --path ... --locked --force`; `tsift --version` now reports `tsift 0.1.87`.
+- Parent integration: advanced the original dirty submodule checkout by fast-forward without altering its unrelated edits, then committed only the parent pointer as `1af2cd0ce` (`chore: update tsift to 0.1.87`). The clean temporary release worktree and branch were removed.
+
+The exchange remains above the accretion warning threshold because I did not compact during the active queue item. Preflight also still reports the installed JetBrains plugin at 0.2.356 versus expected 0.2.357; that warning did not affect the release.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 do [#releasepublish]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -482,7 +502,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#releasepublish] release + publish
+- [ ] 🚧 [#releasepublish] release + publish
 <!-- /agent:backlog -->
 
 ## Review

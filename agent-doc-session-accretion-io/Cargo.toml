@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-session-accretion-io"
-version = "0.35.281"
+version = "0.35.282"
 edition = "2024"
 description = "Session accretion filesystem adapters for agent-doc"
 license = "MIT"
@@ -11,18 +11,18 @@ publish = false
 name = "agent_doc_session_accretion_io"
 
 [dependencies]
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.281" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.281" }
-agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.281" }
-agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.281" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.281" }
-agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.281" }
-agent-doc-session-accretion = { path = "../agent-doc-session-accretion", version = "0.35.281" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.281" }
-agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.281" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.282" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.282" }
+agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.282" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.282" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.282" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.282" }
+agent-doc-session-accretion = { path = "../agent-doc-session-accretion", version = "0.35.282" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.282" }
+agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.282" }
 anyhow = "1"
 serde_json = "1"
 
 [dev-dependencies]
-agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.281" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.282" }
 tempfile = "3"

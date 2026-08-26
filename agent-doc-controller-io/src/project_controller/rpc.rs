@@ -75,10 +75,12 @@ const PANE_LAYOUT_PROJECTION_RETRY_MAX: Duration = Duration::from_secs(5);
 const PANE_LAYOUT_DESIRED_TYPE_TAG: &str = "agent-doc.pane-layout.desired.v1";
 const PANE_LAYOUT_STATUS_TYPE_TAG: &str = "agent-doc.pane-layout.status.v1";
 const DOCUMENT_TURN_AUTHORITY_TYPE_TAG: &str = "agent-doc.document-turn-authority.v1";
+const DOCUMENT_DELIVERY_WAKE_TYPE_TAG: &str = "agent-doc.document-delivery-wake.v1";
 const EDITOR_SURFACE_PROJECTION_TYPE_TAG: &str = "agent-doc.editor-surface.projection.v1";
 pub const CAPTURED_FINALIZE_WAKE_STATE_CHANNEL: &str = "agent-doc/captured-finalize/wake/v1";
 const CAPTURED_FINALIZE_WAKE_TYPE_TAG: &str = "agent-doc.captured-finalize.wake.v1";
 static PANE_LAYOUT_STATUS_EPOCH: AtomicU64 = AtomicU64::new(1);
+static DOCUMENT_DELIVERY_WAKE_EPOCH: AtomicU64 = AtomicU64::new(1);
 static CAPTURED_FINALIZE_WAKE_EPOCH: AtomicU64 = AtomicU64::new(1);
 static EDITOR_SURFACE_PROJECTION_EPOCH: AtomicU64 = AtomicU64::new(1);
 
@@ -709,6 +711,10 @@ pub(super) fn document_turn_authority_channel(document_hash: &str) -> String {
     format!("{DOCUMENT_AUTHORITY_STATE_CHANNEL_PREFIX}{document_hash}")
 }
 
+fn document_delivery_wake_channel(document_hash: &str) -> String {
+    format!("{DOCUMENT_DELIVERY_WAKE_STATE_CHANNEL_PREFIX}{document_hash}")
+}
+
 /// Observe the controller's Lazily document-turn authority projection over one
 /// retained socket.
 ///
@@ -905,6 +911,19 @@ fn document_authority_transport_interrupted(error: &std::io::Error) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct DocumentDeliveryWakeProjection {
+    document_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentDeliveryWakeSubscription {
+    pub controller_generation: u64,
+    pub latest_version: u64,
+    pub timed_out: bool,
+    pub changed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapturedFinalizeWakeProjection {
     pub document_hash: String,
     pub cycle_id: String,
@@ -930,6 +949,67 @@ pub struct CapturedFinalizeWakeSubscription {
 pub struct ControllerStatePlaneCursor {
     pub controller_generation: u64,
     pub plane_version: u64,
+}
+
+/// Await a changed retained CRDT delivery frontier for one document. The
+/// controller parks this request on the document-scoped Lazily state channel;
+/// an idle supervisor therefore consumes no document/controller work while the
+/// frontier is stable.
+pub fn subscribe_document_delivery_wakes_for_file(
+    file: &Path,
+    after: Option<ControllerStatePlaneCursor>,
+    timeout: Duration,
+) -> Result<DocumentDeliveryWakeSubscription> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let channel = document_delivery_wake_channel(&document_hash);
+    let timeout = timeout.min(STATE_PLANE_SUBSCRIBE_MAX);
+    let invocation = ControllerStatePlaneSubscribeInvocation {
+        channel: channel.clone(),
+        after_controller_generation: after.map(|cursor| cursor.controller_generation),
+        after_version: after.map(|cursor| cursor.plane_version).unwrap_or(0),
+        timeout_ms: timeout.as_millis().min(u64::MAX as u128) as u64,
+    };
+    let request = ControllerRequest {
+        command: "state_plane_subscribe".to_string(),
+        file: Some(file.to_path_buf()),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some("idle_watch_document_delivery_subscription".to_string()),
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(serde_json::to_string(&invocation)?),
+    };
+    let subscription: ControllerStatePlaneSubscription = request_controller_with_timeout(
+        &project_root,
+        request,
+        timeout.saturating_add(Duration::from_secs(2)),
+    )?;
+    let changed = subscription.frames.iter().any(|frame| {
+        let Ok(message) = serde_json::from_str::<lazily::IpcMessage>(&frame.message_json) else {
+            return false;
+        };
+        let Ok(payload) =
+            state_plane_snapshot_payload(&message, &channel, DOCUMENT_DELIVERY_WAKE_TYPE_TAG)
+        else {
+            return false;
+        };
+        serde_json::from_slice::<DocumentDeliveryWakeProjection>(&payload)
+            .is_ok_and(|wake| wake.document_hash == document_hash)
+    });
+    Ok(DocumentDeliveryWakeSubscription {
+        controller_generation: subscription.controller_generation,
+        latest_version: subscription.latest_version,
+        timed_out: subscription.timed_out,
+        changed,
+    })
 }
 
 /// Await controller-published captured-finalize state edges. The RPC is only a
@@ -8172,6 +8252,30 @@ fn observe_retained_delivery_after_replica_event(
     let observation = retained_delivery_observation_for_file(canonical, authority)?;
     let document_hash = agent_doc_hash::document_id_for_path(canonical);
     runtime.document_retained_write_observe_delivery(&document_hash, observation);
+    Ok(())
+}
+
+pub(super) fn publish_document_delivery_wake(
+    runtime: &ControllerRuntime,
+    canonical: &Path,
+) -> Result<()> {
+    let document_hash = agent_doc_hash::document_id_for_path(canonical);
+    let channel = document_delivery_wake_channel(&document_hash);
+    let epoch = DOCUMENT_DELIVERY_WAKE_EPOCH.fetch_add(1, Ordering::SeqCst);
+    let bootstrap = runtime.bootstrap_snapshot()?;
+    let producer_id = format!(
+        "agent-doc-controller:{}:{}",
+        std::process::id(),
+        bootstrap.controller_generation
+    );
+    let snapshot = DocumentDeliveryWakeProjection { document_hash };
+    let message_json = state_plane_snapshot_message_json(
+        epoch,
+        &channel,
+        DOCUMENT_DELIVERY_WAKE_TYPE_TAG,
+        &snapshot,
+    )?;
+    runtime.publish_state_plane_frame(channel, producer_id, message_json, epoch, None)?;
     Ok(())
 }
 

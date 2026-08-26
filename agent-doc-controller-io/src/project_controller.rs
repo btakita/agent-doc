@@ -307,12 +307,19 @@ pub const PANE_LAYOUT_STATUS_STATE_CHANNEL: &str = "agent-doc/pane-layout/status
 const STATE_PLANE_MAX_CHANNELS: usize = 256;
 // Four full editor warm sets can overlap during focus replacement or while
 // multiple editor clients observe the same controller. Each editor admits at
-// most 256 documents and retires low-priority streams reactively.
-const DOCUMENT_AUTHORITY_MAX_CHANNELS: usize = 1_024;
+// most 256 documents, with one authority channel and one delivery-wake channel
+// per document.
+const DOCUMENT_SCOPED_MAX_CHANNELS: usize = 2_048;
 const DOCUMENT_AUTHORITY_STATE_CHANNEL_PREFIX: &str = "agent-doc/document-turn-authority/v1/";
+const DOCUMENT_DELIVERY_WAKE_STATE_CHANNEL_PREFIX: &str = "agent-doc/document-delivery-wake/v1/";
 const STATE_PLANE_MAX_RETAINED_FRAMES_PER_CHANNEL: usize = 1_024;
 const STATE_PLANE_MAX_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
 const STATE_PLANE_VERSION_NAMESPACE_BITS: u32 = 32;
+
+fn is_document_scoped_state_plane_channel(channel: &str) -> bool {
+    channel.starts_with(DOCUMENT_AUTHORITY_STATE_CHANNEL_PREFIX)
+        || channel.starts_with(DOCUMENT_DELIVERY_WAKE_STATE_CHANNEL_PREFIX)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerStatePlanePublishInvocation {
@@ -1289,26 +1296,25 @@ impl ControllerStatePlaneGraph {
         );
 
         if !self.histories.is_present(&channel) {
-            let authority_channel = channel.starts_with(DOCUMENT_AUTHORITY_STATE_CHANNEL_PREFIX);
+            let document_channel = is_document_scoped_state_plane_channel(&channel);
             let used = self
                 .histories
                 .present_keys()
                 .into_iter()
                 .filter(|existing| {
-                    existing.starts_with(DOCUMENT_AUTHORITY_STATE_CHANNEL_PREFIX)
-                        == authority_channel
+                    is_document_scoped_state_plane_channel(existing) == document_channel
                 })
                 .count();
-            let capacity = if authority_channel {
-                DOCUMENT_AUTHORITY_MAX_CHANNELS
+            let capacity = if document_channel {
+                DOCUMENT_SCOPED_MAX_CHANNELS
             } else {
                 STATE_PLANE_MAX_CHANNELS
             };
             anyhow::ensure!(
                 used < capacity,
                 "{} state-plane channel capacity reached ({capacity}); close documents or retire an existing channel",
-                if authority_channel {
-                    "document-authority"
+                if document_channel {
+                    "document-scoped"
                 } else {
                     "generic"
                 }
@@ -3281,11 +3287,11 @@ impl ControllerDocumentGraphs {
     /// Publish the post-event CRDT delivery frontier. This is the only write
     /// into the retained-resume delivery Source; the wake decision remains a
     /// Computed over this ingress and the durable projection.
-    fn observe_retained_delivery(
+    fn observe_retained_delivery_with_change(
         &self,
         document_hash: &str,
         observation: Option<RetainedDeliveryObservation>,
-    ) -> Option<RetainedResumeSignal> {
+    ) -> (Option<RetainedResumeSignal>, bool) {
         let key = document_hash.to_string();
         let delivery_changed =
             self.retained_delivery.observe(&self.ctx, &key).flatten() != observation;
@@ -3300,8 +3306,11 @@ impl ControllerDocumentGraphs {
                     .set(ctx, key, compact_retry_generation);
             }
         });
-        self.current_retained_transition_state(document_hash)
-            .resume_signal()
+        (
+            self.current_retained_transition_state(document_hash)
+                .resume_signal(),
+            delivery_changed,
+        )
     }
 
     fn current_verdict(
@@ -4796,10 +4805,27 @@ impl ControllerRuntime {
         &self,
         document_hash: &str,
         observation: Option<RetainedDeliveryObservation>,
-    ) {
-        let _ = self
+    ) -> bool {
+        let wake_file = observation
+            .as_ref()
+            .map(|observation| observation.file.clone());
+        let changed = self
             .document_graphs
-            .observe_retained_delivery(document_hash, observation);
+            .observe_retained_delivery_with_change(document_hash, observation)
+            .1;
+        if changed
+            && let Some(file) = wake_file
+            && let Err(error) = rpc::publish_document_delivery_wake(self, &file)
+        {
+            agent_doc_ops_log_io::log_op(
+                &file,
+                &format!(
+                    "document_delivery_wake_deferred file={} source=retained_delivery_observation reason={error:#}",
+                    file.display(),
+                ),
+            );
+        }
+        changed
     }
 
     pub(crate) fn document_preflight_projection(
@@ -8057,6 +8083,58 @@ mod tests {
             plane.subscribe("test/layout", u64::MAX, true, Duration::ZERO);
         assert_eq!(legacy_replacement_replay.frames, vec![replacement]);
         assert!(!legacy_replacement_replay.timed_out);
+    }
+
+    #[test]
+    fn delivery_wakes_use_the_document_scoped_state_plane_budget() {
+        assert!(is_document_scoped_state_plane_channel(
+            "agent-doc/document-turn-authority/v1/doc-a"
+        ));
+        assert!(is_document_scoped_state_plane_channel(
+            "agent-doc/document-delivery-wake/v1/doc-a"
+        ));
+        assert!(!is_document_scoped_state_plane_channel(
+            "agent-doc/pane-layout/status/v1"
+        ));
+    }
+
+    #[test]
+    fn changed_delivery_frontier_publishes_one_document_wake() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("task.md");
+        std::fs::write(&file, "# task\n").unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let observation = RetainedDeliveryObservation {
+            file: file.clone(),
+            content: Arc::from("# task\n"),
+            content_hash: agent_doc_hash::content_hash("# task\n"),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: 1,
+        };
+
+        assert!(
+            runtime.document_retained_write_observe_delivery(
+                &document_hash,
+                Some(observation.clone())
+            )
+        );
+        let channel = format!("{DOCUMENT_DELIVERY_WAKE_STATE_CHANNEL_PREFIX}{document_hash}");
+        let cold = runtime.subscribe_state_plane(&channel, None, 0, Duration::ZERO);
+        assert_eq!(cold.frames.len(), 1);
+
+        assert!(
+            !runtime.document_retained_write_observe_delivery(&document_hash, Some(observation))
+        );
+        let warm = runtime.subscribe_state_plane(
+            &channel,
+            Some(cold.controller_generation),
+            cold.latest_version,
+            Duration::ZERO,
+        );
+        assert!(warm.frames.is_empty());
+        assert!(warm.timed_out, "an unchanged pull must not publish a wake");
     }
 
     #[test]
@@ -14108,7 +14186,12 @@ revised operator request
             delivery_converged: false,
             delivery_version: 1,
         };
-        document_graphs.observe_retained_delivery(document_hash, Some(delivery.clone()));
+        let (_, delivery_changed) = document_graphs
+            .observe_retained_delivery_with_change(document_hash, Some(delivery.clone()));
+        assert!(
+            delivery_changed,
+            "a new delivery frontier must publish one wake"
+        );
         let registration_retry = document_graphs
             .compact_retry_generation
             .observe(&document_graphs.ctx, &document_hash.to_string())
@@ -14118,7 +14201,12 @@ revised operator request
             "editor registration must retry the compact continuation even without a state event"
         );
 
-        document_graphs.observe_retained_delivery(document_hash, Some(delivery.clone()));
+        let (_, delivery_changed) = document_graphs
+            .observe_retained_delivery_with_change(document_hash, Some(delivery.clone()));
+        assert!(
+            !delivery_changed,
+            "an unchanged pull frontier must not publish another wake"
+        );
         assert_eq!(
             document_graphs
                 .compact_retry_generation
@@ -14127,7 +14215,7 @@ revised operator request
             "an unchanged pull frontier must not spin compact completion"
         );
 
-        document_graphs.observe_retained_delivery(
+        document_graphs.observe_retained_delivery_with_change(
             document_hash,
             Some(RetainedDeliveryObservation {
                 delivery_converged: true,
@@ -14329,17 +14417,19 @@ revised operator request
                 .lock()
                 .contains_key(&document_hash)
         );
-        runtime.document_graphs.observe_retained_delivery(
-            &document_hash,
-            Some(RetainedDeliveryObservation {
-                file: PathBuf::from("/work/task.md"),
-                content: Arc::from("target\nresponse body\n"),
-                content_hash: "target".to_string(),
-                live_editors: 1,
-                delivery_converged: true,
-                delivery_version: 1,
-            }),
-        );
+        runtime
+            .document_graphs
+            .observe_retained_delivery_with_change(
+                &document_hash,
+                Some(RetainedDeliveryObservation {
+                    file: PathBuf::from("/work/task.md"),
+                    content: Arc::from("target\nresponse body\n"),
+                    content_hash: "target".to_string(),
+                    live_editors: 1,
+                    delivery_converged: true,
+                    delivery_version: 1,
+                }),
+            );
 
         assert!(
             !runtime
@@ -14388,7 +14478,7 @@ revised operator request
         };
         runtime
             .document_graphs
-            .observe_retained_delivery(&document_hash, Some(materialized.clone()));
+            .observe_retained_delivery_with_change(&document_hash, Some(materialized.clone()));
 
         assert!(
             !runtime
@@ -14412,7 +14502,7 @@ revised operator request
 
         runtime
             .document_graphs
-            .observe_retained_delivery(&document_hash, Some(materialized));
+            .observe_retained_delivery_with_change(&document_hash, Some(materialized));
         assert!(
             runtime
                 .document_graphs

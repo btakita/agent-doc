@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.282
+
+- **Fix: idle agent-doc sessions no longer poll the controller for unchanged
+document revisions every five seconds.**
+
+The controller now publishes a document-scoped state-plane wake only when its
+retained CRDT delivery frontier actually changes. Idle supervisors long-poll
+that signal, coalesce edit bursts, and reconcile once after the burst; unchanged
+editor pulls publish no wake. A 60-second full reconcile remains as the bounded
+fallback for detached filesystem edits, missed transport edges, and controller
+replacement. This removes the background controller/session CPU churn without
+changing queue ordering or dispatch semantics.
+
 ## 0.35.281
 
 - **Fix: controller reattachment can no longer publish an older retained CRDT

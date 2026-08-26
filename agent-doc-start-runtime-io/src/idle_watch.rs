@@ -147,6 +147,7 @@ const IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL: std::time::Duration =
 /// full-text queue projection as a fail-safe against missed external signals.
 const IDLE_WATCH_FULL_RECONCILE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 const IDLE_WATCH_ZOMBIE_REAP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+const DOCUMENT_DELIVERY_WAKE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(500);
 
 #[derive(Debug, Default)]
 struct AgentChangeFrontmatterRefresh {
@@ -168,6 +169,16 @@ impl AgentChangeFrontmatterRefresh {
     }
 }
 
+fn idle_watch_document_reconcile_due(
+    delivery_edge_pending: bool,
+    last_full_reconcile: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> bool {
+    delivery_edge_pending
+        || last_full_reconcile
+            .is_none_or(|last| now.duration_since(last) >= IDLE_WATCH_FULL_RECONCILE_INTERVAL)
+}
+
 struct CapturedFinalizeResumeWorker {
     key: agent_doc_repair_command_io::CapturedFinalizeResumeKey,
     result: std::sync::mpsc::Receiver<agent_doc_repair_command_io::CapturedFinalizeResumeOutcome>,
@@ -183,6 +194,76 @@ struct CapturedFinalizeResumeRetry {
 
 struct CapturedFinalizeResumeSignalWatch {
     result: std::sync::mpsc::Receiver<()>,
+}
+
+struct DocumentDeliverySignalWatch {
+    result: std::sync::mpsc::Receiver<()>,
+}
+
+#[derive(Debug, Default)]
+struct DocumentDeliveryWakeDebounce {
+    last_edge: Option<std::time::Instant>,
+}
+
+impl DocumentDeliveryWakeDebounce {
+    fn observe_edge(&mut self, now: std::time::Instant) {
+        self.last_edge = Some(now);
+    }
+
+    fn take_ready(&mut self, now: std::time::Instant) -> bool {
+        if self
+            .last_edge
+            .is_some_and(|edge| now.duration_since(edge) >= DOCUMENT_DELIVERY_WAKE_DEBOUNCE)
+        {
+            self.last_edge = None;
+            return true;
+        }
+        false
+    }
+}
+
+fn spawn_document_delivery_signal_watch(
+    file: PathBuf,
+    stop: Arc<AtomicBool>,
+) -> std::io::Result<DocumentDeliverySignalWatch> {
+    // Capacity one is deliberate: a burst of keystrokes is one invalidation,
+    // not a durable queue of redundant reconcile effects.
+    let (send, result) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("doc-deliv-sig".into())
+        .spawn(move || {
+            let mut cursor = None;
+            while !stop.load(Ordering::Relaxed) {
+                match agent_doc_controller_io::project_controller::subscribe_document_delivery_wakes_for_file(
+                    &file,
+                    cursor,
+                    std::time::Duration::from_secs(30),
+                ) {
+                    Ok(subscription) => {
+                        cursor = Some(
+                            agent_doc_controller_io::project_controller::ControllerStatePlaneCursor {
+                                controller_generation: subscription.controller_generation,
+                                plane_version: subscription.latest_version,
+                            },
+                        );
+                        if subscription.changed {
+                            match send.try_send(()) {
+                                Ok(()) | Err(std::sync::mpsc::TrySendError::Full(())) => {}
+                                Err(std::sync::mpsc::TrySendError::Disconnected(())) => return,
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // A transport failure is not a document change. The
+                        // periodic full reconcile remains the covering fallback.
+                        if !sleep_with_stop(&stop, std::time::Duration::from_secs(2)) {
+                            return;
+                        }
+                    }
+                }
+            }
+        })?;
+    Ok(DocumentDeliverySignalWatch { result })
 }
 
 fn spawn_captured_finalize_resume_signal_watch(
@@ -1418,6 +1499,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
     let resume_triggers = CapturedFinalizeResumeTriggers::new();
     let resume_signal_watch =
         spawn_captured_finalize_resume_signal_watch(path.clone(), Arc::clone(&stop)).ok();
+    let document_delivery_signal_watch =
+        spawn_document_delivery_signal_watch(path.clone(), Arc::clone(&stop)).ok();
+    let mut document_delivery_debounce = DocumentDeliveryWakeDebounce::default();
+    let mut document_delivery_reconcile_pending = false;
     // Cold-start inspection is the covering snapshot for a capture that
     // predates this supervisor. Afterwards, only controller state edges or an
     // effect-retry receipt re-arm inspection.
@@ -1447,6 +1532,19 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // and does not touch the controller or editor.
         let supervisor_stale_fast = shared.refresh_binary_stale();
         let now = std::time::Instant::now();
+        if document_delivery_signal_watch.as_ref().is_some_and(|watch| {
+            let mut observed = false;
+            while watch.result.try_recv().is_ok() {
+                observed = true;
+            }
+            observed
+        }) {
+            document_delivery_debounce.observe_edge(now);
+        }
+        if document_delivery_debounce.take_ready(now) {
+            document_delivery_reconcile_pending = true;
+        }
+        let document_delivery_edge_due = document_delivery_reconcile_pending;
         if resume_signal_watch.as_ref().is_some_and(|watch| {
             let mut observed = false;
             while watch.result.try_recv().is_ok() {
@@ -1655,9 +1753,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     || context_reset_in_flight
                     || awaiting_clear_settle
                     || shared.restart_reexec.load(Ordering::Relaxed);
-        let maintenance_due = last_quiescent_maintenance.is_none_or(|last| {
-            last.elapsed() >= IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL
-        });
+        let maintenance_due = document_delivery_edge_due
+            || last_quiescent_maintenance.is_none_or(|last| {
+                last.elapsed() >= IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL
+            });
         if let Some(retry) = resume_retry.as_mut()
             && !retry.needs_operator
             && !retry.trigger_published
@@ -1786,6 +1885,24 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     last_quiescent_maintenance = None;
                 }
                 if actor_ready_fast && !urgent_maintenance && maintenance_due {
+                    let full_reconcile_due = last_full_reconcile.is_none_or(|last| {
+                        now.duration_since(last) >= IDLE_WATCH_FULL_RECONCILE_INTERVAL
+                    });
+                    // Stable live documents arrive here for other bounded
+                    // maintenance every five seconds. That is not evidence the
+                    // queue projection changed, so do not probe the controller.
+                    if !idle_watch_document_reconcile_due(
+                        document_delivery_edge_due,
+                        last_full_reconcile,
+                        now,
+                    ) {
+                        last_quiescent_maintenance = Some(now);
+                        continue;
+                    }
+                    // Receipt for the coalesced edge. From here this iteration
+                    // owns the authoritative reconcile attempt; failures fall
+                    // back to the bounded controller cooldown/full-reconcile path.
+                    document_delivery_reconcile_pending = false;
                     let queue_controller_paused = agent_doc_queue_io::controller_pause::document_queue_controller_pause_reason(
                         &path,
                     )
@@ -1811,10 +1928,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         suppress_controller_observation,
                     ));
                     let revision_changed = revision_state.projection_stale();
-                    let full_reconcile_due = last_full_reconcile.is_none_or(|last| {
-                        last.elapsed() >= IDLE_WATCH_FULL_RECONCILE_INTERVAL
-                    });
-                    if queue_state_observed && !revision_changed && !full_reconcile_due {
+                    if queue_state_observed
+                        && !document_delivery_edge_due
+                        && !revision_changed
+                        && !full_reconcile_due
+                    {
                         last_quiescent_maintenance = Some(now);
                         continue;
                     }
@@ -4779,6 +4897,49 @@ mod tests {
         assert!(!refresh.due(Some("sv-1"), now + std::time::Duration::from_secs(59)));
         assert!(refresh.due(Some("sv-2"), now + std::time::Duration::from_secs(1)));
         assert!(refresh.due(Some("sv-1"), now + IDLE_WATCH_FULL_RECONCILE_INTERVAL));
+    }
+
+    #[test]
+    fn stable_document_maintenance_does_not_schedule_controller_reconcile() {
+        let observed = std::time::Instant::now();
+
+        assert!(!idle_watch_document_reconcile_due(
+            false,
+            Some(observed),
+            observed + IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL,
+        ));
+        assert!(idle_watch_document_reconcile_due(
+            true,
+            Some(observed),
+            observed + IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL,
+        ));
+        assert!(idle_watch_document_reconcile_due(
+            false,
+            Some(observed),
+            observed + IDLE_WATCH_FULL_RECONCILE_INTERVAL,
+        ));
+    }
+
+    #[test]
+    fn document_delivery_wake_debounce_coalesces_a_burst() {
+        let first = std::time::Instant::now();
+        let second = first + std::time::Duration::from_millis(300);
+        let mut debounce = DocumentDeliveryWakeDebounce::default();
+
+        debounce.observe_edge(first);
+        assert!(!debounce.take_ready(second));
+
+        debounce.observe_edge(second);
+        assert!(!debounce.take_ready(
+            second + DOCUMENT_DELIVERY_WAKE_DEBOUNCE - std::time::Duration::from_millis(1)
+        ));
+        assert!(debounce.take_ready(second + DOCUMENT_DELIVERY_WAKE_DEBOUNCE));
+        assert!(
+            !debounce.take_ready(
+                second + DOCUMENT_DELIVERY_WAKE_DEBOUNCE + std::time::Duration::from_secs(1)
+            ),
+            "one burst must produce one reconcile receipt"
+        );
     }
 
     /// `#idlewatchrevisiongate`: the memo answers only for the revision it was

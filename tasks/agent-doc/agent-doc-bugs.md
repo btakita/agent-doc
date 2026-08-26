@@ -43,6 +43,25 @@ The unblock is concrete: provide a reachable Coder workspace URL or SSH target w
 No additional backlog follow-up is needed because `#coder7` itself now retains the complete matrix and the exact external unblock conditions in review.
 
 Local repository verification passed: `make check` exited 0. The latest GitHub Actions `Agent Doc` run failed before either job acquired a runner (both jobs had zero steps), so it is an external CI-start failure rather than a code or tmux-test regression. The required `tsift init` refresh also updated the root navigation instruction block from v0.1.87 to v0.1.88.
+
+### Re: install recycles all open supervisors — gpt-5
+
+Fixed and released as `v0.35.288`.
+
+The root cause was process-namespace drift in install-time discovery. Most live supervisors retain relative document arguments such as `tasks/agent-doc/agent-doc-bugs.md`, but `lib-install` canonicalized those paths against the agent-doc source submodule's CWD. That silently skipped supervisors opened from the parent project. Discovery also considered only route-owned starts rather than every live `agent-doc start` supervisor.
+
+The install boundary now enumerates all open supervisors, parses both route-owned and operator-started `agent-doc start` commands, and resolves each relative document argument against that process's `/proc/<pid>/cwd`. It writes the existing durable, idempotent recycle request for every discovered document before controller recycling; each supervisor consumes it at its next safe idle boundary and preserves the live child PTY across `execve`.
+
+Regression coverage exercises per-supervisor relative CWD resolution, absolute/fallback paths, and discovery of both route-owned and operator-started supervisors. The controller/parser package suites passed, and the full versioned `make check` suite passed twice.
+
+The live clean-worktree release install proved the original fleet case:
+
+- 13 live supervisors existed before install; 11 used relative document arguments.
+- `make install-full` installed `agent-doc 0.35.288` and reported `13 open supervisor(s) marked`, `0 skipped`.
+- The independent `agent-doc admin recycle --all-projects --json` check reported `supervisors_marked: 13`, `supervisors_skipped: 0`.
+- Ten idle supervisors had already re-execed onto the new binary inode at inspection time. Three busy supervisors, including this active turn, remain safely marked and will re-exec at their next idle boundary instead of being interrupted.
+
+Source commit `42a4ddd12` is pushed to `main`; tag `v0.35.288` is pushed. The Book workflow is green. CI, Release, and PyPI workflows were queued/in progress at closeout and were inspected without waiting, per the repository's external-CI policy. The private superproject projection is committed separately as `d74ee5e06`.
 <!-- agent:boundary:64a22d63:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

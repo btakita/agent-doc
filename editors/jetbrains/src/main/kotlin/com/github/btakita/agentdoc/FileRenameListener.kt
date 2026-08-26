@@ -10,6 +10,7 @@ import com.intellij.openapi.vfs.newvfs.events.VFilePropertyChangeEvent
 import com.intellij.util.concurrency.AppExecutorUtil
 import io.github.lazily.ThreadSafeContext
 import io.github.lazily.ThreadSafeSourceMap
+import java.io.File
 import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
@@ -120,6 +121,27 @@ class FileRenameListener(private val project: Project) : BulkFileListener {
         var projection = transitions.get(context, transitionId) ?: return
         try {
             if (projection.phase == DocumentPathTransitionPhase.Observed) {
+                val projectRoot = project.basePath
+                if (
+                    projectRoot != null &&
+                    isDoneArchiveAlias(
+                        oldPath = projection.oldPath,
+                        newPath = projection.newPath,
+                        projectRoot = projectRoot,
+                        canonicalExists = File(projection.oldPath).exists(),
+                    )
+                ) {
+                    transitions.set(
+                        context,
+                        transitionId,
+                        projection.copy(phase = DocumentPathTransitionPhase.Converged),
+                    )
+                    LOG.info(
+                        "[rename] ignored done-archive alias while canonical document remains " +
+                            "${projection.oldPath} → ${projection.newPath}",
+                    )
+                    return
+                }
                 when (
                     ReliableSyncLivenessListener.reportDocumentPathTransition(
                         project,
@@ -251,6 +273,30 @@ class FileRenameListener(private val project: Project) : BulkFileListener {
 
         fun shouldHandleFile(fileName: String?): Boolean =
             fileName != null && fileName.endsWith(".md")
+
+        internal fun isDoneArchiveAlias(
+            oldPath: String,
+            newPath: String,
+            projectRoot: String,
+            canonicalExists: Boolean,
+        ): Boolean {
+            if (!canonicalExists) return false
+            val old = Path.of(oldPath).toAbsolutePath().normalize()
+            val new = Path.of(newPath).toAbsolutePath().normalize()
+            val root = Path.of(projectRoot).toAbsolutePath().normalize()
+            if (!old.startsWith(root)) return false
+            val oldName = old.fileName?.toString() ?: return false
+            val stem = oldName.removeSuffix(".md")
+            if (stem == oldName) return false
+            val archiveName = "$stem.done.md"
+            var directory = old.parent
+            while (directory != null && directory.startsWith(root)) {
+                if (directory.resolve(archiveName) == new) return true
+                if (directory == root) break
+                directory = directory.parent
+            }
+            return false
+        }
 
         internal fun oldPathForRename(parentPath: String, oldName: String): String =
             Path.of(parentPath, oldName).toString()

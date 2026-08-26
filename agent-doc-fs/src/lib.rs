@@ -38,6 +38,40 @@ pub fn find_project_root_canonical(path: &Path) -> Option<PathBuf> {
     find_project_root(&canonical)
 }
 
+/// Candidate `<stem>.done.md` archive paths for `file`, from its containing
+/// directory through the owning project root.
+///
+/// This is document-identity policy as well as backlog discovery policy: an
+/// editor/controller path transition must not mistake one of these archive
+/// companions for a rename of a still-existing canonical document.
+pub fn done_archive_candidates(file: &Path) -> Vec<PathBuf> {
+    let Some(stem) = file.file_stem().and_then(|stem| stem.to_str()) else {
+        return Vec::new();
+    };
+    let archive_name = format!("{stem}.done.md");
+    let root = file
+        .parent()
+        .and_then(find_project_root)
+        .unwrap_or_default();
+    let mut out = Vec::new();
+    let mut dir = file.parent().map(Path::to_path_buf);
+    while let Some(current) = dir {
+        out.push(current.join(&archive_name));
+        if current == root {
+            break;
+        }
+        dir = current.parent().map(Path::to_path_buf);
+    }
+    out
+}
+
+/// Whether `candidate` is one of [`done_archive_candidates`] for `file`.
+pub fn is_done_archive_candidate(file: &Path, candidate: &Path) -> bool {
+    done_archive_candidates(file)
+        .iter()
+        .any(|archive| archive == candidate)
+}
+
 /// Compute the SHA-256 hex hash used to key per-document state sidecars.
 pub fn document_state_hash(doc: &Path) -> Result<String> {
     let canonical = canonical_document_path(doc)?;
@@ -1245,5 +1279,49 @@ mod instruction_surface_tests {
         let anchors = instruction_surface_anchors(dir.path());
         assert!(anchors.contains("ismarkdown"), "{anchors:?}");
         assert!(!anchors.contains("notmarkdown"), "{anchors:?}");
+    }
+}
+
+#[cfg(test)]
+mod done_archive_candidate_tests {
+    use super::*;
+
+    #[test]
+    fn candidates_cover_the_document_directory_through_the_project_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/nested")).unwrap();
+        let document = root.join("tasks/nested/session.md");
+
+        assert_eq!(
+            done_archive_candidates(&document),
+            vec![
+                root.join("tasks/nested/session.done.md"),
+                root.join("tasks/session.done.md"),
+                root.join("session.done.md"),
+            ],
+        );
+        assert!(is_done_archive_candidate(
+            &document,
+            &root.join("tasks/session.done.md"),
+        ));
+        assert!(!is_done_archive_candidate(
+            &document,
+            &root.join("tasks/other.done.md"),
+        ));
+    }
+
+    #[test]
+    fn an_independent_done_document_keeps_its_own_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let document = dir.path().join("session.done.md");
+
+        assert!(!is_done_archive_candidate(&document, &document));
+        assert_eq!(
+            done_archive_candidates(&document),
+            vec![dir.path().join("session.done.done.md")],
+        );
     }
 }

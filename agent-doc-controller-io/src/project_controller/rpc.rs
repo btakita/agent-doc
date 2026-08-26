@@ -9573,6 +9573,9 @@ fn resolve_controller_path_alias(path: &Path) -> PathBuf {
         let Some(next) = aliases.get(&current) else {
             break;
         };
+        if !controller_path_alias_allowed(&current, next) {
+            break;
+        }
         if next == &current {
             break;
         }
@@ -9581,8 +9584,15 @@ fn resolve_controller_path_alias(path: &Path) -> PathBuf {
     current
 }
 
-fn retain_controller_path_alias(old_path: PathBuf, new_path: PathBuf) {
+fn controller_path_alias_allowed(old_path: &Path, new_path: &Path) -> bool {
+    !(old_path.exists() && agent_doc_fs::is_done_archive_candidate(old_path, new_path))
+}
+
+fn retain_controller_path_alias(old_path: PathBuf, new_path: PathBuf) -> bool {
     let target = resolve_controller_path_alias(&new_path);
+    if !controller_path_alias_allowed(&old_path, &target) {
+        return false;
+    }
     let mut aliases = controller_path_aliases().lock();
     for existing_target in aliases.values_mut() {
         if *existing_target == old_path {
@@ -9590,6 +9600,7 @@ fn retain_controller_path_alias(old_path: PathBuf, new_path: PathBuf) {
         }
     }
     aliases.insert(old_path, target);
+    true
 }
 
 fn crdt_replica_refused_data(reason: &str) -> serde_json::Value {
@@ -17715,13 +17726,6 @@ fn handle_document_path_transition_observe(
         "document path transition requires client_id"
     );
 
-    let admitted = runtime
-        .document_path_transition_graph
-        .observe(observation.clone());
-    if admitted.converged {
-        return Ok(admitted);
-    }
-
     let old_path = normalized_transition_path(bootstrap, Path::new(&observation.old_path));
     let new_path = normalized_transition_path(bootstrap, Path::new(&observation.new_path));
     let project_root = bootstrap
@@ -17737,6 +17741,17 @@ fn handle_document_path_transition_observe(
         "document path transition destination does not exist: {}",
         new_path.display()
     );
+    anyhow::ensure!(
+        controller_path_alias_allowed(&old_path, &new_path),
+        "document path transition refused: a done archive candidate cannot replace a still-existing canonical document"
+    );
+
+    let admitted = runtime
+        .document_path_transition_graph
+        .observe(observation.clone());
+    if admitted.converged {
+        return Ok(admitted);
+    }
 
     let old_document_hash = if old_path.exists() {
         agent_doc_fs::document_state_hash(&old_path)?
@@ -17759,7 +17774,10 @@ fn handle_document_path_transition_observe(
         // Install the alias as soon as the live hub moves. An old-path request
         // already queued in the editor then lands on the moved hub while every
         // durable projection below converges.
-        retain_controller_path_alias(old_path.clone(), new_path.clone());
+        anyhow::ensure!(
+            retain_controller_path_alias(old_path.clone(), new_path.clone()),
+            "document path transition alias became inadmissible before publication"
+        );
 
         let conn = open_state_db(&bootstrap.project_root)?;
         let state_report =
@@ -22528,7 +22546,10 @@ mod tests {
             previous_controller_pid: None,
         };
         let canonical_new = new.canonicalize().unwrap();
-        retain_controller_path_alias(old.clone(), canonical_new.clone());
+        assert!(retain_controller_path_alias(
+            old.clone(),
+            canonical_new.clone()
+        ));
 
         assert_eq!(
             canonical_controller_request_file(&bootstrap, &old),
@@ -22539,6 +22560,46 @@ mod tests {
             canonical_controller_request_file(&bootstrap, Path::new("./nested/../before.md"),),
             canonical_new,
             "relative old-path RPCs must normalize before alias resolution",
+        );
+    }
+
+    #[test]
+    fn controller_refuses_a_done_archive_alias_while_the_canonical_document_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let canonical = dir.path().join("tasks/session.md");
+        let archive = dir.path().join("session.done.md");
+        std::fs::write(&canonical, "# canonical\n").unwrap();
+        std::fs::write(&archive, "# archive\n").unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: dir.path().to_path_buf(),
+            socket_path: socket_path(dir.path()),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: current_binary_identity().ok(),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let canonical = canonical.canonicalize().unwrap();
+        let archive = archive.canonicalize().unwrap();
+
+        assert!(!controller_path_alias_allowed(&canonical, &archive));
+        assert!(!retain_controller_path_alias(
+            canonical.clone(),
+            archive.clone(),
+        ));
+        assert_eq!(
+            canonical_controller_request_file(&bootstrap, &canonical),
+            canonical,
+        );
+        assert_eq!(
+            canonical_controller_request_file(&bootstrap, &archive),
+            archive,
+            "an independently addressed done document keeps its own identity",
         );
     }
 

@@ -75,24 +75,7 @@ pub fn archive_pending_done(
 /// document may declare an archive, sit beside one, or both. Callers take the
 /// union, because missing an archive means reporting completed work as invented.
 pub fn done_archive_candidates(file: &Path) -> Vec<PathBuf> {
-    let Some(stem) = file.file_stem().and_then(|stem| stem.to_str()) else {
-        return Vec::new();
-    };
-    let archive_name = format!("{stem}.done.md");
-    let root = file
-        .parent()
-        .and_then(agent_doc_fs::find_project_root)
-        .unwrap_or_default();
-    let mut out = Vec::new();
-    let mut dir = file.parent().map(Path::to_path_buf);
-    while let Some(current) = dir {
-        out.push(current.join(&archive_name));
-        if current == root {
-            break;
-        }
-        dir = current.parent().map(Path::to_path_buf);
-    }
-    out
+    agent_doc_fs::done_archive_candidates(file)
 }
 
 /// Tracked-work ids recorded in this document's done archives.

@@ -43,6 +43,42 @@ class FileRenameListenerTest {
     }
 
     @Test
+    fun `done archive candidates never replace a still existing canonical document`() {
+        assertTrue(
+            FileRenameListener.isDoneArchiveAlias(
+                oldPath = "/work/tasks/nested/session.md",
+                newPath = "/work/tasks/session.done.md",
+                projectRoot = "/work",
+                canonicalExists = true,
+            ),
+        )
+        assertFalse(
+            FileRenameListener.isDoneArchiveAlias(
+                oldPath = "/work/tasks/nested/session.md",
+                newPath = "/work/tasks/session.done.md",
+                projectRoot = "/work",
+                canonicalExists = false,
+            ),
+        )
+        assertFalse(
+            FileRenameListener.isDoneArchiveAlias(
+                oldPath = "/work/tasks/nested/session.done.md",
+                newPath = "/work/tasks/nested/session.done.md",
+                projectRoot = "/work",
+                canonicalExists = true,
+            ),
+        )
+        assertFalse(
+            FileRenameListener.isDoneArchiveAlias(
+                oldPath = "/work/tasks/nested/session.md",
+                newPath = "/work/tasks/other.done.md",
+                projectRoot = "/work",
+                canonicalExists = true,
+            ),
+        )
+    }
+
+    @Test
     fun `retry projection uses bounded exponential delay`() {
         assertEquals(250L, documentPathTransitionRetryDelayMs(0))
         assertEquals(500L, documentPathTransitionRetryDelayMs(1))

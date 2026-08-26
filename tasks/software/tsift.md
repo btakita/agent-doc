@@ -583,6 +583,37 @@ Released and published tsift 0.1.89 with the completed issue #17 fix.
 - Confidence: high. Escalation: none.
 
 Session note: this was a large exchange; preflight queue-maintenance projection was deferred because the CRDT relay was unavailable, while the authoritative response/commit path remained available.
+
+### Re: Fix open tsift issue #18 — gpt-5
+
+Fixed and closed [btakita/tsift#18](https://github.com/btakita/tsift/issues/18). Commit `75aaa74` (`fix: restore workspace extraction workflows`) is pushed to `origin/main`; GitHub now reports no open issues.
+
+The fix restores default workspace-root federation for `explain` and `graph`, makes `explain` line numbers one-based, invalidates cached `too_large` failures when the effective token cap increases, documents the persistent config path, excludes zero-byte files from extraction and coverage, accepts fenced/prefaced balanced JSON responses, and reports meaningful `<root>` language-coverage gaps.
+
+Changed paths:
+- `VERSIONS.md`
+- `packages/tsift-cli/src/cli.rs`
+- `packages/tsift-cli/src/commands/graph.rs`
+- `packages/tsift-cli/src/commands/summarize.rs`
+- `packages/tsift-cli/src/lib.rs`
+- `packages/tsift-cli/tests/exit_code.rs`
+- `packages/tsift-status/src/status.rs`
+- `packages/tsift-summarize/src/summarize.rs`
+- `specs/search-navigation.md`
+
+Verification:
+- `cargo test -p tsift-summarize -p tsift-status -p tsift-cli --lib` — passed.
+- `cargo test -p tsift-cli --test exit_code workspace_explain` — passed.
+- `make check` — passed.
+- `cargo install --path . --locked` — passed; installed `tsift 0.1.89`.
+- GitHub Actions [CI run 33022031439](https://github.com/btakita/tsift/actions/runs/33022031439) — passed, including clippy/test and live Convex graph acceptance.
+- GitHub issue query — issue #18 closed and open issue list empty.
+
+The implementation used an isolated worktree based on current `origin/main`; the pre-existing dirty `src/tsift` checkout and its unrelated changes were preserved untouched.
+
+Confidence: high. Escalation: none.
+
+Operational note: agent-doc preflight warned that the installed agent-doc binary predates local agent-doc source and that the session has accreted context. I did not reinstall unrelated agent-doc tooling or compact without approval.
 <!-- agent:boundary:36d68aeb:tsift -->
 <!-- /agent:exchange -->
 

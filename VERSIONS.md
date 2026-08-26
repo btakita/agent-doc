@@ -2,6 +2,34 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.285
+
+- **Fix: a background JetBrains editor split can no longer steal tmux focus
+from the active split.**
+
+JetBrains emits document-selection events for editor windows that do not own
+keyboard focus. Those events remain authoritative for the spanning editor
+layout, but now carry pane-focus authority only when their file is selected in
+the active editor window. A different or unresolved active window publishes a
+layout-only observation, while the existing component-focus edge retains
+generation-fenced pane selection. This keeps an active `fpe.md` split from
+redirecting tmux into an adjacent agent pane.
+
+- **Fix: Clear Session Context repairs an unobserved lost `/clear` submission.**
+
+Clear completion now requires observable command consumption, a pane transition,
+or an already-cleared probe. When retained conversation history proves an
+unobserved clear did not take effect, the controller performs one bounded full
+command resend; visible split-submit drafts still receive only the submit key.
+
+- **Fix: queue maintenance no longer turns a partial typing snapshot into a
+  second queue item.**
+
+When a live free-text queue draft strictly extends the active backlog item for
+its adjacent generated queue head, admission now updates that item and preserves
+one stable id. Similar non-adjacent tasks and intentional repeated directives
+remain distinct.
+
 ## 0.35.283
 
 - **Fix: a transiently unavailable queue authority no longer disables the idle

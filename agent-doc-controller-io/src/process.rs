@@ -78,10 +78,36 @@ pub fn cmdline_has_preparing_handoff(pid: u32) -> bool {
     agent_doc_controller::command_line::args_have_preparing_handoff(&args)
 }
 
-pub fn route_owned_supervisor_document(pid: u32) -> Option<PathBuf> {
-    agent_doc_controller::command_line::start_route_owned_document_from_args(&read_cmdline_args(
-        pid,
-    )?)
+pub fn open_supervisor_document(pid: u32) -> Option<PathBuf> {
+    supervisor_document_from_observation(&read_cmdline_args(pid)?, process_cwd(pid).as_deref())
+}
+
+fn process_cwd(pid: u32) -> Option<PathBuf> {
+    std::fs::read_link(Path::new("/proc").join(pid.to_string()).join("cwd")).ok()
+}
+
+/// Resolve a document argument in the process namespace that authored it.
+///
+/// Supervisors commonly preserve the relative path passed from their
+/// project shell (for example, `tasks/plan.md`). Install fan-out scans those
+/// command lines from a different working directory, so resolving against the
+/// installer's cwd silently targets the wrong document and leaves that supervisor
+/// on the old binary.
+fn resolve_process_document_path(document: &Path, process_cwd: Option<&Path>) -> PathBuf {
+    if document.is_absolute() {
+        return document.to_path_buf();
+    }
+    process_cwd
+        .map(|cwd| cwd.join(document))
+        .unwrap_or_else(|| document.to_path_buf())
+}
+
+fn supervisor_document_from_observation(
+    args: &[String],
+    process_cwd: Option<&Path>,
+) -> Option<PathBuf> {
+    let document = agent_doc_controller::command_line::start_supervisor_document_from_args(args)?;
+    Some(resolve_process_document_path(&document, process_cwd))
 }
 
 pub fn project_controller_pids(project_root: &Path) -> Vec<u32> {
@@ -102,11 +128,11 @@ pub fn controller_project_roots(exclude_pid: u32) -> BTreeSet<PathBuf> {
         .collect()
 }
 
-pub fn route_owned_supervisor_documents(exclude_pid: u32) -> BTreeSet<PathBuf> {
+pub fn open_supervisor_documents(exclude_pid: u32) -> BTreeSet<PathBuf> {
     process_pids()
         .into_iter()
         .filter(|pid| *pid != exclude_pid)
-        .filter_map(route_owned_supervisor_document)
+        .filter_map(open_supervisor_document)
         .map(|doc| {
             agent_doc_controller::command_line::canonical_path_for_command_line_compare(&doc)
         })
@@ -168,5 +194,68 @@ mod tests {
     fn signal_args_match_kill_flags() {
         assert_eq!(ProcessSignal::Term.as_arg(), "-TERM");
         assert_eq!(ProcessSignal::Kill.as_arg(), "-KILL");
+    }
+
+    #[test]
+    fn supervisor_relative_documents_resolve_against_each_supervisor_cwd() {
+        let first_cwd = Path::new("workspace-one");
+        let second_cwd = Path::new("workspace-two");
+        let relative = Path::new("tasks/plan.md");
+
+        assert_eq!(
+            resolve_process_document_path(relative, Some(first_cwd)),
+            first_cwd.join(relative)
+        );
+        assert_eq!(
+            resolve_process_document_path(relative, Some(second_cwd)),
+            second_cwd.join(relative)
+        );
+        assert_ne!(
+            resolve_process_document_path(relative, Some(first_cwd)),
+            resolve_process_document_path(relative, Some(second_cwd)),
+            "install fan-out must not collapse supervisors from different project cwd values"
+        );
+    }
+
+    #[test]
+    fn supervisor_document_resolution_preserves_absolute_and_missing_cwd_paths() {
+        let absolute = std::env::temp_dir().join("sample-app/tasks/plan.md");
+        assert_eq!(
+            resolve_process_document_path(&absolute, Some(Path::new("ignored"))),
+            absolute
+        );
+
+        let relative = Path::new("tasks/plan.md");
+        assert_eq!(
+            resolve_process_document_path(relative, None),
+            relative.to_path_buf()
+        );
+    }
+
+    #[test]
+    fn install_fanout_discovers_route_owned_and_operator_started_supervisors() {
+        let cwd = Path::new("sample-workspace");
+        let route_owned = vec![
+            "/bin/agent-doc".to_string(),
+            "start".to_string(),
+            "--route-owned".to_string(),
+            "tasks/route-owned.md".to_string(),
+        ];
+        let operator_started = vec![
+            "/bin/agent-doc".to_string(),
+            "start".to_string(),
+            "--resume".to_string(),
+            "--".to_string(),
+            "tasks/operator-started.md".to_string(),
+        ];
+
+        assert_eq!(
+            supervisor_document_from_observation(&route_owned, Some(cwd)),
+            Some(cwd.join("tasks/route-owned.md"))
+        );
+        assert_eq!(
+            supervisor_document_from_observation(&operator_started, Some(cwd)),
+            Some(cwd.join("tasks/operator-started.md"))
+        );
     }
 }

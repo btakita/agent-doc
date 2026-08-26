@@ -85,24 +85,31 @@ pub fn agent_doc_start_arg_index(args: &[String]) -> Option<usize> {
     })
 }
 
-/// Extract the document path a long-lived `agent-doc start --route-owned <doc>`
-/// supervisor process is serving. Returns `None` unless the args are an
-/// `agent-doc start` invocation carrying the `--route-owned` flag with a `.md`
-/// document token after the subcommand. Pure sibling of
+/// Extract the document path served by any long-lived `agent-doc start`
+/// supervisor process. Pure sibling of
 /// [`controller_serve_project_root_from_args`]: `/proc` walkers resolve the doc
-/// to a project root via the caller's filesystem adapter.
-pub fn start_route_owned_document_from_args(args: &[String]) -> Option<PathBuf> {
+/// against the observed process cwd in their filesystem adapter.
+pub fn start_supervisor_document_from_args(args: &[String]) -> Option<PathBuf> {
     let start_idx = agent_doc_start_arg_index(args)?;
     let tail = &args[start_idx + 2..];
-    if !tail.iter().any(|arg| arg == "--route-owned") {
-        return None;
-    }
     tail.iter()
         .find(|arg| {
             let trimmed = arg.trim_matches(|c| c == '"' || c == '\'');
             trimmed.ends_with(".md")
         })
         .map(PathBuf::from)
+}
+
+/// Extract the document served by a route-owned supervisor. Callers that need
+/// every live supervisor (for example install recycle fan-out) must use
+/// [`start_supervisor_document_from_args`] instead.
+pub fn start_route_owned_document_from_args(args: &[String]) -> Option<PathBuf> {
+    let start_idx = agent_doc_start_arg_index(args)?;
+    let tail = &args[start_idx + 2..];
+    tail.iter()
+        .any(|arg| arg == "--route-owned")
+        .then_some(())?;
+    start_supervisor_document_from_args(args)
 }
 
 pub fn args_have_preparing_handoff(args: &[String]) -> bool {
@@ -478,6 +485,28 @@ mod tests {
         assert_eq!(
             start_route_owned_document_from_args(&shell_sentinel),
             Some(PathBuf::from("tasks/doc.md"))
+        );
+    }
+
+    #[test]
+    fn start_supervisor_document_from_args_includes_operator_started_supervisors() {
+        assert_eq!(
+            start_supervisor_document_from_args(&[
+                "/bin/agent-doc".to_string(),
+                "start".to_string(),
+                "--resume".to_string(),
+                "--".to_string(),
+                "tasks/doc.md".to_string(),
+            ]),
+            Some(PathBuf::from("tasks/doc.md"))
+        );
+        assert_eq!(
+            start_supervisor_document_from_args(&[
+                "/bin/agent-doc".to_string(),
+                "route".to_string(),
+                "tasks/doc.md".to_string(),
+            ]),
+            None
         );
     }
 

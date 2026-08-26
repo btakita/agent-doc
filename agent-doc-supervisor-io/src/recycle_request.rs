@@ -1,6 +1,6 @@
 //! Cross-supervisor recycle-request state.
 //!
-//! Install fan-out records one typed fact per served route-owned document in the
+//! Install fan-out records one typed fact per document served by an open supervisor in the
 //! project `state.db`; the owning supervisor consumes it at its next idle boundary.
 
 use std::path::Path;

@@ -3247,7 +3247,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // until it lands the idle path keeps its current behavior.
                 // `#turnsaferecycle` Goal 1 — an install fan-out
                 // (`recycle_supervisors_all_projects_force`) writes a per-document
-                // recycle-request marker so EVERY route-owned supervisor recycles onto
+                // recycle-request marker so EVERY open supervisor recycles onto
                 // the freshly-installed binary at its next idle boundary, not just the
                 // ones that independently self-detect staleness. Honor it like an
                 // explicit admin recycle: `supervisor_recycle_action` maps that to

@@ -5728,9 +5728,10 @@ pub fn recycle_controllers_all_projects_force(force: bool) -> Result<(usize, usi
 
 /// `#turnsaferecycle` Goal 1 — the supervisor breadth of an install fan-out. Today
 /// [`recycle_controllers_all_projects_force`] only marks lazy CONTROLLER (CP)
-/// processes; the long-lived `agent-doc start --route-owned` supervisors that
-/// actually write documents are left to self-detect staleness. This walks `/proc`
-/// for every route-owned supervisor, dedups by served document, and writes each a
+/// processes; the long-lived `agent-doc start` supervisors that actually write
+/// documents are left to self-detect staleness. This walks `/proc` for every open
+/// supervisor, resolves relative document arguments against each process cwd,
+/// dedups by served document, and writes each a
 /// recycle-request marker so they recycle onto the freshly-installed binary at the
 /// next idle boundary. Returns `(marked, skipped)`. `force` is recorded in the
 /// marker reason for parity with the controller fan-out; the supervisor honors the
@@ -9655,7 +9656,7 @@ pub fn checkpoint_route_owned_documents_for_project(
 }
 
 pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usize)> {
-    let docs = crate::process::route_owned_supervisor_documents(std::process::id());
+    let docs = crate::process::open_supervisor_documents(std::process::id());
     let reason = if force {
         "install_fanout_force"
     } else {

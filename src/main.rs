@@ -1736,8 +1736,8 @@ where
 }
 
 /// `#recycle-supervisor-fanout` — an explicit `admin recycle --all-projects` schedules a
-/// recycle of every valid-state route-owned supervisor in addition to the controllers, so
-/// an operator recycle fans out across the whole fleet (route-owned supervisors host the
+/// recycle of every valid-state open supervisor in addition to the controllers, so
+/// an operator recycle fans out across the whole fleet (supervisors host the
 /// agent turns, not just the project controllers). Pure JSON shape so the reported contract
 /// is unit-tested independently of the `/proc` enumeration.
 fn all_projects_recycle_json(
@@ -5473,7 +5473,7 @@ fn try_main() -> anyhow::Result<()> {
                         let (recycled, skipped) =
                         agent_doc_controller_io::project_controller::recycle_controllers_all_projects_force(force)?;
                         // #recycle-supervisor-fanout: an explicit fleet recycle also schedules a
-                        // recycle of every valid-state route-owned supervisor (they host the agent
+                        // recycle of every valid-state open supervisor (they host the agent
                         // turns), honored at each supervisor's next idle boundary. Fail-open — a
                         // supervisor enumeration hiccup must not abort the controller recycle.
                         let (supervisors_marked, supervisors_skipped) =
@@ -5502,7 +5502,7 @@ fn try_main() -> anyhow::Result<()> {
                                 "through a two-phase handoff"
                             };
                             println!(
-                                "[admin] recycle (all projects{}): {recycled} controller(s) marked to recycle {boundary}, {skipped} skipped; {supervisors_marked} route-owned supervisor(s) scheduled to recycle at next idle boundary, {supervisors_skipped} skipped",
+                                "[admin] recycle (all projects{}): {recycled} controller(s) marked to recycle {boundary}, {skipped} skipped; {supervisors_marked} open supervisor(s) scheduled to recycle at next idle boundary, {supervisors_skipped} skipped",
                                 if force { ", forced" } else { "" }
                             );
                         }
@@ -6323,7 +6323,7 @@ mod recycle_force_tests {
     #[test]
     fn all_projects_recycle_json_reports_supervisor_fanout() {
         // #recycle-supervisor-fanout: an explicit `admin recycle --all-projects` must
-        // schedule a recycle of every valid-state route-owned supervisor in addition to
+        // schedule a recycle of every valid-state open supervisor in addition to
         // the controllers, and report both fan-out counts.
         let v = all_projects_recycle_json(2, 1, 3, 0, true);
         assert_eq!(v["recycled"], 2);

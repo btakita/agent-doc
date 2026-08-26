@@ -3,7 +3,7 @@
 //! Distinct from `recycle_inflight` (which signals a recycle is *in progress* so
 //! dispatch should defer) and `recycle_yield` (which asks a self-driving loop to
 //! yield one boundary): a recycle-request is a positive cross-process instruction
-//! that a specific route-owned supervisor should recycle onto the freshly-installed
+//! that a specific open supervisor should recycle onto the freshly-installed
 //! binary at its next idle boundary, EVEN when it is not yet stale and auto-recycle
 //! is opted out. An install fan-out records it per served document; the supervisor
 //! idle loop honors it like an `explicit_admin` recycle.

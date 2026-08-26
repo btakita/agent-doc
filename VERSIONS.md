@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.288
+
+- **Fix: installs now recycle every open supervisor.**
+
+Install-time supervisor discovery now includes every live `agent-doc start`
+process, including operator-started supervisors. Relative document arguments are
+resolved against each observed supervisor's `/proc/<pid>/cwd` before the durable
+recycle request is written, so installing from the agent-doc submodule no longer
+silently skips supervisors opened from the parent project. The existing ordered
+handoff remains intact: supervisors are marked before controllers and live child
+PTYs continue across the safe-boundary supervisor `execve`.
+
 ## 0.35.287
 
 - **Fix: JetBrains focus now restores an authoritative pane that drifted into

@@ -291,7 +291,7 @@ pub(crate) fn run_paths(
     // the JetBrains plugin hot-reloads this cdylib by mtime, but already-running
     // agent-doc controllers/supervisors keep serving the PRIOR binary until they
     // recycle. Instead of only printing the recycle hint, automatically mark every
-    // running controller and route-owned supervisor to recycle safely so the new
+    // running controller and open supervisor to recycle safely so the new
     // build goes live everywhere, not just in the editor cdylib. Controllers use
     // private-socket hydration, atomic promotion, and predecessor RPC drain;
     // supervisors remain turn-boundary gated. Opt out with a falsey
@@ -406,7 +406,7 @@ fn recycle_on_install_enabled() -> bool {
     }
 }
 
-/// Mark every running controller and route-owned supervisor to recycle onto the
+/// Mark every running controller and open supervisor to recycle onto the
 /// freshly-installed binary. Controllers promote a private replacement mid-turn
 /// and drain accepted RPCs on the predecessor; supervisors retain the live child
 /// until a true turn boundary.
@@ -426,12 +426,12 @@ fn auto_recycle_after_install() {
     match agent_doc_controller_io::project_controller::recycle_supervisors_all_projects() {
         Ok((marked, skipped)) => {
             eprintln!(
-                "[lib-install] auto-recycle: {marked} route-owned supervisor(s) marked to recycle at next idle boundary, {skipped} skipped"
+                "[lib-install] auto-recycle: {marked} open supervisor(s) marked to recycle at next idle boundary, {skipped} skipped"
             );
         }
         Err(e) => {
             eprintln!(
-                "[lib-install] warning: supervisor recycle fan-out failed ({e}) — route-owned supervisors still serve the prior binary until they self-detect staleness"
+                "[lib-install] warning: supervisor recycle fan-out failed ({e}) — open supervisors still serve the prior binary until they self-detect staleness"
             );
         }
     }

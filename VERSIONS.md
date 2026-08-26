@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.286
+
+- **Fix: completed-work archives cannot steal a live document's editor
+identity.**
+
+Archive candidate discovery now belongs to the shared document-path boundary.
+JetBrains rejects a still-existing canonical `<stem>.md` → `<stem>.done.md`
+VFS edge before moving editor liveness, and the Project Controller independently
+refuses the same edge before rekeying the relay hub or retaining a path alias.
+Real renames whose old path is gone continue to converge normally, independently
+addressed `.done.md` documents keep their own identities, and a canonical
+document with no editor attachment falls back to disk authority.
+
 ## 0.35.285
 
 - **Fix: a background JetBrains editor split can no longer steal tmux focus

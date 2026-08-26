@@ -562,6 +562,27 @@ High. Regression tests cover both ambiguous graph commands, the exact-case prece
 None. Work was isolated in `/tmp/tsift-issue17-S4iQAF`; the pre-existing dirty checkout at `src/tsift` was preserved and its unrelated changes were not staged or modified. The superproject gitlink was intentionally not advanced because doing so would require disturbing that dirty checkout.
 
 Exchange size is large; queue draining continued without compaction while active. The next queued item is `release + publish`.
+
+### Re: Response
+
+> **Queue prompt:**
+>
+> do [#releasepublish17]
+
+Released and published tsift 0.1.89 with the completed issue #17 fix.
+
+- Fix commit: 303291d847cb2736e37d8f2e582959ee93b94b17. Issue #17 is closed, and the open issue list is empty.
+- Release commit: d79f4e8be91b5babaefb838edba828e7ebe2f41a. Remote main and annotated tag v0.1.89 both resolve to that commit.
+- Local gates: make check passed; all 26 crate package-file checks passed; the npm publish dry run passed; source-built init regeneration reported every tracked instruction and OpenCode surface current.
+- CI: main run https://github.com/btakita/tsift/actions/runs/33004777848 completed successfully.
+- Publication: release run https://github.com/btakita/tsift/actions/runs/33005562229 completed successfully.
+- GitHub Release: https://github.com/btakita/tsift/releases/tag/v0.1.89 is public, non-draft, and non-prerelease, with Linux, Apple Silicon macOS, and Windows archives plus all three checksum files.
+- Registries: all 26 workspace crates are publicly visible at 0.1.89 on crates.io; opencode-tsift 0.1.89 is publicly visible on npm.
+- Installation: cargo install from the exact release tree succeeded, and tsift --version reports 0.1.89.
+- Workspace safety: the original dirty tsift checkout remained at its existing commit with its 23 preexisting status entries untouched; only the clean temporary release worktree was removed after verification.
+- Confidence: high. Escalation: none.
+
+Session note: this was a large exchange; preflight queue-maintenance projection was deferred because the CRDT relay was unavailable, while the authoritative response/commit path remained available.
 <!-- agent:boundary:36d68aeb:tsift -->
 <!-- /agent:exchange -->
 
@@ -576,7 +597,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#releasepublish17] Release and publish tsift 0.1.89 containing the #17 fix at commit 303291d.
 <!-- /agent:backlog -->
 
 ## Review

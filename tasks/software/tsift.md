@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
-  codex: 01a03a06-793c-7d10-967f-054a4de7e303
+  codex: 01a03a6d-1abb-7ce2-a842-9c8de961293d
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -456,6 +456,18 @@ Publication is independently visible:
 - npm reports [`opencode-tsift@0.1.86`](https://www.npmjs.com/package/opencode-tsift/v/0.1.86).
 
 A registry-backed `cargo install tsift --version 0.1.86 --locked --force` completed successfully; `tsift --version` reports `tsift 0.1.86`. Superproject pointer commit `3cb23649d` records the release revision, with its push following this document closeout. No release follow-up remains.
+
+### Re: Fix open tsift issue #15 — gpt-5.6
+
+> **Queue prompt:**
+>
+> Fix the open issues in `tsift` https://github.com/btakita/tsift/issues.
+
+Resolved the only open issue, [#15](https://github.com/btakita/tsift/issues/15), in tsift commit `ef5f79f` and pushed it to `main`. `init` now respects the effective Git ignore stack (including `.git/info/exclude`) and reports the matching source. Workspace discovery now rejects absent non-gitlink declarations, emits a diagnostic, and falls back to indexing/querying the root tree when no declared scope is resolvable. Real but uninitialized gitlinks remain valid workspace scopes.
+
+Verification is complete: focused regressions pass, `make check` passes, `cargo install --path . --locked` succeeds, the installed CLI reports `tsift 0.1.86`, and GitHub CI run `32973940384` passed both live Convex acceptance and the full clippy/test suite. GitHub closed issue #15 from the pushed `Fixes #15` commit. The parent repository records the submodule update in `6e818a1c7`.
+
+The exchange remains large because the active queue requires continuity, so I did not compact it. The JetBrains plugin is still one patch behind the installed agent-doc binary (plugin 0.2.356 vs expected 0.2.357); update or reload it before relying on editor acknowledgements. `release + publish` remains the next queue item.
 <!-- agent:boundary:cd881543 -->
 <!-- /agent:exchange -->
 

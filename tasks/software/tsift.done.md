@@ -522,3 +522,4 @@
 - 2026-08-23 [#wsfedrest] `communities` and `path` still fail closed at a workspace root with no shared root index. #graphfed gave `explain`/`graph` symbol-driven scope resolution; neither of these has a single symbol to resolve from (`communities` reads the whole index, `path` spans two symbols whose scopes may differ). Decide: federate `communities` per scope and merge, resolve `path` only when both endpoints land in one scope, or document the requirement in the generated Code Navigation block so the recommendation and the capability agree.
 - 2026-08-23 [#spinyank] `cargo install --locked` warns that `spin v0.9.8` in Cargo.lock is yanked from crates.io. Harmless today, but a fresh `--locked` build of a published tag will keep warning. Refresh the transitive pin and re-run `make check`.
 - 2026-08-25 [#fixopenissues] Please fix open issues on tsift.
+- 2026-08-26 [#fixopenissues] Fix the open issues in `tsift` https://github.com/btakita/tsift/issues.

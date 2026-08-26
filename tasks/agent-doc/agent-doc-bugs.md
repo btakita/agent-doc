@@ -377,6 +377,12 @@ Released and installed agent-doc `0.35.287` with JetBrains plugin `0.2.360`.
 - Commits `fc921e81f` and `7713b16e5` were pushed; tag `v0.35.287` was pushed. CI, Release, and PyPI jobs were still running at the single status check.
 
 Please restart IDEA once more—the new plugin was installed after your last restart. Then selecting `fpe.md` should retain/focus its right-hand pane and automatically recover it if it was stashed.
+
+### Re: Response
+
+The restart loaded plugin `0.2.360`, but IDEA restored `contracts.md`—not `fpe.md`—in the right split, so the repaired edge has not fired yet.
+
+Please click `fpe.md` in the right split once, then reply `selected`. I’ll immediately verify whether `%37` returns from stash and receives focus without moving you to the left pane.
 <!-- agent:boundary:64a22d63:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

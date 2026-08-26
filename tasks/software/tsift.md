@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -513,14 +513,27 @@ Verification:
 Preflight still reports the existing environment/document warnings: installed agent-doc CLI `0.35.284` versus skill `0.35.285`, JetBrains plugin `0.2.356` versus `0.2.357`, the misplaced `go` attribute, exchange accretion, and semantic-completion false-positive risk.
 
 Queue item `[#z5tb]` (release + publish) remains next.
-<!-- agent:boundary:cd881543 -->
+
+### Re: Agent response — release and publish
+
+Completed queue item `[#z5tb]`: tsift 0.1.88 is released end to end.
+
+- Release commit: `9ab262a` (`release: 0.1.88 -- workspace root federation`), pushed to `main` and tagged `v0.1.88`.
+- Release content: bumped all 26 Rust workspace crates and the OpenCode npm package to 0.1.88, refreshed every generated version surface, and promoted the issue #16 workspace-root federation fix into the 0.1.88 release notes.
+- Local gates: clean-tree `make check` passed; all 26 `cargo package --locked --allow-dirty --list` checks passed; `npm run publish:check` passed; Cargo metadata reported 26 packages and zero version mismatches.
+- The tag push did not enqueue Actions automatically, so I manually dispatched the repository's tag-aware Release workflow against `v0.1.88`. Run [32986592375](https://github.com/btakita/tsift/actions/runs/32986592375) passed: full CI, all Linux/macOS ARM/Windows builds, GitHub Release, npm OIDC publication, and crates.io OIDC publication.
+- crates.io summary: `published=26 skipped=0`. Both `tsift@0.1.88` and the final `tsift-sim-world@0.1.88` resolve from the registry.
+- Public artifacts: the non-draft [v0.1.88 GitHub Release](https://github.com/btakita/tsift/releases/tag/v0.1.88) contains all three platform archives and their SHA-256 files; `npm view opencode-tsift@0.1.88 version` returns `0.1.88`.
+- Local installation: installed from the exact release tree with `cargo install --path . --locked --force`; `tsift --version` reports `tsift 0.1.88`.
+- Parent integration: fast-forwarded the original dirty tsift submodule checkout to `9ab262a` without altering its unrelated edits, staged only the parent gitlink, and removed the clean temporary release worktree and branch.
+
+The only workflow annotations are GitHub's Node 20 deprecation notices for third-party actions; all jobs passed. The exchange remains above the accretion threshold because the queue was active, so I did not compact it. The live JetBrains plugin is now current at 0.2.357; preflight still reports the misplaced `go` attribute and semantic-completion false-positive warning.
+<!-- agent:boundary:36d68aeb:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#2wte]~~
-- do [#z5tb]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -529,7 +542,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue go -->
-- [ ] [#z5tb] release + publish
 <!-- /agent:backlog -->
 
 ## Review

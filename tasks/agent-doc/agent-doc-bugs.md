@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a03e80-9266-7050-be5f-f2454606e9fd
+  codex: 01a0403c-73aa-7011-ab60-a0b1466c0983
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -62,6 +62,28 @@ The live clean-worktree release install proved the original fleet case:
 - Ten idle supervisors had already re-execed onto the new binary inode at inspection time. Three busy supervisors, including this active turn, remain safely marked and will re-exec at their next idle boundary instead of being interrupted.
 
 Source commit `42a4ddd12` is pushed to `main`; tag `v0.35.288` is pushed. The Book workflow is green. CI, Release, and PyPI workflows were queued/in progress at closeout and were inspected without waiting, per the repository's external-CI policy. The private superproject projection is committed separately as `d74ee5e06`.
+
+### Re: fix Compact Exchange retained-continuation lock — gpt-5
+
+Implemented, installed, and live-verified the fix for `#fixcausescompact`.
+
+The root cause was a lifecycle type error: after editor authority and disk had converged, a same-Exchange conflict was still returned as an ordinary error. The controller therefore retained the compact continuation, retried it on every relevant delivery edge, and rejected every later Compact Exchange as already pending.
+
+The corrected invariant is: unsettled delivery may remain retryable, but settled authority must end a retained compact exactly once—either `Settled`, or `Superseded` when the compact-owned component advanced. Supersession never rewrites the document, checkpoints a snapshot, or commits the stale target.
+
+Ownership and reactive topology are now explicit:
+
+- `agent-doc-compact-io` owns the typed rebase/completion decision from retained targets plus converged authority.
+- `agent-doc-state-backbone` owns the identity-matched durable `DocumentCompactProjectionSuperseded` transition.
+- The existing projection Source → compact-resume Computed → completion Effect → durable receipt Source remains the only execution path. No polling, retry loop, or error-string classifier was added.
+
+The transition table is covered for retryable authority/native-save readiness, exact settlement, sibling/tail rebase, settled same-component supersession, and delayed identity-mismatched receipts. Focused state/compact/controller regressions and the full local `make check` pass; GitHub CI run `33021813476` also passed `make check` and `make tmux-ci`. The updated binary was installed and its automatic supervisor recycle replayed the live ledger: continuation `compact-projection-c91a04ba7db247c880ab58ff482850cb276e55550c0b743e0672f6d092857652-94c52d8e-d440-49e8-941c-6f26a20eeabd` now has a `document_compact_projection_superseded` terminal fact. `tasks/software/tsift.md` was not rewritten and Compact Exchange was not retried.
+
+Code commit: `5316b1818` (`fix: retire superseded compact continuations`). Parent submodule-pointer commit: `34ae399fa`.
+
+> **Completed queue prompt:** Fix agent-doc causes of Compact Exchange on tsift.md failed: [compact] pending: the compacted target is retained for editor delivery and is not yet committed. Do not retry Compact Exchange while this target is pending; if delivery remains pending, restart the editor so its agent-doc plugin reconnects
+>
+> [compact] pending: existing continuation compact-projection-c91a04ba7db247c880ab58ff482850cb276e55550c0b743e0672f6d092857652-94c52d8e-d440-49e8-941c-6f26a20eeabd already owns this document (commit_requested=true)
 <!-- agent:boundary:64a22d63:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

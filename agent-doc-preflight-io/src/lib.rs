@@ -2708,6 +2708,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     let mut entries = entries;
     let mut queue_warnings = Vec::new();
     let mut synced_queue_ids = Vec::new();
+    let mut freshly_admitted_queue_ids = std::collections::HashSet::new();
     let mut source_queue_priority = false;
     let mut queue_tag_attrs_normalized = false;
 
@@ -2838,6 +2839,12 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         let body = &current_content[comp.open_end..comp.close_start];
         entries = agent_doc_queue::document_queue::parse(body)
             .context("queue maintenance: failed to parse queue after free-text admission")?;
+        freshly_admitted_queue_ids.extend(
+            admission
+                .queued_ids
+                .iter()
+                .map(|id| id.trim().to_ascii_lowercase()),
+        );
         synced_queue_ids.extend(admission.queued_ids);
         queue_warnings.extend(warnings);
         mutated = true;
@@ -2847,13 +2854,44 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         );
     }
 
-    // `#ynra`: collect `agent:done` ids ONCE up front. The backlog→queue sync
-    // below must never re-mint a `do [#id]` whose id is already completed
-    // (archived in `agent:done`) — otherwise the strike pass removes it every
-    // cycle, the sync re-injects it the next cycle, and the queue churns forever
-    // on a completed ref. `agent:done` is not mutated by any queue maintenance
-    // step, so this set is valid for both the sync filter and the later strike.
+    // `#ynra`: collect `agent:done` ids ONCE up front. Ordinarily the
+    // backlog→queue sync below must never re-mint a `do [#id]` whose id is
+    // already completed (archived in `agent:done`) — otherwise the strike pass
+    // removes it every cycle, the sync re-injects it the next cycle, and the
+    // queue churns forever on a completed ref.
+    //
+    // `#qrepeatid`: an operator may intentionally add the same work again. A
+    // newly admitted queue id, or any currently-open backlog item with that id,
+    // is a fresh incarnation even when an older incarnation with the same
+    // stable id exists in `agent:done`. Exclude those ids from both the mirror
+    // suppression and the preflight done-strike so the repeat reaches the
+    // agent. The live backlog checkbox is the durable incarnation boundary, so
+    // maintenance retries preserve the repeat until closeout reaps that item.
     let done_ids = collect_agent_done_ids_with_root(&content, project_root.as_deref());
+    let mut reactivated_done_ids = freshly_admitted_queue_ids;
+    for id in &done_ids {
+        let active_now =
+            agent_doc_queue::queue_consume::head_id_names_open_backlog_item(&current_content, id);
+        if active_now {
+            reactivated_done_ids.insert(id.trim().to_ascii_lowercase());
+        }
+    }
+    reactivated_done_ids.retain(|id| {
+        done_ids
+            .iter()
+            .any(|done_id| done_id.eq_ignore_ascii_case(id))
+    });
+    let sync_done_ids = done_ids
+        .iter()
+        .filter(|id| !reactivated_done_ids.contains(&id.trim().to_ascii_lowercase()))
+        .cloned()
+        .collect::<std::collections::HashSet<_>>();
+    if !reactivated_done_ids.is_empty() {
+        eprintln!(
+            "[preflight] queue: preserving {} repeated completed id incarnation(s) (#qrepeatid)",
+            reactivated_done_ids.len()
+        );
+    }
 
     // Backlog→queue sync (#backlog-queue-sync-attr): when an `agent:backlog`
     // component carries a `queue` attribute, regenerate the queue `do [#id]`
@@ -2951,7 +2989,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
             agent_doc_queue::backlog_sync::AutoBacklogQueueSyncInput {
                 requested_ids: &sync_request.ids,
                 enqueue_ids: &sync_request.enqueue_ids,
-                done_ids: &done_ids,
+                done_ids: &sync_done_ids,
                 tombstones: &tombstones,
                 entries: &entries,
                 persisted_active_incoming,
@@ -3433,7 +3471,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     // sync (above) and reused here — `agent:done` is untouched by queue
     // maintenance, so the set is still current.
     let gated_ids = agent_doc_element_review::collect_gated_review_ids(&current_content);
-    let mut eligible_ids: std::collections::HashSet<String> = done_ids.clone();
+    let mut eligible_ids: std::collections::HashSet<String> = sync_done_ids.clone();
     for id in &gated_ids {
         eligible_ids.insert(id.clone());
     }
@@ -8180,11 +8218,10 @@ mod tests {
     }
 
     #[test]
-    fn run_queue_maintenance_excludes_done_ids_from_backlog_sync() {
-        // #ynra: a lingering active backlog `[ ]` bullet whose id is also archived
-        // in `agent:done` must NOT be re-minted into the queue (it would be struck
-        // every cycle and re-injected the next → forever churn). The fresh active
-        // id is still minted.
+    fn run_queue_maintenance_open_backlog_incarnation_overrides_done_history() {
+        // #qrepeatid: `agent:done` is historical. A live `[ ]` backlog item is
+        // the current incarnation even when it deliberately reuses an archived
+        // id, so both it and an unrelated fresh id remain queueable.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
@@ -8218,26 +8255,108 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            !updated.contains("[#na3x]") || !updated.contains("do [#na3x]"),
-            "completed id must not be minted into the queue:\n{updated}"
-        );
-        assert!(
-            !updated.contains("do [#na3x]"),
-            "completed id must not appear as a queue do-prompt:\n{updated}"
+            updated.contains("do [#na3x]"),
+            "open repeated incarnation must be queued despite done history:\n{updated}"
         );
         assert!(
             updated.contains("do [#fresh]"),
             "fresh active id must still be queued:\n{updated}"
         );
-        assert_eq!(state.synced_queue_ids, vec!["fresh".to_string()]);
+        assert_eq!(
+            state.synced_queue_ids,
+            vec!["na3x".to_string(), "fresh".to_string()]
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_preserves_repeated_completed_id_incarnation() {
+        // #qrepeatid: the operator may deliberately repeat the same queue work.
+        // Free-text admission converts the prompt to `do [#fixopenissues]`; an
+        // older done entry with that id must not strike the newly-added
+        // incarnation or suppress its backlog mirror. The live backlog item is
+        // the durable incarnation boundary across maintenance retries.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done -->\n",
+            "- 2026-08-26 [#fixopenissues] Please fix all open issues on tsift\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let repeated = baseline.replace(
+            "<!-- agent:queue priority go -->\n<!-- /agent:queue -->",
+            concat!(
+                "<!-- agent:queue priority go -->\n",
+                "- Please fix all open issues on tsift\n",
+                "<!-- /agent:queue -->",
+            ),
+        );
+        let repeated = repeated.replace(
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->",
+            concat!(
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#fixopenissues] Please fix all open issues on tsift\n",
+                "<!-- /agent:backlog -->",
+            ),
+        );
+        std::fs::write(&doc, repeated).unwrap();
+
+        let first = run_queue_maintenance(&doc, None).unwrap();
+        assert!(
+            first
+                .synced_queue_ids
+                .iter()
+                .any(|id| id == "fixopenissues"),
+            "fresh repeat must be admitted into the queue: {first:?}"
+        );
+        for _ in 0..2 {
+            let entries = read_queue_entries(&doc);
+            assert!(
+                entries.iter().any(|entry| matches!(
+                    entry,
+                    agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+                        if prompt.text.contains("do [#fixopenissues]")
+                )),
+                "repeated id must remain live rather than auto-struck: {entries:?}"
+            );
+            assert!(
+                entries.iter().all(|entry| !matches!(
+                    entry,
+                    agent_doc_queue::document_queue::QueueEntry::Completed(prompt)
+                        if prompt.text.contains("fixopenissues")
+                )),
+                "historical done id must not complete the new incarnation: {entries:?}"
+            );
+            // A retry before closeout still compares against the old committed
+            // baseline and must preserve the same fresh incarnation.
+            let _ = run_queue_maintenance(&doc, None).unwrap();
+        }
     }
     #[test]
-    fn run_queue_maintenance_excludes_external_archive_done_ids() {
-        // #ynra (external-archive variant): a completed id reaped to the EXTERNAL
-        // `agent:done archive=<file>` (not inline) must also be excluded from the
-        // backlog→queue sync and struck from the queue. Done-id collection reads
-        // the archive file, so the queue must not churn on an externally-archived
-        // completed ref.
+    fn run_queue_maintenance_open_incarnation_overrides_external_done_history() {
+        // #qrepeatid (external-archive variant): external `agent:done` history
+        // has the same semantics as inline history. A live `[ ]` backlog item
+        // makes the reused id a current incarnation, so its queue head remains
+        // executable instead of being auto-struck.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let archive_rel = "session.done.md";
@@ -8277,8 +8396,8 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            !updated.contains("- do [#extdone]"),
-            "externally-archived completed ref must be struck/excluded, not left live:\n{updated}"
+            updated.contains("- do [#extdone]"),
+            "open incarnation must override externally archived done history:\n{updated}"
         );
         assert!(
             updated.contains("do [#fresh]"),

@@ -54,10 +54,74 @@ use interprocess::local_socket::{
 /// Subdirectory within `.agent-doc/` for supervisor sockets.
 const SUPERVISOR_DIR: &str = "supervisor";
 
-const SUPERVISOR_IPC_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
+const SUPERVISOR_IPC_QUERY_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
+const SUPERVISOR_IPC_EFFECT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(10);
 const SUPERVISOR_IPC_ACCEPT_READ_TIMEOUT: Duration = Duration::from_secs(5);
 const SUPERVISOR_IPC_RESOURCE_BACKOFF: Duration = Duration::from_millis(250);
 const SUPERVISOR_IPC_MAX_INFLIGHT_HANDLERS: u64 = 64;
+
+/// Typed client-side evidence for deciding whether a failed supervisor command
+/// may be safely retried through dead-supervisor recovery.
+///
+/// A connect failure proves the supervisor never accepted the command. A response
+/// timeout proves the opposite boundary: the socket accepted the command, but the
+/// effect receipt did not arrive before the client budget expired. Mutating
+/// commands must never be replayed merely because that receipt was late.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisorCommandFailureKind {
+    Connect,
+    ResponseTimeout,
+}
+
+#[derive(Debug)]
+struct SupervisorCommandFailure {
+    kind: SupervisorCommandFailureKind,
+    message: String,
+}
+
+impl std::fmt::Display for SupervisorCommandFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for SupervisorCommandFailure {}
+
+fn supervisor_command_failure(
+    kind: SupervisorCommandFailureKind,
+    message: impl Into<String>,
+) -> anyhow::Error {
+    anyhow::Error::new(SupervisorCommandFailure {
+        kind,
+        message: message.into(),
+    })
+}
+
+/// Recover typed supervisor-command failure evidence through arbitrary anyhow
+/// context layers added by higher-level session commands.
+pub fn supervisor_command_failure_kind(
+    err: &anyhow::Error,
+) -> Option<SupervisorCommandFailureKind> {
+    err.chain().find_map(|cause| {
+        cause
+            .downcast_ref::<SupervisorCommandFailure>()
+            .map(|failure| failure.kind)
+    })
+}
+
+/// Read-only queries should fail fast. Effectful methods may synchronously cross
+/// tmux/PTY delivery and lifecycle-receipt boundaries, which regularly exceed two
+/// seconds under load; keep their bounded budget long enough for the receipt.
+fn supervisor_response_timeout(method: &IpcMethod) -> Duration {
+    match method {
+        IpcMethod::State | IpcMethod::Pid => SUPERVISOR_IPC_QUERY_RESPONSE_TIMEOUT,
+        IpcMethod::Restart { .. }
+        | IpcMethod::Inject { .. }
+        | IpcMethod::Clear { .. }
+        | IpcMethod::Stop { .. }
+        | IpcMethod::StopAgent { .. } => SUPERVISOR_IPC_EFFECT_RESPONSE_TIMEOUT,
+    }
+}
 
 /// Maximum byte length for a Unix domain socket path (`sun_path` is 108 bytes
 /// including the NUL terminator on Linux).
@@ -812,13 +876,24 @@ pub fn probe_socket(sock: &Path) -> SocketLiveness {
 
 /// Send a command to a supervisor and read the response.
 ///
-/// Connects to the socket, sends the command as NDJSON, and reads one
-/// response line with a 2-second timeout.
+/// Connects to the socket, sends the command as NDJSON, and reads one response
+/// line with a method-specific bounded timeout. Queries fail fast; effectful
+/// commands receive a longer budget for their delivery receipt.
 #[allow(dead_code)] // API surface — used by tests and future IPC clients
 pub fn send_command(sock: &Path, method: &IpcMethod) -> Result<IpcResponse> {
-    let stream = try_connect(sock)?;
+    send_command_with_response_timeout(sock, method, supervisor_response_timeout(method))
+}
+
+fn send_command_with_response_timeout(
+    sock: &Path,
+    method: &IpcMethod,
+    response_timeout: Duration,
+) -> Result<IpcResponse> {
+    let stream = try_connect(sock).map_err(|err| {
+        supervisor_command_failure(SupervisorCommandFailureKind::Connect, format!("{err:#}"))
+    })?;
     stream
-        .set_recv_timeout(Some(SUPERVISOR_IPC_RESPONSE_TIMEOUT))
+        .set_recv_timeout(Some(response_timeout))
         .context("failed to set supervisor response timeout")?;
     let (reader_half, mut writer_half) = stream.split();
 
@@ -837,12 +912,13 @@ pub fn send_command(sock: &Path, method: &IpcMethod) -> Result<IpcResponse> {
                 serde_json::from_str(line.trim()).context("failed to parse supervisor response")?;
             Ok(resp)
         }
-        Err(e) if supervisor_read_error_is_timeout(&e) => {
-            anyhow::bail!(
+        Err(e) if supervisor_read_error_is_timeout(&e) => Err(supervisor_command_failure(
+            SupervisorCommandFailureKind::ResponseTimeout,
+            format!(
                 "supervisor response timeout ({:.1}s)",
-                SUPERVISOR_IPC_RESPONSE_TIMEOUT.as_secs_f32()
-            )
-        }
+                response_timeout.as_secs_f32()
+            ),
+        )),
         Err(e) => anyhow::bail!("supervisor read error: {e}"),
     }
 }
@@ -1069,6 +1145,54 @@ mod tests {
         let data = resp.data.unwrap();
         assert_eq!(data["state"], "healthy");
         assert_eq!(data["running"], true);
+
+        ipc.stop();
+    }
+
+    #[test]
+    fn effectful_commands_have_a_longer_receipt_budget_than_queries() {
+        assert_eq!(
+            supervisor_response_timeout(&IpcMethod::State),
+            SUPERVISOR_IPC_QUERY_RESPONSE_TIMEOUT
+        );
+        assert_eq!(
+            supervisor_response_timeout(&IpcMethod::Pid),
+            SUPERVISOR_IPC_QUERY_RESPONSE_TIMEOUT
+        );
+        assert_eq!(
+            supervisor_response_timeout(&IpcMethod::Clear {
+                bytes: "/clear".to_string(),
+            }),
+            SUPERVISOR_IPC_EFFECT_RESPONSE_TIMEOUT
+        );
+        assert!(SUPERVISOR_IPC_EFFECT_RESPONSE_TIMEOUT > SUPERVISOR_IPC_QUERY_RESPONSE_TIMEOUT);
+    }
+
+    #[test]
+    fn late_effect_receipt_is_typed_as_ambiguous_not_disconnected() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let mut ipc = SupervisorIpc::start(root, "test-late-receipt", |_method| {
+            std::thread::sleep(Duration::from_millis(75));
+            IpcResponse::ok_empty()
+        })
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(25));
+
+        let sock = socket_path(root, "test-late-receipt");
+        let err = send_command_with_response_timeout(
+            &sock,
+            &IpcMethod::Clear {
+                bytes: "/clear".to_string(),
+            },
+            Duration::from_millis(10),
+        )
+        .unwrap_err();
+        assert_eq!(
+            supervisor_command_failure_kind(&err),
+            Some(SupervisorCommandFailureKind::ResponseTimeout)
+        );
 
         ipc.stop();
     }

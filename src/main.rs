@@ -1654,12 +1654,35 @@ const SESSION_ENSURE_SUPERVISOR_WAIT: Duration = Duration::from_secs(8);
 ///   supervisor-provided errors), so `stop-agent` / `cancel-turn` stay fail-closed and
 ///   never fabricate a turn (they are also not wrapped).
 fn session_error_is_missing_supervisor(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        let msg = cause.to_string();
+    match agent_doc_supervisor_io::ipc::supervisor_command_failure_kind(err) {
+        Some(agent_doc_supervisor_io::ipc::SupervisorCommandFailureKind::Connect) => return true,
+        Some(agent_doc_supervisor_io::ipc::SupervisorCommandFailureKind::ResponseTimeout) => {
+            return false;
+        }
+        None => {}
+    }
+
+    let messages = err.chain().map(ToString::to_string).collect::<Vec<_>>();
+    if messages.iter().any(|msg| {
         msg.contains("no live supervisor socket for")
-            || msg.contains("failed to contact supervisor for")
             || msg.contains("supervisor does not support clear IPC and no live pane is available")
-    })
+    }) {
+        return true;
+    }
+
+    // Compatibility for older/untyped send_command errors: require both the
+    // high-level contact context and definite pre-accept connection evidence.
+    // A response timeout, EOF, write failure, or parse failure is ambiguous and
+    // must never replay a mutating clear through cold-start recovery.
+    let contact_context = messages
+        .iter()
+        .any(|msg| msg.contains("failed to contact supervisor for"));
+    let definite_connect_failure = messages.iter().any(|msg| {
+        msg.contains("failed to connect to supervisor socket")
+            || msg.contains("Connection refused")
+            || msg.contains("No such file or directory")
+    });
+    contact_context && definite_connect_failure
 }
 
 /// #supresilience Part C — poll the supervisor socket until it becomes live or the
@@ -6446,6 +6469,19 @@ mod recycle_force_tests {
             "timed out waiting for project controller at /repo/.agent-doc/controller.sock"
         );
         assert!(!session_error_is_missing_supervisor(&controller_timeout));
+
+        // NEGATIVE — a response timeout happens after connect/accept. The clear
+        // may already be delivered, so cold-starting and replaying it is unsafe.
+        let response_timeout = Err::<(), _>(anyhow::anyhow!("supervisor response timeout (10.0s)"))
+            .context("failed to contact supervisor for /repo/plan.md")
+            .unwrap_err();
+        assert!(!session_error_is_missing_supervisor(&response_timeout));
+
+        // NEGATIVE — the broad contact context alone is not disconnect proof.
+        let response_parse = Err::<(), _>(anyhow::anyhow!("failed to parse supervisor response"))
+            .context("failed to contact supervisor for /repo/plan.md")
+            .unwrap_err();
+        assert!(!session_error_is_missing_supervisor(&response_parse));
 
         // NEGATIVE — the turn-scoped no-op report (real `cancel_turn` wording) must
         // stay fail-closed; never cold-start a supervisor to cancel a nonexistent turn.

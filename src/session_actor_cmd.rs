@@ -582,42 +582,35 @@ fn restart_with_target(
 /// logged thousands each, and every replacement attempt on it ended in
 /// `background_failed` while reporting success.
 ///
-/// Report only a positive binary-identity proof. Replacement continues on the
-/// controller's reactive lifecycle plane; this command must not poll/sleep while
-/// waiting for that asynchronously projected state.
+/// Replacement continues on the controller's reactive lifecycle plane; this
+/// command must not poll/sleep while waiting for that asynchronously projected
+/// state. The currently-live PID and binary inode are not completion proof: they
+/// may describe the pre-request supervisor while the background worker later
+/// rejects the replacement.
 fn report_supervisor_replacement_outcome(file: &Path, background_started: bool) {
+    let (warning, message) = supervisor_replacement_outcome_message(file, background_started);
+    if warning {
+        eprintln!("{message}");
+    } else {
+        println!("{message}");
+    }
+}
+
+fn supervisor_replacement_outcome_message(file: &Path, background_started: bool) -> (bool, String) {
     if !background_started {
-        eprintln!(
-            "[session] warning: no background replacement worker started for {}; the supervisor was NOT replaced.",
-            file.display()
+        return (
+            true,
+            format!(
+                "[session] warning: no background replacement worker started for {}; the supervisor was NOT replaced.",
+                file.display()
+            ),
         );
-        return;
     }
-    let Some(pid) = agent_doc_supervisor_io::process::supervisor_pid_for_doc(file) else {
-        println!(
-            "[session] supervisor replacement accepted; freshness proof is pending (no live supervisor has been projected yet)."
-        );
-        return;
-    };
-    let installed_binary_inode =
-        agent_doc_controller_io::project_controller::current_binary_identity()
-            .ok()
-            .and_then(|identity| agent_doc_fs::inode_of_path(&identity.path));
-    let running_binary_inode = agent_doc_fs::running_exe_inode_for_pid(pid);
-    if installed_binary_inode.is_some_and(|installed_binary_inode| {
-        agent_doc_supervisor::config::host_supervisor_maps_installed_binary(
-            running_binary_inode,
-            installed_binary_inode,
-        )
-    }) {
-        println!(
-            "[session] supervisor replacement proven live on the installed binary (pid {pid})."
-        );
-        return;
-    }
-    println!(
-        "[session] supervisor replacement accepted; freshness proof is pending (pid {pid} still maps the prior or an unverified binary)."
-    );
+    (
+        false,
+        "[session] supervisor replacement accepted; completion proof is pending on the controller lifecycle receipt."
+            .to_string(),
+    )
 }
 
 /// "Stop Agent": kill the harness child while keeping the supervisor alive at its
@@ -4166,6 +4159,15 @@ mod tests {
     use super::*;
     use parking_lot::Mutex;
     use std::sync::Arc;
+
+    #[test]
+    fn background_replacement_acceptance_is_not_reported_as_completion_proof() {
+        let (warning, message) =
+            supervisor_replacement_outcome_message(Path::new("tasks/contracts.md"), true);
+        assert!(!warning);
+        assert!(message.contains("completion proof is pending"));
+        assert!(!message.contains("proven live"));
+    }
 
     // `#stale-actor-pane-collision`: bugs2's supervised claude exited and its pane
     // %85 was reused by another Claude session while the stale actor record still

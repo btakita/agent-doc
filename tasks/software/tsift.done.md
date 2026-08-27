@@ -530,3 +530,4 @@
 - 2026-08-26 [#releasepublish17] Release and publish tsift 0.1.89 containing the #17 fix at commit 303291d.
 - 2026-08-26 [#fixopenissues] Fix the open issues on tsift github repo
 - 2026-08-27 [#fixopenissues] Please fix all open issues on [tsift](https://github.com/btakita/tsift)
+- 2026-08-27 [#fixhttpsgithub] Please fix https://github.com/btakita/tsift/issues/20 + release + publish

@@ -689,7 +689,34 @@ The release commit is `cc438b7` (`release: 0.1.91 -- source navigation fidelity`
 **Confidence / escalation**
 
 High confidence. No escalation is required. GitHub emitted only non-failing Node 20 action deprecation annotations; they did not affect publication.
-<!-- agent:boundary:8e328062:tsift -->
+
+### Re: Fix issue #20 and release tsift 0.1.92 — gpt-5.6
+
+Completed and published the full issue-20 follow-up.
+
+The fix covers all five reported gaps: `graph-db --json` is accepted before or after every subcommand; missing node, edge, incident, kind, and neighborhood targets fail closed with diagnostics and a refresh remedy; root graph projections federate every workspace scope and suppress unresolved evidence commands; ast-grep lines and columns are consistently 1-based; and BOM-only or BOM-plus-whitespace extraction candidates are skipped before model selection.
+
+Regression coverage was added for trailing JSON parsing, fail-closed graph lookups, workspace-wide graph projection and scope attribution, unresolved evidence suppression, ast-grep JSON/human coordinates, and BOM-only extraction. The graph, structural-pattern, search-navigation, and version specifications were updated.
+
+Verification completed successfully:
+
+- `make check` passed on the fix tree and again after the 0.1.92 version/generated-surface bump (workspace clippy, all unit/integration/doc tests, 40 graph-db conformance tests, npm tests, and npm pack check).
+- All 26 Cargo packages passed `cargo package --locked --allow-dirty --list`.
+- `npm run publish:check` passed for `opencode-tsift@0.1.92`.
+- The exact release tree was force-installed; `tsift --version` reports `0.1.92`.
+- Fix CI and release-commit CI are green: https://github.com/btakita/tsift/actions/runs/33053022213 and https://github.com/btakita/tsift/actions/runs/33053614259.
+
+Delivery and publication are complete:
+
+- Issue #20 is closed by fix commit `939ddd2`: https://github.com/btakita/tsift/issues/20
+- Release commit `2513610` is on `main`, and annotated tag `v0.1.92` resolves to that commit.
+- The Release workflow is green: https://github.com/btakita/tsift/actions/runs/33053620203
+- GitHub Release `v0.1.92` is public with Linux, macOS, and Windows archives plus SHA-256 files: https://github.com/btakita/tsift/releases/tag/v0.1.92
+- Every one of the 26 crates independently resolves from crates.io at `0.1.92`.
+- npm reports `opencode-tsift@0.1.92` as the `latest` dist-tag.
+
+The pre-existing dirty shared `src/tsift` checkout was preserved; implementation and release work ran in an isolated clean worktree. No additional backlog follow-up is needed because the requested fix, release, publication, and external verification are complete.
+<!-- agent:boundary:2b4bbe33:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue

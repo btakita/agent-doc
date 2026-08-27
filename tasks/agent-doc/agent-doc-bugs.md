@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -111,7 +111,7 @@ Operationally, I also stopped an accidental stale orchestration dispatch before 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 On tsift.md, I added the same queue item and the same backlog id was created `- do [#fixopenissues]`. Then agent-doc auto-struck the queue item. Please fix the act of adding a queue item with the same prompt that was previously run...since I want to repeat an action.
+- ~~On tsift.md, I added the same queue item and the same backlog id was created `- do [#fixopenissues]`. Then agent-doc auto-struck the queue item. Please fix the act of adding a queue item with the same prompt that was previously run...since I want to repeat an action.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a0403c-73aa-7011-ab60-a0b1466c0983
+  codex: 01a041a6-c307-70a0-8897-a4264df34934
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -84,7 +84,25 @@ Code commit: `5316b1818` (`fix: retire superseded compact continuations`). Paren
 > **Completed queue prompt:** Fix agent-doc causes of Compact Exchange on tsift.md failed: [compact] pending: the compacted target is retained for editor delivery and is not yet committed. Do not retry Compact Exchange while this target is pending; if delivery remains pending, restart the editor so its agent-doc plugin reconnects
 >
 > [compact] pending: existing continuation compact-projection-c91a04ba7db247c880ab58ff482850cb276e55550c0b743e0672f6d092857652-94c52d8e-d440-49e8-941c-6f26a20eeabd already owns this document (commit_requested=true)
-<!-- agent:boundary:64a22d63:agent-doc-bugs -->
+
+❯ `agent-doc-compact-io` owns the typed rebase/completion decision from retained targets plus converged authority.
+
+> **Queue prompt:** On tsift.md, I added the same queue item and the same backlog id was created `- do [#fixopenissues]`. Then agent-doc auto-struck the queue item. Please fix the act of adding a queue item with the same prompt that was previously run...since I want to repeat an action.
+
+### Re: repeatable queue work incarnations — gpt-5
+
+Fixed and released as agent-doc `0.35.289`.
+
+The failure was an incarnation bug: preflight treated every id in historical `agent:done` as permanently complete. When the same free-text action generated the stable id `#fixopenissues` again, that old completion record caused the new queue head to be struck immediately.
+
+Preflight now treats a newly admitted id, or an id backed by a currently open backlog item, as a fresh work incarnation. Those ids are excluded from the done-strike set until normal closeout reaps the live backlog item. Historical completion remains archived, while repeated maintenance passes preserve the new unchecked `- do [#fixopenissues]` head.
+
+I added the lifecycle contract to the document-format and orchestration specs and added an exact regression that starts with historical `#fixopenissues` completion, admits the same prompt/id again, runs maintenance repeatedly, and verifies the replacement head stays live. The 61 queue-maintenance tests, the full `agent-doc-preflight-io` package, and the clean versioned-tree `make check` all pass. The first clean-tree gate encountered four transient Lazily controller connection resets; every affected test passed in isolation and the standard full rerun passed.
+
+Source fix: `9047d6422` (`fix: preserve repeated queue work incarnations`). Release: `dc2ec7cef`, tag `v0.35.289`. Parent projection: `a694464a79`. `make install-full` installed `agent-doc 0.35.289`, its shared library, and the matching JetBrains package; the source and parent branches and release tag are pushed. The one-shot post-push checks found CI, Release, and PyPI workflows in progress.
+
+Operationally, I also stopped an accidental stale orchestration dispatch before it made any code changes; it did not influence this implementation or release.
+<!-- agent:boundary:fac83440:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -92,7 +110,8 @@ Code commit: `5316b1818` (`fix: retire superseded compact continuations`). Paren
 
 ## Pending / Not Built
 
-<!-- agent:queue priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 On tsift.md, I added the same queue item and the same backlog id was created `- do [#fixopenissues]`. Then agent-doc auto-struck the queue item. Please fix the act of adding a queue item with the same prompt that was previously run...since I want to repeat an action.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

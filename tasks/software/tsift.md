@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -634,13 +634,39 @@ Verification:
 Confidence: high. Escalation: none.
 
 Session accretion remains above the preferred size; no compaction was performed because this cycle had active queue work and no auto-compaction opt-in.
-<!-- agent:boundary:36d68aeb:tsift -->
+
+### Re: fix all open tsift issues — gpt-5
+
+Completed `#fixopenissues`. GitHub had one open issue, [#19](https://github.com/btakita/tsift/issues/19), and all six reported defects are fixed:
+
+- Search definitions and graph/explain edge coordinates are consistently one-based across human, JSON, tabular, and envelope output.
+- Shared response-budget truncation preserves leading indentation.
+- `search --scope <root>` selects the workspace-root index, and unknown-scope diagnostics include `<root>`.
+- Cached `too_large` extraction failures recommend the minimum known `--max-file-tokens` value instead of only suggesting `--force`.
+- Terminal-failure rows for missing, unsupported, empty, or whitespace-only files are pruned, including legacy zero-byte rows.
+- ASCII-whitespace-only source files are excluded from extraction candidates and cannot create phantom summaries.
+
+The canonical navigation/extraction specification, Unreleased notes, and regression coverage were updated with the implementation.
+
+Verification completed successfully:
+
+- `make check`: workspace Clippy, all Rust unit/integration/doc tests, OpenCode plugin tests, and package dry-run checks passed.
+- `cargo install --path .`: installed `tsift 0.1.90` from the fixed tree.
+- Focused regressions for source indentation, one-based search/graph coordinates, root scoping, cache hints, failure pruning, and whitespace candidates all passed.
+
+Delivery completed:
+
+- Commit `904f2e3` (`fix: preserve source navigation fidelity`) was pushed to `origin/main`.
+- The `Fixes #19` trailer closed the issue automatically; no open tsift issues remain.
+- CI run [33042807868](https://github.com/btakita/tsift/actions/runs/33042807868) is in progress for `904f2e3`; per the runbook this queued/running external check is recorded rather than waited on.
+
+The implementation was developed in an isolated clean worktree based on `origin/main`, so the unrelated uncommitted work in the shared `src/tsift` checkout was preserved. This exchange is large; compacting before a later cycle would reduce context cost.
+<!-- agent:boundary:3de6b0d1:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 release + publish
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

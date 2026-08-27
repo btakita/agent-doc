@@ -107,6 +107,22 @@ Shipped in `src/existence-lang/existence` at `b6be573` (parent gitlink `982237bc
 **Also changed:** the lay-definition and external-link extractors moved from `search.rs` into `markdown.rs` (`extract_definition` → `Option`, `extract_external_links`, `plain_text`) so search and export share one definition of "definition". README documents the command and the new `meta` keys; `Cargo.toml` version is unchanged (0.4.1), so `cargo install existence` users get this at the next release.
 
 **Not done / decisions left to you:** the push (CI validation of the real ontology only runs then; say `push` and I will); `#xlbaseiri` is next in the queue and now amounts to picking the IRI and writing it into `existence.toml`. Domain overlays from `CLAUDE.md` are not exported because the CLI does not parse them yet.
+
+### Re: do #xlbaseiri — base IRI decided and pinned — fable
+
+**Decision:** term IRI = `https://existence-lang.github.io/ontology/{term}` (scheme `https://existence-lang.github.io/ontology/`, rings at `…/ontology/ring/{n}`), `xl:` vocabulary at `https://existence-lang.github.io/ontology/vocab#`. Committed as ontology `87efffa`, existence `f354da3`, parent `3c24c9479`; **not pushed**.
+
+**Why this shape.** The ontology repo already deploys itself to GitHub Pages at `/ontology/` (live 200, no custom domain), so the namespace exists and is owned by the project. The alternatives were: `…/ontology/src/{term}` (dereferences today with zero config, but bakes the repo layout into a permanent identifier) and a `w3id.org` purl (best practice for long-lived ontologies, but needs a PR to `perma-id/w3id.org` from your account and would still redirect here). I went with the clean project namespace now; a w3id can be layered later as a redirect without changing anything here, though it would then be an alias rather than the canonical IRI.
+
+**What makes it real:**
+- `existence.toml` `[meta]` now pins `base_iri` and `vocab_iri` with a comment that changing them renames every published concept.
+- `_config.yml` adds a Jekyll front-matter default (`permalink: /:basename:output_ext` for `src/`) so `src/entity.md` renders at `/ontology/entity` instead of `/ontology/src/entity` ... the IRI itself dereferences to the term page. Relative `src/x.md` links in README and `./x.md` links between nodes are rewritten by `jekyll-relative-links`, so they follow the new URLs.
+- `vocab.md` documents `xl:ring`, `xl:ontology`, `xl:axiology`, `xl:ethics`, `xl:epistemology` (each `##` heading is the fragment target) plus the standard SKOS/RDFS properties used, so `vocab#ontology` resolves.
+- README gains an RDF / SKOS section; the CLI's `DEFAULT_VOCAB_IRI` moved from the org root site to `/ontology/vocab#` so the built-in default and the reference config agree.
+
+**Verified:** `make check` green (51 tests), export against the pinned config emits the new prefixes and `rapper` parses 2,732 triples, `existence lint` clean. **Not verifiable until push:** the permalink rewrite runs in the Pages build (no Ruby/Jekyll locally); `curl -sI …/ontology/entity` is 404 until the next deploy. That check is in the new `#xlpublishttl` item.
+
+Session-accretion is `warn` (2 no-op closeouts in 30 min from the earlier `.done.md` replica wedge); queue stays active. `stale_install` warning for `src/agent-doc` belongs to the concurrent agent-doc session, left alone.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
@@ -114,7 +130,7 @@ Shipped in `src/existence-lang/existence` at `b6be573` (parent gitlink `982237bc
 
 <!-- agent:queue priority go -->
 - ~~do [#xlexportskos]~~
-- do [#xlbaseiri]
+- ~~do [#xlbaseiri]~~
 - do [#xltypedlinks]
 - do [#xlsparql]
 <!-- /agent:queue -->
@@ -122,7 +138,7 @@ Shipped in `src/existence-lang/existence` at `b6be573` (parent gitlink `982237bc
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#xlbaseiri] [recommended] Decide the base IRI for term identity before any RDF export ships. Proposal: `https://existence-lang.github.io/ontology/{term}` (the site repo already exists; publish `ontology.ttl` there). Naming decision ... discuss to convergence first
+- [ ] [#xlpublishttl] Publish `ontology.ttl` + `ontology.jsonld` from the ontology Pages workflow: before the Jekyll build step in `src/existence-lang/ontology/.github/workflows/pages.yml`, install `existence` and run `existence --ontology . export` (+ `--format jsonld`) so `https://existence-lang.github.io/ontology/ontology.ttl` resolves. Needs the `export` command in an installable binary first ... push `existence@f354da3` and either cut a release (`make release`, bumps to 0.5.0) or `cargo install --git` in the workflow. Then verify live: `curl -sI https://existence-lang.github.io/ontology/entity` is 200 and `rapper -i turtle -c` parses the published .ttl
 - [ ] [#xltypedlinks] [recommended] Typed relations for richer SKOS/OWL: today every `[term](./term.md)` link is untyped so export can only emit skos:related. Options: link title attribute (`[term](./term.md "broader")`), a frontmatter `relations:` block, or derive broader/narrower from section position (Ontology-section links vs `#### [Sub](./sub.md)` Pattern Expression subheads) plus overlay `Derives From`→skos:broader. Spec change ... naming discussion first, then `existence lint` rule
 - [ ] [#xlsparql] [recommended] `existence sparql <query>` and a SPARQL endpoint on the planned `serve` command via the `oxigraph` crate behind a cargo feature (keeps the default binary small). Depends on [#xlexportskos]
 <!-- /agent:backlog -->
@@ -137,4 +153,5 @@ Shipped in `src/existence-lang/existence` at `b6be573` (parent gitlink `982237bc
 <!-- agent:done -->
 - 2026-08-26 [#existencelangintegrate] Can existence-lang integrate with ontology technologies such as OWL, RDF, and SPARQL?
 - 2026-08-27 [#xlexportskos] [recommended] `existence export --format turtle|jsonld` ... SKOS mapping (term→skos:Concept, lay definition→skos:definition, `[term](./term.md)` links→skos:related, rings→skos:Collection, external `<a href>` refs→rdfs:seeAlso). Hand-rolled Turtle writer + a `@context` for `lookup --json`; validate output with `riot --validate` in CI. Blocked on the base-IRI decision in [#xlbaseiri]
+- 2026-08-27 [#xlbaseiri] [recommended] Decide the base IRI for term identity before any RDF export ships. Proposal: `https://existence-lang.github.io/ontology/{term}` (the site repo already exists; publish `ontology.ttl` there). Naming decision ... discuss to convergence first
 <!-- /agent:done -->

@@ -63,6 +63,18 @@ class SyncLayoutActionTest {
     }
 
     @Test
+    fun `layout submission waits for native handoff completion`() {
+        val source = java.nio.file.Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/SyncLayoutAction.kt",
+        ).toFile().readText()
+        val reloadReadyIdx = source.indexOf("NativeReloadCoordinator.awaitReady()")
+        val submitIdx = source.indexOf("CpRouteClient.submitSyncTmuxLayout(")
+
+        assertTrue(reloadReadyIdx >= 0)
+        assertTrue(submitIdx > reloadReadyIdx)
+    }
+
+    @Test
     fun `sync failure message surfaces controller diagnostic`() {
         assertEquals(
             "Sync failed: pane creation failed in tmux session agent-doc",

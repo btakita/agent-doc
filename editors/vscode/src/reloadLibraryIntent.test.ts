@@ -19,16 +19,35 @@ describe('typed reload_library intent', () => {
         const extension = fs.readFileSync(path.join(srcDir, 'extension.ts'), 'utf-8');
         const start = extension.indexOf('case EditorIntent.ReloadLibrary:');
         assert.ok(start >= 0);
-        const handler = extension.slice(start, start + 500);
+        const handler = extension.slice(start, extension.indexOf('default:', start));
         assert.ok(handler.includes('native.forceReloadLib(projectRoot)'));
         assert.ok(handler.includes('this.crdtReplicas?.attachDocument('));
+        assert.ok(handler.includes('nativeReloadGate.begin()'));
+        assert.ok(handler.includes('await reload.completion'));
+        assert.ok(handler.includes('requestSurfaceObservation()'));
         assert.ok(extension.includes('if (!this.targetsSocketMessage(message))'));
         assert.ok(!extension.includes('createFileSystemWatcher('));
         assert.ok(!extension.includes('ReloadBroadcast'));
 
         const native = fs.readFileSync(path.join(srcDir, 'native.ts'), 'utf-8');
         assert.ok(native.includes('export function forceReloadLib('));
+        assert.ok(native.includes("NATIVE_HOT_RELOAD_CAPABILITY = 'native_hot_reload_generation_v1'"));
         assert.ok(!native.includes('reloadBroadcastFile'));
+    });
+
+    it('VS Code gates native actions and attaches Compact Exchange to its live replica', () => {
+        const extension = fs.readFileSync(path.join(srcDir, 'extension.ts'), 'utf-8');
+        const compactStart = extension.indexOf('async function compactExchangeAction()');
+        const compactEnd = extension.indexOf('async function runWithJunieAction()', compactStart);
+        const compact = extension.slice(compactStart, compactEnd);
+        assert.ok(compact.includes('nativeReloadGate.awaitReady('));
+        assert.ok(compact.includes('patchWatcher?.ensureOpenReplica('));
+
+        const syncStart = extension.indexOf('async function syncLayoutInternal(');
+        const syncEnd = extension.indexOf('// Feature 4: Editor Surface Reporting', syncStart);
+        const sync = extension.slice(syncStart, syncEnd);
+        assert.ok(sync.includes('nativeReloadGate.awaitReady('));
+        assert.ok(sync.indexOf('nativeReloadGate.awaitReady(') < sync.indexOf('native.syncTmuxLayoutJson('));
     });
 
     it('JetBrains reloads and refreshes replicas only from the typed intent', () => {

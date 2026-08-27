@@ -221,7 +221,7 @@ install-full:
 	@$(MAKE) install-editor-plugins
 	@$(MAKE) cleanup-build-artifacts
 
-# Keep every existing JetBrains agent-doc package on the source generation.
+# Keep every existing JetBrains and VS Code agent-doc package on the source generation.
 # The native cdylib and editor package are separate install surfaces: updating
 # only the former leaves running turns reporting the older package generation.
 install-editor-plugins:
@@ -230,6 +230,11 @@ install-editor-plugins:
 		agent-doc plugin install jetbrains --local --all-installed; \
 	else \
 		echo "No existing JetBrains agent-doc package; editor package sync skipped."; \
+	fi
+	@if agent-doc plugin list 2>/dev/null | grep -q '^vscode'; then \
+		agent-doc plugin install vscode --local; \
+	else \
+		echo "No existing VS Code agent-doc package; editor package sync skipped."; \
 	fi
 
 # A full release install leaves the executable, native library, and plugins in

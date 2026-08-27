@@ -107,6 +107,12 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   suppression. Visible restored files may therefore acquire missing panes
   without an imperative republish, while merely open background files remain
   outside the desired columns.
+- A native-library generation handoff has one shared five-second CRDT-worker
+  shutdown deadline across all open projects. Operator-triggered Compact
+  Exchange and manual layout sync wait on the handoff completion edge instead
+  of observing the intentional manager/listener removal window. After endpoint
+  restart, the coordinator republishes every open project's current editor
+  surface so tab/focus-to-tmux synchronization resumes without another click.
 - If passive `agent-doc sync --no-autostart ...` output from an older build reports that it preserved the current layout because a visible protected pane could not detach yet, JetBrains must treat that as deferred rather than complete for both the generic `[sync] sync preserved...` marker and the safe-passive `[sync] safe passive sync preserved...` marker: leave dedup state unchanged and schedule bounded retries until the requested selection applies or a newer request supersedes it.
 - If a passive sync terminal outcome contains `[sync] safe_passive_sync_lock_contention_retry`, JetBrains must treat the command as deferred, keep the dedup state unchanged, and retry the newest pending automatic selection/layout request rather than waiting for the CLI's full sync-lock budget. Manual `Sync Tmux Layout` uses Project Controller command supersede/admission instead of a long-lived editor-side native sync guard.
 - JetBrains split-editor focus follows both editor focus-gained events and editor mouse-press activation because Swing focus is not guaranteed to change on every click between already-open split editors. Consecutive events for the same markdown path are deduped locally, but alternating paths such as A -> B -> A must each attempt the Project Controller focus handoff.

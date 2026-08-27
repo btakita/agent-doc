@@ -34,6 +34,12 @@ import javax.swing.SwingUtilities
 private const val CRDT_LISTENER_WARN_MS = 10L
 private const val CRDT_WORKER_WARN_MS = 100L
 private const val NATIVE_RELOAD_WORKER_TIMEOUT_MS = 5_000L
+
+internal fun nativeReloadRemainingWaitMillis(deadlineNanos: Long, nowNanos: Long): Long? {
+    val remainingNanos = deadlineNanos - nowNanos
+    if (remainingNanos <= 0L) return null
+    return TimeUnit.NANOSECONDS.toMillis(remainingNanos).coerceAtLeast(1L)
+}
 private const val CRDT_EDT_WARN_MS = 50L
 private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L
 private const val CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS = 2_000L
@@ -2979,9 +2985,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 manager.executor.shutdownNow()
                 manager.documentWorkers.shutdownNow()
             }
-            val quiesced = managers.map { (_, manager) ->
-                manager.awaitWorkerTermination(NATIVE_RELOAD_WORKER_TIMEOUT_MS)
-            }.all { it }
+            // One native handoff owns one bounded outage. Giving every project
+            // its own five-second wait made the no-manager interval grow with
+            // the number of open projects (seven minutes in a live workspace).
+            val deadlineNanos = System.nanoTime() +
+                TimeUnit.MILLISECONDS.toNanos(NATIVE_RELOAD_WORKER_TIMEOUT_MS)
+            val quiesced = managers.all { (_, manager) ->
+                val remainingMs = nativeReloadRemainingWaitMillis(
+                    deadlineNanos,
+                    System.nanoTime(),
+                ) ?: return@all false
+                manager.awaitWorkerTermination(remainingMs)
+            }
             if (quiesced) {
                 managers.forEach { (_, manager) ->
                 manager.forwarders.forEach { (filePath, forwarder) ->
@@ -3287,6 +3302,27 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             forceRefresh: Boolean = false,
         ): Boolean {
             val manager = managerForFilePath(filePath)
+                ?: return false
+            return manager.ensureOpenDocumentReplica(filePath, document, editorText, await, forceRefresh)
+        }
+
+        /**
+         * Project-aware attach used by operator actions after a native-generation
+         * handoff. Reload temporarily removes every manager; once the handoff is
+         * complete it is safe to recreate the current project's manager instead
+         * of misreporting that the open editor has no owning controller.
+         */
+        fun ensureReplicaForOpenDocument(
+            project: Project,
+            filePath: String,
+            document: Document,
+            editorText: String? = null,
+            await: Boolean = false,
+            forceRefresh: Boolean = false,
+        ): Boolean {
+            if (project.isDisposed) return false
+            val manager = managerForFilePath(filePath)
+                ?: getInstance(project).takeIf { it.ownsFilePath(filePath) }
                 ?: return false
             return manager.ensureOpenDocumentReplica(filePath, document, editorText, await, forceRefresh)
         }

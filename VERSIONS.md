@@ -2,6 +2,35 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.292
+
+- **Fix: retained responses resume when the editor reconnects.**
+
+A successful live-editor replica registration now publishes the missing
+captured-finalize state edge when a durable response is waiting for exact editor
+delivery. The supervisor clears its prior `needs_operator` latch and retries the
+same retained capture; it does not manufacture a new closeout payload or force
+disk. Headless replicas remain quiet because they cannot acknowledge editor
+projection delivery.
+
+- **Fix: native reload no longer strands editor/controller actions.**
+
+JetBrains native-generation reload now gives all open project CRDT workers one
+shared five-second shutdown deadline instead of waiting five seconds per
+project. Compact Exchange and manual tmux layout sync wait for the reload
+completion edge, Compact Exchange safely recreates its project manager after
+the handoff, and the coordinator republishes every current editor surface after
+endpoint restart. VS Code now has the same coalesced reload gate: Compact
+Exchange refreshes the exact open replica before compacting, manual tmux sync
+waits for native
+readiness, and reload completion replays the current editor surface. This
+closes the minutes-long no-owner window behind the `contracts.md` attach error
+and the missing automatic/manual tmux sync when switching between `tsift.md`
+and `agent-doc-bugs.md` in either direction. The JetBrains plugin is bumped to
+`0.2.362`; the VS Code plugin is bumped to `0.2.67`. Full installs now detect
+and refresh existing packages for both editor families, so parity fixes cannot
+silently leave an older VS Code extension active.
+
 ## 0.35.291
 
 - **Fix: tmux selection and retained editor delivery now converge predictably.**

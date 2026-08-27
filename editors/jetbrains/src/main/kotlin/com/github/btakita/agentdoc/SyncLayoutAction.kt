@@ -390,6 +390,16 @@ class SyncLayoutAction : AnAction() {
 
         Thread {
                 try {
+                    if (!NativeReloadCoordinator.awaitReady()) {
+                        if (notify) {
+                            TerminalUtil.notifyError(
+                                project,
+                                "Sync deferred because the native-generation handoff did not " +
+                                    "finish within ${NativeReloadCoordinator.USER_ACTION_AWAIT_MS / 1_000} seconds.",
+                            )
+                        }
+                        return@Thread
+                    }
                     val columns = buildSyncColumns(
                         visibleMdFiles,
                         editorLayout,

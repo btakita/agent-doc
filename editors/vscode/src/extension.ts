@@ -64,6 +64,7 @@ import {
     type ReplicaTextChange,
 } from './crdtReplica.js';
 import { registerReliableSyncLiveness } from './reliableSyncLiveness.js';
+import { NativeReloadGate } from './nativeReloadGate.js';
 import {
 decideIdeTerminalAttach,
 IdeTerminalAttachDecision,
@@ -85,6 +86,8 @@ const EDITOR_SURFACE_CLIENT_GENERATION = monotonicMillis();
 const EDITOR_SURFACE_OBSERVE_TIMEOUT_MS = 40_000;
 const EDITOR_SURFACE_FORGET_TIMEOUT_MS = 2_000;
 const LAZILY_CURRENT_OBSERVATION_DELAY_MS = 75;
+const NATIVE_RELOAD_ACTION_TIMEOUT_MS = 30_000;
+const nativeReloadGate = new NativeReloadGate();
 
 function monotonicMillis(): number {
     return Number(process.hrtime.bigint() / 1_000_000n);
@@ -1598,7 +1601,16 @@ async function compactExchangeAction(): Promise<void> {
     }
 
     try {
+        if (!(await nativeReloadGate.awaitReady(NATIVE_RELOAD_ACTION_TIMEOUT_MS))) {
+            throw new Error('native reload did not complete before Compact Exchange timed out');
+        }
         if (!(await ensureDocumentCleanForCommand(editor.document.uri.fsPath, 'Compact exchange'))) return;
+        if (!(await patchWatcher?.ensureOpenReplica(
+            editor.document.uri.fsPath,
+            editor.document.getText(),
+        ))) {
+            throw new Error('the open editor replica could not be attached to its project controller');
+        }
         const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
         const output = await runCli(['compact', rel, '--component', 'exchange', '--commit'], cwd);
         showHint(output || `Compacted exchange for ${rel}`);
@@ -1945,6 +1957,9 @@ async function syncLayoutInternal(root: string, notify: boolean, noAutostart: bo
     }
 
 try {
+if (!(await nativeReloadGate.awaitReady(NATIVE_RELOAD_ACTION_TIMEOUT_MS))) {
+throw new Error('native reload did not complete before tmux layout sync timed out');
+}
 const effectiveFocusFile = focusFile ?? flattenVisibleColumns(visibleColumns)[0];
 if (!noAutostart) {
 await prepareIdeTerminal(root, effectiveFocusFile);
@@ -2334,6 +2349,10 @@ class PatchWatcher implements vscode.Disposable {
         this.outputChannel = vscode.window.createOutputChannel('Agent Doc Patches');
     }
 
+    async ensureOpenReplica(filePath: string, text: string): Promise<boolean> {
+        return await this.crdtReplicas?.attachDocument(filePath, text, true) ?? false;
+    }
+
     start(): void {
         this.disposed = false;
         const projectRoot = this.findProjectRoot();
@@ -2591,12 +2610,29 @@ class PatchWatcher implements vscode.Disposable {
             case EditorIntent.RefreshVcs:
                 if (filePath) await refreshVcsForFile(filePath);
                 return 1;
-            case EditorIntent.ReloadLibrary:
-                native.forceReloadLib(projectRoot);
-                for (const snapshot of this.currentProjectMarkdownSnapshots(projectRoot)) {
-                    await this.crdtReplicas?.attachDocument(snapshot.filePath, snapshot.text, true);
+            case EditorIntent.ReloadLibrary: {
+                const reload = nativeReloadGate.begin();
+                if (!reload.owner) {
+                    return await reload.completion ? 1 : 0;
                 }
-                return 1;
+                let succeeded = false;
+                try {
+                    if (!native.forceReloadLib(projectRoot)) return 0;
+                    let replicasAttached = true;
+                    for (const snapshot of this.currentProjectMarkdownSnapshots(projectRoot)) {
+                        if (!(await this.crdtReplicas?.attachDocument(
+                            snapshot.filePath,
+                            snapshot.text,
+                            true,
+                        ))) replicasAttached = false;
+                    }
+                    requestSurfaceObservation();
+                    succeeded = replicasAttached;
+                    return succeeded ? 1 : 0;
+                } finally {
+                    reload.complete(succeeded);
+                }
+            }
             default:
                 return 0;
         }

@@ -39,6 +39,7 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
   to the desired columns.
 - Repeated clicks between already-open split editors must continue to move tmux focus. The immediate focus handoff is deduped only against the last immediate active editor path, not against the last completed automatic sync state, so rapid A -> B -> A switches cannot be skipped by a stale debounced sync snapshot.
 - Automatic sync subprocesses use a short timeout with exponential retry backoff. A slow tmux/controller repair must not cause repeated 30s automatic sync attempts while the user is only changing focus or tabs. Manual `Sync Tmux Layout` and `Load Tmux Window` use the Project Controller `sync_tmux_layout` receipt path.
+- Native-library reload is one coalesced completion event. Manual `Sync Tmux Layout` waits for that event before entering the native bridge, and the reload owner republishes the current editor surface after every open CRDT replica has reattached. A tab switch in either direction during reload therefore converges after handoff instead of being dropped.
 
 ## Patch Application Safety
 
@@ -61,6 +62,7 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
   buffer or disk.
 - VS Code activation must not run automatic `agent-doc resync`, `resync --fix`, or a reconnect-reread scan over open buffers. Session repair/audit remains an explicit `Resync / Fix Sessions` operator action only.
 - Prompt steering is Project Controller-owned. VS Code must not treat stale supervisor freshness as an editor-IPC apply/receipt/repair veto; supervisor recycle is only an explicit session action.
+- `Compact Exchange` waits for native reload completion and force-refreshes the exact clean open document replica before invoking the CLI. A missing project-controller attachment is a terminal action error; the extension does not compact from a disk-only snapshot.
 
 ## External Disk Pending Parity
 

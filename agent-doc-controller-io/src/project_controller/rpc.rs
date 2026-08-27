@@ -82,6 +82,7 @@ const DOCUMENT_DELIVERY_WAKE_TYPE_TAG: &str = "agent-doc.document-delivery-wake.
 const EDITOR_SURFACE_PROJECTION_TYPE_TAG: &str = "agent-doc.editor-surface.projection.v1";
 pub const CAPTURED_FINALIZE_WAKE_STATE_CHANNEL: &str = "agent-doc/captured-finalize/wake/v1";
 const CAPTURED_FINALIZE_WAKE_TYPE_TAG: &str = "agent-doc.captured-finalize.wake.v1";
+const EDITOR_REPLICA_REGISTERED_REACTIVE_REASON: &str = "editor_replica_registered";
 static PANE_LAYOUT_STATUS_EPOCH: AtomicU64 = AtomicU64::new(1);
 static DOCUMENT_DELIVERY_WAKE_EPOCH: AtomicU64 = AtomicU64::new(1);
 static CAPTURED_FINALIZE_WAKE_EPOCH: AtomicU64 = AtomicU64::new(1);
@@ -9385,6 +9386,18 @@ fn controller_crdt_replica_data(
                         .context(
                             "registered replica is missing its retained canonical receipt queue",
                         )?;
+                        if resolved_editor_pid.is_some() {
+                            // `#retainededitorarrival`: a captured finalize may have
+                            // stopped while no editor projection could accept its exact
+                            // target. A successful live-editor registration is the
+                            // missing state edge; publish it so the keyed supervisor
+                            // worker clears `needs_operator` and retries the same capture.
+                            // Headless replicas cannot acknowledge editor delivery and
+                            // therefore must not manufacture this wake.
+                            publish_retained_capture_wake_after_editor_replica_registration(
+                                runtime, canonical,
+                            );
+                        }
                     }
                     let canonical_projection_retained =
                         durable_projection_retained || registration.canonical_projection_retained;
@@ -9536,6 +9549,38 @@ fn controller_crdt_replica_data(
             }
         }
     }
+}
+
+fn publish_retained_capture_wake_after_editor_replica_registration(
+    runtime: Option<&ControllerRuntime>,
+    canonical: &Path,
+) -> bool {
+    let Some(runtime) = runtime else {
+        return false;
+    };
+    let document_hash = agent_doc_hash::document_id_for_path(canonical);
+    let projection = match runtime.document_state_projection(&document_hash) {
+        Ok(Some(projection)) => projection,
+        Ok(None) => return false,
+        Err(error) => {
+            // Registration already succeeded. Keep its acknowledgement available
+            // and record the advisory wake failure instead of turning that success
+            // into a reconnect loop.
+            agent_doc_ops_log_io::log_op(
+                canonical,
+                &format!(
+                    "captured_finalize_editor_registration_wake_deferred file={} error={error:#}",
+                    canonical.display(),
+                ),
+            );
+            return false;
+        }
+    };
+    publish_captured_finalize_wake(
+        runtime,
+        &projection,
+        EDITOR_REPLICA_REGISTERED_REACTIVE_REASON,
+    )
 }
 
 fn base64_standard_encode(bytes: &[u8]) -> String {
@@ -29969,6 +30014,122 @@ mod tests {
 
         agent_doc_crdt_relay_io::deregister_editor_replica_for_file(&canonical, &identity, pid)
             .unwrap();
+    }
+
+    #[test]
+    fn retained_capture_is_rearmed_when_a_live_editor_replica_registers() {
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("retained-editor-arrival.md");
+        let baseline = "# Session\n";
+        let response = "\n### Re: done\n\nRecovered response.\n";
+        let target = format!("{baseline}{response}");
+        std::fs::write(&file, baseline).unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+
+        append_apply_state_event(
+            &bootstrap,
+            &runtime,
+            agent_doc_state_backbone::StateEvent::new(
+                "retained-editor-arrival-capture",
+                agent_doc_state_backbone::StateFact::ResponseCaptured {
+                    document_hash: document_hash.clone(),
+                    cycle_id: "cycle-retained-editor-arrival".to_string(),
+                    capture_id: "capture-retained-editor-arrival".to_string(),
+                    response_sha256: agent_doc_hash::content_hash(response),
+                    response_body: Some(response.to_string()),
+                    intent_body: None,
+                    mutation_plan_json: None,
+                    file_hash: None,
+                    snapshot_hash: None,
+                    baseline_content: None,
+                },
+            ),
+        )
+        .unwrap();
+        append_apply_state_event(
+            &bootstrap,
+            &runtime,
+            agent_doc_state_backbone::StateEvent::new(
+                "retained-editor-arrival-write",
+                agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+                    document_hash: document_hash.clone(),
+                    intent_id: "intent-retained-editor-arrival".to_string(),
+                    expected_hash: agent_doc_hash::content_hash(baseline),
+                    expected_content: Some(baseline.to_string()),
+                    target_hash: agent_doc_hash::content_hash(&target),
+                    target_content: target,
+                    source: agent_doc_state_backbone::DocumentWriteSource::PendingWrite,
+                    reason: agent_doc_state_backbone::DocumentWriteDeferredReason::EditorProjectionPending,
+                },
+            ),
+        )
+        .unwrap();
+        clear_captured_finalize_wake(&runtime, &document_hash);
+
+        let payload = |editor_pid| ControllerCrdtReplicaPayload {
+            method: ControllerCrdtReplicaMethod::Register,
+            identity: None,
+            state_vector_b64: None,
+            update_b64: None,
+            content_hash: None,
+            disk_persisted: false,
+            awareness_b64: None,
+            source: Some("retained-editor-arrival-test".into()),
+            editor_pid,
+        };
+        controller_crdt_replica_data(
+            Some(&runtime),
+            &canonical,
+            ControllerCrdtReplicaMethod::Register,
+            "headless-retained-observer",
+            &payload(None),
+        )
+        .unwrap();
+        assert!(
+            runtime
+                .captured_finalize_wakes
+                .lock()
+                .get(&document_hash)
+                .is_none(),
+            "a headless replica cannot satisfy editor delivery and must remain quiet"
+        );
+        agent_doc_crdt_relay_io::deregister_replica_for_file(
+            &canonical,
+            "headless-retained-observer",
+        )
+        .unwrap();
+
+        let editor_pid = std::process::id();
+        let editor_identity = format!("jetbrains-{editor_pid}-retained-editor-arrival");
+        controller_crdt_replica_data(
+            Some(&runtime),
+            &canonical,
+            ControllerCrdtReplicaMethod::Register,
+            &editor_identity,
+            &payload(Some(editor_pid)),
+        )
+        .unwrap();
+        let wake = runtime
+            .captured_finalize_wakes
+            .lock()
+            .get(&document_hash)
+            .cloned()
+            .expect("live editor registration must re-arm the retained capture");
+        assert_eq!(wake.cycle_id, "cycle-retained-editor-arrival");
+        assert_eq!(wake.capture_id, "capture-retained-editor-arrival");
+        assert_eq!(wake.response_sha256, agent_doc_hash::content_hash(response));
+        assert_eq!(wake.reason, EDITOR_REPLICA_REGISTERED_REACTIVE_REASON);
+
+        agent_doc_crdt_relay_io::deregister_editor_replica_for_file(
+            &canonical,
+            &editor_identity,
+            editor_pid,
+        )
+        .unwrap();
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-document-realtime"
-version = "0.35.291"
+version = "0.35.292"
 edition = "2024"
 description = "Realtime document authority state machine for agent-doc"
 license = "MIT"
@@ -11,25 +11,25 @@ publish = false
 name = "agent_doc_document_realtime"
 
 [dependencies]
-agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.291" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.292" }
 # `#relaylockpoison`: locks here are parking_lot, not `std::sync` — the workspace
 # keeps `panic=unwind` so the cdylib's `catch_unwind` guards survive a panic in a
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.291" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.291" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.291" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.291" }
-agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.35.291" }
-agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.291" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.291" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.291" }
-agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.291" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.291" }
-agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.291" }
-agent-doc-template = { path = "../agent-doc-template", version = "0.35.291" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.291" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.292" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.292" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.292" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.292" }
+agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.35.292" }
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.292" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.292" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.292" }
+agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.292" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.292" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.292" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.35.292" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.292" }
 anyhow = "1"
 lazily = { version = "0.56.1", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }

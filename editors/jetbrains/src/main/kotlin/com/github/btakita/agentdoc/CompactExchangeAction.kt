@@ -53,8 +53,10 @@ class CompactExchangeAction : AnAction() {
                 // infer detached disk authority behind an open IntelliJ buffer.
                 val editorText = document.text
                 ApplicationManager.getApplication().executeOnPooledThread {
-                    val attached =
+                    val reloadReady = NativeReloadCoordinator.awaitReady()
+                    val attached = reloadReady &&
                         CrdtReplicaManager.ensureReplicaForOpenDocument(
+                            project,
                             file.path,
                             document,
                             editorText = editorText,
@@ -72,7 +74,12 @@ class CompactExchangeAction : AnAction() {
                             // the controller, which is usually healthy and reports ready —
                             // observed twice on 2026-08-11, where the real cause was an IDE
                             // running a plugin generation older than the installed jar.
-                            val reason = CrdtReplicaManager.lastAttachFailureReason(file.path)
+                            val reason = if (reloadReady) {
+                                CrdtReplicaManager.lastAttachFailureReason(file.path)
+                            } else {
+                                "the native-generation handoff did not finish within " +
+                                    "${NativeReloadCoordinator.USER_ACTION_AWAIT_MS / 1_000} seconds"
+                            }
                             val remedy = reason?.let { CrdtReplicaManager.attachFailureRemedy(it) }
                             TerminalUtil.notifyError(
                                 project,

@@ -5,7 +5,7 @@ resume:
 claude_model: fable
 agent_doc_format: template
 agent_doc_write: crdt
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -141,16 +141,27 @@ Shipped: existence `4ccec0a`, spec `2c81a54` (rule 12), ontology `a3d5684` (mirr
 **Verification:** `make check` green, 53 tests (new: typed-link parsing, export hierarchy + inverses + ring filter, lint unknown/conflict/broken cases, escaped Turtle literal). Spec rule 12 added to `existence-lang/spec` and mirrored into the ontology's older SPEC copy (that copy also lacks rule 10 from upstream; left as found).
 
 **Not done:** no node was retitled ... which kernel links are hierarchical is a content decision, filed as `#xltypekernel [recommended]`. Domain-overlay `Derives From` → `skos:broader` still needs the CLI to parse `CLAUDE.md` overlays (not started). Exchange is 108+ lines with the queue active; continuing per the accretion guidance.
+
+### Re: do #xlsparql — `existence sparql` + SPARQL endpoint behind a feature — fable
+
+Shipped: existence `1fe3973`, parent `61dbea34d`; **not pushed**.
+
+**What landed** (all behind `--features sparql`, so the default binary and the release builds are unchanged):
+- `existence sparql <query|->` ... loads `export`'s Turtle into an in-memory Oxigraph 0.5 store (RocksDB feature off) and runs the query. SELECT/ASK print a text table by default, `--format json|csv|tsv|xml` for the standard result formats; CONSTRUCT/DESCRIBE come back as Turtle. `-` reads a multi-line query from stdin. `skos:`, `rdfs:`, `dcterms:`, `xsd:`, `xl:`, and `:` (base IRI, so `:entity`) are pre-declared unless the query declares them itself.
+- `existence serve [--port 3030]` ... the previously "planned" command is now a SPARQL Protocol endpoint on `127.0.0.1` via `tiny_http`: `GET /sparql?query=…`, `POST` with `application/sparql-query` or a form `query=`, `Accept` picks JSON (default) / CSV / TSV / XML, and 404 / 400 / 405 for wrong path, bad or missing query, wrong method.
+- Without the feature both commands fail with one line telling you to rebuild with `cargo install existence --features sparql`.
+
+**Verification:** `make check` now covers both feature sets and is green (56 tests default, 58 with `sparql`; new: URL decoding, form params, Accept mapping, request-shape parsing, and engine tests for SELECT/ASK/CONSTRUCT, implicit vs explicit prefixes, syntax and format errors). CI runs clippy + tests with the feature too. Live against the real ontology: 117 `skos:Concept`s; Ring 0 members with definitions; the endpoint answered GET→JSON, POST→CSV (`Entity`), form ASK→`false`, CONSTRUCT→Turtle with prefixes, and the four error codes as designed.
+
+**A finding from the first real query:** `SELECT ?t WHERE { ?t a skos:Concept FILTER NOT EXISTS { ?x skos:related ?t } }` lists concepts no other node links to ... `integrity`, `pneuma`, `project`, and more. That is an editorial signal (isolated terms), worth a pass when typing the kernel links (`#xltypekernel`).
+
+**Cost:** the `sparql` build pulls in oxigraph's pure-Rust stack (~+2–3 min cold compile, a much larger binary), which is exactly why it is a feature and not the default. This closes the four-item RDF/OWL/SPARQL arc: export (`#xlexportskos`), identity (`#xlbaseiri`), typed links (`#xltypedlinks`), query (`#xlsparql`). Everything is committed locally across `existence`, `ontology`, and `spec`; nothing is pushed, and `#xlpublishttl` (publish the `.ttl` from the Pages workflow) plus `#xltypekernel` remain in backlog. Exchange is ~130 lines; queue drains with this item.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- ~~do [#xlexportskos]~~
-- ~~do [#xlbaseiri]~~
-- ~~do [#xltypedlinks]~~
-- do [#xlsparql]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -158,7 +169,6 @@ Shipped: existence `4ccec0a`, spec `2c81a54` (rule 12), ontology `a3d5684` (mirr
 <!-- agent:backlog -->
 - [ ] [#xltypekernel] [recommended] Type the Ring 0 kernel links: for each of the 14 kernel nodes in `src/existence-lang/ontology/src`, retitle the Ontology-section links that are genuinely hierarchical at the term's own scope (`[information](./information.md "broader")`, `[system](./system.md "narrower")`), leave passing mentions untitled, run `existence lint` (warns on conflicts) and `existence export` to check the resulting skos:broader/narrower graph reads correctly. This is editorial ... the philosophy decides what is broader, so review each edit
 - [ ] [#xlpublishttl] Publish `ontology.ttl` + `ontology.jsonld` from the ontology Pages workflow: before the Jekyll build step in `src/existence-lang/ontology/.github/workflows/pages.yml`, install `existence` and run `existence --ontology . export` (+ `--format jsonld`) so `https://existence-lang.github.io/ontology/ontology.ttl` resolves. Needs the `export` command in an installable binary first ... push `existence@f354da3` and either cut a release (`make release`, bumps to 0.5.0) or `cargo install --git` in the workflow. Then verify live: `curl -sI https://existence-lang.github.io/ontology/entity` is 200 and `rapper -i turtle -c` parses the published .ttl
-- [ ] [#xlsparql] [recommended] `existence sparql <query>` and a SPARQL endpoint on the planned `serve` command via the `oxigraph` crate behind a cargo feature (keeps the default binary small). Depends on [#xlexportskos]
 <!-- /agent:backlog -->
 
 ## Icebox
@@ -173,4 +183,5 @@ Shipped: existence `4ccec0a`, spec `2c81a54` (rule 12), ontology `a3d5684` (mirr
 - 2026-08-27 [#xlexportskos] [recommended] `existence export --format turtle|jsonld` ... SKOS mapping (term→skos:Concept, lay definition→skos:definition, `[term](./term.md)` links→skos:related, rings→skos:Collection, external `<a href>` refs→rdfs:seeAlso). Hand-rolled Turtle writer + a `@context` for `lookup --json`; validate output with `riot --validate` in CI. Blocked on the base-IRI decision in [#xlbaseiri]
 - 2026-08-27 [#xlbaseiri] [recommended] Decide the base IRI for term identity before any RDF export ships. Proposal: `https://existence-lang.github.io/ontology/{term}` (the site repo already exists; publish `ontology.ttl` there). Naming decision ... discuss to convergence first
 - 2026-08-27 [#xltypedlinks] [recommended] Typed relations for richer SKOS/OWL: today every `[term](./term.md)` link is untyped so export can only emit skos:related. Options: link title attribute (`[term](./term.md "broader")`), a frontmatter `relations:` block, or derive broader/narrower from section position (Ontology-section links vs `#### [Sub](./sub.md)` Pattern Expression subheads) plus overlay `Derives From`→skos:broader. Spec change ... naming discussion first, then `existence lint` rule
+- 2026-08-27 [#xlsparql] [recommended] `existence sparql <query>` and a SPARQL endpoint on the planned `serve` command via the `oxigraph` crate behind a cargo feature (keeps the default binary small). Depends on [#xlexportskos]
 <!-- /agent:done -->

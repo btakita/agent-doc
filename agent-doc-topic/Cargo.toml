@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-topic"
-version = "0.35.288"
+version = "0.35.289"
 edition = "2024"
 description = "Pure exchange topic-section parsing for agent-doc documents"
 license = "MIT"

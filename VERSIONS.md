@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.289
+
+- **Fix: repeated queue instructions keep their new work incarnation live.**
+
+When a free-text queue prompt intentionally reuses a stable backlog id that is
+already present in `agent:done`, the current open backlog item now overrides
+that historical completion. Preflight excludes newly admitted and currently
+open ids from its done-strike set until normal closeout reaps the live backlog
+item, so repeating an action no longer auto-strikes the replacement queue head.
+Regression coverage exercises admission and repeated maintenance passes for the
+same completed id.
+
 ## 0.35.288
 
 - **Fix: installs now recycle every open supervisor.**

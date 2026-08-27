@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
-  codex: 01a03e9e-2550-78e2-bd4c-da24846dd17d
+  codex: 01a0403c-e9a8-7781-87ac-12dfd538bf4b
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -614,12 +614,33 @@ The implementation used an isolated worktree based on current `origin/main`; the
 Confidence: high. Escalation: none.
 
 Operational note: agent-doc preflight warned that the installed agent-doc binary predates local agent-doc source and that the session has accreted context. I did not reinstall unrelated agent-doc tooling or compact without approval.
+
+### Re: Release and publish tsift 0.1.90 — gpt-5
+
+Released and published tsift 0.1.90 from commit `0e7e006180725414ab3fc0ddc559f2822212938f` under annotated tag `v0.1.90`.
+
+Changed paths: 61 release-owned paths covering workspace/package manifests and `Cargo.lock`, `VERSIONS.md`, generated code-navigation instructions, and synchronized OpenCode command/package surfaces. The pre-existing dirty `src/tsift` checkout in the parent workspace was preserved untouched; release work used an isolated clean worktree.
+
+Commands: versioned all 26 Cargo packages and the npm plugin; regenerated instruction surfaces with `cargo run --quiet -- init . --opencode`; ran `cargo check --workspace`, `make check`, `cargo install --path . --locked`, package-list validation for all 26 crates, `npm run publish:check`, pushed the release commit to `origin/main`, then pushed `v0.1.90`.
+
+Verification:
+- Local checks passed, the installed binary reports `tsift 0.1.90`, and the clean release worktree has no uncommitted changes.
+- Main CI run 33025600317 passed.
+- Release run 33026762876 passed its immutable-tag validation, Linux/Windows/Apple Silicon builds, GitHub Release creation, crates.io trusted publishing, and npm trusted publishing.
+- GitHub Release: https://github.com/btakita/tsift/releases/tag/v0.1.90 with three platform archives and three SHA-256 assets.
+- crates.io independently reports `0.1.90` for every one of the 26 workspace packages; npm reports `opencode-tsift@0.1.90`.
+- The remote annotated tag dereferences to `0e7e006180725414ab3fc0ddc559f2822212938f`, and the repository has no open GitHub issues.
+
+Confidence: high. Escalation: none.
+
+Session accretion remains above the preferred size; no compaction was performed because this cycle had active queue work and no auto-compaction opt-in.
 <!-- agent:boundary:36d68aeb:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

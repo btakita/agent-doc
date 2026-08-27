@@ -99,6 +99,16 @@ Released the fixes as agent-doc `0.35.292` in commit `6f2cfe516` and tag `v0.35.
 Verification passed: the complete `make check` suite (twice after the final install-target change), JetBrains tests/build/signing, all 179 VS Code tests, plugin version checks, and local package installation. Both project controllers are now fresh and stable on `0.35.292`; the `tsift.md` supervisor has already recycled to the new inode. Release and PyPI CI runs were queued with no immediate failure.
 
 The remaining live-document step is an IDE-host restart: the installed JetBrains package is `0.2.362`, but the running host still reports `0.2.361`, and JetBrains requires restart to activate the Kotlin package generation. Until that restart, `tsift.md` remains safely retained at `editor_projection_pending`; `contracts.md` has moved past the missing-replica pending-write report but still has an open captured response and an old supervisor. No new closeout payload, commit, force-disk, finalize, or document recycle was issued. After restarting the IDE and reopening/attaching the two tabs, retry only `agent-doc session-check` for each document.
+
+### Re: Response
+
+Session checks completed once per document:
+
+- `agent-doc-bugs.md`: **OK** — cycle committed successfully.
+- `tsift.md`: **Still interrupted** — retained response remains blocked on `editor_projection_pending`; the captured response is not yet visible in IDEA.
+- `contracts.md`: **Still interrupted** — cycle remains `response_captured`, and its route-owned supervisor PID is stale.
+
+No replay, commit, force-disk, recycle, or supervisor restart was performed. Restarting IDEA cleared `agent-doc-bugs.md`, but not the other two states.
 <!-- agent:boundary:d82d31f6:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

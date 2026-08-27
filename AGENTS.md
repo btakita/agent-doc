@@ -342,12 +342,12 @@ editors/
 6. Branch → PR → squash merge to main (or commit + push to main directly in this dogfooding repo)
 7. Tag: `git tag v<version> && git push origin v<version>`
 8. The tag push drives both publishes in CI: `.github/workflows/release.yml`
-   builds the five target binaries and runs `gh release create` (GitHub
+   builds the six target binaries and runs `gh release create` (GitHub
    Release), and `.github/workflows/pypi.yml` builds and uploads the wheels
    (PyPI). Every agent-doc Cargo package has `publish = false`, so there is no
    crates.io step.
 9. Verify both runs went green (`gh run list --limit 5`) and that
-   `gh release view v<version>` lists five assets. If PyPI needs a rerun, use
+   `gh release view v<version>` lists six assets. If PyPI needs a rerun, use
    `gh workflow run PyPI --ref v<version>`; the local fallback is
    `make publish-pypi`.
 
@@ -454,7 +454,7 @@ history without introducing a second document model.
 
 agent-doc extends the existence kernel vocabulary with domain-specific terms. See the full ontology table in [README.md](README.md#domain-ontology).
 
-<!-- tsift:code-navigation v=0.1.88 -->
+<!-- tsift:code-navigation v=0.1.93 -->
 ## Code Navigation
 
 Run `tsift status` at session start from the owning repo root. If the task or file lives under a git submodule (for example `src/tsift/...`), switch to that submodule root first so the harness loads the narrower local instructions and repo state instead of the superproject root. `tsift status` repairs the `.tsift/` index state it owns and never rewrites tracked files (`--no-fix` skips even that). If status reports stale or missing instructions, run `tsift init` to refresh the tracked Code Navigation block and runbook; it names every tracked file it rewrites or moves. When the harness cannot perform write commands, ask the user to run the printed `run:` command instead.

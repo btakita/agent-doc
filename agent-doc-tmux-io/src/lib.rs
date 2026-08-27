@@ -81,9 +81,19 @@ impl Default for TmuxIoConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TmuxIoError {
-    Spawn { binary: String, message: String },
-    Failed { code: Option<i32>, stderr: String },
-    Utf8 { message: String },
+    Spawn {
+        binary: String,
+        message: String,
+    },
+    Failed {
+        binary: String,
+        code: Option<i32>,
+        stderr: String,
+    },
+    Utf8 {
+        message: String,
+    },
+    EmptyCurrentPane,
 }
 
 impl fmt::Display for TmuxIoError {
@@ -92,10 +102,15 @@ impl fmt::Display for TmuxIoError {
             Self::Spawn { binary, message } => {
                 write!(f, "failed to spawn {binary}: {message}")
             }
-            Self::Failed { code, stderr } => {
-                write!(f, "tmux command failed with status {code:?}: {stderr}")
+            Self::Failed {
+                binary,
+                code,
+                stderr,
+            } => {
+                write!(f, "{binary} command failed with status {code:?}: {stderr}")
             }
             Self::Utf8 { message } => write!(f, "tmux output was not utf-8: {message}"),
+            Self::EmptyCurrentPane => write!(f, "tmux returned an empty current pane id"),
         }
     }
 }
@@ -154,7 +169,7 @@ impl TmuxCommandRunner for ProcessTmuxRunner {
                     message: err.to_string(),
                 })?;
 
-            tmux_output_to_string(output)
+            tmux_output_to_string(output, &self.config.binary)
         })
     }
 }
@@ -167,11 +182,11 @@ impl TmuxCommandRunner for tmux_router::Tmux {
                     .args(command.args())
                     .output()
                     .map_err(|err| TmuxIoError::Spawn {
-                        binary: "tmux".to_string(),
+                        binary: self.binary_path().display().to_string(),
                         message: err.to_string(),
                     })?;
 
-            tmux_output_to_string(output)
+            tmux_output_to_string(output, &self.binary_path().display().to_string())
         })
     }
 }
@@ -182,9 +197,10 @@ impl TmuxCommandRunner for tmux_router::IsolatedTmux {
     }
 }
 
-fn tmux_output_to_string(output: Output) -> Result<String, TmuxIoError> {
+fn tmux_output_to_string(output: Output, binary: &str) -> Result<String, TmuxIoError> {
     if !output.status.success() {
         return Err(TmuxIoError::Failed {
+            binary: binary.to_string(),
             code: output.status.code(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         });
@@ -267,20 +283,28 @@ pub fn target_pane_id(runner: &(impl TmuxCommandRunner + ?Sized), target: &str) 
     display_message_value_nonempty(runner, Some(target), "#{pane_id}")
 }
 
-pub fn current_pane_id(runner: &(impl TmuxCommandRunner + ?Sized)) -> Option<String> {
-    display_message_value_nonempty(runner, None, "#{pane_id}")
+pub fn current_pane_id(runner: &(impl TmuxCommandRunner + ?Sized)) -> Result<String, TmuxIoError> {
+    let output = runner.run(&display_message(None, "#{pane_id}"))?;
+    let pane = output.trim();
+    if pane.is_empty() {
+        Err(TmuxIoError::EmptyCurrentPane)
+    } else {
+        Ok(pane.to_string())
+    }
 }
 
 pub fn current_pane_id_from_env_or_tmux(
     runner: &(impl TmuxCommandRunner + ?Sized),
-) -> Option<String> {
-    current_pane_id_override()
-        .or_else(|| {
-            std::env::var("TMUX_PANE")
-                .ok()
-                .filter(|pane| !pane.trim().is_empty())
-        })
-        .or_else(|| current_pane_id(runner))
+) -> Result<String, TmuxIoError> {
+    if let Some(pane) = current_pane_id_override() {
+        return Ok(pane);
+    }
+    if let Ok(pane) = std::env::var("TMUX_PANE")
+        && !pane.trim().is_empty()
+    {
+        return Ok(pane);
+    }
+    current_pane_id(runner)
 }
 
 pub fn socket_path(runner: &(impl TmuxCommandRunner + ?Sized)) -> Option<String> {
@@ -630,6 +654,16 @@ mod tests {
         }
     }
 
+    struct ErrorRunner {
+        error: TmuxIoError,
+    }
+
+    impl TmuxCommandRunner for ErrorRunner {
+        fn run(&self, _command: &TmuxCommand) -> Result<String, TmuxIoError> {
+            Err(self.error.clone())
+        }
+    }
+
     struct RecordingRunner {
         commands: RefCell<Vec<Vec<String>>>,
         response: String,
@@ -763,15 +797,31 @@ mod tests {
         let runner = FakeRunner {
             response: "%42\n".to_string(),
         };
-        assert_eq!(current_pane_id(&runner), Some("%42".to_string()));
+        assert_eq!(current_pane_id(&runner), Ok("%42".to_string()));
         assert_eq!(target_pane_id(&runner, "test"), Some("%42".to_string()));
         assert_eq!(target_window_id(&runner, "test"), Some("%42".to_string()));
 
         let blank = FakeRunner {
             response: "\n".to_string(),
         };
-        assert_eq!(current_pane_id(&blank), None);
+        assert_eq!(current_pane_id(&blank), Err(TmuxIoError::EmptyCurrentPane));
         assert_eq!(target_window_id(&blank, "test"), None);
+    }
+
+    #[test]
+    fn current_pane_query_preserves_binary_and_protocol_failure() {
+        let runner = ErrorRunner {
+            error: TmuxIoError::Failed {
+                binary: "/usr/bin/tmux".to_string(),
+                code: Some(1),
+                stderr: "protocol version mismatch".to_string(),
+            },
+        };
+        let error = current_pane_id(&runner).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "/usr/bin/tmux command failed with status Some(1): protocol version mismatch"
+        );
     }
 
     #[test]
@@ -783,17 +833,17 @@ mod tests {
         with_current_pane_id_override("%actor-1", || {
             assert_eq!(
                 current_pane_id_from_env_or_tmux(&runner),
-                Some("%actor-1".to_string())
+                Ok("%actor-1".to_string())
             );
             with_current_pane_id_override("%actor-2", || {
                 assert_eq!(
                     current_pane_id_from_env_or_tmux(&runner),
-                    Some("%actor-2".to_string())
+                    Ok("%actor-2".to_string())
                 );
             });
             assert_eq!(
                 current_pane_id_from_env_or_tmux(&runner),
-                Some("%actor-1".to_string())
+                Ok("%actor-1".to_string())
             );
         });
 

@@ -1,8 +1,9 @@
 //! # Module: install
 //!
 //! ## Spec
-//! - `check_prereqs()`: checks for `tmux` and `claude` in `PATH` via `which`, printing `ok` or
-//!   `MISSING` with an install hint for each.  Never fails — warnings only.
+//! - `check_prereqs()`: resolves the exact tmux client, reports its version, and
+//!   verifies a live-server protocol handshake; also checks `claude` in `PATH`.
+//!   Never fails — warnings only.
 //! - `run(editor, skip_prereqs, skip_plugins)`: orchestrates the full install workflow.
 //!   - Runs `check_prereqs()` unless `skip_prereqs` is set.
 //!   - Skips plugin installation when `skip_plugins` is set.
@@ -40,24 +41,50 @@ fn which(bin: &str) -> bool {
 
 /// Check prerequisites and print status. Does not fail — only warns.
 pub fn check_prereqs() {
-    let prereqs = [
-        (
-            "tmux",
-            "Install tmux: https://github.com/tmux/tmux/wiki/Installing",
+    let tmux = crate::env_cmd::probe_tmux();
+    match (&tmux.version, tmux.server_handshake) {
+        (Some(version), true) => eprintln!(
+            "[install] tmux ... ok (binary={} client={} server={})",
+            tmux.binary,
+            version,
+            tmux.server_version.as_deref().unwrap_or("unknown")
         ),
-        (
-            "claude",
-            "Install Claude Code CLI: https://docs.anthropic.com/en/docs/claude-code",
-        ),
-    ];
-
-    for (bin, install_hint) in &prereqs {
-        if which(bin) {
-            eprintln!("[install] {} ... ok", bin);
-        } else {
-            eprintln!("[install] {} ... MISSING", bin);
-            eprintln!("[install]   hint: {}", install_hint);
+        (Some(version), false) => {
+            eprintln!(
+                "[install] tmux ... BROKEN (binary={} client={})",
+                tmux.binary, version
+            );
+            eprintln!(
+                "[install]   cause: {}",
+                tmux.server_error
+                    .as_deref()
+                    .unwrap_or("server handshake failed")
+            );
+            eprintln!(
+                "[install]   hint: set tmux_bin in .agent-doc/config.toml to the client that owns the running server"
+            );
         }
+        (None, _) => {
+            eprintln!("[install] tmux ... MISSING (binary={})", tmux.binary);
+            eprintln!(
+                "[install]   cause: {}",
+                tmux.version_error
+                    .as_deref()
+                    .unwrap_or("version probe failed")
+            );
+            eprintln!(
+                "[install]   hint: Install tmux: https://github.com/tmux/tmux/wiki/Installing"
+            );
+        }
+    }
+
+    if which("claude") {
+        eprintln!("[install] claude ... ok");
+    } else {
+        eprintln!("[install] claude ... MISSING");
+        eprintln!(
+            "[install]   hint: Install Claude Code CLI: https://docs.anthropic.com/en/docs/claude-code"
+        );
     }
 }
 

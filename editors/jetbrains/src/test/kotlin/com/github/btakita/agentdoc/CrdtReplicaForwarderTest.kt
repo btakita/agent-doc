@@ -89,6 +89,8 @@ class CrdtReplicaForwarderTest {
         private val canonicalStateVector: ByteArray? = null,
         private val canonicalProjectionRetained: Boolean = false,
         private val canonicalContentHash: String? = null,
+        private val durablePushSucceeds: Boolean = true,
+        private val broadcastFails: Boolean = false,
     ) : ReplicaTransport {
         var registered = false
         var registeredStateVector: ByteArray? = null
@@ -123,12 +125,13 @@ class CrdtReplicaForwarderTest {
         }
 
         override fun broadcastUpdate(filePath: String, identity: String, update: ByteArray) {
+            if (broadcastFails) error("fan-out unavailable")
             sentUpdates.add(update)
         }
 
         override fun pushDocumentOps(filePath: String, lineage: String?, deltaJson: String): Boolean {
             sentLineages.add(lineage)
-            return true
+            return durablePushSucceeds
         }
 
         override fun pullUpdates(filePath: String, identity: String): List<ReplicaRemoteUpdate> =
@@ -280,6 +283,48 @@ class CrdtReplicaForwarderTest {
 
         assertEquals("Queue: Temporal", fwd.replicaText())
         assertEquals("one network update may contain several bounded native splices", 1, transport.sentUpdates.size)
+    }
+
+    @Test
+    fun `non-durable splice is retained without ambiguous broadcast`() {
+        val node = FakeNode()
+        val transport = CapturingTransport(
+            bootstrap = "Queue: ".toByteArray(),
+            durablePushSucceeds = false,
+        )
+        val fwd = CrdtReplicaForwarder("plan.md", "intellij:1", node, transport)
+        assertTrue(fwd.register())
+
+        assertFalse(
+            fwd.forwardLocalEdits(
+                listOf(PreparedLocalEditorEdit(7, 0, "item", "Queue: item")),
+            ),
+        )
+
+        assertEquals("Queue: item", fwd.replicaText())
+        assertTrue("durable submission was attempted", transport.sentLineages.isNotEmpty())
+        assertTrue("an unacknowledged operation must not enter the fan-out plane", transport.sentUpdates.isEmpty())
+    }
+
+    @Test
+    fun `durable splice is consumed once when best effort fanout fails`() {
+        val node = FakeNode()
+        val transport = CapturingTransport(
+            bootstrap = "Queue: ".toByteArray(),
+            broadcastFails = true,
+        )
+        val fwd = CrdtReplicaForwarder("plan.md", "intellij:1", node, transport)
+        assertTrue(fwd.register())
+
+        assertTrue(
+            fwd.forwardLocalEdits(
+                listOf(PreparedLocalEditorEdit(7, 0, "item", "Queue: item")),
+            ),
+        )
+
+        assertEquals("Queue: item", fwd.replicaText())
+        assertTrue("durable acceptance owns subsequent delivery", transport.sentLineages.isNotEmpty())
+        assertTrue(transport.sentUpdates.isEmpty())
     }
 
     @Test

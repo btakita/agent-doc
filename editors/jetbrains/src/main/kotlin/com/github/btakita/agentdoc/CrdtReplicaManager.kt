@@ -40,7 +40,8 @@ private const val CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS = 2_000L
 private const val CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS = 1_000L
 private const val CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS = 30_000L
 private const val LOCAL_EDITOR_FLUSH_QUIET_MS = 16L
-private const val LOCAL_EDITOR_READ_RETRY_MS = 25L
+private const val LOCAL_EDITOR_RETRY_BASE_MS = 250L
+private const val LOCAL_EDITOR_RETRY_MAX_MS = 30_000L
 private const val CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS = 100L
 
 /**
@@ -311,6 +312,12 @@ internal fun localReplicaBaselineDecisionUtil(
         LocalReplicaBaselineDecision.RebootstrapCanonicalThenForward
     }
 
+internal fun localEditorRetryDelayMsUtil(failureCount: Int): Long {
+    val exponent = (failureCount.coerceAtLeast(1) - 1).coerceAtMost(12)
+    return (LOCAL_EDITOR_RETRY_BASE_MS * (1L shl exponent))
+        .coerceAtMost(LOCAL_EDITOR_RETRY_MAX_MS)
+}
+
 internal data class CapturedLocalEditorEdit(
     val offsetUtf16: Int,
     val oldFragment: String,
@@ -439,6 +446,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val pendingLocalEdits = ConcurrentHashMap<String, AtomicInteger>()
     private val localEditorFlushVersions = ConcurrentHashMap<String, AtomicLong>()
     private val localEditorFlushTasks = ConcurrentHashMap<String, ScheduledFuture<*>>()
+    private val localEditorRetryFailureCounts = ConcurrentHashMap<String, Int>()
     private val pendingLocalEditorEdits =
         ConcurrentHashMap<String, MutableList<CapturedLocalEditorEdit>>()
     private val remoteEditorEffectGenerations = ConcurrentHashMap<String, AtomicLong>()
@@ -499,6 +507,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         documentWorkers.shutdownNow()
         localEditorFlushTasks.clear()
         localEditorFlushVersions.clear()
+        localEditorRetryFailureCounts.clear()
         pendingLocalEditorEdits.clear()
         localEditorFlushPendingPaths.clear()
         pendingLocalEdits.clear()
@@ -642,8 +651,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         if (retryVersion == null && localEditorFlushPendingPaths.add(filePath)) {
             markLocalPending(filePath)
         }
+        val retryFailureCount = localEditorRetryFailureCounts[filePath] ?: 0
         val delayMs =
-            if (retryVersion == null) LOCAL_EDITOR_FLUSH_QUIET_MS else LOCAL_EDITOR_READ_RETRY_MS
+            if (retryVersion == null && retryFailureCount == 0) {
+                LOCAL_EDITOR_FLUSH_QUIET_MS
+            } else {
+                localEditorRetryDelayMsUtil(retryFailureCount)
+            }
         lateinit var scheduled: ScheduledFuture<*>
         try {
             scheduled =
@@ -668,15 +682,20 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                                 error,
                             )
                         } finally {
-                            if (retrySplices) {
-                                prependLocalEditorEdits(filePath, capturedEdits)
-                            }
+                    if (retrySplices) {
+                        prependLocalEditorEdits(filePath, capturedEdits)
+                        localEditorRetryFailureCounts.compute(filePath) { _, failures ->
+                            ((failures ?: 0) + 1).coerceAtMost(13)
+                        }
+                    } else {
+                        localEditorRetryFailureCounts.remove(filePath)
+                    }
                             if (versionCounter.get() == version) {
                                 if (retrySplices && !disposed.get()) {
-                                    scheduleLocalEditorFlush(
-                                        filePath,
-                                        retryVersion = version,
-                                    )
+                            scheduleLocalEditorFlush(
+                                filePath,
+                                retryVersion = version,
+                            )
                                 } else {
                                     localEditorFlushTasks.remove(filePath, scheduled)
                                     localEditorFlushVersions.remove(filePath, versionCounter)
@@ -701,6 +720,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         } catch (error: RejectedExecutionException) {
             if (versionCounter.get() == version) {
                 localEditorFlushVersions.remove(filePath, versionCounter)
+                localEditorRetryFailureCounts.remove(filePath)
                 if (localEditorFlushPendingPaths.remove(filePath)) {
                     clearLocalPending(filePath)
                 }
@@ -1127,8 +1147,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             when (localReplicaBaselineDecisionUtil(replicaText, beforeText)) {
                 LocalReplicaBaselineDecision.ForwardLocal -> {
                     currentEpoch == nonOperatorMutationEpoch(filePath) &&
-                        forwarder.forwardLocalEdits(edits) &&
-                        forwarder.replicaText() == editorText
+                        forwarder.forwardLocalEdits(edits)
                 }
                 LocalReplicaBaselineDecision.RebootstrapCanonicalThenForward ->
                     rebootstrapCanonicalAndForwardCapturedLocalEdit(
@@ -1195,8 +1214,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         ) {
             return false
         }
-        return replacement.forwardLocalEdits(edits) &&
-            replacement.replicaText() == visibleEditorText
+        return replacement.forwardLocalEdits(edits)
     }
 
     fun requestRemoteDrain(filePath: String? = null, reason: String = "event") {

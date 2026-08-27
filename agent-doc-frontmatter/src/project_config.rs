@@ -318,6 +318,10 @@ pub struct ProjectConfig {
     /// Target tmux session name for this project.
     #[serde(default)]
     pub tmux_session: Option<String>,
+    /// Optional tmux client executable. Use an absolute path when GUI/IDE and
+    /// terminal environments expose different tmux versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tmux_bin: Option<String>,
     /// Project terminal policy. Session naming stays in `tmux_session` above.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal: Option<ProjectTerminalConfig>,

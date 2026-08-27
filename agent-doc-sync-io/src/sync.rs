@@ -5770,8 +5770,12 @@ fn resolve_pane_owner_conflict<'a>(
 pub fn log_cross_document_execution_context(file: &Path, origin: &str) {
     let tmux = Tmux::default_server();
     let current_pane = match agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux) {
-        Some(pane) if !pane.is_empty() => pane,
-        _ => return,
+        Ok(pane) if !pane.is_empty() => pane,
+        Ok(_) => return,
+        Err(error) => {
+            eprintln!("[sync] current tmux pane unavailable: {error}");
+            return;
+        }
     };
     if let Some(other) = pane_owned_document_other_than(&tmux, &current_pane, file) {
         agent_doc_ops_log_io::log_op(

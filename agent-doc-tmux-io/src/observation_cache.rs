@@ -302,6 +302,7 @@ mod tests {
             let _ = run_with_observation_cache(&read_cmd("%1"), || {
                 spawns += 1;
                 Err(TmuxIoError::Failed {
+                    binary: "tmux".to_string(),
                     code: Some(1),
                     stderr: "no server".to_string(),
                 })

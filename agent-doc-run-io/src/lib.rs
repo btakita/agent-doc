@@ -1453,7 +1453,13 @@ pub fn owned_pane_self_invocation_detail(
         return None;
     }
     let tmux = tmux_router::Tmux::default_server();
-    let current_pane = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux)?;
+    let current_pane = match agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux) {
+        Ok(pane) => pane,
+        Err(error) => {
+            eprintln!("[run] failed to query current tmux pane: {error}");
+            return None;
+        }
+    };
     let registry_match = agent_doc_session_registry_io::lookup_entry(session_id)
         .ok()
         .flatten()
@@ -1510,8 +1516,8 @@ pub fn detect_owned_pane_self_invocation_with_options(
         return Ok(None);
     }
     let tmux = tmux_router::Tmux::default_server();
-    let current_pane =
-        agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux).unwrap_or_default();
+    let current_pane = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux)
+        .context("failed to query current tmux pane")?;
     let actor = actor_record_for_file(file).ok().flatten();
     let actor_generation = actor.as_ref().map(|record| record.generation);
     let actor_state = actor

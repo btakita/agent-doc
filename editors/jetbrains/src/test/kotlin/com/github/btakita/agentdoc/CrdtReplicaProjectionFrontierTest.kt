@@ -597,6 +597,36 @@ class CrdtReplicaProjectionFrontierTest {
             localEffect.indexOf("replacement.replicaText() != capturedBaseText") <
                 localEffect.indexOf("replacement.forwardLocalEdits(edits)"),
         )
+        assertFalse(
+            "a concurrent canonical advance after durable acceptance must not retain the same splice",
+            localEffect.contains("forwardLocalEdits(edits) &&"),
+        )
+    }
+
+    @Test
+    fun `retained local splice retries use bounded exponential backoff`() {
+        assertEquals(250L, localEditorRetryDelayMsUtil(0))
+        assertEquals(250L, localEditorRetryDelayMsUtil(1))
+        assertEquals(500L, localEditorRetryDelayMsUtil(2))
+        assertEquals(1_000L, localEditorRetryDelayMsUtil(3))
+        assertEquals(30_000L, localEditorRetryDelayMsUtil(20))
+
+        val managerPath =
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+                Paths.get(
+                    "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt",
+                ),
+            ).first { Files.exists(it) }
+        val manager = Files.readString(managerPath)
+        val flushEffect =
+            manager
+                .substringAfter("private fun scheduleLocalEditorFlush(")
+                .substringBefore("private fun drainLocalEditorEdits(")
+        assertTrue(flushEffect.contains("localEditorRetryFailureCounts.compute(filePath)"))
+        assertTrue(flushEffect.contains("localEditorRetryFailureCounts.remove(filePath)"))
+        assertTrue(flushEffect.contains("retryVersion == null && retryFailureCount == 0"))
+        assertFalse(flushEffect.contains("LOCAL_EDITOR_READ_RETRY_MS"))
     }
 
     private fun update(generation: Long, expectedHash: String) = ReplicaRemoteUpdate(

@@ -63,9 +63,10 @@ pub fn run_with_tmux(tmux: &Tmux) -> Result<()> {
 
 pub fn run_with_tmux_in(tmux: &Tmux, base_dir: &std::path::Path) -> Result<()> {
     let pane_id = match agent_doc_tmux_io::current_pane_id_from_env_or_tmux(tmux) {
-        Some(p) => p,
-        None => {
+        Ok(p) => p,
+        Err(error) => {
             // Not in tmux — nothing to autoclaim
+            eprintln!("[autoclaim] current tmux pane unavailable: {error}");
             return Ok(());
         }
     };

@@ -120,6 +120,13 @@ pub fn project_tmux_session() -> Option<String> {
     load_project().tmux_session
 }
 
+/// Get the project's explicitly configured tmux executable.
+pub fn project_tmux_bin() -> Option<String> {
+    load_project()
+        .tmux_bin
+        .filter(|binary| !binary.trim().is_empty())
+}
+
 /// Save project config to `.agent-doc/config.toml`.
 pub fn save_project(config: &ProjectConfig) -> Result<()> {
     save_project_to(config, &project_config_path())
@@ -231,11 +238,12 @@ mod tests {
         let config_path = setup_project(dir.path());
         std::fs::write(
             &config_path,
-            "tmux_session = \"test\"\nagent_doc_auto_compact = 240\n\n[components.exchange]\npatch = \"append\"\n",
+            "tmux_session = \"test\"\ntmux_bin = \"/opt/tmux/bin/tmux\"\nagent_doc_auto_compact = 240\n\n[components.exchange]\npatch = \"append\"\n",
         )
         .unwrap();
         let cfg = load_project_from(&config_path);
         assert_eq!(cfg.tmux_session.as_deref(), Some("test"));
+        assert_eq!(cfg.tmux_bin.as_deref(), Some("/opt/tmux/bin/tmux"));
         assert_eq!(cfg.agent_doc_auto_compact, Some(240));
         assert_eq!(cfg.components["exchange"].patch, "append");
     }
@@ -257,6 +265,7 @@ mod tests {
 
         let mut cfg = ProjectConfig {
             tmux_session: Some("rt".to_string()),
+            tmux_bin: Some("/opt/tmux/bin/tmux".to_string()),
             ..Default::default()
         };
         cfg.components.insert(
@@ -270,6 +279,7 @@ mod tests {
         save_project_to(&cfg, &config_path).unwrap();
         let loaded = load_project_from(&config_path);
         assert_eq!(loaded.tmux_session.as_deref(), Some("rt"));
+        assert_eq!(loaded.tmux_bin.as_deref(), Some("/opt/tmux/bin/tmux"));
         assert_eq!(loaded.components["status"].patch, "replace");
     }
 

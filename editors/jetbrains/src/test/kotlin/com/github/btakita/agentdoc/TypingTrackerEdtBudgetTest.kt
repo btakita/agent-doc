@@ -480,10 +480,12 @@ class TypingTrackerEdtBudgetTest {
             .substringBefore("private fun seedAndAttachFromDocument(")
         assertTrue(
             "typing bursts must retain one pending-local fence and cancel the superseded queued flush",
-            localFlushBody.contains("localEditorFlushPendingPaths.add(filePath)") &&
-                localFlushBody.contains("LOCAL_EDITOR_FLUSH_QUIET_MS") &&
-                localFlushBody.contains("LOCAL_EDITOR_READ_RETRY_MS") &&
-                localFlushBody.contains("localEditorFlushTasks.put(filePath, scheduled)?.cancel(false)"),
+                localFlushBody.contains("localEditorFlushPendingPaths.add(filePath)") &&
+                    localFlushBody.contains("LOCAL_EDITOR_FLUSH_QUIET_MS") &&
+                    localFlushBody.contains("localEditorRetryDelayMsUtil(retryFailureCount)") &&
+                    localFlushBody.contains("localEditorRetryFailureCounts.compute(filePath)") &&
+                    localFlushBody.contains("retryVersion == null && retryFailureCount == 0") &&
+                    localFlushBody.contains("localEditorFlushTasks.put(filePath, scheduled)?.cancel(false)"),
         )
         assertTrue(
             "every non-operator editor projection must close the prior native op-capture epoch on a worker before EDT dispatch",

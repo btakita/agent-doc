@@ -2,6 +2,22 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.291
+
+- **Fix: tmux selection and retained editor delivery now converge predictably.**
+
+Claim, start, environment, and install paths now share one resolved tmux client,
+prefer the newest compatible binary on `PATH`, honor the project `tmux_bin`
+override, and preserve exact version or server-handshake failures instead of
+silently reporting an unavailable pane. Linux x86_64 releases also include a
+musl artifact so the default installer no longer assumes the builder's glibc.
+
+The JetBrains CRDT bridge now treats relay acceptance separately from optional
+peer broadcast, avoiding replay of an already durable edit. Canonical
+rebootstrap retries use bounded exponential backoff instead of rapidly
+registering and discarding replicas while a retained response waits for exact
+editor delivery.
+
 ## 0.35.290
 
 - **Fix: supervisor command timeouts no longer trigger unsafe mutation replay.**

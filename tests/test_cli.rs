@@ -2019,6 +2019,9 @@ fn test_cli_env_json_reports_classification_and_reason() {
         .success()
         .stdout(predicate::str::contains("\"classification\""))
         .stdout(predicate::str::contains("\"resolved_terminal_host\""))
+        .stdout(predicate::str::contains("\"tmux_probe\""))
+        .stdout(predicate::str::contains("\"binary\""))
+        .stdout(predicate::str::contains("\"server_handshake\""))
         .stdout(predicate::str::contains("\"reason\""));
 }
 

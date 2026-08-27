@@ -40,6 +40,11 @@ private const val ENSURE_CONTROLLER_MIN_INTERVAL_MS = 30_000L
 internal fun shouldAttemptControllerLaunch(nowMs: Long, lastAttemptMs: Long): Boolean =
     lastAttemptMs == 0L || nowMs - lastAttemptMs >= ENSURE_CONTROLLER_MIN_INTERVAL_MS
 
+private data class IncrementalPublishResult(
+    val updateBytes: Int,
+    val durable: Boolean,
+)
+
 /**
  * Thin editor-as-replica forwarding seam (`#crdtauth5`, plan phase 3/5).
  *
@@ -238,8 +243,8 @@ class CrdtReplicaForwarder(
         // unknown and the next explicit baseline check performs one native read.
         knownReplicaText = resultingText
         logSlow("native.applyLocal", applyStarted, details = "offset=$offset delete_cp=$deleteLen insert_chars=${insert.length}")
-        val updateBytes = publishIncremental("local-delta")
-        logSlow("forwardLocalDelta", started, warnMs = 100, details = "update_bytes=$updateBytes")
+        val publish = publishIncremental("local-delta")
+        logSlow("forwardLocalDelta", started, warnMs = 100, details = "update_bytes=${publish.updateBytes}")
     }
 
     /**
@@ -272,14 +277,14 @@ class CrdtReplicaForwarder(
                         "insert_chars=${edit.insert.length}",
             )
         }
-        val updateBytes = publishIncremental("local-splice-batch")
+        val publish = publishIncremental("local-splice-batch")
         logSlow(
             "forwardLocalEdits",
             started,
             warnMs = 100,
-            details = "splices=${edits.size} update_bytes=$updateBytes",
+            details = "splices=${edits.size} update_bytes=${publish.updateBytes} durable=${publish.durable}",
         )
-        return true
+        return publish.durable
     }
 
     /** Publish an already-fenced local editor delta against this replica. */
@@ -309,21 +314,31 @@ class CrdtReplicaForwarder(
         logSlow("native.applyLocal", applyStarted, details = "reason=ensureEditorText delete_cp=$deleteLen insert_chars=${editorText.length}")
         // Incremental from the bootstrap frontier. Callers may only use this
         // after proving the editor shadow matches the controller bootstrap.
-        val updateBytes = publishIncremental("ensure-editor-text")
-        logSlow("ensureEditorText", started, warnMs = 100, details = "chars=${editorText.length} update_bytes=$updateBytes")
+        val publish = publishIncremental("ensure-editor-text")
+        logSlow("ensureEditorText", started, warnMs = 100, details = "chars=${editorText.length} update_bytes=${publish.updateBytes}")
     }
 
-    private fun publishIncremental(reason: String): Int {
-        val frontier = pushedVersion ?: node.stateVector() ?: return 0
+    private fun publishIncremental(reason: String): IncrementalPublishResult {
+        val frontier = pushedVersion ?: node.stateVector() ?: return IncrementalPublishResult(0, false)
         val diffStarted = System.nanoTime()
-        val update = node.diff(frontier) ?: return 0
+        val update = node.diff(frontier) ?: return IncrementalPublishResult(0, false)
         logSlow("native.diff", diffStarted, details = "reason=$reason update_bytes=${update.size}")
         val durable = transport.pushDocumentOps(filePath, lineage, update.toString(Charsets.UTF_8))
-        if (durable) pushedVersion = node.stateVector()
+        if (!durable) {
+            return IncrementalPublishResult(update.size, false)
+        }
+        pushedVersion = node.stateVector()
         val broadcastStarted = System.nanoTime()
-        transport.broadcastUpdate(filePath, identity, update)
+        try {
+            transport.broadcastUpdate(filePath, identity, update)
+        } catch (error: Exception) {
+            // The reliable document-op plane is the acceptance receipt. Once it
+            // owns this exact CRDT update, a best-effort fan-out failure must not
+            // make the manager recreate the operator edit under a new client id.
+            log.debug("[crdt-replica] durable update fan-out deferred for ${File(filePath).name}: ${error.message}")
+        }
         logSlow("transport.broadcastUpdate", broadcastStarted, details = "reason=$reason update_bytes=${update.size}")
-        return update.size
+        return IncrementalPublishResult(update.size, true)
     }
 
     /**

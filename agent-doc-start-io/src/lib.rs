@@ -283,11 +283,14 @@ fn prepare_start_document_for_tmux_bootstrap(file: &Path) -> Result<()> {
 }
 
 fn tmux_for_environment() -> tmux_router::Tmux {
-    tmux_router::Tmux {
-        server_socket: std::env::var(AGENT_DOC_TMUX_SOCKET_ENV)
-            .ok()
-            .filter(|socket| !socket.trim().is_empty()),
-    }
+    agent_doc_project_config_io::project_tmux_bin()
+        .map(tmux_router::Tmux::default_server_with_binary)
+        .unwrap_or_else(tmux_router::Tmux::default_server)
+        .with_server_socket(
+            std::env::var(AGENT_DOC_TMUX_SOCKET_ENV)
+                .ok()
+                .filter(|socket| !socket.trim().is_empty()),
+        )
 }
 
 fn terminal_host_report(tmux: &tmux_router::Tmux) -> TerminalHostReport {
@@ -1101,7 +1104,7 @@ fn prepare_start_runtime_with_admission(
     report_harness_resolution(&fm, &global_config, &harness, &mut session_log, route_owned);
 
     ensure_inside_tmux(file)?;
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = tmux_for_environment();
     let pane_id = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux)
         .context("failed to query current tmux pane")?;
 

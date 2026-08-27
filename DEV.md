@@ -12,6 +12,14 @@ post_release:
 
 # agent-doc — Release Notes
 
+## Source checkout prerequisites
+
+The Rust workspace expects sibling checkouts of `tmux-router`, `lazily-rs`, and
+`agent-kit`. The JetBrains plugin additionally requires JDK 21, `lazily-kt`, and
+the `lazily-spec/proto` sibling when the local `lazily-kt` composite build is
+present. `settings.gradle.kts` now fails with that exact missing path instead of
+an opaque Gradle variant error.
+
 ## Post-release: cargo install is critical
 
 After publishing, always run `cargo install --path .` — the `~/.cargo/bin/agent-doc`

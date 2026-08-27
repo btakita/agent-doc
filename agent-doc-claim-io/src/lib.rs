@@ -117,6 +117,10 @@ use agent_doc_supervisor::claim_binding::{
 use agent_doc_project_config_io as project_config_io;
 use agent_doc_session_registry_io::registration as sessions;
 
+fn session_id_short(session_id: &str) -> String {
+    session_id.chars().take(8).collect()
+}
+
 pub trait ClaimRuntimeEffects {
     fn current_document_content(&self, file: &Path, source: &str) -> Result<String>;
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
@@ -254,7 +258,9 @@ pub fn run(
     // configured session, so run it first and fail closed before the scaffold
     // touches disk. The `// Pane validated — now safe to modify files` invariant
     // below applies to the auto-scaffold too.
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = project_config_io::project_tmux_bin()
+        .map(tmux_router::Tmux::default_server_with_binary)
+        .unwrap_or_else(tmux_router::Tmux::default_server);
     let pane_id = if new_pane {
         None
     } else {
@@ -387,7 +393,7 @@ pub fn run(
                         "warning: overwriting claim on pane {} (was {} → {})",
                         pane_id,
                         existing_label,
-                        &session_id[..8]
+                        session_id_short(&session_id)
                     );
                 } else {
                     // Pane is occupied — provision a new pane instead of erroring.
@@ -570,7 +576,7 @@ pub fn run(
         "Claimed {} for pane {} (session {})",
         file.display(),
         pane_id,
-        &session_id[..8]
+        session_id_short(&session_id)
     );
 
     // Ensure the document has a snapshot + git baseline. If already initialized
@@ -736,6 +742,13 @@ fn run_isolate(file: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn session_id_abbreviation_is_short_and_utf8_safe() {
+        assert_eq!(session_id_short("abc"), "abc");
+        assert_eq!(session_id_short("123456789"), "12345678");
+        assert_eq!(session_id_short("ééééééééé"), "éééééééé");
+    }
 
     #[derive(Default)]
     struct RecordingEffects {

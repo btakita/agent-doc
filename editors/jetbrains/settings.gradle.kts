@@ -25,6 +25,11 @@ val lazilyKt = file("../../../lazily-kt")
 val lazilyKtIsBuild = lazilyKt.resolve("settings.gradle.kts").isFile ||
     lazilyKt.resolve("settings.gradle").isFile
 if (lazilyKtIsBuild) {
+    val lazilySpecProto = file("../../../lazily-spec/proto")
+    check(lazilySpecProto.isDirectory) {
+        "lazily-kt development build requires sibling lazily-spec/proto at ${lazilySpecProto.path}; " +
+            "initialize the lazily-spec sibling or remove the partial lazily-kt checkout"
+    }
     includeBuild(lazilyKt) {
         dependencySubstitution {
             substitute(module("io.github.lazily:lazily")).using(project(":"))

@@ -30,7 +30,7 @@ detect_target() {
   case "$OS" in
     Linux)
       case "$ARCH" in
-        x86_64 | amd64)  echo "x86_64-unknown-linux-gnu" ;;
+        x86_64 | amd64)  echo "x86_64-unknown-linux-musl" ;;
         aarch64 | arm64) echo "aarch64-unknown-linux-gnu" ;;
         *) unsupported "$OS" "$ARCH" ;;
       esac

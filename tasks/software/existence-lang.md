@@ -5,7 +5,7 @@ resume:
 claude_model: fable
 agent_doc_format: template
 agent_doc_write: crdt
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -77,18 +77,51 @@ Importing an external OWL/SKOS vocabulary into existence nodes is a scaffold, no
 #### Recommendation
 
 Do it in this order, each a small change: (1) decide the base IRI, (2) ship `export --format turtle|jsonld` with the SKOS mapping and CI validation, (3) publish the `.ttl` on the site, (4) add SPARQL via oxigraph behind a feature once `serve` exists. Typed links are the only piece that touches the spec, and they should be discussed before any syntax lands. All four are filed as `[recommended]` backlog items below; none are queued, so nothing runs until you promote one.
+
+### Re: do #xlexportskos — `existence export` (SKOS Turtle / JSON-LD) — fable
+
+Shipped in `src/existence-lang/existence` at `b6be573` (parent gitlink `982237bcd`), **not pushed**.
+
+**Command:** `existence export [ring] --format turtle|jsonld [--base-iri IRI]`
+
+**Mapping** (what the exporter can prove from the source, nothing more):
+
+| source | RDF |
+|---|---|
+| node file | `skos:Concept`, `skos:inScheme <base>` |
+| `# Title` | `skos:prefLabel "…"@en` |
+| first Ontology line (SPEC rule 2), markdown stripped | `skos:definition` |
+| Ontology / Axiology / Ethics / Epistemology sections | `xl:ontology` … `xl:epistemology` literals (verbatim markdown, escaped onto one line) |
+| `[term](./term.md)` links to existing nodes | `skos:related` (untyped in source, so no broader/narrower yet) |
+| `href="https://…"` and `[x](https://…)` | `rdfs:seeAlso` |
+| `[rings.N]` in `existence.toml` | `skos:Collection` with `skos:member`, `xl:ring N` |
+| Ring 0 | `skos:hasTopConcept` on the scheme |
+
+**Identity:** term IRI = `{base_iri}{term}`. `base_iri` comes from `--base-iri`, else `meta.base_iri` in `existence.toml`, else the built-in default `https://existence-lang.github.io/ontology/` (normalized to end in `/` or `#`). `meta.vocab_iri` names the `xl:` namespace (default `https://existence-lang.github.io/vocab#`). This makes `#xlbaseiri` a config decision rather than a code change: the ontology repo just sets `meta.base_iri` once we converge on the IRI.
+
+**Verification:**
+- `make check` green: clippy `-D warnings`, 51 tests (7 new for export: ring membership/links/definitions, ring filter, base-IRI precedence and normalization, Turtle well-formedness incl. escaping, JSON-LD shape, unknown format, literal escapes; 2 new in `markdown.rs`), fmt clean.
+- Real ontology: Turtle export is 403 KB and `rapper -i turtle -c` parses **2,732 triples**; JSON-LD has 121 `@graph` nodes (1 scheme + 3 rings + 117 concepts); `export 0` yields exactly the 14 kernel concepts.
+- CI: new `export-validate` job clones `existence-lang/ontology`, exports both formats, parses the Turtle with `rapper`, and checks the JSON-LD shape. It runs on the next push (no run to cite yet since the commit is local).
+
+**Also changed:** the lay-definition and external-link extractors moved from `search.rs` into `markdown.rs` (`extract_definition` → `Option`, `extract_external_links`, `plain_text`) so search and export share one definition of "definition". README documents the command and the new `meta` keys; `Cargo.toml` version is unchanged (0.4.1), so `cargo install existence` users get this at the next release.
+
+**Not done / decisions left to you:** the push (CI validation of the real ontology only runs then; say `push` and I will); `#xlbaseiri` is next in the queue and now amounts to picking the IRI and writing it into `existence.toml`. Domain overlays from `CLAUDE.md` are not exported because the CLI does not parse them yet.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go priority -->
+<!-- agent:queue priority go -->
+- ~~do [#xlexportskos]~~
+- do [#xlbaseiri]
+- do [#xltypedlinks]
+- do [#xlsparql]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#xlexportskos] [recommended] `existence export --format turtle|jsonld` ... SKOS mapping (term→skos:Concept, lay definition→skos:definition, `[term](./term.md)` links→skos:related, rings→skos:Collection, external `<a href>` refs→rdfs:seeAlso). Hand-rolled Turtle writer + a `@context` for `lookup --json`; validate output with `riot --validate` in CI. Blocked on the base-IRI decision in [#xlbaseiri]
 - [ ] [#xlbaseiri] [recommended] Decide the base IRI for term identity before any RDF export ships. Proposal: `https://existence-lang.github.io/ontology/{term}` (the site repo already exists; publish `ontology.ttl` there). Naming decision ... discuss to convergence first
 - [ ] [#xltypedlinks] [recommended] Typed relations for richer SKOS/OWL: today every `[term](./term.md)` link is untyped so export can only emit skos:related. Options: link title attribute (`[term](./term.md "broader")`), a frontmatter `relations:` block, or derive broader/narrower from section position (Ontology-section links vs `#### [Sub](./sub.md)` Pattern Expression subheads) plus overlay `Derives From`→skos:broader. Spec change ... naming discussion first, then `existence lint` rule
 - [ ] [#xlsparql] [recommended] `existence sparql <query>` and a SPARQL endpoint on the planned `serve` command via the `oxigraph` crate behind a cargo feature (keeps the default binary small). Depends on [#xlexportskos]
@@ -103,4 +136,5 @@ Do it in this order, each a small change: (1) decide the base IRI, (2) ship `exp
 
 <!-- agent:done -->
 - 2026-08-26 [#existencelangintegrate] Can existence-lang integrate with ontology technologies such as OWL, RDF, and SPARQL?
+- 2026-08-27 [#xlexportskos] [recommended] `existence export --format turtle|jsonld` ... SKOS mapping (term→skos:Concept, lay definition→skos:definition, `[term](./term.md)` links→skos:related, rings→skos:Collection, external `<a href>` refs→rdfs:seeAlso). Hand-rolled Turtle writer + a `@context` for `lookup --json`; validate output with `riot --validate` in CI. Blocked on the base-IRI decision in [#xlbaseiri]
 <!-- /agent:done -->

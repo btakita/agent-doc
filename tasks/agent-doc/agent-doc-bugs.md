@@ -86,6 +86,19 @@ agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/tsift
 ```
 
 Do not resubmit, force disk, or create another closeout payload. The agent-doc response was persisted, committed, and pushed.
+
+### Re: Retained delivery, Compact Exchange, and tmux editor sync
+
+Released the fixes as agent-doc `0.35.292` in commit `6f2cfe516` and tag `v0.35.292`.
+
+- A successful live editor replica registration now publishes the missing captured-finalize edge. The controller resumes the exact durable response; headless replicas do not falsely acknowledge editor delivery.
+- JetBrains native reload now uses one shared five-second quiesce deadline across projects, recreates a missing project manager for Compact Exchange, gates Compact Exchange and manual Sync Tmux Layout on reload completion, and republishes current editor surfaces after endpoint restart.
+- VS Code now has the equivalent coalesced reload gate, exact open-replica attachment before Compact Exchange, gated manual tmux sync, post-reload surface replay, and success/failure propagation for coalesced reload intents.
+- Plugin parity is machine-declared for native hot reload. JetBrains is `0.2.362`, VS Code is `0.2.67`, and full installs now refresh both installed plugin families instead of leaving VS Code stale.
+
+Verification passed: the complete `make check` suite (twice after the final install-target change), JetBrains tests/build/signing, all 179 VS Code tests, plugin version checks, and local package installation. Both project controllers are now fresh and stable on `0.35.292`; the `tsift.md` supervisor has already recycled to the new inode. Release and PyPI CI runs were queued with no immediate failure.
+
+The remaining live-document step is an IDE-host restart: the installed JetBrains package is `0.2.362`, but the running host still reports `0.2.361`, and JetBrains requires restart to activate the Kotlin package generation. Until that restart, `tsift.md` remains safely retained at `editor_projection_pending`; `contracts.md` has moved past the missing-replica pending-write report but still has an open captured response and an old supervisor. No new closeout payload, commit, force-disk, finalize, or document recycle was issued. After restarting the IDE and reopening/attaching the two tabs, retry only `agent-doc session-check` for each document.
 <!-- agent:boundary:d82d31f6:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -94,10 +107,11 @@ Do not resubmit, force disk, or create another closeout payload. The agent-doc r
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
+- [/operator] [#pluginrestartverify] Restart the JetBrains IDE host to activate plugin 0.2.362, reopen tsift.md and contracts.md, then verify each retained capture converges with its single permitted session-check.
 <!-- /agent:backlog -->
 
 ## Review

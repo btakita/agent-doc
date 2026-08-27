@@ -123,6 +123,24 @@ Shipped in `src/existence-lang/existence` at `b6be573` (parent gitlink `982237bc
 **Verified:** `make check` green (51 tests), export against the pinned config emits the new prefixes and `rapper` parses 2,732 triples, `existence lint` clean. **Not verifiable until push:** the permalink rewrite runs in the Pages build (no Ruby/Jekyll locally); `curl -sI …/ontology/entity` is 404 until the next deploy. That check is in the new `#xlpublishttl` item.
 
 Session-accretion is `warn` (2 no-op closeouts in 30 min from the earlier `.done.md` replica wedge); queue stays active. `stale_install` warning for `src/agent-doc` belongs to the concurrent agent-doc session, left alone.
+
+### Re: do #xltypedlinks — typed links via the link title — fable
+
+Shipped: existence `4ccec0a`, spec `2c81a54` (rule 12), ontology `a3d5684` (mirrored rule), parent `56ad85c61`; **not pushed**.
+
+**Syntax chosen:** the standard markdown link title names the relation ... `[information](./information.md "broader")`, `[system](./system.md "narrower")`; an untitled link is `related`. Vocabulary is exactly SKOS's: `broader | narrower | related`.
+
+**Why this over the alternatives.** A frontmatter `relations:` block would duplicate every link in a second place, add YAML parsing to the CLI, and change how Jekyll treats node files; a `## Relations` section would change the required-section rules. Deriving hierarchy from section position was tested against the kernel and is unreliable (`entity`'s Ontology links are broader-ish, `existence`'s are not; `#### [Soul]` under Pattern Expression is a meta-relation, not narrower). The title is already valid markdown, renders as a hover on the page, sits exactly where the concept is mentioned, and is opt-in per link, so the 117 existing nodes are unchanged and still export as before (real ontology: 2,732 triples, `rapper` clean, `lint` clean).
+
+**Behaviour:**
+- `existence export`: `skos:broader` / `skos:narrower` per declared link, with the **inverse emitted on the target** so the hierarchy is navigable both ways; a target typed once drops out of `skos:related` even when also linked untitled elsewhere. Ring filtering applies to typed edges too.
+- `existence lint`: warns (does not fail) on an unrecognized title (`Unknown link relation "part-of" on ./x.md`) and on a target typed both broader and narrower; titled links keep the broken-link error.
+- Parser: one shared `NODE_LINK` regex in `markdown.rs` (`Relation`, `TypedLink`, `extract_typed_links`); `extract_links`/`graph` see titled links as ordinary links.
+- Smoke test on a scratch copy of the ontology: retitling one link in `entity.md` produced `entity skos:broader information` and `information skos:narrower entity`.
+
+**Verification:** `make check` green, 53 tests (new: typed-link parsing, export hierarchy + inverses + ring filter, lint unknown/conflict/broken cases, escaped Turtle literal). Spec rule 12 added to `existence-lang/spec` and mirrored into the ontology's older SPEC copy (that copy also lacks rule 10 from upstream; left as found).
+
+**Not done:** no node was retitled ... which kernel links are hierarchical is a content decision, filed as `#xltypekernel [recommended]`. Domain-overlay `Derives From` → `skos:broader` still needs the CLI to parse `CLAUDE.md` overlays (not started). Exchange is 108+ lines with the queue active; continuing per the accretion guidance.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
@@ -131,15 +149,15 @@ Session-accretion is `warn` (2 no-op closeouts in 30 min from the earlier `.done
 <!-- agent:queue priority go -->
 - ~~do [#xlexportskos]~~
 - ~~do [#xlbaseiri]~~
-- do [#xltypedlinks]
+- ~~do [#xltypedlinks]~~
 - do [#xlsparql]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#xltypekernel] [recommended] Type the Ring 0 kernel links: for each of the 14 kernel nodes in `src/existence-lang/ontology/src`, retitle the Ontology-section links that are genuinely hierarchical at the term's own scope (`[information](./information.md "broader")`, `[system](./system.md "narrower")`), leave passing mentions untitled, run `existence lint` (warns on conflicts) and `existence export` to check the resulting skos:broader/narrower graph reads correctly. This is editorial ... the philosophy decides what is broader, so review each edit
 - [ ] [#xlpublishttl] Publish `ontology.ttl` + `ontology.jsonld` from the ontology Pages workflow: before the Jekyll build step in `src/existence-lang/ontology/.github/workflows/pages.yml`, install `existence` and run `existence --ontology . export` (+ `--format jsonld`) so `https://existence-lang.github.io/ontology/ontology.ttl` resolves. Needs the `export` command in an installable binary first ... push `existence@f354da3` and either cut a release (`make release`, bumps to 0.5.0) or `cargo install --git` in the workflow. Then verify live: `curl -sI https://existence-lang.github.io/ontology/entity` is 200 and `rapper -i turtle -c` parses the published .ttl
-- [ ] [#xltypedlinks] [recommended] Typed relations for richer SKOS/OWL: today every `[term](./term.md)` link is untyped so export can only emit skos:related. Options: link title attribute (`[term](./term.md "broader")`), a frontmatter `relations:` block, or derive broader/narrower from section position (Ontology-section links vs `#### [Sub](./sub.md)` Pattern Expression subheads) plus overlay `Derives From`→skos:broader. Spec change ... naming discussion first, then `existence lint` rule
 - [ ] [#xlsparql] [recommended] `existence sparql <query>` and a SPARQL endpoint on the planned `serve` command via the `oxigraph` crate behind a cargo feature (keeps the default binary small). Depends on [#xlexportskos]
 <!-- /agent:backlog -->
 
@@ -154,4 +172,5 @@ Session-accretion is `warn` (2 no-op closeouts in 30 min from the earlier `.done
 - 2026-08-26 [#existencelangintegrate] Can existence-lang integrate with ontology technologies such as OWL, RDF, and SPARQL?
 - 2026-08-27 [#xlexportskos] [recommended] `existence export --format turtle|jsonld` ... SKOS mapping (term→skos:Concept, lay definition→skos:definition, `[term](./term.md)` links→skos:related, rings→skos:Collection, external `<a href>` refs→rdfs:seeAlso). Hand-rolled Turtle writer + a `@context` for `lookup --json`; validate output with `riot --validate` in CI. Blocked on the base-IRI decision in [#xlbaseiri]
 - 2026-08-27 [#xlbaseiri] [recommended] Decide the base IRI for term identity before any RDF export ships. Proposal: `https://existence-lang.github.io/ontology/{term}` (the site repo already exists; publish `ontology.ttl` there). Naming decision ... discuss to convergence first
+- 2026-08-27 [#xltypedlinks] [recommended] Typed relations for richer SKOS/OWL: today every `[term](./term.md)` link is untyped so export can only emit skos:related. Options: link title attribute (`[term](./term.md "broader")`), a frontmatter `relations:` block, or derive broader/narrower from section position (Ontology-section links vs `#### [Sub](./sub.md)` Pattern Expression subheads) plus overlay `Derives From`→skos:broader. Spec change ... naming discussion first, then `existence lint` rule
 <!-- /agent:done -->

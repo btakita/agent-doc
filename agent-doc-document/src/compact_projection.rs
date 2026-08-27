@@ -221,6 +221,65 @@ pub fn newer_compacted_exchange_supersedes(retained: &str, current: &str) -> boo
     current_timestamp > retained_timestamp
 }
 
+/// Rebase a retained Compact Exchange projection over the editor's current cut.
+///
+/// Compaction owns the exchange prefix before `agent:boundary`; the editor owns
+/// the live tail after it and every sibling component. A normal component-level
+/// three-way merge treats an editor cut inside the soon-to-be-compacted prefix as
+/// a conflict, even though that prefix is intentionally replaced by the compact
+/// summary. Rebuild only that ownership split and leave the rest of the current
+/// editor projection byte-for-byte intact.
+///
+/// `None` means the inputs do not prove this narrow compact lineage. Callers must
+/// retain the write or use their normal conflict policy instead of guessing.
+pub fn rebase_retained_compact_exchange_over_editor_cut(
+    merge_base: &str,
+    retained_target: &str,
+    editor_cut: &str,
+) -> Option<String> {
+    let retained_timestamp = compacted_exchange_archive_timestamp(retained_target)?;
+    if compacted_exchange_archive_timestamp(editor_cut)
+        .is_some_and(|current_timestamp| current_timestamp > retained_timestamp)
+    {
+        return Some(editor_cut.to_string());
+    }
+
+    let base_components = element::parse(merge_base).ok()?;
+    let retained_components = element::parse(retained_target).ok()?;
+    let editor_components = element::parse(editor_cut).ok()?;
+    let base_exchange = base_components
+        .iter()
+        .find(|component| component.name == "exchange")?;
+    let retained_exchange = retained_components
+        .iter()
+        .find(|component| component.name == "exchange")?;
+    let editor_exchange = editor_components
+        .iter()
+        .find(|component| component.name == "exchange")?;
+    if retained_exchange.attrs != base_exchange.attrs
+        || editor_exchange.attrs != base_exchange.attrs
+    {
+        return None;
+    }
+
+    let base_content = base_exchange.content(merge_base);
+    let retained_content = retained_exchange.content(retained_target);
+    let editor_content = editor_exchange.content(editor_cut);
+    boundary_marker_line(base_content)?;
+    boundary_marker_line(retained_content)?;
+    let editor_boundary = boundary_marker_line(editor_content)?;
+    let (mut retained_prefix, _) = split_component_content_at_boundary(retained_content);
+    let (_, editor_tail) = split_component_content_at_boundary(editor_content);
+    if !retained_prefix.ends_with('\n') {
+        retained_prefix.push('\n');
+    }
+    retained_prefix.push_str(&editor_boundary);
+    retained_prefix.push('\n');
+    retained_prefix.push_str(&editor_tail);
+
+    Some(editor_exchange.replace_content(editor_cut, &retained_prefix))
+}
+
 /// Find malformed compact summary lines rendered as user prompts inside
 /// `agent:exchange`.
 pub fn malformed_compact_summary_lines(compacted: &str) -> Vec<String> {
@@ -396,6 +455,57 @@ mod tests {
         assert!(newer_compacted_exchange_supersedes(&older, &newer));
         assert!(!newer_compacted_exchange_supersedes(&newer, &older));
         assert!(!newer_compacted_exchange_supersedes(&newer, &newer));
+    }
+
+    #[test]
+    fn retained_compact_rebase_owns_prefix_and_preserves_editor_tail_and_siblings() {
+        let base = concat!(
+            "# Session\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "## User\n\nquestion\n\n## Assistant\n\nanswer line one\nanswer line two\n",
+            "<!-- agent:boundary:base -->\n",
+            "queued before compact\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:backlog -->\n- version 1\n<!-- /agent:backlog -->\n",
+        );
+        let retained = concat!(
+            "# Session\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "*Compacted. Content archived to `.agent-doc/archives/doc-20260827-231500.md`*\n",
+            "<!-- agent:boundary:base -->\n",
+            "queued before compact\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:backlog -->\n- version 1\n<!-- /agent:backlog -->\n",
+        );
+        let editor = concat!(
+            "# Session\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "## User\n\nquestion\n\n## Assistant\n\nanswer line one\n",
+            "<!-- agent:boundary:editor -->\n",
+            "new queued editor text\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:backlog -->\n- version 2\n<!-- /agent:backlog -->\n",
+        );
+
+        let rebased = rebase_retained_compact_exchange_over_editor_cut(base, retained, editor)
+            .expect("the retained compact owns the pre-boundary exchange prefix");
+        assert!(rebased.contains("### Session Summary"));
+        assert!(!rebased.contains("answer line one"));
+        assert!(rebased.contains("<!-- agent:boundary:editor -->\nnew queued editor text\n"));
+        assert!(rebased.contains("- version 2"));
+        assert!(!rebased.contains("- version 1"));
+    }
+
+    #[test]
+    fn retained_compact_rebase_keeps_a_newer_visible_compact() {
+        let older = compacted_doc("20260717-225006", "<!-- agent:boundary:x -->\nold tail\n");
+        let newer = compacted_doc("20260717-225039", "<!-- agent:boundary:y -->\nnew tail\n");
+
+        assert_eq!(
+            rebase_retained_compact_exchange_over_editor_cut(&older, &older, &newer),
+            Some(newer)
+        );
     }
 
     #[test]

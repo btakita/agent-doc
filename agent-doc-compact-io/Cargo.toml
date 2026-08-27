@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-compact-io"
-version = "0.35.292"
+version = "0.35.293"
 edition = "2024"
 description = "Compact command I/O for agent-doc session archives"
 license = "MIT"
@@ -16,46 +16,46 @@ name = "agent_doc_compact_io"
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.292" }
-agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.292" }
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.292" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.292" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.292" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.292" }
-agent-doc-lint-io = { path = "../agent-doc-lint-io", version = "0.35.292" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.292" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.292" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.292" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.292" }
-agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.292" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.292" }
-agent-doc-merge-io = { path = "../agent-doc-merge-io", version = "0.35.292" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.292" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.292" }
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.292" }
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.292" }
-agent-doc-dynamic-context-io = { path = "../agent-doc-dynamic-context-io", version = "0.35.292" }
-agent-doc-op-capture-io = { path = "../agent-doc-op-capture-io", version = "0.35.292" }
-agent-doc-session-accretion-io = { path = "../agent-doc-session-accretion-io", version = "0.35.292" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.292" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.292" }
-agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.292" }
-agent-doc-template = { path = "../agent-doc-template", version = "0.35.292" }
-agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.35.292" }
-agent-doc-topic = { path = "../agent-doc-topic", version = "0.35.292" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.292" }
+agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.293" }
+agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.293" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.293" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.293" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.293" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.293" }
+agent-doc-lint-io = { path = "../agent-doc-lint-io", version = "0.35.293" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.293" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.293" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.293" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.293" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.293" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.293" }
+agent-doc-merge-io = { path = "../agent-doc-merge-io", version = "0.35.293" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.293" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.293" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.293" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.293" }
+agent-doc-dynamic-context-io = { path = "../agent-doc-dynamic-context-io", version = "0.35.293" }
+agent-doc-op-capture-io = { path = "../agent-doc-op-capture-io", version = "0.35.293" }
+agent-doc-session-accretion-io = { path = "../agent-doc-session-accretion-io", version = "0.35.293" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.293" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.293" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.293" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.35.293" }
+agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.35.293" }
+agent-doc-topic = { path = "../agent-doc-topic", version = "0.35.293" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.293" }
 anyhow = "1"
 lazily = { version = "0.56.1", features = ["ipc", "durable-sqlite"] }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.35.292", features = ["test-support"] }
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.292" }
-agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.292" }
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.292", features = ["test-support"] }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.292" }
-agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.292" }
-agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.35.292" }
-agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.35.292", features = ["test-support"] }
+agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.35.293", features = ["test-support"] }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.293" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.293" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.293", features = ["test-support"] }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.293" }
+agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.293" }
+agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.35.293" }
+agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.35.293", features = ["test-support"] }
 serde_json = "1"
 tempfile = "3"

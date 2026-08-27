@@ -2,6 +2,22 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.293
+
+- **Fix: retained Compact Exchange recovery no longer wedges on an editor cut.**
+
+The controller now recognizes a retained binary-generated Compact Exchange as
+the owner of the exchange prefix before `agent:boundary`. On editor reconnect it
+replays that compact prefix while preserving the editor's exact current boundary,
+post-boundary queue tail, backlog, and every sibling component. This closes the
+silent conflict where a durable response/compact continuation remained pending
+forever after IDEA reattached with a small cut inside the exchange being
+compacted. Newer compact continuations also remain associated with older
+compact-shaped response replays, so recovery completes the retained response
+before the newest compact continuation settles. The policy lives in the shared
+controller/document layer and is therefore identical for JetBrains, VS Code,
+and the other native editor adapters.
+
 ## 0.35.292
 
 - **Fix: retained responses resume when the editor reconnects.**

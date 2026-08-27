@@ -4126,20 +4126,48 @@ fn retained_transition_state(
         });
     }
 
-    let Ok(mut rebased) =
-        agent_doc_document_realtime::write_policy::rebase_retained_target_over_editor_cut(
+    let compact_exchange_continuation_matches = projection
+        .document
+        .pending_compact_projection
+        .as_ref()
+        .is_some_and(|continuation| {
+            continuation.target_component.as_deref() == Some("exchange")
+                && agent_doc_document::compact_projection::compacted_exchange_archive_timestamp(
+                    &continuation.live_content,
+                )
+                .is_some()
+                && agent_doc_document::compact_projection::compacted_exchange_archive_timestamp(
+                    &intent.target_content,
+                )
+                .is_some()
+        });
+    let compact_rebased = compact_exchange_continuation_matches.then(|| {
+        agent_doc_document::compact_projection::rebase_retained_compact_exchange_over_editor_cut(
             base_content,
             &intent.target_content,
             delivery.content.as_ref(),
         )
-    else {
-        return RetainedTransitionState::Conflict {
-            intent_id: intent.intent_id.clone(),
-            target_hash: intent.target_hash.clone(),
-            visible_hash: Some(delivery.content_hash.clone()),
-            delivery_version: Some(delivery.delivery_version),
-            reason: RetainedTransitionConflict::DivergentVisibleProjection,
-        };
+    });
+    let mut rebased = match compact_rebased.flatten() {
+        Some(rebased) => rebased,
+        None => {
+            match agent_doc_document_realtime::write_policy::rebase_retained_target_over_editor_cut(
+                base_content,
+                &intent.target_content,
+                delivery.content.as_ref(),
+            ) {
+                Ok(rebased) => rebased,
+                Err(_) => {
+                    return RetainedTransitionState::Conflict {
+                        intent_id: intent.intent_id.clone(),
+                        target_hash: intent.target_hash.clone(),
+                        visible_hash: Some(delivery.content_hash.clone()),
+                        delivery_version: Some(delivery.delivery_version),
+                        reason: RetainedTransitionConflict::DivergentVisibleProjection,
+                    };
+                }
+            }
+        }
     };
     rebased = agent_doc_merge::response_cell::deduplicate_response_cells(&rebased)
         .ok()
@@ -13750,6 +13778,74 @@ agent:queue\n\
                 "effect: {name}"
             );
         }
+    }
+
+    #[test]
+    fn retained_compact_transition_rebases_over_an_editor_prefix_cut() {
+        let base = concat!(
+            "# Session\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "## User\n\nquestion\n\n## Assistant\n\nanswer one\nanswer two\n",
+            "<!-- agent:boundary:base -->\nold queue\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:backlog -->\n- version 1\n<!-- /agent:backlog -->\n",
+        );
+        let target = concat!(
+            "# Session\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "*Compacted. Content archived to `.agent-doc/archives/doc-20260827-231500.md`*\n",
+            "<!-- agent:boundary:base -->\nold queue\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:backlog -->\n- version 1\n<!-- /agent:backlog -->\n",
+        );
+        let editor_cut = concat!(
+            "# Session\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "## User\n\nquestion\n\n## Assistant\n\nanswer one\n",
+            "<!-- agent:boundary:editor -->\nnew queue\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:backlog -->\n- version 2\n<!-- /agent:backlog -->\n",
+        );
+        let newer_compact_continuation = target.replace("20260827-231500", "20260827-231600");
+        let mut projection = retained_resume_projection("doc-retained-compact-rebase");
+        {
+            let intent = projection.document.pending_write.as_mut().unwrap();
+            intent.expected_content = Some(base.to_string());
+            intent.expected_hash = agent_doc_hash::content_hash(base);
+            intent.target_content = target.to_string();
+            intent.target_hash = agent_doc_hash::content_hash(target);
+        }
+        projection.apply_fact(
+            &agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
+                document_hash: projection.document_hash.clone(),
+                continuation_id: "compact-editor-cut".to_string(),
+                file: "/work/task.md".to_string(),
+                live_content: newer_compact_continuation.clone(),
+                committed_content: newer_compact_continuation,
+                target_component: Some("exchange".to_string()),
+                commit: true,
+            },
+        );
+        let delivery = RetainedDeliveryObservation {
+            file: PathBuf::from("/work/task.md"),
+            content: Arc::from(editor_cut),
+            content_hash: agent_doc_hash::content_hash(editor_cut),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: 12,
+        };
+
+        let state = retained_transition_state(Some(&projection), Some(&delivery), 3);
+        assert_eq!(retained_transition_state_tag(&state), "apply_target");
+        let rebased = state
+            .transition_projection()
+            .expect("retained compact conflict must become a replayable projection")
+            .target_content;
+        assert!(rebased.contains("### Session Summary"));
+        assert!(rebased.contains("<!-- agent:boundary:editor -->\nnew queue\n"));
+        assert!(rebased.contains("- version 2"));
+        assert!(!rebased.contains("answer one"));
     }
 
     #[test]

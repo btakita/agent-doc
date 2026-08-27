@@ -5,7 +5,7 @@ resume:
 claude_model: fable
 agent_doc_format: template
 agent_doc_write: crdt
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -180,21 +180,34 @@ Shipped: ontology `1be238d`, parent `d85234f3b9`; **not pushed**. Five kernel no
 **Result graph:** `Existence ⊃ Entity ⊃ {Abstraction, Concept, Collective}`, `Illusion ⊃ Abstraction`, `System ⊃ Domain ⊃ Scope ⊃ Context`. The chain's `Entity → System`, `Context → Resolution`, `Resolution → Focus` steps are not expressible today because those nodes never link each other in their Ontology sections; adding the sentences is content work, also in `#xlchaingaps`.
 
 **Verification** (existence CLI built from `1fe3973`): `existence lint` exits 0 with no relation warnings (the 11 warnings are the pre-existing non-standard-subsection notes) so no broader/narrower conflict; `export` emits 8 `skos:broader` plus the 8 inverse `skos:narrower`, `export 0` shows 10 typed lines, `rapper -i turtle -c` parses **2,735** triples (2,732 before). `~/.cargo/bin/existence` is still the 0.4.1 release without typed-link parsing; it reads the titled links as plain links, so nothing breaks for it. Next queue head is `#xlpublishttl`.
+
+### Re: do #xlpublishttl — ontology.ttl / ontology.jsonld published from Pages — fable
+
+**Live now:**
+- `https://existence-lang.github.io/ontology/ontology.ttl` → 200, `rapper -i turtle -c` on the published file parses **2,735 triples** (includes the 8 typed kernel edges from `#xltypekernel`, 7 `skos:broader` lines).
+- `https://existence-lang.github.io/ontology/ontology.jsonld` → 200, 121 `@graph` nodes.
+- `https://existence-lang.github.io/ontology/entity` → 200 and `…/ontology/vocab` → 200, so the term IRIs and the `xl:` vocab IRI dereference; the old `…/ontology/src/entity` path is now 404 (permalink rewrite from `#xlbaseiri` confirmed in the Pages build). Nothing in the repos links to the old path; external links, if any, would need a redirect.
+
+**Pushed** (this item authorized it): existence `aa67c6f..1fe3973` (export, typed links, sparql), spec `e7cfc17..2c81a54` (rule 12; pushed too so the public spec matches the ontology's mirrored rule), ontology `423a487..4fc75af` (base IRI, permalinks, vocab page, typed kernel links, and the workflow). Parent `3cd9eb2418`.
+
+**Workflow** (`ontology/.github/workflows/pages.yml` `4fc75af`): `dtolnay/rust-toolchain@stable` → `actions/cache` on `~/.cargo/bin/existence` keyed by `EXISTENCE_REV` → `cargo install --locked --git …/existence --rev $EXISTENCE_REV` on cache miss → `existence --ontology . export` to `ontology.ttl` and `ontology.jsonld` in the site root → validate (`rapper`, `@context`/`@graph` shape) → Jekyll → deploy. I took the `cargo install --git` branch of the either/or rather than cutting 0.5.0: a pinned commit keeps the site build independent of the CLI's `main` and of a release decision; bumping `EXISTENCE_REV` is a one-line change. The release itself is filed as `#xlrelease050 [recommended]`.
+
+**CI:** ontology Pages run `33127695018` build + deploy success (first run, cold CLI build); existence CI `33127693466` all green, including `RDF export validates` against the pushed ontology and the three installer smokes.
+
+Queue is drained with this item. Exchange is ~185 lines (accretion `warn`); noting per guidance, not compacting without the opt-in.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- ~~do [#xltypekernel]~~
-- do [#xlpublishttl]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#xlrelease050] [recommended] Cut existence 0.5.0 (`make release` in `src/existence-lang/existence`) so `cargo install existence` / `install.sh` users get `export`, typed links, `sparql`, and `serve`; then switch `EXISTENCE_REV` in `ontology/.github/workflows/pages.yml` to the release tag. Today the Pages workflow pins commit `1fe3973` via `cargo install --git`, so the site does not depend on a release
 - [ ] [#xlchaingaps] [recommended] Three edges of the canonical chain (Existence → Entity → System → Domain → Scope → Context → Resolution → Focus) cannot be typed by retitling because the Ontology section has no such link: `system.md` never links `entity`, `resolution.md` links `scope`/`perspective` but not `context`, `focus.md` never links `resolution`. Also two mutual definitions block typing in either direction: `entity.md` ("any information in Existence") vs `information.md` ("An Entity"), and `abstraction.md` ("a concept that models") vs `concept.md` ("an abstraction that does not represent a physical entity"). Decide which side is the genus and reword one sentence per pair; add the three missing chain sentences; then retitle. Content, not code
-- [ ] [#xlpublishttl] Publish `ontology.ttl` + `ontology.jsonld` from the ontology Pages workflow: before the Jekyll build step in `src/existence-lang/ontology/.github/workflows/pages.yml`, install `existence` and run `existence --ontology . export` (+ `--format jsonld`) so `https://existence-lang.github.io/ontology/ontology.ttl` resolves. Needs the `export` command in an installable binary first ... push `existence@f354da3` and either cut a release (`make release`, bumps to 0.5.0) or `cargo install --git` in the workflow. Then verify live: `curl -sI https://existence-lang.github.io/ontology/entity` is 200 and `rapper -i turtle -c` parses the published .ttl
 <!-- /agent:backlog -->
 
 ## Icebox
@@ -211,4 +224,5 @@ Shipped: ontology `1be238d`, parent `d85234f3b9`; **not pushed**. Five kernel no
 - 2026-08-27 [#xltypedlinks] [recommended] Typed relations for richer SKOS/OWL: today every `[term](./term.md)` link is untyped so export can only emit skos:related. Options: link title attribute (`[term](./term.md "broader")`), a frontmatter `relations:` block, or derive broader/narrower from section position (Ontology-section links vs `#### [Sub](./sub.md)` Pattern Expression subheads) plus overlay `Derives From`→skos:broader. Spec change ... naming discussion first, then `existence lint` rule
 - 2026-08-27 [#xlsparql] [recommended] `existence sparql <query>` and a SPARQL endpoint on the planned `serve` command via the `oxigraph` crate behind a cargo feature (keeps the default binary small). Depends on [#xlexportskos]
 - 2026-08-27 [#xltypekernel] [recommended] Type the Ring 0 kernel links: for each of the 14 kernel nodes in `src/existence-lang/ontology/src`, retitle the Ontology-section links that are genuinely hierarchical at the term's own scope (`[information](./information.md "broader")`, `[system](./system.md "narrower")`), leave passing mentions untitled, run `existence lint` (warns on conflicts) and `existence export` to check the resulting skos:broader/narrower graph reads correctly. This is editorial ... the philosophy decides what is broader, so review each edit
+- 2026-08-27 [#xlpublishttl] Publish `ontology.ttl` + `ontology.jsonld` from the ontology Pages workflow: before the Jekyll build step in `src/existence-lang/ontology/.github/workflows/pages.yml`, install `existence` and run `existence --ontology . export` (+ `--format jsonld`) so `https://existence-lang.github.io/ontology/ontology.ttl` resolves. Needs the `export` command in an installable binary first ... push `existence@f354da3` and either cut a release (`make release`, bumps to 0.5.0) or `cargo install --git` in the workflow. Then verify live: `curl -sI https://existence-lang.github.io/ontology/entity` is 200 and `rapper -i turtle -c` parses the published .ttl
 <!-- /agent:done -->

@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.290
+
+- **Fix: supervisor command timeouts no longer trigger unsafe mutation replay.**
+
+Supervisor IPC now gives effectful commands a longer receipt budget than query
+commands and preserves typed evidence for connection failure versus an ambiguous
+late response. Recovery cold-starts and retries only definite pre-accept connect
+failures, so a slow `/clear` delivery cannot be submitted twice. Background
+replacement acceptance is also reported as pending controller lifecycle work,
+not as proof that the replacement completed merely because the old socket is
+still live.
+
 ## 0.35.289
 
 - **Fix: repeated queue instructions keep their new work incarnation live.**

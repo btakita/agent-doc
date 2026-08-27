@@ -68,6 +68,24 @@ For `tasks/software/tsift.md`, the retained response capture remains durable and
 `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
 
 That lets the same retained capture converge through the corrected replica without generating a replacement response.
+
+### Re: Response
+
+Implemented and released:
+
+- agent-doc `v0.35.291`, JetBrains plugin `0.2.361`
+- Issue #46 fixed and closed
+- tmux resolution, diagnostics, musl release artifact, and Compact Exchange retry/replay fixes pushed
+- Full `make check` and plugin tests passed
+- GitHub Release and PyPI workflows were in progress when observed
+
+The retained `tsift.md` response remains safe. Restart JetBrains to load plugin `0.2.361`, then run only:
+
+```bash
+agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/tsift.md
+```
+
+Do not resubmit, force disk, or create another closeout payload. The agent-doc response was persisted, committed, and pushed.
 <!-- agent:boundary:d82d31f6:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

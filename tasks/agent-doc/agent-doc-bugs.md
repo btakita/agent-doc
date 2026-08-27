@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a04494-4142-7e93-9b2e-1cb8aa4f3073
+  codex: 01a044bf-d41d-7623-a5b1-18b84d97a973
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -45,7 +45,30 @@ The fix establishes one safety invariant: only a definite pre-accept connection 
 Regression coverage exercises query/effect timeout budgets, late mutation receipts, definite-connect versus timeout/parse recovery transitions, and pending replacement reporting. Targeted supervisor and CLI tests passed, followed by the complete post-version `make check` with zero failures. The 0.35.290 binary and managed skills were installed, supervisors were recycled through the controller handoff, and commits `71c78fbb0` and `abe40f252` plus tag `v0.35.290` were pushed. CI, Release, PyPI, Book, and Pages workflows were observed in progress after the push; the workflow policy does not wait on running jobs.
 
 There are no actionable follow-up items from this fix.
-<!-- agent:boundary:b93284f2:agent-doc-bugs -->
+
+> **Queue prompt:** Fix https://github.com/btakita/agent-doc/issues/46. release + publish
+
+### Re: Fix issue #46 and release — gpt-5
+
+> **Queue prompt:**
+>
+> do [#fixhttpsgithub]
+
+
+Implemented, verified, and released as agent-doc `v0.35.291` with JetBrains plugin `0.2.361`.
+
+- Claim, start, environment, and install flows now share one exact resolved tmux client. Resolution prefers the newest compatible client on `PATH`, honors project `tmux_bin`, preserves exact version/server-handshake failures, and safely abbreviates short or multibyte session ids.
+- Linux x86_64 publication now includes a musl artifact, and the installer selects it by default. Source-build prerequisites now document JDK 21 and the required sibling repositories.
+- The JetBrains CRDT bridge separates durable relay acceptance from best-effort peer broadcast and uses bounded exponential backoff for failed canonical rebootstrap, removing the rapid register/deregister and already-accepted-edit replay loop that wedged Compact Exchange.
+- tmux-router commits `ec1a6e6` and `2dd5c8c` and agent-doc commit `1bfbcecc5` are pushed. GitHub issue #46 is closed. Tag `v0.35.291` is pushed; Release and PyPI workflows were in progress at the required one-time observation.
+- Verification passed: tmux-router's 144 tests, focused Rust package and CLI tests, focused JetBrains tests, full `make check`, private-name addition scan, and the one-time `make install-full`.
+
+For `tasks/software/tsift.md`, the retained response capture remains durable and I did not patch, restore, resubmit, force disk, or issue another closeout payload. After the corrected binary and plugin were installed and the controller recycled, the single permitted `session-check` safely stopped at `missing_replica`: the running JetBrains process has not loaded plugin `0.2.361` yet. Restart JetBrains, then run only:
+
+`agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/tsift.md`
+
+That lets the same retained capture converge through the corrected replica without generating a replacement response.
+<!-- agent:boundary:d82d31f6:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--

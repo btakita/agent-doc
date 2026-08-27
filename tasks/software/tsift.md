@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
-  codex: 01a0403c-e9a8-7781-87ac-12dfd538bf4b
+  codex: 01a0419f-08ab-7482-aa82-2bb54262df7f
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -661,12 +661,40 @@ Delivery completed:
 - CI run [33042807868](https://github.com/btakita/tsift/actions/runs/33042807868) is in progress for `904f2e3`; per the runbook this queued/running external check is recorded rather than waited on.
 
 The implementation was developed in an isolated clean worktree based on `origin/main`, so the unrelated uncommitted work in the shared `src/tsift` checkout was preserved. This exchange is large; compacting before a later cycle would reduce context cost.
-<!-- agent:boundary:3de6b0d1:tsift -->
+
+### Re: release + publish — gpt-5
+
+> **Queue prompt:** release + publish
+
+Released and published **tsift 0.1.91** from the completed #19 source-navigation work. The semantic-completion warning referred to the prior 0.1.90 release, so this fresh queue incarnation was executed rather than auto-resolved.
+
+The release commit is `cc438b7` (`release: 0.1.91 -- source navigation fidelity`) on `main`, with annotated tag `v0.1.91`. The [GitHub Release](https://github.com/btakita/tsift/releases/tag/v0.1.91) is public with Linux, macOS ARM, and Windows archives plus SHA-256 files. The [Release workflow](https://github.com/btakita/tsift/actions/runs/33043829499) completed successfully; crates.io now serves `tsift 0.1.91`, and npm serves `opencode-tsift 0.1.91`.
+
+**Changed paths**
+
+- Bumped the root and split-crate Cargo manifests, internal dependency requirements, and `Cargo.lock` to 0.1.91.
+- Bumped `packages/opencode-tsift/package.json` and generated OpenCode/code-navigation version markers.
+- Promoted the #19 `VERSIONS.md` entry from Unreleased to 0.1.91.
+
+**Commands and verification**
+
+- Rebuilt the stale agent-doc install with `make install`; `agent-doc --version` reports 0.35.288.
+- `make check` passed in the clean release worktree.
+- `cargo install --path .` passed; `tsift --version` reports 0.1.91.
+- `git diff --check` and the staged check passed; the release worktree is clean.
+- Main CI run `33043808153` passed.
+- Release run `33043829499` passed all verification, package dry-run, three-platform build, crates.io OIDC publish, npm OIDC publish, and GitHub Release jobs.
+- Independent checks confirmed `cargo info --registry crates-io tsift@0.1.91`, npm version `0.1.91`, and all six GitHub release assets.
+
+**Confidence / escalation**
+
+High confidence. No escalation is required. GitHub emitted only non-failing Node 20 action deprecation annotations; they did not affect publication.
+<!-- agent:boundary:8e328062:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

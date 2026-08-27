@@ -5,7 +5,7 @@ resume:
 claude_model: fable
 agent_doc_format: template
 agent_doc_write: crdt
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -156,18 +156,44 @@ Shipped: existence `1fe3973`, parent `61dbea34d`; **not pushed**.
 **A finding from the first real query:** `SELECT ?t WHERE { ?t a skos:Concept FILTER NOT EXISTS { ?x skos:related ?t } }` lists concepts no other node links to ... `integrity`, `pneuma`, `project`, and more. That is an editorial signal (isolated terms), worth a pass when typing the kernel links (`#xltypekernel`).
 
 **Cost:** the `sparql` build pulls in oxigraph's pure-Rust stack (~+2–3 min cold compile, a much larger binary), which is exactly why it is a feature and not the default. This closes the four-item RDF/OWL/SPARQL arc: export (`#xlexportskos`), identity (`#xlbaseiri`), typed links (`#xltypedlinks`), query (`#xlsparql`). Everything is committed locally across `existence`, `ontology`, and `spec`; nothing is pushed, and `#xlpublishttl` (publish the `.ttl` from the Pages workflow) plus `#xltypekernel` remain in backlog. Exchange is ~130 lines; queue drains with this item.
+
+### Re: do #xltypekernel — Ring 0 kernel links typed — fable
+
+Shipped: ontology `1be238d`, parent `d85234f3b9`; **not pushed**. Five kernel nodes retitled, eight edges, no new sentences ... this was retitle-only, as the item asked.
+
+**Typed** (each is a genus statement in the node's own Ontology section, or a step of the canonical chain):
+
+| node | link | relation | why |
+|---|---|---|---|
+| entity | existence | broader | "Any information in *Existence*"; chain Existence → Entity, the universal set containing all entities |
+| entity | abstraction, concept, collective | narrower | "Entities can be an abstraction, concept, … collective" enumerates kinds of entity; `collective.md` confirms ("The Collective is an entity") |
+| abstraction | illusion | broader | "Abstraction is a form of illusion" is a genus, not a mention |
+| scope | domain | broader | "the breadth, depth or reach of an Entity; *a domain*" |
+| context | scope | broader | "Context adds scope to abstractions"; CLAUDE.md: scope applied to abstractions |
+| domain | system | broader | "A domain is the *system* of interest within an entity" |
+
+**Deliberately left untitled:**
+- `entity → information` and `abstraction → concept`: the targets define themselves the other way round (`information.md`: "That which can distinguish one thing from another. An Entity."; `concept.md`: "An abstraction that does not represent a physical entity"). Typing either direction makes a SKOS `broader` cycle. Which side is the genus is a philosophy decision, filed as `#xlchaingaps`.
+- `entity → system`: universal applicability says every entity *is* a system viewed from inside; that is a perspective, not a subkind.
+- everything else in the 14 nodes (scope/entity, focus/system, perspective/entity, consciousness/signal, evolution/environment, resolution/perspective …) is attribute-of or a passing mention. `existence`, `pattern`, `system`, `story` have no hierarchical links at all; `existence` stays the top concept via `skos:hasTopConcept`.
+
+**Result graph:** `Existence ⊃ Entity ⊃ {Abstraction, Concept, Collective}`, `Illusion ⊃ Abstraction`, `System ⊃ Domain ⊃ Scope ⊃ Context`. The chain's `Entity → System`, `Context → Resolution`, `Resolution → Focus` steps are not expressible today because those nodes never link each other in their Ontology sections; adding the sentences is content work, also in `#xlchaingaps`.
+
+**Verification** (existence CLI built from `1fe3973`): `existence lint` exits 0 with no relation warnings (the 11 warnings are the pre-existing non-standard-subsection notes) so no broader/narrower conflict; `export` emits 8 `skos:broader` plus the 8 inverse `skos:narrower`, `export 0` shows 10 typed lines, `rapper -i turtle -c` parses **2,735** triples (2,732 before). `~/.cargo/bin/existence` is still the 0.4.1 release without typed-link parsing; it reads the titled links as plain links, so nothing breaks for it. Next queue head is `#xlpublishttl`.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
+- ~~do [#xltypekernel]~~
+- do [#xlpublishttl]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#xltypekernel] [recommended] Type the Ring 0 kernel links: for each of the 14 kernel nodes in `src/existence-lang/ontology/src`, retitle the Ontology-section links that are genuinely hierarchical at the term's own scope (`[information](./information.md "broader")`, `[system](./system.md "narrower")`), leave passing mentions untitled, run `existence lint` (warns on conflicts) and `existence export` to check the resulting skos:broader/narrower graph reads correctly. This is editorial ... the philosophy decides what is broader, so review each edit
+- [ ] [#xlchaingaps] [recommended] Three edges of the canonical chain (Existence → Entity → System → Domain → Scope → Context → Resolution → Focus) cannot be typed by retitling because the Ontology section has no such link: `system.md` never links `entity`, `resolution.md` links `scope`/`perspective` but not `context`, `focus.md` never links `resolution`. Also two mutual definitions block typing in either direction: `entity.md` ("any information in Existence") vs `information.md` ("An Entity"), and `abstraction.md` ("a concept that models") vs `concept.md` ("an abstraction that does not represent a physical entity"). Decide which side is the genus and reword one sentence per pair; add the three missing chain sentences; then retitle. Content, not code
 - [ ] [#xlpublishttl] Publish `ontology.ttl` + `ontology.jsonld` from the ontology Pages workflow: before the Jekyll build step in `src/existence-lang/ontology/.github/workflows/pages.yml`, install `existence` and run `existence --ontology . export` (+ `--format jsonld`) so `https://existence-lang.github.io/ontology/ontology.ttl` resolves. Needs the `export` command in an installable binary first ... push `existence@f354da3` and either cut a release (`make release`, bumps to 0.5.0) or `cargo install --git` in the workflow. Then verify live: `curl -sI https://existence-lang.github.io/ontology/entity` is 200 and `rapper -i turtle -c` parses the published .ttl
 <!-- /agent:backlog -->
 
@@ -184,4 +210,5 @@ Shipped: existence `1fe3973`, parent `61dbea34d`; **not pushed**.
 - 2026-08-27 [#xlbaseiri] [recommended] Decide the base IRI for term identity before any RDF export ships. Proposal: `https://existence-lang.github.io/ontology/{term}` (the site repo already exists; publish `ontology.ttl` there). Naming decision ... discuss to convergence first
 - 2026-08-27 [#xltypedlinks] [recommended] Typed relations for richer SKOS/OWL: today every `[term](./term.md)` link is untyped so export can only emit skos:related. Options: link title attribute (`[term](./term.md "broader")`), a frontmatter `relations:` block, or derive broader/narrower from section position (Ontology-section links vs `#### [Sub](./sub.md)` Pattern Expression subheads) plus overlay `Derives From`→skos:broader. Spec change ... naming discussion first, then `existence lint` rule
 - 2026-08-27 [#xlsparql] [recommended] `existence sparql <query>` and a SPARQL endpoint on the planned `serve` command via the `oxigraph` crate behind a cargo feature (keeps the default binary small). Depends on [#xlexportskos]
+- 2026-08-27 [#xltypekernel] [recommended] Type the Ring 0 kernel links: for each of the 14 kernel nodes in `src/existence-lang/ontology/src`, retitle the Ontology-section links that are genuinely hierarchical at the term's own scope (`[information](./information.md "broader")`, `[system](./system.md "narrower")`), leave passing mentions untitled, run `existence lint` (warns on conflicts) and `existence export` to check the resulting skos:broader/narrower graph reads correctly. This is editorial ... the philosophy decides what is broader, so review each edit
 <!-- /agent:done -->

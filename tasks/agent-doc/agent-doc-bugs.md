@@ -201,6 +201,12 @@ Architecture closeout:
 Verification passed: focused Rust policy tests, all 491 JetBrains tests, the full static guard target, `cargo fmt --check`, and repository-wide `make check`. The installed binary reports 0.35.300. Release CI was inspected after push and had started normally; the prior PyPI job's only failure was the external 10 GB project storage cap.
 
 The running IntelliJ host still needs a restart to activate installed plugin 0.2.365; that operator-only verification is captured as a gated backlog item.
+
+### Re: Response
+
+PyPI’s authenticated release page is open in Brave. Please sign in, then reply **“signed in.”**
+
+Proposed cleanup: permanently delete the 214 oldest releases and retain the newest 80 (`0.35.144`–`0.35.239`), freeing about 4.83 GiB. PyPI deletions are irreversible. [PyPI storage guidance](https://docs.pypi.org/project-management/storage-limits/)
 <!-- agent:boundary:aeef9436:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

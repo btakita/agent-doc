@@ -5,7 +5,7 @@ resume:
 claude_model: fable
 agent_doc_format: template
 agent_doc_write: crdt
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -195,18 +195,33 @@ Shipped: ontology `1be238d`, parent `d85234f3b9`; **not pushed**. Five kernel no
 **CI:** ontology Pages run `33127695018` build + deploy success (first run, cold CLI build); existence CI `33127693466` all green, including `RDF export validates` against the pushed ontology and the three installer smokes.
 
 Queue is drained with this item. Exchange is ~185 lines (accretion `warn`); noting per guidance, not compacting without the opt-in.
+
+### Re: do #xlrelease050 — existence 0.5.0 released — fable
+
+**Released:** existence `v0.5.0` (main `1fe3973..6f6c1d1`, tag pushed), ontology `5dba321` pins the Pages workflow to that tag. Everything is pushed and live.
+
+**What `make release` did:** `make check` green (56 tests default, 58 with `sparql`, clippy + fmt clean), tag `v0.5.0`, push, `cargo install --path .` (local `existence --version` → 0.5.0). Release run `33141306184`: all 7 target builds, the GitHub release (7 assets: linux gnu/musl × x86_64/aarch64, macOS × 2, windows) and the crates.io publish all succeeded; CI `33141306174` green.
+
+**A defect the release surfaced and fixed:** crates.io had been stuck at **0.4.0** since March. The `v0.4.1` publish job ran with an empty `CARGO_REGISTRY_TOKEN` ("please provide a non-empty token", exit 101) and `continue-on-error: true` turned that into a green job, so nobody saw it ... the repo had zero Actions secrets. I set `CARGO_REGISTRY_TOKEN` on `existence-lang/existence` from `passage btak/CARGO_REGISTRY_TOKEN` (piped, never printed), and `release.yml` now runs `cargo publish --locked` without `continue-on-error`, so a missing or revoked token turns the Release run red instead of silently skipping. Verified: crates.io `max_version` is now **0.5.0**, so `cargo install existence` gets `export`, typed links, `sparql`, and `serve` (the last two still need `--features sparql`).
+
+**Pages workflow** (`ontology/.github/workflows/pages.yml`): `EXISTENCE_REV: v0.5.0` and `cargo install --git … --tag "$EXISTENCE_REV"` replace the `1fe3973` commit pin (`--rev` → `--tag`; the cache key follows the same variable). Pages run `33141329879` built from the tag (cache miss on `existence-cli-v0.5.0-Linux`, installed from the tag) and deployed: `…/ontology/ontology.ttl` is 200 and `rapper` parses **2,735** triples, unchanged from `#xlpublishttl` as expected since the CLI code is identical to `1fe3973`.
+
+**Also checked:** the public installer (`curl … install.sh | sh`) downloads `existence-x86_64-unknown-linux-musl.tar.gz` for `v0.5.0` and reports 0.5.0; README's pin examples say `EXISTENCE_VERSION=v0.5.0`. Note for the future: `install.sh` ignores a plain `INSTALL_DIR=` and writes to `~/.cargo/bin` (its documented variable is different), which is how my smoke test replaced the locally built binary with the release one ... same version, no harm.
+
+Next queue head is `#xlchaingaps`. Exchange is ~200 lines (accretion `warn`); noting per guidance, not compacting without the opt-in.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
+- ~~do [#xlrelease050]~~
+- do [#xlchaingaps]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#xlrelease050] [recommended] Cut existence 0.5.0 (`make release` in `src/existence-lang/existence`) so `cargo install existence` / `install.sh` users get `export`, typed links, `sparql`, and `serve`; then switch `EXISTENCE_REV` in `ontology/.github/workflows/pages.yml` to the release tag. Today the Pages workflow pins commit `1fe3973` via `cargo install --git`, so the site does not depend on a release
 - [ ] [#xlchaingaps] [recommended] Three edges of the canonical chain (Existence → Entity → System → Domain → Scope → Context → Resolution → Focus) cannot be typed by retitling because the Ontology section has no such link: `system.md` never links `entity`, `resolution.md` links `scope`/`perspective` but not `context`, `focus.md` never links `resolution`. Also two mutual definitions block typing in either direction: `entity.md` ("any information in Existence") vs `information.md` ("An Entity"), and `abstraction.md` ("a concept that models") vs `concept.md` ("an abstraction that does not represent a physical entity"). Decide which side is the genus and reword one sentence per pair; add the three missing chain sentences; then retitle. Content, not code
 <!-- /agent:backlog -->
 
@@ -225,4 +240,5 @@ Queue is drained with this item. Exchange is ~185 lines (accretion `warn`); noti
 - 2026-08-27 [#xlsparql] [recommended] `existence sparql <query>` and a SPARQL endpoint on the planned `serve` command via the `oxigraph` crate behind a cargo feature (keeps the default binary small). Depends on [#xlexportskos]
 - 2026-08-27 [#xltypekernel] [recommended] Type the Ring 0 kernel links: for each of the 14 kernel nodes in `src/existence-lang/ontology/src`, retitle the Ontology-section links that are genuinely hierarchical at the term's own scope (`[information](./information.md "broader")`, `[system](./system.md "narrower")`), leave passing mentions untitled, run `existence lint` (warns on conflicts) and `existence export` to check the resulting skos:broader/narrower graph reads correctly. This is editorial ... the philosophy decides what is broader, so review each edit
 - 2026-08-27 [#xlpublishttl] Publish `ontology.ttl` + `ontology.jsonld` from the ontology Pages workflow: before the Jekyll build step in `src/existence-lang/ontology/.github/workflows/pages.yml`, install `existence` and run `existence --ontology . export` (+ `--format jsonld`) so `https://existence-lang.github.io/ontology/ontology.ttl` resolves. Needs the `export` command in an installable binary first ... push `existence@f354da3` and either cut a release (`make release`, bumps to 0.5.0) or `cargo install --git` in the workflow. Then verify live: `curl -sI https://existence-lang.github.io/ontology/entity` is 200 and `rapper -i turtle -c` parses the published .ttl
+- 2026-08-28 [#xlrelease050] [recommended] Cut existence 0.5.0 (`make release` in `src/existence-lang/existence`) so `cargo install existence` / `install.sh` users get `export`, typed links, `sparql`, and `serve`; then switch `EXISTENCE_REV` in `ontology/.github/workflows/pages.yml` to the release tag. Today the Pages workflow pins commit `1fe3973` via `cargo install --git`, so the site does not depend on a release
 <!-- /agent:done -->

@@ -153,6 +153,12 @@ Warnings:
 
 - IDEA still runs plugin 0.2.362; restart it to activate installed 0.2.363.
 - One legacy gated backlog item remains eligible for `agent-doc migrate`.
+
+### Re: Response
+
+Migrated the legacy gated backlog item to `agent:review`.
+
+The migration is committed, `session-check` is OK, and no stale-plugin warning remains after the IDEA restart.
 <!-- agent:boundary:d82d31f6:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -166,7 +172,6 @@ Warnings:
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [/operator] [#pluginrestartverify] Restart the JetBrains IDE host to activate plugin 0.2.362, reopen tsift.md and contracts.md, then verify each retained capture converges with its single permitted session-check.
 <!-- /agent:backlog -->
 
 ## Review
@@ -175,6 +180,7 @@ Warnings:
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.
 - [/] [#harnessswitchverify] [operator-verify] #harnessswitchstorm remains unverified. The 2026-08-25 fpe.md attempt was invalidated by a stale live JetBrains plugin generation: ops.log showed controller_crdt_replica_refusal_storm (25 refusals), editor_absent/disk authority, agent_restart_respec_inert to Claude, then old_harness=claude -> new_harness=codex only after save. Unblocks after make install, restart the JetBrains IDE host, repeat the unsaved claude <-> codex switch, and prove exactly one spawn plus agent_restart_deferred reason=non_authoritative_document_view.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
+- [/operator] [#pluginrestartverify] Restart the JetBrains IDE host to activate plugin 0.2.362, reopen tsift.md and contracts.md, then verify each retained capture converges with its single permitted session-check.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

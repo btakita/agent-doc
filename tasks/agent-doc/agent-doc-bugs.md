@@ -123,6 +123,27 @@ Correct. The robust design is generation-fenced atomic publication:
 A symlink swap offers similar atomicity, but would create editor, watcher, Git, and inode-identity problems. Atomic `rename` is the safer fit here.
 
 One important caveat: a newer document version cannot simply discard an unsettled response. Compaction must first rebase that retained response into its new target, then supersede the prior generation. That missing semantic fence is the source of the `tsift.md` loss/wedge.
+❯ Released and installed agent-doc 0.35.297 (`bc4074499`). GitHub CI and the six-platform Release are green.
+
+❯ Fixed:
+
+- Generation-fenced, atomic editor writes; superseded writes are discarded before rename. Markdown files are not symlinked.
+- Retained-response closeout when editor authority and disk already converged.
+- Compact Exchange ownership wedges.
+- Contracts queue-verdict loss and drainability.
+- JetBrains/VS Code tmux auto-sync and manual Sync Tmux Layout parity.
+- Local VSIX packaging/install ordering.
+
+❯ Live verification:
+
+- `monsterrodholders.md`: original retained capture committed; no delivery wedge remains. `#referralswork` is preserved for the next normal run.
+- `tsift.md`: committed; compact wedge cleared.
+- `contracts.md`: committed; stale supervisor replaced; `#fpetrainpush` is restored and drainable.
+- Installed CLI/native 0.35.297, JetBrains 0.2.363, VS Code 0.2.68.
+
+❯ One required action remains: restart IDEA to activate JetBrains plugin 0.2.363. The running IDE still reports 0.2.362. During the agent-doc skill’s final report closeout, editor authority diverged from disk, so the controller now owns the save. Do not resubmit finalize, force disk, or manually save—restart IDEA and send `continue`.
+
+❯ PyPI wheels built successfully, but publication remains blocked by the project’s existing 10 GB PyPI storage quota. The GitHub release is published.
 <!-- agent:boundary:d82d31f6:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -132,6 +153,7 @@ One important caveat: a newer document version cannot simply discard an unsettle
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+- monsterrodholders.md pane keeps on crashing. Fix agent-doc causes.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

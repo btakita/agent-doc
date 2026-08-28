@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a046b1-bedb-7cd2-8977-dd7869ef8f05
+  codex: 01a04a81-a5e7-7793-8042-0520e71fd010
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -213,6 +213,34 @@ Proposed cleanup: permanently delete the 214 oldest releases and retain the newe
 Publishing v0.35.300 failed at upload because PyPI remains at its 10 GB project limit.
 
 The PyPI login page is open in Brave. Please sign in and reply **“signed in”**. I’ll then delete the 214 oldest releases, retain the newest 80, and rerun the trusted-publishing workflow. [PyPI storage-limit guidance](https://docs.pypi.org/project-management/storage-limits/)
+
+### Re: The monsterrodholders.md tmux pane clashed yet again. Should this now be fixed or is more fixing needed? — gpt-5
+
+> **Queue prompt:**
+>
+> do [#monsterrodholderstmuxpan]
+
+
+More fixing was needed. The earlier `0.35.300` change checked the pane-loss circuit breaker, but the focus-recovery path never recorded its own missing-pane observations. The live evidence showed the consequence: pane `%101` was replaced by `%103`, then `%103` was replaced by `%104` about seven minutes later, while the session log contained no pane-loss events for either disappearance. The breaker was reading an empty ledger.
+
+I fixed that producer/consumer gap and released it as agent-doc `0.35.301`:
+
+- Focus-driven `resume_latest` recovery now sends the dead bound pane and last-known window to the runtime policy boundary.
+- That boundary durably records `controller_focus_missing_pane` before deriving the existing 2-loss/10-minute window.
+- One isolated loss may still recover. A second loss in the window now fails closed before creating or rebinding another pane.
+- Explicit operator `WaitForReady` recovery remains available and does not manufacture automatic-loss evidence.
+
+So the repeated automatic pane-clash/rebind loop should now be fixed. This does not claim that the underlying harness exit itself can never recur: stale supervisor stderr contained an un-timestamped `Too many open files` clue, but the current live processes had low descriptor counts, so there was not enough evidence to make a speculative resource-leak patch. If another pane exits, `0.35.301` will now preserve the exact loss evidence and prevent a rapid second respawn; that evidence will make any remaining exit cause actionable.
+
+Verification and rollout completed:
+
+- New producer and two-loss fail-closed regressions passed.
+- Full `make check` passed.
+- Release-version synchronization passed across all workspace manifests and bundled skills.
+- `make install-full` completed after packaging the required VS Code artifact.
+- Installed CLI and skills report `0.35.301`; JetBrains remains the already-live `0.2.365`, so no new IntelliJ plugin restart is required for this fix.
+- All running controllers received a two-phase recycle request; active supervisors were deferred to their next idle boundary.
+- Commit `67a869c3b` and tag `v0.35.301` were pushed. CI, Release, and PyPI workflows launched and were queued/in progress at the required one-time inspection.
 <!-- agent:boundary:aeef9436:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

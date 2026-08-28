@@ -497,10 +497,9 @@ class RefreshBeforeApplyConflictTest {
             patchWatcher.contains("EditorIntent.DeliverCrdtRemote.token"),
         )
         assertFalse(
-            "delivery events must not select imperative editor recovery branches",
+            "delivery events must not bypass typed reason routing or adopt controller text imperatively",
             patchWatcher.contains("CrdtReplicaEventReason") ||
-                patchWatcher.contains("requestTextAdopt") ||
-                patchWatcher.contains("forceRefreshOpenDocumentReplica"),
+                patchWatcher.contains("requestTextAdopt"),
         )
         assertFalse(
             "layout detector must not run a fallback polling thread",

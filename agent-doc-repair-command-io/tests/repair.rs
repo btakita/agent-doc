@@ -1306,6 +1306,105 @@ mod tests {
         ));
     }
 
+    /// `#writeappliedcontinuation` — regression for the backend.md closeout
+    /// captured by cycle-1787933898735. The response cell and its mutation plan
+    /// were already materialized, then the supervisor replayed the whole
+    /// response command after pending intent had been cleared.
+    #[test]
+    fn binary_owned_resume_continues_write_applied_capture_without_recapture() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\n",
+            "session: test\n",
+            "agent_doc_format: append\n",
+            "agent_doc_write: merge\n",
+            "---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#fix1] original next action\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## User\n\n",
+            "Hello\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let response = "Recovered response with mutation intent.";
+        let plan = agent_doc_write_command_io::CapturedCloseoutMutationPlan {
+            pending_edit: vec!["fix1=narrowed recovery action".to_string()],
+            ..Default::default()
+        };
+        let plan_json = serde_json::to_string(&plan).unwrap();
+        agent_doc_capture_io::capture_response_with_current_content_and_intent_and_plan(
+            &doc,
+            response,
+            content,
+            Some(response),
+            Some(&plan_json),
+        )
+        .unwrap();
+
+        let applied = concat!(
+            "---\n",
+            "session: test\n",
+            "agent_doc_format: append\n",
+            "agent_doc_write: merge\n",
+            "---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#fix1] narrowed recovery action\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## User\n\n",
+            "Hello\n\n",
+            "## Assistant\n\n",
+            "Recovered response with mutation intent.\n",
+        );
+        std::fs::write(&doc, applied).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "test_response_cell_write_applied",
+            Some(applied),
+            Some(applied),
+        )
+        .unwrap();
+        agent_doc_repair_io::pending::clear_pending(&doc).unwrap();
+        assert!(
+            agent_doc_repair_io::load_active_pending_response(&doc)
+                .unwrap()
+                .is_none()
+        );
+
+        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .expect("write-applied capture should expose a durable resume key");
+        let outcome = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
+        assert!(
+            matches!(
+                outcome,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+            ),
+            "{outcome:?}"
+        );
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(result.matches(response).count(), 1);
+        assert!(result.contains("[#fix1] narrowed recovery action"));
+        assert!(!result.contains("[#fix1] original next action"));
+        assert!(matches!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("cycle state")
+                .phase,
+            agent_doc_turn::CyclePhase::Committed
+        ));
+    }
+
     #[test]
     fn session_check_reports_captured_mutation_plan_without_replaying_it() {
         let dir = setup_project();

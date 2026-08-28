@@ -226,6 +226,22 @@ race class instead of papering over each symptom.
   write queue's responsibility. This eliminates the supervisor self-race where a
   route-owned supervisor write and an agent finalize write interleave on the same
   pane ("could not drain the active closeout" / exit 75).
+- **Write-applied continuation.** A captured finalize operation that has reached
+  durable `write_applied` is already materialized. Supervisor recovery must
+  continue that exact cycle/capture/response identity through retained editor
+  delivery, snapshot, and commit; it must not re-enter response capture or
+  reconstruct the mutation command after pending response intent has cleared.
+  `response_captured` may replay its captured mutation plan, while
+  `write_applied` and `committed` use only the closeout continuation effect.
+- **Missing editor-replica transition.** When reliable editor liveness says the
+  document is attached but relay membership is absent, the controller publishes
+  the typed `editor_replica_reregister` event for that exact file. Receipt owns a
+  forced registration from the current editor buffer before the ordinary CRDT
+  drain; `canonical_projection` and every other delivery reason remain
+  drain-only. A changed relay-membership/liveness witness is the progress edge
+  that re-arms bounded recovery, after which the same captured closeout continues
+  through native editor persistence. Disk forcing, response recapture, and
+  supervisor recycle are not substitutes for this editor-owned transition.
 - **Single filesystem watcher.** The controller owns one filesystem watcher per
   live document and feeds its events to the session actor. Editor plugins
   (JetBrains WatchService, VS Code file watcher) are demoted to **read-only

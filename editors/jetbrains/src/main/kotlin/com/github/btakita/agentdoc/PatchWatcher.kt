@@ -503,11 +503,21 @@ class PatchWatcher(private val project: Project) : Disposable {
                 val editorId = extractStringField(json, "editor_id")
                 if (!targetsThisEditorId(editorId)) return APPLY_FAILED
                 val reasonToken = extractStringField(json, "reason")
+                // #editorreplicareregister: a reliable editor can outlive its relay
+                // membership. Only this typed recovery event republishes the current
+                // editor-owned buffer; routine projection wakeups remain drain-only.
+                if (shouldReregisterForRemoteEventUtil(reasonToken)) {
+                    CrdtReplicaManager.forceRefreshOpenDocumentReplica(
+                        project,
+                        file,
+                        "crdt-remote-editor-replica-reregister",
+                    )
+                }
                 // #crdtpushdrain: every controller-published frontier drains urgently.
                 // The urgent path falls back to the gated drain when it finds no work,
                 // so the no-op backoff still governs speculative polling. Legacy
-                // recovery tokens are also handled as ordinary projection wakeups;
-                // they never adopt an editor buffer into controller authority.
+                // all non-reregister recovery tokens are handled as ordinary projection
+                // wakeups and never adopt an editor buffer into controller authority.
                 if (shouldUrgentDrainForRemoteEventUtil(reasonToken)) {
                     CrdtReplicaManager.requestUrgentRemoteDrain(
                         project,

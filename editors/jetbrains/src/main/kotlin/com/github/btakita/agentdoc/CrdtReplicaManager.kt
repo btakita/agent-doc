@@ -103,6 +103,10 @@ internal fun shouldStartRemoteDrainUtil(backoffScheduled: Boolean): Boolean = !b
  */
 internal fun shouldUrgentDrainForRemoteEventUtil(@Suppress("UNUSED_PARAMETER") reasonToken: String?): Boolean = true
 
+/** Only the controller's typed missing-membership recovery may republish editor state. */
+internal fun shouldReregisterForRemoteEventUtil(reasonToken: String?): Boolean =
+    reasonToken == "editor_replica_reregister"
+
 internal fun projectionRecoveryReregisterDueUtil(
     lastStartedMs: Long?,
     nowMs: Long,

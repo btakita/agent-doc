@@ -6744,7 +6744,7 @@ fn reobserve_missing_editor_replica_with_reregistration(
     for attempt in 1..=attempts {
         let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
             file,
-            agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
+            agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
             0,
         ) {
             Ok(()) => "requested".to_string(),

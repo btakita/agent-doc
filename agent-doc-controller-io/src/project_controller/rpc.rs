@@ -3413,7 +3413,7 @@ pub fn schedule_stale_supervisor_cp_recycle(file: &Path, source: &str) -> String
 pub fn schedule_stale_editor_replica_cp_recycle(file: &Path, source: &str) -> String {
     match agent_doc_crdt_relay_io::signal_crdt_replica_event_with_counts(
         file,
-        agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
+        agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
         0,
     ) {
         Ok(outcome) => {
@@ -3503,7 +3503,7 @@ fn schedule_supervisor_cp_recycle(
         };
     let reregister_status = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
         file,
-        agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
+        agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
         0,
     ) {
         Ok(()) => "requested".to_string(),

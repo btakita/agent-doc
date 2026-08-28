@@ -64,6 +64,15 @@ it('VS Code receives CRDT events and renders the controller-owned reactive turn 
         assert.strictEqual(source.includes("'.agent-doc', 'crdt-replica-events'"), false);
         assert.ok(source.includes('case EditorIntent.DeliverCrdtRemote:'));
         assert.ok(source.includes('this.crdtReplicas?.requestRemoteDrain(filePath);'));
+        const deliveryBranch = source.slice(
+            source.indexOf('case EditorIntent.DeliverCrdtRemote:'),
+            source.indexOf('case EditorIntent.RefreshVcs:'),
+        );
+        assert.ok(deliveryBranch.includes("reasonToken === 'editor_replica_reregister'"));
+        assert.ok(deliveryBranch.includes('this.crdtReplicas?.attachDocument('));
+        assert.ok(deliveryBranch.includes('document.getText(),'));
+        assert.ok(deliveryBranch.includes('true,'));
+        assert.strictEqual(deliveryBranch.includes('document.save()'), false);
         assert.ok(source.includes('configureTurnStatusWatcher()'));
         assert.ok(source.includes('connectTurnAuthorityStream'));
         assert.ok(source.includes("command: 'document_turn_authority_stream'"));

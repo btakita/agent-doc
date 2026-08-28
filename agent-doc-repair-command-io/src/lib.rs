@@ -144,6 +144,27 @@ pub fn resume_captured_finalize(
         return CapturedFinalizeResumeOutcome::Superseded;
     }
 
+    // `#writeappliedcontinuation`: the response command owns capture and
+    // materialization only through `write_applied`. Once that durable phase is
+    // visible, replaying the command would start capture again after pending
+    // response intent has already been cleared. Continue the exact capture
+    // through retained delivery/snapshot/commit instead.
+    let projected_phase = agent_doc_cycle_state_io::load_with_closeout_projection(file)
+        .ok()
+        .flatten()
+        .filter(|state| {
+            state.cycle_id == expected.cycle_id
+                && state.capture_id.as_deref() == Some(expected.capture_id.as_str())
+                && state.response_sha256.as_deref() == Some(expected.response_sha256.as_str())
+        })
+        .map(|state| state.phase);
+    if matches!(
+        projected_phase,
+        Some(agent_doc_turn::CyclePhase::WriteApplied | agent_doc_turn::CyclePhase::Committed)
+    ) {
+        return resume_materialized_captured_finalize(file);
+    }
+
     let result = resume_captured_finalize_intent(file, expected);
     match result {
         Ok(outcome) => {
@@ -166,6 +187,31 @@ pub fn resume_captured_finalize(
                         "strict repair returned {outcome:?} but the captured cycle is still open"
                     ),
                 }
+            }
+        }
+        Err(err) => classify_captured_finalize_resume_error(&format!("{err:#}")),
+    }
+}
+
+fn resume_materialized_captured_finalize(file: &Path) -> CapturedFinalizeResumeOutcome {
+    use agent_doc_session_check_io::SessionCheckEffects;
+
+    match agent_doc_closeout_runtime_io::session_check_effects().resume_captured_finalize(file) {
+        Ok(agent_doc_session_check_io::CapturedFinalizeResumeOutcome::Committed) => {
+            CapturedFinalizeResumeOutcome::Committed {
+                repair_outcome: "ContinuedWriteAppliedCapture".to_string(),
+            }
+        }
+        Ok(agent_doc_session_check_io::CapturedFinalizeResumeOutcome::Superseded) => {
+            CapturedFinalizeResumeOutcome::Superseded
+        }
+        Ok(agent_doc_session_check_io::CapturedFinalizeResumeOutcome::Retained { reason }) => {
+            CapturedFinalizeResumeOutcome::WaitingForSignal { reason }
+        }
+        Ok(agent_doc_session_check_io::CapturedFinalizeResumeOutcome::NotApplicable) => {
+            CapturedFinalizeResumeOutcome::WaitingForSignal {
+                reason: "the materialized captured closeout continuation is not yet applicable"
+                    .to_string(),
             }
         }
         Err(err) => classify_captured_finalize_resume_error(&format!("{err:#}")),

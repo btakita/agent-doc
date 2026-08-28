@@ -140,7 +140,15 @@ class CrdtReplicaProjectionFrontierTest {
     }
 
     @Test
-    fun `crdt remote delivery urgently drains without replacing editor authority`() {
+    fun `only typed missing membership delivery reregisters editor authority`() {
+        assertTrue(shouldReregisterForRemoteEventUtil("editor_replica_reregister"))
+        assertFalse(shouldReregisterForRemoteEventUtil("canonical_projection"))
+        assertFalse(shouldReregisterForRemoteEventUtil("cp_write"))
+        assertFalse(shouldReregisterForRemoteEventUtil(null))
+    }
+
+    @Test
+    fun `crdt remote delivery reregisters only for typed recovery and always drains`() {
         val watcherPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
@@ -159,9 +167,10 @@ class CrdtReplicaProjectionFrontierTest {
             "one controller push must not enqueue a second drain through generic activity recording",
             deliveryBranch.contains("recordDocumentActivity(file, \"socket-crdt-remote\")"),
         )
-        assertFalse(
-            "controller delivery must never replace its authority from the editor buffer",
-            deliveryBranch.contains("forceRefreshOpenDocumentReplica("),
+        assertTrue(
+            "typed missing-membership recovery must rebuild the editor-owned replica",
+            deliveryBranch.contains("shouldReregisterForRemoteEventUtil(reasonToken)") &&
+                deliveryBranch.contains("forceRefreshOpenDocumentReplica("),
         )
     }
 

@@ -219,7 +219,7 @@ function resetBindings(): void {
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 export const EDITOR_PLUGIN_KIND = 'vscode';
 export const NATIVE_HOT_RELOAD_CAPABILITY = 'native_hot_reload_generation_v1';
-export const EDITOR_PLUGIN_VERSION = '0.2.68';
+export const EDITOR_PLUGIN_VERSION = '0.2.69';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
 const BOUNDED_EDITOR_SPLICES_CAPABILITY = 'bounded_editor_splices_v1';

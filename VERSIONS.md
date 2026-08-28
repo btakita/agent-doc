@@ -2,6 +2,28 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.298
+
+- **Fix: write-applied finalize recovery continues instead of recapturing.**
+
+Supervisor recovery now treats a durable `write_applied` response as an existing
+closeout operation. It continues the same cycle, capture, and response identity
+through retained editor delivery, snapshot, and commit instead of re-entering
+the response command after pending intent has cleared. This prevents a delivered
+response plus backlog/queue mutation from being mislabeled as missing active
+capture intent and repeatedly gated as operator-required on editor state edges.
+`response_captured` recovery still replays its captured mutation plan when the
+write has not yet materialized.
+
+- **Fix: missing editor relay membership now performs the requested recovery.**
+
+The controller uses a distinct `editor_replica_reregister` event when reliable
+editor liveness exists without a relay member. JetBrains and VS Code rebuild that
+exact editor-owned replica before draining retained CRDT work; ordinary canonical
+projection events remain drain-only. Repeated preflight/session-check recovery can
+therefore advance the membership witness and continue the durable closeout instead
+of reporting a delivered re-registration request that performed no transition.
+
 ## 0.35.297
 
 - **Fix: gate-lifting queue verdicts remain executable.**

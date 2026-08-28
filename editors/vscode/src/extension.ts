@@ -2608,10 +2608,25 @@ class PatchWatcher implements vscode.Disposable {
                     ? 1
                     : 0;
             }
-            case EditorIntent.DeliverCrdtRemote:
+            case EditorIntent.DeliverCrdtRemote: {
                 if (!filePath) return 0;
+                const reasonToken = typeof message.reason === 'string' ? message.reason : undefined;
+                // #editorreplicareregister: only the typed missing-membership recovery
+                // republishes the current editor buffer. Routine projection events remain
+                // drain-only and cannot replace controller authority.
+                if (reasonToken === 'editor_replica_reregister') {
+                    const document = vscode.workspace.textDocuments.find(
+                        (candidate) => candidate.uri.fsPath === filePath,
+                    );
+                    if (!document || !(await this.crdtReplicas?.attachDocument(
+                        filePath,
+                        document.getText(),
+                        true,
+                    ))) return 0;
+                }
                 this.crdtReplicas?.requestRemoteDrain(filePath);
                 return 1;
+            }
             case EditorIntent.RefreshVcs:
                 if (filePath) await refreshVcsForFile(filePath);
                 return 1;

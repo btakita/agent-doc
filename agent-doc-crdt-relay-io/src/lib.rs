@@ -77,6 +77,7 @@ pub enum CrdtReplicaEventReason {
     CpWrite,
     Rebootstrap,
     CanonicalProjection,
+    EditorReplicaReregister,
 }
 
 /// Decision at the controller cold-start boundary for an incoming editor
@@ -134,6 +135,7 @@ impl CrdtReplicaEventReason {
             Self::CpWrite => "cp_write",
             Self::Rebootstrap => "rebootstrap",
             Self::CanonicalProjection => "canonical_projection",
+            Self::EditorReplicaReregister => "editor_replica_reregister",
         }
     }
 }
@@ -3943,6 +3945,18 @@ mod tests {
     use super::*;
     use parking_lot::Mutex;
     use std::io::Write;
+
+    #[test]
+    fn editor_replica_reregister_reason_has_a_distinct_wire_token() {
+        assert_eq!(
+            CrdtReplicaEventReason::EditorReplicaReregister.token(),
+            "editor_replica_reregister"
+        );
+        assert_ne!(
+            CrdtReplicaEventReason::EditorReplicaReregister.token(),
+            CrdtReplicaEventReason::CanonicalProjection.token()
+        );
+    }
 
     #[test]
     fn convergence_await_wakes_on_one_cell_transition() {

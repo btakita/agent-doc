@@ -144,6 +144,15 @@ One important caveat: a newer document version cannot simply discard an unsettle
 ❯ One required action remains: restart IDEA to activate JetBrains plugin 0.2.363. The running IDE still reports 0.2.362. During the agent-doc skill’s final report closeout, editor authority diverged from disk, so the controller now owns the save. Do not resubmit finalize, force disk, or manually save—restart IDEA and send `continue`.
 
 ❯ PyPI wheels built successfully, but publication remains blocked by the project’s existing 10 GB PyPI storage quota. The GitHub release is published.
+
+### Re: Response
+
+No new document changes; the prior cycle is committed.
+
+Warnings:
+
+- IDEA still runs plugin 0.2.362; restart it to activate installed 0.2.363.
+- One legacy gated backlog item remains eligible for `agent-doc migrate`.
 <!-- agent:boundary:d82d31f6:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

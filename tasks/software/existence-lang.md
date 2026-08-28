@@ -5,7 +5,7 @@ resume:
 claude_model: fable
 agent_doc_format: template
 agent_doc_write: crdt
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -209,20 +209,37 @@ Queue is drained with this item. Exchange is ~185 lines (accretion `warn`); noti
 **Also checked:** the public installer (`curl … install.sh | sh`) downloads `existence-x86_64-unknown-linux-musl.tar.gz` for `v0.5.0` and reports 0.5.0; README's pin examples say `EXISTENCE_VERSION=v0.5.0`. Note for the future: `install.sh` ignores a plain `INSTALL_DIR=` and writes to `~/.cargo/bin` (its documented variable is different), which is how my smoke test replaced the locally built binary with the release one ... same version, no harm.
 
 Next queue head is `#xlchaingaps`. Exchange is ~200 lines (accretion `warn`); noting per guidance, not compacting without the opt-in.
+
+### Re: do #xlchaingaps — canonical chain closed, two mutual definitions resolved — fable
+
+Shipped: ontology `0d2e495` (content) + `fa68011` (site fix), **pushed and live**. Seven Ring 0 / Ring 1 nodes edited, no code.
+
+**The canonical chain is now typed end to end.** `existence ⊃ entity ⊃ system ⊃ domain ⊃ scope ⊃ context ⊃ resolution ⊃ focus`, from 13 `skos:broader` edges (8 before). The three missing steps each got a second Ontology sentence, so every lay definition (first sentence, SPEC rule 2) is unchanged:
+- `system.md`: "A system is an [entity](./entity.md "broader") viewed from an internalized perspective." (the wording `entity.md`'s Pattern Expression and the CLAUDE.md table already used)
+- `resolution.md`: "A resolution is a [context](./context.md "broader") observed at a chosen level of detail; zooming in or out changes which patterns are visible."
+- `focus.md`: "A focus is a [resolution](./resolution.md "broader") to which finite attention is applied." (`attention` is not a node, so plain text)
+
+**Pair 1 — Entity is the genus, Information is an entity.** The deciding fact is structural: `information` is Ring 1, and a Ring 0 kernel concept should not have a Ring 1 `broader` above it, or the rings stop meaning "more general". So `information.md` keeps "An [Entity](./entity.md "broader")" and `entity.md`'s definition changed from "Any information in Existence" to "Anything in [Existence](./existence.md "broader") that can be distinguished from anything else" ... which is the same claim (distinguishability *is* information, per Bateson and `information.md`'s own first clause) without naming a Ring 1 term as the genus. The two stay coextensive ("All Entities are information" remains in `information.md`'s Pattern Expression); only the direction of definition is fixed.
+
+**Pair 2 — Abstraction is the genus, Concept is a non-physical abstraction.** `concept.md` already said so in its own Pattern Expression ("Conceptual & Physical are types of Abstraction"), and the CLAUDE.md table defines abstraction as "a symbol representing a real entity". So `abstraction.md` now opens "An abstraction is a symbol that [models](./model.md) something else, allowing expression of the modeled entity without its complexity & ambiguity" (also fixes "it's"), and `concept.md` links `[abstraction](./abstraction.md "broader")`. Concept keeps its direct `narrower`-of-entity edge from `#xltypekernel`; redundant with the transitive path but not wrong.
+
+**Verification:** `existence lint` exit 0 with the same 11 pre-existing subsection warnings (no relation conflicts); local export 2,740 triples (2,735 before), `rapper` clean. Pages run `33141658403` deployed it: the published `ontology.ttl` parses **2,740** triples with 13 `skos:broader` edges, and `…/ontology/entity` shows the new definition.
+
+**A site defect this surfaced and fixed (`fa68011`):** `jekyll-relative-links` ignores markdown links that carry a title, so every typed link since `#xltypekernel` rendered as `href="./x.md"` and **404ed** on the term pages (untyped links render as `/ontology/x.html`). The Pages workflow now rewrites `[x](./x.md "broader")` → `[x](./x.html "broader")` in the build checkout after the export step (which needs the `.md` form) and fails the build if any typed `.md` link survives. Pages run `33141786735`: the entity page now emits `href="./existence.html" title="broader"` etc., all 200, hover titles intact. Repo source is untouched, so the CLI and spec rule 12 see the same syntax as before.
+
+**Not done:** the sibling `philosophy/` repo (`~/.claude/philosophy` resolves there, not to this ontology) and the `<!-- philosophy:start -->` table in `~/.claude/CLAUDE.md` still carry the superseded "Any information in Existence" / "a concept that models" wording. Different repo and your private global file, so filed as `#xlgenusport [recommended]` rather than edited here. Queue is drained with this item. Exchange is ~230 lines (accretion `warn`); noting per guidance, not compacting without the opt-in.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- ~~do [#xlrelease050]~~
-- do [#xlchaingaps]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#xlchaingaps] [recommended] Three edges of the canonical chain (Existence → Entity → System → Domain → Scope → Context → Resolution → Focus) cannot be typed by retitling because the Ontology section has no such link: `system.md` never links `entity`, `resolution.md` links `scope`/`perspective` but not `context`, `focus.md` never links `resolution`. Also two mutual definitions block typing in either direction: `entity.md` ("any information in Existence") vs `information.md` ("An Entity"), and `abstraction.md` ("a concept that models") vs `concept.md` ("an abstraction that does not represent a physical entity"). Decide which side is the genus and reword one sentence per pair; add the three missing chain sentences; then retitle. Content, not code
+- [ ] [#xlgenusport] [recommended] Port the two genus decisions from `#xlchaingaps` to the sibling `philosophy/` repo (what `~/.claude/philosophy` resolves to; its `src/entity.md` still reads "Any information in Existence" and `src/abstraction.md` still says "a concept that models") and to the `<!-- philosophy:start -->` table in `~/.claude/CLAUDE.md` (Entity row). Content, two files plus one table row; decide whether `philosophy/` should track `existence-lang/ontology` instead of drifting
 <!-- /agent:backlog -->
 
 ## Icebox
@@ -241,4 +258,5 @@ Next queue head is `#xlchaingaps`. Exchange is ~200 lines (accretion `warn`); no
 - 2026-08-27 [#xltypekernel] [recommended] Type the Ring 0 kernel links: for each of the 14 kernel nodes in `src/existence-lang/ontology/src`, retitle the Ontology-section links that are genuinely hierarchical at the term's own scope (`[information](./information.md "broader")`, `[system](./system.md "narrower")`), leave passing mentions untitled, run `existence lint` (warns on conflicts) and `existence export` to check the resulting skos:broader/narrower graph reads correctly. This is editorial ... the philosophy decides what is broader, so review each edit
 - 2026-08-27 [#xlpublishttl] Publish `ontology.ttl` + `ontology.jsonld` from the ontology Pages workflow: before the Jekyll build step in `src/existence-lang/ontology/.github/workflows/pages.yml`, install `existence` and run `existence --ontology . export` (+ `--format jsonld`) so `https://existence-lang.github.io/ontology/ontology.ttl` resolves. Needs the `export` command in an installable binary first ... push `existence@f354da3` and either cut a release (`make release`, bumps to 0.5.0) or `cargo install --git` in the workflow. Then verify live: `curl -sI https://existence-lang.github.io/ontology/entity` is 200 and `rapper -i turtle -c` parses the published .ttl
 - 2026-08-28 [#xlrelease050] [recommended] Cut existence 0.5.0 (`make release` in `src/existence-lang/existence`) so `cargo install existence` / `install.sh` users get `export`, typed links, `sparql`, and `serve`; then switch `EXISTENCE_REV` in `ontology/.github/workflows/pages.yml` to the release tag. Today the Pages workflow pins commit `1fe3973` via `cargo install --git`, so the site does not depend on a release
+- 2026-08-28 [#xlchaingaps] [recommended] Three edges of the canonical chain (Existence → Entity → System → Domain → Scope → Context → Resolution → Focus) cannot be typed by retitling because the Ontology section has no such link: `system.md` never links `entity`, `resolution.md` links `scope`/`perspective` but not `context`, `focus.md` never links `resolution`. Also two mutual definitions block typing in either direction: `entity.md` ("any information in Existence") vs `information.md` ("An Entity"), and `abstraction.md` ("a concept that models") vs `concept.md` ("an abstraction that does not represent a physical entity"). Decide which side is the genus and reword one sentence per pair; add the three missing chain sentences; then retitle. Content, not code
 <!-- /agent:done -->

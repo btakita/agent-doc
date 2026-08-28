@@ -159,7 +159,26 @@ Warnings:
 Migrated the legacy gated backlog item to `agent:review`.
 
 The migration is committed, `session-check` is OK, and no stale-plugin warning remains after the IDEA restart.
-<!-- agent:boundary:d82d31f6:agent-doc-bugs -->
+
+> **Queue prompt:** Please fix backend.md Run Agent Doc issue: Closeout did not complete. session-check reports the controller-owned authority/disk divergence — editor authority and disk diverge on backlog, exchange, and queue, with exact editor delivery acknowledgement pending. The response capture is durable and controller owns next attempt, so per recovery contract did not resubmit finalize, force disk, recycle, or rerun session-check. Stopped queue drain.
+
+### Re: backend queue loss and retained authority recovery — gpt-5
+
+Fixed and released both failure layers.
+
+The first release, agent-doc 0.35.298 (commit `a683a28de`), repairs retained closeout recovery and editor membership recovery. A durable `write_applied` or `committed` response now continues the same closeout instead of being recaptured, and missing editor membership emits a distinct `editor_replica_reregister` event. JetBrains force-refreshes the exact open document replica before draining retained work, while VS Code reattaches the exact open document before its drain/ACK.
+
+The additional `backend.md` queue-loss report exposed a separate preflight bug. The queue item is presently still on disk—`#modconfpush` was not intentionally consumed—but the invocation evaluated an older empty relay projection and reported `no_changes` / drained. Agent-doc 0.35.299 (commit `2bcd15c82`, tag `v0.35.299`) now fails admission instead of translating unresolved authority into `QueueState::default()`. When the registered relay cut still equals the durable baseline while disk contains a newer native editor save, preflight uses disk only as divergence evidence, preserves those bytes, requests typed editor-replica re-registration, and refuses to start a response until authority is current. Missing-replica, sync-pending, and exhausted current-authority reads use the same typed fail-closed boundary. The command layer no longer falls back to an empty/drained queue for that error.
+
+Regression coverage reproduces the exact three-way state—empty baseline, stale live relay cut, newer saved queue item—and proves the queued bytes survive while admission is refused. The full controller-backed preflight suites passed, and the final repository-wide `make check` passed. Release artifact: `.tsift/artifacts/tart-a666838b03.test.log`.
+
+The release is installed locally as `agent-doc 0.35.299`, pushed to agent-doc `main`, and the outer workspace update `dae648699` is also pushed. Controller recycling was explicitly disabled, so the live `backend.md` capture was not disturbed. The JetBrains 0.2.364 package from the editor-re-registration release is installed, but a currently running 0.2.363 IDE host still needs its normal restart before that adapter code is active; the retained backend controller likewise promotes only at a safe normal handoff. During the earlier 0.35.298 library install, the installer published its ordinary `reload_library` intent and delivered it to two of three reachable editor endpoints; I did not invoke a manual reload or recycle.
+
+The new 0.35.299 GitHub CI run is in progress; local verification is green. The prior 0.35.298 CI and Release workflows succeeded. PyPI publishing is externally blocked by the project's 10 GB storage quota, independent of these changes.
+
+Five pre-existing formatting-only edits in the agent-doc submodule remain unstaged and were not included in either release commit.
+
+<!-- agent:boundary:23ebe8a4:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -167,7 +186,12 @@ The migration is committed, `session-check` is OK, and no stale-plugin warning r
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Please fix backend.md Run Agent Doc issue:   Closeout did not complete. session-check reports the controller-owned authority/disk divergence — editor authority
+  and disk diverge on backlog, exchange, and queue, with the exact editor delivery acknowledgement pending. The
+  response capture is durable and the controller owns the next attempt, so per the recovery contract I did not resubmit
+  finalize, force disk, recycle, or re-run session-check. I stopped the queue drain rather than looping over an
+  interrupted closeout.
 - monsterrodholders.md pane keeps on crashing. Fix agent-doc causes.
 <!-- /agent:queue -->
 
@@ -180,7 +204,6 @@ The migration is committed, `session-check` is OK, and no stale-plugin warning r
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.
 - [/] [#harnessswitchverify] [operator-verify] #harnessswitchstorm remains unverified. The 2026-08-25 fpe.md attempt was invalidated by a stale live JetBrains plugin generation: ops.log showed controller_crdt_replica_refusal_storm (25 refusals), editor_absent/disk authority, agent_restart_respec_inert to Claude, then old_harness=claude -> new_harness=codex only after save. Unblocks after make install, restart the JetBrains IDE host, repeat the unsaved claude <-> codex switch, and prove exactly one spawn plus agent_restart_deferred reason=non_authoritative_document_view.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [/operator] [#pluginrestartverify] Restart the JetBrains IDE host to activate plugin 0.2.362, reopen tsift.md and contracts.md, then verify each retained capture converges with its single permitted session-check.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

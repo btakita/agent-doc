@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.299
+
+- **Fix: a stale retained queue cut cannot erase or skip a native editor save.**
+
+Queue maintenance now fails admission when live editor authority is missing,
+sync-pending, or unavailable after bounded recovery instead of returning an empty
+queue state. It also detects the three-way proof where the registered relay cut
+still equals the merge baseline while disk contains a newer native save. That
+path preserves the saved queue item byte-for-byte, requests typed editor-replica
+re-registration, and refuses to start a response until authority is current.
+
 ## 0.35.298
 
 - **Fix: write-applied finalize recovery continues instead of recapturing.**

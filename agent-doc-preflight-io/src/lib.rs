@@ -2596,6 +2596,54 @@ fn queue_control_activation(
             || explicit_queue_start_mode(attrs, frontmatter_queue))
 }
 
+/// Queue maintenance cannot truthfully classify the queue until the retained
+/// editor authority is current. Callers must fail admission on this error;
+/// substituting an empty `QueueState` makes a retained queue edit look drained.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueAuthorityUnavailable {
+    reason: String,
+}
+
+impl QueueAuthorityUnavailable {
+    fn new(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for QueueAuthorityUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.reason)
+    }
+}
+
+impl std::error::Error for QueueAuthorityUnavailable {}
+
+/// Return the disk text only when it proves the registered live replica is an
+/// older baseline cut. Disk is evidence here, never a replacement authority.
+fn disk_edit_newer_than_registered_authority(
+    file: &Path,
+    authority: &str,
+) -> Result<Option<String>> {
+    let Some(baseline) = agent_doc_snapshot_io::load_document_baseline(file)? else {
+        return Ok(None);
+    };
+    let disk = std::fs::read_to_string(file)?;
+    Ok((authority == baseline && disk != baseline).then_some(disk))
+}
+
+fn request_queue_editor_replica_reregister(file: &Path) -> String {
+    match agent_doc_crdt_relay_io::signal_crdt_replica_event(
+        file,
+        agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
+        0,
+    ) {
+        Ok(()) => "requested".to_string(),
+        Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
+    }
+}
+
 pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
     // #sqedit-race Phase 2: defer ALL queue maintenance mutation while a different,
     // live process holds a fresh queue-edit lease (a direct `queue prune-noise` /
@@ -2621,11 +2669,41 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     let (mut content, authority_queue_unresolved_prompts) =
         match current_text_via_preflight_authority_retrying(file, "preflight_queue_maintenance") {
             Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
-                text, semantics, ..
-            })) => (
                 text,
-                semantics.map(|semantics| semantics.queue_unresolved_prompts),
-            ),
+                live_editors,
+                semantics,
+                ..
+            })) => {
+                if live_editors > 0 {
+                    let newer_disk = disk_edit_newer_than_registered_authority(file, &text)
+                        .map_err(|err| {
+                            QueueAuthorityUnavailable::new(format!(
+                                "could not verify retained queue authority: {err:#}"
+                            ))
+                        })?;
+                    if let Some(disk) = newer_disk {
+                        let reregister = request_queue_editor_replica_reregister(file);
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "queue_authority_stale_behind_disk file={} authority_hash={} disk_hash={} editor_replica_reregister={} admission=refused",
+                                file.display(),
+                                agent_doc_hash::short_content_hash(&text),
+                                agent_doc_hash::short_content_hash(&disk),
+                                reregister,
+                            ),
+                        );
+                        return Err(QueueAuthorityUnavailable::new(format!(
+                            "registered editor authority is an older baseline cut while disk contains a newer native save; editor replica re-registration {reregister}"
+                        ))
+                        .into());
+                    }
+                }
+                (
+                    text,
+                    semantics.map(|semantics| semantics.queue_unresolved_prompts),
+                )
+            }
             Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) | Ok(None) => {
                 match std::fs::read_to_string(file) {
                     Ok(content) => (content, None),
@@ -2643,7 +2721,10 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                         file.display()
                     ),
                 );
-                return Ok(QueueState::default());
+                return Err(QueueAuthorityUnavailable::new(
+                    "editor authority is attached but its current replica cut is unavailable after bounded recovery",
+                )
+                .into());
             }
             Err(err) => {
                 agent_doc_ops_log_io::log_op(
@@ -2654,7 +2735,10 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                         err
                     ),
                 );
-                return Ok(QueueState::default());
+                return Err(QueueAuthorityUnavailable::new(format!(
+                    "current queue authority is unavailable after bounded recovery: {err:#}"
+                ))
+                .into());
             }
         };
     // `content` already came from the CP/editor authority above. Do not reread
@@ -4973,7 +5057,7 @@ fn ensure_document_model_with_replica_reregistration(
     for attempt in 1..=attempts {
         let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
             file,
-            agent_doc_crdt_relay_io::CrdtReplicaEventReason::CanonicalProjection,
+            agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
             0,
         ) {
             Ok(()) => "requested".to_string(),
@@ -6583,6 +6667,56 @@ mod tests {
         .unwrap()
         .expect("test editor should publish live buffer through CRDT relay");
         (identity, replica)
+    }
+
+    #[test]
+    fn run_queue_maintenance_refuses_stale_relay_cut_behind_native_queue_save() {
+        // A native editor save can reach disk after the relay lost that editor's
+        // registration. The retained relay cut then still equals the baseline,
+        // while disk contains the newly entered queue head. Treating the relay
+        // cut as a real empty queue silently drops/skips the operator request.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: stop\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let _live_replica = publish_test_live_buffer(&doc, "jetbrains-stale", baseline);
+
+        let saved = baseline.replace(
+            "<!-- agent:queue go -->\n",
+            "<!-- agent:queue go -->\n- re [#modconfpush]: run the queued follow-up\n",
+        );
+        std::fs::write(&doc, &saved).unwrap();
+
+        let err = run_queue_maintenance(&doc, None).unwrap_err();
+        assert!(
+            err.downcast_ref::<QueueAuthorityUnavailable>().is_some(),
+            "stale retained authority must return the typed admission error: {err:#}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            saved,
+            "the newer native-save queue item must remain byte-identical"
+        );
     }
 
     #[test]

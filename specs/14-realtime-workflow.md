@@ -1382,6 +1382,9 @@ Implementations must keep tests for these cases:
   visible file state;
 - out-of-band disk writes while an editor owns the document reconcile with the
   live editor buffer or fail closed before any agent response lands;
+- a newly saved queue item cannot be classified as drained from a registered
+  relay cut that still equals the merge baseline. Preflight preserves the newer
+  disk bytes, requests editor-replica re-registration, and refuses admission;
 - lazily visible-write drift cannot reset operator-visible file content;
 - an editor state projection persists its full visible content in Lazily, and a legacy
   hash-only `already_applied` receipt cannot authorize current-buffer

@@ -5,11 +5,11 @@ use agent_doc_diff as diff;
 use agent_doc_diff::semantic::semantic_diff_summary;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_preflight_io::{
-    PendingMaintenanceReport, PreflightResponseContract, QueueState, check_linked_docs,
-    checkpoint_baseline_content, enforce_no_dropped_backlog, enforce_no_shadow_open_backlog,
-    explicit_backlog_target_requirements, inspect_queue_state, read_and_truncate_claims,
-    read_claims, resolve_pipeline_state, run_gate_verify, run_pending_maintenance,
-    run_queue_maintenance,
+    PendingMaintenanceReport, PreflightResponseContract, QueueAuthorityUnavailable, QueueState,
+    check_linked_docs, checkpoint_baseline_content, enforce_no_dropped_backlog,
+    enforce_no_shadow_open_backlog, explicit_backlog_target_requirements, inspect_queue_state,
+    read_and_truncate_claims, read_claims, resolve_pipeline_state, run_gate_verify,
+    run_pending_maintenance, run_queue_maintenance,
     sweep::{current_sweep_owner, log_and_skip_foreign_owned_sweep_if_needed, sweep_owner_for_doc},
 };
 use agent_doc_preflight_runtime_io::{
@@ -919,6 +919,16 @@ pub fn run_with_options_to_writer(
         match run_queue_maintenance(file, diff_result.as_deref()) {
             Ok(state) => state,
             Err(e) => {
+                if e.downcast_ref::<QueueAuthorityUnavailable>().is_some() {
+                    eprintln!(
+                        "[preflight] admission refused — retained queue reconciliation is pending; \
+                         do not start a response or replace the queued edit: {e}"
+                    );
+                    anyhow::bail!(
+                        "preflight refused admission: retained queue reconciliation is pending; \
+                         do not start a response or replace the queued edit: {e}"
+                    );
+                }
                 // `#queuepersistloud`: the mirror/sync progress lines above are
                 // printed while the new queue is being *computed*, before it is
                 // persisted. When persistence then fails the computed queue is

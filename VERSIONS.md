@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.301
+
+- **Fix: focus recovery now records the pane losses its circuit breaker consumes.**
+
+Project Controller `resume_latest` recovery now publishes each observed missing
+bound pane into the durable session-loss ledger before its typed `ProvisionOnly`
+effect derives the recent-loss window. One isolated loss may still recover, but
+the second loss inside the bounded window fails closed without creating or
+rebinding another pane. Operator `WaitForReady` recovery remains available and
+does not publish automatic-loss evidence.
+
 ## 0.35.300
 
 - **Fix: selected-document recovery no longer bypasses the pane-loss circuit breaker.**

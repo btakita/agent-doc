@@ -1480,6 +1480,12 @@ pub enum ControllerRouteAutoStartPolicy {
     ProvisionOnly,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ControllerMissingPaneObservation<'a> {
+    pub pane_id: &'a str,
+    pub last_known_window: Option<&'a str>,
+}
+
 pub struct ControllerRouteAutoStartInvocation<'a> {
     pub tmux: &'a tmux_router::Tmux,
     pub file: &'a Path,
@@ -1487,6 +1493,7 @@ pub struct ControllerRouteAutoStartInvocation<'a> {
     pub file_arg: &'a str,
     pub window: Option<&'a str>,
     pub policy: ControllerRouteAutoStartPolicy,
+    pub missing_pane: Option<ControllerMissingPaneObservation<'a>>,
     pub resume: Option<agent_doc_harness::ResumeRequest>,
 }
 

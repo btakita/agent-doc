@@ -156,13 +156,27 @@ fn enforce_controller_auto_start_policy(
     file: &Path,
     session_id: &str,
     policy: agent_doc_controller_io::project_controller::ControllerRouteAutoStartPolicy,
+    missing_pane: Option<
+        agent_doc_controller_io::project_controller::ControllerMissingPaneObservation<'_>,
+    >,
 ) -> anyhow::Result<()> {
-    // Controller focus is an automatic provisioning edge, so it consumes the
-    // same persisted repeated-loss projection as an editor route. An explicit
-    // restart-supervisor recovery remains operator-owned and uses WaitForReady.
+    // Controller focus owns the missing-pane observation that feeds the same
+    // persisted repeated-loss projection as an editor route. Record the fact
+    // before deriving the current window; otherwise the policy consumes a
+    // ledger that focus recovery itself never populated. An explicit operator
+    // restart remains WaitForReady and does not publish automatic-loss facts.
     if policy
         == agent_doc_controller_io::project_controller::ControllerRouteAutoStartPolicy::ProvisionOnly
     {
+        if let Some(missing_pane) = missing_pane {
+            agent_doc_supervisor_io::startup_miss::record_session_loss(
+                file,
+                session_id,
+                missing_pane.pane_id,
+                "controller_focus_missing_pane",
+                missing_pane.last_known_window,
+            )?;
+        }
         agent_doc_route_io::pane_resolution::fail_if_recent_session_loss_window(
             file, session_id,
         )?;
@@ -206,6 +220,7 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             invocation.file,
             invocation.session_id,
             invocation.policy,
+            invocation.missing_pane,
         )?;
         agent_doc_route_io::startup::auto_start_ext(
             invocation.tmux,
@@ -6265,6 +6280,7 @@ mod controller_auto_start_policy_tests {
             &file,
             session_id,
             agent_doc_controller_io::project_controller::ControllerRouteAutoStartPolicy::ProvisionOnly,
+            None,
         )
         .expect_err("automatic focus recovery must fail closed after repeated pane loss");
         assert!(err.to_string().contains("unexpected pane-loss events"));
@@ -6281,8 +6297,78 @@ mod controller_auto_start_policy_tests {
             &file,
             session_id,
             agent_doc_controller_io::project_controller::ControllerRouteAutoStartPolicy::WaitForReady,
+            Some(agent_doc_controller_io::project_controller::ControllerMissingPaneObservation {
+                pane_id: "%43",
+                last_known_window: Some("@4"),
+            }),
         )
         .expect("explicit supervisor recovery remains available");
+    }
+
+    #[test]
+    fn controller_focus_records_each_observed_loss_before_deciding_to_provision() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.md");
+        let session_id = "controller-focus-observed-pane-loss";
+        let log_dir = dir.path().join(".agent-doc/logs");
+        std::fs::create_dir_all(&log_dir).unwrap();
+        std::fs::write(&file, "# Session\n").unwrap();
+        let log_path = log_dir.join(format!("{session_id}.log"));
+        std::fs::write(
+            &log_path,
+            format!(
+                "[1] session_start file={} pane=%51 session={} generation=1\n[2] codex_start mode=fresh restart_count=0\n",
+                file.display(),
+                session_id,
+            ),
+        )
+        .unwrap();
+
+        enforce_controller_auto_start_policy(
+            &file,
+            session_id,
+            agent_doc_controller_io::project_controller::ControllerRouteAutoStartPolicy::ProvisionOnly,
+            Some(agent_doc_controller_io::project_controller::ControllerMissingPaneObservation {
+                pane_id: "%51",
+                last_known_window: Some("@5"),
+            }),
+        )
+        .expect("one isolated focus loss may provision a replacement");
+
+        use std::io::Write as _;
+        let mut log = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&log_path)
+            .unwrap();
+        writeln!(
+            log,
+            "[3] session_start file={} pane=%52 session={} generation=2\n[4] codex_start mode=resume restart_count=1",
+            file.display(),
+            session_id,
+        )
+        .unwrap();
+
+        let err = enforce_controller_auto_start_policy(
+            &file,
+            session_id,
+            agent_doc_controller_io::project_controller::ControllerRouteAutoStartPolicy::ProvisionOnly,
+            Some(agent_doc_controller_io::project_controller::ControllerMissingPaneObservation {
+                pane_id: "%52",
+                last_known_window: Some("@6"),
+            }),
+        )
+        .expect_err("the second observed focus loss must fail closed");
+        assert!(err.to_string().contains("unexpected pane-loss events"));
+
+        let log = std::fs::read_to_string(log_path).unwrap();
+        assert_eq!(
+            log.matches("reason=controller_focus_missing_pane").count(),
+            2
+        );
+        assert!(log.contains("pane=%51"));
+        assert!(log.contains("last_known_window=@5"));
+        assert!(log.contains("pane=%52"));
+        assert!(log.contains("last_known_window=@6"));
     }
 }
 

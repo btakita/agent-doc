@@ -19708,6 +19708,19 @@ fn rejected_focus_should_resume_latest(
         )
 }
 
+fn missing_focus_pane_observation<'a>(
+    missing_pane_policy: MissingFocusPanePolicy,
+    pane_id: &'a str,
+    last_known_window: Option<&'a str>,
+) -> Option<ControllerMissingPaneObservation<'a>> {
+    (missing_pane_policy == MissingFocusPanePolicy::ResumeLatest && !pane_id.is_empty()).then_some(
+        ControllerMissingPaneObservation {
+            pane_id,
+            last_known_window: last_known_window.filter(|window| !window.is_empty()),
+        },
+    )
+}
+
 fn current_document_session_id(
     canonical: &Path,
     actor_record: Option<&agent_doc_controller::actor::ActorRecord>,
@@ -20007,6 +20020,16 @@ fn handle_focus_document_pane_with_policy(
             }
             let file_arg = canonical.to_string_lossy().to_string();
             let stale_pane = pane_id.clone();
+            let last_known_window = actor_record
+                .as_ref()
+                .map(|record| record.window_id.as_str())
+                .filter(|window| !window.is_empty())
+                .or_else(|| {
+                    registry_entry
+                        .as_ref()
+                        .map(|entry| entry.window.as_str())
+                        .filter(|window| !window.is_empty())
+                });
             pane_id = runtime_effects()?
                 .route_auto_start(ControllerRouteAutoStartInvocation {
                     tmux: &tmux,
@@ -20015,6 +20038,11 @@ fn handle_focus_document_pane_with_policy(
                     file_arg: &file_arg,
                     window: None,
                     policy: ControllerRouteAutoStartPolicy::ProvisionOnly,
+                    missing_pane: missing_focus_pane_observation(
+                        missing_pane_policy,
+                        &stale_pane,
+                        last_known_window,
+                    ),
                     resume: Some(agent_doc_harness::ResumeRequest::Latest),
                 })
                 .with_context(|| {
@@ -22041,6 +22069,7 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
             file_arg: &file_str,
             window: None,
             policy: ControllerRouteAutoStartPolicy::WaitForReady,
+            missing_pane: None,
             resume,
         })
         .with_context(|| {
@@ -24092,6 +24121,21 @@ mod tests {
             FocusPaneRejectReason::ActorNotFocusable,
             None,
         ));
+    }
+
+    #[test]
+    fn resume_latest_focus_emits_missing_pane_evidence_for_auto_start() {
+        assert_eq!(
+            missing_focus_pane_observation(MissingFocusPanePolicy::ResumeLatest, "%61", Some("@9"),),
+            Some(ControllerMissingPaneObservation {
+                pane_id: "%61",
+                last_known_window: Some("@9"),
+            }),
+        );
+        assert_eq!(
+            missing_focus_pane_observation(MissingFocusPanePolicy::ObserveOnly, "%61", Some("@9"),),
+            None,
+        );
     }
 
     #[test]

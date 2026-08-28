@@ -207,6 +207,12 @@ The running IntelliJ host still needs a restart to activate installed plugin 0.2
 PyPI’s authenticated release page is open in Brave. Please sign in, then reply **“signed in.”**
 
 Proposed cleanup: permanently delete the 214 oldest releases and retain the newest 80 (`0.35.144`–`0.35.239`), freeing about 4.83 GiB. PyPI deletions are irreversible. [PyPI storage guidance](https://docs.pypi.org/project-management/storage-limits/)
+
+### Re: Response
+
+Publishing v0.35.300 failed at upload because PyPI remains at its 10 GB project limit.
+
+The PyPI login page is open in Brave. Please sign in and reply **“signed in”**. I’ll then delete the 214 oldest releases, retain the newest 80, and rerun the trusted-publishing workflow. [PyPI storage-limit guidance](https://docs.pypi.org/project-management/storage-limits/)
 <!-- agent:boundary:aeef9436:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

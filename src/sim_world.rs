@@ -2538,6 +2538,31 @@ mod read_only_retained_projection_model {
             }
         }
 
+        fn retained_write_applied_already_converged() -> Self {
+            let authority = "retained response\n".to_string();
+            let disk = authority.clone();
+            let phase = CyclePhase::WriteApplied;
+            let retained_write_blocks = true;
+            let retained_closeout_resume = ReadOnlyRetainedCloseoutResumeProjection::new(
+                authority == disk,
+                Some(phase),
+                retained_write_blocks,
+            );
+            Self {
+                authority,
+                disk,
+                phase,
+                retained_write_blocks,
+                delivery_converged: true,
+                native_save_requested: false,
+                native_save_requests: 0,
+                committed: false,
+                response_replays: 0,
+                operator_exit_requested: false,
+                retained_closeout_resume,
+            }
+        }
+
         fn evaluate_projection(&mut self) {
             match decide_read_only_terminal_projection(
                 self.authority == self.disk,
@@ -2561,7 +2586,14 @@ mod read_only_retained_projection_model {
 
         fn step(&mut self, action: Action) {
             match action {
-                Action::SessionCheck => self.evaluate_projection(),
+                Action::SessionCheck => {
+                    self.evaluate_projection();
+                    if self.retained_closeout_resume.should_resume() {
+                        self.phase = CyclePhase::Committed;
+                        self.retained_write_blocks = false;
+                        self.committed = true;
+                    }
+                }
                 // A clock is not a document-state Source. It cannot create
                 // another closeout or native-save Effect.
                 Action::TimerTick => {}
@@ -2621,6 +2653,18 @@ mod read_only_retained_projection_model {
 
         assert!(world.committed);
         assert_eq!(world.phase, CyclePhase::Committed);
+        assert_eq!(world.response_replays, 0);
+        assert!(!world.operator_exit_requested);
+    }
+
+    #[test]
+    fn preconverged_retained_capture_commits_without_a_redundant_native_save() {
+        let mut world = World::retained_write_applied_already_converged();
+        world.step(Action::SessionCheck);
+
+        assert!(world.committed);
+        assert_eq!(world.phase, CyclePhase::Committed);
+        assert_eq!(world.native_save_requests, 0);
         assert_eq!(world.response_replays, 0);
         assert!(!world.operator_exit_requested);
     }

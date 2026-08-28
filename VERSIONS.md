@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.296
+
+- **Fix: pre-converged retained responses reach their commit boundary.**
+
+`session-check` now resumes an exact captured `write_applied` closeout when editor
+authority and disk already agree at the start of the check. Previously the
+read-only recovery gate required a native-save receipt created during that same
+invocation, so a response delivered immediately before the check remained open
+even though every byte had converged. Capture identity, response hash, exact
+materialization, and current authority/disk equality are still revalidated before
+the commit; no replay or redundant editor save is performed.
+
 ## 0.35.295
 
 - **Fix: queue verdicts, compaction generations, and editor layout sync converge.**

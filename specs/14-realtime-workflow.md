@@ -63,6 +63,7 @@ operator edits.
 | --- | --- | --- |
 | Retained compact; editor target equals disk | Exact canonical editor and disk hash equality | Checkpoint, commit, and settle |
 | Retained compact; target delivered but disk stale | Exact live editor target, delivery convergence, and native-save receipt | Re-observe editor/disk equality, then checkpoint, commit, and settle |
+| Captured response is already `write_applied` when session-check begins | Matching capture identity and response hash, the exact response materialized once, and canonical editor authority equals disk | Resume that same captured closeout and commit without requiring a redundant native-save request |
 | Open exact closeout capture | Matching cycle identity and nonterminal phase | May project the answered free-text queue strike |
 | Terminal or mismatched capture | Committed/terminal proof or a different cycle identity | Preserve the durable response payload, but expose no queue-strike target |
 | Serialized target awaiting delivery/save | Exact delivery and disk receipt within the bounded deadline | Complete the same serialized command |

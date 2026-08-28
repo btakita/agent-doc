@@ -216,12 +216,12 @@ fn terminal_projection_matches_required_scope(
 }
 
 fn derive_read_only_retained_closeout_resume(
-    native_save_settled: bool,
+    settlement_observed: bool,
     authority_matches_disk: bool,
     cycle_phase: Option<CyclePhase>,
     retained_document_write_blocks: bool,
 ) -> bool {
-    native_save_settled
+    settlement_observed
         && authority_matches_disk
         && cycle_phase == Some(CyclePhase::WriteApplied)
         && retained_document_write_blocks
@@ -235,7 +235,7 @@ fn derive_read_only_retained_closeout_resume(
 /// replay, repair, or an unrelated commit.
 pub struct ReadOnlyRetainedCloseoutResumeProjection {
     scope: LocalReadScope,
-    native_save_settled: Source<bool>,
+    settlement_observed: Source<bool>,
     authority_matches_disk: Source<bool>,
     cycle_phase: Source<Option<CyclePhase>>,
     retained_document_write_blocks: Source<bool>,
@@ -249,13 +249,20 @@ impl ReadOnlyRetainedCloseoutResumeProjection {
         retained_document_write_blocks: bool,
     ) -> Self {
         let scope = LocalReadScope::new();
-        let native_save_settled = scope.ctx().source(false);
+        // `#preconvergedcapturecloseout`: editor delivery may settle before the
+        // operator starts session-check. Exact authority/disk equality at the
+        // initial observation is already the receipt this read-only transition
+        // needs; requiring this invocation to request another native save leaves
+        // an otherwise exact captured `write_applied` cycle open forever. The
+        // runtime resume still fences the transition to the durable capture id,
+        // response hash, exact response materialization, and current disk bytes.
+        let settlement_observed = scope.ctx().source(authority_matches_disk);
         let authority_matches_disk = scope.ctx().source(authority_matches_disk);
         let cycle_phase = scope.ctx().source(cycle_phase);
         let retained_document_write_blocks = scope.ctx().source(retained_document_write_blocks);
         let should_resume = scope.ctx().computed(move |ctx| {
             derive_read_only_retained_closeout_resume(
-                native_save_settled.get(ctx),
+                settlement_observed.get(ctx),
                 authority_matches_disk.get(ctx),
                 cycle_phase.get(ctx),
                 retained_document_write_blocks.get(ctx),
@@ -263,7 +270,7 @@ impl ReadOnlyRetainedCloseoutResumeProjection {
         });
         Self {
             scope,
-            native_save_settled,
+            settlement_observed,
             authority_matches_disk,
             cycle_phase,
             retained_document_write_blocks,
@@ -272,7 +279,7 @@ impl ReadOnlyRetainedCloseoutResumeProjection {
     }
 
     pub fn observe_native_save(&self, settled: bool, authority_matches_disk: bool) {
-        self.scope.ctx().set(&self.native_save_settled, settled);
+        self.scope.ctx().set(&self.settlement_observed, settled);
         self.scope
             .ctx()
             .set(&self.authority_matches_disk, authority_matches_disk);
@@ -2878,6 +2885,23 @@ mod terminal_convergence_tests {
         assert!(!projection.should_resume());
 
         projection.observe_native_save(true, true);
+        projection.observe_cycle_phase(Some(CyclePhase::ResponseCaptured));
+        assert!(!projection.should_resume());
+
+        projection.observe_cycle_phase(Some(CyclePhase::WriteApplied));
+        projection.observe_retained_document_write_blocks(false);
+        assert!(!projection.should_resume());
+    }
+
+    #[test]
+    fn read_only_preconverged_capture_resumes_the_exact_write_applied_closeout() {
+        let projection = ReadOnlyRetainedCloseoutResumeProjection::new(
+            true,
+            Some(CyclePhase::WriteApplied),
+            true,
+        );
+        assert!(projection.should_resume());
+
         projection.observe_cycle_phase(Some(CyclePhase::ResponseCaptured));
         assert!(!projection.should_resume());
 

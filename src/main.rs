@@ -152,6 +152,24 @@ fn route_repair_closeout(file: &Path) -> anyhow::Result<String> {
     agent_doc_repair_command_io::repair(file).map(|outcome| format!("{outcome:?}"))
 }
 
+fn enforce_controller_auto_start_policy(
+    file: &Path,
+    session_id: &str,
+    policy: agent_doc_controller_io::project_controller::ControllerRouteAutoStartPolicy,
+) -> anyhow::Result<()> {
+    // Controller focus is an automatic provisioning edge, so it consumes the
+    // same persisted repeated-loss projection as an editor route. An explicit
+    // restart-supervisor recovery remains operator-owned and uses WaitForReady.
+    if policy
+        == agent_doc_controller_io::project_controller::ControllerRouteAutoStartPolicy::ProvisionOnly
+    {
+        agent_doc_route_io::pane_resolution::fail_if_recent_session_loss_window(
+            file, session_id,
+        )?;
+    }
+    Ok(())
+}
+
 struct CliProjectControllerRuntimeEffects;
 
 impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffects
@@ -184,6 +202,11 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             '_,
         >,
     ) -> anyhow::Result<String> {
+        enforce_controller_auto_start_policy(
+            invocation.file,
+            invocation.session_id,
+            invocation.policy,
+        )?;
         agent_doc_route_io::startup::auto_start_ext(
             invocation.tmux,
             invocation.file,
@@ -6205,6 +6228,61 @@ fn try_main() -> anyhow::Result<()> {
                 agent_doc_callback_io::cleanup_expired(&root_path, 300)
             }
         },
+    }
+}
+
+#[cfg(test)]
+mod controller_auto_start_policy_tests {
+    use super::*;
+
+    fn seed_recent_pane_losses(file: &Path, session_id: &str) {
+        let root = file.parent().expect("document parent");
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::write(file, "# Session\n").unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        std::fs::write(
+            root.join(".agent-doc/logs").join(format!("{session_id}.log")),
+            format!(
+                "[{}] supervisor_exit code=missing_pane pane=%41 reason=registered_pane_missing\n[{}] supervisor_exit code=missing_pane pane=%42 reason=registered_pane_missing\n",
+                now.saturating_sub(30),
+                now.saturating_sub(5),
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn controller_focus_provision_consumes_route_pane_loss_circuit_breaker() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.md");
+        let session_id = "controller-focus-pane-loss";
+        seed_recent_pane_losses(&file, session_id);
+
+        let err = enforce_controller_auto_start_policy(
+            &file,
+            session_id,
+            agent_doc_controller_io::project_controller::ControllerRouteAutoStartPolicy::ProvisionOnly,
+        )
+        .expect_err("automatic focus recovery must fail closed after repeated pane loss");
+        assert!(err.to_string().contains("unexpected pane-loss events"));
+    }
+
+    #[test]
+    fn explicit_supervisor_recovery_is_not_reclassified_as_automatic_focus() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.md");
+        let session_id = "controller-explicit-pane-recovery";
+        seed_recent_pane_losses(&file, session_id);
+
+        enforce_controller_auto_start_policy(
+            &file,
+            session_id,
+            agent_doc_controller_io::project_controller::ControllerRouteAutoStartPolicy::WaitForReady,
+        )
+        .expect("explicit supervisor recovery remains available");
     }
 }
 

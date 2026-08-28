@@ -314,9 +314,14 @@ class TypingTrackerEdtBudgetTest {
             .substringBefore("private fun appendOpsLog")
         val disposeBody = watcher.substringAfter("override fun dispose()")
             .substringBefore("companion object")
-        val edtSocketApplyBody = watcher
-            .substringAfter("ApplicationManager.getApplication().invokeAndWait {")
-            .substringBefore("if (applied || wasNoOp) {")
+        val patchOrchestrationBody = watcher.substringAfter("private fun applyPatch(patch: IpcPatch)")
+            .substringBefore("private fun capturePatchApplyOnEdt")
+        val patchCaptureBody = watcher.substringAfter("private fun capturePatchApplyOnEdt")
+            .substringBefore("private fun computePatchOnWorker")
+        val patchComputationBody = watcher.substringAfter("private fun computePatchOnWorker")
+            .substringBefore("private fun applyComputedPatchOnEdt")
+        val computedPatchApplyBody = watcher.substringAfter("private fun applyComputedPatchOnEdt")
+            .substringBefore("private fun patchConflictKey")
         val workerProjectionBody = watcher
             .substringAfter("if (applied || wasNoOp) {")
             .substringBefore("StateProjectionBridge.recordEditorPatchApplied")
@@ -339,7 +344,7 @@ class TypingTrackerEdtBudgetTest {
         assertTrue(
             "native op-capture fencing must precede every socket-driven EDT mutation",
             socketApplyBody.indexOf("prepareNonOperatorEditorMutationOnWorker(patch.file)") in
-                0 until socketApplyBody.indexOf("invokeAndWait") &&
+                0 until socketApplyBody.indexOf("applyPatch(patch)") &&
                 refreshFunction.indexOf("prepareNonOperatorEditorMutationOnWorker(filePath)") in
                 0 until refreshFunction.indexOf("invokeAndWait") &&
                 repositionFunction.indexOf("prepareNonOperatorEditorMutationOnWorker(filePath)") in
@@ -357,8 +362,21 @@ class TypingTrackerEdtBudgetTest {
                 disposeBody.contains("runNativeSideEffectOffEdt"),
         )
         assertFalse(
-            "content projection FFI must not run inside the socket EDT apply closure",
-            edtSocketApplyBody.contains("writeEditorContentProjection"),
+            "editor capture must not cross the native ABI from the EDT",
+            patchCaptureBody.contains("NativePatching."),
+        )
+        assertFalse(
+            "computed editor mutation must not cross the native ABI from the EDT",
+            computedPatchApplyBody.contains("NativePatching."),
+        )
+        assertTrue(
+            "socket patch orchestration must capture on EDT, compute on its worker, then apply on EDT",
+            patchOrchestrationBody.indexOf("capturePatchApplyOnEdt(patch)") in
+                0 until patchOrchestrationBody.indexOf("computePatchOnWorker(patch, captured)") &&
+                patchOrchestrationBody.indexOf("computePatchOnWorker(patch, captured)") in
+                0 until patchOrchestrationBody.indexOf("applyComputedPatchOnEdt(patch, captured, computation)") &&
+                patchComputationBody.contains("applyComponentPatchNative") &&
+                patchComputationBody.contains("native patch computation must run off the IDEA event-dispatch thread"),
         )
         assertTrue(
             "the socket worker must publish the immutable post-apply content before acknowledging",

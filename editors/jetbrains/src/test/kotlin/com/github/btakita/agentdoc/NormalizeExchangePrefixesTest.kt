@@ -323,7 +323,7 @@ One.
         val source = Files.readString(sourcePath)
 
         assertTrue(source.contains("hasPendingMemoryDiskConflict(targetFile)"))
-        assertTrue(source.contains("lastApplyBlockedForFileCacheConflict = true"))
+        assertTrue(source.contains("PatchApplyCapture.Rejected(\"file_cache_conflict_pending\")"))
         assertTrue(source.contains("ui_outcome=real_component_conflict"))
         assertTrue(source.contains("File Cache Conflict pending for") && source.contains("rejecting patch without mutating document"))
         assertTrue(source.contains("recordFileCacheConflictOps("))
@@ -465,8 +465,8 @@ One.
 
         assertTrue(patchWatcher.contains("private fun writeEditorContentProjection(patchId: String?, content: String, filePath: String? = null): Boolean"))
         assertTrue(patchWatcher.contains("FFI unavailable, cannot write content projection"))
-        assertTrue(patchWatcher.contains("lastApplyProjectionContent = document.text"))
-        assertTrue(patchWatcher.contains("projectionContent = lastApplyProjectionContent"))
+        assertTrue(patchWatcher.contains("PatchApplyOutcome(applied = true, projectionContent = document.text)"))
+        assertTrue(patchWatcher.contains("val projectionContent = outcome.projectionContent"))
         assertTrue(patchWatcher.contains("!writeEditorContentProjection(patch.patchId, content, patch.file)"))
         assertTrue(patchWatcher.contains("applyMinimalDocumentEditUtil(document, content, result)"))
         assertFalse(patchWatcher.contains("document.setText(result)"))

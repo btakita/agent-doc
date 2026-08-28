@@ -225,6 +225,8 @@ The stash system preserves running Claude sessions when the user switches editor
 
 This is the **Binding invariant** — the foundational rule of pane management.
 
+Automatic `resume_latest` focus recovery is still bounded routing, not an implicit operator restart. Its typed `ProvisionOnly` effect must consume the route-owned recent-session-loss projection before creating a replacement. The first isolated loss may recover, but once the persisted crash window reaches its threshold the controller fails closed without pane creation or registry rebind. An explicit `restart-supervisor` recovery uses the operator-owned `WaitForReady` policy and remains available.
+
 ### Bounce-Back Suppression
 
 JetBrains (and potentially VS Code) fires spurious `selectionChanged` events in split layouts: after the user selects a file in one split, the IDE re-fires selection for the other split's file ~1 second later. Without suppression, the tmux pane focus bounces back to the previous file, making it appear as if navigation doesn't work.

@@ -76,26 +76,37 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     @Volatile private var memoryDiskConflictReflectionWarned = false
 
-    /**
-     * Signal that the most recent successful [applyPatch] / [applyPatchViaVfs]
-     * call was structurally a no-op against the live buffer (response was
-     * already present). Read by the v2 socket callback path to map the outcome
-     * to `already_applied` so the binary skips the file-IPC fallback.
-     *
-     * Set inside the apply functions immediately before returning `true` from
-     * the `result == content` branch; reset to `false` at the start of the v2
-     * callback path. Safe because `invokeAndWait` blocks the FFI thread until
-     * the EDT closure completes, so reads/writes do not race.
-     *
-     * Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
-     * `#ipcpluginalready`.
-     */
-    @Volatile private var lastApplyWasNoOp = false
+    /** Immutable EDT capture consumed by the socket listener worker. */
+    private sealed interface PatchApplyCapture {
+        data class Rejected(val retryReason: String = "socket_apply_failed") : PatchApplyCapture
+        data object AlreadyApplied : PatchApplyCapture
+        data class Editor(
+            val targetFile: VirtualFile,
+            val document: Document,
+            val proof: EditorApplyProof,
+            val content: String,
+            val diskContent: String?,
+        ) : PatchApplyCapture
+        data class Detached(
+            val targetFile: VirtualFile,
+            val content: String,
+        ) : PatchApplyCapture
+    }
 
-    /** Immutable post-apply content captured on the EDT for worker-side receipt publication. */
-    @Volatile private var lastApplyProjectionContent: String? = null
+    /** Pure/native worker result; no IntelliJ model object is read while producing it. */
+    private sealed interface PatchComputation {
+        data class Changed(val content: String) : PatchComputation
+        data class NoOp(val projectionContent: String? = null) : PatchComputation
+        data class Rejected(val retryReason: String = "socket_apply_failed") : PatchComputation
+    }
 
-    @Volatile private var lastApplyBlockedForFileCacheConflict = false
+    /** Typed receipt returned to the socket callback after the final EDT fence. */
+    private data class PatchApplyOutcome(
+        val applied: Boolean = false,
+        val wasNoOp: Boolean = false,
+        val projectionContent: String? = null,
+        val retryReason: String = "socket_apply_failed",
+    )
 
     @Volatile private var running = false
 
@@ -379,32 +390,15 @@ class PatchWatcher(private val project: Project) : Disposable {
                     )
                     return APPLY_FAILED
                 }
-                var applied = false
-                var wasNoOp = false
-                var projectionContent: String? = null
-                ApplicationManager.getApplication().invokeAndWait {
-                    // Re-check under EDT to avoid TOCTOU race with file watcher
-                    if (isAlreadyApplied(patch.patchId)) {
-                        LOG.info("[socket] dedup (EDT): patch_id ${patch.patchId} already applied — emitting already_applied")
-                        projectionContent = currentContentForProjection(patch.file)
-                        wasNoOp = projectionContent != null
-                        return@invokeAndWait
-                    }
-                    lastApplyWasNoOp = false
-                    lastApplyProjectionContent = null
-                    applied = try {
-                        applyPatch(patch)
-                    } catch (e: Exception) {
-                        LOG.warn("[socket] Failed to apply patch", e)
-                        false
-                    }
-                    if (applied) {
-                        wasNoOp = lastApplyWasNoOp
-                        projectionContent = lastApplyProjectionContent
-                        lastApplyWasNoOp = false
-                        lastApplyProjectionContent = null
-                    }
+                val outcome = try {
+                    applyPatch(patch)
+                } catch (e: Exception) {
+                    LOG.warn("[socket] Failed to apply patch", e)
+                    PatchApplyOutcome()
                 }
+                var applied = outcome.applied
+                var wasNoOp = outcome.wasNoOp
+                val projectionContent = outcome.projectionContent
                 if (applied || wasNoOp) {
                     val content = projectionContent
                     if (content == null || !writeEditorContentProjection(patch.patchId, content, patch.file)) {
@@ -422,16 +416,11 @@ class PatchWatcher(private val project: Project) : Disposable {
                         stateGeneration,
                     )
                 } else {
-                    val retryReason = if (lastApplyBlockedForFileCacheConflict) {
-                        "file_cache_conflict_pending"
-                    } else {
-                        "socket_apply_failed"
-                    }
                     StateProjectionBridge.recordEditorRetryRequested(
                         patch.file,
                         patch.patchId,
                         stateGeneration,
-                        retryReason,
+                        outcome.retryReason,
                     )
                 }
                 if (applied || wasNoOp) {
@@ -785,18 +774,45 @@ class PatchWatcher(private val project: Project) : Disposable {
         return nodePatchesJsonStatic(nodePatches)
     }
 
-    private fun applyPatch(patch: IpcPatch): Boolean {
-        lastApplyWasNoOp = false
-        lastApplyProjectionContent = null
-        lastApplyBlockedForFileCacheConflict = false
+    /**
+     * Socket patch topology: capture IntelliJ model state on the EDT, compute the
+     * native component patch on this listener worker, then return only the
+     * generation-fenced minimal edit to the EDT. Native calls are deliberately
+     * absent from both EDT closures.
+     */
+    private fun applyPatch(patch: IpcPatch): PatchApplyOutcome {
+        check(!SwingUtilities.isEventDispatchThread()) {
+            "socket patch orchestration must run off the IDEA event-dispatch thread"
+        }
+        val capture = AtomicReference<PatchApplyCapture>(PatchApplyCapture.Rejected())
+        ApplicationManager.getApplication().invokeAndWait {
+            capture.set(capturePatchApplyOnEdt(patch))
+        }
+        val captured = capture.get()
+        val computation = computePatchOnWorker(patch, captured)
+        val outcome = AtomicReference(PatchApplyOutcome())
+        ApplicationManager.getApplication().invokeAndWait {
+            outcome.set(applyComputedPatchOnEdt(patch, captured, computation))
+        }
+        return outcome.get()
+    }
 
+    private fun capturePatchApplyOnEdt(patch: IpcPatch): PatchApplyCapture {
+        check(SwingUtilities.isEventDispatchThread()) {
+            "editor patch capture must run on the IDEA event-dispatch thread"
+        }
+        // Re-check under EDT to avoid a TOCTOU race with another socket delivery.
+        if (isAlreadyApplied(patch.patchId)) {
+            LOG.info("[socket] dedup (EDT): patch_id ${patch.patchId} already applied — emitting already_applied")
+            return PatchApplyCapture.AlreadyApplied
+        }
         val localFileSystem = LocalFileSystem.getInstance()
         val targetFile =
             localFileSystem.findFileByPath(patch.file)
                 ?: localFileSystem.refreshAndFindFileByIoFile(File(patch.file))
         if (targetFile == null) {
             LOG.warn("Target file not found: ${patch.file}")
-            return false
+            return PatchApplyCapture.Rejected()
         }
 
         // Reload document from disk if it was externally modified
@@ -815,14 +831,18 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
 
         if (document == null) {
-            // File not open in editor — apply patches via VFS (no Document API needed).
-            // This avoids the "externally modified" dialog for background tabs.
-            LOG.info("No document for ${patch.file}, applying via VFS")
-            return applyPatchViaVfs(targetFile, patch)
+            // Detached/background tabs never receive a whole-buffer write, but
+            // the worker may still prove that the response is already present.
+            val content = try {
+                String(targetFile.contentsToByteArray(), targetFile.charset)
+            } catch (e: Exception) {
+                LOG.warn("Failed to capture VFS content for ${patch.file}", e)
+                return PatchApplyCapture.Rejected()
+            }
+            return PatchApplyCapture.Detached(targetFile, content)
         }
 
         if (hasPendingMemoryDiskConflict(targetFile)) {
-            lastApplyBlockedForFileCacheConflict = true
             val proof = fileCacheConflictProof(patch, document, targetFile, fdm)
             recordFileCacheConflictOps(
                 patch,
@@ -837,7 +857,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                     "$proof $UI_OUTCOME_REAL_COMPONENT_CONFLICT"
             )
             refreshVisualHighlightersAfterFileCacheConflict(targetFile, "blocked")
-            return false
+            return PatchApplyCapture.Rejected("file_cache_conflict_pending")
         }
 
         if (fdm.isDocumentUnsaved(document)) {
@@ -855,30 +875,60 @@ class PatchWatcher(private val project: Project) : Disposable {
 
         if (isPatchGenerationSuperseded(patch, content)) {
             LOG.info("[patch-watcher] generation fence: rejecting superseded live-buffer patch for ${patch.file}")
-            return false
+            return PatchApplyCapture.Rejected()
         }
 
         if (!patch.fullContent.isNullOrEmpty()) {
             LOG.warn("[patch-watcher] full-content IPC is disabled; rejecting patch_id ${patch.patchId} for ${patch.file}")
-            return false
+            return PatchApplyCapture.Rejected()
         }
-
-        // Component-based patching (template/stream-mode documents)
-        var result = content
         val diskContent = try {
             String(targetFile.contentsToByteArray(), targetFile.charset)
         } catch (_: Exception) {
             null
         }
+        return PatchApplyCapture.Editor(targetFile, document, proof, content, diskContent)
+    }
+
+    private fun computePatchOnWorker(
+        patch: IpcPatch,
+        capture: PatchApplyCapture,
+    ): PatchComputation {
+        check(!SwingUtilities.isEventDispatchThread()) {
+            "native patch computation must run off the IDEA event-dispatch thread"
+        }
+        when (capture) {
+            is PatchApplyCapture.Rejected -> return PatchComputation.Rejected(capture.retryReason)
+            PatchApplyCapture.AlreadyApplied -> return PatchComputation.NoOp()
+            is PatchApplyCapture.Detached -> {
+                if (!patch.fullContent.isNullOrEmpty()) {
+                    LOG.warn("[patch-watcher] VFS full-content IPC is disabled; rejecting patch_id ${patch.patchId} for ${patch.file}")
+                    return PatchComputation.Rejected()
+                }
+                if (patchReplayAlreadyPresentUtil(
+                        patch,
+                        listOf(capture.content),
+                    ) { payload -> NativePatching.patchContentAlreadyCommitted(patch.file, payload) }
+                ) {
+                    LOG.info("[patch-watcher] dedup: VFS response patch_id ${patch.patchId} already present in disk/committed content — skipping stale replay")
+                    return PatchComputation.NoOp(capture.content)
+                }
+                LOG.warn("[patch-watcher] VFS whole-buffer patch apply is disabled; rejecting patch_id ${patch.patchId} for ${patch.file}")
+                return PatchComputation.Rejected()
+            }
+            is PatchApplyCapture.Editor -> Unit
+        }
+
+        capture as PatchApplyCapture.Editor
+        val content = capture.content
+        var result = content
         if (patchReplayAlreadyPresentUtil(
                 patch,
-                listOfNotNull(content, diskContent),
+                listOfNotNull(content, capture.diskContent),
             ) { payload -> NativePatching.patchContentAlreadyCommitted(patch.file, payload) }
         ) {
             LOG.info("[patch-watcher] dedup: response patch_id ${patch.patchId} already present in live disk/committed content — skipping stale replay")
-            lastApplyProjectionContent = diskContent ?: content
-            lastApplyWasNoOp = true
-            return true
+            return PatchComputation.NoOp(capture.diskContent ?: content)
         }
 
         // Apply frontmatter patch first (before component patches)
@@ -900,7 +950,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         if (nodePatchNativeAvailable) {
             result = NativePatching.applyNodePatches(result, nodePatchesJson(patch.nodePatches)) ?: run {
                 LOG.warn("[patch-watcher] native node-patch apply rejected patch_id ${patch.patchId} for ${patch.file}")
-                return false
+                return PatchComputation.Rejected()
             }
         }
 
@@ -945,22 +995,73 @@ class PatchWatcher(private val project: Project) : Disposable {
         result = annotateExchangeHeadingsAgainstBaselineUtil(result, "exchange", content) ?: result
         result = NativePatching.normalizeTemplateStructure(result) ?: run {
             LOG.warn("Patch rejected by native template-structure guard for ${patch.file}")
-            return false
+            return PatchComputation.Rejected()
         }
 
         if (result == content) {
             LOG.warn("Patch produced no changes for ${patch.file}")
-            lastApplyProjectionContent = document.text
-            lastApplyWasNoOp = true
-            return true
+            return PatchComputation.NoOp(content)
+        }
+        return PatchComputation.Changed(result)
+    }
+
+    private fun applyComputedPatchOnEdt(
+        patch: IpcPatch,
+        capture: PatchApplyCapture,
+        computation: PatchComputation,
+    ): PatchApplyOutcome {
+        check(SwingUtilities.isEventDispatchThread()) {
+            "computed editor patch apply must run on the IDEA event-dispatch thread"
+        }
+        if (computation is PatchComputation.Rejected) {
+            return PatchApplyOutcome(retryReason = computation.retryReason)
+        }
+        if (capture is PatchApplyCapture.Rejected) {
+            return PatchApplyOutcome()
+        }
+        if (capture == PatchApplyCapture.AlreadyApplied) {
+            val content = currentContentForProjection(patch.file) ?: return PatchApplyOutcome()
+            return PatchApplyOutcome(wasNoOp = true, projectionContent = content)
+        }
+        if (capture is PatchApplyCapture.Detached) {
+            val fdm = FileDocumentManager.getInstance()
+            if (fdm.getDocument(capture.targetFile) != null) {
+                LOG.warn("[patch-watcher] detached patch target opened before receipt for ${patch.file}; retrying")
+                return PatchApplyOutcome()
+            }
+            val current = try {
+                String(capture.targetFile.contentsToByteArray(), capture.targetFile.charset)
+            } catch (e: Exception) {
+                LOG.warn("Failed to revalidate VFS content for ${patch.file}", e)
+                return PatchApplyOutcome()
+            }
+            if (current != capture.content || computation !is PatchComputation.NoOp) {
+                LOG.warn("[patch-watcher] detached patch generation changed before receipt for ${patch.file}; retrying")
+                return PatchApplyOutcome()
+            }
+            return PatchApplyOutcome(
+                wasNoOp = true,
+                projectionContent = computation.projectionContent ?: current,
+            )
         }
 
-        if (!applyProofStillCurrent(proof, document, patch.file, "component patch")) {
-            return false
+        capture as PatchApplyCapture.Editor
+        val document = capture.document
+        val content = capture.content
+        if (!applyProofStillCurrent(capture.proof, document, patch.file, "component patch")) {
+            return PatchApplyOutcome()
         }
+        if (computation is PatchComputation.NoOp) {
+            return PatchApplyOutcome(
+                wasNoOp = true,
+                projectionContent = computation.projectionContent ?: document.text,
+            )
+        }
+        computation as PatchComputation.Changed
+        val result = computation.content
         var wrote = false
         WriteCommandAction.runWriteCommandAction(project, "Agent Doc Patch", null, {
-            if (!editorApplyProofStillCurrentUtil(proof, document.text, document.modificationStamp)) {
+            if (!editorApplyProofStillCurrentUtil(capture.proof, document.text, document.modificationStamp)) {
                 LOG.warn("[patch-watcher] stale editor generation during component patch for ${patch.file}; rejecting")
                 return@runWriteCommandAction
             }
@@ -986,16 +1087,15 @@ class PatchWatcher(private val project: Project) : Disposable {
             LOG.info("Patch applied to ${patch.file} (${result.length - content.length} chars changed)")
         })
         if (!wrote) {
-            return false
+            return PatchApplyOutcome()
         }
 
-        lastApplyProjectionContent = document.text
         // Note: do NOT call agent_doc_commit here. The plugin committing within the IPC
         // window races with the skill's `agent-doc commit` call, causing the binary commit
         // to be a no-op (FFI already committed). The binary's git::commit handles boundary
         // markers and HEAD repositioning; the FFI commit skips all of that. The preflight
         // sweep (Fix 5) handles missed commits as a backstop for interrupted sessions.
-        return true
+        return PatchApplyOutcome(applied = true, projectionContent = document.text)
     }
 
     private fun patchConflictKey(patch: IpcPatch): String =
@@ -1183,34 +1283,6 @@ class PatchWatcher(private val project: Project) : Disposable {
      * It may accept a stale replay already present on disk/HEAD, but it must not
      * synthesize and write a whole-buffer replacement outside editor convergence.
      */
-    private fun applyPatchViaVfs(targetFile: com.intellij.openapi.vfs.VirtualFile, patch: IpcPatch): Boolean {
-        try {
-            val content = String(targetFile.contentsToByteArray(), targetFile.charset)
-
-            if (!patch.fullContent.isNullOrEmpty()) {
-                LOG.warn("[patch-watcher] VFS full-content IPC is disabled; rejecting patch_id ${patch.patchId} for ${patch.file}")
-                return false
-            }
-
-            if (patchReplayAlreadyPresentUtil(
-                    patch,
-                    listOf(content),
-                ) { payload -> NativePatching.patchContentAlreadyCommitted(patch.file, payload) }
-            ) {
-                LOG.info("[patch-watcher] dedup: VFS response patch_id ${patch.patchId} already present in disk/committed content — skipping stale replay")
-                lastApplyProjectionContent = content
-                lastApplyWasNoOp = true
-                return true
-            }
-
-            LOG.warn("[patch-watcher] VFS whole-buffer patch apply is disabled; rejecting patch_id ${patch.patchId} for ${patch.file}")
-            return false
-        } catch (e: Exception) {
-            LOG.warn("Failed to apply patch via VFS for ${patch.file}", e)
-            return false
-        }
-    }
-
     /**
      * Apply a component patch, preferring native FFI with Kotlin fallback.
      *

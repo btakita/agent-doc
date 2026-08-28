@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.300
+
+- **Fix: selected-document recovery no longer bypasses the pane-loss circuit breaker.**
+
+Project Controller `resume_latest` focus recovery now consumes the same persisted
+recent-session-loss projection as ordinary editor routing before its
+`ProvisionOnly` effect creates a replacement pane. Repeated automatic recovery
+therefore fails closed without another pane or registry rebind, while explicit
+operator supervisor recovery remains available.
+
+- **Fix: JetBrains socket patch computation stays off the event thread.**
+
+The plugin now captures immutable editor text/stamp state on the EDT, performs
+native replay, component patching, and template normalization on the listener
+worker, then returns only the proof-fenced minimal edit to the EDT. Typed apply
+receipts replace shared last-apply fields, so native EDT rejection can no longer
+drop a patch while masquerading as an ordinary delivery failure.
+
 ## 0.35.299
 
 - **Fix: a stale retained queue cut cannot erase or skip a native editor save.**

@@ -229,13 +229,13 @@ fn receiver_full_content_rejections_precede_visible_write_sinks() {
     );
     assert_guard_before_sink(
         jetbrains,
-        "private fun applyPatch(patch: IpcPatch): Boolean",
+        "private fun applyPatch(patch: IpcPatch): PatchApplyOutcome",
         "if (!patch.fullContent.isNullOrEmpty())",
         "applyMinimalDocumentEditUtil(document, content, result)",
     );
     assert_guard_before_sink(
         jetbrains,
-        "private fun applyPatchViaVfs",
+        "private fun computePatchOnWorker",
         "if (!patch.fullContent.isNullOrEmpty())",
         "VFS whole-buffer patch apply is disabled",
     );
@@ -260,7 +260,7 @@ fn node_patches_apply_before_visible_write_sinks() {
     let jetbrains = "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt";
     assert_guard_before_sink(
         jetbrains,
-        "private fun applyPatch(patch: IpcPatch): Boolean",
+        "private fun computePatchOnWorker",
         "NativePatching.applyNodePatches",
         "applyMinimalDocumentEditUtil(document, content, result)",
     );

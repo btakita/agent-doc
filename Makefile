@@ -232,6 +232,7 @@ install-editor-plugins:
 		echo "No existing JetBrains agent-doc package; editor package sync skipped."; \
 	fi
 	@if agent-doc plugin list 2>/dev/null | grep -q '^vscode'; then \
+		( cd editors/vscode && npm run package ); \
 		agent-doc plugin install vscode --local; \
 	else \
 		echo "No existing VS Code agent-doc package; editor package sync skipped."; \

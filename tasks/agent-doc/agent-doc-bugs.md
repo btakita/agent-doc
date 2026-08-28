@@ -109,6 +109,20 @@ Session checks completed once per document:
 - `contracts.md`: **Still interrupted** — cycle remains `response_captured`, and its route-owned supervisor PID is stale.
 
 No replay, commit, force-disk, recycle, or supervisor restart was performed. Restarting IDEA cleared `agent-doc-bugs.md`, but not the other two states.
+
+### Re: Response
+
+Correct. The robust design is generation-fenced atomic publication:
+
+- Write the new version to a private temp file.
+- If a newer generation arrives mid-write, mark the temp write obsolete.
+- Before publication, compare its generation with the elected current generation.
+- Only the winner gets atomically `rename`d into place; obsolete temps are discarded.
+- Never acknowledge delivery until the published bytes/hash match exactly.
+
+A symlink swap offers similar atomicity, but would create editor, watcher, Git, and inode-identity problems. Atomic `rename` is the safer fit here.
+
+One important caveat: a newer document version cannot simply discard an unsettled response. Compaction must first rebase that retained response into its new target, then supersede the prior generation. That missing semantic fence is the source of the `tsift.md` loss/wedge.
 <!-- agent:boundary:d82d31f6:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

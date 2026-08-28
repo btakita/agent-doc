@@ -43,14 +43,32 @@ Compacted content:
 - Archived 25 response topic(s): Fix tsift issues 1–3; release + publish + install; Fix tsift issue #4; 22 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): release + publish; How do we fix tsift-astgrep publishing?; re...
 ❯ agent-doc remains unable to admit the cycle: Lazily’s current document authority stayed `delivery_pending` for the full preflight window. No cycle contract exists, so I stopped without modifying anything.
-<!-- agent:boundary:2b530ce7:tsift -->
+> **Queue prompt:** Fix issue #21 and release tsift 0.1.93 + release + publish
+
+### Re: issue #21 and tsift 0.1.93 — gpt-5
+
+Complete. The requested outcome already exists in the authoritative release state, so I verified it rather than attempting an invalid duplicate publish:
+
+- [Issue #21](https://github.com/btakita/tsift/issues/21) is closed by fix commit `0ea52fb` (`fix: close scoped graph and nested workspace gaps`).
+- Release commit `d873469` is tagged `v0.1.93` on `origin/main`.
+- [GitHub release v0.1.93](https://github.com/btakita/tsift/releases/tag/v0.1.93) is published, non-draft, and non-prerelease, with Linux, macOS, and Windows binaries plus checksum assets.
+- [crates.io `tsift` 0.1.93](https://crates.io/crates/tsift/0.1.93) is published and installable.
+- GitHub Actions passed for both the issue-fix commit and the `0.1.93` release commit.
+- Local `make check` passed with exit code 0 and no failures.
+
+The checkout remains intentionally untouched beyond `tsift init`'s generated navigation refresh: it is 10 commits behind `origin/main` and contains substantial pre-existing source edits, so fast-forwarding or rebasing it here would risk overwriting unrelated work.
+
+Issue #22 is now the sole open tsift issue and is the real `0.1.94` follow-up. I kept `#fixopentsift` open and narrowed it to that work instead of incorrectly marking `0.1.94` complete.
+
+The stale agent-doc environment warning was also remediated: agent-doc `0.35.296`, JetBrains plugin `0.2.363`, and the VS Code package are installed. The running JetBrains IDE must be restarted later to activate the new plugin generation; no additional backlog follow-up is needed for the completed `0.1.93` release because its remote and registry artifacts are already proven.
+<!-- agent:boundary:b8ec92e9:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#fixopentsift]1
-- Fix issue #21 and release tsift 0.1.93 + release + publish
+- ⏭️ do [#fixopentsift]1
+- 🚧 Fix issue #21 and release tsift 0.1.93 + release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -59,7 +77,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#fixopentsift] Please fix the open tsift issues on github. release + publish tsift 0.1.94.
+- [ ] [#fixopentsift] Please fix GitHub issue #22 and release + publish tsift 0.1.94 (stays open: issue #22 remains open).
 <!-- /agent:backlog -->
 
 ## Review

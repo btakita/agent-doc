@@ -720,6 +720,26 @@ selectionPath = "/repo/tasks/fpe.md",
 activeWindowPath = null,
 ),
 )
+
+// IDEA may emit selectionChanged before currentWindow advances from old to new. The event still
+// belongs to the active split when the active window reports the event's previous selection.
+assertEquals(
+EditorTabSyncListener.SelectionFocusAuthority.ActiveEditorSplit,
+EditorTabSyncListener.SelectionFocusAuthority.decide(
+selectionPath = "/repo/tasks/agent-doc-bugs.md",
+activeWindowPath = "/repo/tasks/tsift.md",
+previousSelectionPath = "/repo/tasks/tsift.md",
+),
+)
+
+assertEquals(
+EditorTabSyncListener.SelectionFocusAuthority.BackgroundOrUnknownSplit,
+EditorTabSyncListener.SelectionFocusAuthority.decide(
+selectionPath = "/repo/tasks/agent-doc-bugs.md",
+activeWindowPath = "/repo/tasks/contracts.md",
+previousSelectionPath = "/repo/tasks/tsift.md",
+),
+)
 }
 
     @Test

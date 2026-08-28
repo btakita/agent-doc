@@ -2089,6 +2089,33 @@ impl DocumentStateProjection {
                     self.closeout.response_snapshot_hash = snapshot_hash.clone();
                 }
                 if let Some(response_body) = response_body {
+                    // `#compactcapturefence`: a compact continuation is a
+                    // generation-specific publication target. A later final
+                    // response capture supersedes that generation unless the
+                    // retained live target already materializes the exact
+                    // response. Keeping the older continuation eligible lets a
+                    // delayed editor ACK publish it after the newer response and
+                    // erase that response from both live content and HEAD.
+                    //
+                    // The ResponseCaptured fact is itself durable supersession
+                    // evidence, so clearing the computed continuation is the
+                    // reducer-side equivalent of cancelling an unpublished temp
+                    // file. An already-running effect still has the document
+                    // compare-and-swap fence and the newer response replay wins
+                    // the serialized controller effect order.
+                    if self
+                        .document
+                        .pending_compact_projection
+                        .as_ref()
+                        .is_some_and(|pending| {
+                            !agent_doc_turn::response_replay::response_materialized_in_content(
+                                response_body,
+                                &pending.live_content,
+                            )
+                        })
+                    {
+                        self.document.pending_compact_projection = None;
+                    }
                     self.closeout.captured_response = Some(CapturedResponseProjection {
                         cycle_id: cycle_id.clone(),
                         capture_id: capture_id.clone(),
@@ -5884,6 +5911,89 @@ mod tests {
         assert!(
             projection.document.pending_compact_projection.is_none(),
             "settled same-component authority is terminal, not a retry frontier"
+        );
+    }
+
+    #[test]
+    fn newer_response_capture_cancels_compact_target_without_that_response() {
+        // Live sequence from tsift.md: compact A was retained while the editor
+        // was disconnected, then closeout captured response B. A must not remain
+        // eligible to publish after B merely because its delayed ACK arrives.
+        let document_hash = "doc-compact-capture-fence";
+        let mut projection = DocumentStateProjection::new(document_hash);
+        projection.apply_fact(&StateFact::DocumentCompactProjectionRetained {
+            document_hash: document_hash.to_string(),
+            continuation_id: "compact-generation-a".to_string(),
+            file: "/work/tsift.md".to_string(),
+            live_content: "## Exchange\n\nCompacted generation A.\n".to_string(),
+            committed_content: "## Exchange\n\nCompacted generation A.\n".to_string(),
+            target_component: Some("exchange".to_string()),
+            commit: true,
+        });
+
+        projection.apply_fact(&StateFact::ResponseCaptured {
+            document_hash: document_hash.to_string(),
+            cycle_id: "cycle-b".to_string(),
+            capture_id: "capture-b".to_string(),
+            response_sha256: "response-b".to_string(),
+            response_body: Some("### Re: newer\n\nResponse generation B.\n".to_string()),
+            intent_body: None,
+            mutation_plan_json: None,
+            file_hash: None,
+            snapshot_hash: None,
+            baseline_content: None,
+        });
+
+        assert!(
+            projection.document.pending_compact_projection.is_none(),
+            "a compact target missing the newer captured response is superseded"
+        );
+        assert_eq!(
+            projection
+                .closeout
+                .captured_response
+                .as_ref()
+                .map(|capture| capture.capture_id.as_str()),
+            Some("capture-b"),
+        );
+    }
+
+    #[test]
+    fn response_capture_keeps_compact_target_that_already_materializes_it() {
+        let document_hash = "doc-compact-capture-contained";
+        let response = "### Re: current\n\nAlready materialized response.\n";
+        let mut projection = DocumentStateProjection::new(document_hash);
+        projection.apply_fact(&StateFact::DocumentCompactProjectionRetained {
+            document_hash: document_hash.to_string(),
+            continuation_id: "compact-current".to_string(),
+            file: "/work/session.md".to_string(),
+            live_content: format!("## Exchange\n\n{response}"),
+            committed_content: format!("## Exchange\n\n{response}"),
+            target_component: Some("exchange".to_string()),
+            commit: true,
+        });
+
+        projection.apply_fact(&StateFact::ResponseCaptured {
+            document_hash: document_hash.to_string(),
+            cycle_id: "cycle-current".to_string(),
+            capture_id: "capture-current".to_string(),
+            response_sha256: "response-current".to_string(),
+            response_body: Some(response.to_string()),
+            intent_body: None,
+            mutation_plan_json: None,
+            file_hash: None,
+            snapshot_hash: None,
+            baseline_content: None,
+        });
+
+        assert_eq!(
+            projection
+                .document
+                .pending_compact_projection
+                .as_ref()
+                .map(|pending| pending.continuation_id.as_str()),
+            Some("compact-current"),
+            "idempotent recapture must not cancel an exact containing target"
         );
     }
 

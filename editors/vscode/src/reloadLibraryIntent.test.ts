@@ -48,6 +48,12 @@ describe('typed reload_library intent', () => {
         const sync = extension.slice(syncStart, syncEnd);
         assert.ok(sync.includes('nativeReloadGate.awaitReady('));
         assert.ok(sync.indexOf('nativeReloadGate.awaitReady(') < sync.indexOf('native.syncTmuxLayoutJson('));
+        assert.ok(sync.includes('if (!terminalPrepared && !noAutostart)'));
+
+        const manualStart = extension.indexOf('async function syncLayoutAction()');
+        const manualEnd = extension.indexOf('async function syncLayoutInternal(', manualStart);
+        const manual = extension.slice(manualStart, manualEnd);
+        assert.ok(manual.includes('syncLayoutInternal(cwd, true, false, true)'));
     });
 
     it('JetBrains reloads and refreshes replicas only from the typed intent', () => {

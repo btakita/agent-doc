@@ -1929,13 +1929,18 @@ async function syncLayoutAction(): Promise<void> {
 
     try {
         const { cwd } = resolveProject(root, editor.document.uri.fsPath);
-        await syncLayoutInternal(cwd, true, false);
+        await syncLayoutInternal(cwd, true, false, true);
     } finally {
         commandRunning = false;
     }
 }
 
-async function syncLayoutInternal(root: string, notify: boolean, noAutostart: boolean): Promise<void> {
+async function syncLayoutInternal(
+    root: string,
+    notify: boolean,
+    noAutostart: boolean,
+    terminalPrepared = false,
+): Promise<void> {
     const visibleColumns = collectVisibleMarkdownColumns(root);
     const visibleMd = flattenVisibleColumns(visibleColumns);
     if (visibleMd.length === 0) {
@@ -1961,7 +1966,7 @@ if (!(await nativeReloadGate.awaitReady(NATIVE_RELOAD_ACTION_TIMEOUT_MS))) {
 throw new Error('native reload did not complete before tmux layout sync timed out');
 }
 const effectiveFocusFile = focusFile ?? flattenVisibleColumns(visibleColumns)[0];
-if (!noAutostart) {
+if (!terminalPrepared && !noAutostart) {
 await prepareIdeTerminal(root, effectiveFocusFile);
 }
 const receipt = native.syncTmuxLayoutJson({

@@ -82,7 +82,9 @@ class EditorTabSyncListener : FileEditorManagerListener {
         private val instances = ConcurrentHashMap<Project, EditorTabSyncListener>()
 
         fun install(project: Project): EditorTabSyncListener =
-            instances.computeIfAbsent(project) { EditorTabSyncListener() }
+            instances.compute(project) { _, current ->
+                if (current == null || current.closed) EditorTabSyncListener() else current
+            }!!
 
         /** Release the project's surface graphs and stop its debounce executor. */
         fun disposeProject(project: Project) {
@@ -165,8 +167,16 @@ companion object {
 fun decide(
 selectionPath: String,
 activeWindowPath: String?,
+previousSelectionPath: String? = null,
 ): SelectionFocusAuthority =
-if (activeWindowPath == selectionPath) ActiveEditorSplit else BackgroundOrUnknownSplit
+if (
+    activeWindowPath == selectionPath ||
+        (previousSelectionPath != null && activeWindowPath == previousSelectionPath)
+) {
+    ActiveEditorSplit
+} else {
+    BackgroundOrUnknownSplit
+}
 }
 }
 
@@ -512,6 +522,9 @@ private data class CapturedSurface(
     private fun requestObservation(
         observation: PendingSurfaceObservation,
     ) {
+        synchronized(lifecycleLock) {
+            if (closed) return
+        }
         while (true) {
             val current = latestSurfaceObservation.get()
             if (
@@ -1058,6 +1071,7 @@ SelectionFocusAuthority.decide(
 selectionPath = file.path,
 activeWindowPath =
 FileEditorManagerEx.getInstanceEx(project).currentWindow?.selectedFile?.path,
+previousSelectionPath = event.oldFile?.path,
 )
 val selectionOwnsFocus =
 selectionFocusAuthority == SelectionFocusAuthority.ActiveEditorSplit

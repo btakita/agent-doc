@@ -322,13 +322,25 @@ class SyncLayoutAction : AnAction() {
                 return
             }
             val manager = FileEditorManager.getInstance(project)
-            val focusedVFile = manager.selectedTextEditor?.virtualFile
-                ?.takeIf(AgentDocSessionFiles::isSessionDocument)
-                ?: manager.selectedFiles.firstOrNull(AgentDocSessionFiles::isSessionDocument)
-                ?: return
+            // `selectionChanged` can precede selectedTextEditor advancing. The current editor
+            // window is the foreground authority at action time; the remaining candidates keep
+            // split-editor and restored-window fallback behavior intact.
+            val focusedVFile =
+                sequenceOf(
+                    FileEditorManagerEx.getInstanceEx(project).currentWindow?.selectedFile,
+                    manager.selectedTextEditor?.virtualFile,
+                ).plus(manager.selectedFiles.asSequence())
+                    .filterNotNull()
+                    .distinctBy { it.path }
+                    .firstOrNull(AgentDocSessionFiles::isSessionDocument)
+                    ?: run {
+                        LOG.info("[sync] No focused agent-doc session document")
+                        if (notify) TerminalUtil.showHint(project, "No agent-doc session document focused")
+                        return
+                    }
             val focusedFile = focusedVFile.path
             val visibleMdFiles = collectVisibleMarkdownFiles(
-                manager.selectedFiles,
+                (listOf(focusedVFile) + manager.selectedFiles).toTypedArray(),
                 AgentDocSessionFiles::isSessionDocument,
             )
             if (visibleMdFiles.isEmpty()) {
@@ -433,7 +445,9 @@ class SyncLayoutAction : AnAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        syncLayout(project)
+        // The controller submission already owns manual autostart. Submit immediately instead of
+        // making the user action depend on a terminal-tool-window attachment callback.
+        syncLayout(project, terminalPrepared = true)
     }
 
     override fun update(e: AnActionEvent) {

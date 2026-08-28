@@ -2,6 +2,27 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.295
+
+- **Fix: queue verdicts, compaction generations, and editor layout sync converge.**
+
+Queue maintenance now preserves an explicit operator verdict after a tracked ID
+even when the corresponding review item is gated, so directives such as lifting
+a push hold remain drainable instead of being mistaken for stale gated mirrors.
+
+A newly captured response now generation-fences any older Compact Exchange
+target that does not contain it. The stale compact projection is cancelled before
+it can publish over the newer response; compact targets that already materialize
+the response remain eligible. Existing hash/CAS receipts continue to decide the
+single winning publication.
+
+JetBrains tab selection now treats IDEA's old-selection event edge as foreground
+authority while `currentWindow` is still advancing, rejects closed listener
+instances on reinstall, and makes manual Sync Tmux Layout submit immediately
+through the controller using the current editor window. VS Code manual sync uses
+the same direct controller rule. Shared controller fixes remain native across
+both plugins. JetBrains is bumped to `0.2.363`; VS Code is bumped to `0.2.68`.
+
 ## 0.35.294
 
 - **Fix: post-restart retained delivery drains an already-current target.**

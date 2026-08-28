@@ -75,6 +75,22 @@ class SyncLayoutActionTest {
     }
 
     @Test
+    fun `manual sync uses current editor window and submits without terminal callback`() {
+        val source = java.nio.file.Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/SyncLayoutAction.kt",
+        ).toFile().readText()
+        val sync = source.substringAfter("fun syncLayout(").substringBefore("override fun actionPerformed")
+        val action = source.substringAfter("override fun actionPerformed")
+            .substringBefore("override fun update")
+
+        assertTrue(
+            sync.indexOf("FileEditorManagerEx.getInstanceEx(project).currentWindow?.selectedFile") <
+                sync.indexOf("manager.selectedTextEditor?.virtualFile"),
+        )
+        assertTrue(action.contains("syncLayout(project, terminalPrepared = true)"))
+    }
+
+    @Test
     fun `sync failure message surfaces controller diagnostic`() {
         assertEquals(
             "Sync failed: pane creation failed in tmux session agent-doc",

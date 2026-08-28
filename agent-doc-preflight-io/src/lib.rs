@@ -3471,9 +3471,19 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     // sync (above) and reused here — `agent:done` is untouched by queue
     // maintenance, so the set is still current.
     let gated_ids = agent_doc_element_review::collect_gated_review_ids(&current_content);
+    // `#qgateverdict`: a live queue head may be the operator action that resolves
+    // a gated review item. In that shape the text after `[#id]:` is an explicit
+    // verdict (for example "I lift the push hold"), so striking the head merely
+    // because the referenced review row is still `[/]` destroys the only input
+    // that can release the gate. Ordinary mirror heads remain non-drainable;
+    // only the already-established operator-verdict syntax reactivates the id.
+    let operator_answered_ids =
+        agent_doc_queue::queue_continuation::operator_answered_head_ids(&current_content);
     let mut eligible_ids: std::collections::HashSet<String> = sync_done_ids.clone();
     for id in &gated_ids {
-        eligible_ids.insert(id.clone());
+        if !operator_answered_ids.contains(&id.to_ascii_lowercase()) {
+            eligible_ids.insert(id.clone());
+        }
     }
     // `activation.entries_after` already reflects start-fence consumption and
     // the duplicate-prompt collapse above, so it is the authoritative current
@@ -9119,6 +9129,55 @@ mod tests {
         assert!(snap.contains("queue: stop"));
         assert!(!snap.contains("agent:queue auto"));
         assert!(!snap.contains("- do [#alpha]"));
+    }
+
+    #[test]
+    fn queue_maintenance_preserves_operator_verdict_for_gated_review_head() {
+        // `#qgateverdict`: the queue item is the operator's answer to the gate.
+        // It must be dispatched before the still-gated review row can change.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#fpetrainpush] Push the restacked fpe train. Gated on: the push hold lifting.\n",
+            "<!-- /agent:review -->\n",
+        );
+        let current = baseline.replace(
+            "<!-- agent:queue priority go -->\n",
+            concat!(
+                "<!-- agent:queue priority go -->\n",
+                "- complete [#fpetrainpush]: I lift the push hold for the restack: Do the restack + push\n",
+            ),
+        );
+        std::fs::write(&doc, &current).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_active, Some(true));
+        assert_eq!(
+            state.queue_prompts,
+            vec!["complete [#fpetrainpush]: I lift the push hold for the restack: Do the restack + push".to_string()],
+        );
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("complete [#fpetrainpush]: I lift the push hold"),
+            "the gate-lifting verdict must remain executable:\n{updated}",
+        );
+        assert!(!updated.contains("~~complete [#fpetrainpush]"));
     }
     #[test]
     fn queue_maintenance_partial_done_strike_advances_to_live_head_without_halt() {

@@ -9178,6 +9178,11 @@ mod tests {
             "the gate-lifting verdict must remain executable:\n{updated}",
         );
         assert!(!updated.contains("~~complete [#fpetrainpush]"));
+        assert_eq!(
+            agent_doc_queue::queue_continuation::drainable_head_count(&updated),
+            1,
+            "the preserved gate-lifting verdict must be selected as executable work",
+        );
     }
     #[test]
     fn queue_maintenance_partial_done_strike_advances_to_live_head_without_halt() {

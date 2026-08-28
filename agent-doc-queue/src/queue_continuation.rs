@@ -733,7 +733,16 @@ fn head_is_drainable(
             match open_backlog_ids {
                 Some(open) => {
                     if !open.contains(&norm) {
-                        return false;
+                        // `#qgateverdictdrain`: an inline operator verdict is
+                        // fresh executable authority even when its id currently
+                        // lives in `agent:review` rather than the open backlog.
+                        // Treating every id absent from backlog as a stale mirror
+                        // preserved `complete [#id]: ...` during maintenance but
+                        // then reported zero drainable heads, so preflight returned
+                        // `no_changes` without ever reading the gate-lifting task.
+                        // Bare `do [#id]` mirrors still require an open backlog id;
+                        // the nonempty annotation is the proof this is not one.
+                        return operator_answered;
                     }
                     // `#dagdraingate`: a head with an UNMET declared prerequisite
                     // is not drainable. Without this, `after=` was enforced only
@@ -1572,6 +1581,25 @@ mod tests {
         assert_eq!(
             live_drainable_continuation_head(&content, DrainScope::Supervisor).as_deref(),
             Some("eyeball")
+        );
+    }
+
+    #[test]
+    fn operator_verdict_for_gated_review_id_is_drainable_without_open_backlog_mirror() {
+        let head =
+            "complete [#fpetrainpush]: I lift the push hold for the restack: Do the restack + push";
+        let mut content = doc_with_review(&[
+            "- [/] [#fpetrainpush] Push the restacked fpe train. Gated on: the push hold lifting.",
+        ]);
+        content.push_str(&format!(
+            "\n## Queue\n\n<!-- agent:queue priority go -->\n- 🚧 {head}\n<!-- /agent:queue -->\n"
+        ));
+
+        assert!(head_carries_operator_verdict(head));
+        assert_eq!(drainable_head_count(&content), 1);
+        assert_eq!(
+            live_drainable_head_prompt_text(&content, DrainScope::InSessionLoop).as_deref(),
+            Some(head)
         );
     }
 

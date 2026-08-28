@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.297
+
+- **Fix: gate-lifting queue verdicts remain executable.**
+
+An id-backed queue head carrying a nonempty inline operator verdict is now
+drainable even when its tracked item currently lives in `agent:review` rather
+than the open backlog. This completes the `0.35.295` preservation fix: a command
+such as `complete [#push]: hold lifted; do the push` is both retained during
+maintenance and selected as work, instead of producing `no_changes` with zero
+drainable heads. Bare generated `do [#id]` mirrors still require an open tracked
+item, so stale mirrors remain inert.
+
 ## 0.35.296
 
 - **Fix: pre-converged retained responses reach their commit boundary.**

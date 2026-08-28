@@ -372,6 +372,13 @@ snapshot as a second head. This is an adjacency- and lineage-shaped repair, not
 global fuzzy deduplication: non-adjacent similar work and intentional repeated
 directives remain distinct.
 
+An id-backed queue head with a nonempty inline operator verdict, such as
+`complete [#push]: hold lifted; do the push`, is fresh executable authority even
+when the referenced item currently lives in `agent:review` and therefore has no
+open backlog mirror. Maintenance must preserve it and drainability must select
+it. Bare `do [#id]` mirrors still require the id to remain open tracked work, so
+stale generated mirrors do not regain authority through this rule.
+
 Queue crash recovery is part of the Lazily/CP current-document lineage. No
 queue-specific journal or second head set exists: absence from newer Lazily
 current may be an operator deletion and must remain absent. A genuinely unsaved queue add survives through

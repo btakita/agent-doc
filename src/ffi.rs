@@ -2186,10 +2186,15 @@ pub unsafe extern "C" fn agent_doc_deferred_write_post_register_project(
         &recovered,
         "editor_post_register_projection",
     ) {
-        Ok(Some(write)) if write.applied => {
+        Ok(Some(write)) if cp_projection_reached_exact_target(&write, &recovered) => {
             eprintln!(
-                "[deferred-write] post-register intent projected for {}; target_hash={} targets={} live_editors={}",
+                "[deferred-write] post-register intent projected for {}; outcome={} target_hash={} targets={} live_editors={}",
                 file.display(),
+                if write.applied {
+                    "applied"
+                } else {
+                    "already_current"
+                },
                 write.content_hash,
                 write.targets,
                 write.live_editors,
@@ -2219,6 +2224,18 @@ pub unsafe extern "C" fn agent_doc_deferred_write_post_register_project(
             0
         }
     }
+}
+
+/// A CP relay write is successful when controller canonical reached the exact
+/// requested target, whether this call applied it or raced behind an earlier
+/// publication of the same retained intent. `applied` alone is insufficient:
+/// idempotent relay retries deliberately report `applied=false` so they preserve
+/// the existing editor-delivery frontier.
+fn cp_projection_reached_exact_target(
+    write: &agent_doc_crdt_relay_io::CpRelayWrite,
+    target: &str,
+) -> bool {
+    write.content_len == target.len() && write.content_hash == agent_doc_hash::content_hash(target)
 }
 
 fn deferred_write_reconnect_candidate(
@@ -3455,6 +3472,29 @@ fn force_link_core_ffi_symbols() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn post_register_projection_accepts_exact_idempotent_relay_target_only() {
+        let target = "retained target awaiting editor visibility\n";
+        let exact_noop = agent_doc_crdt_relay_io::CpRelayWrite {
+            applied: false,
+            content_len: target.len(),
+            content_hash: agent_doc_hash::content_hash(target),
+            update_bytes: 0,
+            targets: 0,
+            live_editors: 1,
+            delivery_converged: false,
+        };
+        assert!(cp_projection_reached_exact_target(&exact_noop, target));
+
+        let mut mismatched = exact_noop.clone();
+        mismatched.content_hash = agent_doc_hash::content_hash("different target\n");
+        assert!(!cp_projection_reached_exact_target(&mismatched, target));
+
+        let mut wrong_len = exact_noop;
+        wrong_len.content_len += 1;
+        assert!(!cp_projection_reached_exact_target(&wrong_len, target));
+    }
 
     #[test]
     fn editor_surface_event_ffi_writes_one_shared_cross_editor_schema() {

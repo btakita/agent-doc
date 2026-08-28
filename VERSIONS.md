@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.294
+
+- **Fix: post-restart retained delivery drains an already-current target.**
+
+The shared native post-registration projection boundary now recognizes an exact
+idempotent CRDT result as success. When the controller's reactive effect wins
+the race and publishes a retained target before the editor's reconnect replay,
+JetBrains proceeds to the ordinary generation-fenced delivery drain instead of
+retrying `post-register-projection-unavailable` forever. The decision requires
+the controller-reported canonical byte length and hash to match the recovered
+target exactly; missing models, stale baselines, and mismatched targets still
+fail closed. The native contract is shared by all editor adapters.
+
 ## 0.35.293
 
 - **Fix: retained Compact Exchange recovery no longer wedges on an editor cut.**

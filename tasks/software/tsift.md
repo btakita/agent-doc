@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -61,14 +61,34 @@ The checkout remains intentionally untouched beyond `tsift init`'s generated nav
 Issue #22 is now the sole open tsift issue and is the real `0.1.94` follow-up. I kept `#fixopentsift` open and narrowed it to that work instead of incorrectly marking `0.1.94` complete.
 
 The stale agent-doc environment warning was also remediated: agent-doc `0.35.296`, JetBrains plugin `0.2.363`, and the VS Code package are installed. The running JetBrains IDE must be restarted later to activate the new plugin generation; no additional backlog follow-up is needed for the completed `0.1.93` release because its remote and registry artifacts are already proven.
+
+### Re: do [#fixopentsift] — gpt-5
+
+Completed GitHub issue #22 and released tsift 0.1.94.
+
+- Fixed the graph traversal freshness gate so deletion refreshes prune removed files, re-inspect the index, and fail closed if freshness cannot be proven.
+- Made status and scale-guard remediation fields directly executable, without diagnostic suffixes or inline comments.
+- Tightened TypeScript/JavaScript route extraction to router-like receivers, excluding comment text and APIs such as `URLSearchParams.get/delete`.
+- Clarified graph-doctor compaction guidance and preserved recovered checks as overall healthy.
+- Added regression tests and updated the search-navigation and graph specifications.
+
+Release proof:
+
+- Fix commit: `72b0373` (`fix: close release follow-up gaps`); release commit/tag: `6df55c2` / `v0.1.94`.
+- [Issue #22](https://github.com/btakita/tsift/issues/22) is closed.
+- [GitHub release v0.1.94](https://github.com/btakita/tsift/releases/tag/v0.1.94) is published with Linux, macOS, and Windows archives plus checksums.
+- [Main CI](https://github.com/btakita/tsift/actions/runs/33140574321) and the [Release workflow](https://github.com/btakita/tsift/actions/runs/33140590285) completed successfully.
+- Local `make check` passed after the fix and again after release metadata updates.
+- All 26 workspace crates independently resolve from crates.io at 0.1.94, including `tsift`, `tsift-cli`, and `tsift-sim-world`.
+- npm independently reports `opencode-tsift@0.1.94` as `latest`.
+
+The original dirty tsift checkout was preserved untouched; implementation and release validation used a clean temporary worktree, which is clean after the push.
 <!-- agent:boundary:b8ec92e9:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#fixopentsift]1
-- 🚧 Fix issue #21 and release tsift 0.1.93 + release + publish
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -77,7 +97,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#fixopentsift] Please fix GitHub issue #22 and release + publish tsift 0.1.94 (stays open: issue #22 remains open).
 <!-- /agent:backlog -->
 
 ## Review

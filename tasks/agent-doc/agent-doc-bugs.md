@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a044bf-d41d-7623-a5b1-18b84d97a973
+  codex: 01a046b1-bedb-7cd2-8977-dd7869ef8f05
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -178,7 +178,30 @@ The new 0.35.299 GitHub CI run is in progress; local verification is green. The 
 
 Five pre-existing formatting-only edits in the agent-doc submodule remain unstaged and were not included in either release commit.
 
-<!-- agent:boundary:23ebe8a4:agent-doc-bugs -->
+> **Queue prompt:** 📌 monsterrodholders.md pane keeps on crashing. Fix agent-doc causes.
+
+### Re: 📌 monsterrodholders.md pane keeps on crashing. Fix agent-doc causes. — gpt-5
+
+Fixed and released in agent-doc v0.35.300 (commit `a4aa34e3b`, tag pushed), with JetBrains plugin 0.2.365 installed locally.
+
+Two agent-doc failure paths were involved:
+
+- Controller focus recovery called automatic `ProvisionOnly` pane startup directly, bypassing the route-owned recent-loss circuit breaker. Repeated missing-pane observations could therefore keep replacing the pane. Controller auto-start now consumes the same persisted loss-window policy as route startup and fails closed after the bounded loss threshold; explicit operator restart remains the separate `WaitForReady` recovery path.
+- The JetBrains socket receiver entered the IDEA event-dispatch thread before native component replay. IDEA correctly rejected those native calls (`agent-doc native calls are forbidden on the IDEA event-dispatch thread`), and the plugin caught and dropped the delivery. Patch handling is now capture on EDT → native computation on the listener worker → generation-fenced minimal document edit on EDT. Typed outcomes replace the old shared mutable apply flags.
+
+The pane history showed `%97` and `%99` were already absent when focus recovery observed them; no agent-doc kill, panic, or normal child-exit event was recorded for either pane. The change therefore fixes agent-doc's harmful response to repeated loss without inventing an unproven external crash cause.
+
+Architecture closeout:
+
+- Policy owner: `agent-doc-route-io` remains the owner of the persisted recent pane-loss decision; controller `ProvisionOnly` now delegates to it.
+- Transitions tested: two recent missing-pane losses reject automatic provisioning, while explicit `WaitForReady` recovery remains allowed.
+- Reactive topology: pane observation → loss decision → provision/refuse receipt; socket patch → immutable EDT capture → worker-native computation → fenced EDT apply → projection/ACK.
+- Edited surfaces: controller runtime seam, JetBrains patch receiver/tests, static architecture guards, routing/editor specifications, and release projections.
+
+Verification passed: focused Rust policy tests, all 491 JetBrains tests, the full static guard target, `cargo fmt --check`, and repository-wide `make check`. The installed binary reports 0.35.300. Release CI was inspected after push and had started normally; the prior PyPI job's only failure was the external 10 GB project storage cap.
+
+The running IntelliJ host still needs a restart to activate installed plugin 0.2.365; that operator-only verification is captured as a gated backlog item.
+<!-- agent:boundary:aeef9436:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -186,16 +209,11 @@ Five pre-existing formatting-only edits in the agent-doc submodule remain unstag
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Please fix backend.md Run Agent Doc issue:   Closeout did not complete. session-check reports the controller-owned authority/disk divergence — editor authority
-  and disk diverge on backlog, exchange, and queue, with the exact editor delivery acknowledgement pending. The
-  response capture is durable and the controller owns the next attempt, so per the recovery contract I did not resubmit
-  finalize, force disk, recycle, or re-run session-check. I stopped the queue drain rather than looping over an
-  interrupted closeout.
-- monsterrodholders.md pane keeps on crashing. Fix agent-doc causes.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
+- [/] [#restartintellijidea] [operator-verify] Restart IntelliJ IDEA so installed agent-doc JetBrains 0.2.365 becomes live, then confirm a native patch ACK and stable monsterrodholders.md pane.
 <!-- /agent:backlog -->
 
 ## Review

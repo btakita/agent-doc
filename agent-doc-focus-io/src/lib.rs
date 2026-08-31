@@ -139,14 +139,14 @@ pub fn run(effects: &impl FocusEffects, file: &Path, pane: Option<&str>) -> Resu
     if pane.is_none() {
         return effects.focus_or_resume_document_via_controller(file);
     }
-    run_with_tmux(effects, file, pane, &Tmux::default_server())
+    run_with_tmux(effects, file, pane, &agent_doc_tmux_io::configured_tmux())
 }
 
 /// Legacy synchronous focus path. This preserves the old standalone `focus`
 /// behavior for operators that explicitly want focus to surface a stashed pane
 /// before returning.
 pub fn run_blocking(effects: &impl FocusEffects, file: &Path, pane: Option<&str>) -> Result<()> {
-    run_with_tmux_blocking(effects, file, pane, &Tmux::default_server())
+    run_with_tmux_blocking(effects, file, pane, &agent_doc_tmux_io::configured_tmux())
 }
 
 /// Promote a live-owner pane out of the stash window (best-effort) and then

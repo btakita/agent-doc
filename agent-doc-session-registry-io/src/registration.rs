@@ -58,7 +58,7 @@ use std::path::Path;
 
 #[cfg(test)]
 use tmux_router::IsolatedTmux;
-use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, RegistryLock, Tmux};
+use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, RegistryLock};
 
 // ---------------------------------------------------------------------------
 // Free functions — registration operations and env-based checks
@@ -81,7 +81,7 @@ fn register_with_pid_internal(
     transition_caller: &'static str,
     transition_reason: &'static str,
 ) -> Result<()> {
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let window = agent_doc_tmux_io::target_window_id(&tmux, pane_id).unwrap_or_default();
     register_full_internal_call(
         session_id,
@@ -106,7 +106,7 @@ pub fn register_with_pid_and_cwd(
     pid: u32,
     cwd: &str,
 ) -> Result<()> {
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let window = agent_doc_tmux_io::target_window_id(&tmux, pane_id).unwrap_or_default();
     register_full_with_cwd_internal_call(
         session_id,
@@ -185,7 +185,7 @@ pub fn register_supervisor(
     supervisor_pid: u32,
     supervisor_instance_id: &str,
 ) -> Result<()> {
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let window = agent_doc_tmux_io::target_window_id(&tmux, pane_id).unwrap_or_default();
     register_full_internal_call(
         session_id,
@@ -208,7 +208,7 @@ pub fn register_supervisor_in(
     supervisor_pid: u32,
     supervisor_instance_id: &str,
 ) -> Result<()> {
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let window = agent_doc_tmux_io::target_window_id(&tmux, pane_id).unwrap_or_default();
     register_full_with_cwd_and_instance_in(
         base_dir,
@@ -833,7 +833,7 @@ mod tests {
 
     #[test]
     fn pane_alive_returns_false_for_nonexistent() {
-        assert!(!Tmux::default_server().pane_alive("%99999"));
+        assert!(!agent_doc_tmux_io::configured_tmux().pane_alive("%99999"));
     }
 
     #[test]
@@ -913,7 +913,7 @@ mod tests {
 
     #[test]
     fn prune_removes_dead_panes_from_map() {
-        let tmux = Tmux::default_server();
+        let tmux = agent_doc_tmux_io::configured_tmux();
         let mut reg = SessionRegistry::new();
         reg.insert(
             "dead-session-1".to_string(),

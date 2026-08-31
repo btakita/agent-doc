@@ -54,7 +54,7 @@ use agent_doc_sync_io::sync;
 use tmux_router::Tmux;
 
 pub fn run() -> Result<()> {
-    run_with_tmux(&Tmux::default_server())
+    run_with_tmux(&agent_doc_tmux_io::configured_tmux())
 }
 
 pub fn run_with_tmux(tmux: &Tmux) -> Result<()> {
@@ -354,7 +354,8 @@ mod tests {
         // Empty registry — no claims
         agent_doc_session_registry_io::save_in(dir.path(), &SessionRegistry::new()).unwrap();
 
-        let result = run_with_tmux_in_for_pane(&Tmux::default_server(), dir.path(), "%99999");
+        let result =
+            run_with_tmux_in_for_pane(&agent_doc_tmux_io::configured_tmux(), dir.path(), "%99999");
         assert!(result.is_ok());
     }
 }

@@ -466,15 +466,39 @@ fn existing_jetbrains_agent_doc_dirs(dirs: &[PathBuf]) -> Vec<PathBuf> {
 
 fn local_jetbrains_zip() -> Result<PathBuf> {
     let project_root = find_local_build_dir()?;
-    let dist_dir = project_root.join("editors/jetbrains/build/distributions");
+    local_jetbrains_zip_in(&project_root)
+}
 
-    // Pick the newest built version overall; prefer signed only within the same version.
-    find_best_local_zip(&dist_dir).with_context(|| {
-        format!(
-            "No agent-doc-jetbrains*.zip found in {}",
-            dist_dir.display()
-        )
-    })
+fn jetbrains_plugin_version(project_root: &Path) -> Result<String> {
+    let properties = project_root.join("editors/jetbrains/gradle.properties");
+    let content = fs::read_to_string(&properties)
+        .with_context(|| format!("Failed to read {}", properties.display()))?;
+    content
+        .lines()
+        .find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            (key.trim() == "pluginVersion").then(|| value.trim().to_string())
+        })
+        .filter(|value| !value.is_empty())
+        .with_context(|| format!("Missing pluginVersion in {}", properties.display()))
+}
+
+fn local_jetbrains_zip_in(project_root: &Path) -> Result<PathBuf> {
+    let dist_dir = project_root.join("editors/jetbrains/build/distributions");
+    let version = jetbrains_plugin_version(project_root)?;
+    let signed = dist_dir.join(format!("agent-doc-jetbrains-{version}-signed.zip"));
+    if signed.is_file() {
+        return Ok(signed);
+    }
+    let unsigned = dist_dir.join(format!("agent-doc-jetbrains-{version}.zip"));
+    if unsigned.is_file() {
+        return Ok(unsigned);
+    }
+    bail!(
+        "No JetBrains package matching gradle.properties pluginVersion {version} at {}; run `./gradlew buildPlugin` in {}",
+        unsigned.display(),
+        project_root.join("editors/jetbrains").display()
+    )
 }
 
 fn local_jetbrains_zip_version(zip_path: &Path) -> Result<String> {
@@ -604,6 +628,7 @@ fn installed_jetbrains_plugin_version(target_dir: &std::path::Path) -> Option<St
         .map(|(_, version)| version)
 }
 
+#[cfg(test)]
 fn parse_local_jetbrains_zip_version(name: &str) -> Option<Vec<u32>> {
     let base = name.strip_prefix("agent-doc-jetbrains-")?;
     let version = base
@@ -615,6 +640,7 @@ fn parse_local_jetbrains_zip_version(name: &str) -> Option<Vec<u32>> {
         .collect()
 }
 
+#[cfg(test)]
 fn find_best_local_zip(dist_dir: &std::path::Path) -> Option<PathBuf> {
     fs::read_dir(dist_dir)
         .ok()?
@@ -699,7 +725,8 @@ mod tests {
         choose_plugins_dir_with_interactivity, existing_jetbrains_agent_doc_dirs, find_asset,
         find_best_local_zip, find_local_vscode_vsix, find_local_zip, has_asset,
         installed_jetbrains_plugin_version, is_jetbrains_ide_data_dir,
-        jetbrains_plugin_dirs_in_roots, local_jetbrains_zip_version, release_version,
+        jetbrains_plugin_dirs_in_roots, local_jetbrains_zip_in, local_jetbrains_zip_version,
+        release_version,
     };
     use serde_json::json;
     use std::fs;
@@ -830,6 +857,27 @@ mod tests {
             chosen.ends_with("agent-doc-jetbrains-0.2.91-signed.zip"),
             "signed artifact should win when both builds have the same version"
         );
+    }
+
+    #[test]
+    fn local_jetbrains_zip_requires_gradle_properties_version() {
+        let tmp = TempDir::new().unwrap();
+        let jetbrains = tmp.path().join("editors/jetbrains");
+        let dist = jetbrains.join("build/distributions");
+        fs::create_dir_all(&dist).unwrap();
+        fs::write(
+            jetbrains.join("gradle.properties"),
+            "pluginGroup = example.agentdoc\npluginName = agent-doc-jetbrains\npluginVersion = 0.2.91\n",
+        )
+        .unwrap();
+        fs::write(dist.join("agent-doc-jetbrains-0.2.90.zip"), b"stale").unwrap();
+
+        let error = local_jetbrains_zip_in(tmp.path()).unwrap_err().to_string();
+        assert!(error.contains("pluginVersion 0.2.91"));
+
+        let current = dist.join("agent-doc-jetbrains-0.2.91.zip");
+        fs::write(&current, b"current").unwrap();
+        assert_eq!(local_jetbrains_zip_in(tmp.path()).unwrap(), current);
     }
 
     #[test]

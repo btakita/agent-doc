@@ -5,7 +5,6 @@ use agent_doc_controller::fleet::{
     ActorListRecord, ActorListRegistryBinding, DashboardActorDiagnostics,
 };
 use agent_doc_controller_io::dashboard::DashboardEffects;
-use tmux_router::Tmux;
 
 pub use agent_doc_controller_io::dashboard::DEFAULT_INTERVAL_MS;
 
@@ -43,7 +42,7 @@ impl DashboardEffects for CliDashboardEffects {
     }
 
     fn pane_alive(&self, pane: &str) -> bool {
-        Tmux::default_server().pane_alive(pane)
+        agent_doc_tmux_io::configured_tmux().pane_alive(pane)
     }
 
     fn actor_diagnostics(&self, root: &Path, document: &Path) -> Result<DashboardActorDiagnostics> {

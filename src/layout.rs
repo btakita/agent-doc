@@ -93,7 +93,13 @@ impl Split {
 }
 
 pub fn run(files: &[&Path], split: Split, pane: Option<&str>, window: Option<&str>) -> Result<()> {
-    run_with_tmux(files, split, pane, window, &Tmux::default_server())
+    run_with_tmux(
+        files,
+        split,
+        pane,
+        window,
+        &agent_doc_tmux_io::configured_tmux(),
+    )
 }
 
 pub fn run_with_tmux(

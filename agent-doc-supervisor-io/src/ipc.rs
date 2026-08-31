@@ -439,7 +439,7 @@ where
             profile.transform(),
             profile.submit_key(),
         );
-        let tmux = tmux_router::Tmux::default_server();
+        let tmux = agent_doc_tmux_io::configured_tmux();
         agent_doc_tmux_io::send_submitted_text_for_harness_logged(
             &tmux,
             &pane_id,

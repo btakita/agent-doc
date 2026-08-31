@@ -30,7 +30,6 @@ use anyhow::{Context, Result};
 
 use agent_doc_project_config_io as project_config_io;
 use agent_doc_sync_io::resync;
-use tmux_router::Tmux;
 
 /// Show the currently configured tmux session.
 pub fn show() -> Result<()> {
@@ -50,7 +49,7 @@ pub fn clear() -> Result<()> {
 
 /// Set the tmux session and migrate all registered panes.
 pub fn set(name: &str) -> Result<()> {
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let old_session = project_config_io::project_tmux_session();
 
     // Update config first

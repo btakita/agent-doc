@@ -6,6 +6,7 @@ Location: `~/.config/agent-doc/config.toml`
 
 ```toml
 default_agent = "claude"
+tmux_bin = "/opt/tmux/bin/tmux"
 
 [agents.claude]
 command = "claude"
@@ -35,6 +36,7 @@ auto_start_tmux = true
 | Field | Description |
 |-------|-------------|
 | `default_agent` | Agent backend used when not specified elsewhere |
+| `tmux_bin` | Machine-wide tmux client; project `tmux_bin` overrides it |
 | `[agents.NAME]` | Agent backend configuration |
 | `command` | Executable name or path |
 | `args` | Arguments passed before the prompt |
@@ -72,6 +74,8 @@ These override the config file for that specific document.
 frontmatter. Its precedence is document, project, global, then `auto`. The other
 terminal fields use project then global precedence. Terminal configuration does
 not contain a session name: use project `tmux_session` / `agent-doc session set`.
+The tmux executable uses project `tmux_bin`, then global `tmux_bin`, then `PATH`;
+`agent-doc env --json` reports the selected binary and its source.
 See the [Coder workspace terminal runbook](../../runbooks/coder-workspace.md) for
 remote IDE setup and headless failure behavior.
 

@@ -1244,7 +1244,7 @@ fn idle_queue_resubmit_pending_payload(
         "idle_queue_pending_payload_submit_key",
         submit_key,
     );
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     match agent_doc_tmux_io::send_submitted_text_for_harness_logged(
         &tmux,
         &pane,

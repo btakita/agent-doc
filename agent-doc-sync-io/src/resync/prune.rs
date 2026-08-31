@@ -154,7 +154,7 @@ fn should_prune_dead_non_stash(cleanup_mode: PruneCleanupMode) -> bool {
 /// Called automatically before route, sync, and claim operations.
 /// Returns the number of registry entries removed.
 pub fn prune() -> Result<usize> {
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     prune_with_tmux(&tmux)
 }
 

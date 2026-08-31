@@ -2,7 +2,7 @@
 //!
 //! ## Spec
 //! - `check_prereqs()`: resolves the exact tmux client, reports its version, and
-//!   verifies a live-server protocol handshake; also checks `claude` in `PATH`.
+//!   verifies a live-server protocol handshake; also checks `claude` in the caller PATH.
 //!   Never fails — warnings only.
 //! - `run(editor, skip_prereqs, skip_plugins)`: orchestrates the full install workflow.
 //!   - Runs `check_prereqs()` unless `skip_prereqs` is set.
@@ -61,7 +61,7 @@ pub fn check_prereqs() {
                     .unwrap_or("server handshake failed")
             );
             eprintln!(
-                "[install]   hint: set tmux_bin in .agent-doc/config.toml to the client that owns the running server"
+                "[install]   hint: set tmux_bin in .agent-doc/config.toml or ~/.config/agent-doc/config.toml to the client that owns the running server"
             );
         }
         (None, _) => {
@@ -81,9 +81,9 @@ pub fn check_prereqs() {
     if which("claude") {
         eprintln!("[install] claude ... ok");
     } else {
-        eprintln!("[install] claude ... MISSING");
+        eprintln!("[install] claude ... MISSING in caller PATH");
         eprintln!(
-            "[install]   hint: Install Claude Code CLI: https://docs.anthropic.com/en/docs/claude-code"
+            "[install]   hint: Install Claude Code CLI or verify it is available in the tmux pane shell; this check does not inspect interactive-shell PATH setup"
         );
     }
 }

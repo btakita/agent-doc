@@ -573,7 +573,7 @@ mod tests {
         .unwrap();
 
         let repair = repair_missing_registered_pane(
-            &Tmux::default_server(),
+            &agent_doc_tmux_io::configured_tmux(),
             &doc,
             "session-lost-pane",
             "%422",
@@ -635,7 +635,7 @@ mod tests {
             .unwrap();
 
         let repair = repair_missing_registered_pane(
-            &Tmux::default_server(),
+            &agent_doc_tmux_io::configured_tmux(),
             &doc,
             "session-captured-pane-loss-inspect",
             "%422",
@@ -705,7 +705,7 @@ mod tests {
         .unwrap();
 
         let repair = repair_missing_registered_pane(
-            &Tmux::default_server(),
+            &agent_doc_tmux_io::configured_tmux(),
             &doc,
             "session-captured-pane-loss",
             "%422",
@@ -812,7 +812,7 @@ mod tests {
         .unwrap();
 
         let repair = repair_missing_registered_pane(
-            &Tmux::default_server(),
+            &agent_doc_tmux_io::configured_tmux(),
             &doc,
             "session-write-applied-pane-loss",
             "%423",
@@ -981,7 +981,7 @@ mod tests {
         .unwrap();
 
         let repair = repair_missing_registered_pane(
-            &Tmux::default_server(),
+            &agent_doc_tmux_io::configured_tmux(),
             &doc,
             "session-captured-pane-loss-invalid-backlog",
             "%424",
@@ -1037,7 +1037,7 @@ mod tests {
         );
 
         let cached = load_live_authoritative_actor_record_cached(
-            &Tmux::default_server(),
+            &agent_doc_tmux_io::configured_tmux(),
             file,
             session_id,
             &proof_cache,
@@ -1075,7 +1075,7 @@ mod tests {
 
         assert!(
             load_live_authoritative_actor_record_cached(
-                &Tmux::default_server(),
+                &agent_doc_tmux_io::configured_tmux(),
                 file,
                 session_id,
                 &external_cache,
@@ -1091,7 +1091,7 @@ mod tests {
         );
         assert_eq!(
             load_live_authoritative_actor_record_cached(
-                &Tmux::default_server(),
+                &agent_doc_tmux_io::configured_tmux(),
                 file,
                 session_id,
                 &controller_cache,

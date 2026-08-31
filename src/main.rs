@@ -949,7 +949,7 @@ struct CliAdminControllerEffects {
 impl Default for CliAdminControllerEffects {
     fn default() -> Self {
         Self {
-            tmux: tmux_router::Tmux::default_server(),
+            tmux: agent_doc_tmux_io::configured_tmux(),
         }
     }
 }

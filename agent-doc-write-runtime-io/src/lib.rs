@@ -3018,7 +3018,7 @@ fn verify_pane_ownership(file: &Path) -> Result<()> {
         Ok(Some(e)) => e,
         _ => return Ok(()),
     };
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let current = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux)
         .context("failed to query current tmux pane while notifying the session owner")?;
     if entry.pane != current {

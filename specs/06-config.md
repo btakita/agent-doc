@@ -4,6 +4,11 @@
 
 Location: `{XDG_CONFIG_HOME}/agent-doc/config.toml` (default `~/.config/agent-doc/config.toml`).
 
+`tmux_bin` is a machine-wide tmux client override. Resolution is project
+`tmux_bin`, global `tmux_bin`, then `PATH`; the selected source is exposed by
+`agent-doc env --json`. Every tmux-owning runtime path uses this same process-wide
+resolution.
+
 Fields: `default_agent`, `agent_args`, `claude_args`, `codex_args`, `opencode_args`, `codex_network_access`, `[agents.{name}]` with `command`, `args`, `result_path` (reserved), `session_path` (reserved).
 
 ## agent_args
@@ -114,6 +119,7 @@ Location: `.agent-doc/config.toml` (relative to project root).
 
 Fields:
 - `tmux_session` — the tmux session name bound to this project.
+- `tmux_bin` — project override for the tmux client; takes precedence over the global machine value.
 - `agent_doc_auto_compact = <line-threshold>` — explicit opt-in for automatic compaction/reload policies. Session-accretion warnings, repeated no-op closeouts, and Claude skill auto-update must not compact by default when this setting is absent.
 - `agent_doc_queue_context_reset = <bool>` — explicit opt-in for accretion-driven fresh-context handoff in direct `run` and Codex continuation diagnostics (`#nm1x-no-preempt-clear`, `#nm1x-codex-clear-parity`). Default off. When enabled and a reset reason is active, direct `run` may start the next backend call from a fresh session and Codex Stop-hook continuation records the suppressed background-clear decision, but the supervisor idle-queue watch must not inject `/clear` for ordinary queue heads. Explicit operator clears and explicit queued slash commands remain the only clear sources. A document-frontmatter `agent_doc_queue_context_reset: true` takes precedence over this project setting.
 - `agent_doc_bug_target_document = "<relative-or-absolute .md>"` — optional project-default session document for `#agent-doc-bug` and dogfooding route-failure backlog capture. When absent or empty, bug backlog items stay in the current document. Explicit prompt text such as "Add to the backlog of tasks/bugs.md" takes precedence over this default.

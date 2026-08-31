@@ -226,13 +226,16 @@ install-full:
 # only the former leaves running turns reporting the older package generation.
 install-editor-plugins:
 	@if agent-doc plugin list 2>/dev/null | grep -q '^jetbrains'; then \
-		( cd editors/jetbrains && ./gradlew buildPlugin ); \
+		( cd editors/jetbrains && ./gradlew buildPlugin ) || { \
+			echo "JetBrains plugin build failed. Use a JDK 21-compatible Gradle runtime (set JAVA_HOME to JDK 21). Refusing to install a stale package." >&2; \
+			exit 1; \
+		}; \
 		agent-doc plugin install jetbrains --local --all-installed; \
 	else \
 		echo "No existing JetBrains agent-doc package; editor package sync skipped."; \
 	fi
 	@if agent-doc plugin list 2>/dev/null | grep -q '^vscode'; then \
-		( cd editors/vscode && npm run package ); \
+		( cd editors/vscode && npm run package ) || exit 1; \
 		agent-doc plugin install vscode --local; \
 	else \
 		echo "No existing VS Code agent-doc package; editor package sync skipped."; \

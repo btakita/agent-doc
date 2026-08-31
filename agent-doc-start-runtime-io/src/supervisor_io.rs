@@ -183,7 +183,7 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorSha
             .inject_pane
             .as_deref()
             .ok_or_else(|| "supervisor restart prompt has no owned pane".to_string())?;
-        tmux_router::Tmux::default_server()
+        agent_doc_tmux_io::configured_tmux()
             .send_keys(pane, "")
             .map_err(|err| format!("failed to wake supervisor restart prompt on {pane}: {err:#}"))
     }

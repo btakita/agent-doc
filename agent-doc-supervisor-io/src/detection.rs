@@ -160,7 +160,7 @@ where
     S: SupervisorDetectionState + ?Sized,
 {
     let pane = state.owned_pane_id()?;
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let content = agent_doc_tmux_io::capture_pane_with_ansi(&tmux, &pane).ok()?;
     Some(supervisor_detection::pane_dispatch_ready_at_cursor(
         &content,
@@ -216,7 +216,7 @@ where
     S: SupervisorDetectionState + ?Sized,
 {
     let pane_id = state.owned_pane_id()?;
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let content = agent_doc_tmux_io::capture_pane_with_ansi(&tmux, &pane_id).ok()?;
     let cursor_y = agent_doc_tmux_io::pane_cursor_y(&tmux, &pane_id);
     let payload_already_pending = dispatch_payload_pending_in_current_input(
@@ -288,7 +288,7 @@ where
     S: SupervisorDetectionState + ?Sized,
 {
     let pane = state.owned_pane_id()?;
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     agent_doc_tmux_io::capture_pane_with_ansi(&tmux, &pane).ok()
 }
 

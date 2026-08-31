@@ -2,6 +2,22 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.303
+
+- **Fix: every tmux command now honors project, global, then `PATH` binary selection.**
+- **Fix: local editor installation fails closed instead of reusing stale packages.**
+- **Release: Linux glibc artifacts are built with the compatibility cross image.**
+
+Tmux construction now flows through one process-wide resolver. A project
+`tmux_bin` remains authoritative, `~/.config/agent-doc/config.toml` supplies the
+machine-wide fallback, and `PATH` is used only when neither override exists.
+`agent-doc env` reports which source selected the executable.
+
+The JetBrains install target stops when Gradle fails (with a JDK 21 hint), and
+the local installer accepts only a zip whose version matches
+`editors/jetbrains/gradle.properties`. Source-build documentation now covers
+the sibling `tmux-router` checkout and optional Kotlin protocol repositories.
+
 ## 0.35.302
 
 - **CLI: `agent-doc start` now defaults to `agent-doc.md`.**

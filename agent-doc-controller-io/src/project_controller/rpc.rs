@@ -11727,7 +11727,7 @@ fn controller_supervisor_watchdog_tick(
             return;
         }
     };
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let window_secs = agent_doc_supervisor::crash_policy::WATCHDOG_RESTART_WINDOW.as_secs();
 
     for record in store.values() {
@@ -18055,7 +18055,7 @@ fn tmux_layout_sync_state_for_invocation_with_effect_assignment(
     // is a read-only survey, so no pane mutation invalidates the snapshot
     // mid-pass. The scope is thread-local and dropped at the function return.
     let _pane_snapshot = tmux_router::begin_pane_snapshot_scope();
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let Some(configured_session) = pane_layout_observation_session(
         configured_tmux_session_for_project(&bootstrap.project_root),
         effect_file_panes,
@@ -19076,7 +19076,7 @@ fn pane_layout_effect_worker(
         publish_pane_layout_status(&runtime);
 
         if let Some(reusable) = reusable_structure {
-            let tmux = tmux_router::Tmux::default_server();
+            let tmux = agent_doc_tmux_io::configured_tmux();
             let layout_window = pane_layout_target_window_id(
                 &bootstrap.project_root,
                 &tmux,
@@ -19235,7 +19235,7 @@ fn pane_layout_effect_worker(
             continue;
         }
         let focus_receipt = if effect_result.is_ok() {
-            let tmux = tmux_router::Tmux::default_server();
+            let tmux = agent_doc_tmux_io::configured_tmux();
             let layout_window = pane_layout_target_window_id(
                 &bootstrap.project_root,
                 &tmux,
@@ -19505,7 +19505,7 @@ pub(crate) fn handle_tmux_focus_state(
             None,
         ));
     };
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     if !tmux.session_alive(&session_name) {
         return Ok(inactive_tmux_focus_state(
             "tmux_session_not_alive",
@@ -19945,7 +19945,7 @@ fn handle_focus_document_pane_with_policy(
     let actor_record = actor_record_from_authority(bootstrap, runtime, &document_id)?;
     let registry_entry =
         agent_doc_session_registry_io::lookup_file_entry_in(&bootstrap.project_root, &canonical)?;
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let session_id =
         current_document_session_id(&canonical, actor_record.as_ref(), registry_entry.as_ref());
     let proven_live_owner = session_id
@@ -20631,7 +20631,7 @@ mod pane_layout_projection_dispatch_tests {
     #[test]
     fn layout_target_window_prefers_an_explicit_window_id() {
         let project_root = std::env::temp_dir().join("agent-doc-pane-layout-window-id-test");
-        let tmux = tmux_router::Tmux::default_server();
+        let tmux = agent_doc_tmux_io::configured_tmux();
         assert_eq!(
             pane_layout_target_window_id(&project_root, &tmux, Some("@894")),
             Some("@894".to_string())
@@ -21791,7 +21791,7 @@ fn quit_live_harness_pane_to_shell(
 
 #[cfg(not(any(test, feature = "test-support")))]
 fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result<String> {
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let intent = SupervisorReplacementIntent::parse(&work.mode)?;
     let mode = intent.mode;
     // The editor/controller model is the document authority. Cold recovery must
@@ -24190,7 +24190,7 @@ mod tests {
     #[test]
     fn tmux_layout_observation_prefers_effect_assignment_over_partial_actor_store() {
         let project_root = Path::new("/repo");
-        let tmux = tmux_router::Tmux::default_server();
+        let tmux = agent_doc_tmux_io::configured_tmux();
         let actor_store = BTreeMap::new();
         let effect_file_panes = vec![
             ("/repo/tasks/primary.md".to_string(), "%1".to_string()),

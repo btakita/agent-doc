@@ -44,7 +44,7 @@ fn current_document_content(file: &Path, source: &str) -> Result<String> {
 }
 
 pub fn run(file: &Path) -> Result<()> {
-    run_with_tmux(file, &Tmux::default_server())
+    run_with_tmux(file, &agent_doc_tmux_io::configured_tmux())
 }
 
 pub fn run_with_tmux(file: &Path, tmux: &Tmux) -> Result<()> {
@@ -99,7 +99,7 @@ pub struct PromptAllEntry {
 
 /// Poll all live sessions for active prompts.
 pub fn run_all() -> Result<()> {
-    run_all_with_tmux(&Tmux::default_server())
+    run_all_with_tmux(&agent_doc_tmux_io::configured_tmux())
 }
 
 pub fn run_all_with_tmux(tmux: &Tmux) -> Result<()> {
@@ -163,7 +163,7 @@ pub fn run_all_with_tmux(tmux: &Tmux) -> Result<()> {
 }
 
 pub fn answer(file: &Path, option_index: usize) -> Result<()> {
-    answer_with_tmux(file, option_index, &Tmux::default_server())
+    answer_with_tmux(file, option_index, &agent_doc_tmux_io::configured_tmux())
 }
 
 pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result<()> {

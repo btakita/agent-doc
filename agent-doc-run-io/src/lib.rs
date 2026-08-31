@@ -1452,7 +1452,7 @@ pub fn owned_pane_self_invocation_detail(
     if agent_name != "codex" || agent_doc_model_tier::detect_harness() != "codex" {
         return None;
     }
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let current_pane = match agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux) {
         Ok(pane) => pane,
         Err(error) => {
@@ -1515,7 +1515,7 @@ pub fn detect_owned_pane_self_invocation_with_options(
     if owned_pane_self_invocation_detail(file, session_id, agent_name).is_none() {
         return Ok(None);
     }
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let current_pane = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux)
         .context("failed to query current tmux pane")?;
     let actor = actor_record_for_file(file).ok().flatten();
@@ -1659,7 +1659,7 @@ pub fn run_dispatch_timeout_diagnostic(file: &Path, agent_name: &str) -> String 
         .ok()
         .flatten();
     let actor = actor_record_for_file(file).ok().flatten();
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let current_pane = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux);
     let (cycle_id, phase, last_event) = state
         .as_ref()

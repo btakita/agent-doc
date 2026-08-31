@@ -354,7 +354,7 @@ mod registry;
 pub(crate) use registry::*;
 
 pub fn repair_file_state(file: &Path) -> Result<Vec<String>> {
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     repair_file_state_with_tmux(&tmux, file)
 }
 
@@ -390,7 +390,7 @@ pub fn repair_file_state(file: &Path) -> Result<Vec<String>> {
 /// behind it made a defect that permanently breaks focus sync unfixable exactly
 /// when the document was also unhealthy.
 pub fn repair_pane_window_binding(file: &Path) -> Result<Option<String>> {
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     refresh_drifted_pane_window_binding(&tmux, file)
 }
 
@@ -621,7 +621,7 @@ pub fn run(col_args: &[String], window: Option<&str>, focus: Option<&str>) -> Re
         AutoStartMode::Full,
         false,
         true,
-        &Tmux::default_server(),
+        &agent_doc_tmux_io::configured_tmux(),
     )
 }
 
@@ -647,7 +647,7 @@ pub fn run_in_project_root(
         false,
         true,
         &[],
-        &Tmux::default_server(),
+        &agent_doc_tmux_io::configured_tmux(),
     )
 }
 
@@ -666,7 +666,7 @@ pub fn run_provision_only_in_project_root(
         false,
         false,
         &[],
-        &Tmux::default_server(),
+        &agent_doc_tmux_io::configured_tmux(),
     )
 }
 
@@ -686,7 +686,7 @@ pub fn run_provision_only_exact_visible_with_actor_bindings_in_project_root(
         true,
         false,
         actor_bindings,
-        &Tmux::default_server(),
+        &agent_doc_tmux_io::configured_tmux(),
     )
 }
 
@@ -716,7 +716,7 @@ fn run_with_options_at_root(
         false,
         false,
         &[],
-        &Tmux::default_server(),
+        &agent_doc_tmux_io::configured_tmux(),
     )
 }
 
@@ -837,7 +837,7 @@ pub fn run_layout_only_exact_visible_in_project_root(
         col_args,
         window,
         focus,
-        &Tmux::default_server(),
+        &agent_doc_tmux_io::configured_tmux(),
     )
 }
 
@@ -892,7 +892,7 @@ pub fn run_layout_only_exact_visible_with_actor_bindings_in_project_root(
         window,
         focus,
         actor_bindings,
-        &Tmux::default_server(),
+        &agent_doc_tmux_io::configured_tmux(),
     )
 }
 
@@ -5768,7 +5768,7 @@ fn resolve_pane_owner_conflict<'a>(
 /// vector is invisible in the logs. `origin` names the entry point (e.g. `run`,
 /// `preflight`) so a future repro pins where the cross-document cycle started.
 pub fn log_cross_document_execution_context(file: &Path, origin: &str) {
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let current_pane = match agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux) {
         Ok(pane) if !pane.is_empty() => pane,
         Ok(_) => return,
@@ -6900,7 +6900,7 @@ mod tests {
         // owner — it must never over-reject on the focus hot path, or normal
         // editor navigation would spuriously cold-start instead of focusing the
         // existing owner.
-        let tmux = Tmux::default_server();
+        let tmux = agent_doc_tmux_io::configured_tmux();
         let file = Path::new("tasks/software/tsift.md");
 
         // No candidate stays no candidate.

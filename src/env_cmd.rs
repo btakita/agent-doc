@@ -8,17 +8,12 @@ use std::process::Stdio;
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct TmuxProbe {
     pub(crate) binary: String,
+    pub(crate) source: String,
     pub(crate) version: Option<String>,
     pub(crate) version_error: Option<String>,
     pub(crate) server_handshake: bool,
     pub(crate) server_version: Option<String>,
     pub(crate) server_error: Option<String>,
-}
-
-fn configured_tmux() -> tmux_router::Tmux {
-    agent_doc_project_config_io::project_tmux_bin()
-        .map(tmux_router::Tmux::default_server_with_binary)
-        .unwrap_or_else(tmux_router::Tmux::default_server)
 }
 
 fn output_text(output: &std::process::Output) -> String {
@@ -31,10 +26,19 @@ fn output_text(output: &std::process::Output) -> String {
 }
 
 pub(crate) fn probe_tmux() -> TmuxProbe {
-    probe_tmux_with(&configured_tmux())
+    let resolution = agent_doc_tmux_io::configured_tmux_bin_resolution();
+    probe_tmux_with_source(
+        &agent_doc_tmux_io::configured_tmux(),
+        resolution.source.as_str(),
+    )
 }
 
+#[cfg(test)]
 fn probe_tmux_with(tmux: &tmux_router::Tmux) -> TmuxProbe {
+    probe_tmux_with_source(tmux, "explicit")
+}
+
+fn probe_tmux_with_source(tmux: &tmux_router::Tmux, source: &str) -> TmuxProbe {
     let binary = tmux.binary_path().display().to_string();
     let version_output = tmux.cmd().arg("-V").stdin(Stdio::null()).output();
     let (version, version_error) = match version_output {
@@ -79,6 +83,7 @@ fn probe_tmux_with(tmux: &tmux_router::Tmux) -> TmuxProbe {
 
     TmuxProbe {
         binary,
+        source: source.to_string(),
         version,
         version_error,
         server_handshake,
@@ -110,6 +115,7 @@ pub fn run(json: bool) -> anyhow::Result<()> {
 
 fn print_tmux_probe(probe: &TmuxProbe) {
     println!("tmux binary: {}", probe.binary);
+    println!("tmux binary source: {}", probe.source);
     println!(
         "tmux version: {}",
         probe.version.as_deref().unwrap_or("unavailable")

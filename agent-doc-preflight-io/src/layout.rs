@@ -82,7 +82,7 @@ pub fn maybe_auto_resync_on_drift(file: &Path, layout_issues: &[String]) {
 /// (active agent-doc window) session when registered panes still span more than
 /// one session. Best effort: never blocks a cycle.
 fn close_superseded_drift_sessions(file: &Path) {
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let registry = match agent_doc_session_registry_io::load() {
         Ok(registry) => registry,
         Err(e) => {
@@ -121,7 +121,7 @@ fn close_superseded_drift_sessions(file: &Path) {
 }
 
 fn current_tmux_session_name() -> Option<String> {
-    tmux_router::Tmux::default_server().current_session()
+    agent_doc_tmux_io::configured_tmux().current_session()
 }
 
 pub fn maybe_auto_repair_base_index(file: &Path, layout_issues: &[String]) -> bool {
@@ -154,7 +154,7 @@ pub fn maybe_auto_repair_base_index(file: &Path, layout_issues: &[String]) -> bo
         file,
         &format!("auto_repair_base_index immediate session={}", name),
     );
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     if let Err(e) = agent_doc_sync_io::sync::repair_layout(&tmux, &name, "agent-doc") {
         eprintln!(
             "[preflight] auto repair_layout failed: {}; run `agent-doc session doctor {} --repair`",
@@ -179,7 +179,7 @@ pub fn check_layout() -> Vec<String> {
 
     let mut issues = Vec::new();
 
-    let Some(session_name) = tmux_router::Tmux::default_server().current_session() else {
+    let Some(session_name) = agent_doc_tmux_io::configured_tmux().current_session() else {
         return issues;
     };
 

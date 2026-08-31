@@ -13865,6 +13865,7 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         "pub fn agent_doc_bug_target_document_for_doc(",
         "pub fn load_project_from(",
         "pub fn project_tmux_session()",
+        "pub fn tmux_bin_resolution()",
         "pub fn save_project(",
         "pub fn save_project_to(",
         "pub fn update_project_tmux_session(",
@@ -13959,7 +13960,12 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-project-config-io/Cargo.toml")).unwrap();
     let parsed: toml::Value = toml::from_str(&focused_manifest).unwrap();
     let dependencies = parsed["dependencies"].as_table().unwrap();
-    for required in ["agent-doc-frontmatter", "agent-doc-fs", "toml"] {
+    for required in [
+        "agent-doc-config",
+        "agent-doc-frontmatter",
+        "agent-doc-fs",
+        "toml",
+    ] {
         assert!(
             dependencies.contains_key(required),
             "agent-doc-project-config-io should depend on {required} for project config IO"
@@ -13997,6 +14003,41 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         closeout_guards
             .contains("agent_doc_turn::document_drift::detect_bypassed_response_write_between",),
         "session_check closeout guards should adapt current-document IO into the focused document-drift classifier"
+    );
+}
+
+#[test]
+fn test_release_install_paths_fail_closed_for_issue_47() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let makefile = fs::read_to_string(manifest_dir.join("Makefile")).unwrap();
+    let install_target = makefile
+        .split_once("install-editor-plugins:")
+        .expect("install-editor-plugins target")
+        .1
+        .split_once("cleanup-build-artifacts:")
+        .expect("cleanup-build-artifacts target")
+        .0;
+    let build = install_target
+        .find("( cd editors/jetbrains && ./gradlew buildPlugin ) || {")
+        .expect("JetBrains build must fail closed");
+    let install = install_target
+        .find("agent-doc plugin install jetbrains --local --all-installed")
+        .expect("JetBrains local install command");
+    assert!(
+        build < install,
+        "the JetBrains package must build successfully before local installation"
+    );
+    assert!(
+        install_target.contains("Refusing to install a stale package."),
+        "a failed JetBrains build must explicitly refuse stale package installation"
+    );
+
+    let release = fs::read_to_string(manifest_dir.join(".github/workflows/release.yml")).unwrap();
+    assert!(
+        release.contains(
+            "- target: x86_64-unknown-linux-gnu\n            os: ubuntu-latest\n            use_cross: true"
+        ),
+        "the glibc Linux release must use the compatibility-oriented cross image"
     );
 }
 
@@ -17639,7 +17680,7 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
             "impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects"
         ) && cli_main.contains("agent_doc_controller_io::project_controller::load_actor_store")
             && cli_main.contains("agent_doc_session_registry_io::load_in")
-            && cli_main.contains("tmux_router::Tmux::default_server")
+            && cli_main.contains("agent_doc_tmux_io::configured_tmux")
             && cli_main.contains("agent_doc_admin_io::inspect(")
             && !cli_main.contains("agent_doc_orchestration::admin::"),
         "CLI should adapt concrete admin effects and call agent-doc-admin-io directly"
@@ -17665,7 +17706,7 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
             && cli_dashboard
                 .contains("agent_doc_controller_io::project_controller::load_actor_store")
             && cli_dashboard.contains("agent_doc_session_registry_io::load_in")
-            && cli_dashboard.contains("Tmux::default_server().pane_alive")
+            && cli_dashboard.contains("agent_doc_tmux_io::configured_tmux().pane_alive")
             && cli_dashboard.contains("agent_doc_controller_io::project_controller::inspect_actor")
             && cli_dashboard.contains("agent_doc_controller_io::dashboard::dashboard(&EFFECTS"),
         "CLI dashboard should only adapt concrete actor/session/tmux/controller effects"

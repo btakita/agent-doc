@@ -257,7 +257,7 @@ fn restart_busy_action(_evidence: &LivePaneEvidence) -> RestartBusyAction {
 
 pub fn status(file: &Path) -> Result<()> {
     let mut ctx = build_context(file)?;
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     if reconcile_idle_projection_from_live_pane(&ctx, &tmux)? {
         ctx = build_context(file)?;
     }
@@ -421,7 +421,7 @@ pub fn debug(file: Option<&Path>, json: bool) -> Result<()> {
 pub fn attach(file: &Path, pane: Option<&str>) -> Result<()> {
     let ctx = build_context(file)?;
     let pane_id = resolve_attach_pane(pane)?;
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     if !tmux.pane_alive(&pane_id) {
         anyhow::bail!("tmux pane {} is not alive", pane_id);
     }
@@ -515,7 +515,7 @@ fn restart_with_target(
     restart_agent: bool,
 ) -> Result<()> {
     let ctx = build_context(file)?;
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let owner_pane = ctx
         .actor_record
         .as_ref()
@@ -704,7 +704,7 @@ pub fn clear(file: &Path) -> Result<()> {
         &ctx.canonical_file,
         "session_clear",
     )?;
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Clear)?;
     if session_clear_already_satisfied(&ctx, &tmux) {
         agent_doc_ops_log_io::log_op(
@@ -1574,7 +1574,7 @@ pub fn cancel_turn(file: &Path) -> Result<()> {
         &ctx.canonical_file,
         "session_cancel_turn",
     )?;
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let turn_active = document_turn_active(&ctx);
     match cancel_turn_action(turn_active) {
         CancelTurnAction::NoOpIdle => {
@@ -1677,7 +1677,7 @@ pub fn interrupt_clear(file: &Path, force: bool) -> Result<()> {
             ctx.canonical_file.display()
         );
     }
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let evidence = live_pane_evidence(&ctx, &tmux);
     let pane = evidence
         .pane_id
@@ -1785,7 +1785,7 @@ fn force_interrupt_clear(file: &Path) -> Result<()> {
         );
     }
 
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let evidence = live_pane_evidence(&ctx, &tmux);
     let pane = force_interrupt_clear_pane(&ctx, &evidence);
 
@@ -3030,7 +3030,7 @@ fn build_context(file: &Path) -> Result<SessionContext> {
 /// answer yields `None`, which `pane_window_binding_drifted` never treats as
 /// drift.
 fn observe_live_pane_window(pane_id: &str) -> Option<String> {
-    tmux_router::Tmux::default_server()
+    agent_doc_tmux_io::configured_tmux()
         .pane_window(pane_id)
         .ok()
         .map(|window| window.trim().to_string())
@@ -3119,7 +3119,7 @@ fn resolve_attach_pane(pane: Option<&str>) -> Result<String> {
     match pane {
         Some(pane_id) => Ok(pane_id.to_string()),
         None => {
-            let tmux = Tmux::default_server();
+            let tmux = agent_doc_tmux_io::configured_tmux();
             agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux).context(
                 "attach requires --pane when no tmux pane is active in the current environment",
             )
@@ -3784,7 +3784,7 @@ fn print_status_summary(ctx: &SessionContext) {
         }
         None => println!("registry: missing"),
     }
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let evidence = live_pane_evidence(ctx, &tmux);
     println!(
         "live_pane: state={} pane={} source={} current_command={} prompt_ready={} tail={}",
@@ -5122,7 +5122,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             test_supervisor_runtime(Some(ActorState::Starting)),
             Some("starting"),
         );
-        let tmux = Tmux::default_server();
+        let tmux = agent_doc_tmux_io::configured_tmux();
 
         guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Clear)
             .expect("session clear must not be gated by stale starting actor projections");
@@ -5613,7 +5613,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                 .to_string_lossy()
         );
         let iso = tmux_router::IsolatedTmux::new("session-clear-direct-pane");
-        let default_tmux = Tmux::default_server();
+        let default_tmux = agent_doc_tmux_io::configured_tmux();
         let mut pane = iso.new_session("test", dir.path()).unwrap();
         for _ in 0..64 {
             if !default_tmux.pane_alive(&pane) {

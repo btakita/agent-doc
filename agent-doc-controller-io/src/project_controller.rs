@@ -6462,7 +6462,7 @@ pub fn close_stale_dead_pane_actors_with_tmux_for_caller(
     caller: &str,
     reason: &str,
 ) -> Result<(usize, usize)> {
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     if let Err(err) = agent_doc_tmux_io::list_panes(&tmux, None, "#{pane_id}") {
         agent_doc_ops_log_io::log_op(
             project_root,

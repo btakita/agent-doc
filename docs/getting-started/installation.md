@@ -21,8 +21,17 @@ This downloads a prebuilt binary to `~/.local/bin/agent-doc`. Use `--system` to 
 ## From source
 
 ```sh
+# agent-doc uses a sibling tmux-router path dependency
+git clone https://github.com/btakita/tmux-router.git
+git clone https://github.com/btakita/agent-doc.git
+cd agent-doc
 cargo install --path .
 ```
+
+`make install` also rebuilds already-installed editor packages. The JetBrains
+build requires JDK 21. In a monorepo checkout, an initialized sibling `lazily-kt`
+development build also requires sibling `lazily-spec/proto`; standalone checkouts
+use the published Lazily dependency instead.
 
 ## Windows
 

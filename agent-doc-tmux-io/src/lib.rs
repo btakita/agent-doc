@@ -13,6 +13,7 @@ use std::error::Error;
 use std::fmt;
 use std::path::PathBuf;
 use std::process::{Command, Output};
+use std::sync::OnceLock;
 
 use agent_doc_tmux_commands::{
     TmuxCommand, TmuxSubmitProfile, capture_pane as capture_pane_command,
@@ -27,6 +28,26 @@ use agent_doc_tmux_commands::{
     send_key as send_key_command, swap_window as swap_window_command, text_only_command,
     text_submit_command, tmux_submit_profile_for_harness,
 };
+
+static TMUX_BIN_RESOLUTION: OnceLock<agent_doc_project_config_io::TmuxBinResolution> =
+    OnceLock::new();
+
+/// Build the process-wide tmux handle from project config, global config, or PATH.
+///
+/// The resolution is stable for the process lifetime, matching the process CWD
+/// and preventing hot controller/supervisor paths from rereading config files.
+pub fn configured_tmux() -> tmux_router::Tmux {
+    let resolution = configured_tmux_bin_resolution();
+    resolution
+        .binary
+        .as_deref()
+        .map(tmux_router::Tmux::default_server_with_binary)
+        .unwrap_or_else(tmux_router::Tmux::default_server)
+}
+
+pub fn configured_tmux_bin_resolution() -> &'static agent_doc_project_config_io::TmuxBinResolution {
+    TMUX_BIN_RESOLUTION.get_or_init(agent_doc_project_config_io::tmux_bin_resolution)
+}
 
 thread_local! {
     /// Logical pane identity for controller work executed on behalf of a

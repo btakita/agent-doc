@@ -910,7 +910,7 @@ fn dispatch_submit_text_to_tmux(
 }
 
 fn dispatch_submit_text_to_pane(pane: &str, text: &str, harness: &str) -> Result<()> {
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     dispatch_submit_text_to_tmux(&tmux, pane, text, harness)
 }
 
@@ -982,7 +982,7 @@ fn auto_trigger_admission_or_pane_accept(
 ) -> bool {
     let awaited_file = file.to_path_buf();
     let awaited_baseline = baseline_cycle_id.map(str::to_string);
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let accepted_from_pane = &mut false;
     let projected = auto_trigger_admission_or_pane_accept_with(
         timeout,
@@ -1091,7 +1091,7 @@ fn verify_auto_trigger_submitted(
         return AutoTriggerOutcome::Sent;
     }
 
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let mut already_resubmitted = false;
     loop {
         let capture = agent_doc_tmux_io::capture_pane_with_ansi(&tmux, pane_id).ok();
@@ -1818,7 +1818,7 @@ fn surface_managed_capability_proof_status(
         eprintln!("{message}");
         return;
     };
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     if let Err(err) = display_managed_capability_proof_status(&tmux, pane_id, harness_binary, event)
     {
         eprintln!(

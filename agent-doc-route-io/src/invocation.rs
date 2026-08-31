@@ -188,7 +188,7 @@ pub fn run_with_force_disk_and_prune(
 ) -> Result<()> {
     run_with_tmux_with_options(
         file,
-        &Tmux::default_server(),
+        &agent_doc_tmux_io::configured_tmux(),
         pane,
         debounce_ms,
         col_args,

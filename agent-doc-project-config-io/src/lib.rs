@@ -14,6 +14,74 @@ use agent_doc_frontmatter::project_config::{
     ProjectConfig, parse_legacy_components_toml, parse_project_toml,
 };
 
+/// Why agent-doc selected a particular tmux executable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TmuxBinSource {
+    Project,
+    Global,
+    Path,
+}
+
+impl TmuxBinSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Project => "config:project",
+            Self::Global => "config:global",
+            Self::Path => "PATH",
+        }
+    }
+}
+
+/// Resolved tmux executable plus the precedence source that selected it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TmuxBinResolution {
+    pub binary: Option<String>,
+    pub source: TmuxBinSource,
+}
+
+fn nonempty(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+/// Resolve project override, then global machine override, then PATH.
+pub fn resolve_tmux_bin(
+    project_binary: Option<&str>,
+    global_binary: Option<&str>,
+) -> TmuxBinResolution {
+    if let Some(binary) = nonempty(project_binary) {
+        return TmuxBinResolution {
+            binary: Some(binary),
+            source: TmuxBinSource::Project,
+        };
+    }
+    if let Some(binary) = nonempty(global_binary) {
+        return TmuxBinResolution {
+            binary: Some(binary),
+            source: TmuxBinSource::Global,
+        };
+    }
+    TmuxBinResolution {
+        binary: None,
+        source: TmuxBinSource::Path,
+    }
+}
+
+/// Resolve the tmux executable for the current process working directory.
+pub fn tmux_bin_resolution() -> TmuxBinResolution {
+    let project = load_project();
+    let global = match agent_doc_config::load() {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("warning: failed to load global agent-doc config: {error}");
+            agent_doc_config::Config::default()
+        }
+    };
+    resolve_tmux_bin(project.tmux_bin.as_deref(), global.tmux_bin.as_deref())
+}
+
 /// Load project config from `.agent-doc/config.toml` in CWD, or return defaults.
 pub fn load_project() -> ProjectConfig {
     load_project_from(&project_config_path())
@@ -120,11 +188,9 @@ pub fn project_tmux_session() -> Option<String> {
     load_project().tmux_session
 }
 
-/// Get the project's explicitly configured tmux executable.
+/// Get the resolved tmux executable (project, then global; `None` means PATH).
 pub fn project_tmux_bin() -> Option<String> {
-    load_project()
-        .tmux_bin
-        .filter(|binary| !binary.trim().is_empty())
+    tmux_bin_resolution().binary
 }
 
 /// Save project config to `.agent-doc/config.toml`.
@@ -246,6 +312,21 @@ mod tests {
         assert_eq!(cfg.tmux_bin.as_deref(), Some("/opt/tmux/bin/tmux"));
         assert_eq!(cfg.agent_doc_auto_compact, Some(240));
         assert_eq!(cfg.components["exchange"].patch, "append");
+    }
+
+    #[test]
+    fn tmux_bin_precedence_is_project_then_global_then_path() {
+        let project = resolve_tmux_bin(Some(" /project/tmux "), Some("/global/tmux"));
+        assert_eq!(project.binary.as_deref(), Some("/project/tmux"));
+        assert_eq!(project.source, TmuxBinSource::Project);
+
+        let global = resolve_tmux_bin(Some("  "), Some(" /global/tmux "));
+        assert_eq!(global.binary.as_deref(), Some("/global/tmux"));
+        assert_eq!(global.source, TmuxBinSource::Global);
+
+        let path = resolve_tmux_bin(None, None);
+        assert_eq!(path.binary, None);
+        assert_eq!(path.source, TmuxBinSource::Path);
     }
 
     #[test]

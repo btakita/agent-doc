@@ -2314,7 +2314,7 @@ pub fn run_with_reap_policy_and_resume(
                 pane_id
             ),
         );
-        let tmux = tmux_router::Tmux::default_server();
+        let tmux = agent_doc_tmux_io::configured_tmux();
         let _ = agent_doc_tmux_io::kill_pane(&tmux, &pane_id);
     }
     Ok(())

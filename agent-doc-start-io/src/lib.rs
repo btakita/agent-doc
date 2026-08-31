@@ -283,14 +283,11 @@ fn prepare_start_document_for_tmux_bootstrap(file: &Path) -> Result<()> {
 }
 
 fn tmux_for_environment() -> tmux_router::Tmux {
-    agent_doc_project_config_io::project_tmux_bin()
-        .map(tmux_router::Tmux::default_server_with_binary)
-        .unwrap_or_else(tmux_router::Tmux::default_server)
-        .with_server_socket(
-            std::env::var(AGENT_DOC_TMUX_SOCKET_ENV)
-                .ok()
-                .filter(|socket| !socket.trim().is_empty()),
-        )
+    agent_doc_tmux_io::configured_tmux().with_server_socket(
+        std::env::var(AGENT_DOC_TMUX_SOCKET_ENV)
+            .ok()
+            .filter(|socket| !socket.trim().is_empty()),
+    )
 }
 
 fn terminal_host_report(tmux: &tmux_router::Tmux) -> TerminalHostReport {
@@ -989,7 +986,7 @@ fn prepare_start_runtime_with_admission(
     }
 
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let admission_tmux = tmux_router::Tmux::default_server();
+    let admission_tmux = agent_doc_tmux_io::configured_tmux();
     if disk_document_allows_pre_admission_pane_guard(file)
         && let Some(pane_id) = current_pane_id_from_env()
         && let Some(other) = agent_doc_sync_io::sync::pane_owned_document_other_than(

@@ -27,7 +27,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use agent_doc_frontmatter::frontmatter;
-use tmux_router::Tmux;
 
 /// Configuration for a deep run.
 pub struct ParallelConfig {
@@ -100,7 +99,7 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
 
     // tmux_session frontmatter field is deprecated — use current tmux session
     let session_name = {
-        let tmux = Tmux::default_server();
+        let tmux = agent_doc_tmux_io::configured_tmux();
         tmux.current_session()
             .unwrap_or_else(|| "claude".to_string())
     };
@@ -127,7 +126,7 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
     }
 
     // Step 3: Create worktrees (unless --no-worktree) and spawn Claude in tmux panes
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let mut task_states: Vec<TaskState> = Vec::new();
 
     for (i, task) in config.tasks.iter().enumerate() {

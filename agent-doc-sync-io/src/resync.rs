@@ -1184,7 +1184,7 @@ fn finish_turn_current_document_hash(file: &Path) -> Option<String> {
 /// `target_file`: when `Some(file)`, scope detection and mutations to that single
 /// document instead of mutating the whole registry.
 pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>) -> Result<()> {
-    let tmux = Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
 
     if let Some(file) = target_file {
         let target = resolve_target_file(file)?;

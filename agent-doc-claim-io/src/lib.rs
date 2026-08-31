@@ -258,9 +258,7 @@ pub fn run(
     // configured session, so run it first and fail closed before the scaffold
     // touches disk. The `// Pane validated — now safe to modify files` invariant
     // below applies to the auto-scaffold too.
-    let tmux = project_config_io::project_tmux_bin()
-        .map(tmux_router::Tmux::default_server_with_binary)
-        .unwrap_or_else(tmux_router::Tmux::default_server);
+    let tmux = agent_doc_tmux_io::configured_tmux();
     let pane_id = if new_pane {
         None
     } else {
@@ -616,7 +614,7 @@ fn validate_file_claim(file: &Path) {
         return;
     };
 
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
 
     // Find entries pointing to this file with dead panes
     let stale_keys: Vec<(String, String)> = registry
@@ -659,7 +657,7 @@ fn validate_file_claim(file: &Path) {
 
 /// Check if a tmux window is alive by listing its panes.
 fn is_window_alive(window: &str) -> bool {
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     agent_doc_tmux_io::list_panes(&tmux, Some(window), "#{pane_id}").is_ok()
 }
 
@@ -722,7 +720,7 @@ fn run_isolate(file: &Path) -> Result<()> {
         file_str,
     );
 
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     agent_doc_tmux_io::new_window_in_cwd(
         &tmux,
         cwd.to_string_lossy().as_ref(),
@@ -788,7 +786,7 @@ mod tests {
     #[test]
     fn new_pane_provisioning_targets_authoritative_session_once_without_column_reuse() {
         let effects = RecordingEffects::default();
-        let tmux = tmux_router::Tmux::default_server();
+        let tmux = agent_doc_tmux_io::configured_tmux();
 
         provision_authoritative_pane(
             &effects,

@@ -4,7 +4,7 @@
 //! - Defines `Config`: global user configuration loaded from `~/.config/agent-doc/config.toml`
 //!   (or `$XDG_CONFIG_HOME/agent-doc/config.toml`). Fields: `default_agent`, `agents` map,
 //!   `agent_args`, `claude_args`, `codex_args`, `opencode_args` (harness aliases),
-//!   `execution_mode`, `terminal`.
+//!   `execution_mode`, `tmux_bin`, `terminal`.
 //! - Defines `AgentConfig`: per-named-agent settings (`command`, `args`, `result_path`,
 //!   `session_path`).
 //! - Defines `TerminalConfig`: command template for launching an external terminal; supports
@@ -103,6 +103,9 @@ pub struct Config {
     /// Controls how the skill handles concurrent /agent-doc invocations.
     #[serde(default)]
     pub execution_mode: Option<ExecutionMode>,
+    /// Machine-wide tmux client override. Project `tmux_bin` takes precedence.
+    #[serde(default)]
+    pub tmux_bin: Option<String>,
     /// Terminal emulator configuration for `agent-doc terminal`.
     #[serde(default)]
     pub terminal: Option<TerminalConfig>,
@@ -243,6 +246,12 @@ attach_command = "tmux attach-session -t {session}"
             terminal.attach_command.as_deref(),
             Some("tmux attach-session -t {session}")
         );
+    }
+
+    #[test]
+    fn test_global_tmux_bin_deserialization() {
+        let cfg: Config = toml::from_str("tmux_bin = \"/opt/tmux/bin/tmux\"").unwrap();
+        assert_eq!(cfg.tmux_bin.as_deref(), Some("/opt/tmux/bin/tmux"));
     }
 
     #[test]

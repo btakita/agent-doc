@@ -135,7 +135,7 @@ pub fn supervisor_stale(base: &Path) -> bool {
 }
 
 fn set_pane_title(pane: &str, title: &str) {
-    let tmux = tmux_router::Tmux::default_server();
+    let tmux = agent_doc_tmux_io::configured_tmux();
     if let Err(e) = tmux
         .cmd()
         .args(["select-pane", "-t", pane, "-T", title])

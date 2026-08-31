@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -261,7 +261,7 @@ Agent-doc’s threads are idle and are not causing this freeze. No IDEA restart 
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - Please have `agent-doc start` with no other arguments start agent-doc.
 - release + publish
 <!-- /agent:queue -->

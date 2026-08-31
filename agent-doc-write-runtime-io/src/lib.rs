@@ -2068,9 +2068,9 @@ fn run_command_inner_within_pass(
         strict_closeout: commit_mode == CommitMode::Required,
         force_disk: options.force_disk,
         no_pending_capture: options.no_pending_capture,
-        mutation_plan_json: Some(serde_json::to_string(
-            &options.captured_closeout_mutation_plan(),
-        )?),
+        mutation_plan_json: has_pending_ops
+            .then(|| serde_json::to_string(&options.captured_closeout_mutation_plan()))
+            .transpose()?,
         empty_response_recovery,
         rerun_command_base: finalize_rerun_command_base(FinalizeRerunCommand {
             required_commit: commit_mode == CommitMode::Required,

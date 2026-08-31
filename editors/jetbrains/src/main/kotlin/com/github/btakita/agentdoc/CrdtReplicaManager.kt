@@ -335,6 +335,24 @@ internal data class CapturedLocalEditorEdit(
     val projectionEpoch: Long,
 )
 
+/**
+ * Reconstruct the exact editor cut that preceded the first observed local
+ * splice. JetBrains delivers [DocumentEvent] after mutating the document, so a
+ * newly-opened session document can receive operator input before its CRDT
+ * shadow/registration exists. Treating that post-edit buffer as the bootstrap
+ * loses the splice and lets the retained controller text overwrite it.
+ */
+internal fun reconstructLocalEditorBaseTextUtil(
+    after: String,
+    edit: CapturedLocalEditorEdit,
+): String? {
+    val start = edit.offsetUtf16
+    val end = start + edit.newFragment.length
+    if (start < 0 || start > after.length || end > after.length) return null
+    if (after.substring(start, end) != edit.newFragment) return null
+    return after.substring(0, start) + edit.oldFragment + after.substring(end)
+}
+
 internal data class PreparedLocalEditorEdit(
     val offsetCodePoints: Int,
     val deleteCodePoints: Int,
@@ -623,19 +641,29 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             val newFragment = event.newFragment.toString()
             val oldFragment = event.oldFragment.toString()
             if (newFragment.isEmpty() && oldFragment.isEmpty()) return
-            if (!shadows.containsKey(filePath)) {
-                seedAndAttachFromDocument(filePath, event.document)
-                return
-            }
-            recordLocalEditorEdit(
-                filePath,
+            val edit =
                 CapturedLocalEditorEdit(
                     offsetUtf16 = event.offset,
                     oldFragment = oldFragment,
                     newFragment = newFragment,
                     projectionEpoch = projectionEpoch,
-                ),
-            )
+                )
+            if (!shadows.containsKey(filePath)) {
+                val visibleText = tryReadDocumentText(event.document) ?: return
+                val beforeText = reconstructLocalEditorBaseTextUtil(visibleText, edit)
+                if (beforeText == null) {
+                    log.warn(
+                        "[crdt-replica] first local splice could not reconstruct its base for $filePath; " +
+                            "leaving the operator buffer untouched",
+                    )
+                    return
+                }
+                // Install the pre-edit base synchronously before another EDT
+                // event arrives. The serialized worker will register from this
+                // cut and forward this deletion/insertion as a real local delta.
+                shadows.putIfAbsent(filePath, beforeText)
+            }
+            recordLocalEditorEdit(filePath, edit)
             scheduleLocalEditorFlush(filePath)
         } finally {
             loggedFilePath?.let { logSlow("documentChanged-listener", it, started, warnMs = CRDT_LISTENER_WARN_MS) }
@@ -765,26 +793,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             mutableListOf<CapturedLocalEditorEdit>().also { retained ->
                 retained.addAll(edits)
                 if (existing != null) retained.addAll(existing)
-            }
-        }
-    }
-
-    private fun seedAndAttachFromDocument(filePath: String, document: Document) {
-        markLocalPending(filePath)
-        documentWorkers.forDocument(filePath).execute {
-            val started = System.nanoTime()
-            var chars = -1
-            try {
-                val text = tryReadDocumentText(document)
-                    ?: return@execute
-                chars = text.length
-                forwarderFor(filePath, text)
-                requestRemoteDrain(filePath, "seed")
-            } catch (e: Exception) {
-                log.debug("[crdt-replica] seed skipped for $filePath: ${e.message}")
-            } finally {
-                clearLocalPending(filePath)
-                logSlow("seed-and-attach", filePath, started, details = "chars=$chars")
             }
         }
     }
@@ -1147,7 +1155,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return LocalEditorForwardResult.Fenced
         }
         val editorText = edits.lastOrNull()?.resultingText ?: beforeText
-        val forwarder = forwarderFor(filePath, beforeText)
+        val forwarder =
+            forwarderFor(
+                filePath = filePath,
+                initialEditorText = beforeText,
+                deferCanonicalProjectionForPendingLocal = true,
+            )
         if (forwarder == null) {
             shadows[filePath] = beforeText
             return LocalEditorForwardResult.Retry
@@ -1216,6 +1229,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 allowPendingLocalAtSwap = true,
                 bootstrapFromControllerCanonical = true,
                 expectedCanonicalTextAtSwap = capturedBaseText,
+                deferCanonicalProjectionForPendingLocal = true,
             )
         if (replacement == null || replacement === staleForwarder) return false
         if (
@@ -2471,6 +2485,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         allowPendingLocalAtSwap: Boolean = false,
         bootstrapFromControllerCanonical: Boolean = false,
         expectedCanonicalTextAtSwap: String? = null,
+        deferCanonicalProjectionForPendingLocal: Boolean = false,
     ): CrdtReplicaForwarder? {
         val cached = forwarders[filePath]
         // A three-generation reconciliation hold is a real registration
@@ -2541,15 +2556,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             settledShadows[filePath] ?: nativeReloadSettledShadows[filePath]
         val bufferTextAtRegistration = editorBufferText(filePath) ?: initialEditorText
         val retainedProjectionAction =
-            if (forwarder.canonicalProjectionRetained) {
-                retainedRegistrationProjectionActionUtil(
-                    publishedShadow = publishedShadowAtRegistration,
-                    bufferText = bufferTextAtRegistration,
-                    canonicalText = forwarder.replicaText(),
-                )
-            } else {
-                RetainedRegistrationProjectionAction.ApplyCanonical
-            }
+            retainedRegistrationProjectionActionForAttachUtil(
+                deferCanonicalProjectionForPendingLocal = deferCanonicalProjectionForPendingLocal,
+                canonicalProjectionRetained = forwarder.canonicalProjectionRetained,
+                publishedShadow = publishedShadowAtRegistration,
+                bufferText = bufferTextAtRegistration,
+                canonicalText = forwarder.replicaText(),
+            )
         if (forwarder.canonicalProjectionRetained) {
             // Controller state survives an IDEA/plugin restart; this local set
             // does not. Restore the fail-closed baseline before any whole-editor
@@ -2614,6 +2627,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     retainedProjectionHoldPaths.add(filePath)
                     recordRegisterFailure(filePath, "ambiguous-retained-projection")
                     return cached
+                }
+
+                RetainedRegistrationProjectionAction.DeferCanonicalProjection -> {
+                    log.info(
+                        "[crdt-replica] deferred retained controller projection for ${File(filePath).name}; " +
+                            "a captured local delta owns the visible buffer",
+                    )
                 }
             }
         }
@@ -2744,6 +2764,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
 
             RetainedRegistrationProjectionAction.HoldOperatorBuffer -> false
+
+            RetainedRegistrationProjectionAction.DeferCanonicalProjection -> true
         }
 
     /**
@@ -3473,7 +3495,27 @@ internal enum class RetainedRegistrationProjectionAction {
     ApplyCanonical,
     PublishOperatorBuffer,
     HoldOperatorBuffer,
+    DeferCanonicalProjection,
 }
+
+internal fun retainedRegistrationProjectionActionForAttachUtil(
+    deferCanonicalProjectionForPendingLocal: Boolean,
+    canonicalProjectionRetained: Boolean,
+    publishedShadow: String?,
+    bufferText: String?,
+    canonicalText: String?,
+): RetainedRegistrationProjectionAction =
+    if (deferCanonicalProjectionForPendingLocal && canonicalProjectionRetained) {
+        RetainedRegistrationProjectionAction.DeferCanonicalProjection
+    } else if (canonicalProjectionRetained) {
+        retainedRegistrationProjectionActionUtil(
+            publishedShadow = publishedShadow,
+            bufferText = bufferText,
+            canonicalText = canonicalText,
+        )
+    } else {
+        RetainedRegistrationProjectionAction.ApplyCanonical
+    }
 
 /**
  * Decide registration direction from causal facts, not wall-clock arrival.

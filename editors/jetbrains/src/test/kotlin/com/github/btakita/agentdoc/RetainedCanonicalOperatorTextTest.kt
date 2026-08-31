@@ -16,6 +16,20 @@ import org.junit.Test
  */
 class RetainedCanonicalOperatorTextTest {
     @Test
+    fun `first captured local delta defers retained canonical projection`() {
+        assertEquals(
+            RetainedRegistrationProjectionAction.DeferCanonicalProjection,
+            retainedRegistrationProjectionActionForAttachUtil(
+                deferCanonicalProjectionForPendingLocal = true,
+                canonicalProjectionRetained = true,
+                publishedShadow = null,
+                bufferText = "# doc\n\noperator deleted the backlog item\n",
+                canonicalText = "# doc\n\n- [ ] stale backlog item\n",
+            ),
+        )
+    }
+
+    @Test
     fun `a live buffer is published when retained canonical is its exact shadow`() {
         val shadow = "# doc\n\nlast published state\n"
         assertEquals(

@@ -306,6 +306,24 @@ pub fn capture_response_with_current_content_and_intent_and_plan(
     let capture_id = existing_cycle_id.unwrap_or_else(|| format!("synthetic-{}", now_millis()));
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
 
+    // A recovery pass may recapture the same unfinished response without the
+    // original CLI mutation flags. Mutation intent is monotonic within one
+    // capture: an absent plan means "no new plan supplied", not "erase the
+    // already-durable plan". Terminal captures never contribute inherited
+    // intent to a later cycle.
+    let inherited_mutation_plan = if mutation_plan_json.is_none() {
+        load_by_id(file, &capture_id)?.and_then(|capture| {
+            (!matches!(
+                capture.state,
+                CaptureState::Committed | CaptureState::Discarded
+            ))
+            .then_some(capture.mutation_plan_json)
+            .flatten()
+        })
+    } else {
+        None
+    };
+
     let metadata = metadata_from_frontmatter(file_content);
 
     // Redact secrets from the response body before it lands in the state
@@ -335,7 +353,9 @@ pub fn capture_response_with_current_content_and_intent_and_plan(
         response_sha256: response_sha256.clone(),
         response_body: redacted_response,
         intent_body: intent_body.map(agent_doc_secret_redact::redact),
-        mutation_plan_json: mutation_plan_json.map(agent_doc_secret_redact::redact),
+        mutation_plan_json: mutation_plan_json
+            .map(agent_doc_secret_redact::redact)
+            .or(inherited_mutation_plan),
         state: CaptureState::Captured,
     };
     agent_doc_cycle_state_io::mark_response_captured(
@@ -1446,6 +1466,43 @@ mod tests {
             Some(captured_baseline.as_str())
         );
         assert_eq!(projected.baseline_content, record.baseline_content);
+    }
+
+    #[test]
+    fn recapture_without_mutation_flags_preserves_unfinished_plan() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        let content = "---\nsession: sid\nagent: codex\nmodel: gpt-5\n---\n\n## User\n\nHello\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let plan = r#"{"pending_add":["id=sample-follow-up retained work"]}"#;
+
+        let first = capture_response_with_current_content_and_intent_and_plan(
+            &doc,
+            "response body\n",
+            content,
+            Some("response body\n"),
+            Some(plan),
+        )
+        .unwrap();
+        let second = capture_response_with_current_content_and_intent_and_plan(
+            &doc,
+            "response body",
+            content,
+            Some("response body"),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(second.capture_id, first.capture_id);
+        assert_eq!(second.mutation_plan_json.as_deref(), Some(plan));
+        let projected = load_by_id(&doc, &second.capture_id).unwrap().unwrap();
+        assert_eq!(projected.mutation_plan_json.as_deref(), Some(plan));
     }
 
     #[test]

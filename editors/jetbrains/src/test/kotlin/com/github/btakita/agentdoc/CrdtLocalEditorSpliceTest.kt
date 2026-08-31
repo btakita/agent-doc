@@ -7,6 +7,30 @@ import org.junit.Test
 
 class CrdtLocalEditorSpliceTest {
     @Test
+    fun `first backlog deletion reconstructs its causal base before attach`() {
+        val removed = "- [ ] stale backlog item\n"
+        val before = "# contract\n\n<!-- agent:pending -->\n$removed<!-- /agent:pending -->\n"
+        val offset = before.indexOf(removed)
+        val after = before.removeRange(offset, offset + removed.length)
+        val edit = CapturedLocalEditorEdit(offset, removed, "", 1)
+
+        val reconstructed = reconstructLocalEditorBaseTextUtil(after, edit)
+
+        assertEquals(before, reconstructed)
+        assertEquals(after, prepareLocalEditorEditsUtil(reconstructed!!, listOf(edit))!!.single().resultingText)
+    }
+
+    @Test
+    fun `first edit base reconstruction rejects a mismatched post-edit buffer`() {
+        assertNull(
+            reconstructLocalEditorBaseTextUtil(
+                after = "different",
+                edit = CapturedLocalEditorEdit(0, "old", "new", 1),
+            ),
+        )
+    }
+
+    @Test
     fun `partial typing snapshots remain one causal splice stream`() {
         val before = "Queue: "
         val edits =

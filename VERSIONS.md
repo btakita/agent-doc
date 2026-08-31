@@ -6,6 +6,9 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 - **Fix: every tmux command now honors project, global, then `PATH` binary selection.**
 - **Fix: local editor installation fails closed instead of reusing stale packages.**
+- **JetBrains 0.2.367: the first pre-attach deletion is preserved as an operator edit.**
+- **Fix: deferred closeout recapture preserves its durable tracked-work plan.**
+- **Fix: attached tmux sync bypasses transient editor-replica read failures.**
 - **Release: Linux glibc artifacts are built with the compatibility cross image.**
 
 Tmux construction now flows through one process-wide resolver. A project
@@ -17,6 +20,18 @@ The JetBrains install target stops when Gradle fails (with a JDK 21 hint), and
 the local installer accepts only a zip whose version matches
 `editors/jetbrains/gradle.properties`. Source-build documentation now covers
 the sibling `tmux-router` checkout and optional Kotlin protocol repositories.
+
+JetBrains now reconstructs the causal pre-edit buffer when the first local edit
+arrives before CRDT registration. That edit is forwarded before any retained
+controller projection, preventing a deleted backlog item from being restored.
+
+Recovery recaptures in the same unfinished response cycle now inherit an earlier
+tracked-work mutation plan when they supply no new mutation flags. This keeps a
+deferred `--backlog-add` or related mutation coupled to the response that will
+eventually commit. Once a tmux session is already attached, terminal policy
+resolution also reaches its deterministic no-new-terminal result without first
+requiring editor document authority, so a transient missing replica cannot block
+IDE pane synchronization.
 
 ## 0.35.302
 

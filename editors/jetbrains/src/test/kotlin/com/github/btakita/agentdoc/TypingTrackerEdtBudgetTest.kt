@@ -421,7 +421,7 @@ class TypingTrackerEdtBudgetTest {
         ).first { Files.exists(it) }
         val source = Files.readString(managerPath)
         val listenerBody = source.substringAfter("override fun documentChanged")
-            .substringBefore("private fun seedAndAttachFromDocument")
+            .substringBefore("fun ensureOpenDocumentReplica")
         val prepareMutationBody = source
             .substringAfter("fun prepareNonOperatorEditorMutationOnWorker")
             .substringBefore("fun forceRefreshOpenDocumentReplica")
@@ -445,8 +445,10 @@ class TypingTrackerEdtBudgetTest {
                 listenerBody.contains("scheduleLocalEditorFlush(filePath)"),
         )
         assertTrue(
-            "CRDT documentChanged should defer full-buffer seeding to a background worker",
-            listenerBody.contains("seedAndAttachFromDocument(filePath, event.document)"),
+            "the first local edit should reconstruct its pre-edit base and enter the ordinary delta queue",
+            listenerBody.contains("reconstructLocalEditorBaseTextUtil(visibleText, edit)") &&
+                listenerBody.contains("shadows.putIfAbsent(filePath, beforeText)") &&
+                listenerBody.contains("recordLocalEditorEdit(filePath, edit)"),
         )
         assertFalse(
             "CRDT documentChanged must not copy the full editor buffer on every keystroke",
@@ -495,7 +497,7 @@ class TypingTrackerEdtBudgetTest {
                 source.contains("return null"),
         )
         val localFlushBody = source.substringAfter("private fun scheduleLocalEditorFlush(")
-            .substringBefore("private fun seedAndAttachFromDocument(")
+            .substringBefore("fun ensureOpenDocumentReplica(")
         assertTrue(
             "typing bursts must retain one pending-local fence and cancel the superseded queued flush",
                 localFlushBody.contains("localEditorFlushPendingPaths.add(filePath)") &&

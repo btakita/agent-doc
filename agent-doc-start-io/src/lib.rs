@@ -5,7 +5,7 @@ use agent_doc_config::terminal_host::{
     external_host_available, resolve_terminal_policy,
 };
 use agent_doc_controller::status::LaunchMode;
-use agent_doc_frontmatter::frontmatter;
+use agent_doc_frontmatter::frontmatter::{self, TerminalHostPreference};
 use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_session_registry_io::registration as sessions;
 use agent_doc_supervisor::{
@@ -313,14 +313,7 @@ fn terminal_policy_for_file(
     ide_available: bool,
     session_state: TerminalSessionState,
 ) -> Result<ResolvedTerminalPolicy> {
-    let content = agent_doc_document_realtime_io::try_resolve_current_document_with_source(
-        file,
-        "start-terminal-policy",
-    )
-    .with_context(|| format!("failed to resolve terminal policy from {}", file.display()))?
-    .into_content();
-    let (document, _) = frontmatter::parse(&content)
-        .with_context(|| format!("failed to parse terminal policy from {}", file.display()))?;
+    let frontmatter_host = frontmatter_terminal_host_for_file(file, session_state)?;
     let project = agent_doc_project_config_io::load_project_for_doc(file);
     let global = agent_doc_config::load()?;
     let command_available = project
@@ -337,7 +330,7 @@ fn terminal_policy_for_file(
     let external_available = external_host_available(report, command_available);
 
     Ok(resolve_terminal_policy(
-        document.terminal_host,
+        frontmatter_host,
         project.terminal.as_ref(),
         global.terminal.as_ref(),
         report.resolved_terminal_host,
@@ -345,6 +338,28 @@ fn terminal_policy_for_file(
         external_available,
         session_state,
     ))
+}
+
+fn frontmatter_terminal_host_for_file(
+    file: &Path,
+    session_state: TerminalSessionState,
+) -> Result<Option<TerminalHostPreference>> {
+    // An attached session always resolves to TerminalHost::None. Reading the
+    // editor-owned document first can fail closed on a transient missing
+    // replica and incorrectly prevent tmux layout sync from reaching that
+    // deterministic no-op decision.
+    if session_state == TerminalSessionState::Attached {
+        return Ok(None);
+    }
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_with_source(
+        file,
+        "start-terminal-policy",
+    )
+    .with_context(|| format!("failed to resolve terminal policy from {}", file.display()))?
+    .into_content();
+    let (document, _) = frontmatter::parse(&content)
+        .with_context(|| format!("failed to parse terminal policy from {}", file.display()))?;
+    Ok(document.terminal_host)
 }
 
 fn live_registry_target(
@@ -1829,6 +1844,21 @@ fn fire_session_start_hooks(
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn attached_terminal_policy_skips_document_authority_resolution() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing-editor-replica.md");
+
+        assert_eq!(
+            frontmatter_terminal_host_for_file(&missing, TerminalSessionState::Attached).unwrap(),
+            None
+        );
+        assert!(
+            frontmatter_terminal_host_for_file(&missing, TerminalSessionState::Detached).is_err(),
+            "a detached or missing session still needs document frontmatter authority"
+        );
+    }
 
     #[test]
     fn session_id_short_never_panics_on_short_or_multibyte_sessions() {

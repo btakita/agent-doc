@@ -56,6 +56,14 @@ Please choose:
 2. Authorize deletion of old PyPI releases and specify the retention cutoff.
 
 The agent-doc response was committed, with the release queue item left active.
+
+### Re: Response
+
+Reply with an explicit scope, for example:
+
+> I authorize deleting all `agent-doc` PyPI releases older than `0.35.0`. Preserve `0.35.0` and newer. Then resume tagging and publishing `v0.35.303`.
+
+That would free about 1.68 GB. Deletion is permanent and breaks installs pinned to deleted versions; yanking does not free storage. PyPI deletion also requires an authenticated owner/maintainer session through the [release-management page](https://pypi.org/manage/project/agent-doc/releases/). [PyPI deletion guidance](https://docs.pypi.org/project-management/storage-limits/#freeing-up-storage-on-an-existing-project)
 <!-- agent:boundary:aeef9436:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

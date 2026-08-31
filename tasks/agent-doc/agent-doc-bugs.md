@@ -270,6 +270,10 @@ Implemented and released in agent-doc v0.35.302.
 - Focused Rust and JetBrains tests, the full `make check`, `make install-full`, and GitHub CI all passed. Controllers were recycled after installation.
 - GitHub Release v0.35.302 is public: https://github.com/btakita/agent-doc/releases/tag/v0.35.302
 - PyPI built and validated all four wheels, but rejected the upload because the project has reached its 10 GB total-storage quota. PyPI remains at v0.35.239. Recovery requires either a PyPI quota-increase request or permanent deletion of selected old files/releases; no destructive deletion was performed.
+
+### Re: Response
+
+JetBrains plugin v0.2.366 should now be active. Retry agent-doc on `fpe.md`; the malformed JSON receipt error should be resolved.
 <!-- agent:boundary:aeef9436:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

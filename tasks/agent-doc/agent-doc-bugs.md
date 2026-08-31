@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -250,6 +250,7 @@ Verification and rollout completed:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
+- 🚧 Please have `agent-doc start` with no other arguments start agent-doc.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

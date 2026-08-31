@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a04a81-a5e7-7793-8042-0520e71fd010
+  codex: 01a05913-bfc1-7ce0-969a-df6350db8622
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -12,13 +12,14 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-Prior frontmatter bug fix remains complete. New work this cycle is planning only: added a concrete reliability plan for the “response patchback not committed / no patchback cycle ran” failure family. The current diagnosis is that two bugs can surface as the same symptom: (1) fresh Codex sessions can miss the initial route trigger entirely, so `preflight -> write -> commit` never starts; (2) a write/IPC + snapshot save can succeed, but the cycle can still die before `commit_*`, leaving a visible uncommitted assistant patchback in the working tree.
+
+Issue #47 fixed on main as 0.35.303; release tag held pending PyPI quota decision.
 <!-- /agent:status -->
 
 ## Exchange
@@ -31,6 +32,17 @@ Prior frontmatter bug fix remains complete. New work this cycle is planning only
 Compacted content:
 - Archived 16 response topic(s): contracts.md supervisor timeout fixed and released; Fix issue #46 and release; Response; 13 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): #coder7 live Coder validation; install recycles all open super...
+
+
+### Re: Issue #47 fixed; 0.35.303 publication blocked on PyPI quota — gpt-5
+
+Issue #47 is fixed and closed by `75354d041` on `main`. All tmux construction now uses one project → global → `PATH` resolver, `agent-doc env` reports the selected source, editor-package installation fails closed and rejects mismatched JetBrains zips, the Linux glibc release uses the compatibility cross image, and the source-build documentation covers the sibling repositories and JDK 21.
+
+Verification passed: focused resolver/diagnostic/packaging tests, two complete `make check` runs (including the post-install clean rebuild), `make install-full`, `git diff --check`, the private-name additions scan, and a live installed `agent-doc 0.35.303` environment probe. GitHub CI run `33429961606` is currently in `make check`; the tmux job has not started yet.
+
+I pushed the release-ready commit but did not create `v0.35.303`. The previous PyPI run failed because the project has reached its 10 GiB storage quota. Live PyPI metadata reports 9.9984 GiB used, only 0.0016 GiB free, while a recent agent-doc release needs about 70 MB; PyPI publication has been stalled since `0.35.239`.
+
+One operator decision is required before I can tag and publish: authorize deletion of old PyPI release files (and specify the retention cutoff), or obtain a PyPI project-size quota increase and tell me when it is approved. I recommend the quota increase if preserving historical installability matters; otherwise, authorize a concrete old-version deletion policy and I will resume the release.
 <!-- agent:boundary:aeef9436:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -40,7 +52,7 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Fix issue #47 and release + publish.
+- 🚧 Fix issue #47 and release + publish.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

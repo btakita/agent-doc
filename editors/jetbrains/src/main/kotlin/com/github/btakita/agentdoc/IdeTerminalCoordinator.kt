@@ -79,13 +79,16 @@ internal object IdeTerminalCoordinator {
                     listOf(agentDoc, "tmux", "ensure", relativePath, "--json", "--ide-terminal"),
                     cwd,
                     ENSURE_TIMEOUT_MS,
+                    captureStderrSeparately = true,
                 )
             } catch (failure: Throwable) {
                 dispatchFailure(project, onFailure, failure.message ?: failure.javaClass.simpleName)
                 return@executeOnPooledThread
             }
             if (result.exitCode != 0) {
-                val detail = result.output.ifBlank { "agent-doc tmux ensure failed (exit ${result.exitCode})" }
+                val detail = result.errorOutput.ifBlank {
+                    result.output.ifBlank { "agent-doc tmux ensure failed (exit ${result.exitCode})" }
+                }
                 dispatchFailure(project, onFailure, detail)
                 return@executeOnPooledThread
             }

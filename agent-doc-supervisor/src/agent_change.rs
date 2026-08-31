@@ -67,7 +67,13 @@ pub fn agent_change_restart_decision(
     prompt_visible: bool,
     turn_active: bool,
 ) -> AgentChangeRestartAction {
-    agent_change_restart_decision_from_view(harness_changed, knob_on, prompt_visible, turn_active, true)
+    agent_change_restart_decision_from_view(
+        harness_changed,
+        knob_on,
+        prompt_visible,
+        turn_active,
+        true,
+    )
 }
 
 /// `#harnessswitchstorm`: the same policy, plus the question of whether the

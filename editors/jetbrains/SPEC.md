@@ -149,7 +149,9 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 - That JetBrains request-level coalescing must not leak into controller admission for an already-authorized operator reopen. `managed_reopen` and `dispatch_only_reopen` bypass stale same-generation in-flight dispatch receipts so a fresh `Run Agent Doc` request cannot settle successfully without reaching the pane; automatic/non-operator redispatches remain coalesced.
 - `Run Agent Doc` and `Clear Session Context` are serialized per document in the JetBrains action layer before route/clear work is submitted. Repeated Run clicks coalesce with the first alive `editor_route` request; `Clear Session Context` preempts a still-dispatching Run by canceling the in-flight request and then running the normal binary-owned `agent-doc session clear <relative-path>` path. If Run is clicked while a normal clear command is already running, the latest Run intent is queued and starts only after the clear completes synchronously. A clear accepted for deferred delivery by the binary does not release the queued Run immediately.
 - Before Run or an autostarting Sync submits controller work, the plugin calls
-  `agent-doc tmux ensure <FILE> --json`. An already-attached external client is
+  `agent-doc tmux ensure <FILE> --json`. The strict JSON receipt is parsed from
+  stdout only; stderr diagnostics must remain a separate channel so version or
+  controller notices cannot corrupt it. An already-attached external client is
   left authoritative and opens no IDE tab. A detached session opens or reuses
   one live `agent-doc` tab through `TerminalToolWindowManager`, executes the
   binary-provided attach command, and then resumes dispatch. The Terminal plugin

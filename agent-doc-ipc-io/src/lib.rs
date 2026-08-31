@@ -1399,53 +1399,53 @@ where
 
 #[cfg(test)]
 mod tests {
-use super::*;
-use std::io::Read as _;
-use std::thread;
-use std::time::{Duration, Instant};
+    use super::*;
+    use std::io::Read as _;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
-#[test]
-fn socket_directory_override_moves_editor_endpoint_off_project_storage() {
-    let root = Path::new("/workspace/project");
-    let override_dir = std::ffi::OsStr::new("/run/user/1000/agent-doc-project");
-    assert_eq!(
-        socket_directory_with_override(root, Some(override_dir)),
-        Path::new("/run/user/1000/agent-doc-project")
-    );
-    assert_eq!(
-        socket_directory_with_override(root, None),
-        Path::new("/workspace/project/.agent-doc")
-    );
-}
+    #[test]
+    fn socket_directory_override_moves_editor_endpoint_off_project_storage() {
+        let root = Path::new("/workspace/project");
+        let override_dir = std::ffi::OsStr::new("/run/user/1000/agent-doc-project");
+        assert_eq!(
+            socket_directory_with_override(root, Some(override_dir)),
+            Path::new("/run/user/1000/agent-doc-project")
+        );
+        assert_eq!(
+            socket_directory_with_override(root, None),
+            Path::new("/workspace/project/.agent-doc")
+        );
+    }
 
-#[test]
-fn stale_editor_socket_from_dead_process_is_removed() {
-    let dir = tempfile::tempdir().unwrap();
-    let socket_dir = dir.path().join(".agent-doc");
-    std::fs::create_dir_all(&socket_dir).unwrap();
-    let stale = socket_dir.join("ipc-4294967294.sock");
-    std::fs::write(&stale, b"").unwrap();
+    #[test]
+    fn stale_editor_socket_from_dead_process_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(&socket_dir).unwrap();
+        let stale = socket_dir.join("ipc-4294967294.sock");
+        std::fs::write(&stale, b"").unwrap();
 
-    assert_eq!(prune_stale_editor_sockets(dir.path()).unwrap(), 1);
-    assert!(!stale.exists());
-}
+        assert_eq!(prune_stale_editor_sockets(dir.path()).unwrap(), 1);
+        assert!(!stale.exists());
+    }
 
-#[test]
-fn socket_creation_failure_names_the_local_override_directory() {
-    let dir = tempfile::tempdir().unwrap();
-    let blocked_root = dir.path().join("not-a-directory");
-    std::fs::write(&blocked_root, b"file").unwrap();
+    #[test]
+    fn socket_creation_failure_names_the_local_override_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocked_root = dir.path().join("not-a-directory");
+        std::fs::write(&blocked_root, b"file").unwrap();
 
-    let error = start_listener(&blocked_root, |_| None)
-        .expect_err("a file cannot contain the .agent-doc socket directory");
-    let message = format!("{error:#}");
-    assert!(message.contains(AGENT_DOC_SOCKET_DIR_ENV), "{message}");
-    assert!(message.contains("AF_UNIX"), "{message}");
-    assert!(message.contains("project-specific directory"), "{message}");
-}
+        let error = start_listener(&blocked_root, |_| None)
+            .expect_err("a file cannot contain the .agent-doc socket directory");
+        let message = format!("{error:#}");
+        assert!(message.contains(AGENT_DOC_SOCKET_DIR_ENV), "{message}");
+        assert!(message.contains("AF_UNIX"), "{message}");
+        assert!(message.contains("project-specific directory"), "{message}");
+    }
 
-#[test]
-fn connect_watchdog_returns_before_a_wedged_connect_finishes() {
+    #[test]
+    fn connect_watchdog_returns_before_a_wedged_connect_finishes() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("wedged-connect.sock");
         let started = Instant::now();

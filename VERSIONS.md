@@ -2,6 +2,20 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.302
+
+- **CLI: `agent-doc start` now defaults to `agent-doc.md`.**
+- **JetBrains 0.2.366: typed tmux receipts keep diagnostics off stdout.**
+
+Omitting the positional file now resolves to `agent-doc.md` in the current
+working directory and enters the same start admission/runtime path as an
+explicit file. Explicit file arguments and missing-file safety remain
+unchanged.
+
+The JetBrains process boundary now captures stderr separately for
+`agent-doc tmux ensure --json`, so upgrade or controller notices cannot prefix
+the strict Gson receipt used before Run/Sync dispatch.
+
 ## 0.35.301
 
 - **Fix: focus recovery now records the pane losses its circuit breaker consumes.**

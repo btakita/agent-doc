@@ -63,6 +63,7 @@ class SyncLayoutAction : AnAction() {
         internal data class SyncProcessResult(
             val exitCode: Int,
             val output: String,
+            val errorOutput: String,
             val timedOut: Boolean,
         )
 
@@ -70,13 +71,26 @@ class SyncLayoutAction : AnAction() {
             cmd: List<String>,
             projectRoot: String,
             timeoutMs: Long = SYNC_PROCESS_TIMEOUT_MS,
+            captureStderrSeparately: Boolean = false,
         ): SyncProcessResult {
             val process = ProcessBuilder(cmd)
                 .directory(File(projectRoot))
-                .redirectErrorStream(true)
+                .redirectErrorStream(!captureStderrSeparately)
                 .start()
             val outputFuture = CompletableFuture.supplyAsync {
                 process.inputStream.bufferedReader().readText()
+            }
+            val errorOutputFuture = if (captureStderrSeparately) {
+                CompletableFuture.supplyAsync {
+                    process.errorStream.bufferedReader().readText()
+                }
+            } else {
+                CompletableFuture.completedFuture("")
+            }
+            fun collectOutput(future: CompletableFuture<String>): String = try {
+                future.get(1, TimeUnit.SECONDS).trim()
+            } catch (_: Exception) {
+                ""
             }
             if (!process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
                 process.destroy()
@@ -84,25 +98,17 @@ class SyncLayoutAction : AnAction() {
                     process.destroyForcibly()
                     process.waitFor(500, TimeUnit.MILLISECONDS)
                 }
-                val output = try {
-                    outputFuture.get(1, TimeUnit.SECONDS)
-                } catch (_: Exception) {
-                    ""
-                }
                 return SyncProcessResult(
                     exitCode = 124,
-                    output = output.trim(),
+                    output = collectOutput(outputFuture),
+                    errorOutput = collectOutput(errorOutputFuture),
                     timedOut = true,
                 )
             }
-            val output = try {
-                outputFuture.get(1, TimeUnit.SECONDS)
-            } catch (_: Exception) {
-                ""
-            }
             return SyncProcessResult(
                 exitCode = process.exitValue(),
-                output = output.trim(),
+                output = collectOutput(outputFuture),
+                errorOutput = collectOutput(errorOutputFuture),
                 timedOut = false,
             )
         }

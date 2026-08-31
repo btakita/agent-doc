@@ -2216,7 +2216,8 @@ enum Commands {
     },
     /// Start Claude in a tmux pane and register the session
     Start {
-        /// Path to the session document
+        /// Path to the session document (defaults to agent-doc.md)
+        #[arg(default_value = "agent-doc.md")]
         file: PathBuf,
         /// Force binding the session to the current tmux pane, even if a live
         /// owner already exists in another pane

@@ -113,6 +113,23 @@ class SyncLayoutActionTest {
     }
 
     @Test
+    fun `typed subprocess receipt keeps stderr diagnostics out of stdout`() {
+        val result = SyncLayoutAction.runCommandWithTimeout(
+            listOf(
+                "sh",
+                "-c",
+                "printf '{\"ok\":true}\\n'; printf '[upgrade] update available\\n' >&2",
+            ),
+            File(".").absolutePath,
+            captureStderrSeparately = true,
+        )
+
+        assertEquals(0, result.exitCode)
+        assertEquals("{\"ok\":true}", result.output)
+        assertEquals("[upgrade] update available", result.errorOutput)
+    }
+
+    @Test
     fun `supersede re-runs only when the guard holder is superseded mid-flight`() {
         // Held the guard AND a newer sync bumped the generation while we ran → re-run with
         // the latest layout (supersede, not drop).

@@ -6792,12 +6792,11 @@ mod tests {
         // still-unsaved line.
         std::fs::write(&file, "# Plan\n\nGOOD\n").unwrap();
 
-        let action = route_disk_change_signal_with(
-            &file,
-            &WatchDelivery::Change { generation: 1 },
-            |_| true,
-        )
-        .unwrap();
+        let action =
+            route_disk_change_signal_with(&file, &WatchDelivery::Change { generation: 1 }, |_| {
+                true
+            })
+            .unwrap();
         assert_eq!(action, WatchAction::DeferForEditSettle);
         let current = current_text_for_file(&file).unwrap();
         assert!(
@@ -6820,12 +6819,11 @@ mod tests {
 
         std::fs::write(&file, "# Plan\n\nGOOD\n").unwrap();
 
-        let action = route_disk_change_signal_with(
-            &file,
-            &WatchDelivery::Change { generation: 1 },
-            |_| false,
-        )
-        .unwrap();
+        let action =
+            route_disk_change_signal_with(&file, &WatchDelivery::Change { generation: 1 }, |_| {
+                false
+            })
+            .unwrap();
         assert_eq!(action, WatchAction::ReconcileIntoCanonical);
         let current = current_text_for_file(&file).unwrap();
         assert!(

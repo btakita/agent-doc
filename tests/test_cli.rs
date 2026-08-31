@@ -19007,9 +19007,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         );
     }
     assert!(
-        !relay_io_production.contains(
-            "WatchAction::ReconcileIntoCanonical | WatchAction::DeferForEditSettle"
-        ),
+        !relay_io_production
+            .contains("WatchAction::ReconcileIntoCanonical | WatchAction::DeferForEditSettle"),
         "a deferred reconcile must not take the same apply path as a settled one"
     );
     let realtime_io =
@@ -31206,10 +31205,14 @@ fn test_cli_init_no_file_runs_project_init() {
 }
 
 #[test]
-fn test_cli_start_requires_file() {
+fn test_cli_start_defaults_to_agent_doc_markdown() {
+    let tmp = tempfile::TempDir::new().unwrap();
     let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
     cmd.arg("start");
-    cmd.assert().failure();
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("file not found: agent-doc.md"));
 }
 
 #[test]
@@ -31384,6 +31387,27 @@ fn test_cli_start_generates_session_for_bare_file() {
         content.contains("session:"),
         "start should auto-generate session UUID"
     );
+}
+
+#[test]
+fn test_cli_start_without_file_starts_agent_doc_markdown() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let tmux = IsolatedTmuxServer::new("start-default-document");
+    std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+    let doc = tmp.path().join("agent-doc.md");
+    std::fs::write(
+        &doc,
+        "---\nagent_doc_session: 00000000-0000-4000-8000-000000000001\nagent: claude\n---\n\n# Session: Default\n\n## User\n",
+    )
+    .unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    cmd.arg("start");
+    tmux.configure(&mut cmd);
+    cmd.assert()
+        .success()
+        .stderr(predicate::str::contains("dispatched into tmux session"));
 }
 
 #[test]

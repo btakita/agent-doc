@@ -91,21 +91,21 @@ mod tests {
         include_str!(
             "../../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt"
         ),
-include_str!(
-"../../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"
-),
-include_str!(
-"../../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/IdeTerminalHost.kt"
-),
-];
+        include_str!(
+            "../../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"
+        ),
+        include_str!(
+            "../../editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/IdeTerminalHost.kt"
+        ),
+    ];
     const VSCODE_SOURCES: &[&str] = &[
         include_str!("../../editors/vscode/src/native.ts"),
         include_str!("../../editors/vscode/src/editorIntent.ts"),
         include_str!("../../editors/vscode/src/crossEditorHarness.ts"),
         include_str!("../../editors/vscode/src/extension.ts"),
-include_str!("../../editors/vscode/src/crdtReplica.ts"),
-include_str!("../../editors/vscode/src/ideTerminal.ts"),
-];
+        include_str!("../../editors/vscode/src/crdtReplica.ts"),
+        include_str!("../../editors/vscode/src/ideTerminal.ts"),
+    ];
     const ZED_SOURCES: &[&str] = &[include_str!("../../editors/zed/src/agent_doc.rs")];
 
     #[derive(Debug)]
@@ -245,9 +245,9 @@ include_str!("../../editors/vscode/src/ideTerminal.ts"),
             PEER_REPLICA_PULL_CAPABILITY,
             "native_hot_reload_generation_v1",
             CROSS_EDITOR_NATIVE_HARNESS_CAPABILITY,
-CONTROLLER_REBOOT_SELF_HEAL_CAPABILITY,
-IDE_HOSTED_TMUX_CAPABILITY,
-];
+            CONTROLLER_REBOOT_SELF_HEAL_CAPABILITY,
+            IDE_HOSTED_TMUX_CAPABILITY,
+        ];
         assert_eq!(
             rows.iter().map(|row| row.feature).collect::<Vec<_>>(),
             known_features,
@@ -260,17 +260,17 @@ IDE_HOSTED_TMUX_CAPABILITY,
                 ("vscode", row.vscode),
                 ("zed", row.zed),
             ];
-if row.core == "required" {
-assert!(
-matches!(row.jetbrains, "supported" | "conditional"),
-"JetBrains must implement or conditionally host required capability {}",
-row.feature,
-);
-assert!(
-matches!(row.vscode, "supported" | "conditional"),
-"VS Code must implement or conditionally host required capability {}",
-row.feature,
-);
+            if row.core == "required" {
+                assert!(
+                    matches!(row.jetbrains, "supported" | "conditional"),
+                    "JetBrains must implement or conditionally host required capability {}",
+                    row.feature,
+                );
+                assert!(
+                    matches!(row.vscode, "supported" | "conditional"),
+                    "VS Code must implement or conditionally host required capability {}",
+                    row.feature,
+                );
             } else {
                 assert_eq!(
                     row.core, "optional",

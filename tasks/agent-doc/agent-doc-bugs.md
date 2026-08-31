@@ -56,7 +56,6 @@ Please choose:
 2. Authorize deletion of old PyPI releases and specify the retention cutoff.
 
 The agent-doc response was committed, with the release queue item left active.
-
 ### Re: Response
 
 Reply with an explicit scope, for example:
@@ -64,6 +63,12 @@ Reply with an explicit scope, for example:
 > I authorize deleting all `agent-doc` PyPI releases older than `0.35.0`. Preserve `0.35.0` and newer. Then resume tagging and publishing `v0.35.303`.
 
 That would free about 1.68 GB. Deletion is permanent and breaks installs pinned to deleted versions; yanking does not free storage. PyPI deletion also requires an authenticated owner/maintainer session through the [release-management page](https://pypi.org/manage/project/agent-doc/releases/). [PyPI deletion guidance](https://docs.pypi.org/project-management/storage-limits/#freeing-up-storage-on-an-existing-project)
+❯ A Brave tab is already open at the PyPI login page. No PyPI plugin connection is available, so please:
+
+1. Log in there, including 2FA.
+2. Reply `logged in`.
+
+❯ Do not send credentials or delete anything manually. I’ve resolved the authorized scope to 155 releases/363 files, totaling about 1.68 GB, while preserving every `0.35.x` release. Once authenticated, I’ll perform and verify the bounded deletion, then publish `v0.35.303`.
 <!-- agent:boundary:aeef9436:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

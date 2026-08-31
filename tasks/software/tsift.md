@@ -42,13 +42,37 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 2 response topic(s): issue #21 and tsift 0.1.93; do [#fixopentsift]
 - Prior summary/context: prior compacted content: Archived 25 response topic(s): Fix tsift issues 1–3; release + publish + install; Fix tsift ...
+
+### Re: tsift issue #23 and v0.1.95 — gpt-5
+
+> **Queue prompt:** Please fix the open issue in tsift. Release + publish 0.1.95.
+
+Completed issue #23 and released tsift 0.1.95.
+
+- Graph freshness now hashes the semantic index rows that actually feed projection materialization, and the projection contract includes the tsift package version. `graph-db status`, doctor, and context-pack fail closed when index rows or the projection version no longer match.
+- Added the supported `graph-db refresh --rebuild` recovery path, including operator diagnostics and conformance coverage.
+- Federated inline index repair now reuses descendant-scope exclusions, so parent scopes do not re-admit nested-owned files and repeated refreshes remain idempotent.
+- Added regressions for route-row removal, projection-version mismatch, forced rebuild, and nested-scope refresh.
+
+Release proof:
+
+- Fix commit: `c9b75a2` (`Fixes #23`)
+- Release commit/tag/main: `329d7a2` / `v0.1.95`
+- GitHub release: https://github.com/btakita/tsift/releases/tag/v0.1.95 with all 6 expected archives/checksums
+- crates.io: all 26 workspace packages independently resolved at `0.1.95`
+- npm: `opencode-tsift@0.1.95` is `latest`
+- Issue #23 is closed
+- Local verification: focused regression suites plus two clean `make check` runs
+- Hosted CI: https://github.com/btakita/tsift/actions/runs/33426805057 — success
+- Release workflow: https://github.com/btakita/tsift/actions/runs/33426837542 — success
+
+The original dirty `src/tsift` checkout was left untouched; the release was built from an isolated clean worktree.
 <!-- agent:boundary:b8ec92e9:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- Please fix the open issue in tsift. Release + publish 0.1.95.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

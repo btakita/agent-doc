@@ -69,6 +69,10 @@ That would free about 1.68 GB. Deletion is permanent and breaks installs pinne
 2. Reply `logged in`.
 
 ❯ Do not send credentials or delete anything manually. I’ve resolved the authorized scope to 155 releases/363 files, totaling about 1.68 GB, while preserving every `0.35.x` release. Once authenticated, I’ll perform and verify the bounded deletion, then publish `v0.35.303`.
+
+### Re: Response
+
+The PyPI login page is open and active in Brave. Please complete login and 2FA, then reply “logged in.”
 <!-- agent:boundary:aeef9436:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -78,7 +82,7 @@ That would free about 1.68 GB. Deletion is permanent and breaks installs pinne
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 Fix issue #47 and release + publish.
+- ⏭️ Fix issue #47 and release + publish.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

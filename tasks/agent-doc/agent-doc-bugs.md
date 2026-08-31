@@ -253,6 +253,18 @@ i3-msg '[title="Plugin Caddyfile Pro Trial Expired"] focus'
 ```
 
 Agent-doc’s threads are idle and are not causing this freeze. No IDEA restart should be necessary.
+
+### Re: `agent-doc start` with no file — gpt-5
+
+> **Queue prompt:** Please have `agent-doc start` with no other arguments start agent-doc.
+
+Implemented and released in agent-doc v0.35.302.
+
+- `agent-doc start` now defaults to `agent-doc.md`; explicit-file behavior is unchanged, and a missing default document still fails instead of being created implicitly.
+- Fixed the `fpe.md` JetBrains tmux receipt error at the subprocess boundary: JSON remains isolated on stdout while diagnostics remain on stderr, so strict Gson parsing receives a valid receipt. JetBrains plugin v0.2.366 is installed; reload or restart IntelliJ to activate it.
+- Focused Rust and JetBrains tests, the full `make check`, `make install-full`, and GitHub CI all passed. Controllers were recycled after installation.
+- GitHub Release v0.35.302 is public: https://github.com/btakita/agent-doc/releases/tag/v0.35.302
+- PyPI built and validated all four wheels, but rejected the upload because the project has reached its 10 GB total-storage quota. PyPI remains at v0.35.239. Recovery requires either a PyPI quota-increase request or permanent deletion of selected old files/releases; no destructive deletion was performed.
 <!-- agent:boundary:aeef9436:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -262,7 +274,7 @@ Agent-doc’s threads are idle and are not causing this freeze. No IDEA restart 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Please have `agent-doc start` with no other arguments start agent-doc.
+- ~~Please have `agent-doc start` with no other arguments start agent-doc.~~
 - release + publish
 <!-- /agent:queue -->
 

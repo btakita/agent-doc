@@ -43,6 +43,19 @@ Verification passed: focused resolver/diagnostic/packaging tests, two complete `
 I pushed the release-ready commit but did not create `v0.35.303`. The previous PyPI run failed because the project has reached its 10 GiB storage quota. Live PyPI metadata reports 9.9984 GiB used, only 0.0016 GiB free, while a recent agent-doc release needs about 70 MB; PyPI publication has been stalled since `0.35.239`.
 
 One operator decision is required before I can tag and publish: authorize deletion of old PyPI release files (and specify the retention cutoff), or obtain a PyPI project-size quota increase and tell me when it is approved. I recommend the quota increase if preserving historical installability matters; otherwise, authorize a concrete old-version deletion policy and I will resume the release.
+
+### Re: Response
+
+Issue #47 is fixed and closed by [commit `75354d041`](https://github.com/btakita/agent-doc/commit/75354d041). Version `0.35.303` passed `make check` and `make install-full` and is pushed to `main`.
+
+I have not created the release tag because PyPI is at 9.9984 GiB of its 10 GiB quota; publication has stalled since `0.35.239`. [PyPI metadata](https://pypi.org/pypi/agent-doc/json) [quota guidance](https://docs.pypi.org/project-management/storage-limits/#requesting-a-project-size-limit-increase)
+
+Please choose:
+
+1. Request a quota increase (recommended), then tell me when approved.
+2. Authorize deletion of old PyPI releases and specify the retention cutoff.
+
+The agent-doc response was committed, with the release queue item left active.
 <!-- agent:boundary:aeef9436:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

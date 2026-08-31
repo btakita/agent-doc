@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -241,6 +241,18 @@ Verification and rollout completed:
 - Installed CLI and skills report `0.35.301`; JetBrains remains the already-live `0.2.365`, so no new IntelliJ plugin restart is required for this fix.
 - All running controllers received a two-phase recycle request; active supervisors were deferred to their next idle boundary.
 - Commit `67a869c3b` and tag `v0.35.301` were pushed. CI, Release, and PyPI workflows launched and were queued/in progress at the required one-time inspection.
+
+### Re: Response
+
+IDEA isn’t deadlocked—it’s blocked by a modal dialog titled **“Plugin Caddyfile Pro Trial Expired.”** Dismiss that dialog to restore the editor.
+
+If it’s hidden, focus it with:
+
+```bash
+i3-msg '[title="Plugin Caddyfile Pro Trial Expired"] focus'
+```
+
+Agent-doc’s threads are idle and are not causing this freeze. No IDEA restart should be necessary.
 <!-- agent:boundary:aeef9436:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -250,7 +262,8 @@ Verification and rollout completed:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- 🚧 Please have `agent-doc start` with no other arguments start agent-doc.
+- Please have `agent-doc start` with no other arguments start agent-doc.
+- release + publish
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

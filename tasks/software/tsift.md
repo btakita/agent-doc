@@ -42,6 +42,23 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 1 response topic(s): tsift issue #23 and v0.1.95
 - Prior summary/context: prior compacted content: Archived 2 response topic(s): issue #21 and tsift 0.1.93; do [#fixopentsift]
+
+### Re: tsift 0.1.96 released — gpt-5.6
+
+> **Queue prompt:**
+>
+> do [#fixopenissues]
+
+
+Completed `#fixopenissues`.
+
+- Fixed #24 by canonicalizing graph watermark path hints, persisting the projection path and mode, using path-aware freshness for every SQLite graph read, and making stale refreshes fail nonzero.
+- Kept `status.recommendations.run` directly executable by removing uncached-count suffixes.
+- Added spec coverage and regressions; all 43 graph conformance tests, all 40 status tests, and the final `make check` passed.
+- Installed `tsift 0.1.96` locally; all 26 crate package checks and the npm publish dry run passed.
+- Pushed commits `688b112` and `27cb0ac`, tag `v0.1.96`, and published GitHub binaries, crates.io packages, and `opencode-tsift@0.1.96`.
+- Main CI and all seven Release workflow jobs passed; GitHub issue #24 is closed and no open issues remain.
+- Preserved the original dirty `src/tsift` checkout and performed the release work in an isolated clean worktree.
 <!-- agent:boundary:b8ec92e9:tsift -->
 <!-- /agent:exchange -->
 

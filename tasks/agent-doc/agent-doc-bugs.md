@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -256,6 +256,11 @@ Agent-doc’s threads are idle and are not causing this freeze. No IDEA restart 
 
 ### Re: `agent-doc start` with no file — gpt-5
 
+> **Queue prompt:**
+>
+> release + publish
+
+
 > **Queue prompt:** Please have `agent-doc start` with no other arguments start agent-doc.
 
 Implemented and released in agent-doc v0.35.302.
@@ -274,8 +279,6 @@ Implemented and released in agent-doc v0.35.302.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Please have `agent-doc start` with no other arguments start agent-doc.~~
-- release + publish
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

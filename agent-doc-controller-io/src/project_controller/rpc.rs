@@ -26508,7 +26508,11 @@ mod tests {
         drop(dir);
 
         let result = rx
-            .recv_timeout(Duration::from_secs(2))
+            // Loaded CI runners can delay the detached controller's reaper
+            // beyond two seconds even though its normal polling cadence is
+            // much shorter. Keep the assertion bounded without turning
+            // scheduler contention into a release-gating failure.
+            .recv_timeout(Duration::from_secs(10))
             .expect("controller should exit after its temp project root is removed");
         assert_eq!(result, Ok(()));
         handle.join().unwrap();

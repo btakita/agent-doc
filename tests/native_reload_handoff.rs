@@ -73,7 +73,11 @@ fn assert_one_controller_state_inode_generation(project: &Path) {
             continue;
         };
         let target = target.to_string_lossy();
-        let kind = ["state.db", "state.db-wal", "state.db-shm"]
+        // Match the longer SQLite sidecar names first. `state.db-wal` and
+        // `state.db-shm` both contain `state.db`, so shortest-first matching
+        // incorrectly groups the three distinct files as split generations
+        // of the main database whenever WAL mode is active.
+        let kind = ["state.db-wal", "state.db-shm", "state.db"]
             .into_iter()
             .find(|name| target.contains(name));
         let Some(kind) = kind else {

@@ -59,6 +59,19 @@ fat-LTO `make install-full` release-parity build passed. `main` and the release
 tag are pushed; CI/Book/Pages were in progress and Release/PyPI queued at the
 required one-time post-push observation.
 <!-- /patch:exchange -->
+
+### Re: Response
+
+Implemented and released agent-doc 0.35.307.
+
+- All document commands now run a bounded stale-supervisor probe and schedule safe-boundary recycle automatically.
+- Freshness is process-scoped Lazily state; older supervisors use an inode fallback without SQLite.
+- `make check`, local install, and production `make install-full` passed.
+- Pushed `6eb28a846`, tag `v0.35.307`, parent pointer `aff16eeae`.
+- Session response committed and queue prompt consumed.
+- Release/PyPI CI was queued; main CI was running at the required one-time observation.
+
+The JetBrains 0.2.368 package is installed, but the live IDE still reports 0.2.366 and needs restarting. One legacy gated backlog item also remains for a future `agent-doc migrate`.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

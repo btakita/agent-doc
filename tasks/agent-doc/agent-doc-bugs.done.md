@@ -24,3 +24,4 @@
 - 2026-08-26 [#fixcausescompact] Fix agent-doc causes of Compact Exchange on tsift.md failed: [compact] pending: the compacted target is retained for editor delivery and is not yet committed. Do not retry Compact Exchange while this target is pending; if delivery remains pending, restart the editor so its agent-doc plugin reconnects
 - 2026-08-27 [#fixhttpsgithub] Fix https://github.com/btakita/agent-doc/issues/46. release + publish
 - 2026-08-28 [#monsterrodholderstmuxpan] The monsterrodholders.md tmux pane clashed yet again. Should this now be fixed or is more fixing needed?
+- 2026-08-31 [#fixissuerelease] Fix issue #48 and release.

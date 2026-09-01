@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -91,7 +91,39 @@ Published agent-doc v0.35.303 successfully.
 - Commits: 6d94b65a1 and 10de5f73c; tag v0.35.303 points to 10de5f73c.
 
 The newly typed queue item “Fix issue #48 and release.” was preserved for the next cycle.
-<!-- agent:boundary:aeef9436:agent-doc-bugs -->
+
+### Re: issue #48 and v0.35.304 — gpt-5
+
+> **Queue prompt:**
+>
+> do [#fixissuerelease]
+
+
+Issue #48 is fixed and closed. The follow-up shipped in commit `d92a13511`:
+
+- JetBrains 0.2.368 now resolves `agent-doc` through the shared project/home/local/Cargo/`PATH` policy before invoking `lib-path`. The native loader logs the selected executable and every attempted location.
+- Transient executable or library startup failures now enter a bounded retry state. Proven unsafe native-generation transitions still retain the restart-required fence.
+- Claim admission now accepts only explicit `--pane`, `--position`, or process-owned `TMUX_PANE` evidence. With none of those, it provisions one fresh pane in the authoritative project session instead of binding tmux's ambient last-active pane.
+
+v0.35.304 is publicly published:
+
+- GitHub release: https://github.com/btakita/agent-doc/releases/tag/v0.35.304 — six platform assets.
+- PyPI: https://pypi.org/project/agent-doc/0.35.304/ — four wheels.
+- Release workflow `33454191778` and PyPI workflow `33454191819` both completed successfully.
+- The installed local CLI reports `agent-doc 0.35.304`; JetBrains 0.2.368 is installed for IntelliJ IDEA 2026.1. Restart IDEA once more to activate this newly installed plugin generation.
+
+Verification passed: focused claim/tmux tests, the JetBrains native-loader and resolver tests, the source ownership regression, full `make check`, packaged `buildPlugin`, and local `make install`. The issue report's minor concerns were audited as already satisfied by v0.35.303: local plugin installation rejects stale-version zips, and the published GNU/Linux artifact requires no newer than GLIBC 2.18.
+
+The authorized PyPI cleanup remains intact after publishing: PyPI reports v0.35.304 as latest, 141 retained releases, and zero releases older than 0.35.0.
+
+Architecture closeout:
+
+- Invariant preserved: durable editor/pane ownership is derived only from explicit, auditable evidence.
+- Policy owners: `TerminalUtil` owns JetBrains executable resolution; claim admission owns pane provenance; install targets own package-version integrity.
+- Transition table covered: resolved versus exhausted executable search; retryable failure versus restart-required native state; explicit pane, positioned pane, process pane, or provision-new claim.
+- Reactive topology: immutable inputs enter pure decision functions; existing one-shot native-load and claim boundaries perform effects. No polling island, ambient tmux authority, or new long-lived reactive node was added.
+- Edit surfaces and tests stayed within the JetBrains resolver/native loader, claim/tmux boundaries, release metadata, and their focused regressions.
+<!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -99,14 +131,11 @@ The newly typed queue item “Fix issue #48 and release.” was preserved for th
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#fixissuerelease]
-- ⏭️ Fix issue #47 and release + publish.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#fixissuerelease] Fix issue #48 and release.
-- [/] [#restartintellijidea] [operator-verify] Restart IntelliJ IDEA so installed agent-doc JetBrains 0.2.365 becomes live, then confirm a native patch ACK and stable monsterrodholders.md pane.
+- [/] [#restartintellijidea] Restart IntelliJ IDEA so installed agent-doc JetBrains 0.2.368 becomes live, then confirm native FFI loads through the resolved agent-doc executable and pane synchronization remains stable.
 <!-- /agent:backlog -->
 
 ## Review

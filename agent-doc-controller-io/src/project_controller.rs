@@ -5512,6 +5512,9 @@ pub struct StartSessionRequest {
     pub pane_id: String,
     pub window_id: String,
     pub generation: u64,
+    /// Concrete harness selected by the route/start authority plane. Older
+    /// callers may omit it and fall back to document detection.
+    pub harness: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]

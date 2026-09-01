@@ -531,6 +531,30 @@ pub fn auto_start_in_session_with_lock_mode(
     let cwd = agent_doc_git_io::dirs::resolve_pane_cwd(file);
     let registry_base_dir = agent_doc_project_root_io::project_root_or_file_parent(file)
         .unwrap_or_else(|_| cwd.clone());
+    // Queue control is operator authority over autonomous work. Enforce it
+    // before registry reuse or pane allocation so editor layout/reload events
+    // cannot dispatch into an existing harness or resurrect a stopped one.
+    if let Some(control) = agent_doc_sqlite::state_store::load_effective_queue_control_for_path(
+        &registry_base_dir,
+        file,
+    )? {
+        let reason = control.reason.as_deref().unwrap_or("unspecified");
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_auto_start_blocked_by_queue_control file={} state={} reason={}",
+                file.display(),
+                control.state,
+                reason.replace(' ', "_")
+            ),
+        );
+        anyhow::bail!(
+            "automatic route start for {} is blocked while queue control is {} ({}); resume queue control before starting a routed harness",
+            file.display(),
+            control.state,
+            reason,
+        );
+    }
     let existing_registration = agent_doc_session_registry_io::lookup(session_id)?;
     let existing_alive = existing_registration
         .as_deref()
@@ -737,6 +761,7 @@ pub fn auto_start_in_session_with_lock_mode(
                 pane_id: new_pane.clone(),
                 window_id: pane_window,
                 generation: generation.new_generation,
+                harness: Some(harness.binary.clone()),
             },
         )?;
         agent_doc_ops_log_io::log_op(

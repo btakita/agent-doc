@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.309
+
+- **Fix: route-created sessions preserve the resolved harness across provisional actor and child-start boundaries.**
+
+Route auto-start now carries its concrete harness in every controller session-start
+publication, and `start` consults active actor authority whenever document `agent:`
+metadata is absent, including new-session admission. The controller honors the
+transported harness before document fallback, while the registry's literal
+`default` sentinel is normalized as missing rather than treated as an executable
+agent identity. A route that resolved Codex can therefore no longer overwrite its
+actor with `default` and launch Claude during an editor/cache-conflict gap.
+The dead-supervisor watchdog now also observes effective queue pause authority,
+so an intentional kill during quarantine cannot race an automatic restart of the
+stale harness generation. Editor layout/reload auto-start and the route-owned
+`start` lifecycle boundary enforce the same durable pause/drain control before
+pane reuse, pane allocation, or harness spawn, closing the independent IDE route
+path and its pause-vs-start race window.
+
 ## 0.35.308
 
 - **Fix: document claims, harness identity, editor conflicts, stale supervisors, and retained-dead panes now react to authority transitions instead of repeating stale poll state.**

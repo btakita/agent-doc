@@ -30,7 +30,9 @@ pub struct HarnessAuthoritySelection {
 }
 
 fn nonempty(value: Option<&str>) -> Option<&str> {
-    value.map(str::trim).filter(|value| !value.is_empty())
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "default")
 }
 
 pub fn resolve_harness_authority(facts: &HarnessAuthorityFacts) -> HarnessAuthoritySelection {
@@ -151,6 +153,17 @@ mod tests {
         assert_eq!(
             resolve_harness_authority(&facts(None, None, None)).agent,
             "claude"
+        );
+    }
+
+    #[test]
+    fn default_actor_sentinel_does_not_override_configured_harness() {
+        assert_eq!(
+            resolve_harness_authority(&facts(None, Some("default"), Some("codex"))),
+            HarnessAuthoritySelection {
+                agent: "codex".to_string(),
+                source: HarnessAuthoritySource::ConfiguredDefault,
+            }
         );
     }
 

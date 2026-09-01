@@ -3066,6 +3066,25 @@ pub fn load_effective_queue_control_from_db(
     Ok(project.filter(|control| control.state != "resumed"))
 }
 
+/// Resolve durable queue control for one document using the same canonical path
+/// identity as the controller actor store.
+///
+/// Route and start admission both call this helper before creating a new
+/// route-owned lifecycle. Keeping the path-to-document-id conversion here
+/// prevents either boundary from silently consulting a different queue scope.
+pub fn load_effective_queue_control_for_path(
+    project_root: &Path,
+    file: &Path,
+) -> Result<Option<QueueControlStatus>> {
+    let conn = open_state_db(project_root)?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    load_effective_queue_control_from_db(
+        &conn,
+        &canonical.to_string_lossy(),
+        &project_root.to_string_lossy(),
+    )
+}
+
 pub fn load_admin_operations_from_db(
     conn: &Connection,
     document_id: Option<&str>,
@@ -6864,6 +6883,36 @@ mod tests {
         assert_eq!(
             load_project_runtime_state_from_db(&first, "pressure")?.as_deref(),
             Some("50"),
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn effective_queue_control_for_path_uses_canonical_document_identity() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let file = dir.path().join("tasks/payments-ledger.md");
+        std::fs::create_dir_all(file.parent().unwrap())?;
+        std::fs::write(&file, "---\nagent: codex\n---\n")?;
+        let canonical = file.canonicalize()?;
+        let conn = open_state_db(dir.path())?;
+        upsert_queue_control_in_db(
+            &conn,
+            &QueueControlInsert {
+                scope_kind: "document",
+                scope_id: &canonical.to_string_lossy(),
+                state: "paused",
+                reason: Some("file cache conflict quarantine"),
+                operation_receipt_id: Some(7),
+            },
+        )?;
+        drop(conn);
+
+        let control = load_effective_queue_control_for_path(dir.path(), &file)?
+            .expect("canonical document pause should be visible to route admission");
+        assert_eq!(control.state, "paused");
+        assert_eq!(
+            control.reason.as_deref(),
+            Some("file cache conflict quarantine")
         );
         Ok(())
     }

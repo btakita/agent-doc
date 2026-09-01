@@ -567,6 +567,13 @@ impl StartRuntimeAdmission {
     }
 }
 
+fn should_enforce_route_owned_queue_control(
+    route_owned: bool,
+    admission: StartRuntimeAdmission,
+) -> bool {
+    route_owned && !admission.preserves_session_lifecycle()
+}
+
 fn validate_supervisor_reentry_actor(
     canonical: &Path,
     session_id: &str,
@@ -1001,6 +1008,39 @@ fn prepare_start_runtime_with_admission(
     }
 
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
+        });
+    // A route-owned child is autonomous infrastructure even when the tmux
+    // command itself was already submitted. Re-check durable queue control at
+    // the lifecycle boundary to close the pause-vs-route race. Supervisor
+    // exec-reentry is exempt because it preserves an already-running child.
+    if should_enforce_route_owned_queue_control(route_owned, admission)
+        && let Some(control) = agent_doc_sqlite::state_store::load_effective_queue_control_for_path(
+            &project_root,
+            &canonical,
+        )?
+    {
+        let reason = control.reason.as_deref().unwrap_or("unspecified");
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_owned_start_blocked_by_queue_control file={} state={} reason={}",
+                file.display(),
+                control.state,
+                reason.replace(' ', "_")
+            ),
+        );
+        anyhow::bail!(
+            "route-owned start for {} is blocked while queue control is {} ({}); resume queue control before starting a routed harness",
+            file.display(),
+            control.state,
+            reason,
+        );
+    }
     let admission_tmux = agent_doc_tmux_io::configured_tmux();
     if disk_document_allows_pre_admission_pane_guard(file)
         && let Some(pane_id) = current_pane_id_from_env()
@@ -1036,12 +1076,6 @@ fn prepare_start_runtime_with_admission(
     let (updated_content, session_id) =
         agent_doc_frontmatter_io::session::ensure_session_for_file(&content, file)?;
     let assigned_missing_session_uuid = updated_content != content;
-    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
-        .unwrap_or_else(|| {
-            std::env::current_dir()
-                .ok()
-                .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
-        });
     let resolved_identity =
         resolve_start_session_identity(&project_root, file, updated_content, session_id)?;
     let updated_content = resolved_identity.content;
@@ -1105,12 +1139,7 @@ fn prepare_start_runtime_with_admission(
         close_stale_start_actors(&project_root, &mut session_log, route_owned);
     }
 
-    let active_actor_harness = if admission.preserves_session_lifecycle()
-        && fm
-            .agent
-            .as_deref()
-            .is_none_or(|value| value.trim().is_empty())
-    {
+    let active_actor_harness = if should_read_active_actor_harness(fm.agent.as_deref()) {
         agent_doc_controller_io::project_controller::authoritative_actor_binding(
             &project_root,
             &canonical,
@@ -1321,14 +1350,16 @@ fn prepare_start_runtime_with_admission(
             pane_id: &pane_id,
             pane_window: &pane_window,
             start_generation,
+            harness: &harness.binary,
             session_log: &mut session_log,
         })?;
         log_event(
             &mut session_log,
             &format!(
-                "controller_session_start generation={} state={}",
+                "controller_session_start generation={} state={} harness={}",
                 record.generation,
-                record.state.as_str()
+                record.state.as_str(),
+                record.harness
             ),
         );
         start_console_status(
@@ -1672,6 +1703,10 @@ pub fn rebind_project_tmux_session_if_expected_dead(
     }
 }
 
+fn should_read_active_actor_harness(document_agent: Option<&str>) -> bool {
+    document_agent.is_none_or(|value| value.trim().is_empty())
+}
+
 struct StartControllerSessionInput<'a> {
     file: &'a Path,
     canonical: &'a Path,
@@ -1680,6 +1715,7 @@ struct StartControllerSessionInput<'a> {
     pane_id: &'a str,
     pane_window: &'a str,
     start_generation: u64,
+    harness: &'a str,
     session_log: &'a mut Option<std::fs::File>,
 }
 
@@ -1764,6 +1800,7 @@ fn start_controller_session(
         pane_id,
         pane_window,
         start_generation,
+        harness,
         session_log,
     } = input;
     agent_doc_controller_io::project_controller::ensure_controller_running(
@@ -1776,6 +1813,7 @@ fn start_controller_session(
         pane_id: pane_id.to_string(),
         window_id: pane_window.to_string(),
         generation: start_generation,
+        harness: Some(harness.to_string()),
     };
     let mut attempts_used = 0usize;
     const MAX_START_SESSION_RECYCLE_RETRIES: usize = 2;
@@ -1867,6 +1905,29 @@ fn fire_session_start_hooks(
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn queue_control_fences_new_route_owned_lifecycles_but_not_supervisor_reentry() {
+        assert!(should_enforce_route_owned_queue_control(
+            true,
+            StartRuntimeAdmission::NewSession,
+        ));
+        assert!(!should_enforce_route_owned_queue_control(
+            true,
+            StartRuntimeAdmission::SupervisorReexecPreservingChild,
+        ));
+        assert!(!should_enforce_route_owned_queue_control(
+            false,
+            StartRuntimeAdmission::NewSession,
+        ));
+    }
+
+    #[test]
+    fn new_session_without_document_agent_still_reads_actor_harness_authority() {
+        assert!(should_read_active_actor_harness(None));
+        assert!(should_read_active_actor_harness(Some("  ")));
+        assert!(!should_read_active_actor_harness(Some("codex")));
+    }
 
     #[test]
     fn attached_terminal_policy_skips_document_authority_resolution() {

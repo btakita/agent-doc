@@ -1392,7 +1392,7 @@ pub fn start_session(
                 supervisor_pid: None,
                 supervisor_socket: None,
                 command_kind: None,
-                diagnostic_payload: None,
+                diagnostic_payload: request.harness,
             },
         );
     }
@@ -1411,7 +1411,7 @@ pub fn start_session(
             supervisor_pid: None,
             supervisor_socket: None,
             command_kind: None,
-            diagnostic_payload: None,
+            diagnostic_payload: request.harness,
         },
     )
 }
@@ -11724,6 +11724,12 @@ fn supervisor_watchdog_interval() -> Duration {
     Duration::from_secs(secs)
 }
 
+fn supervisor_watchdog_blocked_by_queue_control(
+    control: Option<&state_store::QueueControlStatus>,
+) -> bool {
+    control.is_some_and(|control| control.state == "paused")
+}
+
 /// #supresilience Part B — autonomous route-owned supervisor watchdog.
 ///
 /// The project-controller daemon detects a route-owned supervisor that died and
@@ -11736,6 +11742,7 @@ fn supervisor_watchdog_interval() -> Duration {
 /// A supervisor is restarted ONLY when ALL hold:
 /// - its recorded `supervisor_pid` is dead ([`process_is_alive`] is false),
 /// - the document's actor session is not `Closed`,
+/// - effective queue control is not paused,
 /// - a live tmux pane still exists for it,
 /// - its supervisor session log is still open (a hard crash leaves no close event;
 ///   this also dedups against a restart already recorded and in flight — recording
@@ -11811,6 +11818,28 @@ fn controller_supervisor_watchdog_tick(
         else {
             continue;
         };
+        // A controller pause is operator authority to stop autonomous work. It
+        // must fence the crash watchdog as well as normal queue dispatch;
+        // otherwise an intentional admin kill races this tick and immediately
+        // relaunches the same stale harness generation.
+        let queue_control = match state_store::load_effective_queue_control_from_db(
+            &conn,
+            &document_id,
+            &project_root.to_string_lossy(),
+        ) {
+            Ok(control) => control,
+            Err(err) => {
+                eprintln!(
+                    "[controller] supervisor watchdog: failed to read queue control for {}: {err}",
+                    file.display()
+                );
+                continue;
+            }
+        };
+        if supervisor_watchdog_blocked_by_queue_control(queue_control.as_ref()) {
+            halt_notified.remove(&document_id);
+            continue;
+        }
         // Recorded supervisor pid for the authoritative generation.
         let Some(supervisor_pid) =
             load_supervisor_lease_from_db(&conn, &document_id, record.generation)
@@ -16266,10 +16295,18 @@ pub(crate) fn handle_start_session(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
-    let harness = agent_doc_session_actor_io::detect_document_harness_in(
-        &bootstrap.project_root,
-        &document_id,
-    );
+    let harness = request
+        .diagnostic_payload
+        .as_deref()
+        .map(str::trim)
+        .filter(|harness| !harness.is_empty() && *harness != "default")
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            agent_doc_session_actor_io::detect_document_harness_in(
+                &bootstrap.project_root,
+                &document_id,
+            )
+        });
     let record = agent_doc_controller::actor::ActorRecord {
         document_id: document_id.clone(),
         session_id: session_id.clone(),
@@ -22367,6 +22404,29 @@ mod tests {
     #![allow(unused_imports)]
 
     #[test]
+    fn supervisor_watchdog_respects_operator_queue_pause() {
+        let paused = state_store::QueueControlStatus {
+            receipt_id: 1,
+            scope_kind: "document".to_string(),
+            scope_id: "tasks/payments-ledger.md".to_string(),
+            state: "paused".to_string(),
+            reason: Some("operator quarantine".to_string()),
+            operation_receipt_id: Some(2),
+            updated_at: 3,
+        };
+        let resumed = state_store::QueueControlStatus {
+            state: "resumed".to_string(),
+            ..paused.clone()
+        };
+
+        assert!(supervisor_watchdog_blocked_by_queue_control(Some(&paused)));
+        assert!(!supervisor_watchdog_blocked_by_queue_control(Some(
+            &resumed
+        )));
+        assert!(!supervisor_watchdog_blocked_by_queue_control(None));
+    }
+
+    #[test]
     fn command_probe_prefers_supervisor_projection_and_supports_old_pid_responses() {
         assert!(command_supervisor_probe_is_stale(Some(true), None, None));
         assert!(!command_supervisor_probe_is_stale(
@@ -24525,6 +24585,7 @@ mod tests {
                 pane_id: "%17".to_string(),
                 window_id: "@2".to_string(),
                 generation: 1,
+                harness: Some("codex".to_string()),
             },
         )
         .unwrap();
@@ -24534,6 +24595,7 @@ mod tests {
             agent_doc_controller::actor::ActorState::Starting
         );
         assert_eq!(record.pane_id, "%17");
+        assert_eq!(record.harness, "codex");
         assert_eq!(
             authoritative_actor_binding(dir.path(), &file)
                 .unwrap()

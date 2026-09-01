@@ -267,10 +267,19 @@ Protocol: length-prefixed JSON (same frame format as `ipc_socket.rs`, so the exi
 | `restart` | `{ "mode": "fresh" \| "continue" }` | `{ "ok": true, "pid": <u32> }` | Kills current claude, relaunches |
 | `inject` | `{ "bytes": "<base64>" }` | `{ "ok": true, "n": <usize> }` | Write bytes to pty master |
 | `state` | — | `{ "running": bool, "pid": u32?, "restart_count": u32, "state": "...", "actor_state": "..."?, "current_harness": "..." }` | Includes supervisor health, the current actor lifecycle state, and the live child harness identity |
-| `pid` | — | `{ "pid": u32? }` | Convenience shortcut |
+| `pid` | — | `{ "pid": u32?, "supervisor_instance_id": string?, "binary_stale": bool }` | Lightweight identity/freshness query; does not build the editor-authority `state` snapshot |
 | `stop` | `{ "graceful": bool }` | `{ "ok": true }` | Shuts down supervisor + child |
 
 Socket is created with mode `0600`. Opaque to anything except the FFI library, which exposes typed C ABI wrappers.
+
+Every document-scoped CLI command issues one bounded `pid` query at command
+entry. The query refreshes the supervisor's process-scoped Lazily binary
+freshness observation and returns the derived `binary_stale` projection. A
+`true` result schedules the existing idempotent safe-boundary recycle effect;
+the command never kills a live turn. The query has a 250 ms ceiling and fails
+open. During rolling upgrades, an older supervisor may omit `binary_stale`; the
+CLI then compares the returned process inode with the installed binary inode,
+without reading controller SQLite state.
 
 ### External control use cases
 

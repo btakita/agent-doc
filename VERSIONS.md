@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.307
+
+- **Fix: every document command automatically recycles a stale supervisor at the next safe boundary.**
+
+Document-scoped CLI entry now performs one bounded, fail-open `pid` query. The
+supervisor refreshes a process-scoped Lazily binary-freshness projection and
+returns the derived stale result without building the full editor-authority
+snapshot. A stale result feeds the existing idempotent safe-boundary recycle;
+older supervisors remain compatible through a returned-PID inode comparison,
+with no controller SQLite read on the decision path.
+
 ## 0.35.306
 
 - **Fix: idle stale supervisors no longer reconcile and log twice per second overnight.**

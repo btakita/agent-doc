@@ -1995,10 +1995,10 @@ pub(crate) struct SupervisorShared {
     /// `Restart` handler from `binary_stale` so the idle-watch reexec branch owns the
     /// upgrade and the in-process host loop defers its restart-kill.
     restart_reexec: AtomicBool,
-    /// `#supkill-bg` — the idle-watch's latest staleness probe for this supervisor's
-    /// launch binary (`process_binary_is_stale`), refreshed each idle tick so the IPC
-    /// `Restart` handler can decide reexec-vs-relaunch without recomputing it.
-    binary_stale: AtomicBool,
+    /// Owns the process lifetime of the binary-freshness Lazily graph.
+    _binary_freshness_scope: agent_doc_state_scope::ProcessScope,
+    /// `#supkill-bg` — source observations and the derived freshness projection.
+    binary_freshness: agent_doc_supervisor::binary_freshness::BinaryFreshnessState,
     /// Flag: IPC requested a stop.
     stop_requested: AtomicBool,
     /// Flag: IPC requested a "Stop Agent" — kill the harness child but keep the
@@ -2050,6 +2050,10 @@ impl SupervisorShared {
         actor_state: Option<agent_doc_controller::actor::ActorState>,
         inject_pane: Option<String>,
     ) -> Self {
+        let binary_freshness_scope = agent_doc_state_scope::ProcessScope::new();
+        let binary_freshness = agent_doc_supervisor::binary_freshness::BinaryFreshnessState::new_in(
+            &binary_freshness_scope,
+        );
         Self {
             supervisor_state: Mutex::new(SupervisorState::Healthy),
             actor_runtime,
@@ -2069,7 +2073,8 @@ impl SupervisorShared {
             master_fd: AtomicI32::new(-1),
             restart_requested: AtomicBool::new(false),
             restart_reexec: AtomicBool::new(false),
-            binary_stale: AtomicBool::new(false),
+            _binary_freshness_scope: binary_freshness_scope,
+            binary_freshness,
             stop_requested: AtomicBool::new(false),
             stop_agent_requested: AtomicBool::new(false),
             restart_mode: Mutex::new("continue".to_string()),
@@ -2255,23 +2260,20 @@ impl SupervisorShared {
         let Some(current) =
             agent_doc_controller_io::project_controller::current_binary_identity().ok()
         else {
-            return self.binary_stale.load(Ordering::Relaxed);
+            return self.binary_freshness.stale();
         };
         let identity_stale = agent_doc_controller::status::process_binary_is_stale(
             self.launch_binary_identity.as_ref(),
             Some(&current),
         );
-        let inode_stale = agent_doc_fs::inode_of_path(&current.path)
-            .map(|installed_inode| {
-                agent_doc_supervisor::config::host_supervisor_is_stale(
-                    agent_doc_fs::running_exe_inode_for_pid(self.supervisor_pid),
-                    installed_inode,
-                )
-            })
-            .unwrap_or(false);
-        let stale = identity_stale || inode_stale;
-        self.binary_stale.store(stale, Ordering::Relaxed);
-        stale
+        self.binary_freshness.observe(
+            agent_doc_supervisor::binary_freshness::BinaryFreshnessObservation {
+                identity_stale,
+                running_exe_inode: agent_doc_fs::running_exe_inode_for_pid(self.supervisor_pid),
+                installed_binary_inode: agent_doc_fs::inode_of_path(&current.path),
+            },
+        );
+        self.binary_freshness.stale()
     }
 
     fn set_capability_proof_gate_for_epoch(

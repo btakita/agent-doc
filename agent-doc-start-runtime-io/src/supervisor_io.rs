@@ -340,13 +340,38 @@ mod tests {
         );
         shared.supervisor_pid = 0;
 
-        assert!(!shared.binary_stale.load(Ordering::Relaxed));
+        assert!(!shared.binary_freshness.stale());
         agent_doc_supervisor_io::ipc::request_supervisor_restart(&shared, "continue".to_string())
             .expect("request restart");
 
-        assert!(shared.binary_stale.load(Ordering::Relaxed));
+        assert!(shared.binary_freshness.stale());
         assert!(shared.restart_requested.load(Ordering::Relaxed));
         assert!(shared.restart_reexec.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn pid_ipc_refreshes_and_returns_binary_freshness_projection() {
+        let mut stale_launch =
+            agent_doc_controller_io::project_controller::current_binary_identity()
+                .expect("current binary identity");
+        stale_launch.len = stale_launch.len.saturating_add(1);
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "stale-pid-instance".to_string(),
+            Some(stale_launch),
+            "claude",
+            None,
+            None,
+            None,
+        );
+
+        let response = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(IpcMethod::Pid, &shared);
+
+        assert!(response.ok);
+        let data = response.data.expect("pid response data");
+        assert_eq!(data["pid"], std::process::id());
+        assert_eq!(data["binary_stale"], true);
+        assert!(shared.binary_freshness.stale());
     }
 
     #[test]
@@ -367,7 +392,7 @@ mod tests {
         agent_doc_supervisor_io::ipc::request_supervisor_restart(&shared, "continue".to_string())
             .expect("request restart");
 
-        assert!(!shared.binary_stale.load(Ordering::Relaxed));
+        assert!(!shared.binary_freshness.stale());
         assert!(shared.restart_requested.load(Ordering::Relaxed));
         assert!(!shared.restart_reexec.load(Ordering::Relaxed));
     }

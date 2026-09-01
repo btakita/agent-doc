@@ -35,6 +35,9 @@ use std::collections::BTreeSet;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
 
 const CONTROLLER_CRDT_CURRENT_TEXT_POLL_TIMEOUT: Duration = Duration::from_secs(1);
+/// Every document-scoped CLI command gets one fail-open supervisor freshness
+/// query. This budget keeps the check below human-visible command latency.
+const COMMAND_SUPERVISOR_FRESHNESS_TIMEOUT: Duration = Duration::from_millis(250);
 // Foreground closeout reads may briefly queue behind a replica bootstrap or
 // durable outbox fold. Give that observation enough time to see the ACK that
 // already landed; idle revision probes retain the sub-second budget below.
@@ -3345,6 +3348,67 @@ pub fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
         }
     }
     None
+}
+
+fn command_supervisor_probe_is_stale(
+    reported_binary_stale: Option<bool>,
+    running_inode: Option<u64>,
+    installed_inode: Option<u64>,
+) -> bool {
+    reported_binary_stale.unwrap_or_else(|| {
+        installed_inode.is_some_and(|installed_inode| {
+            agent_doc_supervisor::config::host_supervisor_is_stale(running_inode, installed_inode)
+        })
+    })
+}
+
+/// Ask the document's live supervisor for its process-scoped binary freshness.
+///
+/// This is the command-entry hot path: one bounded `pid` socket query and no
+/// controller/SQLite lookup. New supervisors refresh and return their Lazily
+/// projection. An older supervisor omits `binary_stale`, so the caller compares
+/// its returned PID's running inode with the installed binary as a compatibility
+/// fallback. Every failure is fail-open.
+fn stale_supervisor_pid_from_command_probe(file: &Path) -> Option<u32> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+    let session_id = agent_doc_frontmatter_io::session::read_session_id(file)?;
+    let socket = agent_doc_supervisor_io::ipc::socket_path(&project_root, &session_id);
+    let response = agent_doc_supervisor_io::ipc::probe_supervisor_pid(
+        &socket,
+        COMMAND_SUPERVISOR_FRESHNESS_TIMEOUT,
+    )
+    .ok()?;
+    if !response.ok {
+        return None;
+    }
+    let data = response.data?;
+    let supervisor_pid = data.get("pid")?.as_u64()?.try_into().ok()?;
+    let reported_binary_stale = data
+        .get("binary_stale")
+        .and_then(serde_json::Value::as_bool);
+    let (running_inode, installed_inode) = if reported_binary_stale.is_none() {
+        let current = current_binary_identity().ok()?;
+        (
+            agent_doc_fs::running_exe_inode_for_pid(supervisor_pid),
+            agent_doc_fs::inode_of_path(&current.path),
+        )
+    } else {
+        (None, None)
+    };
+    command_supervisor_probe_is_stale(reported_binary_stale, running_inode, installed_inode)
+        .then_some(supervisor_pid)
+}
+
+/// Automatically schedule a proven-stale document supervisor for safe-boundary
+/// recycle when any document-scoped CLI command starts.
+pub fn recycle_stale_supervisor_for_command(file: &Path, source: &str) -> Option<String> {
+    let supervisor_pid = stale_supervisor_pid_from_command_probe(file)?;
+    let mut message = status::host_supervisor_stale_warning_message(supervisor_pid);
+    let recycle_status = schedule_stale_supervisor_cp_recycle(file, source);
+    message.push_str(&format!(
+        " Automatic safe-boundary recycle request status: {recycle_status}."
+    ));
+    Some(message)
 }
 
 /// Detect a stale route-owned supervisor at a turn stage and unconditionally
@@ -22301,6 +22365,19 @@ pub fn run_restart(root: Option<&Path>, force: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
+
+    #[test]
+    fn command_probe_prefers_supervisor_projection_and_supports_old_pid_responses() {
+        assert!(command_supervisor_probe_is_stale(Some(true), None, None));
+        assert!(!command_supervisor_probe_is_stale(
+            Some(false),
+            Some(11),
+            Some(12)
+        ));
+        assert!(command_supervisor_probe_is_stale(None, Some(11), Some(12)));
+        assert!(!command_supervisor_probe_is_stale(None, Some(11), Some(11)));
+        assert!(!command_supervisor_probe_is_stale(None, None, Some(12)));
+    }
 
     #[test]
     fn detached_temp_controller_roots_are_narrowly_classified_for_idle_reaping() {

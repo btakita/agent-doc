@@ -17391,6 +17391,45 @@ fn test_stale_supervisor_recycle_is_checked_at_every_turn_stage() {
         );
     }
 
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    assert!(
+        main_source.contains("recycle_stale_supervisor_for_command(")
+            && main_source.contains("cli_command_entry"),
+        "every document-scoped CLI command must run the central stale-supervisor probe"
+    );
+
+    let supervisor_ipc =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/ipc.rs")).unwrap();
+    let pid_arm = supervisor_ipc
+        .split("        IpcMethod::Pid => {")
+        .nth(1)
+        .and_then(|source| source.split("IpcMethod::Inject").next())
+        .unwrap();
+    assert!(
+        pid_arm.contains("binary_stale") && !pid_arm.contains("supervisor_ipc_state_snapshot"),
+        "the command-entry pid probe must refresh freshness without building the expensive state snapshot"
+    );
+
+    let controller_rpc = fs::read_to_string(
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    let command_probe = controller_rpc
+        .split("fn stale_supervisor_pid_from_command_probe")
+        .nth(1)
+        .and_then(|source| {
+            source
+                .split("pub fn recycle_stale_supervisor_for_command")
+                .next()
+        })
+        .unwrap();
+    assert!(
+        command_probe.contains("probe_supervisor_pid")
+            && command_probe.contains("binary_stale")
+            && !command_probe.contains("open_state_db"),
+        "the command-entry decision must be one bounded socket query with no SQLite read"
+    );
+
     let preflight_queue =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     assert!(

@@ -4192,6 +4192,19 @@ fn try_main() -> anyhow::Result<()> {
     reject_plain_shell_bare_file_invocation(&raw_args)?;
     let cli = Cli::parse_from(rewrite_bare_file_invocation(raw_args));
 
+    // A document-scoped command is also a cheap freshness observation. The
+    // supervisor's `pid` response refreshes its process-scoped Lazily projection;
+    // a proven-stale owner is marked for the existing safe-boundary recycle.
+    if let Some(file) = dogfood_document_argument()
+        && let Some(message) =
+            agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_command(
+                &file,
+                "cli_command_entry",
+            )
+    {
+        eprintln!("[agent-doc] {message}");
+    }
+
     // Warn about newer versions on startup, but skip if running the upgrade command itself.
     if !matches!(cli.command, Commands::Upgrade) {
         upgrade::warn_if_outdated();

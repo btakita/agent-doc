@@ -509,11 +509,12 @@ where
             }))
         }
         IpcMethod::Pid => {
-            let snapshot = supervisor_ipc_state_snapshot(state);
-            if snapshot.supervisor_pid > 0 {
+            let supervisor_pid = state.supervisor_pid();
+            if supervisor_pid > 0 {
                 IpcResponse::ok(serde_json::json!({
-                    "pid": snapshot.supervisor_pid,
-                    "supervisor_instance_id": snapshot.supervisor_instance_id,
+                    "pid": supervisor_pid,
+                    "supervisor_instance_id": state.supervisor_instance_id(),
+                    "binary_stale": SupervisorIpcLifecycleState::binary_stale(state),
                 }))
             } else {
                 IpcResponse::ok(serde_json::json!({ "pid": null }))
@@ -882,6 +883,12 @@ pub fn probe_socket(sock: &Path) -> SocketLiveness {
 #[allow(dead_code)] // API surface — used by tests and future IPC clients
 pub fn send_command(sock: &Path, method: &IpcMethod) -> Result<IpcResponse> {
     send_command_with_response_timeout(sock, method, supervisor_response_timeout(method))
+}
+
+/// Issue the lightweight supervisor identity/freshness query with a caller-owned
+/// timeout. Unlike `state`, `pid` does not build the editor-authority snapshot.
+pub fn probe_supervisor_pid(sock: &Path, response_timeout: Duration) -> Result<IpcResponse> {
+    send_command_with_response_timeout(sock, &IpcMethod::Pid, response_timeout)
 }
 
 fn send_command_with_response_timeout(

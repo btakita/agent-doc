@@ -4,6 +4,11 @@
 
 This file covers the lower-churn command surface that is not primarily about tmux/session routing, response closeout, or orchestration.
 
+All commands that name an existing markdown session document perform one
+fail-open, 250 ms supervisor `pid` query at command entry. A stale-binary result
+automatically schedules the document owner for idempotent safe-boundary recycle;
+commands do not wait for the recycle and never interrupt an active turn.
+
 ## run
 
 `agent-doc [run] <FILE> [-b] [--agent NAME] [--model MODEL] [--dry-run] [--no-git]`

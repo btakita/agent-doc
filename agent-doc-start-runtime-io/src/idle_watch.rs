@@ -3025,9 +3025,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // `#supkill-bg` — publish the live staleness probe so the IPC `Restart`
                 // handler can decide drain-reexec vs immediate relaunch without
                 // recomputing it.
-                shared
-                    .binary_stale
-                    .store(supervisor_stale, Ordering::Relaxed);
+                shared.binary_freshness.observe(
+                    agent_doc_supervisor::binary_freshness::BinaryFreshnessObservation {
+                        identity_stale: supervisor_stale,
+                        ..Default::default()
+                    },
+                );
                 // `#suptmuxstale` — publish the same staleness probe as an on-disk
                 // marker so the `turn-status` hook (a separate short-lived process in
                 // the agent pane that cannot read this in-memory atomic) can decorate

@@ -220,6 +220,13 @@ source-of-truth document, including editor-buffer changes, pluginless disk
 saves, backlog mirror inputs, priority markers, auto-DAG dependencies, and
 exchange body additions/edits.
 
+A route-owned queue mutation retained by the editor/CRDT plane has three
+distinct settled observations. The exact target continues route dispatch; the
+unchanged expected-current baseline remains pending because the retained target
+has not become visible yet; and only a third projection is newer concurrent
+editor state that requires a fresh read and CRDT re-merge. A converged baseline
+must never be labeled as newer drift or consume the bounded re-merge attempts.
+
 Exchange response-turn identity is content-derived from the response heading
 **and** body, never the heading alone (`#qcellmerge-response-body-id`). Two
 `### Re:` turns that share a heading — a same-topic or same-preset follow-up

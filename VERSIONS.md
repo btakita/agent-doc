@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.305
+
+- **Fix: Run Agent Doc no longer exhausts queue-activation retries when the old editor baseline settles before its retained target.**
+
+Route-owned queue writes now distinguish three CRDT observations: the exact
+target continues dispatch, the unchanged expected-current baseline remains
+pending, and only a genuinely third editor projection triggers a fresh read and
+re-merge. This prevents editor replica re-registration from mislabeling the old
+baseline as newer operator state and repeating the same failed activation three
+times.
+
 ## 0.35.304
 
 - **JetBrains 0.2.368: native FFI uses the shared executable resolver and retries transient startup failures.**

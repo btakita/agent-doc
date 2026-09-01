@@ -18,6 +18,7 @@ enum RetainedRouteProjection {
 fn retained_route_projection(
     current: Option<&agent_doc_crdt_relay_io::CurrentText>,
     target: &str,
+    baseline: &str,
 ) -> RetainedRouteProjection {
     match current {
         Some(agent_doc_crdt_relay_io::CurrentText::Current {
@@ -25,6 +26,11 @@ fn retained_route_projection(
             delivery_converged: true,
             ..
         }) if text == target => RetainedRouteProjection::ConvergedTarget,
+        Some(agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            delivery_converged: true,
+            ..
+        }) if text == baseline => RetainedRouteProjection::Pending,
         Some(agent_doc_crdt_relay_io::CurrentText::Current {
             delivery_converged: true,
             ..
@@ -45,7 +51,12 @@ fn retained_route_write_error(error: &anyhow::Error) -> bool {
 /// the subsequent prompt dispatch. Keep the route call alive until the exact
 /// target is editor-visible, so the caller can checkpoint it and continue into
 /// preflight instead of returning an owner-pane-only `commit` remedy.
-fn await_retained_route_write(file: &Path, target: &str, source: &str) -> Result<()> {
+fn await_retained_route_write(
+    file: &Path,
+    target: &str,
+    baseline: &str,
+    source: &str,
+) -> Result<()> {
     let deadline = Instant::now() + RETAINED_ROUTE_WRITE_TIMEOUT;
     loop {
         let current =
@@ -54,7 +65,7 @@ fn await_retained_route_write(file: &Path, target: &str, source: &str) -> Result
                 "route_retained_write_projection",
             )
             .unwrap_or(None);
-        match retained_route_projection(current.as_ref(), target) {
+        match retained_route_projection(current.as_ref(), target, baseline) {
             RetainedRouteProjection::ConvergedTarget => {
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -121,7 +132,7 @@ pub fn route_write_document(
         ) {
             Ok(()) => Ok(()),
             Err(error) if retained_route_write_error(&error) => {
-                await_retained_route_write(file, next_content, reason)
+                await_retained_route_write(file, next_content, previous_content, reason)
             }
             Err(error) => Err(error),
         }
@@ -143,24 +154,35 @@ mod tests {
     }
 
     #[test]
-    fn retained_route_write_waits_for_exact_visible_target() {
+    fn retained_route_write_distinguishes_settled_baseline_from_newer_projection() {
+        let baseline = "queue: stop\n";
         let target = "queue: go\n";
         assert_eq!(
-            retained_route_projection(Some(&current(target, false)), target),
+            retained_route_projection(Some(&current(target, false)), target, baseline),
             RetainedRouteProjection::Pending,
         );
         assert_eq!(
-            retained_route_projection(Some(&current(target, true)), target),
+            retained_route_projection(Some(&current(target, true)), target, baseline),
             RetainedRouteProjection::ConvergedTarget,
         );
         assert_eq!(
-            retained_route_projection(Some(&current("queue: stop\n", true)), target),
+            retained_route_projection(Some(&current(baseline, true)), target, baseline),
+            RetainedRouteProjection::Pending,
+            "the settled expected-current baseline is not a newer editor projection",
+        );
+        assert_eq!(
+            retained_route_projection(
+                Some(&current("queue: newer operator edit\n", true)),
+                target,
+                baseline,
+            ),
             RetainedRouteProjection::ConvergedDrift,
         );
         assert_eq!(
             retained_route_projection(
                 Some(&agent_doc_crdt_relay_io::CurrentText::EditorSyncPending),
                 target,
+                baseline,
             ),
             RetainedRouteProjection::Pending,
         );

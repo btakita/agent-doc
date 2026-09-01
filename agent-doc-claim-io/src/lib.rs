@@ -31,9 +31,11 @@
 //! - Ensures the session UUID exists in frontmatter via `frontmatter::ensure_session`;
 //!   writes the UUID back to disk if it was freshly generated.
 //! - Pane resolution priority: explicit `--pane` > `--position` (scoped to
-//!   effective window if set) > `TMUX_PANE` / active pane.
-//! - `--new-pane` bypasses pane resolution and cross-session validation, then
-//!   provisions exactly one pane in the project's authoritative tmux session.
+//!   effective window if set) > process-owned `TMUX_PANE` evidence.
+//! - `--new-pane`, or a claim with no explicit/process-owned pane evidence,
+//!   bypasses cross-session validation and provisions exactly one pane in the
+//!   project's authoritative tmux session. Ambient last-active tmux state is
+//!   never treated as ownership proof.
 //! - **Session validation:** After resolving `pane_id`, checks that the pane belongs to
 //!   the project's configured tmux session (`project_tmux_session()`). Cross-session
 //!   mismatches fail closed while the configured session is still alive; stale
@@ -204,6 +206,33 @@ pub struct ClaimOptions<'a> {
     pub new_pane: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClaimPaneSource<'a> {
+    ProvisionNew,
+    Explicit(&'a str),
+    Position(&'a str),
+    Environment(&'a str),
+}
+
+fn claim_pane_source<'a>(
+    new_pane: bool,
+    pane: Option<&'a str>,
+    position: Option<&'a str>,
+    environment_pane: Option<&'a str>,
+) -> ClaimPaneSource<'a> {
+    if new_pane {
+        ClaimPaneSource::ProvisionNew
+    } else if let Some(pane) = pane {
+        ClaimPaneSource::Explicit(pane)
+    } else if let Some(position) = position {
+        ClaimPaneSource::Position(position)
+    } else if let Some(pane) = environment_pane {
+        ClaimPaneSource::Environment(pane)
+    } else {
+        ClaimPaneSource::ProvisionNew
+    }
+}
+
 pub fn run(
     file: &Path,
     options: ClaimOptions<'_>,
@@ -259,22 +288,24 @@ pub fn run(
     // touches disk. The `// Pane validated — now safe to modify files` invariant
     // below applies to the auto-scaffold too.
     let tmux = agent_doc_tmux_io::configured_tmux();
-    let pane_id = if new_pane {
-        None
-    } else {
-        Some(if let Some(p) = pane {
-            p.to_string() // Plugin-provided, authoritative
-        } else if let Some(pos) = position {
+    let environment_pane = agent_doc_tmux_io::current_pane_id_from_env();
+    let pane_source = claim_pane_source(new_pane, pane, position, environment_pane.as_deref());
+    let provision_new = matches!(pane_source, ClaimPaneSource::ProvisionNew);
+    let pane_id = match pane_source {
+        ClaimPaneSource::ProvisionNew => None,
+        ClaimPaneSource::Explicit(pane) | ClaimPaneSource::Environment(pane) => {
+            Some(pane.to_string())
+        }
+        ClaimPaneSource::Position(pos) => {
             if let Some(ref win) = effective_window {
                 // Scope position detection to the specified window
-                agent_doc_tmux_io::pane_by_position_in_window(&tmux, pos, win)?
+                Some(agent_doc_tmux_io::pane_by_position_in_window(
+                    &tmux, pos, win,
+                )?)
             } else {
-                agent_doc_tmux_io::pane_by_position(&tmux, pos)?
+                Some(agent_doc_tmux_io::pane_by_position(&tmux, pos)?)
             }
-        } else {
-            agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux)
-                .context("failed to query current tmux pane")?
-        })
+        }
     };
 
     let configured_session = project_config_io::project_tmux_session();
@@ -495,7 +526,7 @@ pub fn run(
         }
     }
 
-    if new_pane {
+    if provision_new {
         eprintln!(
             "[claim] provisioning a new pane in authoritative session {}",
             configured_session.as_deref().unwrap_or("(auto-detect)")
@@ -746,6 +777,30 @@ mod tests {
         assert_eq!(session_id_short("abc"), "abc");
         assert_eq!(session_id_short("123456789"), "12345678");
         assert_eq!(session_id_short("ééééééééé"), "éééééééé");
+    }
+
+    #[test]
+    fn claim_pane_source_requires_explicit_ownership_evidence() {
+        assert_eq!(
+            claim_pane_source(false, Some("%explicit"), Some("left"), Some("%environment")),
+            ClaimPaneSource::Explicit("%explicit")
+        );
+        assert_eq!(
+            claim_pane_source(false, None, Some("left"), Some("%environment")),
+            ClaimPaneSource::Position("left")
+        );
+        assert_eq!(
+            claim_pane_source(false, None, None, Some("%environment")),
+            ClaimPaneSource::Environment("%environment")
+        );
+        assert_eq!(
+            claim_pane_source(false, None, None, None),
+            ClaimPaneSource::ProvisionNew
+        );
+        assert_eq!(
+            claim_pane_source(true, Some("%explicit"), Some("left"), Some("%environment")),
+            ClaimPaneSource::ProvisionNew
+        );
     }
 
     #[derive(Default)]

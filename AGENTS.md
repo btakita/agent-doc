@@ -454,7 +454,7 @@ history without introducing a second document model.
 
 agent-doc extends the existence kernel vocabulary with domain-specific terms. See the full ontology table in [README.md](README.md#domain-ontology).
 
-<!-- tsift:code-navigation v=0.1.93 -->
+<!-- tsift:code-navigation v=0.1.96 -->
 ## Code Navigation
 
 Run `tsift status` at session start from the owning repo root. If the task or file lives under a git submodule (for example `src/tsift/...`), switch to that submodule root first so the harness loads the narrower local instructions and repo state instead of the superproject root. `tsift status` repairs the `.tsift/` index state it owns and never rewrites tracked files (`--no-fix` skips even that). If status reports stale or missing instructions, run `tsift init` to refresh the tracked Code Navigation block and runbook; it names every tracked file it rewrites or moves. When the harness cannot perform write commands, ask the user to run the printed `run:` command instead.

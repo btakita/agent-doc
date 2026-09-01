@@ -154,6 +154,38 @@ class LibMtimeChangedTest {
     }
 
     @Test
+    fun `initial native load retries transient resolution failures but preserves restart fences`() {
+        assertEquals(
+            NativeInitialLoadDecision.Attempt,
+            nativeInitialLoadDecision(NativeInitialLoadBlock.None, nowNanos = 10L, retryAtNanos = 20L),
+        )
+        assertEquals(
+            NativeInitialLoadDecision.BackOff,
+            nativeInitialLoadDecision(
+                NativeInitialLoadBlock.RetryableFailure,
+                nowNanos = 19L,
+                retryAtNanos = 20L,
+            ),
+        )
+        assertEquals(
+            NativeInitialLoadDecision.Attempt,
+            nativeInitialLoadDecision(
+                NativeInitialLoadBlock.RetryableFailure,
+                nowNanos = 20L,
+                retryAtNanos = 20L,
+            ),
+        )
+        assertEquals(
+            NativeInitialLoadDecision.StopUntilRestart,
+            nativeInitialLoadDecision(
+                NativeInitialLoadBlock.RestartRequired,
+                nowNanos = Long.MAX_VALUE,
+                retryAtNanos = 0L,
+            ),
+        )
+    }
+
+    @Test
     fun `retired generation transition publishes distinct replacement when dlclose leaves inert mapping`() {
         assertEquals(
             NativeRetiredGenerationTransition.LoadReplacement,

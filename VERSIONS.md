@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.304
+
+- **JetBrains 0.2.368: native FFI uses the shared executable resolver and retries transient startup failures.**
+- **Fix: pane-less claims provision a fresh authoritative pane instead of binding tmux's ambient pane.**
+
+The JetBrains native loader now resolves `agent-doc` through the same ordered
+project/home/local/Cargo/`PATH` policy as terminal commands. Resolution logs
+include the selected executable and complete attempt list. A missing executable
+or library enters a bounded retry state, while proven unsafe native-generation
+transitions retain their restart-required fence.
+
+Claim admission now distinguishes explicit `--pane`, `--position`, and
+process-owned `TMUX_PANE` evidence from tmux's unrelated last-active pane. When
+none of those proofs exists, the claim provisions exactly one pane in the
+project's authoritative session. The v0.35.303 installer version check and
+cross-built GNU artifact remain unchanged; the published GNU artifact was also
+audited to require no newer than GLIBC 2.18.
+
 ## 0.35.303
 
 - **Fix: every tmux command now honors project, global, then `PATH` binary selection.**

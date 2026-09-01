@@ -1450,15 +1450,23 @@ object TerminalUtil {
         }
     }
 
-    fun resolveAgentDoc(basePath: String? = null): String {
-        val candidates = listOfNotNull(
+    internal fun agentDocCandidates(
+        basePath: String? = null,
+        home: String? = System.getenv("HOME"),
+    ): List<String> =
+        listOfNotNull(
             basePath?.let { "$it/.bin/agent-doc" },
-            System.getenv("HOME")?.let { "$it/bin/agent-doc" },
-            System.getenv("HOME")?.let { "$it/.local/bin/agent-doc" },
-            System.getenv("HOME")?.let { "$it/.cargo/bin/agent-doc" },
-            "/usr/local/bin/agent-doc"
+            home?.let { "$it/bin/agent-doc" },
+            home?.let { "$it/.local/bin/agent-doc" },
+            home?.let { "$it/.cargo/bin/agent-doc" },
+            "/usr/local/bin/agent-doc",
         )
-        for (path in candidates) {
+
+    internal fun agentDocResolutionAttempts(basePath: String? = null): List<String> =
+        agentDocCandidates(basePath) + "agent-doc (PATH)"
+
+    fun resolveAgentDoc(basePath: String? = null): String {
+        for (path in agentDocCandidates(basePath)) {
             if (java.io.File(path).canExecute()) {
                 return path
             }

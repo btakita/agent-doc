@@ -1112,6 +1112,40 @@ class TerminalUtilTest {
         assertTrue(commandRunner.contains("[document-command] failed to start file="))
     }
 
+    @Test
+    fun `agent-doc executable candidates include cargo bin before PATH fallback`() {
+        assertEquals(
+            listOf(
+                "/workspace/.bin/agent-doc",
+                "/operator/bin/agent-doc",
+                "/operator/.local/bin/agent-doc",
+                "/operator/.cargo/bin/agent-doc",
+                "/usr/local/bin/agent-doc",
+            ),
+            TerminalUtil.agentDocCandidates("/workspace", "/operator"),
+        )
+    }
+
+    @Test
+    fun `native loader uses shared executable resolution with auditable attempts`() {
+        val nativeLibPath =
+            listOf(
+                    Paths.get("src/main/kotlin/com/github/btakita/agentdoc/NativeLib.kt"),
+                    Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/NativeLib.kt"
+                    ),
+                )
+                .first { Files.exists(it) }
+        val source = Files.readString(nativeLibPath)
+        val resolver =
+            source.substringAfter("private fun resolveLibPath()")
+                .substringBefore("private val LOG")
+
+        assertTrue(resolver.contains("TerminalUtil.resolveAgentDoc()"))
+        assertTrue(resolver.contains("TerminalUtil.agentDocResolutionAttempts()"))
+        assertFalse(resolver.contains("ProcessBuilder(\"agent-doc\""))
+    }
+
     private class FakeRouteHandle(private var alive: Boolean) : TerminalUtil.InFlightRouteHandle {
         var cancelCount: Int = 0
             private set

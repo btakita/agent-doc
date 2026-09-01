@@ -36,6 +36,34 @@ internal enum class NativeRetiredGenerationTransition {
     LoadReplacementRetainingInertMapping,
 }
 
+internal enum class NativeInitialLoadBlock {
+    None,
+    RetryableFailure,
+    RestartRequired,
+}
+
+internal enum class NativeInitialLoadDecision {
+    Attempt,
+    BackOff,
+    StopUntilRestart,
+}
+
+internal fun nativeInitialLoadDecision(
+    block: NativeInitialLoadBlock,
+    nowNanos: Long,
+    retryAtNanos: Long,
+): NativeInitialLoadDecision =
+    when (block) {
+        NativeInitialLoadBlock.None -> NativeInitialLoadDecision.Attempt
+        NativeInitialLoadBlock.RetryableFailure ->
+            if (nowNanos >= retryAtNanos) {
+                NativeInitialLoadDecision.Attempt
+            } else {
+                NativeInitialLoadDecision.BackOff
+            }
+        NativeInitialLoadBlock.RestartRequired -> NativeInitialLoadDecision.StopUntilRestart
+    }
+
 internal fun nativeRetiredGenerationTransition(
     oldGenerationUnmapped: Boolean
 ): NativeRetiredGenerationTransition =
@@ -1066,6 +1094,8 @@ interface AgentDocLib : Library {
         @Volatile private var instance: AgentDocLib? = null
         @Volatile private var loadedGeneration: LoadedGeneration? = null
         @Volatile private var loadError: String? = null
+        @Volatile private var initialLoadBlock = NativeInitialLoadBlock.None
+        @Volatile private var initialLoadRetryAtNanos = 0L
         @Volatile private var loadedPath: String? = null
         @Volatile private var loadedMtime: Long = 0L
         @Volatile private var failedReloadMtime: Long = 0L
@@ -1074,6 +1104,7 @@ interface AgentDocLib : Library {
         private const val NATIVE_QUIESCE_TIMEOUT_MS = 7_000L
         private const val NATIVE_CALL_TIMEOUT_MS = 10_000L
         private const val NATIVE_GENERATION_WORKER_COUNT = 4
+        private val INITIAL_LOAD_RETRY_DELAY_NANOS = TimeUnit.SECONDS.toNanos(5)
 
         @Synchronized
         fun get(): AgentDocLib? {
@@ -1088,13 +1119,25 @@ interface AgentDocLib : Library {
                 return current
             }
 
-            if (loadError != null) return null
+            when (
+                nativeInitialLoadDecision(
+                    initialLoadBlock,
+                    System.nanoTime(),
+                    initialLoadRetryAtNanos,
+                )
+            ) {
+                NativeInitialLoadDecision.Attempt -> Unit
+                NativeInitialLoadDecision.BackOff,
+                NativeInitialLoadDecision.StopUntilRestart,
+                -> return null
+            }
 
             val libPath =
                 resolveLibPath()
                     ?: run {
-                        loadError = "agent-doc binary not found; FFI unavailable"
-                        LOG.warn(loadError!!)
+                        recordRetryableInitialLoadFailure(
+                            "agent-doc binary or lib-path unavailable; FFI will retry",
+                        )
                         return null
                     }
 
@@ -1224,10 +1267,18 @@ interface AgentDocLib : Library {
                 registerShutdownHook()
                 generation.proxy
             } catch (error: Throwable) {
-                loadError = "Failed to load libagent_doc: ${error.message}"
-                LOG.warn(loadError!!)
+                recordRetryableInitialLoadFailure(
+                    "Failed to load libagent_doc; FFI will retry: ${error.message}",
+                )
                 null
             }
+        }
+
+        private fun recordRetryableInitialLoadFailure(message: String) {
+            loadError = message
+            initialLoadBlock = NativeInitialLoadBlock.RetryableFailure
+            initialLoadRetryAtNanos = System.nanoTime() + INITIAL_LOAD_RETRY_DELAY_NANOS
+            LOG.warn(message)
         }
 
         private fun loadValidatedGeneration(
@@ -1253,6 +1304,8 @@ interface AgentDocLib : Library {
             loadedGeneration = generation
             instance = generation.proxy
             loadError = null
+            initialLoadBlock = NativeInitialLoadBlock.None
+            initialLoadRetryAtNanos = 0L
             removePidLock()
             writePidLock(path)
         }
@@ -1261,6 +1314,7 @@ interface AgentDocLib : Library {
             loadedGeneration = null
             instance = null
             loadError = "IDE restart required: $reason"
+            initialLoadBlock = NativeInitialLoadBlock.RestartRequired
             removePidLock()
             LOG.warn("[native] $loadError")
             return NativeReloadOutcome.RestartRequired(reason)
@@ -1272,6 +1326,7 @@ interface AgentDocLib : Library {
             loadedGeneration = null
             instance = null
             loadError = "IDE restart required: $reason"
+            initialLoadBlock = NativeInitialLoadBlock.RestartRequired
             removePidLock()
             LOG.warn("[native] $loadError")
         }
@@ -1402,16 +1457,28 @@ interface AgentDocLib : Library {
         }
 
         private fun resolveLibPath(): String? {
+            val executable = TerminalUtil.resolveAgentDoc()
+            val attempts = TerminalUtil.agentDocResolutionAttempts().joinToString()
+            LOG.info("[native] resolving lib-path executable=$executable attempts=[$attempts]")
             try {
                 val process =
-                    ProcessBuilder("agent-doc", "lib-path").redirectErrorStream(false).start()
-                val path = process.inputStream.bufferedReader().readLine()?.trim()
+                    ProcessBuilder(executable, "lib-path").redirectErrorStream(true).start()
+                val output = process.inputStream.bufferedReader().readText().trim()
                 val exitCode = process.waitFor()
+                val path = output.lineSequence().firstOrNull()?.trim()
                 if (exitCode == 0 && path != null && File(path).exists()) {
                     return path
                 }
+                LOG.warn(
+                    "[native] lib-path resolution failed executable=$executable " +
+                        "attempts=[$attempts] exit=$exitCode output=${output.ifBlank { "<empty>" }}",
+                )
             } catch (e: Exception) {
-                LOG.debug("[native] agent-doc lib-path failed: ${e.message}")
+                LOG.warn(
+                    "[native] lib-path launch failed executable=$executable " +
+                        "attempts=[$attempts]: ${e.message}",
+                    e,
+                )
             }
             return null
         }

@@ -317,15 +317,24 @@ pub fn current_pane_id(runner: &(impl TmuxCommandRunner + ?Sized)) -> Result<Str
 pub fn current_pane_id_from_env_or_tmux(
     runner: &(impl TmuxCommandRunner + ?Sized),
 ) -> Result<String, TmuxIoError> {
-    if let Some(pane) = current_pane_id_override() {
-        return Ok(pane);
-    }
-    if let Ok(pane) = std::env::var("TMUX_PANE")
-        && !pane.trim().is_empty()
-    {
+    if let Some(pane) = current_pane_id_from_env() {
         return Ok(pane);
     }
     current_pane_id(runner)
+}
+
+/// Resolve only pane evidence carried by this process context.
+///
+/// Unlike [`current_pane_id_from_env_or_tmux`], this never asks tmux for its
+/// ambient last-active pane. Callers that create durable ownership bindings
+/// use this boundary so absence of explicit evidence remains observable.
+pub fn current_pane_id_from_env() -> Option<String> {
+    if let Some(pane) = current_pane_id_override() {
+        return Some(pane);
+    }
+    std::env::var("TMUX_PANE")
+        .ok()
+        .filter(|pane| !pane.trim().is_empty())
 }
 
 pub fn socket_path(runner: &(impl TmuxCommandRunner + ?Sized)) -> Option<String> {
@@ -869,6 +878,13 @@ mod tests {
         });
 
         assert_eq!(current_pane_id_override(), None);
+    }
+
+    #[test]
+    fn environment_only_pane_resolution_never_needs_an_ambient_tmux_query() {
+        with_current_pane_id_override("%actor", || {
+            assert_eq!(current_pane_id_from_env(), Some("%actor".to_string()));
+        });
     }
 
     #[test]

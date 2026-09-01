@@ -23365,9 +23365,11 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
             && startup_ready_source.contains("agent_doc_tmux_io::target_current_command(")
             && route_dispatch_target.contains("agent_doc_tmux_io::target_window_id(")
             && route_startup_sync.contains("agent_doc_tmux_io::target_window_id(")
+            && tmux_io_source.contains("pub fn current_pane_id_from_env(")
             && tmux_io_source.contains("pub fn current_pane_id_from_env_or_tmux(")
             && claim_source.contains("agent_doc_tmux_io::pane_pid(")
-            && claim_source.contains("agent_doc_tmux_io::current_pane_id_from_env_or_tmux(")
+            && claim_source.contains("agent_doc_tmux_io::current_pane_id_from_env(")
+            && !claim_source.contains("agent_doc_tmux_io::current_pane_id_from_env_or_tmux(")
             && session_actor_cmd_source.contains("agent_doc_tmux_io::pane_pid(")
             && session_actor_cmd_source
                 .contains("agent_doc_tmux_io::current_pane_id_from_env_or_tmux(")

@@ -592,6 +592,41 @@ pub fn idle_queue_context_reset_ops_log_message(
     )
 }
 
+/// Transition emitted by [`StaleRecycleDeferralTracking`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StaleRecycleDeferralTransition {
+    EnteredAwaitTurnBoundary,
+    Unchanged,
+    Cleared,
+}
+
+/// Process-scoped history for a routine stale-binary recycle that cannot yet
+/// cross a turn boundary.
+///
+/// Polling the same deferred fact is not a new diagnostic or maintenance edge.
+/// The runtime adapter uses this state to emit one receipt on entry and to
+/// reduce expensive reconciliation while the unchanged deferral remains true.
+#[derive(Debug, Default)]
+pub struct StaleRecycleDeferralTracking {
+    awaiting_turn_boundary: bool,
+}
+
+impl StaleRecycleDeferralTracking {
+    pub fn awaiting_turn_boundary(&self) -> bool {
+        self.awaiting_turn_boundary
+    }
+
+    pub fn observe(&mut self, awaiting_turn_boundary: bool) -> StaleRecycleDeferralTransition {
+        let transition = match (self.awaiting_turn_boundary, awaiting_turn_boundary) {
+            (false, true) => StaleRecycleDeferralTransition::EnteredAwaitTurnBoundary,
+            (true, false) => StaleRecycleDeferralTransition::Cleared,
+            _ => StaleRecycleDeferralTransition::Unchanged,
+        };
+        self.awaiting_turn_boundary = awaiting_turn_boundary;
+        transition
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -604,6 +639,32 @@ mod tests {
             pane_busy: false,
             payload_still_pending: false,
         }
+    }
+
+    #[test]
+    fn stale_recycle_deferral_is_a_transition_not_a_poll_effect() {
+        let mut tracking = StaleRecycleDeferralTracking::default();
+
+        assert_eq!(
+            tracking.observe(true),
+            StaleRecycleDeferralTransition::EnteredAwaitTurnBoundary
+        );
+        assert!(tracking.awaiting_turn_boundary());
+        assert_eq!(
+            tracking.observe(true),
+            StaleRecycleDeferralTransition::Unchanged,
+            "an unchanged poll must not re-emit the diagnostic"
+        );
+        assert_eq!(
+            tracking.observe(false),
+            StaleRecycleDeferralTransition::Cleared
+        );
+        assert!(!tracking.awaiting_turn_boundary());
+        assert_eq!(
+            tracking.observe(true),
+            StaleRecycleDeferralTransition::EnteredAwaitTurnBoundary,
+            "clearing the deferral rearms a later episode"
+        );
     }
 
     #[test]

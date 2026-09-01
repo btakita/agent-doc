@@ -367,6 +367,17 @@ fn idle_watch_fast_path_can_sleep(
     queue_state_observed && actor_ready && !urgent_maintenance && !maintenance_due
 }
 
+fn stale_recycle_reconcile_due(
+    awaiting_turn_boundary: bool,
+    last_reconcile: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> bool {
+    !awaiting_turn_boundary
+        || last_reconcile.is_none_or(|last| {
+            now.duration_since(last) >= IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL
+        })
+}
+
 fn stale_recycle_safe_checkpoint(supervisor_stale: bool, inflight_handlers: u64) -> bool {
     supervisor_stale && inflight_handlers == 0
 }
@@ -1371,6 +1382,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let recycle_grace = agent_doc_controller_io::project_controller::recycle_idle_grace();
             let mut recycle_stale_since: Option<std::time::Instant> = None;
             let mut recycle_detected_logged = false;
+            // `#processesawaycomputer`: stale-binary discovery stays on the cheap
+            // 500ms local-stat path. Once the full policy says a routine recycle
+            // must await a turn boundary, however, that unchanged fact is
+            // quiescent: reconcile it at the bounded maintenance cadence and log
+            // only the transition into the deferral.
+            let mut stale_recycle_deferral =
+                agent_doc_supervisor::idle_watch::StaleRecycleDeferralTracking::default();
+            let mut last_stale_recycle_reconcile: Option<std::time::Instant> = None;
             // `#suprecyclestall` — set once a self-`execve` recycle has failed so we
             // do not re-attempt a hopeless hot-reload (which orphans the child / hangs
             // the pane) on every later idle boundary. The supervisor keeps running on
@@ -1550,6 +1569,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // and does not touch the controller or editor.
         let supervisor_stale_fast = shared.refresh_binary_stale();
         let now = std::time::Instant::now();
+        if !supervisor_stale_fast {
+            stale_recycle_deferral.observe(false);
+            last_stale_recycle_reconcile = None;
+        }
         if document_delivery_signal_watch.as_ref().is_some_and(|watch| {
             let mut observed = false;
             while watch.result.try_recv().is_ok() {
@@ -1767,7 +1790,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                 }
                 let actor_ready_fast = actor_state_is_ready(&shared);
-                let urgent_maintenance = supervisor_stale_fast
+                let stale_recycle_reconcile_due = supervisor_stale_fast
+                    && stale_recycle_reconcile_due(
+                        stale_recycle_deferral.awaiting_turn_boundary(),
+                        last_stale_recycle_reconcile,
+                        now,
+                    );
+                let urgent_maintenance = stale_recycle_reconcile_due
                     || context_reset_in_flight
                     || awaiting_clear_settle
                     || shared.restart_reexec.load(Ordering::Relaxed);
@@ -3645,7 +3674,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         matches!(recycle_action, SupervisorRecycleAction::RecycleDebounced),
                         turn_boundary,
                     );
+                let deferral_transition = stale_recycle_deferral
+                    .observe(routine_recycle_deferred_intra_turn);
                 if routine_recycle_deferred_intra_turn {
+                    last_stale_recycle_reconcile = Some(std::time::Instant::now());
+                } else {
+                    last_stale_recycle_reconcile = None;
+                }
+                if matches!(
+                    deferral_transition,
+                    agent_doc_supervisor::idle_watch::StaleRecycleDeferralTransition::EnteredAwaitTurnBoundary
+                ) {
                     log_event(
                         &mut session_log,
                         &format!(
@@ -5122,6 +5161,23 @@ mod tests {
         assert!(!idle_watch_fast_path_can_sleep(true, false, false, false));
         assert!(!idle_watch_fast_path_can_sleep(true, true, true, false));
         assert!(!idle_watch_fast_path_can_sleep(true, true, false, true));
+    }
+
+    #[test]
+    fn stale_recycle_deferral_reconciles_on_the_quiescent_cadence() {
+        let now = std::time::Instant::now();
+        assert!(stale_recycle_reconcile_due(false, None, now));
+        assert!(stale_recycle_reconcile_due(true, None, now));
+        assert!(!stale_recycle_reconcile_due(
+            true,
+            Some(now),
+            now + IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL / 2,
+        ));
+        assert!(stale_recycle_reconcile_due(
+            true,
+            Some(now),
+            now + IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL,
+        ));
     }
 
     #[test]

@@ -214,6 +214,12 @@ a closed actor record is replaceable through the stale-authority path.
   Routine idle-watch, stale-busy reconcile, and stale-binary hot-reload
   diagnostics must stay in the session log / ops log instead of painting over
   the foreground TUI after `/clear`, restart, or inter-queue-item recycle.
+- An unchanged routine stale-binary recycle deferral is quiescent state, not a
+  poll effect. The supervisor keeps the cheap 500 ms installed-binary identity
+  check, emits one `supervisor_binary_stale_recycle_deferred` receipt on entry,
+  and bounds full turn-boundary reconciliation to the quiescent maintenance
+  cadence until the deferral clears. This preserves boundary safety without
+  consuming sustained CPU or growing logs while an idle session waits.
 - Codex background-terminal banners are active-turn evidence. If recent pane
   output contains `Waiting for background terminal (... esc to interrupt)`, the
   supervisor idle-queue watch and route readiness checks must treat the pane as

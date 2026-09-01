@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.306
+
+- **Fix: idle stale supervisors no longer reconcile and log twice per second overnight.**
+
+The installed-binary identity probe remains responsive at 500 ms, but an
+unchanged routine recycle deferral now enters process-scoped transition state.
+While it waits for a safe turn boundary, expensive reconciliation runs only at
+the five-second quiescent cadence and the deferred receipt is emitted once per
+episode instead of on every poll.
+
 ## 0.35.305
 
 - **Fix: Run Agent Doc no longer exhausts queue-activation retries when the old editor baseline settles before its retained target.**

@@ -440,6 +440,7 @@ mod tests {
         );
 
         let current = CurrentRevision::Current {
+            lineage: "lineage-a".to_string(),
             state_vector: vec![1, 2, 3],
             live_editors: 1,
             delivery_converged: true,

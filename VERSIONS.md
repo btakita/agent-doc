@@ -2,6 +2,27 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.308
+
+- **Fix: document claims, harness identity, editor conflicts, stale supervisors, and retained-dead panes now react to authority transitions instead of repeating stale poll state.**
+
+Current document revisions now include the CRDT lineage, preventing a replacement
+document with a colliding state vector from reusing another lineage's cached queue
+head. Process-scoped Lazily projections edge-trigger route-owned reap decisions,
+stale-busy repairs, and actor-generation retirement, so unchanged polls cannot
+flood session logs, retry an obsolete generation, or accumulate process resources.
+Automatic prune captures registered dead-pane status and output before removing
+its ownership row and protects that pane through the same cleanup pass, preserving
+the crash evidence needed for recovery instead of deleting it immediately.
+Existing sessions now resolve harness authority as explicit live `agent:` then
+active actor then configured defaults, so a blank or temporarily unavailable CRDT
+projection cannot silently switch Codex to Claude during route, repair, re-entry,
+idle detection, or restart. The JetBrains component-patch and CRDT lanes share one
+File Cache Conflict guard; CRDT delivery drops the stale payload without touching
+editor or disk and waits for a real conflict-resolution edge instead of polling.
+
+- **JetBrains 0.2.369: CRDT remote delivery now honors IntelliJ File Cache Conflict authority.**
+
 ## 0.35.307
 
 - **Fix: every document command automatically recycles a stale supervisor at the next safe boundary.**

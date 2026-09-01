@@ -1963,19 +1963,18 @@ pub(crate) struct SupervisorShared {
     running: AtomicBool,
     /// CWD source tag for IPC `state` responses.
     cwd_source: &'static str,
-    /// Harness binary for harness-specific tmux submit behavior AND the harness
-    /// identity reported to the state backbone (authoritative actor record) via
-    /// IPC `state`. Mutable so an in-loop harness switch (`agent:` change →
-    /// `agent_restart_performed` fresh spawn) updates the lazily state immediately
-    /// instead of leaving the persisted actor record reading the old harness until
-    /// an unrelated reconcile catches up (`#actor-harness-switch-writeback`).
-    harness_binary: Mutex<String>,
+    /// Lazily-derived harness authority. A missing current `agent:` observation
+    /// keeps the active actor; only an explicit document edge can switch it.
+    harness_authority: agent_doc_supervisor::harness_authority::HarnessAuthorityState,
     /// Writer handle for IPC `inject`. Replaced on each spawn, cleared between restarts.
     inject_writer: SharedWriter,
     /// In-memory advisory projection of the prompt currently admitted for this
     /// actor generation. The controller's durable dispatch receipt remains
     /// authoritative; this only prevents a local duplicate write before Ready.
     prompt_dispatch_projection: Mutex<Option<PromptDispatchProjection>>,
+    /// Monotonic admission edge for stale-busy reconciliation. Polling terminal
+    /// evidence cannot create another repair effect until a new dispatch starts.
+    prompt_dispatch_epoch: AtomicU64,
     /// Claimed tmux pane that should receive supervisor-owned injected input.
     inject_pane: Option<String>,
     /// Filtered output and visible terminal projection for the current child process.
@@ -1995,10 +1994,13 @@ pub(crate) struct SupervisorShared {
     /// `Restart` handler from `binary_stale` so the idle-watch reexec branch owns the
     /// upgrade and the in-process host loop defers its restart-kill.
     restart_reexec: AtomicBool,
-    /// Owns the process lifetime of the binary-freshness Lazily graph.
-    _binary_freshness_scope: agent_doc_state_scope::ProcessScope,
+    /// Owns the process lifetime of the supervisor's Lazily graphs.
+    _process_scope: agent_doc_state_scope::ProcessScope,
     /// `#supkill-bg` — source observations and the derived freshness projection.
     binary_freshness: agent_doc_supervisor::binary_freshness::BinaryFreshnessState,
+    /// Lease for this process's authoritative actor generation. A controller CAS
+    /// conflict retires it and suppresses every later lifecycle write.
+    actor_generation_lease: agent_doc_supervisor::actor_generation::ActorGenerationLease,
     /// Flag: IPC requested a stop.
     stop_requested: AtomicBool,
     /// Flag: IPC requested a "Stop Agent" — kill the harness child but keep the
@@ -2050,10 +2052,17 @@ impl SupervisorShared {
         actor_state: Option<agent_doc_controller::actor::ActorState>,
         inject_pane: Option<String>,
     ) -> Self {
-        let binary_freshness_scope = agent_doc_state_scope::ProcessScope::new();
-        let binary_freshness = agent_doc_supervisor::binary_freshness::BinaryFreshnessState::new_in(
-            &binary_freshness_scope,
-        );
+        let process_scope = agent_doc_state_scope::ProcessScope::new();
+        let binary_freshness =
+            agent_doc_supervisor::binary_freshness::BinaryFreshnessState::new_in(&process_scope);
+        let actor_generation_lease =
+            agent_doc_supervisor::actor_generation::ActorGenerationLease::new_in(&process_scope);
+        let harness_authority =
+            agent_doc_supervisor::harness_authority::HarnessAuthorityState::new_in(
+                &process_scope,
+                Some(harness_binary.to_string()),
+                None,
+            );
         Self {
             supervisor_state: Mutex::new(SupervisorState::Healthy),
             actor_runtime,
@@ -2064,17 +2073,19 @@ impl SupervisorShared {
             restart_count: AtomicU32::new(0),
             running: AtomicBool::new(false),
             cwd_source,
-            harness_binary: Mutex::new(harness_binary.to_string()),
+            harness_authority,
             inject_writer: Mutex::new(None),
             prompt_dispatch_projection: Mutex::new(None),
+            prompt_dispatch_epoch: AtomicU64::new(0),
             inject_pane,
             output: SupervisorOutputState::default(),
             child_pid: AtomicU32::new(0),
             master_fd: AtomicI32::new(-1),
             restart_requested: AtomicBool::new(false),
             restart_reexec: AtomicBool::new(false),
-            _binary_freshness_scope: binary_freshness_scope,
+            _process_scope: process_scope,
             binary_freshness,
+            actor_generation_lease,
             stop_requested: AtomicBool::new(false),
             stop_agent_requested: AtomicBool::new(false),
             restart_mode: Mutex::new("continue".to_string()),
@@ -2094,7 +2105,21 @@ impl SupervisorShared {
     /// harness switch so IPC `state` reports the switched harness to the state
     /// backbone (`#actor-harness-switch-writeback`).
     fn current_harness(&self) -> String {
-        self.harness_binary.lock().clone()
+        agent_doc_harness::HarnessConfig::from_agent_name(&self.harness_authority.current().agent)
+            .binary
+    }
+
+    /// Resolve a current document observation against the active actor. Missing
+    /// `agent:` is deliberately inert; an explicit value is the only switch edge.
+    fn resolve_document_harness(
+        &self,
+        declared_agent: Option<&str>,
+        configured_default_agent: Option<&str>,
+    ) -> agent_doc_harness::HarnessConfig {
+        let selection = self
+            .harness_authority
+            .resolve_document_agent(declared_agent, configured_default_agent);
+        agent_doc_harness::HarnessConfig::from_agent_name(&selection.agent)
     }
 
     /// Update the harness identity after an in-loop `agent:` switch spawned a fresh
@@ -2112,7 +2137,8 @@ impl SupervisorShared {
     /// that already spawned the new harness — but it is logged loudly rather than
     /// swallowed, since a silent failure reintroduces exactly this bug.
     fn set_current_harness(&self, harness_binary: &str) {
-        *self.harness_binary.lock() = harness_binary.to_string();
+        self.harness_authority
+            .set_active_actor_harness(harness_binary);
         let Some(runtime) = self.actor_runtime.as_ref() else {
             return;
         };
@@ -2213,7 +2239,20 @@ impl SupervisorShared {
             key: key.clone(),
             admitted_at: std::time::Instant::now(),
         });
+        self.prompt_dispatch_epoch.fetch_add(1, Ordering::Relaxed);
         agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Accepted { key }
+    }
+
+    fn stale_busy_reconcile_effect_key(&self) -> String {
+        let generation = self
+            .actor_runtime
+            .as_ref()
+            .map(|runtime| runtime.generation)
+            .unwrap_or_default();
+        format!(
+            "generation-{generation}:dispatch-{}",
+            self.prompt_dispatch_epoch.load(Ordering::Relaxed)
+        )
     }
 
     fn prompt_dispatch_grace_active(&self, grace: std::time::Duration) -> bool {
@@ -2327,6 +2366,9 @@ impl SupervisorShared {
         caller: &str,
         reason: &str,
     ) {
+        if !self.actor_generation_lease.active() {
+            return;
+        }
         let Some(runtime) = self.actor_runtime.as_ref() else {
             return;
         };
@@ -2338,12 +2380,28 @@ impl SupervisorShared {
                 }
             }
             Err(err) => {
-                eprintln!(
-                    "[session-actor] warning: failed to record {} transition for {}: {}",
-                    state.as_str(),
-                    runtime.file.display(),
-                    err
-                );
+                let detail = format!("{err:#}");
+                match self.actor_generation_lease.observe_failure(&detail) {
+                    agent_doc_supervisor::actor_generation::ActorGenerationFailureTransition::Retired => {
+                        *self.actor_state.lock() = None;
+                        self.stop_requested.store(true, Ordering::Relaxed);
+                        self.kill_child();
+                        eprintln!(
+                            "[session-actor] retiring stale generation for {} after controller ownership advanced: {}",
+                            runtime.file.display(),
+                            detail
+                        );
+                    }
+                    agent_doc_supervisor::actor_generation::ActorGenerationFailureTransition::AlreadyRetired => {}
+                    agent_doc_supervisor::actor_generation::ActorGenerationFailureTransition::Retryable => {
+                        eprintln!(
+                            "[session-actor] warning: failed to record {} transition for {}: {}",
+                            state.as_str(),
+                            runtime.file.display(),
+                            detail
+                        );
+                    }
+                }
             }
         }
     }

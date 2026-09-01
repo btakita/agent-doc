@@ -59,7 +59,33 @@ pub(crate) fn resolve_harness_for_sync(file: &Path) -> agent_doc_harness::Harnes
     rc.set_doc_content(content);
     let fm = rc.frontmatter();
     let global_config = rc.global_config();
-    agent_doc_harness::HarnessConfig::from_context(&fm, &global_config)
+    let active_actor_harness = if fm
+        .agent
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        None
+    } else {
+        agent_doc_project_root_io::project_root_or_file_parent(file)
+            .ok()
+            .and_then(|project_root| {
+                agent_doc_controller_io::project_controller::authoritative_actor_binding(
+                    &project_root,
+                    file,
+                )
+                .ok()
+                .flatten()
+            })
+            .map(|record| record.harness)
+    };
+    let selection = agent_doc_supervisor::harness_authority::resolve_harness_authority(
+        &agent_doc_supervisor::harness_authority::HarnessAuthorityFacts {
+            declared_document_agent: fm.agent.clone(),
+            active_actor_harness,
+            configured_default_agent: global_config.default_agent.clone(),
+        },
+    );
+    agent_doc_harness::HarnessConfig::from_agent_name(&selection.agent)
 }
 
 pub(crate) fn protected_registered_pane_state(

@@ -411,6 +411,7 @@ private data class RemoteEditorApplyOutcome(
     val diskPersisted: Boolean,
     val editorText: String?,
     val editorNormalizedText: String? = null,
+    val fileCacheConflictDeferred: Boolean = false,
 )
 
 private enum class RemoteTextApplyDisposition {
@@ -462,6 +463,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             NativePatching::normalizeTemplateStructure,
             ::contentHash,
         )
+    private val fileCacheConflicts = FileCacheConflictPlane(ownershipContext)
     private val shadows = ConcurrentHashMap<String, String>()
     // Unlike [shadows], this frontier advances only after the controller
     // acknowledges the complete visible projection. A local CRDT mutation can
@@ -562,6 +564,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         shadows.clear()
         settledShadows.clear()
         templateValidation.clear()
+        fileCacheConflicts.clear()
     }
 
     private fun awaitWorkerTermination(timeoutMs: Long): Boolean {
@@ -1112,6 +1115,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     forwarder.deregister()
                 }
                 templateValidation.remove(filePath)
+                fileCacheConflicts.remove(filePath)
                 true
             }.get(CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         } catch (e: TimeoutException) {
@@ -1854,6 +1858,32 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 ?: return completeRemoteEditorApply(pending, RemoteEditorApplyOutcome(false, null), started)
             val document = FileDocumentManager.getInstance().getDocument(targetFile)
                 ?: return completeRemoteEditorApply(pending, RemoteEditorApplyOutcome(false, null), started)
+            val conflictDecision =
+                fileCacheConflicts.observe(
+                    pending.filePath,
+                    pending =
+                        IntelliJFileCacheConflictGuard.hasPending(targetFile) { message, error ->
+                            log.warn("[crdt-replica] $message", error)
+                        },
+                    diskWitness = targetFile.modificationStamp,
+                )
+            if (conflictDecision.deferMutation) {
+                if (conflictDecision.newlyPendingEdge) {
+                    log.warn(
+                        "[crdt-replica] File Cache Conflict pending for ${pending.filePath}; " +
+                            "dropping the stale remote payload without mutating editor or disk",
+                    )
+                }
+                return completeRemoteEditorApply(
+                    pending,
+                    RemoteEditorApplyOutcome(
+                        diskPersisted = false,
+                        editorText = document.text,
+                        fileCacheConflictDeferred = true,
+                    ),
+                    started,
+                )
+            }
             val fileDocumentManager = FileDocumentManager.getInstance()
             val documentWasUnsaved = fileDocumentManager.isDocumentUnsaved(document)
             if (
@@ -2163,11 +2193,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         outcome: RemoteEditorApplyOutcome,
         started: Long,
     ) {
-        val projectionVisible = shouldProjectVisibleRemoteDeliveryUtil(
-            outcome.editorText,
-            pending.targetText,
-            outcome.diskPersisted,
-        )
+        val projectionVisible =
+            !outcome.fileCacheConflictDeferred &&
+                shouldProjectVisibleRemoteDeliveryUtil(
+                    outcome.editorText,
+                    pending.targetText,
+                    outcome.diskPersisted,
+                )
         logSlow(
             "remote-apply-edt",
             pending.filePath,
@@ -2210,7 +2242,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     }
                 } finally {
                     remoteEditorApplyPaths.remove(pending.filePath)
-                    if (projectionPublished && outcome.editorNormalizedText == null) {
+                    if (outcome.fileCacheConflictDeferred) {
+                        // The current remote payload was derived before IntelliJ's
+                        // operator-owned conflict decision. Do not retain or poll it;
+                        // the next real editor/VFS/controller edge will pull current
+                        // canonical state after the conflict clears.
+                        retainedCanonicalProjectionPaths.remove(pending.filePath)
+                    } else if (projectionPublished && outcome.editorNormalizedText == null) {
                         retainedCanonicalProjectionPaths.remove(pending.filePath)
                         consecutiveNoOpReschedules.set(0)
                     } else if (outcome.editorNormalizedText != null) {

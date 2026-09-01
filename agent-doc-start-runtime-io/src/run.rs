@@ -742,13 +742,24 @@ pub fn run_with_reap_policy_and_resume(
     // `harness` was already resolved above for the early recursive-guard / shared
     // state; the spec re-resolves it (identical inputs ⇒ identical harness) and
     // also carries `base_args`/`resolved_env`/`capability_proof_required`.
+    let mut initial_launch_fm = fm.clone();
+    if initial_launch_fm
+        .agent
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        // Start admission already resolved the active actor. Preserve that
+        // authority through launch-spec construction when the live document
+        // projection temporarily omits `agent:`.
+        initial_launch_fm.agent = Some(harness.binary.clone());
+    }
     let initial_launch_spec = {
         let mut launch_log = StartRunLaunchLog {
             session_log: &mut session_log,
             route_owned,
         };
         agent_doc_supervisor_process_io::build_harness_launch_spec_with_resume(
-            &fm,
+            &initial_launch_fm,
             &global_config,
             &canonical,
             &mut launch_log,
@@ -759,7 +770,7 @@ pub fn run_with_reap_policy_and_resume(
     let mut initial_launch_args = initial_launch_spec.base_args.clone();
     let mut base_args = initial_launch_spec.fresh_base_args.clone();
     let mut resolved_env = initial_launch_spec.resolved_env.clone();
-    let mut capability_proof_frontmatter = fm.clone();
+    let mut capability_proof_frontmatter = initial_launch_fm;
     let mut active_resume_id = resume.as_ref().and_then(|request| match request {
         agent_doc_harness::ResumeRequest::Id(id) => Some(id.clone()),
         agent_doc_harness::ResumeRequest::Latest => None,
@@ -1121,7 +1132,17 @@ pub fn run_with_reap_policy_and_resume(
             .ok()
             .and_then(|content| frontmatter::parse(&content).ok().map(|(fm, _)| fm));
             match restart_fm {
-                Some(restart_fm) => {
+                Some(mut restart_fm) => {
+                    let authority_harness = shared.resolve_document_harness(
+                        restart_fm.agent.as_deref(),
+                        global_config.default_agent.as_deref(),
+                    );
+                    // `HarnessConfig::from_context` treats a missing `agent:` as
+                    // the global/built-in default. For a live supervisor that is
+                    // not a switch edge: retain the actor selected by the reactive
+                    // authority graph and materialize it only for launch-spec
+                    // construction.
+                    restart_fm.agent = Some(authority_harness.binary);
                     let mut launch_log = StartRunLaunchLog {
                         session_log: &mut session_log,
                         route_owned,
@@ -2564,6 +2585,7 @@ mod tests {
         )));
         assert!(!resume_claim_candidate_reads_disk(Ok(
             &CurrentRevision::Current {
+                lineage: "lineage-a".to_string(),
                 state_vector: Vec::new(),
                 live_editors: 1,
                 delivery_converged: true,

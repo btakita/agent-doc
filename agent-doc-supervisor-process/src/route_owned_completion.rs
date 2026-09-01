@@ -15,8 +15,9 @@ use agent_doc_harness::HarnessConfig;
 use agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision;
 use agent_doc_supervisor::route_owned::{
     RouteOwnedCycleFacts, RouteOwnedCyclePhase, RouteOwnedLivenessReason, RouteOwnedReapDecision,
-    RouteOwnedReapPolicy, route_owned_cycle_committed_since_start,
-    route_owned_liveness_reason_for_content, route_owned_reap_decision,
+    RouteOwnedReapEffect, RouteOwnedReapEffects, RouteOwnedReapPolicy,
+    route_owned_cycle_committed_since_start, route_owned_liveness_reason_for_content,
+    route_owned_reap_decision,
 };
 
 pub const ROUTE_OWNED_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(500);
@@ -140,7 +141,7 @@ where
                 ready_busy_reconcile_ticks,
             } = config;
             let mut baseline = baseline.as_ref().map(route_owned_facts_from_cycle_state);
-            let mut logged_busy_cycle: Option<String> = None;
+            let reap_effects = RouteOwnedReapEffects::new();
             let mut ready_busy_ticks: u32 = 0;
             let mut ready_busy_key: Option<(String, String)> = None;
             let mut ready_busy_logged_key: Option<(String, String)> = None;
@@ -152,16 +153,28 @@ where
                             && state.paused_queue_has_no_supervisor_drainable_head(&file)
                         {
                             let decision = route_owned_reap_decision(reap_policy, None);
-                            let event = format!(
-                                "route_owned_reap_decision policy={} decision={} reason={} cycle={} event={} suppression=paused_queue_no_supervisor_drainable_head",
-                                reap_policy.as_str(),
-                                if decision.reap { "reap" } else { "keep_alive" },
-                                decision.reason,
-                                cycle_state.cycle_id,
-                                cycle_state.last_event
-                            );
-                            log_session_event(&mut session_log, &event);
-                            agent_doc_ops_log_io::log_op(&file, &event);
+                            let effect = RouteOwnedReapEffect {
+                                policy: reap_policy,
+                                decision: decision.clone(),
+                                cycle_id: cycle_state.cycle_id.clone(),
+                                cycle_event: cycle_state.last_event.clone(),
+                                suppression: Some(
+                                    "paused_queue_no_supervisor_drainable_head".to_string(),
+                                ),
+                            };
+                            if let Some(effect) = reap_effects.observe_and_take(effect) {
+                                let event = format!(
+                                    "route_owned_reap_decision policy={} decision={} reason={} cycle={} event={} suppression={}",
+                                    effect.policy.as_str(),
+                                    if effect.decision.reap { "reap" } else { "keep_alive" },
+                                    effect.decision.reason,
+                                    effect.cycle_id,
+                                    effect.cycle_event,
+                                    effect.suppression.as_deref().unwrap_or("none"),
+                                );
+                                log_session_event(&mut session_log, &event);
+                                agent_doc_ops_log_io::log_op(&file, &event);
+                            }
                             if decision.reap {
                                 completed.store(true, Ordering::Relaxed);
                                 state.request_child_stop();
@@ -236,16 +249,23 @@ where
                             liveness_reason,
                         )
                     };
-                    let event = format!(
-                        "route_owned_reap_decision policy={} decision={} reason={} cycle={} event={}",
-                        reap_policy.as_str(),
-                        if decision.reap { "reap" } else { "keep_alive" },
-                        decision.reason,
-                        cycle_state.cycle_id,
-                        cycle_state.last_event
-                    );
                     let busy_guard = decision.reason.starts_with("live_pane_busy_no_idle_prompt");
-                    if !busy_guard || logged_busy_cycle.as_deref() != Some(&cycle_state.cycle_id) {
+                    let effect = RouteOwnedReapEffect {
+                        policy: reap_policy,
+                        decision: decision.clone(),
+                        cycle_id: cycle_state.cycle_id.clone(),
+                        cycle_event: cycle_state.last_event.clone(),
+                        suppression: None,
+                    };
+                    if let Some(effect) = reap_effects.observe_and_take(effect) {
+                        let event = format!(
+                            "route_owned_reap_decision policy={} decision={} reason={} cycle={} event={}",
+                            effect.policy.as_str(),
+                            if effect.decision.reap { "reap" } else { "keep_alive" },
+                            effect.decision.reason,
+                            effect.cycle_id,
+                            effect.cycle_event,
+                        );
                         log_session_event(&mut session_log, &event);
                         agent_doc_ops_log_io::log_op(&file, &event);
                     }
@@ -254,10 +274,7 @@ where
                         state.request_child_stop();
                         return;
                     }
-                    if busy_guard {
-                        logged_busy_cycle = Some(cycle_state.cycle_id.clone());
-                    } else {
-                        logged_busy_cycle = None;
+                    if !busy_guard {
                         baseline = Some(facts);
                     }
                 }

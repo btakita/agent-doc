@@ -421,11 +421,6 @@ pub(crate) fn purge_unregistered_dead_non_stash_panes_with_registry(
     purge_unregistered_dead_non_stash_panes_bulk_with_registry(tmux, &panes, registry);
 }
 
-pub(crate) fn purge_unregistered_dead_non_stash_panes_bulk(tmux: &Tmux, panes: &PaneMeta) {
-    let registry = agent_doc_session_registry_io::load().unwrap_or_default();
-    purge_unregistered_dead_non_stash_panes_bulk_with_registry(tmux, panes, &registry);
-}
-
 pub(crate) fn purge_unregistered_dead_non_stash_panes_bulk_with_registry(
     tmux: &Tmux,
     panes: &PaneMeta,

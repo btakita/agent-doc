@@ -6,6 +6,7 @@
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 
+pub mod actor_generation;
 pub mod agent_change;
 pub mod auto_install_stdio;
 pub mod auto_trigger;
@@ -15,6 +16,7 @@ pub mod config;
 pub mod crash_policy;
 pub mod detection;
 pub mod handoff;
+pub mod harness_authority;
 pub mod heartbeat;
 pub mod idle_reconcile;
 pub mod idle_revision;

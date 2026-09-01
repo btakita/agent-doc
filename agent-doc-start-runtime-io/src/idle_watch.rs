@@ -1331,6 +1331,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut last_dispatched: Option<String> = None;
             let queue_continuation_triggers =
                 agent_doc_supervisor::idle_watch::QueueContinuationTriggers::new();
+            let stale_busy_reconcile_effects =
+                agent_doc_supervisor::idle_reconcile::StaleBusyReconcileEffects::new();
             let mut last_context_reset_head: Option<String> = None;
             let mut last_context_clear_at: Option<u64> = None;
             let mut context_reset_in_flight = false;
@@ -2028,7 +2030,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                     _ => idle_busy_ticks = 0,
                 }
-                if stale_busy_idle_reconcile_decision(
+                let stale_busy_reconcile_due = stale_busy_idle_reconcile_decision(
                     actor_busy,
                     pane_busy_cue == Some(true),
                     turn_active,
@@ -2036,7 +2038,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     clear_cooldown_active,
                     idle_busy_ticks,
                     STALE_BUSY_RECONCILE_TICKS,
-                ) {
+                );
+                let stale_busy_reconcile_effect_due = stale_busy_reconcile_due
+                    && stale_busy_reconcile_effects
+                        .observe_and_take(shared.stale_busy_reconcile_effect_key());
+                if stale_busy_reconcile_effect_due {
                     shared.transition_actor_state(
                         agent_doc_controller::actor::ActorState::Ready,
                         "supervisor",
@@ -2064,6 +2070,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     eprintln!(
                         "[agent-doc] idle-queue watch: reconciled stale busy actor to ready from idle pane evidence (no pane kill)"
                     );
+                } else if stale_busy_reconcile_due {
+                    idle_busy_ticks = 0;
                 }
 
                 let queue_pause_reason =
@@ -2278,7 +2286,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     && let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content)
                 {
                     let global = agent_doc_config::load().unwrap_or_default();
-                    let resolved = agent_doc_harness::HarnessConfig::from_context(&fm, &global);
+                    let resolved = shared.resolve_document_harness(
+                        fm.agent.as_deref(),
+                        global.default_agent.as_deref(),
+                    );
                     let harness_changed = resolved.binary != launch_harness_binary;
                     if harness_changed {
                         let decision = agent_change_restart_decision_from_view(
@@ -5041,8 +5052,9 @@ mod tests {
         let doc = dir.path().join("memo.md");
         std::fs::write(&doc, "# memo\n").unwrap();
 
-        let revision = |sv: &[u8], live: usize, converged: bool| {
+        let revision = |lineage: &str, sv: &[u8], live: usize, converged: bool| {
             agent_doc_crdt_relay_io::CurrentRevision::Current {
+                lineage: lineage.to_string(),
                 state_vector: sv.to_vec(),
                 live_editors: live,
                 delivery_converged: converged,
@@ -5053,7 +5065,7 @@ mod tests {
             transition: IdleQueueTransition::Converged,
         };
 
-        let base = revision(b"sv-1", 1, true);
+        let base = revision("lineage-a", b"sv-1", 1, true);
         memoize_queue_head(&doc, Some(base.clone()), &observed);
         assert_eq!(
             memoized_queue_head(&doc, &base),
@@ -5061,13 +5073,15 @@ mod tests {
             "an unchanged revision must be served from the memo, not a full-text read"
         );
 
-        // Every field of the revision is part of the identity: the state vector
-        // is the text, and `live_editors` / `delivery_converged` change the
-        // transition the drain acts on even when the text has not moved.
+        // Every field of the revision is part of the identity: lineage prevents
+        // a canonical replacement from colliding with an earlier state vector,
+        // while `live_editors` / `delivery_converged` change the transition the
+        // drain acts on even when the text has not moved.
         for moved in [
-            revision(b"sv-2", 1, true),
-            revision(b"sv-1", 2, true),
-            revision(b"sv-1", 1, false),
+            revision("lineage-b", b"sv-1", 1, true),
+            revision("lineage-a", b"sv-2", 1, true),
+            revision("lineage-a", b"sv-1", 2, true),
+            revision("lineage-a", b"sv-1", 1, false),
         ] {
             assert_eq!(
                 memoized_queue_head(&doc, &moved),

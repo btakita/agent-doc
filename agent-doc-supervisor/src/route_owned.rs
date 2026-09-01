@@ -8,6 +8,8 @@
 use std::{fmt, str::FromStr};
 
 use agent_doc_prompt_lines::text_line_looks_like_prompt_target;
+use agent_doc_state_scope::LocalProcessScope;
+use lazily::{Computed, Source};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteOwnedReapPolicy {
@@ -101,6 +103,81 @@ impl fmt::Display for RouteOwnedLivenessReason {
 pub struct RouteOwnedReapDecision {
     pub reap: bool,
     pub reason: String,
+}
+
+/// One fully-derived route-owned completion effect.
+///
+/// Polling observes these facts; only a change in this value licenses another
+/// diagnostic/effect receipt. This keeps liveness state in Lazily instead of
+/// turning every timer tick into a command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteOwnedReapEffect {
+    pub policy: RouteOwnedReapPolicy,
+    pub decision: RouteOwnedReapDecision,
+    pub cycle_id: String,
+    pub cycle_event: String,
+    pub suppression: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct RouteOwnedReapProjection {
+    observed: Option<RouteOwnedReapEffect>,
+    consumed: Option<RouteOwnedReapEffect>,
+}
+
+impl RouteOwnedReapProjection {
+    fn pending(&self) -> Option<RouteOwnedReapEffect> {
+        (self.observed != self.consumed)
+            .then(|| self.observed.clone())
+            .flatten()
+    }
+}
+
+/// Lazily-owned edge detector for route-owned completion effects.
+pub struct RouteOwnedReapEffects {
+    scope: LocalProcessScope,
+    projection: Source<RouteOwnedReapProjection>,
+    pending: Computed<Option<RouteOwnedReapEffect>>,
+}
+
+impl Default for RouteOwnedReapEffects {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RouteOwnedReapEffects {
+    pub fn new() -> Self {
+        let scope = LocalProcessScope::new();
+        let projection = scope.ctx().source(RouteOwnedReapProjection::default());
+        let projection_for_pending = projection;
+        let pending = scope
+            .ctx()
+            .computed(move |ctx| ctx.get(&projection_for_pending).pending());
+        Self {
+            scope,
+            projection,
+            pending,
+        }
+    }
+
+    /// Observe state and consume at most one effect for this exact transition.
+    pub fn observe_and_take(
+        &self,
+        observation: RouteOwnedReapEffect,
+    ) -> Option<RouteOwnedReapEffect> {
+        let mut projection = self.scope.ctx().get(&self.projection);
+        if projection.observed.as_ref() != Some(&observation) {
+            projection.observed = Some(observation);
+            self.scope.ctx().set(&self.projection, projection);
+        }
+
+        let effect = self.scope.ctx().get(&self.pending)?;
+        let mut projection = self.scope.ctx().get(&self.projection);
+        projection.consumed = Some(effect.clone());
+        self.scope.ctx().set(&self.projection, projection);
+        Some(effect)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -276,6 +353,39 @@ fn route_owned_line_is_response_heading(line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reap_effect(cycle: &str, reason: &str) -> RouteOwnedReapEffect {
+        RouteOwnedReapEffect {
+            policy: RouteOwnedReapPolicy::Auto,
+            decision: RouteOwnedReapDecision {
+                reap: false,
+                reason: reason.to_string(),
+            },
+            cycle_id: cycle.to_string(),
+            cycle_event: "commit_success".to_string(),
+            suppression: None,
+        }
+    }
+
+    #[test]
+    fn route_owned_reap_effect_is_edge_triggered_by_lazily_state() {
+        let effects = RouteOwnedReapEffects::new();
+        let first = reap_effect("cycle-a", "queue_non_empty");
+
+        assert_eq!(effects.observe_and_take(first.clone()), Some(first.clone()));
+        assert_eq!(
+            effects.observe_and_take(first),
+            None,
+            "an unchanged poll must not emit another log or completion effect"
+        );
+
+        let changed = reap_effect("cycle-b", "document_dirty_after_commit");
+        assert_eq!(
+            effects.observe_and_take(changed.clone()),
+            Some(changed),
+            "a new lifecycle transition must emit exactly once"
+        );
+    }
 
     #[test]
     fn auto_reaps_without_liveness_signals() {

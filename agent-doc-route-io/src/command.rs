@@ -12,7 +12,6 @@ use crate::pane_resolution::{ManagedPaneResolutionEffects, cleanup_failed_route_
 use crate::session_resolution::resolve_target_session;
 use crate::startup::RouteStartupEffects;
 use crate::startup_debounce::await_idle;
-use agent_doc_harness::HarnessConfig;
 use agent_doc_run_context_io::AgentDocContextExt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,7 +148,8 @@ pub fn run_with_tmux_with_options(
     // deterministically, while the bare form relies on the agent inferring the
     // workflow from ambient instructions. Codex is unaffected: its native
     // `trigger_command` is already the bare form.
-    let harness = HarnessConfig::from_context(&fm, &global_config);
+    let harness =
+        crate::startup_harness::resolve_harness_from_authorities(file, &fm, &global_config);
 
     // Use absolute path for trigger commands to avoid CWD-dependent resolution
     // when the pane's CWD differs from the invoker's (e.g., narrowed to a

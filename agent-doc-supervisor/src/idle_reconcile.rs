@@ -4,7 +4,69 @@
 //! from observed pane facts. It does not capture panes, inspect harness output,
 //! mutate actor state, write logs, or dispatch queue work.
 
+use agent_doc_state_scope::LocalProcessScope;
+use lazily::{Computed, Source};
+
 pub const QUEUED_DRAFT_BLOCKER_REASON: &str = "queued draft in composer";
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct StaleBusyReconcileProjection {
+    observed_key: Option<String>,
+    consumed_key: Option<String>,
+}
+
+impl StaleBusyReconcileProjection {
+    fn ready(&self) -> bool {
+        self.observed_key.is_some() && self.observed_key != self.consumed_key
+    }
+}
+
+/// Lazily-owned edge detector for the stale-busy repair effect.
+///
+/// A poll can rediscover stale terminal evidence indefinitely. Only a new actor
+/// dispatch epoch licenses another controller write and diagnostic.
+pub struct StaleBusyReconcileEffects {
+    scope: LocalProcessScope,
+    projection: Source<StaleBusyReconcileProjection>,
+    ready: Computed<bool>,
+}
+
+impl Default for StaleBusyReconcileEffects {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StaleBusyReconcileEffects {
+    pub fn new() -> Self {
+        let scope = LocalProcessScope::new();
+        let projection = scope.ctx().source(StaleBusyReconcileProjection::default());
+        let projection_for_ready = projection;
+        let ready = scope
+            .ctx()
+            .computed(move |ctx| ctx.get(&projection_for_ready).ready());
+        Self {
+            scope,
+            projection,
+            ready,
+        }
+    }
+
+    pub fn observe_and_take(&self, key: String) -> bool {
+        let mut projection = self.scope.ctx().get(&self.projection);
+        if projection.observed_key.as_ref() != Some(&key) {
+            projection.observed_key = Some(key);
+            self.scope.ctx().set(&self.projection, projection);
+        }
+        if !self.scope.ctx().get(&self.ready) {
+            return false;
+        }
+        let mut projection = self.scope.ctx().get(&self.projection);
+        projection.consumed_key = projection.observed_key.clone();
+        self.scope.ctx().set(&self.projection, projection);
+        true
+    }
+}
 
 pub fn recoverable_ready_busy_blocker_reason(reason: &str) -> bool {
     matches!(reason, QUEUED_DRAFT_BLOCKER_REASON)
@@ -53,6 +115,14 @@ mod tests {
     use super::*;
 
     const REQUIRED_TICKS: u32 = 4;
+
+    #[test]
+    fn stale_busy_reconcile_effect_fires_once_per_dispatch_epoch() {
+        let effects = StaleBusyReconcileEffects::new();
+        assert!(effects.observe_and_take("generation-7:dispatch-11".to_string()));
+        assert!(!effects.observe_and_take("generation-7:dispatch-11".to_string()));
+        assert!(effects.observe_and_take("generation-7:dispatch-12".to_string()));
+    }
 
     #[test]
     fn stale_busy_reconcile_fires_after_debounce_over_idle_pane() {

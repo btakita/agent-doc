@@ -1864,6 +1864,49 @@ mod tests {
         );
     }
 
+    #[test]
+    fn empty_scaffold_queue_is_not_a_supervisor_continuation() {
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: 7dac5d22-4f53-436a-b3ce-e0d7def9df7c\n",
+            "resume:\n",
+            "  claude: ec8b5a35-4854-49e4-b6bd-39c1b2908ca8\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n\n",
+            "<!-- agent:boundary:519683dd -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Queue\n\n",
+            "<!-- agent:queue go -->\n",
+            "- \n",
+            "<!-- /agent:queue -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Icebox\n\n",
+            "<!-- agent:icebox -->\n",
+            "<!-- /agent:icebox -->\n",
+        );
+
+        assert_eq!(
+            content.len(),
+            536,
+            "fixture must match the claimed document"
+        );
+        assert_eq!(
+            live_drainable_continuation_head(content, DrainScope::Supervisor),
+            None,
+            "an empty scaffold bullet must never arm the idle watcher",
+        );
+        assert_eq!(drainable_head_count(content), 0);
+    }
+
     /// `#qstartinert` guard: the explicit halts must still stop drainability.
     #[test]
     fn drainable_head_count_respects_explicit_halts_without_legacy_flag() {

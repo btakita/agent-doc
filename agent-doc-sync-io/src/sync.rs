@@ -231,7 +231,7 @@ use tmux_router::FileResolution;
 
 mod layout;
 pub(crate) use layout::*;
-mod pane_repair;
+pub(crate) mod pane_repair;
 pub(crate) use pane_repair::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

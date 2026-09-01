@@ -1027,6 +1027,11 @@ pub enum CurrentRevision {
     EditorAttachedMissingReplica,
     /// The compact authoritative canonical frontier and related readiness state.
     Current {
+        /// Identity of the canonical CRDT lineage. A full-text replacement can
+        /// restart the state vector at the same bytes as the prior lineage, so
+        /// the vector alone is not a safe memoization key.
+        #[serde(default)]
+        lineage: String,
         state_vector: Vec<u8>,
         live_editors: usize,
         delivery_converged: bool,
@@ -1050,6 +1055,7 @@ pub fn current_revision_for_file_with_authority(
     let hub = handle.lock();
 
     Ok(CurrentRevision::Current {
+        lineage: hub.lineage().to_string(),
         state_vector: hub.canonical_state_vector(),
         live_editors: hub.live_count(),
         delivery_converged: hub.delivery_converged(),

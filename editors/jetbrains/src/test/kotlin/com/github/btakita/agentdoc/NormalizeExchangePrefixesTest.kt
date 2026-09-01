@@ -322,7 +322,7 @@ One.
         ).first { Files.exists(it) }
         val source = Files.readString(sourcePath)
 
-        assertTrue(source.contains("hasPendingMemoryDiskConflict(targetFile)"))
+        assertTrue(source.contains("IntelliJFileCacheConflictGuard.hasPending(targetFile)"))
         assertTrue(source.contains("PatchApplyCapture.Rejected(\"file_cache_conflict_pending\")"))
         assertTrue(source.contains("ui_outcome=real_component_conflict"))
         assertTrue(source.contains("File Cache Conflict pending for") && source.contains("rejecting patch without mutating document"))
@@ -392,7 +392,7 @@ One.
         val patchWatcher = Files.readString(patchWatcherPath)
         val visualHighlighter = Files.readString(visualHighlighterPath)
 
-        val conflict = patchWatcher.indexOf("hasPendingMemoryDiskConflict(targetFile)")
+        val conflict = patchWatcher.indexOf("IntelliJFileCacheConflictGuard.hasPending(targetFile)")
         val conflictRefresh = patchWatcher.indexOf("refreshVisualHighlightersAfterFileCacheConflict(targetFile, \"blocked\")")
 
         assertTrue(visualHighlighter.contains("fun refreshFile(file: VirtualFile)"))

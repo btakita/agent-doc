@@ -1105,7 +1105,30 @@ fn prepare_start_runtime_with_admission(
         close_stale_start_actors(&project_root, &mut session_log, route_owned);
     }
 
-    let harness = agent_doc_harness::HarnessConfig::from_context(&fm, &global_config);
+    let active_actor_harness = if admission.preserves_session_lifecycle()
+        && fm
+            .agent
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+    {
+        agent_doc_controller_io::project_controller::authoritative_actor_binding(
+            &project_root,
+            &canonical,
+        )
+        .ok()
+        .flatten()
+        .map(|record| record.harness)
+    } else {
+        None
+    };
+    let harness_selection = agent_doc_supervisor::harness_authority::resolve_harness_authority(
+        &agent_doc_supervisor::harness_authority::HarnessAuthorityFacts {
+            declared_document_agent: fm.agent.clone(),
+            active_actor_harness,
+            configured_default_agent: global_config.default_agent.clone(),
+        },
+    );
+    let harness = agent_doc_harness::HarnessConfig::from_agent_name(&harness_selection.agent);
     let stderr_redirect = {
         let mut launch_log = StartAdmissionLaunchLog {
             session_log: &mut session_log,

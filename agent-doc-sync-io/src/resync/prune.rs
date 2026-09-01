@@ -91,6 +91,12 @@ pub fn prune_with_tmux_timed_in_mode(
     tracing::debug!("resync::prune start");
     let mut timings = Vec::new();
     let registry_path = agent_doc_session_registry_io::registry_path();
+    // Keep one coherent ownership snapshot for the whole cleanup pass. A dead
+    // registered pane must be diagnosed before tmux-router forgets its document
+    // and session identity, and it must not become eligible for retained-dead
+    // pane deletion merely because the preceding phase removed its row.
+    let registry_before_prune = agent_doc_session_registry_io::load()?;
+    capture_registered_dead_pane_diagnostics(tmux, &registry_before_prune);
     let removed = record_prune_phase(&mut timings, "prune_registry", || {
         tmux_router::prune(&registry_path, tmux)
     })?;
@@ -138,12 +144,37 @@ pub fn prune_with_tmux_timed_in_mode(
     }
     if should_prune_dead_non_stash(cleanup_mode) {
         record_prune_phase(&mut timings, "prune_dead_non_stash", || {
-            purge_unregistered_dead_non_stash_panes_bulk(tmux, &panes)
+            purge_unregistered_dead_non_stash_panes_bulk_with_registry(
+                tmux,
+                &panes,
+                &registry_before_prune,
+            )
         });
     } else {
         record_prune_phase(&mut timings, "prune_dead_non_stash", || {});
     }
     Ok((removed, timings))
+}
+
+fn capture_registered_dead_pane_diagnostics(tmux: &Tmux, registry: &tmux_router::Registry) {
+    for (key, entry) in registry {
+        if !tmux.pane_dead(&entry.pane) {
+            continue;
+        }
+        let session_id = registry_entry_session_id(key, entry);
+        if let Err(err) = crate::sync::pane_repair::capture_dead_pane_diagnostics(
+            tmux,
+            Path::new(&entry.file),
+            session_id,
+            &entry.pane,
+            Some(&entry.window),
+        ) {
+            eprintln!(
+                "resync: failed to capture retained-dead pane diagnostics for {}: {}",
+                entry.pane, err
+            );
+        }
+    }
 }
 
 fn should_prune_dead_non_stash(cleanup_mode: PruneCleanupMode) -> bool {
@@ -428,6 +459,47 @@ mod tests {
         assert!(should_prune_dead_non_stash(
             PruneCleanupMode::PreserveLiveAgentStashPanes
         ));
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn prune_captures_and_preserves_registered_dead_pane_for_the_cleanup_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("crashed.md");
+        std::fs::write(&doc, "# Crashed\n").unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("resync-prune-retained-dead-evidence");
+        let live_pane = iso.auto_start("test", dir.path()).unwrap();
+        let dead_pane = iso.split_window(&live_pane, dir.path(), "-dh").unwrap();
+        iso.enable_remain_on_exit(&dead_pane).unwrap();
+        drive_pane_to_retained_dead(
+            &iso,
+            &dead_pane,
+            "printf 'crash evidence\\n'; exit 17",
+            std::time::Duration::from_secs(6),
+        );
+
+        let mut registry = SessionRegistry::new();
+        registry.insert(
+            "crash-session".to_string(),
+            test_entry(&dead_pane, &doc.to_string_lossy()),
+        );
+        agent_doc_session_registry_io::save(&registry).unwrap();
+
+        let (removed, _) = prune_with_tmux_timed(&iso).unwrap();
+
+        assert_eq!(removed, 1, "the dead registry row should be pruned");
+        assert!(
+            iso.pane_dead(&dead_pane),
+            "the pane registered at pass start must remain inspectable through that pass"
+        );
+        let capture_dir = dir.path().join(".agent-doc/logs/dead-panes");
+        assert!(
+            std::fs::read_dir(capture_dir)
+                .unwrap()
+                .any(|entry| entry.is_ok()),
+            "the pane tail should be persisted before its ownership row is removed"
+        );
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]

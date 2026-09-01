@@ -15,8 +15,6 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.util.Alarm
 import java.io.File
 import java.time.Instant
-import java.lang.reflect.Field
-import java.lang.reflect.Method
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.SwingUtilities
@@ -74,7 +72,6 @@ class PatchWatcher(private val project: Project) : Disposable {
     /** Boundary reposition requests delayed after a stale proof/apply attempt. */
     private val scheduledRepositionRetries = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    @Volatile private var memoryDiskConflictReflectionWarned = false
 
     /** Immutable EDT capture consumed by the socket listener worker. */
     private sealed interface PatchApplyCapture {
@@ -842,7 +839,11 @@ class PatchWatcher(private val project: Project) : Disposable {
             return PatchApplyCapture.Detached(targetFile, content)
         }
 
-        if (hasPendingMemoryDiskConflict(targetFile)) {
+        if (
+            IntelliJFileCacheConflictGuard.hasPending(targetFile) { message, error ->
+                LOG.warn("[patch-watcher] $message", error)
+            }
+        ) {
             val proof = fileCacheConflictProof(patch, document, targetFile, fdm)
             recordFileCacheConflictOps(
                 patch,
@@ -1219,50 +1220,6 @@ class PatchWatcher(private val project: Project) : Disposable {
         } catch (e: Exception) {
             LOG.warn("[patch-watcher] unable to refresh visual highlighters after File Cache Conflict $outcome for ${targetFile.path}", e)
         }
-    }
-
-    private fun hasPendingMemoryDiskConflict(targetFile: VirtualFile): Boolean {
-        val fdm = FileDocumentManager.getInstance()
-        return try {
-            val resolverField = findFieldInHierarchy(fdm.javaClass, "myConflictResolver")
-                ?: return false
-            resolverField.isAccessible = true
-            val resolver = resolverField.get(fdm) ?: return false
-            val hasConflict = findMethodInHierarchy(resolver.javaClass, "hasConflict", VirtualFile::class.java)
-                ?: return false
-            hasConflict.isAccessible = true
-            hasConflict.invoke(resolver, targetFile) as? Boolean ?: false
-        } catch (e: Exception) {
-            if (!memoryDiskConflictReflectionWarned) {
-                memoryDiskConflictReflectionWarned = true
-                LOG.warn("[patch-watcher] unable to inspect IntelliJ File Cache Conflict state; proceeding without conflict guard", e)
-            }
-            false
-        }
-    }
-
-    private fun findFieldInHierarchy(type: Class<*>, name: String): Field? {
-        var current: Class<*>? = type
-        while (current != null) {
-            try {
-                return current.getDeclaredField(name)
-            } catch (_: NoSuchFieldException) {
-                current = current.superclass
-            }
-        }
-        return null
-    }
-
-    private fun findMethodInHierarchy(type: Class<*>, name: String, vararg parameterTypes: Class<*>): Method? {
-        var current: Class<*>? = type
-        while (current != null) {
-            try {
-                return current.getDeclaredMethod(name, *parameterTypes)
-            } catch (_: NoSuchMethodException) {
-                current = current.superclass
-            }
-        }
-        return null
     }
 
     private fun applyProofStillCurrent(

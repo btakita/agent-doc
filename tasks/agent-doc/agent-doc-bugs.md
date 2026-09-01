@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -80,8 +80,7 @@ The JetBrains 0.2.368 package is installed, but the live IDE still reports 0.2.3
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- 🚧 agent-doc commands should automatically recycle the supervisor if stale, assuming the stale check is fast. Ideally the stale state should be handled via lazily state.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

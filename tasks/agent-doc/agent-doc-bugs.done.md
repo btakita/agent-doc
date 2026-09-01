@@ -25,3 +25,4 @@
 - 2026-08-27 [#fixhttpsgithub] Fix https://github.com/btakita/agent-doc/issues/46. release + publish
 - 2026-08-28 [#monsterrodholderstmuxpan] The monsterrodholders.md tmux pane clashed yet again. Should this now be fixed or is more fixing needed?
 - 2026-08-31 [#fixissuerelease] Fix issue #48 and release.
+- 2026-08-31 [#fixrunbackend] Fix Run Agent Doc on backend.md:

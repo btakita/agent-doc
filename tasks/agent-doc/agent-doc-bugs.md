@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a05913-bfc1-7ce0-969a-df6350db8622
+  codex: 01a05a70-bc53-7611-bccd-24895dd7f479
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -123,6 +123,33 @@ Architecture closeout:
 - Transition table covered: resolved versus exhausted executable search; retryable failure versus restart-required native state; explicit pane, positioned pane, process pane, or provision-new claim.
 - Reactive topology: immutable inputs enter pure decision functions; existing one-shot native-load and claim boundaries perform effects. No polling island, ambient tmux authority, or new long-lived reactive node was added.
 - Edit surfaces and tests stayed within the JetBrains resolver/native loader, claim/tmux boundaries, release metadata, and their focused regressions.
+❯ 🚧 Fix Run Agent Doc on backend.md:
+```
+failed to activate queue in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md: route_queue_activation: retained route write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md converged to a newer editor projection; recovery=retry_crdt_merge
+```
+
+### Re: Fix Run Agent Doc on backend.md — gpt-5
+
+> **Queue prompt:**
+>
+> do [#fixrunbackend]
+
+
+Fixed the live runtime and the agent-doc cause.
+
+The backend document is no longer blocked by a retained write. The recovery check proved the prior response is committed and no write remains retained; the remaining editor/disk divergence is a fresh unanswered live-buffer edit, so the next backend agent-doc cycle can admit and answer it without force-disk recovery. The corrected local runtime reports `agent-doc 0.35.305`, and its supervisors/controllers have been marked for idle-boundary recycle.
+
+The incident logs exposed the exact bug: all three queue-activation attempts had the same `expected_hash` and the controller's current hash equaled that expected baseline, but the route waiter classified any converged text unequal to its target as a “newer editor projection.” It therefore mistook the unchanged old baseline for concurrent drift and repeated the same doomed merge.
+
+The route projection now models the three real states explicitly:
+
+- exact retained target: continue dispatch;
+- unchanged expected-current baseline: remain pending until the target becomes visible;
+- genuinely third editor projection: re-read and CRDT re-merge.
+
+The realtime workflow spec and a focused regression test cover that transition table. The change stays inside the existing route-owned convergence effect: no new polling node, controller, or ambient authority was introduced.
+
+Verification passed: the focused route regression, full `make check`, `git diff --check`, local `make install`, and the single release-parity `make install-full`. Commit `3d7124c7a` is pushed to `main`; tag `v0.35.305` is pushed. GitHub CI is in progress, while the Release and PyPI workflows are queued, so publication will complete through the normal tag-driven path.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -135,6 +162,9 @@ Architecture closeout:
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
+```
+failed to activate queue in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md: route_queue_activation: retained route write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md converged to a newer editor projection; recovery=retry_crdt_merge
+```
 - [/] [#restartintellijidea] Restart IntelliJ IDEA so installed agent-doc JetBrains 0.2.368 becomes live, then confirm native FFI loads through the resolved agent-doc executable and pane synchronization remains stable.
 <!-- /agent:backlog -->
 

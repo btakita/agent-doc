@@ -32,6 +32,33 @@ Issue #47 fixed on main as 0.35.303; release tag held pending PyPI quota decisio
 Compacted content:
 - Archived 8 response topic(s): Issue #47 fixed; 0.35.303 publication blocked on PyPI quota; Response; Response; 5 more
 - Prior summary/context: prior compacted content: Archived 16 response topic(s): contracts.md supervisor timeout fixed and released; Fix issue...
+<!-- patch:exchange -->
+### Re: Automatic stale-supervisor recycle — gpt-5
+
+> **Queue prompt:** agent-doc commands should automatically recycle the supervisor if stale, assuming the stale check is fast. Ideally the stale state should be handled via lazily state.
+
+Implemented and released in agent-doc 0.35.307 (`6eb28a846`, tag
+`v0.35.307`). Every command that names an existing markdown session document
+now runs one central, fail-open supervisor freshness probe at CLI entry. The
+probe has a 250 ms response ceiling and schedules the existing idempotent
+safe-boundary recycle when staleness is proven, so it never kills an active
+turn or waits for recycle completion.
+
+The supervisor `pid` RPC is now a genuinely lightweight query: it no longer
+builds the full editor-authority state snapshot. It refreshes and returns a
+process-scoped Lazily `Source` → `Computed<bool>` binary-freshness projection,
+replacing the manually synchronized atomic stale flag. Rolling upgrades remain
+compatible: an older supervisor that omits `binary_stale` is checked by comparing
+the returned PID's running executable inode with the installed binary inode,
+without reading controller SQLite state.
+
+Verification passed for the Lazily transition model, fresh/stale PID responses,
+old-supervisor fallback, central command-entry wiring, and the no-SQLite/no-full-
+snapshot hot-path invariants. The full `make check`, local install, and the single
+fat-LTO `make install-full` release-parity build passed. `main` and the release
+tag are pushed; CI/Book/Pages were in progress and Release/PyPI queued at the
+required one-time post-push observation.
+<!-- /patch:exchange -->
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

@@ -73,6 +73,24 @@ That would free about 1.68 GB. Deletion is permanent and breaks installs pinne
 ### Re: Response
 
 The PyPI login page is open and active in Brave. Please complete login and 2FA, then reply “logged in.”
+
+### Re: Response
+
+> **Queue prompt:** Fix issue #47 and release + publish.
+
+Published agent-doc v0.35.303 successfully.
+
+- Fixed and closed issue #47.
+- Fixed first-delete resurrection in JetBrains editor projections.
+- Preserved deferred mutation plans so captured --backlog-add intent survives same-capture recovery.
+- Allowed attached tmux policy resolution without unavailable editor-replica reads; auto-sync is working after the IDEA restart.
+- Verified docs.md Run Agent Doc did submit text plus Enter to Claude Code; delivery took about 4.4 seconds during hot reload, and the pane actively processed it, so no lost-submit code change was warranted.
+- Deleted every PyPI release older than 0.35.0: 155 releases / 363 files removed; 0.35.0 and newer preserved.
+- GitHub Release and PyPI workflows passed. GitHub has six native assets; PyPI has four wheels and zero releases below 0.35.0.
+- Installed and verified agent-doc 0.35.303 locally, including JetBrains 0.2.367 and VS Code 0.2.69.
+- Commits: 6d94b65a1 and 10de5f73c; tag v0.35.303 points to 10de5f73c.
+
+The newly typed queue item “Fix issue #48 and release.” was preserved for the next cycle.
 <!-- agent:boundary:aeef9436:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -82,10 +100,12 @@ The PyPI login page is open and active in Brave. Please complete login and 2FA, 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 do [#fixissuerelease]
 - ⏭️ Fix issue #47 and release + publish.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
+- [ ] 🚧 [#fixissuerelease] Fix issue #48 and release.
 - [/] [#restartintellijidea] [operator-verify] Restart IntelliJ IDEA so installed agent-doc JetBrains 0.2.365 becomes live, then confirm a native patch ACK and stable monsterrodholders.md pane.
 <!-- /agent:backlog -->
 

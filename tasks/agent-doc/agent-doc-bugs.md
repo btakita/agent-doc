@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a05a70-bc53-7611-bccd-24895dd7f479
+  codex: 01a05d26-8cec-7702-9b35-bc5446b45d50
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -123,7 +123,7 @@ Architecture closeout:
 - Transition table covered: resolved versus exhausted executable search; retryable failure versus restart-required native state; explicit pane, positioned pane, process pane, or provision-new claim.
 - Reactive topology: immutable inputs enter pure decision functions; existing one-shot native-load and claim boundaries perform effects. No polling island, ambient tmux authority, or new long-lived reactive node was added.
 - Edit surfaces and tests stayed within the JetBrains resolver/native loader, claim/tmux boundaries, release metadata, and their focused regressions.
-❯ 🚧 Fix Run Agent Doc on backend.md:
+❯ Fix Run Agent Doc on backend.md:
 ```
 failed to activate queue in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md: route_queue_activation: retained route write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md converged to a newer editor projection; recovery=retry_crdt_merge
 ```
@@ -150,6 +150,32 @@ The route projection now models the three real states explicitly:
 The realtime workflow spec and a focused regression test cover that transition table. The change stays inside the existing route-owned convergence effect: no new polling node, controller, or ambient authority was introduced.
 
 Verification passed: the focused route regression, full `make check`, `git diff --check`, local `make install`, and the single release-parity `make install-full`. Commit `3d7124c7a` is pushed to `main`; tag `v0.35.305` is pushed. GitHub CI is in progress, while the Release and PyPI workflows are queued, so publication will complete through the normal tag-driven path.
+
+### Re: Response
+
+> **Queue prompt:**
+>
+> do [#processesawaycomputer]
+
+
+Fixed the overnight idle CPU problem in agent-doc 0.35.306.
+
+The cause was a stale supervisor waiting for a safe turn boundary. That unchanged deferral was treated as urgent on every 500 ms poll, so the idle-watch thread repeatedly ran the expensive reconciliation path and appended the same `supervisor_binary_stale_recycle_deferred` event. One affected session accumulated 193,824 copies of that event.
+
+The supervisor now owns process-scoped deferral transition state. It still checks the installed binary identity every 500 ms, but while the same safe-boundary deferral remains active it performs full reconciliation only on the existing five-second quiescent cadence. The diagnostic is emitted once when the deferral begins, clears with the state, and rearms for a later episode. Turn-boundary safety is unchanged.
+
+Verification completed:
+
+- Focused transition and cadence tests passed.
+- The full `make check` suite passed.
+- `make install` completed and installed agent-doc 0.35.306 plus the existing editor packages.
+- A live ready/busy stale supervisor averaged 0.67% CPU in `idle-queue-watch` over 15 seconds, down from 6.3% before (about an 89% reduction).
+- Across that live measurement, the deferred-event count remained exactly 193,824: zero repeated log entries after the transition receipt.
+- The latest completed `main` CI run is green.
+
+The release is committed locally as `12a8a0d09` (`fix: quiesce stale supervisor deferrals`). The required post-closeout push, tag, and publication follow this document commit.
+
+The earlier “Run Agent Doc on backend.md” item remains fixed by 0.35.305; removing its in-progress marker required no additional code change.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

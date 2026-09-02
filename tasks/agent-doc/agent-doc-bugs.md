@@ -99,6 +99,19 @@ Installed locally:
 Verification passed: relay/controller Rust tests, JetBrains tests, full local `make check`, CI, six-platform Release, and PyPI publication.
 
 IntelliJ is still running plugin v0.2.368. Restart IntelliJ before editing or restoring `payments-ledger.md` or reopening `backend.md`; that is required to load v0.2.370's causal recovery/File Cache Conflict guard. I intentionally did not rewrite the quarantined payments document while the old plugin remained attached, because it could delete the restored components again.
+
+### Re: Response
+
+Fixed and released agent-doc v0.35.311 (`5bc9643fa`).
+
+- `payments-ledger.md`: Codex pane `%64` is visible in `@3`, fresh and quarantined.
+- `monsterrodholders.md`: replacement Codex pane `%65` is live; destructive queue work remains paused.
+- `backend.md`: pane `%25` was preserved and its supervisor safely upgraded.
+- Harness selection, hidden-pane focus, stale-binary restart, and Lazily retained-frontier recovery were fixed.
+- Local tests, `make check`, CI, Release, and PyPI all passed.
+- Agent-doc session check passed and the response was committed.
+
+Restart IntelliJ now. Plugin v0.2.370 is installed, but the running IDE still has v0.2.368 loaded. I intentionally left `payments-ledger.md` content quarantined until restart so the old plugin cannot delete its components again.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

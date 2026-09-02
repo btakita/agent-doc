@@ -2597,6 +2597,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             retainedRegistrationProjectionActionForAttachUtil(
                 deferCanonicalProjectionForPendingLocal = deferCanonicalProjectionForPendingLocal,
                 canonicalProjectionRetained = forwarder.canonicalProjectionRetained,
+                canonicalCoversRetainedFrontier = forwarder.canonicalCoversRetainedFrontier,
                 publishedShadow = publishedShadowAtRegistration,
                 bufferText = bufferTextAtRegistration,
                 canonicalText = forwarder.replicaText(),
@@ -3539,6 +3540,7 @@ internal enum class RetainedRegistrationProjectionAction {
 internal fun retainedRegistrationProjectionActionForAttachUtil(
     deferCanonicalProjectionForPendingLocal: Boolean,
     canonicalProjectionRetained: Boolean,
+    canonicalCoversRetainedFrontier: Boolean? = null,
     publishedShadow: String?,
     bufferText: String?,
     canonicalText: String?,
@@ -3547,6 +3549,7 @@ internal fun retainedRegistrationProjectionActionForAttachUtil(
         RetainedRegistrationProjectionAction.DeferCanonicalProjection
     } else if (canonicalProjectionRetained) {
         retainedRegistrationProjectionActionUtil(
+            canonicalCoversRetainedFrontier = canonicalCoversRetainedFrontier,
             publishedShadow = publishedShadow,
             bufferText = bufferText,
             canonicalText = canonicalText,
@@ -3563,6 +3566,7 @@ internal fun retainedRegistrationProjectionActionForAttachUtil(
  * must hold instead of selecting one by destructive whole-document projection.
  */
 internal fun retainedRegistrationProjectionActionUtil(
+    canonicalCoversRetainedFrontier: Boolean? = null,
     publishedShadow: String?,
     bufferText: String?,
     canonicalText: String?,
@@ -3573,6 +3577,12 @@ internal fun retainedRegistrationProjectionActionUtil(
         bufferText != null && canonicalText == bufferText ->
             RetainedRegistrationProjectionAction.ApplyCanonical
         publishedShadow == null || bufferText == null ->
+            RetainedRegistrationProjectionAction.ApplyCanonical
+        // The buffer has not advanced past the last controller-accepted
+        // projection, and canonical is causally at or beyond the cached native
+        // CRDT frontier. A forced full bootstrap is therefore a safe recovery,
+        // even when its text differs from that settled projection.
+        bufferText == publishedShadow && canonicalCoversRetainedFrontier == true ->
             RetainedRegistrationProjectionAction.ApplyCanonical
         canonicalText == publishedShadow -> RetainedRegistrationProjectionAction.PublishOperatorBuffer
         else -> RetainedRegistrationProjectionAction.HoldOperatorBuffer

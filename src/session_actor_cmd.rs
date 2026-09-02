@@ -2982,7 +2982,8 @@ fn build_context(file: &Path) -> Result<SessionContext> {
             canonical_file.display()
         )
     })?;
-    let harness = agent_doc_session_actor_io::detect_document_harness_in(
+    let explicit_document_harness = agent_doc_harness::document_harness_from_content(&content);
+    let detected_harness = agent_doc_session_actor_io::detect_document_harness_in(
         &base_dir,
         &canonical_file.to_string_lossy(),
     );
@@ -3003,6 +3004,14 @@ fn build_context(file: &Path) -> Result<SessionContext> {
         operator_status,
         &supervisor_runtime,
     )?;
+    let harness = status_harness(
+        explicit_document_harness,
+        operator_status
+            .record
+            .as_ref()
+            .map(|record| record.harness.as_str()),
+        detected_harness,
+    );
     let actor_record = operator_status.record.clone();
     let live_pane_window = actor_record
         .as_ref()
@@ -3024,6 +3033,20 @@ fn build_context(file: &Path) -> Result<SessionContext> {
         supervisor_socket,
         live_pane_window,
     })
+}
+
+/// Report the same harness authority that owns the document actor. An explicit
+/// document selection remains highest authority; otherwise the durable actor
+/// record must win over ambient harness detection so a Codex shell cannot make
+/// a Claude actor look like Codex (or vice versa).
+fn status_harness(
+    explicit_document_harness: Option<String>,
+    actor_harness: Option<&str>,
+    ambient_harness: String,
+) -> String {
+    explicit_document_harness
+        .or_else(|| actor_harness.map(str::to_string))
+        .unwrap_or(ambient_harness)
 }
 
 /// Read the window a pane currently lives in. Best-effort: a tmux that cannot
@@ -4123,6 +4146,19 @@ fn timestamp_secs() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn status_harness_prefers_document_then_actor_over_ambient_detection() {
+        assert_eq!(
+            super::status_harness(Some("opencode".into()), Some("claude"), "codex".into()),
+            "opencode"
+        );
+        assert_eq!(
+            super::status_harness(None, Some("claude"), "codex".into()),
+            "claude"
+        );
+        assert_eq!(super::status_harness(None, None, "codex".into()), "codex");
+    }
+
     /// `#restartselfpane` / `#restartselfdefer`: detecting that the caller IS the
     /// target is only half the decision. With a live supervisor the restart
     /// drains to the turn boundary and supersedes in place, so a self-request is

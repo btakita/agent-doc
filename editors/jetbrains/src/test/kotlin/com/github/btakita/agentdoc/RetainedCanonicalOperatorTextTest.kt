@@ -83,6 +83,34 @@ class RetainedCanonicalOperatorTextTest {
     }
 
     @Test
+    fun `a causally covered settled buffer accepts retained canonical recovery`() {
+        val settledBuffer = "# doc\n\nlast controller-accepted editor projection\n"
+        assertEquals(
+            RetainedRegistrationProjectionAction.ApplyCanonical,
+            retainedRegistrationProjectionActionUtil(
+                canonicalCoversRetainedFrontier = true,
+                publishedShadow = settledBuffer,
+                bufferText = settledBuffer,
+                canonicalText = "# doc\n\nnewer retained controller projection\n",
+            ),
+        )
+    }
+
+    @Test
+    fun `an uncovered settled buffer keeps the ambiguity hold`() {
+        val settledBuffer = "# doc\n\nprojection known only to the retiring controller\n"
+        assertEquals(
+            RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+            retainedRegistrationProjectionActionUtil(
+                canonicalCoversRetainedFrontier = false,
+                publishedShadow = settledBuffer,
+                bufferText = settledBuffer,
+                canonicalText = "# doc\n\nolder replacement controller projection\n",
+            ),
+        )
+    }
+
+    @Test
     fun `a replacement canonical that catches the live buffer ends the hold`() {
         val liveBuffer = "# doc\n\noperator edit\n"
         assertEquals(

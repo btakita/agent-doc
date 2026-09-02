@@ -1552,6 +1552,18 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         invocation: ControllerTmuxLayoutSyncInvocation,
     ) -> Result<ControllerTmuxLayoutSyncReceipt>;
 
+    /// Surface a proven live-owner pane that is parked in the tmux stash.
+    ///
+    /// The implementation lives above this crate because the sync adapter
+    /// depends on the controller. Keeping the operation behind this port lets
+    /// a fenced focus effect recover co-visibility without introducing that
+    /// dependency cycle.
+    fn promote_pane_to_agent_doc_window(
+        &self,
+        tmux: &tmux_router::Tmux,
+        pane_id: &str,
+    ) -> Result<bool>;
+
     /// Queue an exact answered-free-text target on the document's owner thread.
     ///
     /// This port must return after admission, not after editor/CRDT convergence:
@@ -1717,6 +1729,14 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
             routes_created_panes,
             file_panes: Vec::new(),
         })
+    }
+
+    fn promote_pane_to_agent_doc_window(
+        &self,
+        _tmux: &tmux_router::Tmux,
+        _pane_id: &str,
+    ) -> Result<bool> {
+        Ok(false)
     }
 
     fn project_answered_free_text_strike(

@@ -2,6 +2,50 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.311
+
+- **Fix: navigating to a live stashed document pane surfaces it before focus.**
+
+The Project Controller no longer returns `actor_pane_not_visible` immediately
+when the selected document's proven live-owner pane is parked in tmux stash. Its
+focus effect now promotes the pane through the sync runtime boundary, rechecks
+that the pane actually entered the active `agent-doc` window, and only then
+selects it. Promotion and selection remain inside the latest-wins editor focus
+fence, so an inactive desktop or superseded navigation cannot mutate layout;
+failed promotion still returns the closed not-visible receipt. Regression tests
+cover promotion-before-selection, post-promotion co-visibility, and inactive
+focus suppression.
+
+- **Fix: manual recovery can explicitly restore harness authority before closing the prior actor.**
+
+When cache-conflict damage temporarily removes document `agent:` metadata, a
+manual `agent-doc start` now reads the existing operator actor projection,
+including a closed recovery record, before lifecycle cleanup. The captured Codex authority therefore
+survives new-session admission instead of falling through to a configured Claude
+default. When the surviving actor projection was itself corrupted, operators can
+use `agent-doc start --harness codex <file>` to transport recovery authority
+without mutating the quarantined document. The flag survives tmux re-exec and
+becomes the durable actor authority. Session status now reports explicit document
+authority, then durable actor authority, before ambient shell detection, so the
+wrong harness cannot masquerade as the expected one. Supervisor hot-reload also
+resolves the installed `agent-doc` command without preferring a still-launchable
+source-build `current_exe`; a source-launched supervisor therefore cannot re-exec
+the same stale inode forever after installation. Regression tests cover the
+load-before-cleanup ordering, flag transport, status precedence, and installed
+binary resolution.
+
+- **Fix: retained replica recovery distinguishes a safe canonical catch-up from an ambiguous editor overwrite.**
+
+Replica registration no longer drops the editor's retained CRDT state vector when
+a durable canonical projection forces a full bootstrap. The controller returns a
+separate causal-coverage proof, and JetBrains accepts the retained canonical state
+over an unchanged settled buffer only when that proof is explicitly true. An
+older controller, an invalid frontier, or a frontier ahead of canonical retains
+the existing ambiguity hold, so the recovery cannot recreate the
+`missing_replica` loop or weaken File Cache Conflict data-loss protection.
+
+- **JetBrains 0.2.370: retained canonical recovery consumes causal frontier proof.**
+
 ## 0.35.310
 
 - **Fix: detached controllers retain project-root incarnation authority throughout their serve lifetime.**

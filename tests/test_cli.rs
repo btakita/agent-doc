@@ -18346,9 +18346,9 @@ fn test_agent_doc_turn_executor_owns_capability_proof_policy() {
     let start_source =
         fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/lib.rs")).unwrap();
     assert!(
-        start_source.contains("use agent_doc_turn_executor::binary::current_agent_doc_binary;")
+        start_source.contains("use agent_doc_turn_executor::binary::installed_agent_doc_binary;")
             && !start_source.contains("project_controller::current_agent_doc_binary"),
-        "start.rs should import focused binary launch resolution directly"
+        "start runtime should import focused installed-binary resolution directly"
     );
     let controller_rpc_source = fs::read_to_string(
         manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),

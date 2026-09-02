@@ -1132,8 +1132,9 @@ ObservationAuthority.Layout
      *
     * Focus events fire repeatedly for the same editor. The focus lane and surface generation guard
     * independently collapse those repeats. Republish the spanning surface as well as the targeted
-    * focus: a focus-only projection deliberately leaves a stashed pane for the layout reconciler,
-    * and IDEA does not emit [selectionChanged] when the operator moves between existing splits.
+    * focus: the fenced focus projection can recover the selected stashed pane, while the spanning
+    * projection remains the exact-layout authority. IDEA does not emit [selectionChanged] when the
+    * operator moves between existing splits, so both edges are required.
      */
     fun onEditorFocusGained(project: Project, file: VirtualFile) {
         if (!AgentDocSessionFiles.isSessionDocument(file)) {

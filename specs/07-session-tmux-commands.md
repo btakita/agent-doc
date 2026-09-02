@@ -227,16 +227,18 @@ thread or in a detached periodic timer.
   ordered pane list is not a visible column and must not satisfy a layout slot or
   stand in as `expected_focus_pane`, so a stashed pane never counts toward
   `observation=synced`.
-- Default focus defers stash promotion (`#jb-nav-3pane-promote-swap`): `agent-doc
-focus <FILE>` selects the resolved pane when it is already visible, but skips
-  additive `join-pane` promotion when the pane is parked in a `stash` window.
-  Stash reparenting is left to the debounced `sync` reconcile that follows
-  editor navigation. Without this, the focus-path promote and the reconcile race
-  on a 1-in/1-out tab switch: the promote joins the incoming pane while the
-  reconcile (operating on a stale snapshot, or unable to stash a busy outgoing
-  pane) does not remove the displaced pane, growing the `agent-doc` window to an
-  extra pane (the "3 panes for a 2-column editor" symptom). Keep this aligned in
-  `focus.rs`, the editor `buildFocusCommand`, and this spec.
+- Controller focus surfaces a proven live-owner pane before selecting it. The
+  promotion and `select-pane` are one editor focus-fenced effect, and the
+  controller re-reads `#{window_id}` after promotion before reporting success.
+  A superseded focus generation, inactive desktop editor, failed move, or pane
+  that remains outside the active `agent-doc` window must not select inside
+  stash. The editor's full retained surface still follows as structural
+  authority and reconciles the exact visible column set; the focus effect owns
+  immediate recovery of the selected pane, not full stash consolidation.
+- Standalone non-blocking `run_with_tmux` helpers retain deferred stash promotion
+  (`#jb-nav-3pane-promote-swap`) for layout internals and explicit-pane escape
+  hatches. Their caller already owns the following structural reconcile, so
+  they must not race it with an additive promotion.
 - Blocking focus (`#stash-pane-promote-on-focus`): `agent-doc focus <FILE>
   --blocking` (alias `--synchronous`) preserves the previous standalone focus
   behavior for manual/operator flows that explicitly want to surface a stashed
@@ -248,9 +250,9 @@ focus <FILE>` selects the resolved pane when it is already visible, but skips
   still selects the pane in place. It does not run full stash consolidation.
   Keep this aligned in `focus.rs`, `sync.rs`, and this spec.
 - Editor automatic tab-to-pane sync must not use `focus` as a substitute for
-  passive `sync --no-autostart`; beyond the single-pane stash promotion above,
-  focus does not own full stash consolidation, safe passive replacement, or
-  preserved-layout reselect proof.
+  the retained exact-visible layout projection; beyond the selected-pane
+  recovery above, focus does not own full stash consolidation, safe passive
+  replacement, or preserved-layout reselect proof.
 
 ## layout
 

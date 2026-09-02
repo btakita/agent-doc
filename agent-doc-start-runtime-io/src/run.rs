@@ -617,6 +617,24 @@ pub fn run_with_reap_policy_and_resume(
     route_owned_reap_policy: RouteOwnedReapPolicy,
     resume: Option<agent_doc_harness::ResumeRequest>,
 ) -> Result<()> {
+    run_with_reap_policy_resume_and_harness(
+        file,
+        force,
+        route_owned,
+        route_owned_reap_policy,
+        resume,
+        None,
+    )
+}
+
+pub fn run_with_reap_policy_resume_and_harness(
+    file: &Path,
+    force: bool,
+    route_owned: bool,
+    route_owned_reap_policy: RouteOwnedReapPolicy,
+    resume: Option<agent_doc_harness::ResumeRequest>,
+    harness_override: Option<String>,
+) -> Result<()> {
     // A live child handed across `execve` means this invocation replaces only
     // the supervisor transport. Detect it before start admission so that
     // admission cannot publish a false session start or advance actor generation.
@@ -640,7 +658,16 @@ pub fn run_with_reap_policy_and_resume(
     } = if preserved_child_survived {
         prepare_start_runtime_reentry(file, force, route_owned)?
     } else {
-        prepare_start_runtime(file, force, route_owned)?
+        if let Some(harness_override) = harness_override.as_deref() {
+            agent_doc_start_io::prepare_start_runtime_with_harness(
+                file,
+                force,
+                route_owned,
+                Some(harness_override),
+            )?
+        } else {
+            prepare_start_runtime(file, force, route_owned)?
+        }
     };
     let _stderr_redirect = stderr_redirect;
 

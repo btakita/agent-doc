@@ -23,6 +23,36 @@ pub fn current_agent_doc_binary() -> Result<PathBuf> {
     )
 }
 
+/// Resolve the installed `agent-doc` command without considering the currently
+/// mapped executable image. Supervisor hot-reload uses this path because a
+/// launchable source-build `current_exe` can still be stale relative to the
+/// binary installed on `PATH`.
+pub fn installed_agent_doc_binary() -> Result<PathBuf> {
+    let cwd = std::env::current_dir().context("failed to resolve current working directory")?;
+    resolve_installed_agent_doc_binary_from_env(
+        std::env::var_os(AGENT_DOC_BIN_ENV),
+        std::env::var_os("PATH"),
+        std::env::var_os("HOME"),
+        &cwd,
+    )
+}
+
+pub fn resolve_installed_agent_doc_binary_from_env(
+    override_bin: Option<OsString>,
+    path_env: Option<OsString>,
+    home: Option<OsString>,
+    cwd: &Path,
+) -> Result<PathBuf> {
+    resolve_agent_doc_binary_from_env(
+        override_bin,
+        None,
+        Some(OsString::from("agent-doc")),
+        path_env,
+        home,
+        cwd,
+    )
+}
+
 pub fn resolve_agent_doc_binary_from_env(
     override_bin: Option<OsString>,
     current_exe: Option<PathBuf>,
@@ -231,6 +261,28 @@ mod tests {
         .unwrap();
 
         assert_eq!(resolved, current);
+    }
+
+    #[test]
+    fn installed_binary_resolution_uses_path_instead_of_a_launchable_current_image() {
+        let dir = temp_dir("installed-not-current");
+        let source_build = dir.join("agent-doc-source-build");
+        let path_bin_dir = dir.join("bin");
+        let installed = path_bin_dir.join("agent-doc");
+        std::fs::create_dir_all(&path_bin_dir).unwrap();
+        std::fs::write(&source_build, "source build").unwrap();
+        std::fs::write(&installed, "installed").unwrap();
+
+        let resolved = resolve_installed_agent_doc_binary_from_env(
+            None,
+            Some(path_bin_dir.into_os_string()),
+            None,
+            &dir,
+        )
+        .unwrap();
+
+        assert_eq!(resolved, installed);
+        assert_ne!(resolved, source_build);
     }
 
     #[test]

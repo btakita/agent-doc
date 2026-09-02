@@ -205,6 +205,7 @@ pub fn bootstrap_start_inside_tmux_if_needed(
     route_owned: bool,
     route_owned_reap_policy: agent_doc_supervisor::route_owned::RouteOwnedReapPolicy,
     resume: Option<&agent_doc_harness::ResumeRequest>,
+    harness_override: Option<&str>,
 ) -> Result<Option<TmuxEnsureOutcome>> {
     if agent_doc_tmux_io::in_tmux() {
         return Ok(None);
@@ -238,7 +239,14 @@ pub fn bootstrap_start_inside_tmux_if_needed(
                 )
             })?
     };
-    let command = start_reexec_command(file, force, route_owned, route_owned_reap_policy, resume)?;
+    let command = start_reexec_command(
+        file,
+        force,
+        route_owned,
+        route_owned_reap_policy,
+        resume,
+        harness_override,
+    )?;
     tmux.send_keys(&pane_id, &command)
         .with_context(|| format!("failed to re-exec agent-doc start in pane {pane_id}"))?;
     eprintln!(
@@ -480,6 +488,7 @@ fn start_reexec_command(
     route_owned: bool,
     route_owned_reap_policy: agent_doc_supervisor::route_owned::RouteOwnedReapPolicy,
     resume: Option<&agent_doc_harness::ResumeRequest>,
+    harness_override: Option<&str>,
 ) -> Result<String> {
     let executable =
         std::env::current_exe().context("failed to resolve the agent-doc executable")?;
@@ -490,6 +499,10 @@ fn start_reexec_command(
     ];
     if force {
         args.push("--force".to_string());
+    }
+    if let Some(harness) = harness_override {
+        args.push("--harness".to_string());
+        args.push(shell_escape(harness));
     }
     match resume {
         None => args.push("--fresh".to_string()),
@@ -970,11 +983,21 @@ fn resolve_start_admission_document(file: &Path) -> Result<StartAdmissionDocumen
 }
 
 pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Result<StartRuntime> {
+    prepare_start_runtime_with_harness(file, force, route_owned, None)
+}
+
+pub fn prepare_start_runtime_with_harness(
+    file: &Path,
+    force: bool,
+    route_owned: bool,
+    harness_override: Option<&str>,
+) -> Result<StartRuntime> {
     prepare_start_runtime_with_admission(
         file,
         force,
         route_owned,
         StartRuntimeAdmission::NewSession,
+        harness_override,
     )
 }
 
@@ -994,6 +1017,7 @@ pub fn prepare_start_runtime_reentry(
         force,
         route_owned,
         StartRuntimeAdmission::SupervisorReexecPreservingChild,
+        None,
     )
 }
 
@@ -1002,6 +1026,7 @@ fn prepare_start_runtime_with_admission(
     force: bool,
     route_owned: bool,
     admission: StartRuntimeAdmission,
+    harness_override: Option<&str>,
 ) -> Result<StartRuntime> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
@@ -1135,24 +1160,36 @@ fn prepare_start_runtime_with_admission(
         );
     }
 
-    if !admission.preserves_session_lifecycle() {
-        close_stale_start_actors(&project_root, &mut session_log, route_owned);
-    }
-
-    let active_actor_harness = if should_read_active_actor_harness(fm.agent.as_deref()) {
-        agent_doc_controller_io::project_controller::authoritative_actor_binding(
-            &project_root,
-            &canonical,
-        )
-        .ok()
-        .flatten()
-        .map(|record| record.harness)
-    } else {
-        None
-    };
+    // Capture harness authority before new-session cleanup closes the prior actor.
+    // Cache-conflict recovery can temporarily remove `agent:` from the document;
+    // in that state the prior actor is the only evidence that this is a Codex
+    // session, and closing it first silently falls through to the Claude default.
+    let active_actor_harness = capture_actor_harness_before_session_cleanup(
+        harness_override.or(fm.agent.as_deref()),
+        || {
+            // `authoritative_actor_binding` intentionally filters closed actors
+            // because it serves dispatch admission. Start needs the broader
+            // operator projection: a closed actor still owns durable harness
+            // identity during an explicit new-session recovery.
+            agent_doc_controller_io::project_controller::session_operator_status(
+                &project_root,
+                &canonical,
+            )
+            .ok()
+            .and_then(|status| status.record)
+            .map(|record| record.harness)
+        },
+        || {
+            if !admission.preserves_session_lifecycle() {
+                close_stale_start_actors(&project_root, &mut session_log, route_owned);
+            }
+        },
+    );
     let harness_selection = agent_doc_supervisor::harness_authority::resolve_harness_authority(
         &agent_doc_supervisor::harness_authority::HarnessAuthorityFacts {
-            declared_document_agent: fm.agent.clone(),
+            declared_document_agent: harness_override
+                .map(str::to_string)
+                .or_else(|| fm.agent.clone()),
             active_actor_harness,
             configured_default_agent: global_config.default_agent.clone(),
         },
@@ -1707,6 +1744,22 @@ fn should_read_active_actor_harness(document_agent: Option<&str>) -> bool {
     document_agent.is_none_or(|value| value.trim().is_empty())
 }
 
+fn capture_actor_harness_before_session_cleanup<Load, Cleanup>(
+    document_agent: Option<&str>,
+    load: Load,
+    cleanup: Cleanup,
+) -> Option<String>
+where
+    Load: FnOnce() -> Option<String>,
+    Cleanup: FnOnce(),
+{
+    let harness = should_read_active_actor_harness(document_agent)
+        .then(load)
+        .flatten();
+    cleanup();
+    harness
+}
+
 struct StartControllerSessionInput<'a> {
     file: &'a Path,
     canonical: &'a Path,
@@ -1927,6 +1980,22 @@ mod tests {
         assert!(should_read_active_actor_harness(None));
         assert!(should_read_active_actor_harness(Some("  ")));
         assert!(!should_read_active_actor_harness(Some("codex")));
+    }
+
+    #[test]
+    fn new_session_captures_actor_harness_before_lifecycle_cleanup() {
+        let events = std::cell::RefCell::new(Vec::new());
+        let harness = capture_actor_harness_before_session_cleanup(
+            None,
+            || {
+                events.borrow_mut().push("load");
+                Some("codex".to_string())
+            },
+            || events.borrow_mut().push("cleanup"),
+        );
+
+        assert_eq!(harness.as_deref(), Some("codex"));
+        assert_eq!(*events.borrow(), ["load", "cleanup"]);
     }
 
     #[test]
@@ -2333,11 +2402,13 @@ auto_start_tmux = false
             Some(&agent_doc_harness::ResumeRequest::Id(
                 "conversation-id".into(),
             )),
+            Some("codex"),
         )
         .unwrap();
 
         assert!(command.contains("start 'tasks/a document.md'"));
         assert!(command.contains("--force"));
+        assert!(command.contains("--harness codex"));
         assert!(command.contains("--resume conversation-id"));
         assert!(command.contains("--route-owned-reap-policy keep-alive"));
     }

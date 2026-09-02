@@ -107,6 +107,10 @@ class CrdtReplicaForwarder(
     var canonicalProjectionRetained: Boolean = false
         private set
 
+    /** Whether controller canonical causally covers this replica's retained frontier. */
+    var canonicalCoversRetainedFrontier: Boolean? = null
+        private set
+
     var canonicalContentHash: String? = null
         private set
 
@@ -154,6 +158,7 @@ class CrdtReplicaForwarder(
             clientId = ack.clientId
             lineage = ack.lineage
             canonicalProjectionRetained = ack.canonicalProjectionRetained
+            canonicalCoversRetainedFrontier = ack.canonicalCoversRetainedFrontier
             canonicalContentHash = ack.canonicalContentHash
             val incremental = ack.bootstrapKind == ReplicaBootstrapKind.Delta
             if (incremental && (resumeState == null || ack.canonicalStateVector == null)) {
@@ -494,6 +499,7 @@ data class ReplicaRegisterAck(
     val bootstrapKind: ReplicaBootstrapKind = ReplicaBootstrapKind.Full,
     val canonicalStateVector: ByteArray? = null,
     val canonicalProjectionRetained: Boolean = false,
+    val canonicalCoversRetainedFrontier: Boolean? = null,
     val canonicalContentHash: String? = null,
 )
 
@@ -674,6 +680,10 @@ class CpSocketReplicaTransport(
             data.get("canonical_state_vector_b64")?.asString?.let { decodeBase64(it) }
         val canonicalProjectionRetained =
             data.get("canonical_projection_retained")?.asBoolean ?: false
+        val canonicalCoversRetainedFrontier =
+            data.get("canonical_covers_retained_frontier")
+                ?.takeUnless { it.isJsonNull }
+                ?.asBoolean
         val canonicalContentHash = data.get("canonical_content_hash")?.asString
         val lineage = data.get("lineage")?.asString
         lastRegisterError = null
@@ -684,6 +694,7 @@ class CpSocketReplicaTransport(
             bootstrapKind = bootstrapKind,
             canonicalStateVector = canonicalStateVector,
             canonicalProjectionRetained = canonicalProjectionRetained,
+            canonicalCoversRetainedFrontier = canonicalCoversRetainedFrontier,
             canonicalContentHash = canonicalContentHash,
         )
     }

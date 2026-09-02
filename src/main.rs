@@ -352,6 +352,14 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         )
     }
 
+    fn promote_pane_to_agent_doc_window(
+        &self,
+        tmux: &tmux_router::Tmux,
+        pane_id: &str,
+    ) -> anyhow::Result<bool> {
+        agent_doc_sync_io::sync::promote_pane_to_agent_doc_window(tmux, pane_id)
+    }
+
     fn project_answered_free_text_strike(
         &self,
         invocation: agent_doc_controller_io::project_controller::ControllerAnsweredFreeTextStrikeInvocation,
@@ -2223,6 +2231,10 @@ enum Commands {
         /// owner already exists in another pane
         #[arg(long)]
         force: bool,
+        /// Explicit harness authority for recovery when document/actor metadata
+        /// is missing or damaged.
+        #[arg(long, value_parser = ["claude", "codex", "opencode"])]
+        harness: Option<String>,
         /// Resume the harness conversation instead of starting a fresh one.
         /// This is the DEFAULT: with no `--resume`/`--fresh` flag at all, a start
         /// still resumes the id recorded in the document's `resume:` frontmatter
@@ -4374,6 +4386,7 @@ fn try_main() -> anyhow::Result<()> {
         Commands::Start {
             file,
             force,
+            harness,
             resume,
             fresh,
             route_owned,
@@ -4403,17 +4416,19 @@ fn try_main() -> anyhow::Result<()> {
                 route_owned,
                 route_owned_reap_policy,
                 resume.as_ref(),
+                harness.as_deref(),
             )?
             .is_some()
             {
                 Ok(())
             } else {
-                agent_doc_start_runtime_io::run_with_reap_policy_and_resume(
+                agent_doc_start_runtime_io::run_with_reap_policy_resume_and_harness(
                     &file,
                     force,
                     route_owned,
                     route_owned_reap_policy,
                     resume,
+                    harness,
                 )
             }
         }

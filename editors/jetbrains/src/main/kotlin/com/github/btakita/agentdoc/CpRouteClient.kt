@@ -966,9 +966,9 @@ internal fun editorCommandAwaitRequest(
 payload.addProperty("document_path", documentPath)
 payload.addProperty("no_promotion", true)
 payload.addProperty("active_window_guard", true)
-// The low-latency selection lane only focuses an already-visible pane.
-// Surface reconciliation owns pane recovery/creation; doing that work here
-// made a stale focus request slow enough to land after the operator moved on.
+// The controller focus-generation fence owns selected-pane recovery and
+// selection. The retained surface projection that follows still owns exact
+// layout reconciliation and pane creation.
 payload.addProperty("missing_pane_policy", MissingFocusPanePolicy.ObserveOnly.token)
         return commandSubmitRequest(
             filePath = documentPath,

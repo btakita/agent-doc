@@ -32,11 +32,10 @@
 //!   resync repair the registry. This also recovers a dead-registered or
 //!   unregistered document whose session is still running in another pane, instead
 //!   of failing closed.
-//! - On success, calls `tmux select-pane` when the resolved pane is already visible
-//!   in the agent-doc window and logs the focused pane + file path to stderr. If the
-//!   pane is parked in the stash window, default focus defers surfacing + selection
-//!   to the sync reconciler so the tmux pane switch stays fast and does not grow the
-//!   visible layout additively.
+//! - Default `run` delegates focus to the Project Controller. The controller surfaces
+//!   a proven stashed live-owner pane inside the editor focus fence, rechecks
+//!   co-visibility, and selects it only after the move succeeds. Standalone
+//!   `run_with_tmux` retains deferred stash surfacing for layout-internal callers.
 //!
 //! ## Agentic Contracts
 //! - `run_with_tmux` never modifies the durable registry or the document on disk.

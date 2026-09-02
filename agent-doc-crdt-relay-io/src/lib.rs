@@ -1618,6 +1618,10 @@ pub struct ReplicaRegistration {
     /// canonical projection. A replacement editor must not publish its stale
     /// whole buffer over this bootstrap.
     pub canonical_projection_retained: bool,
+    /// Whether the controller's canonical CRDT frontier causally covers the
+    /// retained frontier supplied by this registering editor. `None` means the
+    /// editor supplied no usable frontier, so consumers must remain fail-closed.
+    pub canonical_covers_retained_frontier: Option<bool>,
     pub canonical_content_hash: String,
 }
 
@@ -1697,10 +1701,30 @@ pub fn register_replica_for_file_incremental(
     identity: &str,
     retained_state_vector: Option<&[u8]>,
 ) -> Result<Option<ReplicaRegistration>> {
+    register_replica_for_file_incremental_with_projection_mode(
+        file,
+        identity,
+        retained_state_vector,
+        false,
+    )
+}
+
+/// Register a replica while optionally forcing a full canonical bootstrap.
+///
+/// A retained canonical projection must never be union-merged with a native
+/// editor's cached state. The cached frontier is still carried into registration
+/// so the response can prove whether canonical causally covers it.
+pub fn register_replica_for_file_incremental_with_projection_mode(
+    file: &Path,
+    identity: &str,
+    retained_state_vector: Option<&[u8]>,
+    force_full_bootstrap: bool,
+) -> Result<Option<ReplicaRegistration>> {
     register_replica_for_file_incremental_with_liveness(
         file,
         identity,
         retained_state_vector,
+        force_full_bootstrap,
         None,
         agent_doc_reliable_sync_io::process_pid_is_live,
     )
@@ -1718,6 +1742,24 @@ pub fn register_editor_replica_for_file_incremental(
     retained_state_vector: Option<&[u8]>,
     editor_pid: u32,
 ) -> Result<Option<ReplicaRegistration>> {
+    register_editor_replica_for_file_incremental_with_projection_mode(
+        file,
+        identity,
+        retained_state_vector,
+        editor_pid,
+        false,
+    )
+}
+
+/// Register a process-scoped editor replica while optionally forcing a full
+/// canonical bootstrap without discarding its retained causal frontier.
+pub fn register_editor_replica_for_file_incremental_with_projection_mode(
+    file: &Path,
+    identity: &str,
+    retained_state_vector: Option<&[u8]>,
+    editor_pid: u32,
+    force_full_bootstrap: bool,
+) -> Result<Option<ReplicaRegistration>> {
     let doc = file.display().to_string();
     agent_doc_document_realtime::editor_open_docs::editor_open_docs().mark_open(&doc, true);
     agent_doc_document_realtime::editor_attach::editor_attach().attach(&doc, editor_pid);
@@ -1725,6 +1767,7 @@ pub fn register_editor_replica_for_file_incremental(
         file,
         identity,
         retained_state_vector,
+        force_full_bootstrap,
         Some(editor_pid),
         agent_doc_reliable_sync_io::process_pid_is_live,
     ) {
@@ -1748,16 +1791,24 @@ fn register_replica_for_file_with_liveness(
     identity: &str,
     is_pid_live: impl Fn(u32) -> bool,
 ) -> Result<Option<(u64, Vec<u8>)>> {
-    register_replica_for_file_incremental_with_liveness(file, identity, None, None, is_pid_live)
-        .map(|registration| {
-            registration.map(|registration| (registration.client_id, registration.bootstrap))
-        })
+    register_replica_for_file_incremental_with_liveness(
+        file,
+        identity,
+        None,
+        false,
+        None,
+        is_pid_live,
+    )
+    .map(|registration| {
+        registration.map(|registration| (registration.client_id, registration.bootstrap))
+    })
 }
 
 fn register_replica_for_file_incremental_with_liveness(
     file: &Path,
     identity: &str,
     retained_state_vector: Option<&[u8]>,
+    force_full_bootstrap: bool,
     registering_editor_pid: Option<u32>,
     is_pid_live: impl Fn(u32) -> bool,
 ) -> Result<Option<ReplicaRegistration>> {
@@ -1805,14 +1856,35 @@ fn register_replica_for_file_incremental_with_liveness(
         canonical_state_vector,
         incremental,
         canonical_projection_retained,
+        canonical_covers_retained_frontier,
         canonical_content_hash,
     ) = with_hub_seeded_from_file(file, |hub| {
+        // Causal coverage is independent of bootstrap shape. A retained
+        // canonical projection forces a full bootstrap, but the supplied
+        // native frontier still proves whether adopting that bootstrap can
+        // discard any editor-only operation.
+        let canonical_covers_retained_frontier = retained_state_vector.and_then(
+            |state_vector| match hub.canonical_covers_state_vector(state_vector) {
+                Ok(covers) => Some(covers),
+                Err(error) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "crdt_replica_register_frontier_proof_unavailable file={} client_id={} reason=invalid_state_vector error={error}",
+                            file.display(),
+                            client_id,
+                        ),
+                    );
+                    None
+                }
+            },
+        );
         // Registration/reconnect removes the retiring member and its queue.
         // Preserve that unsettled visible-write obligation under the new
         // identity, and force a full canonical bootstrap so a stale retained
         // native frontier cannot union-merge over it.
-        let canonical_projection_retained = (!hub.controller_projection_established()
-            && retained_state_vector.is_some())
+        let canonical_projection_retained = force_full_bootstrap
+            || (!hub.controller_projection_established() && retained_state_vector.is_some())
             || !hub.delivery_converged();
         let effective_retained_state_vector = if canonical_projection_retained {
             None
@@ -1888,6 +1960,7 @@ fn register_replica_for_file_incremental_with_liveness(
             canonical_state_vector,
             incremental,
             canonical_projection_retained,
+            canonical_covers_retained_frontier,
             canonical_content_hash,
         ))
     })??;
@@ -1919,6 +1992,7 @@ fn register_replica_for_file_incremental_with_liveness(
         canonical_state_vector,
         incremental,
         canonical_projection_retained,
+        canonical_covers_retained_frontier,
         canonical_content_hash,
     }))
 }
@@ -4550,6 +4624,7 @@ mod tests {
             &doc,
             "generic:must-remain-detached",
             None,
+            false,
             None,
             |_| true,
         )
@@ -4566,6 +4641,7 @@ mod tests {
             &doc,
             "intellij-424242:/tmp/editor-register-first.md",
             None,
+            false,
             Some(editor_pid),
             |pid| pid == editor_pid,
         )
@@ -4586,6 +4662,7 @@ mod tests {
             &doc,
             "intellij-999999:/tmp/dead-editor-register.md",
             None,
+            false,
             Some(999_999),
             |_| false,
         )
@@ -4612,6 +4689,7 @@ mod tests {
             &doc,
             &format!("jetbrains-{editor_pid}-abc:/tmp/identity-pid-register.md"),
             None,
+            false,
             // Exactly what the older generation sends: nothing.
             None,
             |pid| pid == editor_pid,
@@ -4629,6 +4707,7 @@ mod tests {
             &doc,
             &format!("jetbrains-{editor_pid}-abc:/tmp/identity-pid-register.md"),
             None,
+            false,
             resolved,
             |pid| pid == editor_pid,
         )
@@ -4650,6 +4729,7 @@ mod tests {
             &doc,
             identity,
             None,
+            false,
             editor_process_id_from_identity(identity),
             |_| false,
         )
@@ -4715,6 +4795,7 @@ mod tests {
             registration.incremental,
             "a valid retained frontier must not receive another full bootstrap"
         );
+        assert_eq!(registration.canonical_covers_retained_frontier, Some(true));
 
         let resumed = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
             registration.client_id,
@@ -4761,6 +4842,7 @@ mod tests {
         .expect("replacement editor should receive a safe canonical bootstrap");
         assert!(!registration.incremental);
         assert!(registration.canonical_projection_retained);
+        assert_eq!(registration.canonical_covers_retained_frontier, Some(true));
         let replacement = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
             registration.client_id,
             &registration.bootstrap,
@@ -4823,6 +4905,7 @@ mod tests {
             !registration.incremental,
             "a retained frontier ahead of canonical must receive a full bootstrap"
         );
+        assert_eq!(registration.canonical_covers_retained_frontier, Some(false));
         let replacement = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
             registration.client_id,
             &registration.bootstrap,

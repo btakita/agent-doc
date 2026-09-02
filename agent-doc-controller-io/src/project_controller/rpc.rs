@@ -9409,16 +9409,17 @@ fn controller_crdt_replica_data(
                 .transpose()?
                 .flatten()
                 .is_some();
-            let retained_state_vector = if durable_projection_retained {
-                None
-            } else {
-                payload
-                    .state_vector_b64
-                    .as_deref()
-                    .map(base64_standard_decode)
-                    .transpose()
-                    .context("CRDT replica register payload has invalid state_vector_b64")?
-            };
+            // Keep the editor's retained frontier even when durable recovery
+            // requires a full canonical bootstrap. The relay must not merge that
+            // cached state, but it can compare frontiers and return the causal
+            // proof the editor needs to distinguish a safe canonical adoption
+            // from an ambiguous File Cache Conflict.
+            let retained_state_vector = payload
+                .state_vector_b64
+                .as_deref()
+                .map(base64_standard_decode)
+                .transpose()
+                .context("CRDT replica register payload has invalid state_vector_b64")?;
             // `#registeridentitypid`: an editor integration that predates the
             // explicit `editor_pid` field still names its PID inside the identity
             // it has always sent, so resolve it there rather than falling through
@@ -9428,17 +9429,19 @@ fn controller_crdt_replica_data(
                 .or_else(|| agent_doc_crdt_relay_io::editor_process_id_from_identity(identity));
             let registration = match resolved_editor_pid {
                 Some(editor_pid) => {
-                    agent_doc_crdt_relay_io::register_editor_replica_for_file_incremental(
+                    agent_doc_crdt_relay_io::register_editor_replica_for_file_incremental_with_projection_mode(
                         canonical,
                         identity,
                         retained_state_vector.as_deref(),
                         editor_pid,
+                        durable_projection_retained,
                     )?
                 }
-                None => agent_doc_crdt_relay_io::register_replica_for_file_incremental(
+                None => agent_doc_crdt_relay_io::register_replica_for_file_incremental_with_projection_mode(
                     canonical,
                     identity,
                     retained_state_vector.as_deref(),
+                    durable_projection_retained,
                 )?,
             };
             match registration {
@@ -9473,6 +9476,7 @@ fn controller_crdt_replica_data(
                             &registration.canonical_state_vector
                         ),
                         "canonical_projection_retained": canonical_projection_retained,
+                        "canonical_covers_retained_frontier": registration.canonical_covers_retained_frontier,
                         "canonical_content_hash": registration.canonical_content_hash,
                         "lineage": agent_doc_crdt_relay_io::current_lineage_for_file(canonical)?
                             .context("registered replica is missing its canonical lineage")?,
@@ -20020,6 +20024,45 @@ fn active_pane_process_owner_document(
     ))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FocusDocumentPaneEffect {
+    Focused,
+    DesktopEditorInactive,
+    PaneNotVisible,
+}
+
+/// Apply the tmux half of a selected-document focus intent.
+///
+/// A pane parked in the stash is a valid live owner, but it is not selectable
+/// from the visible `agent-doc` window. Surface it inside the same fenced effect,
+/// then re-observe its window before selecting. The re-observation prevents a
+/// failed or racing promotion from reporting success and from selecting inside
+/// the stash.
+fn apply_focus_document_pane_effect(
+    pane_id: &str,
+    expected_window: Option<&str>,
+    desktop_editor_active: bool,
+    observe_pane_window: impl Fn(&str) -> Option<String>,
+    promote_pane: impl FnOnce(&str) -> Result<bool>,
+    select_pane: impl FnOnce(&str) -> Result<()>,
+) -> Result<FocusDocumentPaneEffect> {
+    if !desktop_editor_active {
+        return Ok(FocusDocumentPaneEffect::DesktopEditorInactive);
+    }
+
+    let pane_is_visible = |pane_window: Option<String>| {
+        pane_window.as_deref() == expected_window && expected_window.is_some()
+    };
+    if !pane_is_visible(observe_pane_window(pane_id))
+        && (!promote_pane(pane_id)? || !pane_is_visible(observe_pane_window(pane_id)))
+    {
+        return Ok(FocusDocumentPaneEffect::PaneNotVisible);
+    }
+
+    select_pane(pane_id)?;
+    Ok(FocusDocumentPaneEffect::Focused)
+}
+
 pub(crate) fn handle_focus_document_pane(
     bootstrap: &ControllerBootstrap,
     request: ControllerRequest,
@@ -20214,26 +20257,17 @@ fn handle_focus_document_pane_with_policy(
             window_name,
         ));
     }
-    let pane_window = tmux.pane_window(&pane_id).ok();
-    if pane_window.as_deref() != window_id.as_deref() {
-        return Ok(tmux_focus_receipt(
-            false,
-            "actor_pane_not_visible",
-            Some(document_id),
-            Some(pane_id),
-            Some(session_name_value),
-            window_id,
-            window_name,
-        ));
-    }
     let focus_effect = || {
-        if focus_fence.is_some() && desktop_editor_focus_state() == DesktopEditorFocusState::Other {
-            return Ok(false);
-        }
-        tmux.select_pane(&pane_id)?;
-        Ok(true)
+        apply_focus_document_pane_effect(
+            &pane_id,
+            window_id.as_deref(),
+            focus_fence.is_none() || desktop_editor_focus_state() != DesktopEditorFocusState::Other,
+            |pane| tmux.pane_window(pane).ok(),
+            |pane| runtime_effects()?.promote_pane_to_agent_doc_window(&tmux, pane),
+            |pane| tmux.select_pane(pane),
+        )
     };
-    let focused = if focus_fence.is_some() {
+    let focus_effect = if focus_fence.is_some() {
         runtime
             .context("async editor focus fence requires controller runtime")?
             .async_editor_commands
@@ -20241,23 +20275,37 @@ fn handle_focus_document_pane_with_policy(
     } else {
         focus_effect()?
     };
-    if !focused {
-        agent_doc_ops_log_io::log_op(
-            &bootstrap.project_root,
-            &format!(
-                "controller_focus_suppressed document={} pane={} reason=desktop_editor_inactive",
-                document_id, pane_id
-            ),
-        );
-        return Ok(tmux_focus_receipt(
-            false,
-            "desktop_editor_inactive",
-            Some(document_id),
-            Some(pane_id),
-            Some(session_name_value),
-            window_id,
-            window_name,
-        ));
+    match focus_effect {
+        FocusDocumentPaneEffect::Focused => {}
+        FocusDocumentPaneEffect::DesktopEditorInactive => {
+            agent_doc_ops_log_io::log_op(
+                &bootstrap.project_root,
+                &format!(
+                    "controller_focus_suppressed document={} pane={} reason=desktop_editor_inactive",
+                    document_id, pane_id
+                ),
+            );
+            return Ok(tmux_focus_receipt(
+                false,
+                "desktop_editor_inactive",
+                Some(document_id),
+                Some(pane_id),
+                Some(session_name_value),
+                window_id,
+                window_name,
+            ));
+        }
+        FocusDocumentPaneEffect::PaneNotVisible => {
+            return Ok(tmux_focus_receipt(
+                false,
+                "actor_pane_not_visible",
+                Some(document_id),
+                Some(pane_id),
+                Some(session_name_value),
+                window_id,
+                window_name,
+            ));
+        }
     }
     Ok(tmux_focus_receipt(
         true,
@@ -20273,6 +20321,7 @@ fn handle_focus_document_pane_with_policy(
 #[cfg(test)]
 mod desktop_editor_focus_tests {
     use super::*;
+    use std::cell::Cell;
 
     fn i3_tree(class: Option<&str>) -> serde_json::Value {
         let focused = match class {
@@ -20342,6 +20391,81 @@ mod desktop_editor_focus_tests {
             DesktopEditorFocusState::Other
         ));
         assert_eq!(manual.focus.as_deref(), Some("a.md"));
+    }
+
+    #[test]
+    fn document_focus_promotes_stashed_pane_before_selecting_it() {
+        let live_window = Cell::new("@stash");
+        let promoted = Cell::new(false);
+        let selected = Cell::new(false);
+
+        let effect = apply_focus_document_pane_effect(
+            "%64",
+            Some("@agent-doc"),
+            true,
+            |_| Some(live_window.get().to_string()),
+            |pane| {
+                assert_eq!(pane, "%64");
+                promoted.set(true);
+                live_window.set("@agent-doc");
+                Ok(true)
+            },
+            |pane| {
+                assert_eq!(pane, "%64");
+                assert!(promoted.get(), "promotion must precede selection");
+                selected.set(true);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(effect, FocusDocumentPaneEffect::Focused);
+        assert!(selected.get());
+    }
+
+    #[test]
+    fn document_focus_never_selects_when_promotion_does_not_make_pane_visible() {
+        let selected = Cell::new(false);
+        let effect = apply_focus_document_pane_effect(
+            "%64",
+            Some("@agent-doc"),
+            true,
+            |_| Some("@stash".to_string()),
+            |_| Ok(true),
+            |_| {
+                selected.set(true);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(effect, FocusDocumentPaneEffect::PaneNotVisible);
+        assert!(!selected.get());
+    }
+
+    #[test]
+    fn inactive_desktop_focus_does_not_move_or_select_a_pane() {
+        let promoted = Cell::new(false);
+        let selected = Cell::new(false);
+        let effect = apply_focus_document_pane_effect(
+            "%64",
+            Some("@agent-doc"),
+            false,
+            |_| Some("@stash".to_string()),
+            |_| {
+                promoted.set(true);
+                Ok(true)
+            },
+            |_| {
+                selected.set(true);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(effect, FocusDocumentPaneEffect::DesktopEditorInactive);
+        assert!(!promoted.get());
+        assert!(!selected.get());
     }
 }
 
@@ -30224,6 +30348,16 @@ mod tests {
         let document_hash = agent_doc_hash::document_id_for_path(&canonical);
         let bootstrap = test_bootstrap(&dir);
         let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let editor_pid = std::process::id();
+        let seed_identity = format!("jetbrains-{editor_pid}-retained-editor-arrival-seed");
+        agent_doc_crdt_relay_io::register_editor_replica_for_file_incremental(
+            &canonical,
+            &seed_identity,
+            None,
+            editor_pid,
+        )
+        .unwrap()
+        .expect("seed editor registration must establish the canonical frontier");
 
         append_apply_state_event(
             &bootstrap,
@@ -30265,10 +30399,10 @@ mod tests {
         .unwrap();
         clear_captured_finalize_wake(&runtime, &document_hash);
 
-        let payload = |editor_pid| ControllerCrdtReplicaPayload {
+        let payload = |editor_pid, state_vector_b64| ControllerCrdtReplicaPayload {
             method: ControllerCrdtReplicaMethod::Register,
             identity: None,
-            state_vector_b64: None,
+            state_vector_b64,
             update_b64: None,
             content_hash: None,
             disk_persisted: false,
@@ -30276,14 +30410,18 @@ mod tests {
             source: Some("retained-editor-arrival-test".into()),
             editor_pid,
         };
-        controller_crdt_replica_data(
+        let headless_registration = controller_crdt_replica_data(
             Some(&runtime),
             &canonical,
             ControllerCrdtReplicaMethod::Register,
             "headless-retained-observer",
-            &payload(None),
+            &payload(None, None),
         )
         .unwrap();
+        let retained_state_vector_b64 = headless_registration["canonical_state_vector_b64"]
+            .as_str()
+            .expect("registration must publish its canonical frontier")
+            .to_string();
         assert!(
             runtime
                 .captured_finalize_wakes
@@ -30298,16 +30436,21 @@ mod tests {
         )
         .unwrap();
 
-        let editor_pid = std::process::id();
         let editor_identity = format!("jetbrains-{editor_pid}-retained-editor-arrival");
-        controller_crdt_replica_data(
+        let editor_registration = controller_crdt_replica_data(
             Some(&runtime),
             &canonical,
             ControllerCrdtReplicaMethod::Register,
             &editor_identity,
-            &payload(Some(editor_pid)),
+            &payload(Some(editor_pid), Some(retained_state_vector_b64)),
         )
         .unwrap();
+        assert_eq!(editor_registration["bootstrap_kind"], "full");
+        assert_eq!(editor_registration["canonical_projection_retained"], true);
+        assert_eq!(
+            editor_registration["canonical_covers_retained_frontier"], true,
+            "durable recovery must force a full bootstrap without discarding causal coverage proof"
+        );
         let wake = runtime
             .captured_finalize_wakes
             .lock()
@@ -30322,6 +30465,12 @@ mod tests {
         agent_doc_crdt_relay_io::deregister_editor_replica_for_file(
             &canonical,
             &editor_identity,
+            editor_pid,
+        )
+        .unwrap();
+        agent_doc_crdt_relay_io::deregister_editor_replica_for_file(
+            &canonical,
+            &seed_identity,
             editor_pid,
         )
         .unwrap();

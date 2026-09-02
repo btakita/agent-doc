@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -143,6 +143,12 @@ Verification completed:
 - A two-phase controller recycle was requested and will respect this open cycle.
 
 The running JetBrains process reported plugin `0.2.368` during preflight even though `0.2.370` is installed, so restart or reload the IDE once to activate the installed plugin generation.
+
+### Re: Recycle Supervisor queue closeout — gpt-5
+
+> **Queue prompt:** When I call JB `Recycle Supervisor` while a session is running, the session immediately is interrupted and restarts but does not continue once restarted. Please make sure the session continues if already running.
+
+Completed in agent-doc `0.35.312`: the non-forced restart request now remains pending while the harness-owned turn lease is active, then recycles at the idle boundary without interrupting the running turn. The implementation, verification, release, and installed-plugin note are recorded in the preceding response.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -152,14 +158,6 @@ The running JetBrains process reported plugin `0.2.368` during preflight even th
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- ~~do [#fixclaimtmux]~~
-~~~done
-did you already do this task? Is this a leftover? If yes, please fix agent-doc not cleaning this up:
-```
-failed to activate queue in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md: route_queue_activation: retained route write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md converged to a newer editor projection; recovery=retry_crdt_merge
-```
-~~~
-- 🚧 When I call JB `Recycle Supervisor` while a session is running, the session immediately is interrupted and restarts but does not continue once restarted. Please make sure the session continues if already running.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

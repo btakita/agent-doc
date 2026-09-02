@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
-  codex: 01a044ce-1438-7c20-b3d6-07469fefa0f0
+  codex: 01a0599a-9461-7981-b7a8-068420950fbf
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -59,6 +59,21 @@ Completed `#fixopenissues`.
 - Pushed commits `688b112` and `27cb0ac`, tag `v0.1.96`, and published GitHub binaries, crates.io packages, and `opencode-tsift@0.1.96`.
 - Main CI and all seven Release workflow jobs passed; GitHub issue #24 is closed and no open issues remain.
 - Preserved the original dirty `src/tsift` checkout and performed the release work in an isolated clean worktree.
+
+### Re: Response
+
+Fixed and released as agent-doc **0.35.315** / JetBrains plugin **0.2.371**.
+
+- Root cause: provisional registration reset retry state before retained-projection reconciliation committed, causing one-second register/deregister/pull storms.
+- Fix: only committed endpoints clear backoff; ambiguity now backs off to 30 seconds. See [CrdtReplicaManager.kt](/home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt:2523).
+- Regression coverage added at [CrdtReplicaForwarderTest.kt](/home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/CrdtReplicaForwarderTest.kt:518) and [RetainedCanonicalOperatorTextTest.kt](/home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/RetainedCanonicalOperatorTextTest.kt:151).
+- `make check` and all 503 JetBrains tests pass.
+- Commits pushed, tag `v0.35.315` pushed, release CI observed queued. Controllers are fresh and stable.
+- No reactive topology extraction was needed: controller event ingress and the keyed retry scheduler remain authoritative; the defect was the premature state transition.
+
+I did not capture a usable JVM stack—the restart happened before JVM attach completed—but the logs provided definitive causal evidence, including the same live storm recurring on `contracts.md`.
+
+**Restart IDEA once more now.** Plugin 0.2.371 is installed, but PID `3019171` is still running the old loaded Kotlin classes.
 <!-- agent:boundary:b8ec92e9:tsift -->
 <!-- /agent:exchange -->
 

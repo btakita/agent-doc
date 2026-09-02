@@ -75,6 +75,21 @@ Fixed and released in agent-doc 0.35.313 and 0.35.314.
 Regression coverage includes malformed heading placement, valid fenced responses, empty tracked-work closeouts, dispatch-report deduplication, fresh/stale idle and busy supervisor recycling, focus receipt propagation, and focus failure propagation. The full `make check` suite passes.
 
 Runtime commits: `fde79d7f3` and `6c27b4c0d`. Workspace release commits: `a97656e0e` and `5ab705e69`. Tag `v0.35.314` is pushed.
+
+### Re: Response
+
+Fixed, released, and committed.
+
+- Released agent-doc `0.35.314`; full `make check` passes.
+- Fixed payments-ledger response duplication and editor-to-tmux auto-sync.
+- Fixed contracts missing-replica recovery.
+- Recycle Supervisor now preserves idle and running sessions without invoking agent-doc.
+- Added transactional closeout validation discovered during dogfooding.
+- Live backend, contracts, and payments-ledger actors are healthy.
+- Runtime commits: `fde79d7f3`, `6c27b4c0d`.
+- Workspace commits: `a97656e0e`, `5ab705e69`.
+- Pushed tag `v0.35.314`.
+- The agent-doc response committed successfully and `session-check` passed. The remaining queue head was handed to the supervisor continuation path.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

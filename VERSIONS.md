@@ -2,6 +2,20 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.312
+
+- **Fix: Recycle Supervisor preserves an active harness turn until its idle boundary.**
+
+Non-forced `restart-supervisor` no longer treats a moment with zero supervisor
+IPC handlers as permission to re-exec during a live harness turn. Replacement
+now requires both drained supervisor IPC and an idle harness-owned turn lease;
+until then, the existing restart intent remains pending and the turn continues
+uninterrupted. This keeps child adoption as a recovery mechanism instead of
+making it responsible for resuming an interrupted generic turn. The turn lease's
+existing TTL still releases genuinely stale busy markers. Pure lifecycle and
+SimWorld regressions cover the unsafe no-IPC/live-turn row, pending intent, pane
+and generation preservation, and replacement at the subsequent idle boundary.
+
 ## 0.35.311
 
 - **Fix: navigating to a live stashed document pane surfaces it before focus.**

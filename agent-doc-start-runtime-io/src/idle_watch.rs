@@ -3189,9 +3189,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     );
                 }
             // The cycle-open escalation remains the backstop for ordinary recycle
-            // and fresh-binary child relaunch. Stale in-place replacement instead
-            // uses the no-IPC safe checkpoint below: execve preserves both the
-            // child and durable cycle, so a stale turn marker cannot starve it.
+            // and fresh-binary child relaunch. Stale in-place replacement may cross
+            // an open agent-doc cycle once supervisor IPC is drained, but the pure
+            // restart policy still requires a real turn boundary. The harness turn
+            // lease is authoritative while fresh; reexec adoption is not a generic
+            // continuation checkpoint for an interrupted non-agent-doc turn.
             let effective_cycle_open = cycle_open && !escalate_cycle_open;
             let stale_restart_safe_checkpoint =
                 stale_recycle_safe_checkpoint(supervisor_stale, inflight);

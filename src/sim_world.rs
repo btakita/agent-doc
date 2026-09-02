@@ -8056,11 +8056,12 @@ fn restart_supervisor_drains_then_reexecs_in_place_no_dropped_turn() {
 }
 
 #[test]
-fn stale_restart_reexecs_at_no_ipc_checkpoint_despite_stale_busy_marker() {
-    // A prior binary can retain a stale Busy/open-cycle marker after the harness
-    // has returned to an idle prompt. In-place execve preserves the harness child,
-    // pane, and checkpoint, so the absence of supervisor IPC is the authoritative
-    // safe checkpoint; waiting for that stale marker would wedge replacement.
+fn stale_restart_waits_for_live_turn_lease_then_reexecs_at_boundary() {
+    // A drained supervisor IPC handler is not proof that the harness turn ended.
+    // The harness-owned turn lease remains authoritative while fresh, because a
+    // failed child adoption has no generic turn checkpoint from which to continue.
+    // A genuinely stale lease expires through the production TTL; the model drives
+    // the normal Stop/idle transition explicitly.
     let mut world = SimWorld::new(4_243);
     world.apply(SimCommand::BindRouteOwner).unwrap();
     world.apply(SimCommand::SupervisorReady).unwrap();
@@ -8075,6 +8076,25 @@ fn stale_restart_reexecs_at_no_ipc_checkpoint_despite_stale_busy_marker() {
     world.apply(SimCommand::RequestSupervisorRestart).unwrap();
     world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
 
+    assert_eq!(
+        world.coverage.supervisor_restart_drain_reexecs, 0,
+        "drained supervisor IPC must not interrupt a live harness turn"
+    );
+    assert!(
+        world.recycle_clear.restart_requested,
+        "the replacement remains pending until the turn boundary"
+    );
+    assert!(world.recycle_clear.binary_stale);
+    assert_eq!(world.route.durable.generation, generation_before);
+    assert_eq!(world.route.durable.pane_id, pane_before);
+    assert!(
+        world.recycle_clear.cycle_open,
+        "deferral preserves the durable open-cycle checkpoint"
+    );
+
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+
     assert_eq!(world.coverage.supervisor_restart_drain_reexecs, 1);
     assert!(!world.recycle_clear.restart_requested);
     assert!(!world.recycle_clear.binary_stale);
@@ -8082,7 +8102,7 @@ fn stale_restart_reexecs_at_no_ipc_checkpoint_despite_stale_busy_marker() {
     assert_eq!(world.route.durable.pane_id, pane_before);
     assert!(
         world.recycle_clear.cycle_open,
-        "in-place replacement preserves the durable open-cycle checkpoint"
+        "boundary replacement preserves the durable open-cycle checkpoint"
     );
 }
 
@@ -8266,8 +8286,8 @@ fn pure_codex_thread_does_not_inherit_orchard_agent_doc_work() {
 fn restart_supervisor_open_cycle_never_overrides_active_ipc_then_reexecs_when_drained() {
     // A stale open closeout cycle may hit the bounded cycle-open escalation,
     // but that timer must never override an active supervisor IPC handler. Once
-    // IPC drains, in-place replacement is immediately safe even though the open
-    // cycle remains; execve preserves the child, pane, and durable checkpoint.
+    // IPC drains at an idle turn boundary, in-place replacement is safe even though
+    // the open cycle remains; execve preserves the child, pane, and durable checkpoint.
     use agent_doc_supervisor::lifecycle::MAX_CYCLE_OPEN_DEFER_TICKS;
 
     let mut world = SimWorld::new(4_243);
@@ -8301,7 +8321,7 @@ fn restart_supervisor_open_cycle_never_overrides_active_ipc_then_reexecs_when_dr
     world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
     assert_eq!(
         world.coverage.supervisor_restart_drain_reexecs, 1,
-        "the pending replacement reexecs at the first no-IPC safe checkpoint"
+        "the pending replacement reexecs at the first drained turn boundary"
     );
     assert!(
         !world.recycle_clear.restart_requested,

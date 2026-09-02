@@ -680,8 +680,11 @@ must never receive another command.
   report which cleanup steps actually ran.
   Stale-binary freshness is not a wedged-owner discard: stale-supervisor
   warnings and compaction recovery hints must use `agent-doc admin recycle` or
-  normal `agent-doc session restart-supervisor <FILE>`, which refuses
-  `alive-busy` panes, rather than this force path.
+  normal `agent-doc session restart-supervisor <FILE>`. A healthy live
+  supervisor accepts that request as a pending drain-to-boundary handoff: an
+  `alive-busy` turn continues uninterrupted, and replacement runs only after
+  supervisor IPC is drained and the harness-owned turn lease becomes idle.
+  It does not borrow the destructive semantics of this force path.
   For Codex panes, a capture
   that shows only Codex status/footer chrome such as the model/cwd/context line,
   with no prompt input or busy cue, is direct idle evidence for operator

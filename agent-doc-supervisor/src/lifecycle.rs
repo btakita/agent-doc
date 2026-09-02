@@ -317,12 +317,15 @@ pub fn supervisor_restart_action(
     if !restart_requested {
         return SupervisorRestartAction::None;
     }
-    // Re-exec replaces only the stale supervisor host; execve preserves the
-    // harness child, pane, and durable cycle checkpoint. Its authoritative
-    // safety condition is drained supervisor IPC, even if a stale turn marker
-    // disagrees. A prompt boundary must never override an active IPC handler.
+    // Re-exec replaces only the stale supervisor host; execve normally preserves
+    // the harness child, pane, and durable cycle checkpoint. It must still wait
+    // for BOTH authorities to report a safe boundary: supervisor IPC is drained
+    // and the harness-owned turn lease is idle. Child adoption is recovery, not
+    // permission to interrupt a live turn; if adoption fails there is no generic
+    // harness-turn checkpoint from which to continue. The turn lease has its own
+    // TTL, so a genuinely stale marker cannot block replacement forever.
     if reexec_intent {
-        return if stale_reexec_safe_checkpoint {
+        return if turn_boundary && stale_reexec_safe_checkpoint {
             SupervisorRestartAction::ReexecInPlace
         } else {
             SupervisorRestartAction::AwaitDrain
@@ -604,7 +607,7 @@ mod tests {
         );
         assert_eq!(
             supervisor_restart_action(true, true, false, true),
-            ReexecInPlace
+            AwaitDrain
         );
         assert_eq!(
             supervisor_restart_action(true, true, true, false),

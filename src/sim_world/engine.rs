@@ -1385,12 +1385,14 @@ impl SimWorld {
         // (2b) `#supkill-bg` blue/green drain-and-supersede restart. An explicit
         // `restart-supervisor` (IPC `Restart`) drives the production
         // `supervisor_restart_action` policy BEFORE the opt-in auto-recycle path: it
-        // DRAINS while supervisor IPC is in flight (`AwaitDrain`, restart stays
-        // pending). A stale binary re-execs in place at the first no-IPC safe
-        // checkpoint, even if a stale turn marker still says Busy; execve preserves
-        // the harness child, pane, and durable cycle. A fresh-binary child relaunch
-        // still waits for a real turn boundary. `reexec_intent` is the live
-        // staleness probe, exactly as the IPC handler stamps `restart_reexec`.
+        // DRAINS while supervisor IPC is in flight OR the harness-owned turn lease
+        // is active (`AwaitDrain`, restart stays pending). A stale binary re-execs
+        // in place only once both authorities reach a safe turn boundary; execve
+        // then preserves the harness child, pane, and durable cycle without making
+        // child adoption responsible for resuming an interrupted generic turn. A
+        // fresh-binary child relaunch uses the same real turn boundary. `reexec_intent`
+        // is the live staleness probe, exactly as the IPC handler stamps
+        // `restart_reexec`.
         let stale_restart_safe_checkpoint =
             self.recycle_clear.binary_stale && !self.recycle_clear.ipc_inflight;
         let restart_action = supervisor_restart_action(

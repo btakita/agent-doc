@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -90,6 +90,19 @@ Fixed, released, and committed.
 - Workspace commits: `a97656e0e`, `5ab705e69`.
 - Pushed tag `v0.35.314`.
 - The agent-doc response committed successfully and `session-check` passed. The remaining queue head was handed to the supervisor continuation path.
+
+### Re: do [#jetbrainsrunroute] — gpt-5.6-sol
+
+> **Queue prompt:**
+>
+> do [#jetbrainsrunroute]
+
+
+This is the older duplicate of the completed `#jetbrainsrunroute-z09d` incident, so it is resolved by the same shipped fix rather than a second code change.
+
+Both items describe the same payments-ledger route attempt on pane `%57`, actor generation 6, with the same `run_agent_doc_route_dispatch_failure` invariant. `#jetbrainsrunroute` is the lower `supervisor_dispatch_start_proof` report; `#jetbrainsrunroute-z09d` is the redundant outer `dispatch_only_dispatch_start_proof` report. Agent-doc 0.35.313 commit `fde79d7f3` made the lower transport report authoritative for an unproven dispatch start while retaining the outer fallback report for accepted-only failures.
+
+Fresh verification passed: `cargo test -p agent-doc-route-io dispatch_only_`. The implementation checkout is clean, installed agent-doc is 0.35.314, and GitHub CI run `33595682483` for the release commit is still in progress.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -99,12 +112,9 @@ Fixed, released, and committed.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- ~~do [#jetbrainsrunroute-z09d]~~
-- do [#jetbrainsrunroute]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#jetbrainsrunroute] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/payments-ledger.md stage=supervisor_dispatch_start_proof pane=%57 actor_generation=6 editor_attempt_id=unknown dispatch_proof_state=none elapsed_ms=10175 diagnostic_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/route-submit/1788302182345-supervisor_dispatch_start_unproven-codex-_57-46eeee34c802.txt ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=supervisor_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=01c84c57b94f408496d07ab9fc1b9d0c1fdb1cb7638200326fe45eaf1127be39 component=route/supervisor_dispatch_start_proof content_hash=sha256:f0c87b98bd1da3bde1b6e67dc6185450e129fc83ae96e45d60acc0766d8aeb8d]
 <!-- /agent:backlog -->
 
 ## Review

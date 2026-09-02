@@ -10996,9 +10996,12 @@ pub(crate) fn serve_with_options(
                 });
             }
             Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                if !project_root.exists() {
+                // The path can be recreated by a concurrent cleanup/bootstrap after
+                // its original directory is removed. Existence alone would let this
+                // detached controller attach itself to that new project incarnation.
+                if !root_incarnation.still_matches(project_root) {
                     eprintln!(
-                        "[controller] project root {} no longer exists; shutting down detached controller",
+                        "[controller] project root {} no longer names its original incarnation; shutting down detached controller",
                         project_root.display()
                     );
                     should_stop.store(true, Ordering::SeqCst);
@@ -26645,6 +26648,10 @@ mod tests {
         wait_for_test_controller(&project_root);
 
         drop(dir);
+        // Recreate the same path before the next idle tick. A path-existence check
+        // cannot distinguish this new directory from the controller's original
+        // project root; the retained incarnation must.
+        std::fs::create_dir_all(&project_root).unwrap();
 
         let result = rx
             // Loaded CI runners can delay the detached controller's reaper
@@ -26655,6 +26662,7 @@ mod tests {
             .expect("controller should exit after its temp project root is removed");
         assert_eq!(result, Ok(()));
         handle.join().unwrap();
+        std::fs::remove_dir_all(&project_root).unwrap();
     }
 
     #[cfg(unix)]

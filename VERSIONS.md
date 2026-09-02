@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.310
+
+- **Fix: detached controllers retain project-root incarnation authority throughout their serve lifetime.**
+
+The idle serve loop now compares the live project-root directory with the retained
+startup incarnation rather than checking path existence alone. A concurrent
+cleanup or bootstrap may recreate the same pathname after deletion; that new
+directory no longer keeps the old controller alive or lets it attach to a
+different project incarnation. The regression test recreates the path before the
+next idle tick to cover the CI race deterministically.
+
 ## 0.35.309
 
 - **Fix: route-created sessions preserve the resolved harness across provisional actor and child-start boundaries.**

@@ -36,6 +36,14 @@ Compacted content:
 
 > **Queue prompt:**
 >
+> did you already do this task? Is this a leftover? If yes, please fix agent-doc not cleaning this up:
+> ```
+> failed to activate queue in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md: route_queue_activation: retained route write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md converged to a newer editor projection; recovery=retry_crdt_merge
+> ```
+
+
+> **Queue prompt:**
+>
 > do [#fixclaimtmux]
 
 ### Re: Automatic stale-supervisor recycle — gpt-5
@@ -122,12 +130,12 @@ Restart IntelliJ now. Plugin v0.2.370 is installed, but the running IDE still ha
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 - ~~do [#fixclaimtmux]~~
----
+~~~done
 did you already do this task? Is this a leftover? If yes, please fix agent-doc not cleaning this up:
 ```
 failed to activate queue in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md: route_queue_activation: retained route write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md converged to a newer editor projection; recovery=retry_crdt_merge
 ```
----
+~~~
 - When I call JB `Recycle Supervisor` while a session is running, the session immediately is interrupted and restarts but does not continue once restarted. Please make sure the session continues if already running.
 <!-- /agent:queue -->
 

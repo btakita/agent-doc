@@ -27528,7 +27528,9 @@ mod tests {
     #[test]
     fn queue_boundary_self_recycle_makes_stale_content_ours_refusal_ineligible() {
         use agent_doc_supervisor::config::host_supervisor_is_stale;
-        use agent_doc_supervisor::lifecycle::{SupervisorRecycleAction, supervisor_recycle_action};
+        use agent_doc_supervisor::lifecycle::{
+            SupervisorRecycleAction, SupervisorRecycleCheckpoint, supervisor_recycle_action,
+        };
 
         let installed_inode = 4242u64;
         assert!(
@@ -27538,10 +27540,15 @@ mod tests {
 
         assert_eq!(
             supervisor_recycle_action(
-                /* stale */ true, /* auto_recycle */ true, /* turn_boundary */ true,
-                /* head_pending */ true, /* explicit_admin */ false,
-                /* write_wedged */ false, /* editor_delivery_stale */ false,
-                /* reexec_failed */ false, /* cycle_open */ false,
+                /* stale */ true,
+                /* auto_recycle */ true,
+                /* checkpoint */ SupervisorRecycleCheckpoint::TurnBoundary,
+                /* head_pending */ true,
+                /* explicit_admin */ false,
+                /* write_wedged */ false,
+                /* editor_delivery_stale */ false,
+                /* reexec_failed */ false,
+                /* cycle_open */ false,
             ),
             SupervisorRecycleAction::RecycleImmediate,
             "a stale supervisor with a pending queue head must self-recycle before the next item"

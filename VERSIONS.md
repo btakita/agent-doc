@@ -2,6 +2,20 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.318
+
+- **Fix: explicit supervisor recycle completes after a committed closeout.**
+
+The supervisor recycle state machine now distinguishes an unsafe IPC checkpoint,
+a safe intra-turn checkpoint, and a full turn boundary. A durable explicit
+`admin recycle` remains deferred while a document cycle is open or supervisor IPC
+is in flight, then performs its in-place `execve` as soon as the cycle commits and
+IPC drains—even if the enclosing harness turn marker remains active. Because the
+reexec preserves the harness child and pane, this breaks the prior circular wait
+without interrupting the live turn. Routine non-explicit maintenance still waits
+for a full turn boundary. Unit, runtime-seam, and deterministic SimWorld coverage
+pin the transition and its safety interlocks.
+
 ## 0.35.317
 
 - **Fix: live editor CRDT updates cannot cross agent-doc component boundaries.**
@@ -3412,7 +3426,7 @@ and dead registrations cannot.
   diagnostic of its own.
 
   Observed live 2026-08-09 while proving `#unrenderedframestormlive`: the
-  supervisor for `src/boost-client/tasks/monsterrodholders.md` (PID 4069526,
+  supervisor for `src/sample-app/tasks/sampleorders.md` (PID 4069526,
   started 2026-08-05) had run four days on a **deleted** binary image
   (`readlink /proc/4069526/exe` → `/home/brian/.cargo/bin/agent-doc (deleted)`)
   while its controller projection stayed unavailable. Its ops log carried 227
@@ -3713,7 +3727,7 @@ and dead registrations cannot.
   context-usage token, and `is_claude_status_chrome_line` keyed the whole chrome
   test on it. A **fresh** session has no meaningful context usage, so Claude
   omits that token entirely and renders
-  `Opus 5 ~/…/src/boost-client main brian@cachyos-x8664`. That line was
+  `Opus 5 ~/…/src/sample-app main alex@workstation`. That line was
   therefore classified as ordinary output, and because it sits *below* the
   composer it won `last_prompt_candidate` and masked the `❯` prompt above it.
   Every non-cursor-scoped readiness check — `output_prompt_visible`, and through

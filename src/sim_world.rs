@@ -7729,19 +7729,20 @@ fn open_agent_doc_cycle_defers_self_recycle_until_finalize_commits() {
 }
 
 #[test]
-fn operator_recycle_mark_defers_while_agent_doc_cycle_open() {
-    // `#midturn-recycle-resume`: an explicit operator/admin recycle is still a
-    // recycle arm. While a preflight->finalize cycle is open, it must remain pending
-    // instead of bypassing the policy and execve-ing through the live checkpoint.
+fn operator_recycle_fires_after_cycle_commit_while_harness_turn_remains_active() {
+    // `#supboundarylivelock`: an explicit operator/admin recycle remains pending
+    // while a preflight->finalize cycle is open. Once finalize commits and IPC is
+    // drained, the in-place supervisor exec must fire even though the harness turn
+    // marker stays active until this outer turn returns.
     let mut world = SimWorld::new(8_202);
     world.apply(SimCommand::BindRouteOwner).unwrap();
     world.apply(SimCommand::SupervisorReady).unwrap();
 
     let gen_before = world.route.durable.generation;
 
-    world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
     world.apply(SimCommand::OperatorRecycleMark).unwrap();
     world.apply(SimCommand::SetAgentDocCycleOpen(true)).unwrap();
+    world.apply(SimCommand::SupervisorBusy).unwrap();
 
     for tick in 1..=3 {
         world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
@@ -7762,7 +7763,7 @@ fn operator_recycle_mark_defers_while_agent_doc_cycle_open() {
 
     assert_eq!(
         world.coverage.supervisor_recycles, 1,
-        "the pending operator recycle fires after the cycle commits"
+        "the pending operator recycle fires after the cycle commits even while the harness turn is active"
     );
     assert!(
         !world.recycle_clear.operator_recycle_marked,
@@ -8827,7 +8828,7 @@ fn stale_supervisor_recycles_even_when_the_drain_bails_early() {
     // recycle decision lives after the drain, so any supervisor stuck in one of
     // those drain states could never reach it.
     //
-    // Observed live 2026-08-09 on `src/boost-client/tasks/monsterrodholders.md`:
+    // Observed live 2026-08-09 on `src/sample-app/tasks/sampleorders.md`:
     // PID 4069526 ran four days on a DELETED binary image
     // (`readlink /proc/4069526/exe` → `... (deleted)`) while its controller
     // projection stayed unavailable. 227 CP recycle requests were written and

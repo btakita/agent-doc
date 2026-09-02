@@ -1285,8 +1285,8 @@ impl SimWorld {
             idle_queue_drain_decision,
         };
         use agent_doc_supervisor::lifecycle::{
-            SupervisorRecycleAction, SupervisorRestartAction, supervisor_recycle_action,
-            supervisor_restart_action,
+            SupervisorRecycleAction, SupervisorRecycleCheckpoint, SupervisorRestartAction,
+            supervisor_recycle_action, supervisor_restart_action,
         };
 
         // The supervisor's idle signal: a dispatch-ready harness prompt is visible
@@ -1440,10 +1440,14 @@ impl SimWorld {
         // the first available SAFE intra-turn checkpoint (no IPC connection in flight),
         // so a wedge waits for a safe point before recycling. Model that gate here.
         let write_wedged = self.recycle_clear.write_wedged && !self.recycle_clear.ipc_inflight;
+        let recycle_checkpoint = SupervisorRecycleCheckpoint::from_observation(
+            turn_boundary,
+            !self.recycle_clear.ipc_inflight,
+        );
         let recycle_action = supervisor_recycle_action(
             self.recycle_clear.binary_stale,
             self.recycle_clear.auto_recycle,
-            turn_boundary && !self.recycle_clear.ipc_inflight,
+            recycle_checkpoint,
             head_pending,
             self.recycle_clear.operator_recycle_marked,
             write_wedged,
@@ -1502,13 +1506,10 @@ impl SimWorld {
             write_wedged && matches!(recycle_action, SupervisorRecycleAction::RecycleImmediate);
         // `#suprecyclestall`: once a self-`execve` recycle has failed the watch
         // disables further attempts and runs on the current binary, so a hopeless
-        // recycle is not re-tried every idle boundary. A wedge recycle bypasses the
-        // turn-boundary requirement (`#midturn-wedge-recycle`); every other arm still
-        // waits for a boundary, exactly as `do_recycle` does in the real idle watch.
-        if (turn_boundary || wedge_triggered)
-            && !self.recycle_clear.recycle_disabled
-            && auto_recycle_now
-        {
+        // recycle is not re-tried every idle boundary. The pure lifecycle action
+        // already owns both the IPC-safe checkpoint and turn/cycle policy, including
+        // wedge recovery and explicit cycle-closed admin recycle.
+        if !self.recycle_clear.recycle_disabled && auto_recycle_now {
             self.recycle_clear.operator_recycle_marked = false;
             if self.recycle_clear.reexec_will_fail {
                 // `supervisor_perform_reexec` returned Err. The watch logs, surfaces

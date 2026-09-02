@@ -617,9 +617,16 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   `idle_queue_drain_decision`) the live idle-queue watch uses rather than
   reimplementing the policy, so the recycle + clear pipeline is simulated offline
   across its interoperating systems.
-- `#wd40` state-flush: an explicit `admin recycle` recycles at the next turn
-  boundary even when the installed binary already matches the running supervisor
-  (`supervisor:fresh`). The recycle then restarts the supervisor *process*, which
+- `#wd40` / `#supboundarylivelock` state-flush: an explicit `admin recycle`
+  recycles at the first supervisor-safe checkpoint even when the installed binary
+  already matches the running supervisor (`supervisor:fresh`). A checkpoint is
+  safe when supervisor IPC is drained and either the harness is at a turn boundary
+  or the document cycle has committed. The latter must not wait for the enclosing
+  harness turn marker to retire: an in-place supervisor `execve` preserves the live
+  harness child, while waiting inside closeout would make the recycle depend on the
+  same turn that is waiting for it. An open document cycle or in-flight supervisor
+  IPC remains authoritative and keeps the durable recycle request pending. The
+  recycle then restarts the supervisor *process*, which
   rebuilds its in-memory state — flushing a lagging CRDT projection
   (`projection_lag`) that can keep re-pinning a queue head (`#rt83` phantom-pin
   churn) even though there is no stale binary to swap. `supervisor_recycle_action`
@@ -631,8 +638,8 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   recycle projection (mirroring the `stale_binary_drain` path) so the loop
   yields one inter-item boundary and the process restart fires. Preflight,
   session-check, and queue continuation detection observe the projection through
-  controller RPC instead of a `.agent-doc/recycle-yield` marker. It still respects
-  `turn_boundary` — a fresh-binary flush never drops a live turn.
+  controller RPC instead of a `.agent-doc/recycle-yield` marker. Routine
+  non-explicit maintenance still respects `turn_boundary`.
 - `#midturn-controller-recycle` / `#recycleforce`: a project controller may
   start a private replacement even while durable harness dispatches or
   controller RPCs remain open. Socket promotion redirects new RPCs, then the

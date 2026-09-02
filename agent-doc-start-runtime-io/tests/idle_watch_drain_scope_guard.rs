@@ -7,7 +7,7 @@
 //! `⚠ STALE SUPERVISOR` pane marker, which is why the failure produced no
 //! diagnostic at all.
 //!
-//! Observed live 2026-08-09: `src/boost-client/tasks/monsterrodholders.md`'s
+//! Observed live 2026-08-09: `src/sample-app/tasks/sampleorders.md`'s
 //! supervisor (PID 4069526) ran four days on a deleted binary image because its
 //! queue authority stayed unavailable, so every tick took the
 //! `QueueHeadObservation::AuthorityUnavailable` early exit. 227 CP recycle

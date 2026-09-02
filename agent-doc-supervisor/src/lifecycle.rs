@@ -10,7 +10,40 @@ pub enum SupervisorRecycleAction {
     RecycleImmediate,
     RecycleDebounced,
     EscalateKillRelaunch,
+    DeferUnsafeCheckpoint,
     DeferCycleOpen,
+}
+
+/// The strongest supervisor-recycle checkpoint observed on this watch tick.
+///
+/// This is deliberately narrower than a generic "idle" fact. An in-place
+/// supervisor `execve` preserves the harness child, so an explicit operator
+/// recycle may run at [`Self::SafeIntraTurn`] once the document cycle is closed.
+/// Routine maintenance still requires [`Self::TurnBoundary`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisorRecycleCheckpoint {
+    /// At least one supervisor IPC handler is still in flight.
+    Unsafe,
+    /// Supervisor IPC is drained, but the harness turn marker remains active.
+    SafeIntraTurn,
+    /// Supervisor IPC is drained and the harness reports a real turn boundary.
+    TurnBoundary,
+}
+
+impl SupervisorRecycleCheckpoint {
+    pub fn from_observation(turn_boundary: bool, supervisor_ipc_drained: bool) -> Self {
+        if !supervisor_ipc_drained {
+            Self::Unsafe
+        } else if turn_boundary {
+            Self::TurnBoundary
+        } else {
+            Self::SafeIntraTurn
+        }
+    }
+
+    pub fn is_safe(self) -> bool {
+        !matches!(self, Self::Unsafe)
+    }
 }
 
 pub const MAX_REEXEC_ESCALATIONS: u32 = 2;
@@ -153,7 +186,7 @@ mod restart_admission_tests {
         let recycle = supervisor_recycle_action(
             false, // stale
             true,  // auto_recycle
-            false, // turn_boundary
+            SupervisorRecycleCheckpoint::SafeIntraTurn,
             false, // head_pending
             true,  // explicit_admin
             false, // write_wedged
@@ -196,7 +229,7 @@ pub fn recycle_interrupted_resubmit_should_wait(
 pub fn supervisor_recycle_action(
     stale: bool,
     auto_recycle: bool,
-    turn_boundary: bool,
+    checkpoint: SupervisorRecycleCheckpoint,
     head_pending: bool,
     explicit_admin: bool,
     write_wedged: bool,
@@ -204,6 +237,17 @@ pub fn supervisor_recycle_action(
     reexec_failed: bool,
     cycle_open: bool,
 ) -> SupervisorRecycleAction {
+    // The transition owner consumes the live IPC-drain observation directly.
+    // Durable recycle intents remain pending until a safe checkpoint rather
+    // than relying on each effect caller to reproduce this guard.
+    if !checkpoint.is_safe() {
+        return if explicit_admin || write_wedged || editor_delivery_stale {
+            SupervisorRecycleAction::DeferUnsafeCheckpoint
+        } else {
+            SupervisorRecycleAction::None
+        };
+    }
+
     // `#midturn-wedge-recycle`: a proven editor-IPC write wedge means the active
     // turn/cycle can never reach its own boundary — closeout is blocked on a
     // convergence receipt that will not arrive, so `turn_boundary` never becomes
@@ -229,27 +273,28 @@ pub fn supervisor_recycle_action(
         };
     }
 
-    if !turn_boundary {
+    if !matches!(checkpoint, SupervisorRecycleCheckpoint::TurnBoundary) {
         // `#supboundarylivelock`: an EXPLICIT operator recycle must not be
-        // silently dropped here.
+        // silently dropped or wait on its own harness turn forever.
         //
-        // `turn_boundary` is `prompt_visible && !turn_active`, which never
-        // holds for a continuously-active pane, so `admin recycle` on a busy
-        // non-stale supervisor returned `None` on every tick and the request
-        // simply expired at `DEFAULT_RECYCLE_REQUEST_TTL_SECS` (900s) with its
-        // ledger phase still `Requested` — a stale binary stayed mapped for a
-        // whole session with no signal that the operator's request had died.
+        // `turn_boundary` is `prompt_visible && !turn_active`. During closeout,
+        // the cycle can commit while the harness turn marker correctly remains
+        // active until the final response returns. Waiting for that marker from
+        // inside closeout creates a circular wait: `admin recycle` stays pending
+        // even though supervisor IPC is drained and there is no open cycle.
         //
-        // Deferring keeps the request alive and visible for the next boundary
-        // instead of discarding it. Deliberately NOT `RecycleImmediate`: away
-        // from a turn boundary a recycle would kill a live turn, which is the
-        // very thing the gate exists to prevent. This fixes the silent loss,
-        // not the mid-turn escalation question.
-        return if explicit_admin {
-            SupervisorRecycleAction::DeferCycleOpen
-        } else {
-            SupervisorRecycleAction::None
-        };
+        // The in-place `execve` preserves the harness child. Once the document
+        // cycle is closed, a safe intra-turn checkpoint therefore completes the
+        // explicit recycle without interrupting the turn. An open cycle remains
+        // authoritative and continues to defer.
+        if explicit_admin {
+            return if cycle_open {
+                SupervisorRecycleAction::DeferCycleOpen
+            } else {
+                SupervisorRecycleAction::RecycleImmediate
+            };
+        }
+        return SupervisorRecycleAction::None;
     }
 
     if cycle_open {
@@ -344,34 +389,68 @@ mod tests {
     use super::*;
 
     /// `#supboundarylivelock`: an explicit `admin recycle` against a busy,
-    /// non-stale supervisor used to return `None` on every tick, so the request
-    /// expired after 900s with its ledger phase still `Requested` and a stale
-    /// binary stayed mapped for the whole session. It must defer (stay alive
-    /// for the next boundary), never vanish — and must still not recycle
-    /// mid-turn, which would kill the live turn the gate protects.
+    /// non-stale supervisor used to wait for the harness turn marker even after
+    /// the document cycle committed. The in-place exec preserves the harness
+    /// child, so a cycle-closed, IPC-drained checkpoint must complete it.
     #[test]
-    fn explicit_admin_recycle_defers_away_from_a_turn_boundary_instead_of_vanishing() {
+    fn explicit_admin_recycle_uses_cycle_closed_safe_intra_turn_checkpoint() {
         use SupervisorRecycleAction::*;
-        // stale=false, auto=false, turn_boundary=FALSE, head_pending=false,
-        // explicit_admin=TRUE, no wedge, no reexec failure, cycle_open=false.
+        use SupervisorRecycleCheckpoint::*;
+
         assert_eq!(
-            supervisor_recycle_action(false, false, false, false, true, false, false, false, false),
-            DeferCycleOpen,
-            "an explicit operator recycle must survive to the next boundary"
+            supervisor_recycle_action(
+                false,
+                false,
+                SafeIntraTurn,
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
+            RecycleImmediate,
+            "a drained, cycle-closed checkpoint must honor the explicit recycle"
+        );
+
+        assert_eq!(
+            supervisor_recycle_action(
+                false, false, Unsafe, false, true, false, false, false, false,
+            ),
+            DeferUnsafeCheckpoint,
+            "an in-flight IPC handler keeps the durable request pending"
         );
 
         // Without an explicit request there is nothing to preserve.
         assert_eq!(
             supervisor_recycle_action(
-                false, false, false, false, false, false, false, false, false
+                false,
+                false,
+                SafeIntraTurn,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
             ),
             None,
-            "a non-explicit tick away from a boundary stays a no-op"
+            "routine maintenance still waits for a real turn boundary"
         );
 
         // At a real boundary the explicit request is consumed as before.
         assert_eq!(
-            supervisor_recycle_action(false, false, true, false, true, false, false, false, false),
+            supervisor_recycle_action(
+                false,
+                false,
+                TurnBoundary,
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
             RecycleImmediate,
             "reaching a boundary must still honor the explicit request immediately"
         );
@@ -380,25 +459,76 @@ mod tests {
     #[test]
     fn recycle_action_policy() {
         use SupervisorRecycleAction::*;
+        use SupervisorRecycleCheckpoint::*;
 
         assert_eq!(
-            supervisor_recycle_action(false, true, true, true, false, false, false, false, false),
+            supervisor_recycle_action(
+                false,
+                true,
+                TurnBoundary,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
             None
         );
         assert_eq!(
-            supervisor_recycle_action(true, true, false, true, false, false, false, false, false),
+            supervisor_recycle_action(
+                true,
+                true,
+                SafeIntraTurn,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
             None
         );
         assert_eq!(
-            supervisor_recycle_action(true, false, true, false, false, false, false, false, false),
+            supervisor_recycle_action(
+                true,
+                false,
+                TurnBoundary,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
             Detect
         );
         assert_eq!(
-            supervisor_recycle_action(true, true, true, true, false, false, false, false, false),
+            supervisor_recycle_action(
+                true,
+                true,
+                TurnBoundary,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
             RecycleImmediate
         );
         assert_eq!(
-            supervisor_recycle_action(true, true, true, false, false, false, false, false, false),
+            supervisor_recycle_action(
+                true,
+                true,
+                TurnBoundary,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
             RecycleDebounced
         );
     }
@@ -406,37 +536,108 @@ mod tests {
     #[test]
     fn recycle_defers_all_recycle_arms_while_cycle_open() {
         use SupervisorRecycleAction::*;
+        use SupervisorRecycleCheckpoint::*;
 
         assert_eq!(
-            supervisor_recycle_action(true, true, true, true, false, false, false, false, true),
+            supervisor_recycle_action(
+                true,
+                true,
+                TurnBoundary,
+                true,
+                false,
+                false,
+                false,
+                false,
+                true,
+            ),
             DeferCycleOpen
         );
         assert_eq!(
-            supervisor_recycle_action(false, false, true, false, true, false, false, false, true),
+            supervisor_recycle_action(
+                false,
+                false,
+                TurnBoundary,
+                false,
+                true,
+                false,
+                false,
+                false,
+                true,
+            ),
             DeferCycleOpen
         );
         assert_eq!(
-            supervisor_recycle_action(true, false, true, false, true, false, false, false, true),
+            supervisor_recycle_action(
+                true,
+                false,
+                TurnBoundary,
+                false,
+                true,
+                false,
+                false,
+                false,
+                true,
+            ),
             DeferCycleOpen
         );
         // `#midturn-wedge-recycle`: a proven write wedge no longer defers on
         // cycle_open — the wedged cycle is precisely the one that never closes, so
         // deferring would deadlock. Covered by `wedge_recycles_immediately_mid_turn`.
         assert_eq!(
-            supervisor_recycle_action(true, true, true, true, false, false, false, true, true),
+            supervisor_recycle_action(
+                true,
+                true,
+                TurnBoundary,
+                true,
+                false,
+                false,
+                false,
+                true,
+                true,
+            ),
             DeferCycleOpen
         );
 
         assert_eq!(
-            supervisor_recycle_action(true, false, true, false, true, false, false, false, false),
+            supervisor_recycle_action(
+                true,
+                false,
+                TurnBoundary,
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
             RecycleImmediate
         );
         assert_eq!(
-            supervisor_recycle_action(true, false, true, false, false, true, false, false, false),
+            supervisor_recycle_action(
+                true,
+                false,
+                TurnBoundary,
+                false,
+                false,
+                true,
+                false,
+                false,
+                false,
+            ),
             RecycleImmediate
         );
         assert_eq!(
-            supervisor_recycle_action(true, true, true, true, false, false, false, true, false),
+            supervisor_recycle_action(
+                true,
+                true,
+                TurnBoundary,
+                true,
+                false,
+                false,
+                false,
+                true,
+                false,
+            ),
             EscalateKillRelaunch
         );
     }
@@ -444,62 +645,131 @@ mod tests {
     #[test]
     fn wedge_recycles_immediately_mid_turn() {
         use SupervisorRecycleAction::*;
+        use SupervisorRecycleCheckpoint::*;
 
-        // Args: (stale, auto, turn_boundary, head_pending, admin, write_wedged,
+        // Args: (stale, auto, checkpoint, head_pending, admin, write_wedged,
         // editor_delivery_stale, reexec_failed, cycle_open)
         // The whole point of `#midturn-wedge-recycle`: a proven wedge recycles even
         // when NOT at a turn boundary — the wedged turn can never reach one.
         assert_eq!(
-            supervisor_recycle_action(false, false, false, false, false, true, false, false, false),
+            supervisor_recycle_action(
+                false,
+                false,
+                SafeIntraTurn,
+                false,
+                false,
+                true,
+                false,
+                false,
+                false,
+            ),
             RecycleImmediate
         );
         // ...and even mid-cycle: the open cycle is the one that is wedged.
         assert_eq!(
-            supervisor_recycle_action(false, false, false, false, false, true, false, false, true),
+            supervisor_recycle_action(
+                false,
+                false,
+                SafeIntraTurn,
+                false,
+                false,
+                true,
+                false,
+                false,
+                true,
+            ),
             RecycleImmediate
         );
         // Fires on a fresh (non-stale) binary — this session's exact case, where the
         // supervisor was `fresh` yet the editor-IPC write never converged.
         assert_eq!(
-            supervisor_recycle_action(false, true, false, false, false, true, false, false, true),
+            supervisor_recycle_action(
+                false,
+                true,
+                SafeIntraTurn,
+                false,
+                false,
+                true,
+                false,
+                false,
+                true,
+            ),
             RecycleImmediate
         );
         // A wedge whose in-place execve already failed escalates to kill+relaunch
         // instead of re-execing a binary that cannot converge.
         assert_eq!(
-            supervisor_recycle_action(false, false, false, false, false, true, false, true, true),
+            supervisor_recycle_action(
+                false,
+                false,
+                SafeIntraTurn,
+                false,
+                false,
+                true,
+                false,
+                true,
+                true,
+            ),
             EscalateKillRelaunch
         );
-        // No wedge, mid-turn: still nothing RECYCLES off a boundary. This case
-        // carries `explicit_admin = true`, so since `#supboundarylivelock` it
-        // defers instead of returning `None` — the operator's request stays
-        // alive for the next boundary rather than silently expiring after 900s.
-        // The invariant this line guards (no mid-turn recycle) is unchanged:
-        // `DeferCycleOpen` does not recycle.
+        // A durable explicit admin request is different from routine
+        // maintenance: once IPC is drained and the cycle is closed, its in-place
+        // exec preserves the harness child and must not wait on the turn marker.
         assert_eq!(
-            supervisor_recycle_action(true, true, false, true, true, false, false, false, false),
-            DeferCycleOpen
+            supervisor_recycle_action(
+                true,
+                true,
+                SafeIntraTurn,
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
+            RecycleImmediate
         );
     }
 
     #[test]
     fn stale_editor_delivery_recycles_capture_backed_open_cycle() {
         use SupervisorRecycleAction::*;
+        use SupervisorRecycleCheckpoint::*;
 
         assert_eq!(
             supervisor_recycle_action(
-                /* stale binary */ false, /* auto */ false,
-                /* turn boundary */ false, /* head pending */ false,
-                /* admin */ false, /* write wedged */ false,
-                /* editor delivery stale */ true, /* reexec failed */ false,
+                /* stale binary */ false,
+                /* auto */ false,
+                /* checkpoint */ SafeIntraTurn,
+                /* head pending */ false,
+                /* admin */ false,
+                /* write wedged */ false,
+                /* editor delivery stale */ true,
+                /* reexec failed */ false,
                 /* cycle open */ true,
             ),
             RecycleImmediate,
             "the stale replica refresh must not wait for the cycle it unblocks",
         );
         assert_eq!(
-            supervisor_recycle_action(false, false, false, false, false, false, true, true, true),
+            supervisor_recycle_action(
+                false,
+                false,
+                SafeIntraTurn,
+                false,
+                false,
+                false,
+                true,
+                true,
+                true,
+            ),
             EscalateKillRelaunch,
+        );
+
+        assert_eq!(
+            supervisor_recycle_action(false, false, Unsafe, false, true, false, true, false, true,),
+            DeferUnsafeCheckpoint,
+            "an in-flight handler remains authoritative even for a stale delivery worker",
         );
     }
 

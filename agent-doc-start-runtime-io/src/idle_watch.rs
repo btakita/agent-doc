@@ -33,9 +33,9 @@ use agent_doc_supervisor::{
     },
     lifecycle::{
         MAX_CYCLE_OPEN_DEFER_TICKS, MAX_REEXEC_ESCALATIONS, SupervisorInstallAction,
-        SupervisorRecycleAction, SupervisorRestartAction, cycle_open_defer_escalates,
-        reexec_escalation_within_bound, supervisor_install_action, supervisor_recycle_action,
-        supervisor_restart_action,
+        SupervisorRecycleAction, SupervisorRecycleCheckpoint, SupervisorRestartAction,
+        cycle_open_defer_escalates, reexec_escalation_within_bound, supervisor_install_action,
+        supervisor_recycle_action, supervisor_restart_action,
     },
 };
 use agent_doc_turn::op_log::OpsLogEvent;
@@ -2131,7 +2131,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // stayed unavailable therefore mapped a deleted binary
                 // indefinitely: no recycle, no `⚠ STALE SUPERVISOR` marker, and
                 // no `supervisor_binary_stale_*` receipt to diagnose it from.
-                // Observed live on `src/boost-client/tasks/monsterrodholders.md`
+                // Observed live on `src/sample-app/tasks/sampleorders.md`
                 // (PID 4069526, four days on a deleted image while its
                 // controller projection was unavailable and 227 CP recycle
                 // requests went unanswered).
@@ -3371,9 +3371,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // window. Off a safe checkpoint the recycle defers to the next tick and
                 // re-checks — it still fires mid-turn (no wait for the full turn
                 // boundary), just at the earliest point that cannot corrupt in-flight IO.
-            let inflight_handlers = inflight;
-            let at_safe_checkpoint = inflight_handlers == 0;
-            let stale_safe_checkpoint = stale_restart_safe_checkpoint;
+                let inflight_handlers = inflight;
+                let at_safe_checkpoint = inflight_handlers == 0;
+                let stale_safe_checkpoint = stale_restart_safe_checkpoint;
+                let recycle_checkpoint = SupervisorRecycleCheckpoint::from_observation(
+                    turn_boundary || stale_safe_checkpoint,
+                    at_safe_checkpoint,
+                );
                 let write_wedged = wedge_needs_recycle && at_safe_checkpoint;
                 let editor_delivery_stale =
                     stale_editor_replica_requested && at_safe_checkpoint;
@@ -3404,14 +3408,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         ),
                     );
                 }
-            let recycle_action = supervisor_recycle_action(
-                supervisor_stale,
-                recycle_auto_enabled,
-                // A nominal prompt boundary cannot override an active supervisor
-                // IPC handler. The live handler count is the authoritative I/O
-                // safety fact for both ordinary and stale recycle.
-                (turn_boundary && at_safe_checkpoint) || stale_safe_checkpoint,
-                head_pending,
+                let recycle_action = supervisor_recycle_action(
+                    supervisor_stale,
+                    recycle_auto_enabled,
+                    recycle_checkpoint,
+                    head_pending,
                     explicit_admin_recycle,
                     write_wedged,
                     editor_delivery_stale,
@@ -3421,17 +3422,33 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     // Non-stale operator replacement retains the cycle-open interlock.
                     effective_cycle_open && !stale_safe_checkpoint,
                 );
-                if matches!(recycle_action, SupervisorRecycleAction::DeferCycleOpen) {
-                    agent_doc_ops_log_io::log_op(
-                        &path,
-                        &format!(
-                            "supervisor_recycle_deferred_cycle_open file={} pane={} stale={} inflight={} reason=agent_doc_cycle_open (#midturn-recycle-resume)",
-                            path.display(),
-                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
-                            supervisor_stale,
-                            agent_doc_ipc_io::inflight_connection_handlers(),
-                        ),
-                    );
+                match recycle_action {
+                    SupervisorRecycleAction::DeferCycleOpen => {
+                        agent_doc_ops_log_io::log_op(
+                            &path,
+                            &format!(
+                                "supervisor_recycle_deferred_cycle_open file={} pane={} stale={} inflight={} reason=agent_doc_cycle_open (#midturn-recycle-resume)",
+                                path.display(),
+                                shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                supervisor_stale,
+                                inflight_handlers,
+                            ),
+                        );
+                    }
+                    SupervisorRecycleAction::DeferUnsafeCheckpoint => {
+                        agent_doc_ops_log_io::log_op(
+                            &path,
+                            &format!(
+                                "supervisor_recycle_deferred_unsafe_checkpoint file={} pane={} stale={} cycle_open={} inflight={} reason=supervisor_ipc_inflight (#supboundarylivelock)",
+                                path.display(),
+                                shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                supervisor_stale,
+                                effective_cycle_open,
+                                inflight_handlers,
+                            ),
+                        );
+                    }
+                    _ => {}
                 }
                 // `#midturn-wedge-recycle`: if this tick's recycle is being driven by a
                 // proven editor-IPC wedge, latch the once-per-episode guard on the
@@ -3495,7 +3512,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         supervisor_recycle_action(
                             supervisor_stale,
                             recycle_auto_enabled,
-                            true,
+                            SupervisorRecycleCheckpoint::TurnBoundary,
                             head_pending,
                             explicit_admin_recycle,
                             write_wedged,
@@ -3721,7 +3738,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     // `execve`, preserving the live harness child + tmux pane. Falls
                     // back to a clean exit (child restarts) if the in-place swap cannot
                     // start.
-                    let recycle_boundary = if stale_safe_checkpoint && !turn_boundary {
+                    let recycle_boundary = if matches!(
+                        recycle_checkpoint,
+                        SupervisorRecycleCheckpoint::SafeIntraTurn
+                    ) {
                         "safe_intra_turn"
                     } else if head_pending {
                         "next_queue_item"
@@ -5392,7 +5412,7 @@ mod tests {
             supervisor_recycle_action(
                 /* stale */ true,
                 /* auto_recycle */ true,
-                /* turn_boundary */ true,
+                /* checkpoint */ SupervisorRecycleCheckpoint::TurnBoundary,
                 /* head_pending */ true,
                 /* explicit_admin */ false,
                 /* write_wedged */ false,
@@ -5412,7 +5432,7 @@ mod tests {
             supervisor_recycle_action(
                 /* stale */ false,
                 /* auto_recycle */ false,
-                /* turn_boundary */ false,
+                /* checkpoint */ SupervisorRecycleCheckpoint::SafeIntraTurn,
                 /* head_pending */ false,
                 /* explicit_admin */ true,
                 /* write_wedged */ false,
@@ -5425,8 +5445,9 @@ mod tests {
         );
 
         // Commit the cycle: now it is no longer open and (in this single-threaded
-        // test) no IPC handler is in flight, so cycle_open is false and the same
-        // inputs recycle — the deferred recycle fires at the true quiescent boundary.
+        // test) no IPC handler is in flight, so cycle_open is false. An explicit
+        // fresh-binary recycle must now fire at the safe intra-turn checkpoint even
+        // while the enclosing harness turn marker remains active.
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &file,
@@ -5447,18 +5468,18 @@ mod tests {
         );
         assert_eq!(
             supervisor_recycle_action(
-                true,
-                true,
-                true,
-                true,
                 false,
+                false,
+                SupervisorRecycleCheckpoint::SafeIntraTurn,
+                false,
+                true,
                 false,
                 false,
                 false,
                 cycle_open_after_commit,
             ),
             SupervisorRecycleAction::RecycleImmediate,
-            "once the cycle commits and IPC drains, the deferred recycle fires"
+            "once the cycle commits and IPC drains, the explicit recycle does not wait on the harness turn marker"
         );
     }
 

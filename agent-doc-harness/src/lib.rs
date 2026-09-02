@@ -1605,7 +1605,7 @@ fn claude_ctx_usage_token_present(trimmed: &str) -> bool {
 /// (`#freshclaudectxless`).
 ///
 /// A **fresh** session has no meaningful context usage, so Claude omits that
-/// token entirely and renders `Opus 5 ~/…/src/boost-client main brian@host`.
+/// token entirely and renders `Opus 5 ~/…/src/sample-app main alex@workstation`.
 /// Keying the chrome test on `ctx:` alone therefore classified the fresh-session
 /// status line as ordinary output. Because it sits *below* the composer, it then
 /// won `last_prompt_candidate` and masked the `❯` prompt above it, so every
@@ -1657,7 +1657,7 @@ fn is_user_at_host_token(token: &str) -> bool {
 }
 
 /// A displayed working-directory token: absolute, `~`-relative, or elided
-/// (`~/…/src/boost-client`).
+/// (`~/…/src/sample-app`).
 fn is_filesystem_path_token(token: &str) -> bool {
     token.starts_with('/') || token == "~" || token.starts_with("~/")
 }
@@ -2755,7 +2755,7 @@ mod tests {
     #[test]
     /// `#freshclaudectxless`: a FRESH Claude session renders its built-in status
     /// line WITHOUT the `ctx:N%` segment (0% context is omitted), e.g.
-    /// `Opus 5 ~/…/src/boost-client main brian@cachyos-x8664`. Keying the chrome
+    /// `Opus 5 ~/…/src/sample-app main alex@workstation`. Keying the chrome
     /// test on `ctx:` alone left that line non-ignorable, so it became the last
     /// prompt candidate and masked the `❯` composer directly above it — a
     /// genuinely idle, dispatch-ready fresh pane read as never-ready.
@@ -2765,8 +2765,8 @@ mod tests {
     #[test]
     fn fresh_claude_status_line_without_ctx_is_chrome_not_a_prompt_candidate() {
         let h = HarnessConfig::claude();
-        let fresh = "  Opus 5 ~/…/src/boost-client main brian@cachyos-x8664";
-        let established = "  Opus 5 ctx:20% ~/…/src/boost-client main brian@cachyos-x8664";
+        let fresh = "  Opus 5 ~/…/src/sample-app main alex@workstation";
+        let established = "  Opus 5 ctx:20% ~/…/src/sample-app main alex@workstation";
 
         assert!(
             h.is_ignorable_output_line(established),
@@ -2788,7 +2788,7 @@ mod tests {
             "────────────────────────────────────────\n",
             "❯ \n",
             "────────────────────────────────────────\n",
-            "  Opus 5 ~/…/src/boost-client main brian@cachyos-x8664\n",
+            "  Opus 5 ~/…/src/sample-app main alex@workstation\n",
             "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent\n",
         );
 
@@ -2869,7 +2869,7 @@ mod tests {
     fn claude_status_chrome_rule_does_not_swallow_prompts_or_output() {
         let h = HarnessConfig::claude();
         for line in [
-            "❯ Opus 5 ~/…/src/boost-client main brian@cachyos-x8664",
+            "❯ Opus 5 ~/…/src/sample-app main alex@workstation",
             "⏵ deploy ~/src main brian@host",
             "✻ Cooked for 8m 45s",
             "· Roosting… (14s · ↓ 487 tokens)",
@@ -3314,7 +3314,7 @@ cargo install — installed agent-doc 0.34.0
 
 
 
-  /home/brian/work/btakita/agent-loop/src/boost-client:main                                                                      1.18.14
+  /workspace/src/sample-app:main                                                                                                1.18.14
 
 
 ";
@@ -3432,7 +3432,7 @@ cargo install — installed agent-doc 0.34.0
 
 
 
-  /home/brian/work/btakita/agent-loop/src/boost-client:main                                                                      1.18.14
+  /workspace/src/sample-app:main                                                                                                1.18.14
 
 
 ";
@@ -3886,7 +3886,7 @@ Working (21s - esc to interrupt)
             "────────────────────────────────────────\n",
             "❯ \n",
             "────────────────────────────────────────\n",
-            "  Opus 5 ~/…/src/boost-client main brian@cachyos-x8664\n",
+            "  Opus 5 ~/…/src/sample-app main alex@workstation\n",
             "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent\n",
         );
 
@@ -3915,7 +3915,7 @@ Working (21s - esc to interrupt)
             "────────────────────────────────────────\n",
             "❯ \n",
             "────────────────────────────────────────\n",
-            "  Opus 5 ctx:20% ~/…/src/boost-client main brian@cachyos-x8664\n",
+            "  Opus 5 ctx:20% ~/…/src/sample-app main alex@workstation\n",
             "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent\n",
         );
 

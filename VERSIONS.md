@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.319
+
+- **Fix: stale-install diagnostics no longer stall unrelated document sessions.**
+
+Preflight still reports installed artifacts that predate local agent-doc source and
+still identifies committed fixes that are not yet running. The warning now states
+its advisory disposition explicitly: unrelated document sessions continue their
+task and queue drain without rebuilding, while the cycle that owns source-tree
+development/release owns installation and the supervisor owns the safe recycle.
+Generated harness skills carry the same ownership rule.
+
 ## 0.35.318
 
 - **Fix: explicit supervisor recycle completes after a committed closeout.**

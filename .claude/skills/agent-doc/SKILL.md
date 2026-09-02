@@ -2,7 +2,7 @@
 description: "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>. Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.35.318"
+agent-doc-version: "0.35.319"
 ---
 
 # agent-doc
@@ -59,7 +59,7 @@ Detect subcommands before the normal workflow:
 **Preflight runs in the binary (`#preflightinbinary`)** — the `UserPromptSubmit` hook runs it when the `agent-doc <FILE>` trigger arrives, so the contract is already in context and sealed by the trailing `[agent-doc] cycle contract ...` success marker. Do **not** run `agent-doc preflight <FILE>` from the model turn. A missing marker is a fail-closed harness-admission defect, not a fallback path. Preflight owns recovery before diffing and prints the cycle contract: `no_changes`, `warnings`, `claims`, `slash_commands`, `builtin_commands`, `orchestration_request`, `prompt_presets_requested`, tier/model fields, `agent_model`, `diff_type`, and the diff contract.
 
 - If `no_changes: true` → tell the user nothing changed and stop.
-- Surface any `warnings`; for `harness_mismatch`, note that the document-declared agent differs from the active harness and continue with the active harness attribution/closeout path.
+- Surface any `warnings`; they are advisory and do not stop the cycle. For `harness_mismatch`, note that the document-declared agent differs from the active harness and continue with the active harness attribution/closeout path. For `stale_install`, continue the document task without rebuilding; only the cycle that owns development/release of this repository runs `make install`, and the supervisor owns the safe recycle.
 - Print any `claims` to the console as a record.
 - The cycle baseline is binary-owned: preflight captures it into `state.db` cycle state at a stable post-commit point, and `respond` / `write --commit` read it from there. There is no `--baseline-file` flag on any response-persistence command — do NOT pass one, and do NOT save your own baseline.
 - First cycle only: if the document is not yet in context, run `agent-doc read <FILE>` to fetch HEAD content. Do NOT read the snapshot file directly.

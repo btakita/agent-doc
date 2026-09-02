@@ -127,6 +127,8 @@ pub fn semantic_completion_warnings(file: &Path) -> Vec<PreflightWarning> {
 /// at an unchanged version string (`#install-stale-guard`). Best-effort: only
 /// fires when an `agent-doc` source repo is locatable (development / dogfooding)
 /// and silently no-ops otherwise (for example a prebuilt or PyPI install with no source).
+/// The warning is advisory: the source-tree development/release owner installs,
+/// while unrelated document sessions continue without rebuilding.
 ///
 /// `#supstaledetect`: the staleness basis is the newest source-FILE mtime
 /// (`newest_crate_source_mtime_secs`, the same signal the supervisor auto-install
@@ -158,20 +160,26 @@ pub fn stale_install_warning(doc_git_root: &Path) -> Option<PreflightWarning> {
     let missing = oldest_installed
         .map(|since| commits_since(&repo, since))
         .unwrap_or_default();
+    let freshness_detail = missing_commits_note(&missing).unwrap_or_else(|| {
+        "No committed agent-doc change is missing; only concurrent source edits are newer."
+            .to_string()
+    });
 
     Some(PreflightWarning {
         code: "stale_install".to_string(),
         message: format!(
-            "stale agent-doc install: {} predate the latest local source edit - live sessions (tmux / JetBrains) may run pre-edit code at an unchanged version.{} Run `make install` in {} to rebuild the binary + cdylib.",
+            "stale agent-doc install (advisory): {} predate the latest local source edit - live sessions (tmux / JetBrains) may run pre-edit code at an unchanged version. {freshness_detail} {} Source repo: {}.",
             stale.join(", "),
-            missing_commits_note(&missing)
-                .map(|note| format!(" {note}"))
-                .unwrap_or_default(),
+            stale_install_guidance(),
             repo.display()
         ),
         document_agent: None,
         active_harness: None,
     })
+}
+
+fn stale_install_guidance() -> &'static str {
+    "Continue this document session; this warning is not a closeout or queue-drain blocker. Unless this cycle owns development/release of this repository, do not run `make install`: the owning development/release cycle installs and the supervisor performs the safe recycle."
 }
 
 /// Name what the running binary is actually missing.
@@ -467,6 +475,16 @@ mod tests {
             "the NEWEST commit is the most useful identifier: {many}"
         );
         assert!(many.contains("(+2 more)"), "{many}");
+    }
+
+    #[test]
+    fn stale_install_guidance_never_blocks_an_unrelated_document_session() {
+        let message = super::stale_install_guidance();
+
+        assert!(message.contains("Continue this document session"));
+        assert!(message.contains("not a closeout or queue-drain blocker"));
+        assert!(message.contains("Unless this cycle owns development/release"));
+        assert!(!message.contains("Run `make install`"));
     }
 
     use super::*;

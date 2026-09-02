@@ -2,6 +2,20 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.315
+
+- **Fix: JetBrains retained-projection retries preserve their backoff until commit.**
+
+JetBrains now treats controller transport registration as provisional until the
+retained canonical projection has reconciled and the replacement endpoint owns
+the document. Forced refresh and three-generation ambiguity holds no longer
+clear the existing retry projection, so repeated refusals advance through the
+configured exponential backoff to its 30-second ceiling instead of resetting to
+one second. This prevents the register/deregister/stale-pull churn that could
+saturate and freeze IDEA while preserving the fail-closed operator-buffer guard.
+Regression coverage checks both the retry policy and the registration adapter's
+commit-only clear boundary.
+
 ## 0.35.314
 
 - **Fix: strict closeout validates the response before tracked-work simulation.**

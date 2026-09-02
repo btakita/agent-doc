@@ -52,8 +52,8 @@ Verification completed:
 - Installed binary smoke check: `chromium-bridge network --help` and `chromium-bridge network inspect --help`
 
 ❯ Git:
-❯ - Commit: `078f943` (`feat: add network request inspection`)
-❯ - Pushed to `origin/main`
+- Commit: `078f943` (`feat: add network request inspection`)
+- Pushed to `origin/main`
 ❯ do [#cbsnap]. spec-test-build-install-commit-push
 ### Re: #cbsnap — gpt-5
 Implemented structured accessibility snapshots for `chromium-bridge`.

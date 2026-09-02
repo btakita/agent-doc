@@ -90,12 +90,29 @@ Implemented, installed, and released agent-doc 0.35.316.
 - Installed CLI/library 0.35.316 and JetBrains plugin package 0.2.371 (plus the current VS Code package). This includes `0edc73f69 fix(jetbrains): preserve replica retry backoff`. The running IntelliJ instance still needs one restart to activate the newly installed JetBrains package.
 - Verification passed: the four targeted regressions, `cargo fmt --all`, `git diff --check`, docs audit, and full `make check` (`tart-c259b7e2c9`).
 - Source commit `b57cc4609` is pushed on `main`; tag `v0.35.316` is pushed. CI, Release, and PyPI workflows are in progress. Parent integration commit: `fdc27b915`.
+
+### Re: incomplete queue edit and agent-doc release — gpt-5.6
+
+> **Queue prompt:**
+>
+> While development
+
+The admitted edit ends there, so it does not yet contain an actionable request. I did not infer the missing text or mutate the queue/backlog. Finish the sentence or issue description and invoke `agent-doc` again; any text added after this cycle baseline remains operator-owned input for that next cycle.
+
+The preceding agent-doc repair work is complete and released as agent-doc **0.35.317** and JetBrains plugin **0.2.372**:
+
+- Live editor updates are checked against the replica last acknowledged by the editor and reconciled through the per-cell CRDT before fan-out. A stale `notes` deletion can no longer splice a concurrent response across the `exchange` marker; component-less plain-text documents retain ordinary CRDT peer union.
+- Codex approval prompts now project `WaitingInput` / `input_required` through the existing controller stream. JetBrains shows an important notification and editor banner with a `Focus Agent Terminal` action, without adding a prompt poller or second answer authority.
+- Targeted regressions, JetBrains tests/build, two full `make check` passes, `make tmux-ci`, local and full release installs all passed. Commit `935f45037`, tag `v0.35.317`, and parent integration `bb4934761` are pushed. Release/PyPI CI started and was queued or in progress at the one post-push observation.
+
+The preflight queue-maintenance CAS warning was preserved rather than forced, and the stale root supervisor now has an explicit safe-boundary recycle request. Restart IDEA to load the structurally changed JetBrains plugin classes.
 <!-- agent:boundary:b8ec92e9:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
+- While agent-doc development was in flight, Run Agent Doc on infra.md had an issue: `• Agent-doc reports its installed binary is one committed fix behind, so I’m rebuilding that installation first as required by the session guard. Then I’ll amend the existing PR #12 review to state the timeline explicitly: the three backend engineers own operations today, and a dedicated DevOps FTE is expected later.`
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

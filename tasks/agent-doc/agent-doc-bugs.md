@@ -120,6 +120,29 @@ Fixed and released agent-doc v0.35.311 (`5bc9643fa`).
 - Agent-doc session check passed and the response was committed.
 
 Restart IntelliJ now. Plugin v0.2.370 is installed, but the running IDE still has v0.2.368 loaded. I intentionally left `payments-ledger.md` content quarantined until restart so the old plugin cannot delete its components again.
+
+### Re: Recycle Supervisor continuation — gpt-5
+
+Fixed and released in agent-doc `0.35.312` (commit `456ce1879`, tag `v0.35.312`).
+
+The root cause was in supervisor restart admission, not the JetBrains action. The normal Recycle Supervisor action already sends a non-forced continue request, but the runtime treated “no supervisor IPC handler is active at this instant” as sufficient permission to re-exec even while the harness-owned turn lease still proved a turn was running. If child adoption then failed, only an open agent-doc cycle had a durable redispatch checkpoint, so an ordinary harness turn could restart into an idle session and never continue.
+
+The restart intent now remains pending until both source facts are true: supervisor IPC is drained and the harness-owned turn lease is idle. The active turn therefore continues uninterrupted; replacement happens at the subsequent idle boundary while preserving the pane, harness child, conversation binding, and durable cycle. The existing turn-lease TTL still releases genuinely stale busy markers. The explicitly forced branch remains the destructive operator escape hatch.
+
+This follows the Lazily topology already owned by the supervisor: restart intent remains Source state, the two-authority boundary is a Computed decision, and the generation-fenced re-exec is the effect. No polling loop, duplicate continuation path, or JetBrains-side lifecycle workaround was added.
+
+Verification completed:
+
+- Pure lifecycle policy regression for the no-IPC/live-turn row.
+- SimWorld regression proving the restart stays pending, generation and pane remain unchanged during the turn, and re-exec occurs only after the idle transition.
+- Existing drain, open-cycle, fallback, and supervisor restart regressions pass.
+- `make check` passed before and after version projection.
+- `make install-full` passed; installed CLI reports `agent-doc 0.35.312`.
+- JetBrains `0.2.370` and VS Code `0.2.69` packages are installed.
+- Commit and tag were pushed; CI, Release, and PyPI workflows were in progress at the one required observation.
+- A two-phase controller recycle was requested and will respect this open cycle.
+
+The running JetBrains process reported plugin `0.2.368` during preflight even though `0.2.370` is installed, so restart or reload the IDE once to activate the installed plugin generation.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -128,7 +151,7 @@ Restart IntelliJ now. Plugin v0.2.370 is installed, but the running IDE still ha
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
 - ~~do [#fixclaimtmux]~~
 ~~~done
 did you already do this task? Is this a leftover? If yes, please fix agent-doc not cleaning this up:
@@ -136,7 +159,7 @@ did you already do this task? Is this a leftover? If yes, please fix agent-doc n
 failed to activate queue in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md: route_queue_activation: retained route write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md converged to a newer editor projection; recovery=retry_crdt_merge
 ```
 ~~~
-- When I call JB `Recycle Supervisor` while a session is running, the session immediately is interrupted and restarts but does not continue once restarted. Please make sure the session continues if already running.
+- 🚧 When I call JB `Recycle Supervisor` while a session is running, the session immediately is interrupted and restarts but does not continue once restarted. Please make sure the session continues if already running.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

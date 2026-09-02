@@ -27,134 +27,11 @@ Issue #47 fixed on main as 0.35.303; release tag held pending PyPI quota decisio
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260901-193306.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260902-040620.md`*
 
 Compacted content:
-- Archived 8 response topic(s): Issue #47 fixed; 0.35.303 publication blocked on PyPI quota; Response; Response; 5 more
-- Prior summary/context: prior compacted content: Archived 16 response topic(s): contracts.md supervisor timeout fixed and released; Fix issue...
-<!-- patch:exchange -->
-
-> **Queue prompt:**
->
-> did you already do this task? Is this a leftover? If yes, please fix agent-doc not cleaning this up:
-> ```
-> failed to activate queue in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md: route_queue_activation: retained route write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md converged to a newer editor projection; recovery=retry_crdt_merge
-> ```
-
-
-> **Queue prompt:**
->
-> do [#fixclaimtmux]
-
-### Re: Automatic stale-supervisor recycle — gpt-5
-
-> **Queue prompt:** agent-doc commands should automatically recycle the supervisor if stale, assuming the stale check is fast. Ideally the stale state should be handled via lazily state.
-
-Implemented and released in agent-doc 0.35.307 (`6eb28a846`, tag
-`v0.35.307`). Every command that names an existing markdown session document
-now runs one central, fail-open supervisor freshness probe at CLI entry. The
-probe has a 250 ms response ceiling and schedules the existing idempotent
-safe-boundary recycle when staleness is proven, so it never kills an active
-turn or waits for recycle completion.
-
-The supervisor `pid` RPC is now a genuinely lightweight query: it no longer
-builds the full editor-authority state snapshot. It refreshes and returns a
-process-scoped Lazily `Source` → `Computed<bool>` binary-freshness projection,
-replacing the manually synchronized atomic stale flag. Rolling upgrades remain
-compatible: an older supervisor that omits `binary_stale` is checked by comparing
-the returned PID's running executable inode with the installed binary inode,
-without reading controller SQLite state.
-
-Verification passed for the Lazily transition model, fresh/stale PID responses,
-old-supervisor fallback, central command-entry wiring, and the no-SQLite/no-full-
-snapshot hot-path invariants. The full `make check`, local install, and the single
-fat-LTO `make install-full` release-parity build passed. `main` and the release
-tag are pushed; CI/Book/Pages were in progress and Release/PyPI queued at the
-required one-time post-push observation.
-<!-- /patch:exchange -->
-
-### Re: Response
-
-Implemented and released agent-doc 0.35.307.
-
-- All document commands now run a bounded stale-supervisor probe and schedule safe-boundary recycle automatically.
-- Freshness is process-scoped Lazily state; older supervisors use an inode fallback without SQLite.
-- `make check`, local install, and production `make install-full` passed.
-- Pushed `6eb28a846`, tag `v0.35.307`, parent pointer `aff16eeae`.
-- Session response committed and queue prompt consumed.
-- Release/PyPI CI was queued; main CI was running at the required one-time observation.
-
-The JetBrains 0.2.368 package is installed, but the live IDE still reports 0.2.366 and needs restarting. One legacy gated backlog item also remains for a future `agent-doc migrate`.
-
-### Re: do [#fixclaimtmux] — gpt-5
-
-stream: false
-origin: skill
-
-Fixed the shared causes and released agent-doc v0.35.311 (commit `5bc9643fa`).
-
-- `payments-ledger.md`: restored a visible Codex pane at `%64` in window `@3`. The actor and supervisor are fresh v0.35.311, projection lag is false, and its queue remains paused behind the File Cache Conflict quarantine. Explicit harness authority now survives cleanup/restart, so `agent: codex` no longer falls through to Claude.
-- `monsterrodholders.md`: pruned the dead projection, created replacement pane `%65` in `@3`, attached generation 1714, and started the requested Codex harness. The controller/supervisor are fresh, the pane is live, and the destructive Cloudflare-token queue head remains paused.
-- `backend.md`: added a Lazily retained-frontier proof from relay registration through the controller and JetBrains client. A retained editor buffer is accepted only when canonical state causally covers its retained frontier; false or unknown proof stays on hold, preserving the earlier no-clobber safety rule. Pane `%25` remained attached, and its supervisor was safely re-execed onto v0.35.311.
-- Focus now promotes a stashed registered pane before selecting it. Supervisor replacement resolves the installed binary instead of re-executing an obsolete process image. `agent-doc start --harness codex|claude|opencode` provides explicit recovery authority, while status precedence is document declaration, durable actor, then ambient harness.
-
-Installed locally:
-
-- agent-doc v0.35.311
-- JetBrains plugin v0.2.370
-- VS Code extension v0.2.69
-
-Verification passed: relay/controller Rust tests, JetBrains tests, full local `make check`, CI, six-platform Release, and PyPI publication.
-
-IntelliJ is still running plugin v0.2.368. Restart IntelliJ before editing or restoring `payments-ledger.md` or reopening `backend.md`; that is required to load v0.2.370's causal recovery/File Cache Conflict guard. I intentionally did not rewrite the quarantined payments document while the old plugin remained attached, because it could delete the restored components again.
-
-### Re: Response
-
-Fixed and released agent-doc v0.35.311 (`5bc9643fa`).
-
-- `payments-ledger.md`: Codex pane `%64` is visible in `@3`, fresh and quarantined.
-- `monsterrodholders.md`: replacement Codex pane `%65` is live; destructive queue work remains paused.
-- `backend.md`: pane `%25` was preserved and its supervisor safely upgraded.
-- Harness selection, hidden-pane focus, stale-binary restart, and Lazily retained-frontier recovery were fixed.
-- Local tests, `make check`, CI, Release, and PyPI all passed.
-- Agent-doc session check passed and the response was committed.
-
-Restart IntelliJ now. Plugin v0.2.370 is installed, but the running IDE still has v0.2.368 loaded. I intentionally left `payments-ledger.md` content quarantined until restart so the old plugin cannot delete its components again.
-
-### Re: Recycle Supervisor continuation — gpt-5
-
-Fixed and released in agent-doc `0.35.312` (commit `456ce1879`, tag `v0.35.312`).
-
-The root cause was in supervisor restart admission, not the JetBrains action. The normal Recycle Supervisor action already sends a non-forced continue request, but the runtime treated “no supervisor IPC handler is active at this instant” as sufficient permission to re-exec even while the harness-owned turn lease still proved a turn was running. If child adoption then failed, only an open agent-doc cycle had a durable redispatch checkpoint, so an ordinary harness turn could restart into an idle session and never continue.
-
-The restart intent now remains pending until both source facts are true: supervisor IPC is drained and the harness-owned turn lease is idle. The active turn therefore continues uninterrupted; replacement happens at the subsequent idle boundary while preserving the pane, harness child, conversation binding, and durable cycle. The existing turn-lease TTL still releases genuinely stale busy markers. The explicitly forced branch remains the destructive operator escape hatch.
-
-This follows the Lazily topology already owned by the supervisor: restart intent remains Source state, the two-authority boundary is a Computed decision, and the generation-fenced re-exec is the effect. No polling loop, duplicate continuation path, or JetBrains-side lifecycle workaround was added.
-
-Verification completed:
-
-- Pure lifecycle policy regression for the no-IPC/live-turn row.
-- SimWorld regression proving the restart stays pending, generation and pane remain unchanged during the turn, and re-exec occurs only after the idle transition.
-- Existing drain, open-cycle, fallback, and supervisor restart regressions pass.
-- `make check` passed before and after version projection.
-- `make install-full` passed; installed CLI reports `agent-doc 0.35.312`.
-- JetBrains `0.2.370` and VS Code `0.2.69` packages are installed.
-- Commit and tag were pushed; CI, Release, and PyPI workflows were in progress at the one required observation.
-- A two-phase controller recycle was requested and will respect this open cycle.
-
-The running JetBrains process reported plugin `0.2.368` during preflight even though `0.2.370` is installed, so restart or reload the IDE once to activate the installed plugin generation.
-
-### Re: Recycle Supervisor queue closeout — gpt-5
-
-> **Queue prompt:** When I call JB `Recycle Supervisor` while a session is running, the session immediately is interrupted and restarts but does not continue once restarted. Please make sure the session continues if already running.
-
-Completed in agent-doc `0.35.312`: the non-forced restart request now remains pending while the harness-owned turn lease is active, then recycles at the idle boundary without interrupting the running turn. The implementation, verification, release, and installed-plugin note are recorded in the preceding response.
-
-### Re: Response
-
-Verified. IntelliJ is now running agent-doc plugin `0.2.370`, and `agent-doc-bugs.md` is registered with the live editor endpoint. The reliable-sync projection is complete.
-
-You can now retry **Recycle Supervisor**.
+- Archived 7 response topic(s): Automatic stale-supervisor recycle; Response; do [#fixclaimtmux]; 4 more
+- Prior summary/context: prior compacted content: Archived 8 response topic(s): Issue #47 fixed; 0.35.303 publication blocked on PyPI quota; R...
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -164,9 +41,14 @@ You can now retry **Recycle Supervisor**.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
+- I called Compact Exchange with backlog additions. The compacted backlog is uncommitted.
+- do [#jetbrainsrunroute-z09d]
+- do [#jetbrainsrunroute]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
+- [ ] [#jetbrainsrunroute-z09d] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/payments-ledger.md stage=dispatch_only_dispatch_start_proof pane=%57 actor_generation=6 editor_attempt_id=unknown dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=01c84c57b94f408496d07ab9fc1b9d0c1fdb1cb7638200326fe45eaf1127be39 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:ae01f8f47888cedcf3548e7f603f4fc7d156db5a3be864bd2ceaf5d3ca081cee]
+- [ ] [#jetbrainsrunroute] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/payments-ledger.md stage=supervisor_dispatch_start_proof pane=%57 actor_generation=6 editor_attempt_id=unknown dispatch_proof_state=none elapsed_ms=10175 diagnostic_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/route-submit/1788302182345-supervisor_dispatch_start_unproven-codex-_57-46eeee34c802.txt ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=supervisor_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=01c84c57b94f408496d07ab9fc1b9d0c1fdb1cb7638200326fe45eaf1127be39 component=route/supervisor_dispatch_start_proof content_hash=sha256:f0c87b98bd1da3bde1b6e67dc6185450e129fc83ae96e45d60acc0766d8aeb8d]
 - [/] [#restartintellijidea] Restart IntelliJ IDEA so installed agent-doc JetBrains 0.2.368 becomes live, then confirm native FFI loads through the resolved agent-doc executable and pane synchronization remains stable.
 <!-- /agent:backlog -->
 

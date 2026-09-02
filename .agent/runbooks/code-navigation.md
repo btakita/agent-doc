@@ -1,4 +1,4 @@
-<!-- tsift:code-navigation-runbook v=0.1.80 -->
+<!-- tsift:code-navigation-runbook v=0.1.96 -->
 # Code Navigation
 
 Managed by `tsift init` (versioned markers) — do not hand-edit between the markers; re-run `tsift init` to refresh. Text outside the markers is preserved.
@@ -7,7 +7,7 @@ This runbook is the detail behind the `Code Navigation` block in `AGENTS.md`. Th
 
 ## Session start
 
-Run `tsift status` from the owning repo root. If the task or file lives under a git submodule (for example `src/tsift/...`), switch to that submodule root first so the harness loads the narrower local instructions and repo state instead of the superproject root. If status prints a `run:` recommendation for stale or missing tsift state, run `tsift status --fix` before relying on tsift results; when the harness cannot perform write commands, ask the user to run the printed command instead.
+Run `tsift status` from the owning repo root. If the task or file lives under a git submodule (for example `src/tsift/...`), switch to that submodule root first so the harness loads the narrower local instructions and repo state instead of the superproject root. `tsift status` repairs the `.tsift/` index state it owns and never rewrites tracked files (`--no-fix` skips even that). If status reports stale or missing instructions, run `tsift init` to refresh the tracked Code Navigation block and runbook; it names every tracked file it rewrites or moves. When the harness cannot perform write commands, ask the user to run the printed `run:` command instead.
 
 Codex projects can install a prompt-time auto-reindex hook with `tsift init --codex`; OpenCode projects can install per-project tsift command shortcuts with `tsift init --opencode`.
 
@@ -15,7 +15,7 @@ Codex projects can install a prompt-time auto-reindex hook with `tsift init --co
 
 Use the commands listed in `tsift status`'s `use:` output:
 
-- `tsift --envelope source-read <file> --budget normal` — AST-symbol projection with span metadata and source-window expansion commands (prefer over cat/head for source code files)
+- `tsift --envelope source-read <file> --budget normal` — AST-symbol projection with span metadata and source-window expansion commands (prefer over raw cat/head/tail/sed/less reads for source files)
 - `tsift --envelope symbol-read <symbol> --budget normal` — token-budgeted symbol body, AST span metadata, child refs, and graph/source expansion commands
 - `tsift --envelope search <query> --budget normal` — AST-aware hybrid search preview (prefer over grep/rg)
 - `tsift --envelope explain <symbol> --budget normal` — callers, callees, community preview
@@ -29,8 +29,9 @@ When a search envelope includes `report.scale_guard`, run one of its `narrow_com
 
 Prefer bounded digest commands over raw transcript, diff, and verbose-log reads:
 
-- `tsift --envelope session-review <path> --next-context --budget normal` or `tsift --envelope context-pack <path> --budget normal` instead of replaying long session docs, JSONL transcripts, or agent-doc runtime logs with `cat`, `tail`, or `sed`.
-- `tsift diff-digest [path]` (`--cached`, `--revision <rev>`) instead of `git diff`, `git show`, or patch-style `git log`.
+- `tsift --envelope session-review <path> --next-context` / `tsift --envelope context-pack <path>` when a resumable handoff is the goal
+- raw-read rewrites route recognized agent-doc/JSONL sessions to `tsift session-digest --input <path>` and captured logs to `tsift log-digest --input <path>` instead of replaying them with `cat`, `head`, `tail`, `sed`, or `less`
+- `tsift diff-digest [path]` (`--cached`, `--revision <rev>`, repeatable `--pathspec <pathspec>`) instead of `git diff`, commit-form `git show`, or patch-style `git log`. Blob-form `git show <rev>:<path>` is an object read and is deliberately not rewritten.
 - `tsift --envelope digest-runner --kind test --path . --shell-command '<test command>'` / `tsift --envelope digest-runner --kind log --path . --shell-command '<build command>'` for noisy test/build/install output, or let the rewrite/hooks create those artifact-backed envelopes for `cargo test`, `pytest`, and verbose cargo commands.
 - If RTK is installed, digest-runner delegates supported generic command families through `rtk rewrite` and records the chosen compact filter in `report.filter` while preserving tsift artifact handles.
 
@@ -40,7 +41,7 @@ Codex, OpenCode, and other harnesses without Claude-style `PreToolUse` hooks sho
 
 ## Verification
 
-For local verification, run `make check` before committing. After local changes, check the latest GitHub Actions CI run with `gh run list --workflow CI --limit 1` and fix any failing tests before calling the work complete.
+For local verification, run `make check` before committing. After local changes, check the latest GitHub Actions CI run with `gh run list --limit 1` and fix any failing tests before calling the work complete.
 
 Only read full source files when tsift results are insufficient.
 <!-- /tsift:code-navigation-runbook -->

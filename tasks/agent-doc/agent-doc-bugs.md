@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a05d26-8cec-7702-9b35-bc5446b45d50
+  codex: 01a05ebd-87c0-7063-94e3-0d53d7519cf0
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -72,6 +72,28 @@ Implemented and released agent-doc 0.35.307.
 - Release/PyPI CI was queued; main CI was running at the required one-time observation.
 
 The JetBrains 0.2.368 package is installed, but the live IDE still reports 0.2.366 and needs restarting. One legacy gated backlog item also remains for a future `agent-doc migrate`.
+
+### Re: do [#fixclaimtmux] — gpt-5
+
+stream: false
+origin: skill
+
+Fixed the shared causes and released agent-doc v0.35.311 (commit `5bc9643fa`).
+
+- `payments-ledger.md`: restored a visible Codex pane at `%64` in window `@3`. The actor and supervisor are fresh v0.35.311, projection lag is false, and its queue remains paused behind the File Cache Conflict quarantine. Explicit harness authority now survives cleanup/restart, so `agent: codex` no longer falls through to Claude.
+- `monsterrodholders.md`: pruned the dead projection, created replacement pane `%65` in `@3`, attached generation 1714, and started the requested Codex harness. The controller/supervisor are fresh, the pane is live, and the destructive Cloudflare-token queue head remains paused.
+- `backend.md`: added a Lazily retained-frontier proof from relay registration through the controller and JetBrains client. A retained editor buffer is accepted only when canonical state causally covers its retained frontier; false or unknown proof stays on hold, preserving the earlier no-clobber safety rule. Pane `%25` remained attached, and its supervisor was safely re-execed onto v0.35.311.
+- Focus now promotes a stashed registered pane before selecting it. Supervisor replacement resolves the installed binary instead of re-executing an obsolete process image. `agent-doc start --harness codex|claude|opencode` provides explicit recovery authority, while status precedence is document declaration, durable actor, then ambient harness.
+
+Installed locally:
+
+- agent-doc v0.35.311
+- JetBrains plugin v0.2.370
+- VS Code extension v0.2.69
+
+Verification passed: relay/controller Rust tests, JetBrains tests, full local `make check`, CI, six-platform Release, and PyPI publication.
+
+IntelliJ is still running plugin v0.2.368. Restart IntelliJ before editing or restoring `payments-ledger.md` or reopening `backend.md`; that is required to load v0.2.370's causal recovery/File Cache Conflict guard. I intentionally did not rewrite the quarantined payments document while the old plugin remained attached, because it could delete the restored components again.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -81,12 +103,18 @@ The JetBrains 0.2.368 package is installed, but the live IDE still reports 0.2.3
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-<!-- /agent:queue -->
-
-<!-- agent:backlog -->
+- 🚧 do [#fixclaimtmux]
+---
+did you already do this task? Is this a leftover? If yes, please fix agent-doc not cleaning this up:
 ```
 failed to activate queue in /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md: route_queue_activation: retained route write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md converged to a newer editor projection; recovery=retry_crdt_merge
 ```
+---
+- When I call JB `Recycle Supervisor` while a session is running, the session immediately is interrupted and restarts but does not continue once restarted. Please make sure the session continues if already running.
+<!-- /agent:queue -->
+
+<!-- agent:backlog -->
+- [ ] 🚧 [#fixclaimtmux] Please fix Claim for Tmux Pane on payments.md. Both session state + agent-doc causes.
 - [/] [#restartintellijidea] Restart IntelliJ IDEA so installed agent-doc JetBrains 0.2.368 becomes live, then confirm native FFI loads through the resolved agent-doc executable and pane synchronization remains stable.
 <!-- /agent:backlog -->
 

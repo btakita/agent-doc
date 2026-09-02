@@ -19,7 +19,8 @@ prompt_presets:
 ## Status
 
 <!-- agent:status patch=replace -->
-chromium-bridge v0.2.0 released. Type command shipped. Sift integration via corky search backend. Pipeline: chromium-bridge → corky → sift/ragie.<!-- /agent:status -->
+chromium-bridge v0.2.0 released. Type command shipped. Sift integration via corky search backend. Pipeline: chromium-bridge → corky → sift/ragie.
+<!-- /agent:status -->
 
 ## Exchange
 
@@ -140,11 +141,79 @@ Verification completed:
 Git:
 - Commit: `85aa751` (`feat: mirror ingests into project mailboxes`)
 - Pushed to `origin/main`
+### Re: Windows install package — gpt-5
+
+> **Queue prompt:** Please add a windows package that can be installed.
+
+Released `chromium-bridge v0.3.1` with installable Windows packages.
+
+What shipped:
+- Tagged releases now build and publish `.zip` packages for Windows x64 (`x86_64-pc-windows-msvc`) and ARM64 (`aarch64-pc-windows-msvc`).
+- Added a PowerShell installer that detects the host architecture, downloads the matching GitHub release asset, requires and verifies its SHA-256 release digest, installs `chromium-bridge.exe` under `%LOCALAPPDATA%\Programs\chromium-bridge`, and adds that directory to the user `PATH`.
+- Added packaging contract tests and updated README/spec distribution documentation.
+
+Install from PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/btakita/chromium-bridge/main/install.ps1 | iex
+```
+
+Verification completed:
+- `cargo fmt --check`
+- `make check` — Clippy clean; 14 tests passed
+- `cargo build --release`
+- `cargo install --path . --force`
+- Installed binary smoke check: `chromium-bridge help`
+- `actionlint .github/workflows/release.yml`
+- GitHub Release workflow: all six build targets and the release job passed; the Windows x64 job also installed and ran the packaged executable on a Windows runner
+- Published ZIPs were downloaded, inspected, and matched GitHub's SHA-256 digests:
+  - x64: `4f58d08ee6cbf9c80c7938a84d83fcb1cc98e9620e959c2330b228cdc9848a2f`
+  - ARM64: `f67c1492a29413d91c8f699878511f1e6709c2303f22028b949fe084092b173d`
+
+Git:
+- Commit: `7713bc2` (`feat: add installable Windows packages`) — pushed to `origin/main`
+- Release: [v0.3.1](https://github.com/btakita/chromium-bridge/releases/tag/v0.3.1)
+`backend.md` is unwedgeed and active again.
+
+- Fixed the retained queue-strike settlement invariant in agent-doc 0.35.320.
+- Installed it, recycled the controller, and verified `session-check` succeeds.
+- A pure preflight now selects the next queue item with `queue_continuation_required=true`.
+- The backend Claude pane is actively processing work.
+- Published commit `7fde87d8a` and tag `v0.35.320`; release workflows are running.
+- `make check` and targeted settlement/controller tests passed.
+
+The fix remains fail-closed: authority-only settlement applies solely to committed `free_text_strike` intents with complete response and queue-delta proof. Other divergence still requires normal editor/disk convergence.
+
+The Chromium Windows packages are published in [v0.3.1](https://github.com/btakita/chromium-bridge/releases/tag/v0.3.1). Its agent-doc response is safely retained in editor/controller authority, but IntelliJ 0.2.371 has not saved it to disk. Plugin 0.2.372 is installed; please restart/reload IntelliJ, then tell me and I’ll complete the pending commit check.
 <!-- agent:boundary:28f7ea75 -->
 <!-- /agent:exchange -->
 ###
+
+## Queue
+
+<!-- agent:queue go -->
+- Please add a windows package that can be installed.
+<!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
 <!-- /agent:backlog -->
+
+## Review
+
+<!-- agent:review -->
+<!-- /agent:review -->
+
+<!-- agent:notes -->
+<!-- /agent:notes -->
+
+## Icebox
+
+<!-- agent:icebox -->
+<!-- /agent:icebox -->
+
+<!-- agent:done archive="tasks/chromium-bridge.done.md" -->
+
+<!-- completed work archived in tasks/backend.done.md -->
+<!-- /agent:done -->

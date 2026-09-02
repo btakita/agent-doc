@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
-  codex: 01a0632a-e84b-7891-b60e-53475fa42153
+  codex: 01a063bf-83bc-7831-8716-42e142e537d6
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -106,14 +106,32 @@ The preceding agent-doc repair work is complete and released as agent-doc **0.35
 - Targeted regressions, JetBrains tests/build, two full `make check` passes, `make tmux-ci`, local and full release installs all passed. Commit `935f45037`, tag `v0.35.317`, and parent integration `bb4934761` are pushed. Release/PyPI CI started and was queued or in progress at the one post-push observation.
 
 The preflight queue-maintenance CAS warning was preserved rather than forced, and the stale root supervisor now has an explicit safe-boundary recycle request. Restart IDEA to load the structurally changed JetBrains plugin classes.
+
+### Re: Please fix fpe.md Recycle Supervisor stalling. — gpt-5.6
+
+> **Queue prompt:**
+>
+> Please fix fpe.md Recycle Supervisor stalling.
+
+Fixed, installed, and released as agent-doc **0.35.318**.
+
+- Root cause: an explicit supervisor recycle that arrived during an open agent-doc cycle was correctly deferred, but after the response committed and supervisor IPC drained, the lifecycle policy still waited for the outer harness turn marker. That created a circular wait: the in-place supervisor `execve` preserves the child process and pane, so it did not need the harness turn itself to end.
+- The invariant is now explicit: recycle never crosses an open document cycle or in-flight supervisor IPC; once both are clear, an explicit recycle may run at a safe intra-turn checkpoint. Routine maintenance still waits for the full turn boundary.
+- `agent_doc_supervisor::lifecycle::supervisor_recycle_action` owns the policy through a typed `Unsafe` / `SafeIntraTurn` / `TurnBoundary` checkpoint. Idle-watch and SimWorld now supply observations to that state machine instead of duplicating policy, and unsafe-IPC deferral has its own accurate diagnostic.
+- The reactive path is: durable recycle request plus cycle, IPC, and harness observations → pure checkpoint projection → lifecycle action → in-place recycle effect and durable settlement. The remaining imperative boundary is the idle-watch sampling of external process, file, and PTY state.
+- Regression coverage proves that an operator recycle defers while the cycle is open, then fires after commit even while the harness remains busy. The lifecycle, runtime seam, and SimWorld regressions passed, as did two full `make check` runs; the final receipt was `tart-6898004897`.
+- `make install-full` installed CLI/library 0.35.318, JetBrains plugin 0.2.372, and VS Code extension 0.2.69. The live `fpe.md` supervisor re-executed in place and now reports controller and supervisor freshness as `fresh`, with the same supervisor PID, child PID, and tmux pane preserved; `session doctor` reports no issues.
+- Source commit `6b22cf92c` and tag `v0.35.318` are pushed. Parent integration commit: `08218f038`. CI, Release, and PyPI workflows were queued or in progress at the required post-push observation.
+
+Restart IntelliJ once to activate the installed JetBrains 0.2.372 package.
 <!-- agent:boundary:b8ec92e9:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- While agent-doc development was in flight, Run Agent Doc on infra.md had an issue: `• Agent-doc reports its installed binary is one committed fix behind, so I’m rebuilding that installation first as required by the session guard. Then I’ll amend the existing PR #12 review to state the timeline explicitly: the three backend engineers own operations today, and a dedicated DevOps FTE is expected later.`
-- Please fix fpe.md Recycle Supervisor stalling.
+- ⏭️ While agent-doc development was in flight, Run Agent Doc on infra.md had an issue: `• Agent-doc reports its installed binary is one committed fix behind, so I’m rebuilding that installation first as required by the session guard. Then I’ll amend the existing PR #12 review to state the timeline explicitly: the three backend engineers own operations today, and a dedicated DevOps FTE is expected later.`
+- 🚧 Please fix fpe.md Recycle Supervisor stalling.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

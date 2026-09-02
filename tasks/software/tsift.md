@@ -124,6 +124,23 @@ Fixed, installed, and released as agent-doc **0.35.318**.
 - Source commit `6b22cf92c` and tag `v0.35.318` are pushed. Parent integration commit: `08218f038`. CI, Release, and PyPI workflows were queued or in progress at the required post-push observation.
 
 Restart IntelliJ once to activate the installed JetBrains 0.2.372 package.
+
+### Re: stale-install warning stalled infra.md — gpt-5.6
+
+> **Queue prompt:**
+>
+> While agent-doc development was in flight, Run Agent Doc on infra.md had an issue: `• Agent-doc reports its installed binary is one committed fix behind, so I’m rebuilding that installation first as required by the session guard. Then I’ll amend the existing PR #12 review to state the timeline explicitly: the three backend engineers own operations today, and a dedicated DevOps FTE is expected later.`
+
+Fixed, installed, and released as agent-doc **0.35.319**.
+
+- Root cause: preflight correctly serialized `stale_install` under non-blocking `warnings[]`, but its message ended with the unconditional imperative “Run `make install`.” An unrelated document agent therefore reasonably treated concurrent agent-doc development as a required stop and took over the release owner's installation work.
+- The ownership invariant is now explicit: stale-install classification remains visible, including the count and newest identity of committed changes not yet running, but it never blocks another document's response or queue drain. Only the cycle that owns development/release of the repository installs; the supervisor owns safe recycling.
+- The transition is now: fresh artifacts → no warning; newer uncommitted source → advisory and continue; committed gap → stronger advisory naming the missing commit(s), but still continue. The owning release cycle performs the install in both stale cases.
+- `agent-doc-preflight-io` owns the warning policy. Its sources are buildable-source mtimes, installed-artifact mtimes, and commits after the oldest artifact; its derived result is the stale-artifact/committed-gap diagnostic. The install and recycle remain separate supervisor/release effects, so no reactive effect topology needed extraction.
+- Generated Claude, Codex, OpenCode, and Cursor instructions now say all preflight warnings are advisory and explicitly forbid an unrelated `stale_install` rebuild. The core-command spec uses the same ownership contract and the actual source-file-mtime freshness basis.
+- The focused warning regression and generated-skill command audit passed. Full `make check` passed with receipt `tart-1d378406e8`; the single `make install-full` passed with receipt `tart-7eb3400bee`.
+- CLI/library 0.35.319 is installed. The live `infra.md` controller and supervisor both report `fresh` after the supported recycle, while its Codex child and pane remain live.
+- Source commit `8db45c801` and tag `v0.35.319` are pushed. Parent integration commit: `d2751cc7a`. CI, Book, Release, and PyPI workflows were queued or in progress at the required post-push observation; the preceding 0.35.318 Release and PyPI workflows passed.
 <!-- agent:boundary:b8ec92e9:tsift -->
 <!-- /agent:exchange -->
 

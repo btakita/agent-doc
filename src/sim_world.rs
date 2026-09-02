@@ -752,6 +752,7 @@ mod retained_write_generation_model {
                         superseding_stage: None,
                         carries_response_payload: false,
                         carries_content_delta: true,
+                        closeout_committed: false,
                     };
                     let (editor, disk) = durable_exact_observations(&self.projection.document);
                     self.settled = matches!(

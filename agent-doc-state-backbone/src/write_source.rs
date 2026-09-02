@@ -88,6 +88,8 @@ pub enum DocumentWriteSource {
     PendingAddSync,
     /// Closeout stage 2, taken through the tracked-work rewrite fallback.
     PendingAddSyncFallback,
+    /// Closeout stage 2: strike an answered free-text `agent:queue` head.
+    FreeTextStrike,
     /// Closeout stage 3: boundary / `(HEAD)` marker cleanup after the commit.
     PostCommitReposition,
     /// Generic serialized whole-document write through the CRDT authority. This
@@ -116,6 +118,7 @@ impl DocumentWriteSource {
             Self::PendingWrite => "pending_write",
             Self::PendingAddSync => "pending_add_sync",
             Self::PendingAddSyncFallback => "pending_add_sync_fallback",
+            Self::FreeTextStrike => "free_text_strike",
             Self::PostCommitReposition => "post_commit_reposition",
             Self::SerializedAtomicWrite => "serialized_atomic_write",
             Self::SerializedAtomicWriteEditorSavePending => {
@@ -139,7 +142,9 @@ impl DocumentWriteSource {
     pub fn closeout_stage(&self) -> Option<CloseoutStage> {
         match self {
             Self::PendingWrite => Some(CloseoutStage::ResponseWrite),
-            Self::PendingAddSync | Self::PendingAddSyncFallback => Some(CloseoutStage::QueueMirror),
+            Self::PendingAddSync | Self::PendingAddSyncFallback | Self::FreeTextStrike => {
+                Some(CloseoutStage::QueueMirror)
+            }
             Self::PostCommitReposition => Some(CloseoutStage::PostCommitReposition),
             Self::SerializedAtomicWrite
             | Self::SerializedAtomicWriteEditorSavePending
@@ -189,6 +194,12 @@ impl DocumentWriteSource {
         matches!(self, Self::PostCommitReposition)
     }
 
+    /// Is this the state-only queue mutation that retires an answered free-text
+    /// head after its response has committed?
+    pub fn is_free_text_strike(&self) -> bool {
+        matches!(self, Self::FreeTextStrike)
+    }
+
     /// Did `later` supersede a target retained by `self` as the **next stage of
     /// the same closeout**?
     ///
@@ -214,6 +225,7 @@ impl From<&str> for DocumentWriteSource {
             "pending_write" => Self::PendingWrite,
             "pending_add_sync" => Self::PendingAddSync,
             "pending_add_sync_fallback" => Self::PendingAddSyncFallback,
+            "free_text_strike" => Self::FreeTextStrike,
             "post_commit_reposition" => Self::PostCommitReposition,
             "serialized_atomic_write" => Self::SerializedAtomicWrite,
             "serialized_atomic_write_editor_save_pending" => {
@@ -276,6 +288,7 @@ mod tests {
             "pending_write",
             "pending_add_sync",
             "pending_add_sync_fallback",
+            "free_text_strike",
             "post_commit_reposition",
             "serialized_atomic_write",
             "serialized_atomic_write_editor_save_pending",
@@ -319,6 +332,10 @@ mod tests {
     fn closeout_stages_are_ordered_response_then_mirror_then_reposition() {
         assert!(CloseoutStage::ResponseWrite < CloseoutStage::QueueMirror);
         assert!(CloseoutStage::QueueMirror < CloseoutStage::PostCommitReposition);
+        assert_eq!(
+            DocumentWriteSource::FreeTextStrike.closeout_stage(),
+            Some(CloseoutStage::QueueMirror)
+        );
     }
 
     /// Stages are **optional**, which is why this is an ordering and not a state

@@ -77,6 +77,11 @@ pub struct RetainedIntentFacts {
     /// A deletion-only or whitespace-only intent adds nothing, so there is no
     /// delta to find in the converged content and it stays on exact bytes.
     pub carries_content_delta: bool,
+    /// The cycle that owns this intent has already committed its response.
+    /// Only the typed state-only queue strike may use this to settle from
+    /// canonical authority while disk projection remains advisory.
+    #[serde(default)]
+    pub closeout_committed: bool,
 }
 
 /// One observation of a content plane.
@@ -199,6 +204,10 @@ pub enum SatisfiedProof {
     /// which `intent_added_lines` deliberately reports as unknown and which
     /// therefore stranded forever.
     SupersededByLaterCloseoutStage,
+    /// A committed free-text queue strike is already present in canonical
+    /// authority, together with its committed response. Its editor-to-disk save
+    /// may lag without making the completed queue transition block a new cycle.
+    CommittedStateOnlyAuthorityMaterialized,
 }
 
 impl SatisfiedProof {
@@ -208,6 +217,9 @@ impl SatisfiedProof {
             Self::RebasedPayloadMaterialized => "rebased_payload_materialized",
             Self::SupersededDeltaMaterialized => "superseded_delta_materialized",
             Self::SupersededByLaterCloseoutStage => "superseded_by_later_closeout_stage",
+            Self::CommittedStateOnlyAuthorityMaterialized => {
+                "committed_state_only_authority_materialized"
+            }
         }
     }
 }
@@ -375,6 +387,7 @@ enum SettlementInput {
 enum ObservationState {
     Unobserved,
     AuthorityDiskDiverged,
+    CommittedStateOnlyAuthorityMaterialized,
     Converged(ConvergenceEvidence),
 }
 
@@ -410,6 +423,11 @@ impl StateTable for RetainedSettlementTable {
             SettlementInput::Retained(ObservationState::AuthorityDiskDiverged) => {
                 SettlementDecision::Unsettled(UnsettledCause::AuthorityDiskDiverged)
             }
+            SettlementInput::Retained(
+                ObservationState::CommittedStateOnlyAuthorityMaterialized,
+            ) => SettlementDecision::Satisfied(
+                SatisfiedProof::CommittedStateOnlyAuthorityMaterialized,
+            ),
             SettlementInput::Retained(ObservationState::Converged(
                 ConvergenceEvidence::ExactTarget,
             )) => SettlementDecision::Satisfied(SatisfiedProof::ExactTarget),
@@ -441,6 +459,7 @@ impl lazily::FiniteState for SettlementInput {
             Self::NoRetainedIntent,
             Self::Retained(ObservationState::Unobserved),
             Self::Retained(ObservationState::AuthorityDiskDiverged),
+            Self::Retained(ObservationState::CommittedStateOnlyAuthorityMaterialized),
             Self::Retained(ObservationState::Converged(ExactTarget)),
             Self::Retained(ObservationState::Converged(RebasedPayloadMaterialized)),
             Self::Retained(ObservationState::Converged(SupersededDeltaMaterialized)),
@@ -462,6 +481,16 @@ fn settlement_input(
         return SettlementInput::Retained(ObservationState::Unobserved);
     };
     if authority.content_hash != disk.content_hash {
+        if pending.closeout_committed
+            && pending.source.is_free_text_strike()
+            && pending.carries_content_delta
+            && authority.intent_delta_materialized
+            && authority.payload_materialized
+        {
+            return SettlementInput::Retained(
+                ObservationState::CommittedStateOnlyAuthorityMaterialized,
+            );
+        }
         return SettlementInput::Retained(ObservationState::AuthorityDiskDiverged);
     }
 
@@ -687,6 +716,7 @@ mod tests {
             superseding_stage: None,
             carries_response_payload,
             carries_content_delta: false,
+            closeout_committed: false,
         }
     }
 
@@ -778,13 +808,14 @@ mod tests {
         let coverage = lazily::table_coverage::<RetainedSettlementTable>();
         assert_eq!(
             coverage.len(),
-            8,
+            9,
             "the row set is the finite semantic sum, not a Cartesian product padded with impossible states",
         );
         coverage.assert_decisions_exactly(&[
             SettlementDecision::NoRetainedIntent,
             SettlementDecision::Unobserved,
             SettlementDecision::Unsettled(UnsettledCause::AuthorityDiskDiverged),
+            SettlementDecision::Satisfied(SatisfiedProof::CommittedStateOnlyAuthorityMaterialized),
             SettlementDecision::Satisfied(SatisfiedProof::ExactTarget),
             SettlementDecision::Satisfied(SatisfiedProof::RebasedPayloadMaterialized),
             SettlementDecision::Satisfied(SatisfiedProof::SupersededDeltaMaterialized),
@@ -792,6 +823,84 @@ mod tests {
             SettlementDecision::Unsettled(UnsettledCause::PayloadAbsentFromConvergedContent),
         ]);
         coverage.assert_every_row("decided without a fall-through state", |_, _| true);
+    }
+
+    #[test]
+    fn committed_free_text_strike_settles_from_materialized_authority_while_disk_lags() {
+        let mut pending = intent("strike-target", false);
+        pending.source = DocumentWriteSource::FreeTextStrike;
+        pending.carries_content_delta = true;
+        pending.closeout_committed = true;
+        let authority = ContentObservation {
+            content_hash: "canonical-successor".to_string(),
+            payload_materialized: true,
+            intent_delta_materialized: true,
+        };
+        let disk = observed("older-disk", false);
+
+        assert_eq!(
+            settlement_verdict(Some(&pending), Some(&authority), Some(&disk)),
+            SettlementVerdict::Satisfied {
+                intent_id: "intent-1".to_string(),
+                retained_target_hash: "strike-target".to_string(),
+                settled_hash: "canonical-successor".to_string(),
+                proof: SatisfiedProof::CommittedStateOnlyAuthorityMaterialized,
+                intent_source: DocumentWriteSource::FreeTextStrike,
+            }
+        );
+    }
+
+    #[test]
+    fn authority_only_settlement_stays_fail_closed_without_every_queue_strike_proof() {
+        let authority = ContentObservation {
+            content_hash: "canonical-successor".to_string(),
+            payload_materialized: true,
+            intent_delta_materialized: true,
+        };
+        let disk = observed("older-disk", false);
+        let mut pending = intent("strike-target", false);
+        pending.source = DocumentWriteSource::FreeTextStrike;
+        pending.carries_content_delta = true;
+        pending.closeout_committed = true;
+
+        for candidate in [
+            RetainedIntentFacts {
+                closeout_committed: false,
+                ..pending.clone()
+            },
+            RetainedIntentFacts {
+                source: DocumentWriteSource::PendingWrite,
+                ..pending.clone()
+            },
+            RetainedIntentFacts {
+                carries_content_delta: false,
+                ..pending.clone()
+            },
+        ] {
+            assert!(matches!(
+                settlement_verdict(Some(&candidate), Some(&authority), Some(&disk)),
+                SettlementVerdict::Unsettled {
+                    cause: UnsettledCause::AuthorityDiskDiverged,
+                    ..
+                }
+            ));
+        }
+
+        let authority_without_response = ContentObservation {
+            payload_materialized: false,
+            ..authority
+        };
+        assert!(matches!(
+            settlement_verdict(
+                Some(&pending),
+                Some(&authority_without_response),
+                Some(&disk)
+            ),
+            SettlementVerdict::Unsettled {
+                cause: UnsettledCause::AuthorityDiskDiverged,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -1316,6 +1425,7 @@ mod suppression_guard {
             superseding_stage: None,
             carries_response_payload: true,
             carries_content_delta: false,
+            closeout_committed: false,
         }));
         assert!(
             settlement.verdict().should_clear_intent(),
@@ -1332,6 +1442,7 @@ mod suppression_guard {
             superseding_stage: None,
             carries_response_payload: true,
             carries_content_delta: false,
+            closeout_committed: false,
         }));
         assert!(
             matches!(suppressed.verdict(), SettlementVerdict::Unobserved { .. }),

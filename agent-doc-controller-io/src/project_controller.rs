@@ -4493,6 +4493,8 @@ fn retained_intent_facts_from_projection(
             superseding_stage: document.document.superseding_closeout_stage(pending),
             carries_response_payload,
             carries_content_delta,
+            closeout_committed: document.closeout.phase
+                == Some(agent_doc_turn::CyclePhase::Committed),
         },
     )
 }
@@ -13268,6 +13270,86 @@ agent:queue\n\
                     if intent_id == "intent-1"
             )),
             "the clear must be durable, not just an in-memory projection edit"
+        );
+    }
+
+    #[test]
+    fn committed_free_text_strike_retires_reactively_while_disk_projection_lags() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (file, document_hash) = retained_test_document(&dir);
+        let events = [
+            preflight_started_event(&document_hash),
+            response_captured_event(&document_hash),
+            agent_doc_state_backbone::StateEvent::new(
+                "write-applied-free-text-strike-test",
+                agent_doc_state_backbone::StateFact::WriteApplied {
+                    document_hash: document_hash.clone(),
+                    cycle_id: "cycle-1".to_string(),
+                    patch_id: Some("patch-1".to_string()),
+                    file_hash: None,
+                    snapshot_hash: None,
+                },
+            ),
+            agent_doc_state_backbone::StateEvent::new(
+                "deferred-free-text-strike-test",
+                agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+                    document_hash: document_hash.clone(),
+                    intent_id: "strike-intent".to_string(),
+                    expected_hash: "before-strike".to_string(),
+                    expected_content: Some(
+                        "response body\n<!-- agent:queue -->\n- explain the design\n"
+                            .to_string(),
+                    ),
+                    target_hash: "strike-target".to_string(),
+                    target_content: "response body\n<!-- agent:queue -->\n- ~~explain the design~~\n- strike receipt\n".to_string(),
+                    source: agent_doc_state_backbone::DocumentWriteSource::FreeTextStrike,
+                    reason: agent_doc_state_backbone::DocumentWriteDeferredReason::EditorProjectionPending,
+                },
+            ),
+            agent_doc_state_backbone::StateEvent::new(
+                "commit-free-text-strike-test",
+                agent_doc_state_backbone::StateFact::CommitObserved {
+                    document_hash: document_hash.clone(),
+                    cycle_id: "cycle-1".to_string(),
+                    commit: "head-sha".to_string(),
+                    file_hash: None,
+                    snapshot_hash: None,
+                },
+            ),
+        ];
+        for event in events {
+            append_state_event(dir.path(), &event).unwrap();
+            runtime.apply_state_event(&event).unwrap();
+        }
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash).as_deref(),
+            Some("strike-intent")
+        );
+
+        runtime.document_retained_write_verdict(
+            &document_hash,
+            &file,
+            Some(
+                agent_doc_state_backbone::retained_write::ContentObservation {
+                    content_hash: "canonical-successor".to_string(),
+                    payload_materialized: true,
+                    intent_delta_materialized: true,
+                },
+            ),
+            Some(
+                agent_doc_state_backbone::retained_write::ContentObservation {
+                    content_hash: "older-disk".to_string(),
+                    payload_materialized: false,
+                    intent_delta_materialized: false,
+                },
+            ),
+        );
+
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash),
+            None,
+            "the derived committed state-only proof must clear only the retained strike"
         );
     }
 

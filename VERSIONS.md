@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.320
+
+- **Fix: a committed free-text queue strike no longer waits on an advisory editor save.**
+
+Retained-write settlement now recognizes `free_text_strike` as a typed queue-mirror
+source. Once the owning response is committed, canonical authority still contains
+that response, and every line added by the strike is materialized, the reactive
+settlement effect retires that exact intent even when the editor-to-disk projection
+lags. This keeps state-only queue maintenance from blocking the next queue item
+while preserving fail-closed behavior for pre-commit writes, missing responses,
+incomplete strike deltas, unknown sources, and all non-queue document changes.
+
 ## 0.35.319
 
 - **Fix: stale-install diagnostics no longer stall unrelated document sessions.**

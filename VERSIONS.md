@@ -2,6 +2,28 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.317
+
+- **Fix: live editor CRDT updates cannot cross agent-doc component boundaries.**
+
+The realtime relay now evaluates an editor update against that replica's last
+acknowledged projection before accepting a whole-document `Y.Text` union. For
+documents with typed component cells, it reconciles the update through the
+production per-cell merge and rotates every live replica onto a repaired epoch
+when the raw union would splice content across a marker. Plain-text documents
+retain native multi-peer CRDT union. The regression reproduces the observed
+`notes` deletion plus concurrent `exchange` response corruption and proves the
+response remains exclusively in `exchange`.
+
+- **Fix: JetBrains surfaces interactive Codex approval prompts.**
+
+The supervisor now recognizes Codex's numbered approval prompt, projects the
+actor through `WaitingInput`, and publishes `input_required` on the existing
+controller stream. JetBrains reacts with an editor banner and important IDE
+notification whose action focuses the owning Agent Doc terminal; resolution
+returns the actor to busy without adding a prompt poller or a second answer
+authority. Claude and OpenCode prompt detection continue through the same path.
+
 ## 0.35.316
 
 - **Fix: repeated Compact Exchange reports one actionable pending continuation.**

@@ -35,6 +35,8 @@ object TurnStateBridge {
         val tooltip: String? = null,
         /** Route-failure labels belong in the status bar, not the active-turn banner. */
         val showBanner: Boolean = true,
+        /** The harness is displaying an interactive approval/input prompt. */
+        val inputRequired: Boolean = false,
     )
 
     /**
@@ -84,6 +86,7 @@ object TurnStateBridge {
             val root = JsonParser.parseString(json).asJsonObject
             val state = root.get("state")?.asString ?: "idle"
             val inFlight = root.get("turn_in_flight")?.asBoolean ?: false
+            val inputRequired = root.get("input_required")?.asBoolean ?: false
             val conflicts =
                 root.getAsJsonArray("semantic_merge_conflicts")
                     ?.mapNotNull { element ->
@@ -106,7 +109,14 @@ object TurnStateBridge {
                     }
                     .joinToString("\n")
                     .ifBlank { null }
-            if (state == "idle" || !inFlight) {
+            if (inputRequired) {
+                TurnStatePresentation(
+                    label = "⚠ agent-doc: input required",
+                    guardPromptForwarding = true,
+                    tooltip = "The agent is waiting for approval in the Agent Doc terminal.",
+                    inputRequired = true,
+                )
+            } else if (state == "idle" || !inFlight) {
                 TurnStatePresentation(
                     label = conflictLabel?.let { "agent-doc: $it" } ?: "",
                     guardPromptForwarding = false,

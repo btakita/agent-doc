@@ -2217,7 +2217,7 @@ pub fn relay_replica_update_for_file(
             // component close marker) can be rejected and the canonical restored
             // before the corruption ever becomes authoritative.
             let before_text = hub.canonical_text();
-            let (packet, reattached, canonical_projection_pending) = match decision {
+            let (packet, reattached, mut canonical_projection_pending) = match decision {
                 ColdStartReplicaUpdateDecision::Relay => {
                     (Some(hub.relay_update(client_id, update)?), false, false)
                 }
@@ -2231,6 +2231,13 @@ pub fn relay_replica_update_for_file(
                 }
             };
             let mut corruption_restored = None;
+            if packet
+                .as_ref()
+                .is_some_and(|packet| packet.component_isolation_reconciled)
+            {
+                canonical_projection_pending = true;
+                corruption_restored = Some("cross_component_raw_union".to_string());
+            }
             if packet.is_some() {
                 let after_text = hub.canonical_text();
                 // Narrow to component *parse* failures (unclosed / mismatched /

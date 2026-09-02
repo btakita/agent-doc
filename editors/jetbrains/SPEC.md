@@ -142,6 +142,10 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 
 - JetBrains must not start a defensive `PromptPoller` / `PromptPanel`, poll `agent-doc prompt --all`, auto-save tracked documents, or run timer-based merge/reload logic from prompt handling.
 - Permission prompts remain in the owning agent/tmux surface.
+- Interactive Codex, Claude, and OpenCode prompts are detected by the supervisor and projected as
+  controller-stream `input_required` state. JetBrains shows an important notification and editor
+  banner with a `Focus Agent Terminal` action on the false-to-true transition; it does not poll or
+  become a second answer authority.
 
 ### Run Feedback
 

@@ -63,6 +63,9 @@ Automatic tab-to-pane sync is **reported, not planned** (`#jbsurfaceswap` / `#jb
 ## 5. Prompt Polling Removed
 
 - **First-party editor plugins:** No prompt-polling timer. JetBrains and VS Code must not poll `agent-doc prompt --all`, call `agent-doc prompt --answer`, auto-save tracked documents, refresh tracked files, or mutate editor buffers from a defensive prompt UI loop. Permission prompts stay in the owning agent/tmux surface.
+- **Reactive prompt visibility:** The supervisor parses interactive harness output and projects
+  `input_required` through the controller stream. Editor integrations may surface that state and
+  focus the owning terminal, but must not duplicate the prompt's answer authority.
 
 ## 6. Popup Menu
 

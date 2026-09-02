@@ -41,13 +41,58 @@ pub struct PromptOption {
     pub label: String,
 }
 
-/// Parse tmux pane content for Claude Code and OpenCode permission prompts.
+/// Parse tmux pane content for Codex, Claude Code, and OpenCode permission prompts.
 pub fn parse_prompt(content: &str) -> PromptInfo {
+    let codex = parse_codex_prompt(content);
+    if codex.active {
+        return codex;
+    }
     let claude = parse_claude_prompt(content);
     if claude.active {
         return claude;
     }
     parse_opencode_prompt(content)
+}
+
+fn parse_codex_prompt(content: &str) -> PromptInfo {
+    let lines: Vec<String> = content.lines().map(strip_ansi).collect();
+    let footer_idx = lines.iter().rposition(|line| {
+        let lower = line.to_ascii_lowercase();
+        lower.contains("enter to confirm") && lower.contains("esc") && lower.contains("to cancel")
+    });
+    let Some(footer_idx) = footer_idx else {
+        return inactive_prompt();
+    };
+    let title_idx = lines[..footer_idx].iter().rposition(|line| {
+        let lower = line.trim().to_ascii_lowercase();
+        lower.starts_with("would you like to ") || lower.ends_with(" needs your approval.")
+    });
+    let Some(title_idx) = title_idx else {
+        return inactive_prompt();
+    };
+
+    let mut options = Vec::new();
+    let mut selected = None;
+    for line in &lines[title_idx + 1..footer_idx] {
+        let trimmed = line.trim();
+        if let Some(option) = parse_option_line(trimmed) {
+            if trimmed.starts_with('›') || trimmed.starts_with('❯') || trimmed.starts_with('>')
+            {
+                selected = Some(option.index.saturating_sub(1));
+            }
+            options.push(option);
+        }
+    }
+    if options.is_empty() {
+        return inactive_prompt();
+    }
+
+    PromptInfo {
+        active: true,
+        question: Some(lines[title_idx].trim().to_string()),
+        options: Some(options),
+        selected,
+    }
 }
 
 fn parse_claude_prompt(content: &str) -> PromptInfo {
@@ -297,7 +342,11 @@ fn opencode_question(lines: &[String]) -> Option<String> {
 
 /// Parse a single option line like "[1] Yes", "1. Yes", or "❯ [2] Yes".
 fn parse_option_line(line: &str) -> Option<PromptOption> {
-    let stripped = line.trim_start_matches('❯').trim_start_matches('>').trim();
+    let stripped = line
+        .trim_start_matches('›')
+        .trim_start_matches('❯')
+        .trim_start_matches('>')
+        .trim();
 
     if stripped.starts_with('[') {
         let bracket_close = stripped.find(']')?;
@@ -701,6 +750,43 @@ mod tests {
         assert_eq!(opts[0].label, "Yes");
         assert_eq!(opts[2].index, 3);
         assert_eq!(opts[2].label, "No");
+    }
+
+    #[test]
+    fn parse_codex_command_approval_prompt() {
+        let content = r#"
+Would you like to run the following command?
+
+Reason: run the focused regression
+
+$ cargo test -p agent-doc-turn-executor-tmux
+
+› 1. Yes, proceed
+  2. Yes, and don't ask again for commands that start with `cargo test`
+  3. No, continue without running it
+
+Press enter to confirm or esc to cancel
+"#;
+        let info = parse_prompt(content);
+        assert!(info.active, "Codex approval prompt should be detected");
+        assert_eq!(
+            info.question.as_deref(),
+            Some("Would you like to run the following command?")
+        );
+        let options = info.options.as_ref().unwrap();
+        assert_eq!(options.len(), 3);
+        assert_eq!(options[0].label, "Yes, proceed");
+        assert_eq!(info.selected, Some(0));
+        assert_eq!(
+            navigation_axis_for_prompt(content),
+            PromptNavigationAxis::Vertical
+        );
+    }
+
+    #[test]
+    fn codex_footer_without_an_approval_title_is_not_a_prompt() {
+        let content = "Finished.\nPress enter to confirm or esc to cancel\n";
+        assert!(!parse_prompt(content).active);
     }
 
     #[test]

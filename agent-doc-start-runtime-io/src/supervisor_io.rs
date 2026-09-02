@@ -46,6 +46,26 @@ impl agent_doc_supervisor_process_io::SupervisorProcessIoState for SupervisorSha
         );
     }
 
+    fn transition_actor_waiting_input_for_prompt(&self) {
+        self.transition_actor_state(
+            agent_doc_controller::actor::ActorState::WaitingInput,
+            "supervisor",
+            "harness_permission_prompt",
+        );
+    }
+
+    fn transition_actor_busy_after_prompt(&self) {
+        self.transition_actor_state(
+            agent_doc_controller::actor::ActorState::Busy,
+            "supervisor",
+            "harness_permission_prompt_resolved",
+        );
+    }
+
+    fn actor_waiting_input(&self) -> bool {
+        *self.actor_state.lock() == Some(agent_doc_controller::actor::ActorState::WaitingInput)
+    }
+
     fn clear_suppress_stale_ctrl_d_until_prompt(&self) {
         self.suppress_stale_ctrl_d_until_prompt
             .store(false, Ordering::Relaxed);

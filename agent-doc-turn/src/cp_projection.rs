@@ -196,6 +196,10 @@ fn turn_steering_projection_is_none(steering: &TurnSteeringProjection) -> bool {
     !steering.is_present() && !steering.has_observation_receipt()
 }
 
+const fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// Cycle-local semantic merge conflict shown by the controller projection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SemanticMergeConflictProjection {
@@ -212,6 +216,10 @@ pub struct TurnProjection {
     pub state: TurnState,
     /// Whether a turn is in flight (response not yet committed/abandoned).
     pub turn_in_flight: bool,
+    /// Whether the harness is blocked on an interactive approval/input prompt.
+    /// This rides the controller stream so editor integrations need no poller.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub input_required: bool,
     /// Who owns the transition into the current phase.
     pub transition_authority: TransitionAuthority,
     /// Operator steering observed in the realtime document model during this
@@ -236,6 +244,7 @@ impl TurnProjection {
         Self {
             state,
             turn_in_flight: phase.is_open(),
+            input_required: false,
             // The Project Controller is authoritative for every turn-state
             // transition today.
             transition_authority: TransitionAuthority::ProjectController,
@@ -246,6 +255,11 @@ impl TurnProjection {
 
     pub fn with_realtime_steering(mut self, steering: TurnSteeringProjection) -> Self {
         self.realtime_steering = steering;
+        self
+    }
+
+    pub fn with_input_required(mut self, input_required: bool) -> Self {
+        self.input_required = input_required;
         self
     }
 
@@ -368,6 +382,15 @@ mod tests {
         let back: TurnProjection = serde_json::from_str(&json).unwrap();
         assert_eq!(proj, back);
         assert!(json.contains("persisting"));
+        assert!(!json.contains("input_required"));
+
+        let waiting = proj.with_input_required(true);
+        let waiting_json = serde_json::to_string(&waiting).unwrap();
+        assert!(waiting_json.contains("\"input_required\":true"));
+        assert_eq!(
+            waiting,
+            serde_json::from_str::<TurnProjection>(&waiting_json).unwrap()
+        );
     }
 
     #[test]

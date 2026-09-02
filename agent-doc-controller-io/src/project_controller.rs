@@ -2456,11 +2456,14 @@ fn project_document_turn_authority(
     let projected_phase = closeout
         .phase
         .unwrap_or(agent_doc_turn::CyclePhase::Committed);
+    let input_required = model_state == Some(ActorState::WaitingInput);
     let phase = match model_state {
-        Some(ActorState::Busy | ActorState::Blocked) if projected_phase.is_open() => {
+        Some(ActorState::Busy | ActorState::Blocked | ActorState::WaitingInput)
+            if projected_phase.is_open() =>
+        {
             projected_phase
         }
-        Some(ActorState::Busy | ActorState::Blocked) => {
+        Some(ActorState::Busy | ActorState::Blocked | ActorState::WaitingInput) => {
             agent_doc_turn::CyclePhase::PreflightStarted
         }
         Some(_) => agent_doc_turn::CyclePhase::Committed,
@@ -2479,6 +2482,7 @@ fn project_document_turn_authority(
         )
         .collect();
     let projection = agent_doc_turn::cp_projection::TurnProjection::from_phase(phase)
+        .with_input_required(input_required)
         .with_semantic_merge_conflicts(conflicts);
     if projection.turn_in_flight {
         projection.with_realtime_steering(closeout.realtime_steering.clone())
@@ -7515,6 +7519,18 @@ mod tests {
             authority_graph.projection(document_hash, document_id).state,
             TurnState::Persisting
         );
+
+        actor_graph.set(BTreeMap::from([(
+            document_id.to_string(),
+            actor_record_for_test(
+                document_id,
+                "%42",
+                agent_doc_controller::actor::ActorState::WaitingInput,
+            ),
+        )]));
+        let waiting = authority_graph.projection(document_hash, document_id);
+        assert_eq!(waiting.state, TurnState::Persisting);
+        assert!(waiting.input_required);
 
         actor_graph.set(BTreeMap::from([(
             document_id.to_string(),

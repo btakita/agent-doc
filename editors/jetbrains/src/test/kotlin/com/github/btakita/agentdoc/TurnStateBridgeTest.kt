@@ -54,6 +54,25 @@ class TurnStateBridgeTest {
     }
 
     @Test
+    fun `presentation surfaces harness input required`() {
+        val presentation =
+            TurnStateBridge.presentation(
+                """
+                    {
+                      "state":"awaiting_response",
+                      "turn_in_flight":true,
+                      "input_required":true,
+                      "transition_authority":"project_controller"
+                    }
+                """.trimIndent(),
+            )
+
+        assertEquals("⚠ agent-doc: input required", presentation.label)
+        assertTrue(presentation.inputRequired)
+        assertTrue(presentation.guardPromptForwarding)
+    }
+
+    @Test
     fun `route failure presentation explains start-session pane crash`() {
         val presentation = TurnStateBridge.routeFailurePresentation(
             """

@@ -50,8 +50,11 @@ use parking_lot::{Condvar, Mutex};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use agent_doc_merge::crdt_sync::{ReplicaState, commit_barrier_ready, flush_to_commit_barrier};
-use agent_doc_merge::document_cell::ThreadSafeDocumentCellTree;
+use agent_doc_merge::document_cell::{ThreadSafeDocumentCellTree, project_document};
+use agent_doc_merge::{
+    crdt::{CrdtDoc, merge_by_component},
+    crdt_sync::{ReplicaState, commit_barrier_ready, flush_to_commit_barrier},
+};
 
 use crate::crdt_authority::CrdtAuthority;
 
@@ -112,6 +115,11 @@ impl LiveDocumentProjection {
 struct Member {
     /// The supervisor's mirror of this editor's replica (synced via deltas).
     replica: ReplicaState,
+    /// The last replica frontier the editor has either published itself or
+    /// acknowledged as visibly projected. Unlike `replica`, this does not
+    /// optimistically absorb outbound deliveries. It therefore preserves the
+    /// semantic base of a local edit that races a controller replacement.
+    observed_replica: ReplicaState,
     generation: u64,
     last_ack_generation: u64,
     pending: VecDeque<PendingReplicaUpdate>,
@@ -148,6 +156,10 @@ pub struct BroadcastPacket {
     pub update: Vec<u8>,
     /// The currently-live OTHER replicas that should receive `update`.
     pub targets: Vec<u64>,
+    /// The raw character union disagreed with a component-scoped merge, so the
+    /// hub atomically rebuilt from the isolated result and queued every live
+    /// editor for replace-capable re-bootstrap instead of exposing this delta.
+    pub component_isolation_reconciled: bool,
 }
 
 /// One supervisor-to-editor delivery awaiting a matching visible-state projection.
@@ -882,11 +894,14 @@ impl RelayHub {
     /// unique stable client-ids are required for deterministic op attribution.
     pub fn register(&mut self, client_id: u64) -> Result<()> {
         self.validate_unique(client_id)?;
-        let replica = ReplicaState::from_encoded(client_id, &self.canonical.encode_state())?;
+        let bootstrap = self.canonical.encode_state();
+        let replica = ReplicaState::from_encoded(client_id, &bootstrap)?;
+        let observed_replica = ReplicaState::from_encoded(client_id, &bootstrap)?;
         self.members.insert(
             client_id,
             Member {
                 replica,
+                observed_replica,
                 generation: 0,
                 last_ack_generation: 0,
                 pending: VecDeque::new(),
@@ -1040,6 +1055,7 @@ impl RelayHub {
             origin: client_id,
             update,
             targets,
+            component_isolation_reconciled: false,
         };
         self.enqueue_delivery(&packet);
         Ok(packet)
@@ -1069,13 +1085,55 @@ impl RelayHub {
             .members
             .get(&client_id)
             .ok_or_else(|| anyhow!("replica {client_id} is not registered"))?;
+        let member_before_text = member.replica.text();
+        let observed_before_text = member.observed_replica.text();
         // Apply the editor's encoded op to its hub-side mirror first.
         member.replica.apply_update(update)?;
+        let member_after_text = member.replica.text();
+        // The acknowledged mirror has intentionally not absorbed unacknowledged
+        // outbound controller writes. Applying the editor's own delta here
+        // reconstructs the actual before/after intent that produced this update.
+        member.observed_replica.apply_update(update)?;
+        let observed_after_text = member.observed_replica.text();
         // Then pull whatever the mirror now holds that canonical is missing.
         let before = self.canonical.state_vector();
         let into_canonical = member.replica.diff(&self.canonical.state_vector())?;
         self.canonical.apply_update(&into_canonical)?;
         let after_text = self.canonical.text();
+
+        // `TextCrdt` retains character origins, not agent-doc component
+        // identity. A member editing an older projection can therefore produce
+        // a causally valid insertion that a raw union materializes on the far
+        // side of a component marker after a concurrent broad replacement.
+        // Compare that union with the component-scoped three-way authority
+        // before publishing it. Prefer the editor-acknowledged frontier; fall
+        // back to the optimistic member mirror only when a causally incomplete
+        // update cannot yet materialize against that frontier.
+        let (intent_before_text, intent_after_text) = if observed_before_text != observed_after_text
+        {
+            (&observed_before_text, &observed_after_text)
+        } else {
+            (&member_before_text, &member_after_text)
+        };
+        // Plain-text documents have no component boundary to protect and must
+        // retain native CRDT peer-union behavior. The semantic firewall is only
+        // active once the canonical document actually contains component cells.
+        let component_scoped = !project_document(&before_text).is_empty();
+        if component_scoped
+            && (intent_before_text != &before_text || intent_after_text != &after_text)
+        {
+            let base_state = CrdtDoc::from_text(intent_before_text).encode_state();
+            let isolated = merge_by_component(Some(&base_state), &before_text, intent_after_text)?;
+            if isolated != after_text {
+                self.rebuild_component_isolated_epoch(&before_text, &isolated)?;
+                return Ok(BroadcastPacket {
+                    origin: client_id,
+                    update: Vec::new(),
+                    targets: Vec::new(),
+                    component_isolation_reconciled: true,
+                });
+            }
+        }
         self.sync_live_document_projection(&before_text, &after_text);
         let delta = self.canonical.diff(&before)?;
         let targets: Vec<u64> = self
@@ -1088,6 +1146,7 @@ impl RelayHub {
             origin: client_id,
             update: delta,
             targets,
+            component_isolation_reconciled: false,
         };
         self.enqueue_delivery(&packet);
         Ok(packet)
@@ -1139,6 +1198,7 @@ impl RelayHub {
             origin: self.canonical_id,
             update: out,
             targets,
+            component_isolation_reconciled: false,
         };
         self.enqueue_delivery(&packet);
         Ok(packet)
@@ -1247,6 +1307,7 @@ impl RelayHub {
             origin: self.canonical_id,
             update,
             targets,
+            component_isolation_reconciled: false,
         };
         self.enqueue_delivery(&packet);
         for target in &packet.targets {
@@ -1502,6 +1563,8 @@ impl RelayHub {
         if member.pending.is_empty() {
             let projected = visible_content_hash == canonical_content_hash;
             if projected {
+                member.observed_replica =
+                    ReplicaState::from_encoded(client_id, &member.replica.encode_state())?;
                 self.settle_requested_epoch_compaction()?;
             }
             return Ok(projected);
@@ -1523,6 +1586,14 @@ impl RelayHub {
             .range(..=matched_pos)
             .any(|update| update.patch_id.starts_with("crdt-bootstrap:"));
         let projected_generation = member.pending[matched_pos].generation;
+        let acknowledged_updates: Vec<Vec<u8>> = member
+            .pending
+            .range(..=matched_pos)
+            .map(|pending| pending.update.clone())
+            .collect();
+        for update in acknowledged_updates {
+            member.observed_replica.apply_update(&update)?;
+        }
         member.pending.drain(..=matched_pos);
         member.last_ack_generation = member.last_ack_generation.max(projected_generation);
         member.redeliveries_without_ack = 0;
@@ -1829,6 +1900,17 @@ impl RelayHub {
     }
 
     fn rebuild_authoritative_epoch(&mut self, before_text: &str, text: &str) -> Result<()> {
+        self.rebuild_component_isolated_epoch(before_text, text)?;
+        self.last_committed_text = Some(text.to_string());
+        self.last_committed_state_vector = Some(self.canonical.state_vector());
+        Ok(())
+    }
+
+    /// Replace the additive whole-text lineage with a component-isolated visible
+    /// result without claiming that result has already crossed the commit
+    /// boundary. Every old-lineage delivery is discarded and each live editor is
+    /// queued for the existing replace-capable re-bootstrap path.
+    fn rebuild_component_isolated_epoch(&mut self, before_text: &str, text: &str) -> Result<()> {
         let fresh = ReplicaState::new(self.canonical_id);
         if !text.is_empty() {
             fresh.apply_local_edit(0, 0, text);
@@ -1840,8 +1922,13 @@ impl RelayHub {
         let ids: Vec<u64> = self.members.keys().copied().collect();
         for id in ids {
             let replica = ReplicaState::from_encoded(id, &bootstrap)?;
+            let observed_replica = ReplicaState::from_encoded(id, &bootstrap)?;
             if let Some(member) = self.members.get_mut(&id) {
                 member.replica = replica;
+                member.observed_replica = observed_replica;
+                member.pending.clear();
+                member.last_ack_generation = member.generation;
+                member.redeliveries_without_ack = 0;
             }
         }
         let live: Vec<u64> = self
@@ -1851,8 +1938,12 @@ impl RelayHub {
             .filter(|id| self.is_live(*id))
             .collect();
         self.pending_rebootstrap.extend(live);
-        self.last_committed_text = Some(text.to_string());
-        self.last_committed_state_vector = Some(self.canonical.state_vector());
+        self.last_committed_state_vector = self
+            .last_committed_text
+            .as_ref()
+            .filter(|committed| committed.as_str() == text)
+            .map(|_| self.canonical.state_vector());
+        self.bump_delivery_epoch();
         Ok(())
     }
 
@@ -2155,6 +2246,74 @@ mod tests {
             "hello-ipc",
             "the raw-update fan-out reached the other live replica's mirror"
         );
+    }
+
+    #[test]
+    fn notes_delete_cannot_splice_a_concurrent_exchange_response() {
+        let base = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:notes -->\n",
+            "scratch\n",
+            "<!-- /agent:notes -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#old]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let agent_write = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt.\n\n### Re: prompt — codex\n\nComplete response.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:notes -->\n",
+            "scratch\n",
+            "<!-- /agent:notes -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#old]\n",
+            "- do [#next]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let expected = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt.\n\n### Re: prompt — codex\n\nComplete response.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:notes -->\n",
+            "<!-- /agent:notes -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#old]\n",
+            "- do [#next]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let mut hub = RelayHub::from_text(1, base);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        let editor_frontier = editor.state_vector();
+
+        // The CP write spans exchange through queue, while the editor still sees
+        // the prior projection and deletes only notes.
+        hub.apply_canonical_replace(base, agent_write).unwrap();
+        let scratch = base.find("scratch\n").unwrap();
+        editor.apply_local_edit(
+            base[..scratch].chars().count() as u32,
+            "scratch\n".chars().count() as u32,
+            "",
+        );
+        let update = editor.diff(&editor_frontier).unwrap();
+
+        let packet = hub.relay_update(2, &update).unwrap();
+
+        assert!(packet.component_isolation_reconciled);
+        let canonical = hub.canonical_text();
+        assert_eq!(canonical, expected);
+        let notes = canonical
+            .split("<!-- agent:notes -->")
+            .nth(1)
+            .and_then(|body| body.split("<!-- /agent:notes -->").next())
+            .unwrap();
+        assert!(!notes.contains("Complete response."));
+        assert_eq!(hub.pending_rebootstrap_members(), vec![2, 3]);
     }
 
     #[test]
@@ -2495,7 +2654,6 @@ mod tests {
         assert_eq!(target.last_ack_generation, 1);
     }
 
-    #[test]
     /// `#pullnoackdeadlock`: a replica that pulls forever and never ACKs must
     /// stop holding the delivery barrier.
     ///

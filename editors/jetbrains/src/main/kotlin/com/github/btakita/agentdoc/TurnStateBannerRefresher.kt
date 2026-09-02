@@ -1,5 +1,8 @@
 package com.github.btakita.agentdoc
 
+import com.intellij.notification.NotificationAction
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
@@ -180,6 +183,9 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
                         "[turn-state] projection changed via $reason for $filePath: " +
                             next.label.ifEmpty { "(idle, hidden)" },
                     )
+                    if (next.inputRequired && previous?.inputRequired != true) {
+                        notifyInputRequired(filePath)
+                    }
                     notifyUi(filePath, "controller-authority-stream")
                 }
             }
@@ -187,6 +193,25 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         if (previous != null) {
             subscription.close()
         }
+    }
+
+    private fun notifyInputRequired(filePath: String) {
+        val fileName = java.io.File(filePath).name
+        val notification =
+            NotificationGroupManager.getInstance()
+                .getNotificationGroup("Agent Doc")
+                .createNotification(
+                    "Agent input required for $fileName",
+                    "Open the Agent Doc terminal to answer the approval prompt.",
+                    NotificationType.WARNING,
+                )
+        notification.isImportant = true
+        notification.addAction(
+            NotificationAction.createSimple("Focus Agent Terminal") {
+                IdeTerminalHost.focusExisting(project)
+            },
+        )
+        notification.notify(project)
     }
 
     private fun notifyUi(filePath: String, reason: String) {

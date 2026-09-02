@@ -3,7 +3,7 @@
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_harness::HarnessConfig;
 use agent_doc_supervisor_io::detection::{
-    SupervisorDetectionState, current_child_prompt_visible,
+    SupervisorDetectionState, child_output_for_detection, current_child_prompt_visible,
     normalize_stdin_for_harness_permission_prompt, prompt_visible_requires_ready_transition,
     record_recent_output, record_terminal_screen,
 };
@@ -533,6 +533,9 @@ fn agent_launch_args_sources(
 
 pub trait SupervisorProcessIoState: SupervisorDetectionState + Send + Sync + 'static {
     fn transition_actor_ready_for_prompt(&self);
+    fn transition_actor_waiting_input_for_prompt(&self);
+    fn transition_actor_busy_after_prompt(&self);
+    fn actor_waiting_input(&self) -> bool;
     fn clear_suppress_stale_ctrl_d_until_prompt(&self);
     fn suppress_stale_ctrl_d_until_prompt(&self) -> bool;
     fn prompt_visible_once(&self) -> bool;
@@ -544,6 +547,18 @@ where
 {
     fn transition_actor_ready_for_prompt(&self) {
         self.as_ref().transition_actor_ready_for_prompt();
+    }
+
+    fn transition_actor_waiting_input_for_prompt(&self) {
+        self.as_ref().transition_actor_waiting_input_for_prompt();
+    }
+
+    fn transition_actor_busy_after_prompt(&self) {
+        self.as_ref().transition_actor_busy_after_prompt();
+    }
+
+    fn actor_waiting_input(&self) -> bool {
+        self.as_ref().actor_waiting_input()
     }
 
     fn clear_suppress_stale_ctrl_d_until_prompt(&self) {
@@ -605,6 +620,16 @@ where
 {
     record_terminal_screen(state, bytes);
     record_recent_output(state, bytes);
+    let output = child_output_for_detection(state);
+    if agent_doc_turn_executor_tmux::prompt::parse_prompt(&output).active {
+        if !state.actor_waiting_input() {
+            state.transition_actor_waiting_input_for_prompt();
+        }
+        return;
+    }
+    if state.actor_waiting_input() {
+        state.transition_actor_busy_after_prompt();
+    }
     if current_child_prompt_visible(state, harness) {
         if prompt_visible_requires_ready_transition(state) {
             state.transition_actor_ready_for_prompt();

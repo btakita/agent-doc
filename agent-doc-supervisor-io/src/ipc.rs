@@ -339,16 +339,33 @@ where
     S: SupervisorIpcLifecycleState + ?Sized,
 {
     let (mode, restart_agent) = decode_restart_intent(mode);
+    // Refresh the IPC-visible binary projection on every restart request even
+    // when the child is dead and the request will take the normal relaunch
+    // path. Re-exec is now a transport-continuity decision, not a binary-
+    // freshness decision, but callers still rely on this request as a fresh
+    // observation boundary.
+    let _binary_stale = state.binary_stale();
+    let child_alive = state.child_alive();
+    // A supervisor-only continue request is a process recycle, not a harness
+    // restart. Preserve the live child whether or not the currently-running
+    // supervisor binary is stale. The re-exec path owns waiting for a safe turn
+    // boundary, so a busy turn keeps running and an idle harness stays idle.
+    // Explicit Restart Agent and fresh replacement retain child-replacement
+    // semantics. A dead child cannot be adopted and must use the normal relaunch
+    // path instead.
+    let preserve_live_child =
+        !restart_agent && mode.trim().eq_ignore_ascii_case("continue") && child_alive;
     // `#haivendupsession`: refuse to spawn a replacement while the current child
     // still owns an open cycle. The recycle path has always deferred here; the
     // restart path did not, and with a keep-alive reap policy the un-reaped old
     // child kept rendering through the same pane's PTY proxy underneath the new
     // one. Fail loudly rather than silently dropping the operator's request —
     // a silent no-op is the failure mode this whole area keeps reproducing.
-    if agent_doc_supervisor::lifecycle::supervisor_restart_admission(
-        state.agent_doc_cycle_open(),
-        state.child_alive(),
-    ) == agent_doc_supervisor::lifecycle::SupervisorRestartAdmission::DeferCycleOpen
+    if !preserve_live_child
+        && agent_doc_supervisor::lifecycle::supervisor_restart_admission(
+            state.agent_doc_cycle_open(),
+            child_alive,
+        ) == agent_doc_supervisor::lifecycle::SupervisorRestartAdmission::DeferCycleOpen
     {
         return Err(
             "supervisor restart deferred: a document cycle is open and the current harness \
@@ -370,11 +387,10 @@ where
         mode
     });
     state.set_restart_requested(true);
-    // A controller-only recycle may preserve the live harness child across an
-    // in-place re-exec. An explicit Restart Agent intent may not: it exists to
-    // re-resolve frontmatter (including an `agent:` harness switch) and replace
-    // that child even when the serving supervisor binary is stale.
-    let reexec = state.binary_stale() && !restart_agent;
+    // A controller-only continue recycle preserves the live harness child across
+    // an in-place re-exec. An explicit Restart Agent or fresh replacement may
+    // not: those intents exist to replace the harness child.
+    let reexec = preserve_live_child;
     state.set_restart_reexec(reexec);
     if !reexec {
         state.kill_child_for_ipc();
@@ -968,7 +984,7 @@ mod tests {
     /// the request had already been accepted here, and this path spawned anyway,
     /// leaving two children on one pane under a keep-alive reap policy.
     #[test]
-    fn restart_over_a_live_child_mid_cycle_is_refused_not_spawned() {
+    fn restart_agent_over_a_live_child_mid_cycle_is_refused_not_spawned() {
         let state = RestartLifecycleState {
             cycle_open: true,
             child_alive: true,
@@ -980,7 +996,7 @@ mod tests {
             prompt_woken: AtomicBool::new(false),
             restart_mode: Mutex::new(String::new()),
         };
-        let result = request_supervisor_restart(&state, "continue".to_string());
+        let result = request_supervisor_restart(&state, "agent:continue".to_string());
         assert!(
             result.is_err(),
             "an open cycle over a live child must refuse"
@@ -1100,7 +1116,7 @@ mod tests {
     fn controller_recycle_preserves_child_during_stale_binary_reexec() {
         let state = RestartLifecycleState {
             cycle_open: false,
-            child_alive: false,
+            child_alive: true,
             waiting_input: false,
             binary_stale: true,
             restart_requested: AtomicBool::new(false),
@@ -1114,6 +1130,71 @@ mod tests {
 
         assert!(state.restart_reexec.load(Ordering::Relaxed));
         assert!(!state.child_killed.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn controller_recycle_preserves_idle_child_when_binary_is_fresh() {
+        let state = RestartLifecycleState {
+            cycle_open: false,
+            child_alive: true,
+            waiting_input: false,
+            binary_stale: false,
+            restart_requested: AtomicBool::new(false),
+            restart_reexec: AtomicBool::new(false),
+            child_killed: AtomicBool::new(false),
+            prompt_woken: AtomicBool::new(false),
+            restart_mode: Mutex::new(String::new()),
+        };
+
+        request_supervisor_restart(&state, "continue".to_string()).unwrap();
+
+        assert!(state.restart_requested.load(Ordering::Relaxed));
+        assert!(state.restart_reexec.load(Ordering::Relaxed));
+        assert!(!state.child_killed.load(Ordering::Relaxed));
+        assert_eq!(*state.restart_mode.lock().unwrap(), "continue");
+    }
+
+    #[test]
+    fn controller_recycle_defers_busy_turn_without_replacing_child() {
+        let state = RestartLifecycleState {
+            cycle_open: true,
+            child_alive: true,
+            waiting_input: false,
+            binary_stale: false,
+            restart_requested: AtomicBool::new(false),
+            restart_reexec: AtomicBool::new(false),
+            child_killed: AtomicBool::new(false),
+            prompt_woken: AtomicBool::new(false),
+            restart_mode: Mutex::new(String::new()),
+        };
+
+        request_supervisor_restart(&state, "continue".to_string())
+            .expect("supervisor-only recycle must preserve the running turn");
+
+        assert!(state.restart_requested.load(Ordering::Relaxed));
+        assert!(state.restart_reexec.load(Ordering::Relaxed));
+        assert!(!state.child_killed.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn fresh_supervisor_replacement_still_replaces_the_child() {
+        let state = RestartLifecycleState {
+            cycle_open: false,
+            child_alive: true,
+            waiting_input: false,
+            binary_stale: true,
+            restart_requested: AtomicBool::new(false),
+            restart_reexec: AtomicBool::new(false),
+            child_killed: AtomicBool::new(false),
+            prompt_woken: AtomicBool::new(false),
+            restart_mode: Mutex::new(String::new()),
+        };
+
+        request_supervisor_restart(&state, "fresh".to_string()).unwrap();
+
+        assert!(state.restart_requested.load(Ordering::Relaxed));
+        assert!(!state.restart_reexec.load(Ordering::Relaxed));
+        assert!(state.child_killed.load(Ordering::Relaxed));
     }
 
     fn start_echo_handler(root: &Path, uuid: &str) -> SupervisorIpc {

@@ -2,6 +2,36 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.313
+
+- **Fix: editor navigation receives the real tmux focus outcome.**
+
+The reactive editor-surface focus effect now returns its exact
+`ControllerTmuxFocusReceipt` through the published projection instead of
+discarding it and returning the graph's no-op receipt. JetBrains can therefore
+confirm exact pane selection and, when the actor pane is still parked in stash,
+request the structural layout repair that surfaces it. Focus failures remain an
+accepted editor fact but are exposed in the receipt's error field. Regression
+coverage verifies both selected-pane proof and failure propagation.
+
+- **Fix: Recycle Supervisor preserves an idle or running child even after the binary is fresh.**
+
+A supervisor-only continue recycle now re-execs and adopts every live harness
+child, independent of whether the current supervisor inode is stale. The prior
+stale-inode condition made a second recycle destructive: it killed an idle child
+or interrupted a running turn and then relaunched the harness. Explicit Restart
+Agent and fresh replacement retain their destructive semantics; dead children
+still take the normal relaunch path. Regressions cover fresh idle, fresh busy,
+stale-binary, explicit agent restart, and fresh replacement rows.
+
+- **Fix: an unproven dispatch start files one authoritative route bug.**
+
+The dispatch-only proof guard no longer reports a second route bug after the
+lower transport dispatcher has already timed out, captured its diagnostic
+snapshot, and filed the authoritative failure. Accepted-only fallback failures
+still report at the outer guard. This prevents duplicated bug directives and the
+second live-document response/write that could remain uncommitted.
+
 ## 0.35.312
 
 - **Fix: Recycle Supervisor preserves an active harness turn until its idle boundary.**

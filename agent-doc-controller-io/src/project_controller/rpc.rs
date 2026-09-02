@@ -17758,6 +17758,26 @@ pub(crate) fn handle_tmux_layout_sync_state(
     tmux_layout_sync_state_for_invocation(bootstrap, runtime, &invocation)
 }
 
+fn record_editor_surface_focus_outcome(
+    receipt: &mut SurfaceObservationReceipt,
+    focus_result: Result<ControllerTmuxFocusReceipt>,
+) -> Result<()> {
+    match focus_result {
+        Ok(outcome) => {
+            receipt.outcome = Some(
+                serde_json::to_string(&outcome)
+                    .context("serialize editor surface focus outcome")?,
+            );
+            receipt.error = None;
+        }
+        Err(error) => {
+            receipt.outcome = None;
+            receipt.error = Some(format!("{error:#}"));
+        }
+    }
+    Ok(())
+}
+
 fn handle_editor_surface_observe(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -17777,7 +17797,7 @@ fn handle_editor_surface_observe(
     // converge, so the editor socket request never blocks on a tmux survey.
     // Cold start (no retained observation) derives `Sync`, which schedules the
     // worker through the in-process publish below.
-    let (accepted, receipt) = runtime.editor_surface_graph.observe(
+    let (accepted, mut receipt) = runtime.editor_surface_graph.observe(
         &runtime._scope,
         &bootstrap.project_root,
         observation,
@@ -17812,13 +17832,19 @@ fn handle_editor_surface_observe(
                     command_kind: None,
                     diagnostic_payload: None,
                 };
-                let _ = handle_focus_document_pane_with_policy(
+                let focus_result = handle_focus_document_pane_with_policy(
                     bootstrap,
                     Some(runtime),
                     focus_request,
                     MissingFocusPanePolicy::ResumeLatest,
                     None,
                 );
+                // The editor focus lane needs the real tmux receipt to prove
+                // exact pane selection (or to request structural repair). The
+                // graph's eager effect is intentionally a production no-op, so
+                // discarding this result left JetBrains with an accepted fact
+                // but no applied projection.
+                record_editor_surface_focus_outcome(&mut receipt, focus_result)?;
             }
             SurfaceIntent::Idle => {}
         }
@@ -22733,6 +22759,60 @@ mod tests {
             force_reconcile: true,
             focus_only: false,
         }
+    }
+
+    #[test]
+    fn editor_surface_focus_receipt_exposes_exact_pane_selection() {
+        let mut receipt = SurfaceObservationReceipt {
+            intent: SurfaceIntent::Focus {
+                document: "/project/payments-ledger.md".to_string(),
+            },
+            idle: false,
+            outcome: None,
+            error: None,
+        };
+
+        record_editor_surface_focus_outcome(
+            &mut receipt,
+            Ok(tmux_focus_receipt(
+                true,
+                "focused",
+                Some("document-1".to_string()),
+                Some("%7".to_string()),
+                Some("agent-doc".to_string()),
+                Some("@3".to_string()),
+                Some("agent-doc".to_string()),
+            )),
+        )
+        .unwrap();
+
+        let outcome: ControllerTmuxFocusReceipt =
+            serde_json::from_str(receipt.outcome.as_deref().unwrap()).unwrap();
+        assert!(outcome.focused);
+        assert_eq!(outcome.reason, "focused");
+        assert_eq!(outcome.pane_id.as_deref(), Some("%7"));
+        assert_eq!(receipt.error, None);
+    }
+
+    #[test]
+    fn editor_surface_focus_failure_is_returned_without_rejecting_the_editor_fact() {
+        let mut receipt = SurfaceObservationReceipt {
+            intent: SurfaceIntent::Focus {
+                document: "/project/payments-ledger.md".to_string(),
+            },
+            idle: false,
+            outcome: Some("stale-eager-effect".to_string()),
+            error: None,
+        };
+
+        record_editor_surface_focus_outcome(
+            &mut receipt,
+            Err(anyhow::anyhow!("payments queue is paused")),
+        )
+        .unwrap();
+
+        assert_eq!(receipt.outcome, None);
+        assert_eq!(receipt.error.as_deref(), Some("payments queue is paused"));
     }
 
     /// `#tmuxautosyncreactive`: the background worker publishes the actual tmux

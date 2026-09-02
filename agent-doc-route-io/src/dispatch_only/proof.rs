@@ -184,10 +184,18 @@ fn require_dispatch_only_dispatch_start_proof_with_requirement(
         );
     }
     agent_doc_ops_log_io::log_op(file, &accepted_only_dispatch_start_log_message(facts));
-    report_bug(DispatchOnlyBugReportFacts {
-        elapsed: timeout,
-        proof: dispatch_start,
-    });
+    // `DispatchStartUnproven` is produced only after the transport-specific
+    // dispatcher has timed out, captured its diagnostic snapshot, and filed the
+    // authoritative route bug. Filing again here creates a second queue item for
+    // the same dispatch and can strand a second response capture against the live
+    // document. Accepted-only fallbacks have no lower-layer timeout report, so
+    // this guard remains their report owner.
+    if dispatch_start != RoutedDispatchStartProof::DispatchStartUnproven {
+        report_bug(DispatchOnlyBugReportFacts {
+            elapsed: timeout,
+            proof: dispatch_start,
+        });
+    }
     anyhow::bail!(accepted_only_dispatch_start_refusal_message(facts));
 }
 
@@ -355,6 +363,7 @@ mod tests {
 
     #[test]
     fn dispatch_only_tracked_timeout_fails_closed_even_when_accepted_only_is_allowed() {
+        let mut reports = 0;
         let err = require_dispatch_only_dispatch_start_proof_with_requirement(
             Path::new("/tmp/agent-doc-bugs2.md"),
             "%4",
@@ -362,7 +371,7 @@ mod tests {
             DispatchOnlyReopenDelivery::DirectPaneSubmit,
             RoutedDispatchStartProof::DispatchStartUnproven,
             true,
-            |_| {},
+            |_| reports += 1,
         )
         .expect_err("tracked dispatch-start timeouts must not report route success");
 
@@ -374,6 +383,30 @@ mod tests {
         assert!(
             message.contains("no dispatch-start proof was recorded"),
             "{message}"
+        );
+        assert_eq!(
+            reports, 0,
+            "the transport timeout already owns the diagnostic route-bug report"
+        );
+    }
+
+    #[test]
+    fn dispatch_only_accepted_only_failure_still_files_its_fallback_report() {
+        let mut reports = 0;
+        require_dispatch_only_dispatch_start_proof_with_requirement(
+            Path::new("/tmp/agent-doc-bugs2.md"),
+            "%4",
+            &HarnessConfig::codex(),
+            DispatchOnlyReopenDelivery::DirectPaneSubmit,
+            RoutedDispatchStartProof::CommandAcceptedOnly,
+            true,
+            |_| reports += 1,
+        )
+        .expect_err("accepted-only proof must fail closed when start proof is required");
+
+        assert_eq!(
+            reports, 1,
+            "the outer guard owns accepted-only fallback reports"
         );
     }
 

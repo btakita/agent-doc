@@ -324,7 +324,7 @@ mod tests {
     use tmux_router::IsolatedTmux;
 
     #[test]
-    fn restart_ipc_refreshes_stale_binary_before_reexec_decision() {
+    fn restart_ipc_refreshes_stale_binary_before_dead_child_relaunch_decision() {
         let mut stale_launch =
             agent_doc_controller_io::project_controller::current_binary_identity()
                 .expect("current binary identity");
@@ -346,7 +346,7 @@ mod tests {
 
         assert!(shared.binary_freshness.stale());
         assert!(shared.restart_requested.load(Ordering::Relaxed));
-        assert!(shared.restart_reexec.load(Ordering::Relaxed));
+        assert!(!shared.restart_reexec.load(Ordering::Relaxed));
     }
 
     #[test]

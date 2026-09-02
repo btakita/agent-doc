@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a0604b-a81c-7cc3-8c20-b9d94b87abf7
+  codex: 01a062c4-7f79-7d40-a88a-64f976ec3765
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -102,6 +102,18 @@ This is the older duplicate of the completed `#jetbrainsrunroute-z09d` incident,
 Both items describe the same payments-ledger route attempt on pane `%57`, actor generation 6, with the same `run_agent_doc_route_dispatch_failure` invariant. `#jetbrainsrunroute` is the lower `supervisor_dispatch_start_proof` report; `#jetbrainsrunroute-z09d` is the redundant outer `dispatch_only_dispatch_start_proof` report. Agent-doc 0.35.313 commit `fde79d7f3` made the lower transport report authoritative for an unproven dispatch start while retaining the outer fallback report for accepted-only failures.
 
 Fresh verification passed: `cargo test -p agent-doc-route-io dispatch_only_`. The implementation checkout is clean, installed agent-doc is 0.35.314, and GitHub CI run `33595682483` for the release commit is still in progress.
+
+### Re: do [#fixcausesflood] — gpt-5.6-sol
+
+Fixed the shared Agent Doc defects and the affected live state.
+
+- The contracts.md flood came from captured-finalize normalization treating the binary-authored `> **Queue prompt:**` response quote as new user prose. It became `❯ > ...`, failed captured-response materialization, and each retry appended another copy. Normalization now canonicalizes legacy prefixed quote lines, collapses immediately repeated identical scaffolds, excludes Markdown blockquotes from prompt decoration, and is regression-tested as idempotent.
+- Compact Exchange now repairs a scaffold stranded inside `agent:queue` only when an identical canonical quote block exists in `agent:exchange` and its placement is isolated between queue rows/component boundaries. Unmatched quotes, surrounding response prose, malformed structure, and other ambiguous corruption still fail closed at the integrity gate.
+- The native visual-token projection now labels the complete binary `> **Queue prompt:**` quote block as `prompt`, including continuation quote lines. IntelliJ therefore receives the same prompt styling for Codex, Claude, and OpenCode. The matching JetBrains 0.2.370 package and native library are installed; the existing `#restartintellijidea` Review item now tracks activation/verification in a restarted IDE.
+- Lazily proved infra.md's `#nats-workspace-launcher` and `#nats-broker-proof` heads were orphaned after their backend-owned implementations completed. Both were struck through guarded `queue consume --id` operations and committed; the controller has since advanced infra.md to its next unrelated prompt.
+- I did not patch, resubmit, recycle, or force contracts.md. Its controller-owned closeout remained authoritative, and the @tmstorm reviewer request remains queued and undrained.
+
+Verification: all affected crate suites pass, repository-wide `make check` passes, and `make install` rebuilt/installed the binary, native library, JetBrains package, and VS Code package. Runtime commit `143e73cff` and workspace pointer commit `ab3aa2b29` are pushed. GitHub Actions run `33654305421` was still running `make check` and `tmux-ci` without a surfaced failure at closeout.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -111,9 +123,11 @@ Fresh verification passed: `cargo test -p agent-doc-route-io dispatch_only_`. Th
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
+- 🚧 do [#fixcausesflood]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
+- [ ] 🚧 [#fixcausesflood] Please fix the agent-doc causes of the flood of `❯ > **Queue prompt:** Rename sdk-spike to haiven-sdk + update git references + directory name to haiven-sdk.` in contracts.md.
 <!-- /agent:backlog -->
 
 ## Review

@@ -149,6 +149,12 @@ The running JetBrains process reported plugin `0.2.368` during preflight even th
 > **Queue prompt:** When I call JB `Recycle Supervisor` while a session is running, the session immediately is interrupted and restarts but does not continue once restarted. Please make sure the session continues if already running.
 
 Completed in agent-doc `0.35.312`: the non-forced restart request now remains pending while the harness-owned turn lease is active, then recycles at the idle boundary without interrupting the running turn. The implementation, verification, release, and installed-plugin note are recorded in the preceding response.
+
+### Re: Response
+
+Verified. IntelliJ is now running agent-doc plugin `0.2.370`, and `agent-doc-bugs.md` is registered with the live editor endpoint. The reliable-sync projection is complete.
+
+You can now retry **Recycle Supervisor**.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

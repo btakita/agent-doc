@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
-  codex: 01a0599a-9461-7981-b7a8-068420950fbf
+  codex: 01a0632a-e84b-7891-b60e-53475fa42153
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -74,6 +74,22 @@ Fixed and released as agent-doc **0.35.315** / JetBrains plugin **0.2.371**.
 I did not capture a usable JVM stack—the restart happened before JVM attach completed—but the logs provided definitive causal evidence, including the same live storm recurring on `contracts.md`.
 
 **Restart IDEA once more now.** Plugin 0.2.371 is installed, but PID `3019171` is still running the old loaded Kotlin classes.
+
+### Re: do [#fixcompactexchange] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#fixcompactexchange]
+
+
+Implemented, installed, and released agent-doc 0.35.316.
+
+- Compact Exchange now emits exactly one continuation-aware diagnostic when a repeated compact request finds an already-pending continuation. The regression covers the repeated-request path and the spec/runbook now state the single-diagnostic contract.
+- Fixed the runtime ownership failure behind the `contracts.md` report. A durable `pending_compact_projection` remained after the ordinary retained write settled, but `session-check` only consulted pending document-write settlement. It therefore reclassified the partially projected compact target as a new unanswered edit. The realtime ownership cut now treats a retained compact projection as a durable holder, so preflight/session closeout defer to that continuation before unanswered-edit classification. Regressions cover the no-pending-document-write edge and session-check classification.
+- Recovered `src/haiven-dev/tasks/contracts.md` through the controller continuation without forcing disk or manually editing/staging it. The compact projection committed as `ac0576adcfcd2cdce739dffaf9d09751d74bab8c`; the operator's PR review/merge-order question is preserved in the compact document, the prior `#sdkspikeleftovers` response is preserved in the archive, the file is git-clean, and `agent-doc session-check` now reports committed with no drainable work.
+- Installed CLI/library 0.35.316 and JetBrains plugin package 0.2.371 (plus the current VS Code package). This includes `0edc73f69 fix(jetbrains): preserve replica retry backoff`. The running IntelliJ instance still needs one restart to activate the newly installed JetBrains package.
+- Verification passed: the four targeted regressions, `cargo fmt --all`, `git diff --check`, docs audit, and full `make check` (`tart-c259b7e2c9`).
+- Source commit `b57cc4609` is pushed on `main`; tag `v0.35.316` is pushed. CI, Release, and PyPI workflows are in progress. Parent integration commit: `fdc27b915`.
 <!-- agent:boundary:b8ec92e9:tsift -->
 <!-- /agent:exchange -->
 

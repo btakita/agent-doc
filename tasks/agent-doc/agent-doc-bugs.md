@@ -90,7 +90,6 @@ Fixed, released, and committed.
 - Workspace commits: `a97656e0e`, `5ab705e69`.
 - Pushed tag `v0.35.314`.
 - The agent-doc response committed successfully and `session-check` passed. The remaining queue head was handed to the supervisor continuation path.
-
 ### Re: do [#jetbrainsrunroute] — gpt-5.6-sol
 
 > **Queue prompt:**

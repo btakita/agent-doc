@@ -33,6 +33,11 @@ Compacted content:
 - Archived 8 response topic(s): Issue #47 fixed; 0.35.303 publication blocked on PyPI quota; Response; Response; 5 more
 - Prior summary/context: prior compacted content: Archived 16 response topic(s): contracts.md supervisor timeout fixed and released; Fix issue...
 <!-- patch:exchange -->
+
+> **Queue prompt:**
+>
+> do [#fixclaimtmux]
+
 ### Re: Automatic stale-supervisor recycle — gpt-5
 
 > **Queue prompt:** agent-doc commands should automatically recycle the supervisor if stale, assuming the stale check is fast. Ideally the stale state should be handled via lazily state.
@@ -103,7 +108,7 @@ IntelliJ is still running plugin v0.2.368. Restart IntelliJ before editing or re
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-- 🚧 do [#fixclaimtmux]
+- ~~do [#fixclaimtmux]~~
 ---
 did you already do this task? Is this a leftover? If yes, please fix agent-doc not cleaning this up:
 ```
@@ -114,7 +119,6 @@ failed to activate queue in /home/brian/work/btakita/agent-loop/src/haiven-dev/t
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#fixclaimtmux] Please fix Claim for Tmux Pane on payments.md. Both session state + agent-doc causes.
 - [/] [#restartintellijidea] Restart IntelliJ IDEA so installed agent-doc JetBrains 0.2.368 becomes live, then confirm native FFI loads through the resolved agent-doc executable and pane synchronization remains stable.
 <!-- /agent:backlog -->
 

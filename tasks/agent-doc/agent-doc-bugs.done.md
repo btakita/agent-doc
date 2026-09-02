@@ -27,3 +27,4 @@
 - 2026-08-31 [#fixissuerelease] Fix issue #48 and release.
 - 2026-08-31 [#fixrunbackend] Fix Run Agent Doc on backend.md:
 - 2026-09-01 [#processesawaycomputer] agent-doc processes are using CP while I was away from the computer overnight. Is there a way to make agent-doc idle not use so much CPU?
+- 2026-09-01 [#fixclaimtmux] Please fix Claim for Tmux Pane on payments.md. Both session state + agent-doc causes.

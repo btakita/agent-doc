@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.314
+
+- **Fix: strict closeout validates the response before tracked-work simulation.**
+
+Template closeout now validates the complete response envelope before running
+the virtual tracked-work mutation pass. A malformed response therefore fails
+without first printing successful-looking queue completion or reap diagnostics.
+The validated stdin body is retained for the real write path, preserving the
+single-read closeout contract. Regression coverage exercises both rejected
+content outside the patch block and a valid heading inside it.
+
 ## 0.35.313
 
 - **Fix: editor navigation receives the real tmux focus outcome.**

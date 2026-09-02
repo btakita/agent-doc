@@ -790,6 +790,93 @@ fn read_response_input_for_closeout(strict_closeout: bool) -> Result<String> {
     )
 }
 
+fn validate_template_response_shape_before_tracked_work(
+    file: &Path,
+    current_content: &str,
+    response: &str,
+    allow_replace_pending: bool,
+) -> Result<()> {
+    let mut response = response.to_string();
+    agent_doc_template::response_materialization::sanitize_template_patchback_response(
+        &mut response,
+    )?;
+    let parsed = agent_doc_template_io::parse_template_patchback(
+        file,
+        &response,
+        "prevalidate_tracked_work_response",
+        agent_doc_ops_log_io::log_op,
+    )?;
+    let mut patches = parsed.patches;
+    let mut unmatched = parsed.unmatched;
+    template::sanitize::sanitize_patches(&mut patches);
+    template::sanitize::sanitize_unmatched(&mut unmatched);
+    let normalized = agent_doc_template_io::normalize_backlog_patch_response(
+        file,
+        current_content,
+        patches,
+        unmatched,
+        allow_replace_pending,
+    )?;
+    if !allow_replace_pending && !agent_doc_template_io::pending_replace_escape_hatch_enabled() {
+        agent_doc_template::response_materialization::ensure_template_response_write_proof(
+            &normalized.patches,
+            &normalized.unmatched,
+        )?;
+    }
+    Ok(())
+}
+
+/// A strict response and its tracked-work flags form one transaction. Validate
+/// the response envelope before the tracked-work dry run so a malformed patch
+/// cannot emit successful-looking virtual mutation diagnostics such as
+/// "completed and reaped" before the response is rejected. The response is
+/// re-stashed for the selected write path after validation succeeds.
+fn prevalidate_template_response_before_tracked_work(
+    file: &Path,
+    options: &CommandOptions,
+    commit_mode: CommitMode,
+    has_pending_ops: bool,
+) -> Result<()> {
+    if commit_mode != CommitMode::Required || !has_pending_ops || options.pending_only {
+        return Ok(());
+    }
+
+    let current_content = if options.force_disk {
+        resolve_force_disk_document(file, "prevalidate_tracked_work_response")?.into_content()
+    } else {
+        resolve_current_document(file, "prevalidate_tracked_work_response")?.into_content()
+    };
+    let (fm, _) = frontmatter::parse(&current_content)?;
+    if !fm.resolve_mode().is_template() && !options.is_template {
+        return Ok(());
+    }
+
+    let response = read_response_input()?;
+    if response.trim().is_empty() {
+        // Empty stdin can intentionally mean a tracked-work-only closeout. Leave
+        // that established recovery path authoritative; there is no response
+        // envelope to validate before its virtual mutation pass.
+        RESPONSE_STDIN_OVERRIDE.with(|slot| {
+            slot.borrow_mut().replace(response);
+        });
+        return Ok(());
+    }
+    let response =
+        agent_doc_template::response_materialization::canonicalize_strict_closeout_response_heading(
+            &response,
+        );
+    validate_template_response_shape_before_tracked_work(
+        file,
+        &current_content,
+        &response,
+        options.allow_replace_pending,
+    )?;
+    RESPONSE_STDIN_OVERRIDE.with(|slot| {
+        slot.borrow_mut().replace(response);
+    });
+    Ok(())
+}
+
 fn log_resolved_backlog_prompt_cleanup(file: &Path, removed_total: usize) {
     agent_doc_ops_log_io::log_op(
         file,
@@ -1998,6 +2085,16 @@ fn run_command_inner_within_pass(
         }
         return finalize_commit(file, commit_mode, options.force_disk);
     }
+
+    // Validate the response half first. The tracked-work pass below is virtual,
+    // but its command helpers report successful-looking mutation diagnostics;
+    // those diagnostics must never precede a response-envelope rejection.
+    prevalidate_template_response_before_tracked_work(
+        file,
+        &options,
+        commit_mode,
+        has_pending_ops,
+    )?;
 
     // `#prmergeguardpr`: closeout is one transaction. A tracked-work mutation
     // that this envelope will reject must fail the turn HERE, while nothing is
@@ -3274,6 +3371,52 @@ mod tests {
     fn stdin_read_deadline_zero_disables_the_bound() {
         assert_eq!(stdin_read_deadline(false, 0), None);
         assert_eq!(stdin_read_deadline(true, 0), None);
+    }
+
+    #[test]
+    fn tracked_closeout_prevalidation_rejects_heading_outside_patch_block() {
+        let tmp = TempDir::new().unwrap();
+        let doc = tmp.path().join("doc.md");
+        let current = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "### Re: task — gpt-5\n\n",
+            "<!-- patch:exchange -->\n",
+            "Body.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        let err =
+            validate_template_response_shape_before_tracked_work(&doc, current, response, false)
+                .expect_err("unmatched heading must fail before tracked-work validation");
+
+        assert!(
+            err.to_string().contains("unsafe unmatched content"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn tracked_closeout_prevalidation_accepts_heading_inside_patch_block() {
+        let tmp = TempDir::new().unwrap();
+        let doc = tmp.path().join("doc.md");
+        let current = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: task — gpt-5\n\n",
+            "Body.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        validate_template_response_shape_before_tracked_work(&doc, current, response, false)
+            .expect("fully fenced response must pass prevalidation");
     }
 
     #[test]

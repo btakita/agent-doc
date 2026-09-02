@@ -1123,6 +1123,44 @@ fn write_commit_empty_stdin_with_done_commits_pending_only_reap() {
 }
 
 #[test]
+fn write_commit_malformed_response_rejects_before_done_dry_run_diagnostics() {
+    let (tmp, doc) = setup_session_stream_doc();
+    let original = "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n### Re: already handled — gpt-5\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:backlog -->\n- [ ] [#done1] Close the loop\n<!-- /agent:backlog -->\n\n<!-- agent:queue auto -->\n- do [#done1]\n<!-- /agent:queue -->\n";
+    fs::write(&doc, original).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    let output = agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            "--commit",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--done",
+            "done1",
+        ])
+        .write_stdin(
+            "### Re: done1 — gpt-5\n<!-- patch:exchange -->\nResolved.\n<!-- /patch:exchange -->\n",
+        )
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "malformed closeout must fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unsafe unmatched content around patch blocks"),
+        "response-shape rejection must remain authoritative:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("[pending] completed and reaped")
+            && !stderr.contains("snapshot recovery warning during queue consume"),
+        "tracked-work dry-run diagnostics must not precede response rejection:\n{stderr}"
+    );
+    assert_eq!(fs::read_to_string(&doc).unwrap(), original);
+    assert_eq!(head_blob(tmp.path()), original);
+}
+
+#[test]
 fn write_commit_remains_best_effort_for_non_session_document() {
     let (_tmp, doc) = setup_template_doc();
 

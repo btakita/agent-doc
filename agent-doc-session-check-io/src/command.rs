@@ -410,6 +410,28 @@ pub trait SessionCheckEffects {
     }
 }
 
+/// Derive the terminal divergence owner from one coherent observation cut.
+///
+/// `retained_projection_blocks` deliberately precedes `unanswered_edit`: a
+/// Compact Exchange continuation can remain live after the response cycle is
+/// committed and while a partial native save happens to expose queue/backlog
+/// drift. That edit is not admissible as the next prompt until the continuation
+/// settles or is identity-matched as superseded.
+fn terminal_divergence_ownership(
+    cycle_phase: Option<CyclePhase>,
+    retained_capture: bool,
+    retained_projection_blocks: bool,
+    unanswered_edit: bool,
+) -> agent_doc_turn::write_ownership::RetainedWriteOwnership {
+    agent_doc_turn::write_ownership::RetainedWriteOwnership::new_with_phase(
+        cycle_phase.is_some_and(agent_doc_turn::CyclePhase::is_open),
+        retained_capture,
+        cycle_phase == Some(agent_doc_turn::CyclePhase::WriteApplied),
+    )
+    .with_retained_projection(retained_projection_blocks)
+    .with_unanswered_edit(unanswered_edit)
+}
+
 /// CLI entry: check the end-of-cycle write invariant for `file`.
 ///
 /// Prints a short status line to stdout and exits with:
@@ -990,14 +1012,10 @@ fn run_with_options_inner(
         // is neither a self-completing deferral nor a stranded write, and this
         // site is the one that already reported it correctly as INTERRUPTED —
         // its note must name the same recovery the write path now names.
-        let ownership = agent_doc_turn::write_ownership::RetainedWriteOwnership::new_with_phase(
-            cycle_phase.is_some_and(agent_doc_turn::CyclePhase::is_open),
-            agent_doc_capture_io::load_active(file)
-                .ok()
-                .flatten()
-                .is_some(),
-            cycle_phase == Some(agent_doc_turn::CyclePhase::WriteApplied),
-        );
+        let retained_capture = agent_doc_capture_io::load_active(file)
+            .ok()
+            .flatten()
+            .is_some();
         // `#strandedremedydeadlock`: ownership alone cannot tell "the agent's
         // write is stranded" from "the operator typed the next prompt into the
         // live buffer" — both have no cycle and no capture. This site reported
@@ -1037,7 +1055,10 @@ fn run_with_options_inner(
                 &disk_content,
             )
         });
-        let ownership = ownership.with_unanswered_edit(
+        let ownership = terminal_divergence_ownership(
+            cycle_phase,
+            retained_capture,
+            retained_document_write_blocks,
             agent_doc_git::has_blocking_non_exchange_component_drift(
                 &disk_content,
                 &authority_content,
@@ -2867,6 +2888,21 @@ mod terminal_convergence_tests {
             retained_write_gate_status(existing.clone(), true, Path::new("/tmp/doc.md")),
             existing,
         );
+    }
+
+    #[test]
+    fn retained_projection_prevents_partial_compact_from_becoming_unanswered_edit() {
+        let ownership = terminal_divergence_ownership(None, false, true, true);
+
+        assert_eq!(
+            ownership.verdict(),
+            agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred,
+        );
+        let remedy =
+            agent_doc_turn::write_ownership::retained_write_remedy(ownership, "tasks/contracts.md");
+        assert!(remedy.contains("retained capture or projection"));
+        assert!(!remedy.contains("UNANSWERED DOCUMENT EDIT"));
+        assert!(!remedy.contains("agent-doc tasks/contracts.md` to open the next cycle"));
     }
 
     #[test]

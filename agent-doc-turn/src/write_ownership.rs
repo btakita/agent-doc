@@ -58,6 +58,15 @@ pub struct RetainedWriteOwnership {
     /// when a capture remains, its captured-finalize worker still owns that
     /// exact commit and manual recovery would race it.
     pub write_applied: bool,
+    /// A non-response projection continuation durably owns the current
+    /// authority/disk divergence.
+    ///
+    /// This includes retained document-write delivery and Compact Exchange's
+    /// content-bearing continuation. Neither requires an open response cycle or
+    /// response capture, but both have a controller state edge that will resume
+    /// the exact operation. Omitting this bit lets a partial editor-native save
+    /// look like a fresh unanswered edit once the response cycle is committed.
+    pub retained_projection: bool,
     /// The divergence is an unanswered edit to typed components this turn's
     /// write never produced — a queue strike, a backlog add — that the disk
     /// projection does not have yet (`#strandedremedydeadlock`).
@@ -85,6 +94,7 @@ impl RetainedWriteOwnership {
         cycle_open: false,
         retained_capture: false,
         write_applied: false,
+        retained_projection: false,
         unanswered_edit: false,
     };
 
@@ -93,6 +103,7 @@ impl RetainedWriteOwnership {
             cycle_open,
             retained_capture,
             write_applied: false,
+            retained_projection: false,
             unanswered_edit: false,
         }
     }
@@ -107,8 +118,15 @@ impl RetainedWriteOwnership {
             cycle_open,
             retained_capture,
             write_applied,
+            retained_projection: false,
             unanswered_edit: false,
         }
+    }
+
+    /// Refine ownership with a durable non-response projection continuation.
+    pub const fn with_retained_projection(mut self, retained_projection: bool) -> Self {
+        self.retained_projection |= retained_projection;
+        self
     }
 
     /// Record that the diverging components are an edit this turn's write did
@@ -135,7 +153,7 @@ impl RetainedWriteOwnership {
         // captured-finalize worker is waiting on the same editor state edge and
         // a manual `commit` would race it. Only an *uncaptured* write-applied
         // cycle needs the manual terminal-commit recovery.
-        if self.retained_capture {
+        if self.retained_capture || self.retained_projection {
             RetainedWriteVerdict::Deferred
         } else if self.write_applied {
             RetainedWriteVerdict::AwaitingTerminalCommit
@@ -261,7 +279,7 @@ pub fn retained_write_remedy(ownership: RetainedWriteOwnership, file: &str) -> S
 fn retained_write_remedy_inner(ownership: RetainedWriteOwnership, file: &str) -> String {
     match ownership.verdict() {
         RetainedWriteVerdict::Deferred => format!(
-            "The capture is already durable and the same intent commits itself once delivery \
+            "The retained capture or projection is already durable and the same intent commits itself once delivery \
              converges — this is a deferral, not a lost response. Run \
              `agent-doc session-check {file}` once to observe the terminal state; do NOT \
              re-send the response, force disk, `admin recycle`, or `admin reload-lib`, all of \
@@ -572,6 +590,14 @@ mod tests {
             RetainedWriteOwnership::new(false, false).verdict(),
             RetainedWriteVerdict::Stranded,
             "the 2026-08-03 shape: newest cycle committed hours earlier, zero retained captures"
+        );
+        assert_eq!(
+            RetainedWriteOwnership::UNOWNED
+                .with_unanswered_edit(true)
+                .with_retained_projection(true)
+                .verdict(),
+            RetainedWriteVerdict::Deferred,
+            "a compact continuation owns partial projection drift before it can be an unanswered edit"
         );
     }
 

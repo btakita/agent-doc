@@ -7855,7 +7855,8 @@ pub fn retained_write_blocks_new_cycle(file: &Path, source: &str) -> bool {
             ),
         );
     }
-    verdict.blocks_new_cycle()
+    let compact = pending_compact_projection(file);
+    verdict.blocks_new_cycle() || retained_compact_projection_blocks(file, source, compact.as_ref())
 }
 
 pub fn retained_write_blocks_session_closeout(file: &Path, source: &str) -> bool {
@@ -7876,7 +7877,59 @@ pub fn retained_write_blocks_session_closeout(file: &Path, source: &str) -> bool
             ),
         );
     }
+    let compact = pending_compact_projection(file);
     verdict.blocks_session_closeout()
+        || retained_compact_projection_blocks(file, source, compact.as_ref())
+}
+
+/// Read the compact continuation from the existing controller projection.
+///
+/// This stays on the reactive hot path: callers observe the controller's
+/// per-document projection and never replay SQLite or invent a second compact
+/// settlement rule in their short-lived process.
+pub fn pending_compact_projection(
+    file: &Path,
+) -> Option<agent_doc_state_backbone::DocumentCompactProjectionContinuation> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+    match agent_doc_controller_io::project_controller::document_state_projection_existing(
+        &project_root,
+        file,
+    ) {
+        Ok(projection) => {
+            projection.and_then(|projection| projection.document.pending_compact_projection)
+        }
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "pending_compact_projection_unavailable file={} reason={error}",
+                    file.display(),
+                ),
+            );
+            None
+        }
+    }
+}
+
+fn retained_compact_projection_blocks(
+    file: &Path,
+    source: &str,
+    continuation: Option<&agent_doc_state_backbone::DocumentCompactProjectionContinuation>,
+) -> bool {
+    let Some(continuation) = continuation else {
+        return false;
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "retained_compact_projection_blocks_cycle file={} source={} continuation_id={} commit={} action=preserve_owner_until_identity_matched_settlement",
+            file.display(),
+            source,
+            continuation.continuation_id,
+            continuation.commit,
+        ),
+    );
+    true
 }
 
 // `#retainedclearreactive`: there is deliberately no public
@@ -11898,6 +11951,32 @@ mod tests {
         );
         assert!(pending_document_write(&file).is_none());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), normalized_target);
+    }
+
+    #[test]
+    fn retained_compact_continuation_blocks_cycle_without_pending_document_write() {
+        let continuation = agent_doc_state_backbone::DocumentCompactProjectionContinuation {
+            continuation_id: "compact-projection-contracts-regression".to_string(),
+            file: "/tmp/contracts.md".to_string(),
+            live_content: "complete compact target".to_string(),
+            committed_content: "complete compact target".to_string(),
+            target_component: Some("exchange".to_string()),
+            commit: true,
+        };
+        let no_document_write =
+            agent_doc_state_backbone::retained_write::SettlementVerdict::NoRetainedIntent;
+
+        assert!(!no_document_write.blocks_new_cycle());
+        assert!(retained_compact_projection_blocks(
+            Path::new("/tmp/contracts.md"),
+            "retained_compact_new_cycle_regression_test",
+            Some(&continuation),
+        ));
+        assert!(!retained_compact_projection_blocks(
+            Path::new("/tmp/contracts.md"),
+            "retained_compact_settled_regression_test",
+            None,
+        ));
     }
 
     #[test]

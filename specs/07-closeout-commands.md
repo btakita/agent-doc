@@ -71,6 +71,14 @@ ACK request and never polls for a receipt. If the editor changes again, is
 unavailable, or its replica is absent, the continuation remains retained without
 a direct disk write.
 
+A retained Compact Exchange continuation owns the same new-cycle and terminal
+closeout gates even after the response cycle is committed and any ordinary
+document-write intent has settled. Until identity-matched compact settlement or
+supersession, a partial native-save projection is not an unanswered document
+edit and must not be admitted as the next prompt. The gate observes the existing
+controller projection; it does not replay storage, poll, retry, force disk, or
+mint a second continuation.
+
 Current-document resolution follows the same rule. A live editor without a
 usable controller replica remains a missing projection; disk is never promoted
 to live authority and no imperative recovery command is sent. Registration,
@@ -169,6 +177,11 @@ backlog edits continue to reject Review-only targets.
 - A stale caller/controller binary mismatch fails before mutation and performs at
   most one reconnect/promotion retry. The command uses a compact-operation
   deadline, not the short generic controller-response timeout.
+- While a retained compact continuation owns the document, a repeated request
+  reuses that single-flight operation without another mutation. The CLI emits
+  exactly one `pending` diagnostic containing the continuation identity,
+  requested commit mode, retained-delivery state, and editor-restart recovery;
+  it must not precede that diagnostic with a duplicate generic pending notice.
 - After writing the archive markdown, compact best-effort upserts that archive into `.agent-doc/archive-index.db`; indexing failure warns but must not roll back archive creation.
 - For exchange compaction without an explicit message, the default summary must include an archive pointer plus a digest of the compacted exchange content. It must not duplicate live `agent:backlog`, `agent:queue`, or `agent:icebox` component content into `agent:exchange`.
 - When compacting an exchange that already begins with a compacted `### Session Summary`, the default digest must summarize only that prior summary's compact metadata. It must not recursively embed the previous `Prior summary/context` payload or replay detailed ordered-list response lines into the new live summary.

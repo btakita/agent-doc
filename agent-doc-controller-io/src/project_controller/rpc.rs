@@ -6817,9 +6817,9 @@ pub fn compact_document_via_controller(
             continuation_id,
             commit: pending_commit,
         } => {
-            eprintln!("{COMPACT_RETAINED_PENDING_NOTE}");
             eprintln!(
-                "[compact] pending: existing continuation {continuation_id} already owns this document (commit_requested={pending_commit})"
+                "{}",
+                compact_already_pending_note(continuation_id, *pending_commit)
             );
         }
         ControllerCompactDocumentOutcome::NoChanges => {
@@ -6841,6 +6841,15 @@ pub fn compact_document_via_controller(
             )
     );
     Ok(())
+}
+
+fn compact_already_pending_note(continuation_id: &str, commit_requested: bool) -> String {
+    let retained_detail = COMPACT_RETAINED_PENDING_NOTE
+        .strip_prefix("[compact] pending: ")
+        .unwrap_or(COMPACT_RETAINED_PENDING_NOTE);
+    format!(
+        "[compact] pending: existing continuation {continuation_id} already owns this document (commit_requested={commit_requested}); {retained_detail}"
+    )
 }
 
 pub fn record_committed_baseline_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
@@ -22555,6 +22564,19 @@ pub fn run_restart(root: Option<&Path>, force: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
+
+    #[test]
+    fn repeated_compact_reports_one_continuation_aware_pending_diagnostic() {
+        let note = compact_already_pending_note("compact-projection-123", true);
+
+        assert_eq!(note.matches("[compact] pending:").count(), 1);
+        assert_eq!(note.lines().count(), 1);
+        assert!(note.contains("existing continuation compact-projection-123"));
+        assert!(note.contains("commit_requested=true"));
+        assert!(note.contains("retained for editor delivery"));
+        assert!(note.contains("Do not retry Compact Exchange"));
+        assert!(note.contains("restart the editor"));
+    }
 
     #[test]
     fn supervisor_watchdog_respects_operator_queue_pause() {

@@ -2,6 +2,29 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.316
+
+- **Fix: repeated Compact Exchange reports one actionable pending continuation.**
+
+When a retained Compact Exchange continuation already owns a document, the CLI
+now emits one diagnostic that includes the continuation identity, requested
+commit mode, retained editor-delivery state, and restart recovery. It no longer
+prints a generic pending warning followed by a second ownership warning, while
+the controller continues to preserve the existing single-flight operation
+without another mutation. The specification and regression coverage pin that
+one-line contract.
+
+- **Fix: retained Compact Exchange projection cannot be misread as a new prompt.**
+
+Preflight and `session-check` now treat the controller's durable compact
+continuation as an owner even after the response cycle is committed and its
+ordinary retained document-write intent has settled. A partial editor-native
+save can therefore no longer turn compact authority/disk divergence into the
+`unanswered_edit_pending` remedy or admit a new response that supersedes the
+compact continuation. Diagnostics retain the continuation identity and commit
+mode; the controller remains the only effect owner until identity-matched
+settlement or supersession.
+
 ## 0.35.315
 
 - **Fix: JetBrains retained-projection retries preserve their backoff until commit.**

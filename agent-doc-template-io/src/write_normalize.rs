@@ -983,6 +983,32 @@ do #next. spec-test-build-install-commit-push
             result
         );
     }
+
+    #[test]
+    fn normalize_user_prompts_repairs_and_dedupes_queue_prompt_quote_scaffold() {
+        let prompt = "Rename sdk-spike to haiven-sdk + update git references + directory name to haiven-sdk.";
+        let snapshot = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
+        let baseline = format!(
+            "<!-- agent:exchange patch=append -->\n> **Queue prompt:** {prompt}\n<!-- /agent:exchange -->\n"
+        );
+        let content = format!(
+            "<!-- agent:exchange patch=append -->\n\
+             ❯ > **Queue prompt:** {prompt}\n\
+             ❯ > **Queue prompt:** {prompt}\n\
+             ❯ > **Queue prompt:** {prompt}\n\
+             <!-- agent:boundary:abc -->\n\
+             <!-- /agent:exchange -->\n"
+        );
+
+        let result = normalize_user_prompts_in_exchange(&content, &baseline, snapshot);
+        let canonical = format!("> **Queue prompt:** {prompt}");
+        assert_eq!(result.matches(&canonical).count(), 1, "{result}");
+        assert!(!result.contains("❯ > **Queue prompt:**"), "{result}");
+
+        let repeated = normalize_user_prompts_in_exchange(&result, &baseline, snapshot);
+        assert_eq!(repeated, result, "normalization must be idempotent");
+    }
+
     #[test]
     fn normalize_user_prompts_no_exchange_passthrough() {
         let content = "No exchange here.\n";

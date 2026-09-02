@@ -308,6 +308,159 @@ pub fn guard_no_conversation_tail_outside_exchange(doc: &str) -> Result<()> {
     );
 }
 
+fn line_and_newline(segment: &str) -> (&str, &str) {
+    if let Some(line) = segment.strip_suffix("\r\n") {
+        (line, "\r\n")
+    } else if let Some(line) = segment.strip_suffix('\n') {
+        (line, "\n")
+    } else {
+        (segment, "")
+    }
+}
+
+fn canonical_queue_prompt_quote_line(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let canonical = trimmed.strip_prefix("❯ ").unwrap_or(trimmed);
+    canonical.starts_with('>').then_some(canonical.trim_end())
+}
+
+fn queue_prompt_quote_blocks(body: &str) -> Vec<Vec<String>> {
+    let lines: Vec<&str> = body.lines().collect();
+    let mut blocks = Vec::new();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let Some(first) = canonical_queue_prompt_quote_line(lines[index]) else {
+            index += 1;
+            continue;
+        };
+        if !first.starts_with("> **Queue prompt:**") {
+            index += 1;
+            continue;
+        }
+
+        let mut block = vec![first.to_string()];
+        index += 1;
+        while index < lines.len() {
+            let Some(line) = canonical_queue_prompt_quote_line(lines[index]) else {
+                break;
+            };
+            block.push(line.to_string());
+            index += 1;
+        }
+        blocks.push(block);
+    }
+    blocks
+}
+
+/// Repair only a provably duplicated binary queue-prompt quote scaffold that
+/// was stranded inside `agent:queue` by a torn editor/controller projection.
+///
+/// The quote must have a byte-equivalent canonical block in `agent:exchange`
+/// and must be isolated between queue rows (or a component boundary). Any
+/// surrounding response prose, unmatched quote, or ambiguous placement is left
+/// untouched so the semantic integrity guard still fails closed.
+pub fn repair_duplicate_queue_prompt_scaffold_inside_queue(doc: &str) -> Result<Option<String>> {
+    let Ok(components) = element::parse(doc) else {
+        return Ok(None);
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return Ok(None);
+    };
+    let Some(queue) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(None);
+    };
+    let exchange_blocks = queue_prompt_quote_blocks(exchange.content(doc));
+    if exchange_blocks.is_empty() {
+        return Ok(None);
+    }
+
+    let queue_body = queue.content(doc);
+    let segments: Vec<&str> = queue_body.split_inclusive('\n').collect();
+    let mut rebuilt = String::with_capacity(queue_body.len());
+    let mut changed = false;
+    let mut index = 0usize;
+
+    while index < segments.len() {
+        let (line, newline) = line_and_newline(segments[index]);
+        let Some(marker) = line.find("> **Queue prompt:**") else {
+            rebuilt.push_str(segments[index]);
+            index += 1;
+            continue;
+        };
+
+        let before_marker = &line[..marker];
+        let scaffold_start = if before_marker.ends_with("❯ ") {
+            marker.saturating_sub("❯ ".len())
+        } else {
+            marker
+        };
+        let retained_prefix = line[..scaffold_start].trim_end();
+        let retained = retained_prefix.trim();
+        if !retained.is_empty() && !retained.starts_with("- ") {
+            rebuilt.push_str(segments[index]);
+            index += 1;
+            continue;
+        }
+
+        let previous_is_queue_boundary = retained.is_empty()
+            && (0..index)
+                .rev()
+                .find_map(|prior| {
+                    let (prior_line, _) = line_and_newline(segments[prior]);
+                    (!prior_line.trim().is_empty()).then_some(prior_line.trim())
+                })
+                .is_none_or(|prior| prior.starts_with("- "));
+        if retained.is_empty() && !previous_is_queue_boundary {
+            rebuilt.push_str(segments[index]);
+            index += 1;
+            continue;
+        }
+
+        let mut block = vec![line[marker..].trim_end().to_string()];
+        let mut after = index + 1;
+        while after < segments.len() {
+            let (candidate, _) = line_and_newline(segments[after]);
+            let Some(canonical) = canonical_queue_prompt_quote_line(candidate) else {
+                break;
+            };
+            block.push(canonical.to_string());
+            after += 1;
+        }
+        let next_is_queue_boundary = (after..segments.len())
+            .find_map(|next| {
+                let (next_line, _) = line_and_newline(segments[next]);
+                (!next_line.trim().is_empty()).then_some(next_line.trim())
+            })
+            .is_none_or(|next| next.starts_with("- "));
+        let proven_duplicate = exchange_blocks.iter().any(|candidate| candidate == &block);
+
+        if !next_is_queue_boundary || !proven_duplicate {
+            rebuilt.push_str(segments[index]);
+            index += 1;
+            continue;
+        }
+
+        if !retained_prefix.is_empty() {
+            rebuilt.push_str(retained_prefix);
+            rebuilt.push_str(newline);
+        }
+        changed = true;
+        index = after;
+    }
+
+    if !changed {
+        Ok(None)
+    } else {
+        Ok(Some(queue.replace_content(doc, &rebuilt)))
+    }
+}
+
 /// Reject binary-authored conversation scaffolding embedded inside a tracked
 /// non-exchange component.
 ///
@@ -1146,6 +1299,69 @@ mod tests {
         let error = guard_no_conversation_content_inside_tracked_components(document)
             .expect_err("welded response debris must fail closed");
         assert!(error.to_string().contains("agent:review"));
+    }
+
+    #[test]
+    fn repair_duplicate_queue_prompt_scaffold_removes_only_exchange_proven_quote() {
+        let document = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: first — gpt-5\n\n",
+            "> **Queue prompt:** do [#first]\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#first]❯ > **Queue prompt:** do [#first]\n",
+            "- do [#second]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let repaired = repair_duplicate_queue_prompt_scaffold_inside_queue(document)
+            .unwrap()
+            .expect("exchange-proven isolated scaffold should repair");
+        assert!(repaired.contains("- do [#first]\n- do [#second]\n"));
+        assert_eq!(repaired.matches("> **Queue prompt:**").count(), 1);
+        guard_no_conversation_content_inside_tracked_components(&repaired).unwrap();
+    }
+
+    #[test]
+    fn repair_duplicate_queue_prompt_scaffold_leaves_unproven_quote_fail_closed() {
+        let document = concat!(
+            "<!-- agent:exchange -->\n",
+            "> **Queue prompt:** do [#other]\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#first]\n",
+            "> **Queue prompt:** do [#first]\n",
+            "- do [#second]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        assert_eq!(
+            repair_duplicate_queue_prompt_scaffold_inside_queue(document).unwrap(),
+            None
+        );
+        guard_no_conversation_content_inside_tracked_components(document)
+            .expect_err("unproven scaffold must remain corrupt");
+    }
+
+    #[test]
+    fn repair_duplicate_queue_prompt_scaffold_rejects_surrounding_response_prose() {
+        let document = concat!(
+            "<!-- agent:exchange -->\n",
+            "> **Queue prompt:** do [#first]\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#first]\n",
+            "> **Queue prompt:** do [#first]\n",
+            "Response prose must not be inferred away.\n",
+            "- do [#second]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        assert_eq!(
+            repair_duplicate_queue_prompt_scaffold_inside_queue(document).unwrap(),
+            None
+        );
     }
 
     #[test]

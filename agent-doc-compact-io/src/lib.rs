@@ -692,13 +692,22 @@ fn run_in_controller_scoped(
     if replay_repaired_content != semantic_base_content {
         agent_doc_ops_log_io::log_op(file, "compact_repaired_stranded_duplicate_response_heading");
     }
-    let semantic_base_content = replay_repaired_content;
+    let semantic_base_content = if let Some(repaired) =
+        agent_doc_template::repair_duplicate_queue_prompt_scaffold_inside_queue(
+            &replay_repaired_content,
+        )? {
+        agent_doc_ops_log_io::log_op(file, "compact_repaired_duplicate_queue_prompt_scaffold");
+        repaired
+    } else {
+        replay_repaired_content
+    };
     // Compact is not an arbitrary repair command. The only normalization before
-    // the integrity gate removes a proven-empty replay heading whose answered
-    // twin already has a body; every user/body byte remains untouched. Gate the
-    // resulting exact realtime/disk authority before creating tags, composing
-    // captures, mutating CRDT state, or committing. This prevents a no-op
-    // compact from laundering any other malformed document into HEAD.
+    // the integrity gate removes either a proven-empty replay heading whose
+    // answered twin already has a body or an exchange-proven queue-prompt quote
+    // isolated among queue rows. Gate the resulting exact realtime/disk
+    // authority before creating tags, composing captures, mutating CRDT state,
+    // or committing. This prevents a no-op compact from laundering any other
+    // malformed document into HEAD.
     agent_doc_lint_io::validate_integrity_on_content_with_logger(
         file,
         &semantic_base_content,
@@ -3096,6 +3105,21 @@ mod tests {
             !snapshot_after.contains("do #autocmp. spec-test-build-install-commit-push"),
             "unresolved trailing prompt must remain live drift after compact, not committed snapshot state:\n{snapshot_after}"
         );
+    }
+
+    #[test]
+    fn compact_repairs_exchange_proven_queue_prompt_scaffold_before_integrity_gate() {
+        let source = include_str!("lib.rs");
+        let repair = "repair_duplicate_queue_prompt_scaffold_inside_queue";
+        let integrity = "validate_integrity_on_content_with_logger";
+        let repair_position = source.find(repair).expect("compact repair wiring");
+        let integrity_position = source.find(integrity).expect("compact integrity gate");
+
+        assert!(
+            repair_position < integrity_position,
+            "the narrow scaffold repair must run before compact's fail-closed integrity gate"
+        );
+        assert!(source.contains("compact_repaired_duplicate_queue_prompt_scaffold"));
     }
 
     #[test]

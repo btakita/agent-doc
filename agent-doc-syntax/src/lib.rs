@@ -329,13 +329,22 @@ fn collect_scratch_comment_body_tokens(
 
 fn collect_line_tokens(doc: &str, code_ranges: &[(usize, usize)], out: &mut Vec<VisualToken>) {
     let mut offset = 0usize;
+    let mut in_queue_prompt_quote = false;
     for chunk in doc.split_inclusive('\n') {
         let line = chunk.strip_suffix('\n').unwrap_or(chunk);
         let line_end = offset + line.len();
         if !overlaps_code(offset, line_end, code_ranges) {
             let leading_ws = line.len() - line.trim_start_matches([' ', '\t']).len();
             let trimmed = &line[leading_ws..];
-            if trimmed.starts_with("❯ ") {
+            let undecorated = trimmed.strip_prefix("❯ ").unwrap_or(trimmed);
+            let is_queue_prompt_header = undecorated.starts_with("> **Queue prompt:**");
+            if is_queue_prompt_header {
+                in_queue_prompt_quote = true;
+            } else if !undecorated.starts_with('>') {
+                in_queue_prompt_quote = false;
+            }
+            if trimmed.starts_with("❯ ") || (in_queue_prompt_quote && undecorated.starts_with('>'))
+            {
                 out.push(VisualToken {
                     kind: VisualTokenKind::Prompt,
                     start: offset + leading_ws,
@@ -585,6 +594,28 @@ hello
             tokens
                 .iter()
                 .any(|token| token.kind == VisualTokenKind::LabelTag)
+        );
+    }
+
+    #[test]
+    fn collects_binary_queue_prompt_quote_blocks_as_prompts() {
+        let doc = "\
+### Re: queued work — gpt-5
+
+> **Queue prompt:**
+>
+> do [#queued-work]
+
+Answer.
+";
+
+        assert_eq!(
+            tokens_of(doc, VisualTokenKind::Prompt),
+            vec![
+                "> **Queue prompt:**".to_string(),
+                ">".to_string(),
+                "> do [#queued-work]".to_string(),
+            ]
         );
     }
 

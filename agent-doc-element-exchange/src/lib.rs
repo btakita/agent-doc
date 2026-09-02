@@ -1494,6 +1494,7 @@ fn decorate_exchange_prompt_line(line: &str, in_progress: bool) -> Option<String
     let undecorated = strip_exchange_prompt_decorators(trimmed);
     if undecorated.is_empty()
         || undecorated.starts_with("<!--")
+        || undecorated.starts_with('>')
         || line_looks_like_markdown_list_item(undecorated)
     {
         return None;
@@ -1515,6 +1516,84 @@ fn decorate_exchange_prompt_line(line: &str, in_progress: bool) -> Option<String
     Some(format!(
         "{indent}{EXCHANGE_PROMPT_PREFIX}{marker}{undecorated}"
     ))
+}
+
+/// Canonicalize binary-authored queue-prompt quote scaffolds before prompt
+/// classification. A captured response can be replayed through normalization;
+/// treating its Markdown quote as fresh user prose turns `> **Queue prompt:**`
+/// into `❯ > **Queue prompt:**` and makes the next replay append it again.
+fn normalize_queue_prompt_quote_scaffolds(content: &str) -> String {
+    let Some(exchange) = exchange_component(content) else {
+        return content.to_string();
+    };
+    let exchange_content = exchange.content(content);
+    let mut rebuilt = String::with_capacity(exchange_content.len());
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 3usize;
+    let mut in_queue_prompt_quote = false;
+    let mut previous_queue_prompt_header: Option<String> = None;
+
+    for segment in exchange_content.split_inclusive('\n') {
+        let (line, newline) = split_line_segment(segment);
+        let trimmed = line.trim();
+        let fence_delimiter = if !in_fence {
+            if let Some((fc, fl)) = fence_open(trimmed) {
+                in_fence = true;
+                fence_char = fc;
+                fence_len = fl;
+                true
+            } else {
+                false
+            }
+        } else if fence_close(trimmed, fence_char, fence_len) {
+            in_fence = false;
+            true
+        } else {
+            false
+        };
+
+        if in_fence || fence_delimiter {
+            in_queue_prompt_quote = false;
+            previous_queue_prompt_header = None;
+            rebuilt.push_str(line);
+            rebuilt.push_str(newline);
+            continue;
+        }
+
+        let leading_trimmed = line.trim_start();
+        let indent = &line[..line.len().saturating_sub(leading_trimmed.len())];
+        let canonical = leading_trimmed
+            .strip_prefix(EXCHANGE_PROMPT_PREFIX)
+            .unwrap_or(leading_trimmed);
+        let is_header = canonical.starts_with("> **Queue prompt:**");
+        let is_quote_line = canonical.starts_with('>');
+
+        if is_header {
+            in_queue_prompt_quote = true;
+            let canonical_line = format!("{indent}{canonical}");
+            if previous_queue_prompt_header.as_deref() == Some(canonical_line.as_str()) {
+                continue;
+            }
+            previous_queue_prompt_header = Some(canonical_line.clone());
+            rebuilt.push_str(&canonical_line);
+        } else if in_queue_prompt_quote && is_quote_line {
+            previous_queue_prompt_header = None;
+            rebuilt.push_str(indent);
+            rebuilt.push_str(canonical);
+        } else {
+            in_queue_prompt_quote = false;
+            previous_queue_prompt_header = None;
+            rebuilt.push_str(line);
+        }
+        rebuilt.push_str(newline);
+    }
+
+    if rebuilt == exchange_content {
+        content.to_string()
+    } else {
+        exchange.replace_content(content, &rebuilt)
+    }
 }
 
 fn decorate_active_exchange_prompt_block(block: &str) -> String {
@@ -1662,8 +1741,10 @@ fn strip_exchange_boundary_markers(content: &str) -> String {
 /// the previous snapshot. This is a pure document transformation; effectful
 /// safety rails and logging live in orchestration.
 pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapshot: &str) -> String {
+    let canonical_content = normalize_queue_prompt_quote_scaffolds(content);
+    let content = canonical_content.as_str();
     let Ok(content_comps) = agent_doc_element::element::parse(content) else {
-        return content.to_string();
+        return canonical_content;
     };
     let baseline_comps = agent_doc_element::element::parse(baseline).unwrap_or_default();
     let snap_comps = agent_doc_element::element::parse(snapshot).unwrap_or_default();
@@ -1770,6 +1851,7 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
             && !heading_replaces_deleted_heading
             && !trimmed.is_empty()
             && !trimmed.starts_with('❯')
+            && !trimmed.starts_with('>')
             && !trimmed.starts_with("<!--")
             && !is_fence_delim
             && !agent_doc_diff::line_is_binary_authored_compact_summary(trimmed)

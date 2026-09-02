@@ -46,6 +46,16 @@ The two additional document repairs are complete:
 
 - `payments-ledger.md`: response replay duplication was self-healed through the retained capture, the stale idle route host was retired, and `agent-doc session-check` now reports `committed (commit_already_current)`. That document has no working-tree diff.
 - `contracts.md`: the missing JetBrains replica was restored by reloading the live native library; `agent-doc session-check` reports `committed (commit_success)` and repaired its historical captured-snapshot drift. A newer queue prompt in that document remains intact and uncommitted for its own response cycle.
+
+### Re: Response
+
+All three document issues are resolved:
+
+- [agent-doc-bugs.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md): response committed; `session-check` passed. Existing route-bug backlog entries were preserved without duplication, and `#restartintellijidea` migrated to Review.
+- [payments-ledger.md](/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/payments-ledger.md): duplicate response removed, retained cycle committed, and working tree clean. The stale idle session binding was closed.
+- [contracts.md](/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md): editor replica restored and `session-check` passed. Its newer queue prompt remains intact for the next cycle.
+
+The bugs-document supervisor will automatically continue draining its remaining focused-cycle queue. No code tests were needed; these were session-state repairs.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -55,7 +65,7 @@ The two additional document repairs are complete:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- 🚧 I called Compact Exchange with backlog additions. The compacted backlog is uncommitted.
+- ~~I called Compact Exchange with backlog additions. The compacted backlog is uncommitted.~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#jetbrainsrunroute-z09d]
 - do [#jetbrainsrunroute]
 <!-- /agent:queue -->

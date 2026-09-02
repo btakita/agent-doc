@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -111,8 +111,9 @@ The preflight queue-maintenance CAS warning was preserved rather than forced, an
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - While agent-doc development was in flight, Run Agent Doc on infra.md had an issue: `• Agent-doc reports its installed binary is one committed fix behind, so I’m rebuilding that installation first as required by the session guard. Then I’ll amend the existing PR #12 review to state the timeline explicitly: the three backend engineers own operations today, and a dedicated DevOps FTE is expected later.`
+- Please fix fpe.md Recycle Supervisor stalling.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

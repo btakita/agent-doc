@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -105,6 +105,11 @@ Fresh verification passed: `cargo test -p agent-doc-route-io dispatch_only_`. Th
 
 ### Re: do [#fixcausesflood] — gpt-5.6-sol
 
+> **Queue prompt:**
+>
+> do [#fixcausesflood]
+
+
 Fixed the shared Agent Doc defects and the affected live state.
 
 - The contracts.md flood came from captured-finalize normalization treating the binary-authored `> **Queue prompt:**` response quote as new user prose. It became `❯ > ...`, failed captured-response materialization, and each retry appended another copy. Normalization now canonicalizes legacy prefixed quote lines, collapses immediately repeated identical scaffolds, excludes Markdown blockquotes from prompt decoration, and is regression-tested as idempotent.
@@ -123,11 +128,9 @@ Verification: all affected crate suites pass, repository-wide `make check` passe
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- 🚧 do [#fixcausesflood]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#fixcausesflood] Please fix the agent-doc causes of the flood of `❯ > **Queue prompt:** Rename sdk-spike to haiven-sdk + update git references + directory name to haiven-sdk.` in contracts.md.
 <!-- /agent:backlog -->
 
 ## Review
@@ -136,7 +139,7 @@ Verification: all affected crate suites pass, repository-wide `make check` passe
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.
 - [/] [#harnessswitchverify] [operator-verify] #harnessswitchstorm remains unverified. The 2026-08-25 fpe.md attempt was invalidated by a stale live JetBrains plugin generation: ops.log showed controller_crdt_replica_refusal_storm (25 refusals), editor_absent/disk authority, agent_restart_respec_inert to Claude, then old_harness=claude -> new_harness=codex only after save. Unblocks after make install, restart the JetBrains IDE host, repeat the unsaved claude <-> codex switch, and prove exactly one spawn plus agent_restart_deferred reason=non_authoritative_document_view.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [/] [#restartintellijidea] Restart IntelliJ IDEA so installed agent-doc JetBrains 0.2.368 becomes live, then confirm native FFI loads through the resolved agent-doc executable and pane synchronization remains stable.
+- [/] [#restartintellijidea] Restart IntelliJ IDEA so installed agent-doc JetBrains 0.2.370 becomes live, then confirm native queue-prompt styling for Codex, Claude, and OpenCode, FFI loading through the resolved agent-doc executable, and pane synchronization remains stable.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

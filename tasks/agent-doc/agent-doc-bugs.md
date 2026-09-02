@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a05ebd-87c0-7063-94e3-0d53d7519cf0
+  codex: 01a0604b-a81c-7cc3-8c20-b9d94b87abf7
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -56,6 +56,25 @@ All three document issues are resolved:
 - [contracts.md](/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md): editor replica restored and `session-check` passed. Its newer queue prompt remains intact for the next cycle.
 
 The bugs-document supervisor will automatically continue draining its remaining focused-cycle queue. No code tests were needed; these were session-state repairs.
+
+### Re: do [#jetbrainsrunroute-z09d] — gpt-5.6-sol
+
+> **Queue prompt:**
+>
+> do [#jetbrainsrunroute-z09d]
+
+
+Fixed and released in agent-doc 0.35.313 and 0.35.314.
+
+- The payments-ledger duplicate/uncommitted-response cause is fixed: the outer dispatch-start proof guard no longer files a second route bug after the lower transport layer has already filed the authoritative failure. Accepted-only fallback failures still report normally.
+- JetBrains editor navigation now publishes the actual tmux focus receipt instead of a graph no-op receipt. This lets the editor repair a stashed actor pane into the active window; the live payments-ledger pane moved from `%66` in `@13` to `%66` in `@3` without restarting or resubmitting its turn.
+- Recycle Supervisor now preserves every live child for supervisor-only continue recycling, whether that child is idle or running and whether the binary inode is stale or fresh. Explicit Restart Agent and fresh replacement remain destructive by design. The live backend session stayed `99322dd7-9075-4110-b93f-696bdc71e46c`, generation 22, pane `%25`, and is ready after the release recycle without an agent-doc submission.
+- The contracts missing-replica/editor-attached wedge was recovered through the live editor library reload path rather than a refused disk-authority fallback. Its actor is ready on pane `%23`.
+- The closeout defect found while responding to this item is fixed in 0.35.314: strict template response shape is validated before the tracked-work dry run, so malformed envelopes cannot print successful-looking completion/reap diagnostics before rejection. Empty-stdin tracked-work-only closeouts retain their existing behavior, and validated stdin is reused by the atomic write.
+
+Regression coverage includes malformed heading placement, valid fenced responses, empty tracked-work closeouts, dispatch-report deduplication, fresh/stale idle and busy supervisor recycling, focus receipt propagation, and focus failure propagation. The full `make check` suite passes.
+
+Runtime commits: `fde79d7f3` and `6c27b4c0d`. Workspace release commits: `a97656e0e` and `5ab705e69`. Tag `v0.35.314` is pushed.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -65,13 +84,12 @@ The bugs-document supervisor will automatically continue draining its remaining 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- ⏭️ do [#jetbrainsrunroute-z09d]
-- 🚧 do [#jetbrainsrunroute]
+- ~~do [#jetbrainsrunroute-z09d]~~
+- do [#jetbrainsrunroute]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#jetbrainsrunroute-z09d] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/payments-ledger.md stage=dispatch_only_dispatch_start_proof pane=%57 actor_generation=6 editor_attempt_id=unknown dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=01c84c57b94f408496d07ab9fc1b9d0c1fdb1cb7638200326fe45eaf1127be39 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:ae01f8f47888cedcf3548e7f603f4fc7d156db5a3be864bd2ceaf5d3ca081cee]
-- [ ] 🚧 [#jetbrainsrunroute] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/payments-ledger.md stage=supervisor_dispatch_start_proof pane=%57 actor_generation=6 editor_attempt_id=unknown dispatch_proof_state=none elapsed_ms=10175 diagnostic_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/route-submit/1788302182345-supervisor_dispatch_start_unproven-codex-_57-46eeee34c802.txt ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=supervisor_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=01c84c57b94f408496d07ab9fc1b9d0c1fdb1cb7638200326fe45eaf1127be39 component=route/supervisor_dispatch_start_proof content_hash=sha256:f0c87b98bd1da3bde1b6e67dc6185450e129fc83ae96e45d60acc0766d8aeb8d]
+- [ ] [#jetbrainsrunroute] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/payments-ledger.md stage=supervisor_dispatch_start_proof pane=%57 actor_generation=6 editor_attempt_id=unknown dispatch_proof_state=none elapsed_ms=10175 diagnostic_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/route-submit/1788302182345-supervisor_dispatch_start_unproven-codex-_57-46eeee34c802.txt ops_log_path=/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=supervisor_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=01c84c57b94f408496d07ab9fc1b9d0c1fdb1cb7638200326fe45eaf1127be39 component=route/supervisor_dispatch_start_proof content_hash=sha256:f0c87b98bd1da3bde1b6e67dc6185450e129fc83ae96e45d60acc0766d8aeb8d]
 <!-- /agent:backlog -->
 
 ## Review

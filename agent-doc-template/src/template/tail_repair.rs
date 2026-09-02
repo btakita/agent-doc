@@ -489,10 +489,10 @@ pub fn guard_no_conversation_content_inside_tracked_components(doc: &str) -> Res
         for line in body.split_inclusive('\n') {
             let line_start = offset;
             offset += line.len();
-            if ignored(line_start) {
-                continue;
-            }
-            if line.contains("> **Queue prompt:**") {
+            if line
+                .match_indices("> **Queue prompt:**")
+                .any(|(relative, _)| !ignored(line_start + relative))
+            {
                 anyhow::bail!(
                     "binary conversation scaffold is embedded inside `agent:{}`; \
                      refusing to treat response text as tracked component content",
@@ -1376,6 +1376,19 @@ mod tests {
             "  >\n",
             "  > example only\n",
             "  ```\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        guard_no_conversation_content_inside_tracked_components(document).unwrap();
+    }
+
+    #[test]
+    fn guard_allows_queue_prompt_literal_inside_component_inline_code() {
+        let document = concat!(
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#flood] Fix repeated `❯ > **Queue prompt:** Rename sdk-spike` lines.\n",
             "<!-- /agent:backlog -->\n",
         );
 

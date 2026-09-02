@@ -515,7 +515,7 @@ class CrdtReplicaForwarderTest {
     }
 
     @Test
-    fun `desired replica registration remains retryable across early controller refusal`() {
+    fun `desired replica registration backs off to its configured ceiling`() {
         val first =
             nextReplicaRegistrationRetryProjection(
                 previous = null,
@@ -539,16 +539,17 @@ class CrdtReplicaForwarderTest {
         assertEquals(200L, second.backoffMs)
 
         var retained = second
-        repeat(8) {
+        repeat(4) {
             retained =
                 nextReplicaRegistrationRetryProjection(
                     previous = retained,
                     nowMs = retained.retryAfterMs,
                     baseBackoffMs = 100L,
-                    maxBackoffMs = 800L,
+                    maxBackoffMs = 3_000L,
                 )
         }
-        assertEquals(800L, retained.backoffMs)
+        assertEquals(6, retained.failureCount)
+        assertEquals(3_000L, retained.backoffMs)
         assertTrue(replicaRegistrationAttemptDueUtil(null, retained.retryAfterMs))
     }
 

@@ -170,8 +170,14 @@ internal fun nextReplicaRegistrationRetryProjection(
     maxBackoffMs: Long = CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS,
 ): ReplicaRegistrationRetryProjection {
     val failureCount = ((previous?.failureCount ?: 0) + 1).coerceAtMost(16)
-    val step = (failureCount - 1).coerceAtLeast(0).coerceAtMost(3)
-    val backoffMs = (baseBackoffMs * (1L shl step)).coerceAtMost(maxBackoffMs)
+    val step = (failureCount - 1).coerceAtLeast(0).coerceAtMost(15)
+    val multiplier = 1L shl step
+    val backoffMs =
+        if (baseBackoffMs >= maxBackoffMs || baseBackoffMs > Long.MAX_VALUE / multiplier) {
+            maxBackoffMs
+        } else {
+            (baseBackoffMs * multiplier).coerceAtMost(maxBackoffMs)
+        }
     return ReplicaRegistrationRetryProjection(
         failureCount = failureCount,
         retryAfterMs = nowMs + backoffMs,
@@ -2542,10 +2548,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return cached
         }
         if (bypassRegisterBackoff) {
-            // A refresh is register -> swap -> retire. Never create an authority
-            // gap by deregistering the working member before its replacement has
-            // accepted the canonical bootstrap.
-            clearRegisterFailure(filePath)
+            // Bypass only the retry deadline. The existing projection remains
+            // authoritative until transport registration and retained-state
+            // reconciliation both commit below.
         } else if (!replaceCached) {
             cached?.let { return it }
         }
@@ -2589,7 +2594,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             forwarder.deregister()
             return null
         }
-        clearRegisterFailure(filePath)
         val publishedShadowAtRegistration =
             settledShadows[filePath] ?: nativeReloadSettledShadows[filePath]
         val bufferTextAtRegistration = editorBufferText(filePath) ?: initialEditorText
@@ -2759,8 +2763,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         action: RetainedRegistrationProjectionAction,
         publishedShadow: String?,
         bufferText: String?,
-    ): Boolean =
-        when (action) {
+    ): Boolean {
+        val committed =
+            when (action) {
             RetainedRegistrationProjectionAction.ApplyCanonical -> {
                 retainCanonicalProjectionAfterRegistration(filePath, forwarder)
                 true
@@ -2806,6 +2811,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
             RetainedRegistrationProjectionAction.DeferCanonicalProjection -> true
         }
+        if (committed) {
+            // A controller transport registration is provisional until its
+            // retained projection has committed. Clearing earlier resets an
+            // ambiguous hold to failure_count=1 and recreates a one-second
+            // register/deregister/pull loop.
+            clearRegisterFailure(filePath)
+        }
+        return committed
+    }
 
     /**
      * Registration is controller -> editor projection only. A pre-existing

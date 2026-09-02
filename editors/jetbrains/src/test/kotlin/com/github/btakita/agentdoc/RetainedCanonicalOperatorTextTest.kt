@@ -1,5 +1,7 @@
 package com.github.btakita.agentdoc
 
+import java.nio.file.Files
+import java.nio.file.Paths
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -143,6 +145,24 @@ class RetainedCanonicalOperatorTextTest {
                 registrationAttemptDue = false,
             ),
         )
+    }
+
+    @Test
+    fun `provisional transport registration cannot reset projection retry state`() {
+        val source =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            )
+        val registration =
+            source.substringAfter("    private fun forwarderFor(")
+                .substringBefore("    /** Complete the causal projection decision")
+        val finalization =
+            source.substringAfter("    private fun finalizeRegistrationProjection(")
+                .substringBefore("    /**", missingDelimiterValue = source)
+
+        assertFalse(registration.contains("clearRegisterFailure(filePath)"))
+        assertTrue(finalization.contains("if (committed)"))
+        assertTrue(finalization.contains("clearRegisterFailure(filePath)"))
     }
 
     @Test

@@ -118,6 +118,10 @@ Two operator items remain:
 ### Re: Restart verified — gpt-5
 
 Confirmed: the restarted IDE registered the live JetBrains plugin as `0.2.373`, matching the expected release. The earlier `0.2.372` warning is stale and has been superseded, so the plugin-side FIFO/native-save ordering fix is now loaded. No further restart is needed.
+
+### Re: Response
+
+Restart confirmed. IntelliJ is now running Agent Doc plugin `0.2.373`, so the FIFO/native-save ordering fix is loaded. The session response was committed and `session-check` passed. No further restart is needed.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

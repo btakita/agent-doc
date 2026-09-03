@@ -114,6 +114,10 @@ Two operator items remain:
 
 - Restart IntelliJ to activate the already-installed JetBrains plugin 0.2.373; the live IDE still reports 0.2.372.
 - React’s GitHub release and CI are green, but first-time npm publication requires npm credentials or trusted-publisher configuration. All implementation work itself is complete.
+
+### Re: Restart verified — gpt-5
+
+Confirmed: the restarted IDE registered the live JetBrains plugin as `0.2.373`, matching the expected release. The earlier `0.2.372` warning is stale and has been superseded, so the plugin-side FIFO/native-save ordering fix is now loaded. No further restart is needed.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

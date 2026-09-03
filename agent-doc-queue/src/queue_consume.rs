@@ -1005,6 +1005,63 @@ pub fn consume_queue_nodes_by_key(content: &str, node_keys: &[String]) -> Result
     Ok(strip_in_progress_marker_from_struck_queue_items(&consumed))
 }
 
+/// Consume the selected queue prompts through the queue parser's exact source
+/// spans when a prompt has no Markdown-AST node key.
+///
+/// This is the safe fallback for narrowly recovered prompt surfaces such as an
+/// operator-authored prose report containing a fenced diagnostic and a trailing
+/// request. [`document_queue::parse_spans`] is the segmentation authority for
+/// those heads, so replacing only the matched ranges preserves every byte of
+/// later queue work. Returning `None` means the requested texts could not be
+/// proven against this exact document frontier.
+pub fn consume_queue_prompts_by_exact_spans(
+    content: &str,
+    target_texts: &[String],
+) -> Result<Option<String>> {
+    if target_texts.is_empty() {
+        return Ok(Some(content.to_string()));
+    }
+
+    let components = element::parse(content)?;
+    let queue = components
+        .iter()
+        .find(|component| component.name == "queue")
+        .ok_or_else(|| anyhow::anyhow!("queue consume: document has no agent:queue component"))?;
+    let body = &content[queue.open_end..queue.close_start];
+    let mut target_index = 0usize;
+    let mut replacements = Vec::with_capacity(target_texts.len());
+
+    for (entry, range) in document_queue::parse_spans(body)? {
+        if target_index == target_texts.len() {
+            break;
+        }
+        let QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        if !queue_prompt_texts_match_for_consumption(&prompt.text, &target_texts[target_index]) {
+            continue;
+        }
+
+        let mut completed = prompt;
+        completed.text = strip_in_progress_marker(&completed.text);
+        replacements.push((
+            (queue.open_end + range.start)..(queue.open_end + range.end),
+            document_queue::render(&[QueueEntry::Completed(completed)]),
+        ));
+        target_index += 1;
+    }
+
+    if target_index != target_texts.len() {
+        return Ok(None);
+    }
+
+    let mut rewritten = content.to_string();
+    for (range, replacement) in replacements.into_iter().rev() {
+        rewritten.replace_range(range, &replacement);
+    }
+    Ok(Some(rewritten))
+}
+
 /// Derive the exact answered-free-text queue target for one authoritative
 /// document frontier.
 ///

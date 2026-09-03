@@ -146,5 +146,9 @@ When the queue drains to empty: `auto` is stripped from the opening tag, `queue_
 Single-line list prompts and canonical multiline prompt fences are one ordered,
 AST-addressable item sequence. Node-keyed consumption of a multiline live item
 renders `~~~done` / `~~~` around the same prompt text; unstrike restores the
-bare `---` / `---` live shape. A malformed or unknown surface that cannot be
-matched between queue parsing and node enumeration fails closed before mutation.
+bare `---` / `---` live shape. A narrowly recovered prose-plus-fenced-diagnostic
+head that has no AST node key is consumed only through the exact byte range
+returned by the queue parser; that range alone becomes a canonical `~~~done`
+item, and later queue bytes are preserved. A malformed or unknown surface that
+has neither an exact parser range nor an AST node key fails closed before
+mutation.

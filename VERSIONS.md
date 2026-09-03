@@ -2,6 +2,20 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.325
+
+- **Fix: committed recovered queue heads close out through exact parser spans.**
+
+Queue consumption now uses the queue parser's exact source range when a narrowly
+recovered prose/fenced-diagnostic head has no independent Markdown-AST node key.
+The consumer canonicalizes only the proven answered head as `~~~done`, preserves
+every byte of later queue work, and emits no fabricated structural node op. This
+removes the contradiction where the targeted-consume safety guard retained an
+already answered head and the mandatory residue guard then interrupted every
+recovery attempt. The release also advances agent-doc to the corrected, ordered
+`lazily` 0.57.1 release produced after lazily-spec 0.38.0 and lazily-formal
+0.38.1.
+
 ## 0.35.324
 
 - **Fix: retained native saves follow the document update lane and remain retryable.**

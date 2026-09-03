@@ -13,7 +13,8 @@ use agent_doc_element::element;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_queue::{
     queue_consume::{
-        IpcNodeOp, QueueConsumptionPlan, consume_queue_nodes_by_key, first_n_queue_prompt_texts,
+        IpcNodeOp, QueueConsumptionPlan, consume_queue_nodes_by_key,
+        consume_queue_prompts_by_exact_spans, first_n_queue_prompt_texts,
         head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, node_replace_ops_from_diff, normalized_done_id_bag,
         project_answered_free_text_strike, queue_consume_count_for_done_ids,
@@ -282,10 +283,10 @@ pub fn acknowledge_paused_free_text_queue_head_with_outcome(
     }
 
     let node_keys = queue_prompt_node_keys_for_count(&content, 1)?;
-    if !node_keys.ast_backed || node_keys.keys.len() != 1 {
+    if node_keys.keys.len() != 1 {
         anyhow::bail!(
             "{}: refusing --ack-text because the paused queue head is not uniquely \
-             addressable as a markdown node (#qconsumenostrike).",
+             addressable (#qconsumenostrike).",
             file.display()
         );
     }
@@ -293,7 +294,17 @@ pub fn acknowledge_paused_free_text_queue_head_with_outcome(
     let completed_entries =
         agent_doc_queue::document_queue::mark_first_n_prompts_completed(&entries, 1);
     let remaining = agent_doc_queue::document_queue::prompts(&completed_entries).len();
-    let mut target = consume_queue_nodes_by_key(&content, &node_keys.keys)?;
+    let mut target = if node_keys.ast_backed {
+        consume_queue_nodes_by_key(&content, &node_keys.keys)?
+    } else {
+        consume_queue_prompts_by_exact_spans(&content, std::slice::from_ref(&observed_head))?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "{}: refusing --ack-text because the parser could not prove the exact paused queue-head span (#qconsumenostrike).",
+                    file.display()
+                )
+            })?
+    };
     let response_first_line = projected_capture_response_body(file)
         .and_then(|body| first_nonempty_line(&body).map(str::to_string));
     target = embed_consumed_prompt_in_response(
@@ -305,7 +316,11 @@ pub fn acknowledge_paused_free_text_queue_head_with_outcome(
     let plan = QueueConsumptionPlan {
         consumed_text: observed_head.clone(),
         consumed_texts: vec![observed_head.clone()],
-        node_ops: queue_consume_node_ops(&node_keys.keys),
+        node_ops: if node_keys.ast_backed {
+            queue_consume_node_ops(&node_keys.keys)
+        } else {
+            Vec::new()
+        },
         remaining,
         drained: remaining == 0,
         auto: agent_doc_queue::document_queue::has_auto_attr(&queue.attrs),
@@ -1156,7 +1171,11 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
             })?;
             let consumed_node_keys =
                 queue_prompt_node_keys_for_done_ids(content, done_ids, &consumed_texts);
-            let node_ops = queue_consume_node_ops(&consumed_node_keys.keys);
+            let node_ops = if consumed_node_keys.ast_backed {
+                queue_consume_node_ops(&consumed_node_keys.keys)
+            } else {
+                Vec::new()
+            };
 
             let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs);
             let remaining = agent_doc_queue::document_queue::prompts(&completed_entries).len();
@@ -1167,25 +1186,19 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                 completed_entries
             };
             let new_body = agent_doc_queue::document_queue::render(&new_entries);
-            // `#qconsumenostrike`: a targeted consume whose head is NOT
-            // AST-addressable must fail closed. Canonical multiline fences are
-            // addressable now; this guard remains for malformed or future
-            // surfaces so a positional re-render can never strike a neighbour.
-            //
-            // A full drain has no targeting ambiguity (every entry goes), so it
-            // keeps the re-render path.
-            if !drained && !consumed_node_keys.ast_backed {
-                anyhow::bail!(
-                    "queue consume: refusing to strike — the target head is not addressable as a \
-                     markdown node, so a positional re-render could mark unrelated queue work \
-                     complete (#qconsumenostrike). The queue parser and node enumerator disagree \
-                     about this surface; leave it queued until the shape is made addressable."
-                );
-            }
             let mut current = if drained {
                 comp.replace_content(content, &new_body)
-            } else {
+            } else if consumed_node_keys.ast_backed {
                 consume_queue_nodes_by_key(content, &consumed_node_keys.keys)?
+            } else {
+                consume_queue_prompts_by_exact_spans(content, &consumed_texts)?.ok_or_else(
+                    || {
+                        anyhow::anyhow!(
+                            "queue consume: refusing to strike — neither a markdown node nor an \
+                             exact parser span proves the target head (#qconsumenostrike)"
+                        )
+                    },
+                )?
             };
 
             if drained {
@@ -1270,13 +1283,18 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                         );
                     }
 
-                    let mut new_snap = if drained
-                        || snap_new_entries != new_entries
-                        || !snapshot_node_keys.ast_backed
-                    {
+                    let mut new_snap = if drained || snap_new_entries != new_entries {
                         snap_queue.replace_content(snap, &new_body)
-                    } else {
+                    } else if snapshot_node_keys.ast_backed {
                         consume_queue_nodes_by_key(snap, &snapshot_node_keys.keys)?
+                    } else {
+                        consume_queue_prompts_by_exact_spans(snap, &snapshot_consumed_texts)?
+                            .ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "queue consume: snapshot parser could not prove the exact \
+                                     done-id head span (#qconsumenostrike)"
+                                )
+                            })?
                     };
                     if drained {
                         if snap_has_auto
@@ -1432,7 +1450,11 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
     let consumed_node_keys = queue_prompt_node_keys_for_count(content, consume_count)?;
     let completed_entries =
         agent_doc_queue::document_queue::mark_first_n_prompts_completed(&entries, consume_count);
-    let node_ops = queue_consume_node_ops(&consumed_node_keys.keys);
+    let node_ops = if consumed_node_keys.ast_backed {
+        queue_consume_node_ops(&consumed_node_keys.keys)
+    } else {
+        Vec::new()
+    };
 
     let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs);
     let remaining = agent_doc_queue::document_queue::prompts(&completed_entries).len();
@@ -1443,21 +1465,17 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
         completed_entries
     };
     let new_body = agent_doc_queue::document_queue::render(&new_entries);
-    // `#qconsumenostrike`: see the sibling guard above — a targeted consume of
-    // a head the node enumerator cannot address must fail closed rather than
-    // strike a neighbour by position.
-    if !drained && !consumed_node_keys.ast_backed {
-        anyhow::bail!(
-            "queue consume: refusing to strike — the target head is not addressable as a \
-             markdown node, so a positional re-render could mark unrelated queue work complete \
-             (#qconsumenostrike). The queue parser and node enumerator disagree about this \
-             surface; leave it queued until the shape is made addressable."
-        );
-    }
     let mut current = if drained {
         comp.replace_content(content, &new_body)
-    } else {
+    } else if consumed_node_keys.ast_backed {
         consume_queue_nodes_by_key(content, &consumed_node_keys.keys)?
+    } else {
+        consume_queue_prompts_by_exact_spans(content, &consumed_texts)?.ok_or_else(|| {
+            anyhow::anyhow!(
+                "queue consume: refusing to strike — neither a markdown node nor an exact parser \
+                 span proves the target head (#qconsumenostrike)"
+            )
+        })?
     };
 
     if drained {
@@ -1571,20 +1589,23 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                 );
             }
 
-            let mut new_snap = if drained
-                || snap_new_entries != new_entries
-                || snapshot_node_keys
-                    .as_ref()
-                    .is_none_or(|keys| !keys.ast_backed)
-            {
+            let mut new_snap = if drained || snap_new_entries != new_entries {
                 snap_queue.replace_content(snap, &new_body)
             } else {
-                consume_queue_nodes_by_key(
-                    snap,
-                    &snapshot_node_keys
-                        .expect("matching snapshot heads have node keys")
-                        .keys,
-                )?
+                match snapshot_node_keys.as_ref() {
+                    None => snap_queue.replace_content(snap, &new_body),
+                    Some(keys) if keys.ast_backed => consume_queue_nodes_by_key(snap, &keys.keys)?,
+                    Some(_) => consume_queue_prompts_by_exact_spans(
+                        snap,
+                        &snapshot_consumed_texts,
+                    )?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "queue consume: snapshot parser could not prove the exact free-text \
+                             head span (#qconsumenostrike)"
+                        )
+                    })?,
+                }
             };
             if drained {
                 if snap_has_auto
@@ -2398,6 +2419,65 @@ mod core_tests {
         assert!(
             !after.contains("- ~~do [#neighbour]~~"),
             "the neighbour must not be struck: {after}"
+        );
+    }
+
+    /// `#qconsumespan`: recovered operator prose can be a real queue head even
+    /// though it is not a standalone Markdown list/fence node. The queue parser
+    /// already owns an exact span for that head; closeout must use that proof
+    /// rather than wedging after the response has committed.
+    #[test]
+    fn recovered_unwrapped_fenced_head_consumes_by_exact_span_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.md");
+        let prompt = concat!(
+            "The document closeout is deferred, not lost. agent-doc respond reports ",
+            "editor_projection_pending — the editor remains authoritative.\n",
+            "```text\n",
+            "queue consume: refusing to strike — target is not addressable\n",
+            "```\n",
+            "Please diagnose and fix the queue-consumption wedge."
+        );
+        let content = format!(
+            concat!(
+                "---\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: queue recovery — opus\n\n",
+                "> **Queue prompt:** {}\n\n",
+                "Diagnosed and fixed.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue priority go -->\n",
+                "{}\n",
+                "---\n",
+                "- do [#neighbour]\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            prompt, prompt
+        );
+        std::fs::write(&file, &content).unwrap();
+
+        let result =
+            consume_free_text_queue_prompts_with_outcome(&file, 1, true, &TestQueueConsumeEffects);
+        let outcome = result.expect("the recovered head must be span-addressable");
+        let outcome = outcome.expect("the recovered head should be consumed");
+        assert_eq!(outcome.consumed_count, 1);
+        assert!(
+            outcome.node_ops.is_empty(),
+            "an exact-span projection must not invent an AST node operation"
+        );
+
+        let after = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            after.contains(&format!("~~~done\n{prompt}\n~~~\n- do [#neighbour]\n")),
+            "the exact recovered head span must become one completed fence: {after}"
+        );
+        assert!(
+            after.contains("- do [#neighbour]"),
+            "the later queue head must remain active: {after}"
+        );
+        assert!(
+            !after.contains("- ~~do [#neighbour]~~"),
+            "the later queue head must not be consumed: {after}"
         );
     }
 

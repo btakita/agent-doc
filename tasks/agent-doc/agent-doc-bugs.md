@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a065a2-d7bc-77b1-9c70-75eabcf6998a
+  codex: 01a068ac-ce18-7510-95e9-161237197ac8
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -32,6 +32,18 @@ Issue #47 fixed on main as 0.35.303; release tag held pending PyPI quota decisio
 Compacted content:
 - Archived 8 response topic(s): Compact Exchange and session recovery; Response; do [#jetbrainsrunroute-z09d]; 5 more
 - Prior summary/context: prior compacted content: Archived 7 response topic(s): Automatic stale-supervisor recycle; Response; do [#fixclaimtmu...
+
+### Re: / 0 FAIL, the pinned-publication test with HAIVEN_CONTRACTS_ROOT scoped to ./cmd/contractpublish only, go vet, go — gpt-5
+
+Fixed and recovered. Your queue edits did not cause the first native-save rejection: the editor accepted and projected the response at 15:02:40, the first save was rejected at 15:03:48, and your next observed typing began at 15:05:04. The later edits correctly became the newer canonical revision; they exposed the ordering defect, but they were not the original cause.
+
+The wedge had two agent-doc causes. First, the controller's `AwaitingConvergence` retained-write state derived no persistence effect, so a rejected advisory save had no owned retry path. Second, JetBrains handled the native save outside the per-document CRDT worker, allowing it to race accepted local/remote update work. Making the controller wait synchronously would have introduced an update-RPC/save-RPC cycle, so the fix uses a non-authoritative controller egress worker and keeps document authority in the existing reactive graph.
+
+The reusable policy is now in Lazily as `LatestDurableProjectionCore<K,V>`: monotone desired epochs, per-key latest-value conflation, one flight, retryable failure, exact durable acknowledgement, stale-receipt safety, and reconnect generation fencing. `lazily-spec` v0.38.0 (1c388a5) and `lazily-formal` v0.38.0 (74d0f76) were released first. Conformant `lazily-rs` v0.57.0 (c4a760b) was then released to crates.io with core, reactive, thread-safe, and async surfaces and canonical fixture replay.
+
+agent-doc now queues native save behind all earlier accepted operations on JetBrains' per-document FIFO, enters the EDT only from that lane, validates the exact visible/replica/disk revision, and logs a typed reason for every rejection. The controller retains the latest desired revision through retry/supersession and advances only on the matching durable receipt. This is a command/effect driver in the Controller, not a second authority actor.
+
+Released and installed agent-doc v0.35.324 at 1772efe18 with JetBrains 0.2.373. Verification passed: registry-backed Rust checks, 9,192 workspace tests, model checks, `make check`, `make tmux-ci`, and signed JetBrains build. Normal `agent-doc session-check` recovered `src/haiven-dev/tasks/backend.md` to `committed (commit_success)`; doctor confirms editor convergence, Lazily/CP equals disk, and no failure markers remain. No response resend, force-disk write, or destructive recovery was used, and the newer operator text was preserved. The remaining focused queue head was durably handed to the supervisor for clear-and-continue. Restarting IntelliJ activates the installed 0.2.373 Kotlin package; the controller-side retained retry is already live.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

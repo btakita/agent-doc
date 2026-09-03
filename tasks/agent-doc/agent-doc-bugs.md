@@ -160,6 +160,21 @@ Live recovery and verification completed:
 The Project Controller remains the single layout-policy owner. The transition is now: observe desired editor layout → reject any foreign live process owner → reconcile/provision without disturbing that owner → publish physical pane/window receipts → allow focus only from the converged projection. No polling or second policy owner was added.
 
 Code commit: 35129fc89 (fix: reject stale tmux pane projections).
+
+### Re: Response
+
+Fixed and committed as `35129fc89`.
+
+- Live process ownership now overrides stale pane projections.
+- Post-sync actor and registry window bindings are refreshed from tmux.
+- `backend.md` now correctly uses pane `%78` in window `@3`.
+- Pane `%0` remains owned by the bugs document.
+- Doctor and focus verification pass.
+- `make check`: 9,195 tests passed.
+- Installed updated CLI, library, and editor packages.
+- Agent-doc response committed; session-check passed.
+
+The removed/re-added queue tag likely exposed the race but was not the root cause.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

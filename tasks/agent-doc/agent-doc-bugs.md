@@ -44,7 +44,6 @@ The reusable policy is now in Lazily as `LatestDurableProjectionCore<K,V>`: mono
 agent-doc now queues native save behind all earlier accepted operations on JetBrains' per-document FIFO, enters the EDT only from that lane, validates the exact visible/replica/disk revision, and logs a typed reason for every rejection. The controller retains the latest desired revision through retry/supersession and advances only on the matching durable receipt. This is a command/effect driver in the Controller, not a second authority actor.
 
 Released and installed agent-doc v0.35.324 at 1772efe18 with JetBrains 0.2.373. Verification passed: registry-backed Rust checks, 9,192 workspace tests, model checks, `make check`, `make tmux-ci`, and signed JetBrains build. Normal `agent-doc session-check` recovered `src/haiven-dev/tasks/backend.md` to `committed (commit_success)`; doctor confirms editor convergence, Lazily/CP equals disk, and no failure markers remain. No response resend, force-disk write, or destructive recovery was used, and the newer operator text was preserved. The remaining focused queue head was durably handed to the supervisor for clear-and-continue. Restarting IntelliJ activates the installed 0.2.373 Kotlin package; the controller-side retained retry is already live.
-
 ### Re: / 0 FAIL, the pinned-publication test with HAIVEN_CONTRACTS_ROOT scoped to ./cmd/contractpublish only, go vet, go — gpt-5
 
 > **Queue prompt:** The document closeout is deferred, not lost. agent-doc respond reports editor_projection_pending — the editor

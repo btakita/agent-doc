@@ -27,154 +27,11 @@ Issue #47 fixed on main as 0.35.303; release tag held pending PyPI quota decisio
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260902-040620.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260903-190913.md`*
 
 Compacted content:
-- Archived 7 response topic(s): Automatic stale-supervisor recycle; Response; do [#fixclaimtmux]; 4 more
-- Prior summary/context: prior compacted content: Archived 8 response topic(s): Issue #47 fixed; 0.35.303 publication blocked on PyPI quota; R...
-
-### Re: Compact Exchange and session recovery — gpt-5.6-sol
-
-> **Queue prompt:** I called Compact Exchange with backlog additions. The compacted backlog is uncommitted.
-
-Verified and closed out. The compacted exchange and the two route-failure backlog items (`#jetbrainsrunroute-z09d` and `#jetbrainsrunroute`) were already present in `HEAD`; the live diff was the queue activation marker, so I did not create duplicate backlog entries. There are no additional actionable follow-up items from this queue prompt because those two existing backlog items fully capture the work.
-
-
-I also applied the preflight-requested migration that moved the legacy gated `#restartintellijidea` item from backlog into Review.
-
-The two additional document repairs are complete:
-
-- `payments-ledger.md`: response replay duplication was self-healed through the retained capture, the stale idle route host was retired, and `agent-doc session-check` now reports `committed (commit_already_current)`. That document has no working-tree diff.
-- `contracts.md`: the missing JetBrains replica was restored by reloading the live native library; `agent-doc session-check` reports `committed (commit_success)` and repaired its historical captured-snapshot drift. A newer queue prompt in that document remains intact and uncommitted for its own response cycle.
-
-### Re: Response
-
-All three document issues are resolved:
-
-- [agent-doc-bugs.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md): response committed; `session-check` passed. Existing route-bug backlog entries were preserved without duplication, and `#restartintellijidea` migrated to Review.
-- [payments-ledger.md](/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/payments-ledger.md): duplicate response removed, retained cycle committed, and working tree clean. The stale idle session binding was closed.
-- [contracts.md](/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md): editor replica restored and `session-check` passed. Its newer queue prompt remains intact for the next cycle.
-
-The bugs-document supervisor will automatically continue draining its remaining focused-cycle queue. No code tests were needed; these were session-state repairs.
-
-### Re: do [#jetbrainsrunroute-z09d] — gpt-5.6-sol
-
-> **Queue prompt:**
->
-> do [#jetbrainsrunroute-z09d]
-
-
-Fixed and released in agent-doc 0.35.313 and 0.35.314.
-
-- The payments-ledger duplicate/uncommitted-response cause is fixed: the outer dispatch-start proof guard no longer files a second route bug after the lower transport layer has already filed the authoritative failure. Accepted-only fallback failures still report normally.
-- JetBrains editor navigation now publishes the actual tmux focus receipt instead of a graph no-op receipt. This lets the editor repair a stashed actor pane into the active window; the live payments-ledger pane moved from `%66` in `@13` to `%66` in `@3` without restarting or resubmitting its turn.
-- Recycle Supervisor now preserves every live child for supervisor-only continue recycling, whether that child is idle or running and whether the binary inode is stale or fresh. Explicit Restart Agent and fresh replacement remain destructive by design. The live backend session stayed `99322dd7-9075-4110-b93f-696bdc71e46c`, generation 22, pane `%25`, and is ready after the release recycle without an agent-doc submission.
-- The contracts missing-replica/editor-attached wedge was recovered through the live editor library reload path rather than a refused disk-authority fallback. Its actor is ready on pane `%23`.
-- The closeout defect found while responding to this item is fixed in 0.35.314: strict template response shape is validated before the tracked-work dry run, so malformed envelopes cannot print successful-looking completion/reap diagnostics before rejection. Empty-stdin tracked-work-only closeouts retain their existing behavior, and validated stdin is reused by the atomic write.
-
-Regression coverage includes malformed heading placement, valid fenced responses, empty tracked-work closeouts, dispatch-report deduplication, fresh/stale idle and busy supervisor recycling, focus receipt propagation, and focus failure propagation. The full `make check` suite passes.
-
-Runtime commits: `fde79d7f3` and `6c27b4c0d`. Workspace release commits: `a97656e0e` and `5ab705e69`. Tag `v0.35.314` is pushed.
-
-### Re: Response
-
-Fixed, released, and committed.
-
-- Released agent-doc `0.35.314`; full `make check` passes.
-- Fixed payments-ledger response duplication and editor-to-tmux auto-sync.
-- Fixed contracts missing-replica recovery.
-- Recycle Supervisor now preserves idle and running sessions without invoking agent-doc.
-- Added transactional closeout validation discovered during dogfooding.
-- Live backend, contracts, and payments-ledger actors are healthy.
-- Runtime commits: `fde79d7f3`, `6c27b4c0d`.
-- Workspace commits: `a97656e0e`, `5ab705e69`.
-- Pushed tag `v0.35.314`.
-- The agent-doc response committed successfully and `session-check` passed. The remaining queue head was handed to the supervisor continuation path.
-### Re: do [#jetbrainsrunroute] — gpt-5.6-sol
-
-> **Queue prompt:**
->
-> do [#jetbrainsrunroute]
-
-
-This is the older duplicate of the completed `#jetbrainsrunroute-z09d` incident, so it is resolved by the same shipped fix rather than a second code change.
-
-Both items describe the same payments-ledger route attempt on pane `%57`, actor generation 6, with the same `run_agent_doc_route_dispatch_failure` invariant. `#jetbrainsrunroute` is the lower `supervisor_dispatch_start_proof` report; `#jetbrainsrunroute-z09d` is the redundant outer `dispatch_only_dispatch_start_proof` report. Agent-doc 0.35.313 commit `fde79d7f3` made the lower transport report authoritative for an unproven dispatch start while retaining the outer fallback report for accepted-only failures.
-
-Fresh verification passed: `cargo test -p agent-doc-route-io dispatch_only_`. The implementation checkout is clean, installed agent-doc is 0.35.314, and GitHub CI run `33595682483` for the release commit is still in progress.
-
-### Re: do [#fixcausesflood] — gpt-5.6-sol
-
-> **Queue prompt:**
->
-> do [#fixcausesflood]
-
-
-Fixed the shared Agent Doc defects and the affected live state.
-
-- The contracts.md flood came from captured-finalize normalization treating the binary-authored `> **Queue prompt:**` response quote as new user prose. It became `❯ > ...`, failed captured-response materialization, and each retry appended another copy. Normalization now canonicalizes legacy prefixed quote lines, collapses immediately repeated identical scaffolds, excludes Markdown blockquotes from prompt decoration, and is regression-tested as idempotent.
-- Compact Exchange now repairs a scaffold stranded inside `agent:queue` only when an identical canonical quote block exists in `agent:exchange` and its placement is isolated between queue rows/component boundaries. Unmatched quotes, surrounding response prose, malformed structure, and other ambiguous corruption still fail closed at the integrity gate.
-- The native visual-token projection now labels the complete binary `> **Queue prompt:**` quote block as `prompt`, including continuation quote lines. IntelliJ therefore receives the same prompt styling for Codex, Claude, and OpenCode. The matching JetBrains 0.2.370 package and native library are installed; the existing `#restartintellijidea` Review item now tracks activation/verification in a restarted IDE.
-- Lazily proved infra.md's `#nats-workspace-launcher` and `#nats-broker-proof` heads were orphaned after their backend-owned implementations completed. Both were struck through guarded `queue consume --id` operations and committed; the controller has since advanced infra.md to its next unrelated prompt.
-- I did not patch, resubmit, recycle, or force contracts.md. Its controller-owned closeout remained authoritative, and the @tmstorm reviewer request remains queued and undrained.
-
-Verification: all affected crate suites pass, repository-wide `make check` passes, and `make install` rebuilt/installed the binary, native library, JetBrains package, and VS Code package. Runtime commit `143e73cff` and workspace pointer commit `ab3aa2b29` are pushed. GitHub Actions run `33654305421` was still running `make check` and `tmux-ci` without a surfaced failure at closeout.
-
-### Re: Agent Doc closeout authority and response thrash — gpt-5
-
-Fixed and shipped agent-doc 0.35.322.
-
-- Route now uses the generation-fenced live actor record as the transport authority. Desired/frontmatter harness projections can request a switch but cannot cause Claude, Codex, or OpenCode prompt/probe syntax to be sent to a different live child.
-- Every successful initial spawn, recycle adoption, and harness switch now writes the normalized actual child identity back to that record. This closes the observed `default`-record/Claude-child wedge and restores the correct shared `input_required` path used by JetBrains prompts.
-- Generic closeout recovery no longer abandons a fresh empty preflight while its response may still be generating. Matching file hashes cannot bypass the stale-age fence, and same-owner reentry is allowed only when the current pane and harness match the actor record.
-- Completed free-text queue strikes settle without waiting on an advisory editor save, preventing an answered head from being redispatched. Together, these changes stop the abandon/regenerate response thrash seen at the end of `contracts.md`.
-- The Compact Exchange scaffold repair remains fail-closed for ambiguous content; this document's typed queue is empty and its exchange parses cleanly now, so no binary conversation scaffold remains embedded in `agent:queue`.
-- `infra.md` is clean with its completed heads consumed. In `contracts.md`, the stale answered head was struck and committed and its response landed once; the remaining missing-response status belongs to the newly entered prompt, which remains intact for its own cycle.
-
-The verified 0.35.322 binary, native library, JetBrains 0.2.372 package, and VS Code package are installed. IDEA 2026.1 must be restarted once to activate the installed plugin generation; safe supervisor/controller recycling is already requested and will occur at an idle boundary without interrupting live work.
-
-Verification: 9,188 tests passed, release projection and documentation audit passed, and all formal model checks passed. Source commit `e4f6d1eef` and workspace commit `9ebc736fb` are pushed. GitHub CI run `33704789115` is in progress with no surfaced failure at closeout.
-❯ 🚧 Fix docs.md "agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: refusing semantically corrupt canonical target for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md; current Lazily/editor authority is unchanged and pending intents remain retained: binary conversation scaffold is embedded inside `agent:review`; refusing to treat response text as tracked component content"
-
-### Re: Fix docs.md compact repair — gpt-5.6-sol
-
-> **Queue prompt:**
->
-> do [#fixdocscommand]
-
-
-Fixed and released locally as agent-doc `0.35.323`.
-
-The failure was a torn editor/controller projection that copied the latest complete queue-prompt/response turn out of `agent:exchange` and welded it between the checkbox and ID of an `agent:review` row. Compact correctly rejected that semantic corruption, but it had no proven repair for this exact shape.
-
-The new policy owner is the pure template repair in `agent-doc-template/src/template/tail_repair.rs`. Before compact's existing integrity gate, it may delete conversation bytes from `agent:review` only when all of these hold:
-
-- the bytes are an exact copy of the latest complete queue-prompt/response turn already retained in `agent:exchange`;
-- exactly one non-code, non-comment match exists;
-- deletion reconstructs a single ID-backed `- [/] [#id] ...` review row.
-
-Non-identical responses, multiple copies, code/comment examples, invalid row reconstructions, and all other ambiguous shapes remain fail-closed. `agent-doc-compact-io` invokes this one-shot projection before the existing queue-scaffold repair and semantic integrity gate; the controller/CRDT topology, retries, polling, and cache ownership are unchanged.
-
-Changed paths:
-
-- `agent-doc-template/src/template/tail_repair.rs`: exact exchange-proof extraction, safe review-row reconstruction, and positive/fail-closed regressions.
-- `agent-doc-compact-io/src/lib.rs`: compact pre-gate wiring and ordering/log regression.
-- `SPEC.md` and `specs/07-closeout-commands.md`: the repair invariant and refusal cases.
-- `VERSIONS.md`, workspace manifests/lockfile, and bundled skill copies: `0.35.323` release projection.
-
-Verification:
-
-- `cargo fmt --check` passed.
-- Focused template regressions passed for exact repair, non-identical refusal, and multiple-match refusal.
-- Compact repair-before-integrity ordering regression passed.
-- `make check` passed across the full workspace.
-- `make install-full` completed; installed CLI reports `agent-doc 0.35.323`; controller recycle was requested.
-- The original `agent-doc compact /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md --commit` no longer raises `binary conversation scaffold is embedded inside agent:review`. Delivery recovery committed the compact as `f28b977`, with superproject pointer commit `56cf0aae32`.
-- The live `docs.md` is clean, its exchange is compacted, and review now contains the restored `- [/] [#plcite] ...` row with no embedded response copy. A separate pre-existing answered free-text queue row remains visible and is now reported by the queue-residue guard; it did not prevent the compact commit.
-
-Commits: source `7f4eeabde`; workspace release pointer `30b32b818`; target compact `f28b977`. Local release tag: `v0.35.323`. Push/tag publication and one CI observation follow this transactional closeout.
-
-Confidence: high. Escalation: none.
+- Archived 8 response topic(s): Compact Exchange and session recovery; Response; do [#jetbrainsrunroute-z09d]; 5 more
+- Prior summary/context: prior compacted content: Archived 7 response topic(s): Automatic stale-supervisor recycle; Response; do [#fixclaimtmu...
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -184,6 +41,28 @@ Confidence: high. Escalation: none.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
+Please fix agent-doc causes of turn closeout not completing in backend.md. I was typing in the queue while the turn was closing:
+```
+  Verified by reproducing in a clean worktree at 628bf4ac with the submodule at its own pin 2cd516e, then running the
+  preflight workflow's steps in order at both heads — task tidy + git diff --exit-code clean, go test ./... 25 packages
+  / 0 FAIL, the pinned-publication test with HAIVEN_CONTRACTS_ROOT scoped to ./cmd/contractpublish only, go vet, go
+  build, all exit 0 — then confirmed on GitHub's runners. Pushed with --force-with-lease; temp worktree removed.
+
+  Two things need you:
+
+  1. The document closeout is deferred, not lost. agent-doc respond reports editor_projection_pending — the editor
+     acknowledged the canonical content (df8a7991…) but hasn't projected its native save to disk. The retained intent
+     1788462227612561795-1-df8a7991… commits itself once delivery converges; the binary explicitly forbids re-sending,
+     forcing disk, or recycling, so I stopped after six session-check polls over ~2 minutes, all still INTERRUPTED. A
+     save in the editor should converge it. Contributing factor worth knowing: the lint gate blocked the first two
+     attempts on a pre-existing stray go attribute on <!-- agent:backlog priority go --> (queue-only, ignored, also
+     flagged by preflight), and removing it required a disk edit under the live buffer — which is plausibly what the
+     editor is now reconciling.
+  2. #stalewtclean bit again. I couldn't rebase #413 to drop its now-redundant harness hunk because
+     feat/studio-exposure-vocabulary is still checked out by ~/.claude/jobs/93c87c28/tmp/be-studio. Not urgent — git
+     drops that hunk automatically (a trial rebase reported dropping … patch contents already upstream), and #413/#416
+     stay green and MERGEABLE meanwhile.
+```
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

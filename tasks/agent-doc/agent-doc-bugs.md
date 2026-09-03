@@ -44,6 +44,14 @@ The reusable policy is now in Lazily as `LatestDurableProjectionCore<K,V>`: mono
 agent-doc now queues native save behind all earlier accepted operations on JetBrains' per-document FIFO, enters the EDT only from that lane, validates the exact visible/replica/disk revision, and logs a typed reason for every rejection. The controller retains the latest desired revision through retry/supersession and advances only on the matching durable receipt. This is a command/effect driver in the Controller, not a second authority actor.
 
 Released and installed agent-doc v0.35.324 at 1772efe18 with JetBrains 0.2.373. Verification passed: registry-backed Rust checks, 9,192 workspace tests, model checks, `make check`, `make tmux-ci`, and signed JetBrains build. Normal `agent-doc session-check` recovered `src/haiven-dev/tasks/backend.md` to `committed (commit_success)`; doctor confirms editor convergence, Lazily/CP equals disk, and no failure markers remain. No response resend, force-disk write, or destructive recovery was used, and the newer operator text was preserved. The remaining focused queue head was durably handed to the supervisor for clear-and-continue. Restarting IntelliJ activates the installed 0.2.373 Kotlin package; the controller-side retained retry is already live.
+
+### Re: / 0 FAIL, the pinned-publication test with HAIVEN_CONTRACTS_ROOT scoped to ./cmd/contractpublish only, go vet, go — gpt-5
+
+> **Queue prompt:** The document closeout is deferred, not lost. agent-doc respond reports editor_projection_pending — the editor
+
+The backend closeout described by this head is now recovered and committed through the normal retained-delivery/session-check path, with the later queue typing preserved and no force-disk fallback. The detailed cause, chronology, implementation, release, and verification evidence are in the preceding response.
+
+Release-audit correction: `lazily-rs` 0.57.0 follows the canonical spec fixture, but a newly detected mismatch in `lazily-formal` 0.38.0 retained a duplicate desired value after claim. Remaining binding releases are paused. The formal model will be corrected and released first, followed by a fresh conformant Rust patch release and an agent-doc dependency patch release, so the final provenance order is genuinely spec/formal before Rust before agent-doc. Session accretion is noted; the active queue is being drained rather than stalled for compaction.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -57,11 +65,9 @@ Please fix agent-doc causes of turn closeout not completing in backend.md. I was
 ```
   Verified by reproducing in a clean worktree at 628bf4ac with the submodule at its own pin 2cd516e, then running the
   preflight workflow's steps in order at both heads — task tidy + git diff --exit-code clean, go test ./... 25 packages
-  / 0 FAIL, the pinned-publication test with HAIVEN_CONTRACTS_ROOT scoped to ./cmd/contractpublish only, go vet, go
+- / 0 FAIL, the pinned-publication test with HAIVEN_CONTRACTS_ROOT scoped to ./cmd/contractpublish only, go vet, go
   build, all exit 0 — then confirmed on GitHub's runners. Pushed with --force-with-lease; temp worktree removed.
-
   Two things need you:
-
   1. The document closeout is deferred, not lost. agent-doc respond reports editor_projection_pending — the editor
      acknowledged the canonical content (df8a7991…) but hasn't projected its native save to disk. The retained intent
      1788462227612561795-1-df8a7991… commits itself once delivery converges; the binary explicitly forbids re-sending,
@@ -70,7 +76,7 @@ Please fix agent-doc causes of turn closeout not completing in backend.md. I was
      attempts on a pre-existing stray go attribute on <!-- agent:backlog priority go --> (queue-only, ignored, also
      flagged by preflight), and removing it required a disk edit under the live buffer — which is plausibly what the
      editor is now reconciling.
-  2. #stalewtclean bit again. I couldn't rebase #413 to drop its now-redundant harness hunk because
+  2. ⏭️ #stalewtclean bit again. I couldn't rebase #413 to drop its now-redundant harness hunk because
      feat/studio-exposure-vocabulary is still checked out by ~/.claude/jobs/93c87c28/tmp/be-studio. Not urgent — git
      drops that hunk automatically (a trial rebase reported dropping … patch contents already upstream), and #413/#416
      stay green and MERGEABLE meanwhile.

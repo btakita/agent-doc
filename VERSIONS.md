@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.326
+
+- **Fix: committed queue-residue recovery gives an executable command order.**
+
+When `session-check` finds an answered queue head left active after its cycle
+committed, its recovery hint now opens the required binary-owned repair cycle
+with `preflight` before directing `write --commit`. The prior hint skipped that
+state transition, so the write gate correctly rejected the already committed
+cycle and turned a recoverable exact-span strike into another terminal failure.
+The new hint explicitly preserves the committed response and forbids resubmission.
+
 ## 0.35.325
 
 - **Fix: committed recovered queue heads close out through exact parser spans.**

@@ -122,6 +122,18 @@ Confirmed: the restarted IDE registered the live JetBrains plugin as `0.2.373`, 
 ### Re: Response
 
 Restart confirmed. IntelliJ is now running Agent Doc plugin `0.2.373`, so the FIFO/native-save ordering fix is loaded. The session response was committed and `session-check` passed. No further restart is needed.
+
+### Re: Response
+
+Fixed [backend.md](/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md:632).
+
+- Removed all five stale `be-*` worktrees safely.
+- Cleared `#stalewtclean` from the queue and backlog.
+- Recovered the editor-projection closeout with `agent-doc commit`; no force-disk write or duplicate response.
+- `session-check` reports `commit_success` and `no_drainable_work`.
+- Returned document ownership to Claude pane `%25`.
+
+Agent Doc did see the item; `[operator-verify]` intentionally prevented automatic execution until your explicit authorization.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

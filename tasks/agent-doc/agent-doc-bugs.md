@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a062c4-7f79-7d40-a88a-64f976ec3765
+  codex: 01a065a2-d7bc-77b1-9c70-75eabcf6998a
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -134,6 +134,47 @@ Fixed and shipped agent-doc 0.35.322.
 The verified 0.35.322 binary, native library, JetBrains 0.2.372 package, and VS Code package are installed. IDEA 2026.1 must be restarted once to activate the installed plugin generation; safe supervisor/controller recycling is already requested and will occur at an idle boundary without interrupting live work.
 
 Verification: 9,188 tests passed, release projection and documentation audit passed, and all formal model checks passed. Source commit `e4f6d1eef` and workspace commit `9ebc736fb` are pushed. GitHub CI run `33704789115` is in progress with no surfaced failure at closeout.
+❯ 🚧 Fix docs.md "agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: refusing semantically corrupt canonical target for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md; current Lazily/editor authority is unchanged and pending intents remain retained: binary conversation scaffold is embedded inside `agent:review`; refusing to treat response text as tracked component content"
+
+### Re: Fix docs.md compact repair — gpt-5.6-sol
+
+> **Queue prompt:**
+>
+> do [#fixdocscommand]
+
+
+Fixed and released locally as agent-doc `0.35.323`.
+
+The failure was a torn editor/controller projection that copied the latest complete queue-prompt/response turn out of `agent:exchange` and welded it between the checkbox and ID of an `agent:review` row. Compact correctly rejected that semantic corruption, but it had no proven repair for this exact shape.
+
+The new policy owner is the pure template repair in `agent-doc-template/src/template/tail_repair.rs`. Before compact's existing integrity gate, it may delete conversation bytes from `agent:review` only when all of these hold:
+
+- the bytes are an exact copy of the latest complete queue-prompt/response turn already retained in `agent:exchange`;
+- exactly one non-code, non-comment match exists;
+- deletion reconstructs a single ID-backed `- [/] [#id] ...` review row.
+
+Non-identical responses, multiple copies, code/comment examples, invalid row reconstructions, and all other ambiguous shapes remain fail-closed. `agent-doc-compact-io` invokes this one-shot projection before the existing queue-scaffold repair and semantic integrity gate; the controller/CRDT topology, retries, polling, and cache ownership are unchanged.
+
+Changed paths:
+
+- `agent-doc-template/src/template/tail_repair.rs`: exact exchange-proof extraction, safe review-row reconstruction, and positive/fail-closed regressions.
+- `agent-doc-compact-io/src/lib.rs`: compact pre-gate wiring and ordering/log regression.
+- `SPEC.md` and `specs/07-closeout-commands.md`: the repair invariant and refusal cases.
+- `VERSIONS.md`, workspace manifests/lockfile, and bundled skill copies: `0.35.323` release projection.
+
+Verification:
+
+- `cargo fmt --check` passed.
+- Focused template regressions passed for exact repair, non-identical refusal, and multiple-match refusal.
+- Compact repair-before-integrity ordering regression passed.
+- `make check` passed across the full workspace.
+- `make install-full` completed; installed CLI reports `agent-doc 0.35.323`; controller recycle was requested.
+- The original `agent-doc compact /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md --commit` no longer raises `binary conversation scaffold is embedded inside agent:review`. Delivery recovery committed the compact as `f28b977`, with superproject pointer commit `56cf0aae32`.
+- The live `docs.md` is clean, its exchange is compacted, and review now contains the restored `- [/] [#plcite] ...` row with no embedded response copy. A separate pre-existing answered free-text queue row remains visible and is now reported by the queue-residue guard; it did not prevent the compact commit.
+
+Commits: source `7f4eeabde`; workspace release pointer `30b32b818`; target compact `f28b977`. Local release tag: `v0.35.323`. Push/tag publication and one CI observation follow this transactional closeout.
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

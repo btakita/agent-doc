@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -40,7 +40,7 @@ Compacted content:
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 Please fix agent-doc causes of turn closeout not completing in backend.md. I was typing in the queue while the turn was closing:
 ```
   Verified by reproducing in a clean worktree at 628bf4ac with the submodule at its own pin 2cd516e, then running the

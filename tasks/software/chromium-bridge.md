@@ -225,6 +225,19 @@ Verification passed:
 - exact committed checkout installed successfully, including editor packages, followed by library reload and controller recycle.
 
 Published `agent-doc` commit `2ae58cba8` and tag `v0.35.321`; CI, Release, and PyPI workflows were observed after dispatch without waiting on them. Concurrent uncommitted closeout/repair work that appeared later in the shared submodule was preserved and excluded from this release.
+
+### Re: Response
+
+Fixed, released, installed, and pushed.
+
+- `contracts.md` is unwedged: stale queue residue removed, closeout committed, `session-check` passes, and the fresh supervisor reports `alive-idle` / `prompt_ready=true`.
+- `backend.md` is unwedged: historical snapshot drift repaired and the cycle is committed. Its remaining queue item is intentionally operator-gated.
+- Root cause fixed: plain Run triggers can no longer bypass an unresolved closeout.
+- Released `agent-doc` v0.35.321 at `2ae58cba8`.
+- Full `make check` and targeted regressions passed.
+- Installed from the exact committed checkout and recycled the runtimes.
+- Pushed agent-doc, tag `v0.35.321`, and agent-loop main through `5b1d1fbd34`.
+- Concurrent unrelated worktree changes were preserved and excluded.
 <!-- agent:boundary:28f7ea75 -->
 <!-- /agent:exchange -->
 ###

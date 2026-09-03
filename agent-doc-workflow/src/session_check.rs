@@ -366,7 +366,7 @@ pub fn free_text_queue_completed_residue_result(file: &str, heads: &[String]) ->
         .collect::<Vec<_>>()
         .join("; ");
     GuardResult::Error(format!(
-        "[session-check] INTERRUPTED: completed free-text agent:queue head(s) {heads_text} are still active in the committed queue even though exchange history contains a `Queue prompt` echo proving they were already answered — completed queue residue would re-run stale work\n[session-check] hint: this cycle is already committed, so run `agent-doc preflight {file}` first to open the binary-owned repair cycle and strike the answered head, then run `agent-doc write --commit {file}` without resubmitting the response; add `<!-- no-free-text-queue-head-guard -->` only if keeping the answered row active is intentional (see #qheadresidue/#qresiduecommittedhint)"
+        "[session-check] INTERRUPTED: completed free-text agent:queue head(s) {heads_text} are still active in the committed queue even though exchange history contains a `Queue prompt` echo proving they were already answered — completed queue residue would re-run stale work\n[session-check] hint: this cycle is already committed, so run `agent-doc preflight {file}` first to open the binary-owned repair cycle and strike the answered head, then run `agent-doc commit {file}` without resubmitting the response; add `<!-- no-free-text-queue-head-guard -->` only if keeping the answered row active is intentional (see #qheadresidue/#qresiduecommittedhint/#qresiduecommitonly)"
     ))
 }
 
@@ -1155,12 +1155,14 @@ mod tests {
         let preflight = residue_message
             .find("agent-doc preflight doc.md")
             .expect("the committed-cycle repair must start a new preflight");
-        let write = residue_message
-            .find("agent-doc write --commit doc.md")
-            .expect("the repair cycle must still cross the write/commit boundary");
-        assert!(preflight < write, "preflight must be ordered before write");
+        let commit = residue_message
+            .find("agent-doc commit doc.md")
+            .expect("the response-free repair cycle must cross the commit boundary directly");
+        assert!(preflight < commit, "preflight must be ordered before commit");
+        assert!(!residue_message.contains("agent-doc write --commit doc.md"));
         assert!(residue_message.contains("without resubmitting the response"));
         assert!(residue_message.contains("#qresiduecommittedhint"));
+        assert!(residue_message.contains("#qresiduecommitonly"));
     }
 
     #[test]

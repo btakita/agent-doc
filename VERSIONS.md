@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.327
+
+- **Fix: queue-residue recovery closes response-free repair cycles with `commit`.**
+
+The committed queue-residue recovery hint now sends the preflight-owned exact
+span strike through `agent-doc commit`, the response-free metadata/content
+closeout path. The previous `write --commit` instruction still invoked response
+materialization and therefore rejected the correctly empty stdin after preflight
+had already applied the queue mutation. Recovery continues to preserve the
+committed response and forbids resubmission.
+
 ## 0.35.326
 
 - **Fix: committed queue-residue recovery gives an executable command order.**

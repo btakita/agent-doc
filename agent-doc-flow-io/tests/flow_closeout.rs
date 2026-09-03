@@ -49,7 +49,7 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for LocalCrdtBarrierCloseoutEf
             .enforce_clean_closeout_for_authority(file, force_disk)
     }
 
-    fn cancel_preflight_cycle(&self, file: &Path) -> Result<()> {
+    fn cancel_preflight_cycle(&self, file: &Path) -> Result<agent_doc_turn::repair::CancelOutcome> {
         agent_doc_closeout_runtime_io::closeout_effects().cancel_preflight_cycle(file)
     }
 
@@ -1141,7 +1141,8 @@ mod tests {
     #[test]
     fn classify_recovery_open_empty_preflight_when_nothing_followed() {
         // `#recursive-repair-recovery-states`: a bare preflight_started cycle with
-        // no capture / response / pending mutation is an abandonable probe.
+        // no capture / response / pending mutation is an empty preflight. It is
+        // reclaimable only after the owning harness run is actually canceled.
         let base = "---\nsession: test\n---\n\nHi\n";
         let (_dir, doc) = setup_git_project_with_doc(base);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
@@ -1152,7 +1153,7 @@ mod tests {
         let cmd =
             closeout_recovery_command_for_file(&doc, CloseoutRecoveryState::OpenEmptyPreflight)
                 .unwrap();
-        assert!(cmd.contains("agent-doc cancel"), "{cmd}");
+        assert!(cmd.contains("agent-doc session cancel-turn"), "{cmd}");
     }
 
     #[test]
@@ -1410,22 +1411,23 @@ mod tests {
     }
 
     #[test]
-    fn apply_recovery_cancels_open_empty_preflight() {
-        // `#recursive-repair-apply`: the safe action for an empty probe cycle is to
-        // abandon it — exactly the churn the diagnostic-preflight bug produces.
+    fn apply_recovery_protects_open_empty_preflight_without_run_cancel_proof() {
+        // An empty preflight is indistinguishable from a model still generating
+        // its first response. Generic closeout recovery must not abandon it.
         let base = "---\nsession: test\n---\n\nHi\n";
         let (_dir, doc) = setup_git_project_with_doc(base);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         match apply_closeout_recovery(&doc).unwrap() {
-            RecoveryApplication::Applied { state, .. } => {
+            RecoveryApplication::NotApplied { state, reason, .. } => {
                 assert_eq!(state, CloseoutRecoveryState::OpenEmptyPreflight);
+                assert!(reason.contains("generating run"), "{reason}");
             }
-            other => panic!("expected Applied for empty preflight, got {other:?}"),
+            other => panic!("expected NotApplied for empty preflight, got {other:?}"),
         }
-        // The cycle is now abandoned, so re-classification is Clean.
+        // The cycle remains open until the owning run closes or is canceled.
         assert_eq!(
             classify_closeout_recovery_state_for_file(&doc),
-            CloseoutRecoveryState::Clean
+            CloseoutRecoveryState::OpenEmptyPreflight
         );
     }
 

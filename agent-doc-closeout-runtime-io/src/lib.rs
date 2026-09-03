@@ -1108,8 +1108,8 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects {
         )
     }
 
-    fn cancel_preflight_cycle(&self, file: &Path) -> Result<()> {
-        agent_doc_repair_io::cancel_preflight_cycle(&REPAIR_IO_EFFECTS, file).map(|_| ())
+    fn cancel_preflight_cycle(&self, file: &Path) -> Result<agent_doc_turn::repair::CancelOutcome> {
+        agent_doc_repair_io::cancel_preflight_cycle(&REPAIR_IO_EFFECTS, file)
     }
 
     fn detect_jb_cache_conflict_cancel_recoverable(&self, file: &Path) -> Result<bool> {

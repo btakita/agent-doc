@@ -372,6 +372,14 @@ pub fn run_with_options_to_writer(
     // post-repair lifecycle would forget that a sibling queue edit arrived
     // during an already-open owner turn.
     let entry_cycle_was_open = closeout_cycle_is_open(file).unwrap_or(false);
+    // `#preflightinbinary`: recovery must not destroy the very cycle that a
+    // same-owner recursive preflight is designed to reuse. The actor record is
+    // transport authority, so pane + harness must both match this process.
+    // The cycle-state layer additionally requires a fresh PreflightStarted
+    // phase with no captured response before it honors this mode.
+    let preserve_fresh_owned_pane_reentry = !options.probe
+        && entry_cycle_was_open
+        && agent_doc_run_io::authoritative_actor_owns_current_pane(file).unwrap_or(false);
 
     // Repair is the first signal-gated effect. Everything through pending
     // maintenance belongs to this effect boundary; commit cannot start until
@@ -384,7 +392,7 @@ pub fn run_with_options_to_writer(
     let (recovered_prior, committed_prior) = if options.probe {
         (false, false)
     } else {
-        enforce_cycle_completion(file)?
+        enforce_cycle_completion(file, preserve_fresh_owned_pane_reentry)?
     };
 
     let response_contract = response_contract_for_content(&content);

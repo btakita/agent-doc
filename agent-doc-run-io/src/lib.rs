@@ -1708,6 +1708,28 @@ fn actor_record_for_file(file: &Path) -> Result<Option<agent_doc_controller::act
     agent_doc_session_actor_io::load_record_in(&project_root, &file_arg)
 }
 
+/// Whether this process is running inside the live pane owned by the
+/// authoritative actor record for `file`.
+///
+/// This is intentionally stricter than the Codex-specific UI self-invocation
+/// projection: lifecycle recovery uses it as authority to preserve a fresh,
+/// uncaptured preflight during same-owner re-entry. A pane match alone is not
+/// enough when a harness handoff is pending, so the persisted actor transport
+/// must also match the harness executing this process.
+pub fn authoritative_actor_owns_current_pane(file: &Path) -> Result<bool> {
+    let Some(actor) = actor_record_for_file(file)? else {
+        return Ok(false);
+    };
+    if matches!(actor.state, agent_doc_controller::actor::ActorState::Closed) {
+        return Ok(false);
+    }
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    let current_pane = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux)
+        .context("failed to query current tmux pane")?;
+    let current_harness = agent_doc_model_tier::detect_harness();
+    Ok(actor.pane_id == current_pane && actor.harness == current_harness)
+}
+
 pub fn compute_run_diff(file: &Path) -> Result<Option<(String, bool)>> {
     if let Some(d) = agent_doc_diff_io::compute(
         &agent_doc_snapshot_io::DiffBaselineStore::new(agent_doc_ops_log_io::log_op),

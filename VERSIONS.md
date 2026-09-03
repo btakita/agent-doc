@@ -2,6 +2,33 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.322
+
+- **Fix: live actor transport no longer follows a stale desired-harness projection.**
+
+Route now keeps the generation-fenced actor record as the protocol authority for
+its owned pane. Frontmatter and supervisor projections may request a harness
+switch, but they cannot rewrite the actor identity during lookup or cause Claude,
+Codex, or OpenCode prompt/probe syntax to be sent to a different live harness.
+After every successful initial spawn, recycle adoption, or switch, the supervisor
+persists the normalized actual child identity, replacing a launch-time `default`
+guess without claiming authority for a child that failed to start.
+
+- **Fix: closeout recovery no longer abandons a response that is still generating.**
+
+An empty `preflight_started` cycle is protected unless the caller first proves
+that it canceled the owning harness run. Editor cancel, successful session clear,
+and `session cancel-turn` retain immediate reclaim; ordinary reroute recovery and
+the diagnostic `cancel` command cannot race a late response capture. Matching
+snapshot/file hashes also no longer bypass the stale-age requirement, since an
+unchanged document is expected while the first response is still generating.
+Same-owner recursive preflight remains supported through a narrower authority:
+only the current pane and harness matching the live actor record may reuse a
+fresh uncaptured cycle, so sibling queue edits integrate without weakening the
+non-owner recovery guard. Together with committed free-text strike settlement,
+this prevents an answered queue head from being redispatched and stops the
+abandon/regenerate response thrash observed at the end of a document session.
+
 ## 0.35.321
 
 - **Fix: Run Agent Doc no longer overtakes an unresolved closeout.**

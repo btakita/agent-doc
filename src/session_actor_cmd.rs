@@ -714,7 +714,10 @@ pub fn clear(file: &Path) -> Result<()> {
                 ctx.canonical_file.display()
             ),
         );
-        reclaim_orphaned_cycle_on_clear(&ctx.canonical_file);
+        reclaim_orphaned_cycle_after_run_cancel(
+            &ctx.canonical_file,
+            "session_clear_already_satisfied",
+        );
         clear_durable_context_on_explicit_clear(&ctx)?;
         println!(
             "Cleared session context for {} (already no live session; controller stage {}).",
@@ -858,7 +861,7 @@ pub fn clear(file: &Path) -> Result<()> {
     // Explicit clear aborts the current turn, so reclaim any orphaned open
     // preflight cycle the cleared run left behind so the next Run Agent Doc
     // starts fresh instead of waiting on a stale open cycle.
-    reclaim_orphaned_cycle_on_clear(&ctx.canonical_file);
+    reclaim_orphaned_cycle_after_run_cancel(&ctx.canonical_file, "session_clear");
     clear_durable_context_on_explicit_clear(&ctx)?;
     println!(
         "Cleared session context for {} (controller stage {}).",
@@ -876,8 +879,11 @@ pub fn clear(file: &Path) -> Result<()> {
 /// stale open cycle; a cycle that already captured a response is protected and
 /// left intact. Reclaim failures are non-fatal — the clear itself already
 /// delivered — and surface as a warning.
-fn reclaim_orphaned_cycle_on_clear(file: &Path) -> agent_doc_turn::repair::CancelOutcome {
-    match agent_doc_repair_io::cancel_preflight_cycle(
+fn reclaim_orphaned_cycle_after_run_cancel(
+    file: &Path,
+    source: &str,
+) -> agent_doc_turn::repair::CancelOutcome {
+    match agent_doc_repair_io::cancel_preflight_cycle_after_run_cancel(
         &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
         file,
     ) {
@@ -885,8 +891,9 @@ fn reclaim_orphaned_cycle_on_clear(file: &Path) -> agent_doc_turn::repair::Cance
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "session_clear_cycle_reclaim file={} outcome={outcome:?}",
-                    file.display()
+                    "run_cancel_cycle_reclaim file={} source={} outcome={outcome:?}",
+                    file.display(),
+                    source,
                 ),
             );
             outcome
@@ -1631,6 +1638,7 @@ pub fn cancel_turn(file: &Path) -> Result<()> {
             }
             let codex_shell_search = codex_pane_in_shell_search_state(&ctx, &tmux, &evidence);
             send_operator_interrupt_sequence(&tmux, pane, &ctx.harness, codex_shell_search)?;
+            reclaim_orphaned_cycle_after_run_cancel(&ctx.canonical_file, "session_cancel_turn");
             agent_doc_ops_log_io::log_op(
                 &ctx.canonical_file,
                 &format!(
@@ -1825,7 +1833,7 @@ fn force_interrupt_clear(file: &Path) -> Result<()> {
     report.pane_killed = kill_pane_for_force_clear(&ctx.canonical_file, &tmux, pane.as_deref());
     report.socket_removed = remove_supervisor_socket_for_force_clear(&ctx);
 
-    reclaim_orphaned_cycle_on_clear(&ctx.canonical_file);
+    reclaim_orphaned_cycle_after_run_cancel(&ctx.canonical_file, "session_interrupt_clear_force");
     let dynamic_context_clear = clear_durable_context_on_explicit_clear(&ctx);
 
     agent_doc_ops_log_io::log_op(
@@ -5862,7 +5870,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         // The clear path reclaims the orphaned cycle so the next Run Agent Doc
         // is not wedged by a stale open cycle.
         assert_eq!(
-            reclaim_orphaned_cycle_on_clear(&doc),
+            reclaim_orphaned_cycle_after_run_cancel(&doc, "test_clear"),
             agent_doc_turn::repair::CancelOutcome::Abandoned
         );
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
@@ -5878,7 +5886,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
         // A cycle that owns a captured response must not be discarded by clear.
         assert_eq!(
-            reclaim_orphaned_cycle_on_clear(&doc),
+            reclaim_orphaned_cycle_after_run_cancel(&doc, "test_clear"),
             agent_doc_turn::repair::CancelOutcome::Protected
         );
         assert!(
@@ -5894,7 +5902,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     fn clear_reclaim_is_noop_without_an_open_cycle() {
         let (_dir, doc) = clear_reclaim_project();
         assert_eq!(
-            reclaim_orphaned_cycle_on_clear(&doc),
+            reclaim_orphaned_cycle_after_run_cancel(&doc, "test_clear"),
             agent_doc_turn::repair::CancelOutcome::NoOpenCycle
         );
     }

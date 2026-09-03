@@ -2122,9 +2122,10 @@ impl SupervisorShared {
         agent_doc_harness::HarnessConfig::from_agent_name(&selection.agent)
     }
 
-    /// Update the harness identity after an in-loop `agent:` switch spawned a fresh
-    /// harness, so the persisted authoritative actor record stops reading the old
-    /// harness (`#actor-harness-switch-writeback` / `#actorharnessrecordwriteback`).
+    /// Update the harness identity after the selected child is successfully
+    /// established, so the persisted authoritative actor record names the actual
+    /// transport on initial spawn/adoption as well as after an in-loop `agent:`
+    /// switch (`#actorharnessinitialwriteback` / `#actorharnessrecordwriteback`).
     ///
     /// Two stores must move together, and the second one is the whole point:
     ///   1. the in-memory identity, read by IPC `state` and the tmux submit profile;
@@ -3565,6 +3566,77 @@ mod tests {
         // end-to-end (restart → persisted record → route dispatch that does NOT
         // defer, with a stale-record negative control) by the SimWorld scenario
         // `route_sim_harness_switch_persists_record_so_post_restart_dispatch_does_not_defer`.
+    }
+
+    #[test]
+    fn initial_child_establishment_replaces_default_actor_harness_guess() {
+        // A document may intentionally omit `agent:` and let the start command
+        // choose a concrete child. The launch-time actor record then contains
+        // `default`; once the child exists, its protocol identity must win.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("task.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: initial-harness\nagent: default\n---\nBody\n",
+        )
+        .unwrap();
+        let initial = agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "initial-harness",
+            "%71",
+            "@8",
+            1,
+        )
+        .unwrap();
+        assert_eq!(initial.harness, "default");
+
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            None,
+            "claude",
+            Some(SessionActorRuntime {
+                project_root: tmp.path().to_path_buf(),
+                file: doc.clone(),
+                session_id: "initial-harness".to_string(),
+                pane_id: "%71".to_string(),
+                generation: 1,
+            }),
+            Some(agent_doc_controller::actor::ActorState::Starting),
+            Some("%71".to_string()),
+        );
+
+        shared.set_current_harness("claude");
+
+        let persisted =
+            agent_doc_session_actor_io::load_record_in(tmp.path(), &doc.to_string_lossy())
+                .unwrap()
+                .unwrap();
+        assert_eq!(persisted.harness, "claude-code");
+        assert_eq!(shared.current_harness(), "claude");
+    }
+
+    #[test]
+    fn successful_child_establishment_writes_harness_before_io_publication() {
+        // Pin the production call site as well as the persistence helper above.
+        // A helper-only regression would pass while an initial spawn still forgot
+        // to invoke it, recreating the live `default`-record routing wedge.
+        let source = include_str!("run.rs");
+        let launch = source
+            .split_once("let adopting_preserved_child =")
+            .map(|(_, tail)| tail)
+            .expect("child launch boundary must remain discoverable");
+        let writeback = launch
+            .find("shared.set_current_harness(&harness.binary);")
+            .expect("successful child establishment must persist its harness");
+        let publish = launch
+            .find("// Extract writer and reader for shared I/O")
+            .expect("child I/O publication boundary must remain discoverable");
+        assert!(
+            writeback < publish,
+            "actual harness identity must be persisted before child I/O is published"
+        );
     }
     /// `#autotriggeradmissionstall`: live pane proof must be able to end the
     /// admission wait early.

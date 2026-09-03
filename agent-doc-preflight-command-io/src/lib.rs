@@ -134,8 +134,16 @@ use agent_doc_session_accretion::SessionAccretionReport;
 /// 5. Read document HEAD from disk
 ///
 /// Outputs JSON to stdout. Progress/diagnostic messages go to stderr.
-fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
-    agent_doc_preflight_io::enforce_cycle_completion(
+fn enforce_cycle_completion(
+    file: &Path,
+    preserve_fresh_owned_pane_reentry: bool,
+) -> Result<(bool, bool)> {
+    let mode = if preserve_fresh_owned_pane_reentry {
+        agent_doc_preflight_io::PreflightCycleCompletionMode::PreserveFreshOwnedPaneReentry
+    } else {
+        agent_doc_preflight_io::PreflightCycleCompletionMode::RecoverInterrupted
+    };
+    agent_doc_preflight_io::enforce_cycle_completion_with_mode(
         file,
         &agent_doc_preflight_runtime_io::preflight_cycle_completion_effects(
             agent_doc_repair_runtime_io::repair_coordinator_effects(
@@ -143,6 +151,7 @@ fn enforce_cycle_completion(file: &Path) -> Result<(bool, bool)> {
             ),
             agent_doc_closeout_runtime_io::session_check_effects(),
         ),
+        mode,
     )
 }
 
@@ -668,7 +677,7 @@ mod tests {
         )
         .unwrap();
 
-        let (recovered, committed) = enforce_cycle_completion(&doc).unwrap();
+        let (recovered, committed) = enforce_cycle_completion(&doc, false).unwrap();
         assert!(
             !recovered,
             "no replay should be needed when file already has the response"
@@ -955,7 +964,7 @@ mod tests {
         )
         .unwrap();
 
-        let (recovered, committed) = enforce_cycle_completion(&doc).unwrap();
+        let (recovered, committed) = enforce_cycle_completion(&doc, false).unwrap();
         assert!(
             recovered,
             "the missing commit boundary should be recovered from already-committed HEAD"

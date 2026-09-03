@@ -110,6 +110,18 @@ No legacy layout file is imported or emitted.
   authoritative actor. A different canonical harness blocks only while the
   existing record still has live, healthy, non-closed supervisor authority; stale
   cross-harness records may be replaced by a fresh start.
+- The generation-fenced actor record is the transport authority for its owned
+  pane. Frontmatter/config chooses the desired harness and supervisor runtime
+  reports are advisory switch state; neither may rewrite the recorded harness
+  during route lookup. Until the successful switch path persists the new actor
+  identity, route probes and submits with the recorded harness protocol. This
+  prevents a desired Claude projection from sending Claude input to a live
+  Codex actor (and applies symmetrically to OpenCode).
+- Every successful harness child establishment, including initial spawn and
+  recycle adoption, must persist the normalized actual child identity to the
+  generation-fenced actor record. This replaces a launch-time `default` guess
+  for documents without `agent:` only after the concrete child exists; failed
+  spawns cannot claim transport authority.
 - Store updates must be monotonic and fail closed on generation regressions; a
   stale writer must not overwrite a newer generation.
 - Same-generation state transitions must also fail closed when the caller's

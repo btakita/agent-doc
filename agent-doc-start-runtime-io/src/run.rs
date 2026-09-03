@@ -1561,6 +1561,13 @@ pub fn run_with_reap_policy_resume_and_harness(
                 .with_context(|| format!("failed to spawn {}", harness.binary))?
         };
 
+        // The selected child is now the actual transport authority. Persist that
+        // fact after every successful spawn/adoption, including the initial child:
+        // documents without an explicit `agent:` otherwise leave the actor record
+        // at the launch-time `default` guess and route the live Claude/Codex/OpenCode
+        // pane with the wrong protocol (`#actorharnessinitialwriteback`).
+        shared.set_current_harness(&harness.binary);
+
         // Extract writer and reader for shared I/O
         #[cfg(unix)]
         let pty_write_fd = session.dup_write_fd()?;

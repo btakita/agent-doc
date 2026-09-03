@@ -445,7 +445,8 @@ pub unsafe extern "C" fn agent_doc_document_closed_for_editor(
 
 /// `#cancel-orphans-preflight-cycle`: explicit run-cancel reclaim seam.
 ///
-/// The JB plugin's "cancel run" action calls this so an orphaned, empty
+/// The JB plugin's "cancel run" action calls this only after it has canceled
+/// the harness run, so an orphaned, empty
 /// `preflight_started` cycle (no response capture) is abandoned immediately and
 /// the next `Run Agent Doc` starts fresh instead of waiting for the staleness
 /// window. The abandon decision is fail-safe in the binary: a cycle that
@@ -463,7 +464,7 @@ pub unsafe extern "C" fn agent_doc_cancel_preflight_cycle(file_path: *const c_ch
         Ok(s) => s,
         Err(_) => return -1,
     };
-    match agent_doc_repair_io::cancel_preflight_cycle(
+    match agent_doc_repair_io::cancel_preflight_cycle_after_run_cancel(
         &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
         std::path::Path::new(path),
     ) {

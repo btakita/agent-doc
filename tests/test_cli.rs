@@ -21099,7 +21099,8 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
     }
 
     assert!(
-        orchestration_preflight.contains("agent_doc_preflight_io::enforce_cycle_completion(")
+        orchestration_preflight
+            .contains("agent_doc_preflight_io::enforce_cycle_completion_with_mode(")
             && orchestration_preflight
                 .contains("agent_doc_preflight_runtime_io::preflight_cycle_completion_effects(")
             && orchestration_preflight
@@ -29741,6 +29742,7 @@ fn test_agent_doc_route_io_owns_authoritative_dispatch_loop() {
             && authoritative_dispatch.contains("require_routed_admission_projection(")
             && authoritative_dispatch.contains("dispatch_only_send_reopen(")
             && authoritative_dispatch.contains("activate_existing_route_queue_head(")
+            && authoritative_dispatch.contains("actor_transport_harness(&actor.record.harness)")
             && authoritative_actor.contains("pub fn managed_capability_proof_status(")
             && authoritative_actor.contains("fn document_declares_expected_harness(")
             && authoritative_actor
@@ -29750,6 +29752,10 @@ fn test_agent_doc_route_io_owns_authoritative_dispatch_loop() {
             && pane_resolution.contains("RouteAuthoritativeActorEffects")
             && pane_resolution.contains("route_via_authoritative_actor("),
         "agent-doc-route-io authoritative_dispatch should own authoritative actor reroute decisions and pane resolution should call it directly"
+    );
+    assert!(
+        !authoritative_actor.contains("set_record_harness_direct("),
+        "route lookup must not rewrite generation-fenced actor harness identity from supervisor desired/current projection"
     );
     assert!(
         !authoritative_actor.contains("std::fs::read_to_string(file)")

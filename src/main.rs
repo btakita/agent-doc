@@ -4494,7 +4494,7 @@ fn try_main() -> anyhow::Result<()> {
                 }
                 agent_doc_turn::repair::CancelOutcome::Protected => {
                     println!(
-                        "[cancel] open cycle owns real work (advanced past preflight or has a response capture); left intact"
+                        "[cancel] open cycle may still belong to a generating run (or owns captured work); cancel the harness run first; left intact"
                     );
                 }
             }

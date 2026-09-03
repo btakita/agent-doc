@@ -2393,7 +2393,7 @@ mod tests {
     }
 
     #[test]
-    fn drain_cancels_empty_preflight_before_document_repair() {
+    fn drain_protects_fresh_empty_preflight_before_document_repair() {
         use agent_doc_controller::dispatch::RouteCloseoutDrainOutcome as DrainOutcome;
 
         let dir = tempfile::tempdir().unwrap();
@@ -2420,12 +2420,9 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(
-            outcome,
-            DrainOutcome::Recovered("empty_preflight_cancelled".to_string()),
-        );
+        assert!(matches!(outcome, DrainOutcome::Blocked(_)), "{outcome:?}");
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
-        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Abandoned);
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
     }
 
@@ -2528,7 +2525,7 @@ mod tests {
     }
 
     #[test]
-    fn plain_run_trigger_drains_an_open_closeout_before_dispatch() {
+    fn plain_run_trigger_cannot_overtake_a_fresh_open_preflight() {
         use agent_doc_controller::dispatch::RouteCloseoutDrainOutcome as DrainOutcome;
 
         let dir = tempfile::tempdir().unwrap();
@@ -2545,16 +2542,13 @@ mod tests {
             super::route_closeout_drain_effects(super::route_repair_closeout),
         )
         .unwrap();
-        assert_eq!(
-            outcome,
-            DrainOutcome::Recovered("empty_preflight_cancelled".to_string())
-        );
+        assert!(matches!(outcome, DrainOutcome::Blocked(_)), "{outcome:?}");
         assert!(
-            !agent_doc_cycle_state_io::load(&doc)
+            agent_doc_cycle_state_io::load(&doc)
                 .unwrap()
                 .unwrap()
                 .is_open(),
-            "plain Run must terminalize an open cycle before dispatch"
+            "plain Run must preserve the open cycle until its owner closes or cancels it"
         );
     }
 

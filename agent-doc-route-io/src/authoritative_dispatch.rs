@@ -2,6 +2,10 @@
 
 use anyhow::Result;
 use std::path::Path;
+
+fn actor_transport_harness(recorded_harness: &str) -> HarnessConfig {
+    HarnessConfig::from_agent_name(recorded_harness)
+}
 use std::time::Duration;
 
 use agent_doc_controller::dispatch::{
@@ -156,7 +160,7 @@ pub fn route_via_authoritative_actor(
     file_path: &str,
     target_session: &str,
     split_before: bool,
-    harness: &HarnessConfig,
+    requested_harness: &HarnessConfig,
     baseline: Option<&agent_doc_cycle_state_io::CycleState>,
     prompt_context: Option<&PromptBearingRouteContext>,
     dispatch_only: bool,
@@ -209,7 +213,13 @@ pub fn route_via_authoritative_actor(
                 outcome
             );
             if let Some(refreshed) = load_authoritative_actor_binding(
-                tmux, file, session_id, file_path, harness, false, false,
+                tmux,
+                file,
+                session_id,
+                file_path,
+                requested_harness,
+                false,
+                false,
             )? {
                 actor = refreshed;
                 dispatch_pane = actor.record.pane_id.clone();
@@ -293,6 +303,26 @@ pub fn route_via_authoritative_actor(
                 }
             }
         }
+    }
+    // The actor record is the generation-fenced identity of the process in the
+    // owned pane. Desired/frontmatter harness selection is only a switch request;
+    // it must never choose the probe syntax or prompt transport for that pane.
+    let harness = actor_transport_harness(&actor.record.harness);
+    let harness = &harness;
+    if agent_doc_harness::normalize_harness_name(&requested_harness.binary)
+        != agent_doc_harness::normalize_harness_name(&harness.binary)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_authoritative_actor_transport_authority file={} pane={} requested_harness={} actor_harness={} generation={} action=use_actor_record",
+                file.display(),
+                dispatch_pane,
+                requested_harness.binary,
+                harness.binary,
+                actor.record.generation,
+            ),
+        );
     }
     if let Some(context) = prompt_context
         && let Some(queued) = enqueue_exchange_slash_command_for_idle_drain(
@@ -1285,5 +1315,19 @@ pub fn route_via_authoritative_actor(
             )?;
             Ok(admission_pane.unwrap_or(dispatch_pane))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn actor_record_selects_live_pane_transport_harness() {
+        let requested = HarnessConfig::claude();
+        let transport = actor_transport_harness("codex");
+
+        assert_eq!(requested.binary, "claude");
+        assert_eq!(transport.binary, "codex");
     }
 }

@@ -2422,6 +2422,25 @@ pub fn cancel_preflight_cycle(
     effects: &impl RepairIoEffects,
     file: &Path,
 ) -> Result<agent_doc_turn::repair::CancelOutcome> {
+    cancel_preflight_cycle_with_authority(effects, file, false)
+}
+
+/// Reclaim the empty preflight left after the caller has already canceled the
+/// harness run. This authority is intentionally separate from ordinary
+/// closeout recovery: `preflight_started` with no capture is also the normal
+/// state while a model is still generating its first response.
+pub fn cancel_preflight_cycle_after_run_cancel(
+    effects: &impl RepairIoEffects,
+    file: &Path,
+) -> Result<agent_doc_turn::repair::CancelOutcome> {
+    cancel_preflight_cycle_with_authority(effects, file, true)
+}
+
+fn cancel_preflight_cycle_with_authority(
+    effects: &impl RepairIoEffects,
+    file: &Path,
+    run_cancelled: bool,
+) -> Result<agent_doc_turn::repair::CancelOutcome> {
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(agent_doc_turn::repair::CancelOutcome::NoOpenCycle);
     };
@@ -2432,6 +2451,17 @@ pub fn cancel_preflight_cycle(
         return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
     }
     if cycle_has_captured_response_projection(file, &state)? {
+        return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
+    }
+    if !run_cancelled {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "cancel_preflight_cycle_protected file={} cycle_id={} reason=run_cancel_not_proven",
+                file.display(),
+                state.cycle_id,
+            ),
+        );
         return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
     }
     let snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)?;
@@ -2493,26 +2523,43 @@ pub fn repair_stale_preflight_started_cycle(
     let normalized_hashes_match = state.normalized_file_hash.as_deref()
         == Some(current_normalized_file_hash.as_str())
         && state.normalized_snapshot_hash == current_normalized_snapshot_hash;
+    let cycle_capture_exists = cycle_has_captured_response_projection(file, &state)?;
+    let age_secs = agent_doc_turn::closeout_recovery::stale_preflight_cycle_age_secs(
+        state.started_at,
+        state.updated_at,
+        now_secs(),
+    );
 
-    if raw_hashes_match || normalized_hashes_match {
-        if !head_already_matches_current_doc(file, &file_content)?
-            && let Some(marker) = agent_doc_session_check_io::detect_bypassed_response_write(file)?
-        {
-            agent_doc_flow_io::closeout::log_closeout_guard_event(
-                file,
-                agent_doc_flow::types::FlowStage::TerminalGuard,
-                agent_doc_flow::types::FlowOutcome::FailedClosed,
-                agent_doc_turn::closeout_guard::CloseoutGuardReason::ResponsePatchbackUncommitted,
-            );
-            anyhow::bail!(
-                "{} for {}: stale preflight_started cycle `{}` has visible response patchback drift ({marker}) that is not committed in HEAD. Run `agent-doc write --commit {}` or `agent-doc finalize {}` through the normal closeout path; recovery will not report an already-committed cycle while this response is still only in the working tree.",
-                agent_doc_turn::repair::RESPONSE_PATCHBACK_UNCOMMITTED_ERROR,
-                file.display(),
-                state.cycle_id,
-                file.display(),
-                file.display(),
-            );
-        }
+    // A response already present when this cycle was opened is not ambiguous:
+    // matching cycle hashes bind that exact visible patchback to the open
+    // preflight, while HEAD proves it is still uncommitted. Diagnose the normal
+    // closeout requirement immediately, but do not transition the fresh cycle.
+    // The stale-age gate below governs only automatic closure.
+    if (raw_hashes_match || normalized_hashes_match)
+        && !cycle_capture_exists
+        && !head_already_matches_current_doc(file, &file_content)?
+        && let Some(marker) = agent_doc_session_check_io::detect_bypassed_response_write(file)?
+    {
+        agent_doc_flow_io::closeout::log_closeout_guard_event(
+            file,
+            agent_doc_flow::types::FlowStage::TerminalGuard,
+            agent_doc_flow::types::FlowOutcome::FailedClosed,
+            agent_doc_turn::closeout_guard::CloseoutGuardReason::ResponsePatchbackUncommitted,
+        );
+        anyhow::bail!(
+            "{} for {}: stale preflight_started cycle `{}` has visible response patchback drift ({marker}) that is not committed in HEAD. Run `agent-doc write --commit {}` or `agent-doc finalize {}` through the normal closeout path; recovery will not report an already-committed cycle while this response is still only in the working tree.",
+            agent_doc_turn::repair::RESPONSE_PATCHBACK_UNCOMMITTED_ERROR,
+            file.display(),
+            state.cycle_id,
+            file.display(),
+            file.display(),
+        );
+    }
+
+    if (raw_hashes_match || normalized_hashes_match)
+        && !cycle_capture_exists
+        && age_secs >= agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS
+    {
         effects.mark_committed_frontmatter(
             file,
             "repair_preflight_stale_lock",
@@ -2522,9 +2569,10 @@ pub fn repair_stale_preflight_started_cycle(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "repair_preflight_stale_lock file={} cycle_id={}",
+                "repair_preflight_stale_lock file={} cycle_id={} age_secs={}",
                 file.display(),
-                state.cycle_id
+                state.cycle_id,
+                age_secs,
             ),
         );
         agent_doc_flow_io::closeout::log_closeout_guard_event(
@@ -2588,12 +2636,6 @@ pub fn repair_stale_preflight_started_cycle(
         );
     }
 
-    let cycle_capture_exists = cycle_has_captured_response_projection(file, &state)?;
-    let age_secs = agent_doc_turn::closeout_recovery::stale_preflight_cycle_age_secs(
-        state.started_at,
-        state.updated_at,
-        now_secs(),
-    );
     if !cycle_capture_exists && {
         let steering = agent_doc_session_check_io::realtime_steering_since_turn_baseline(file)?;
         steering.is_present()

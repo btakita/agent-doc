@@ -7,17 +7,18 @@ pub const EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR: &str =
     "empty preflight_started cycle has no response capture";
 pub const STALE_EMPTY_PREFLIGHT_TTL_SECS: u64 = 60;
 
-/// Outcome of an explicit run-cancel reclaim.
+/// Outcome of a preflight-cycle reclaim request.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CancelOutcome {
     /// An empty `preflight_started` cycle with no response capture was
-    /// abandoned so the next dispatch can start a fresh cycle immediately.
+    /// abandoned after the caller proved the owning run was canceled, so the
+    /// next dispatch can start a fresh cycle immediately.
     Abandoned,
     /// Nothing to reclaim: no open cycle for this document.
     NoOpenCycle,
-    /// The open cycle is protected: it advanced past `preflight_started` or it
-    /// already owns a response capture, so an explicit cancel must not discard
-    /// it. Reclaim waits for the normal closeout or staleness path instead.
+    /// The open cycle is protected: run cancellation was not proven, it
+    /// advanced past `preflight_started`, or it already owns a response capture.
+    /// Reclaim waits for the normal closeout or staleness path instead.
     Protected,
 }
 

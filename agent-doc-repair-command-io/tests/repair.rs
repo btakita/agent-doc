@@ -197,16 +197,35 @@ mod tests {
     }
 
     #[test]
-    fn cancel_preflight_cycle_abandons_empty_preflight_immediately() {
+    fn cancel_preflight_cycle_protects_empty_preflight_without_run_cancel_proof() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");
         let content = "# Doc\n\n## User\n\nDo the thing\n";
         std::fs::write(&doc, content).unwrap();
-        // Fresh empty preflight_started cycle (no capture), age irrelevant.
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         assert_eq!(
             agent_doc_repair_io::cancel_preflight_cycle(
+                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+                &doc
+            )
+            .unwrap(),
+            CancelOutcome::Protected
+        );
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
+    }
+
+    #[test]
+    fn cancel_preflight_cycle_after_run_cancel_abandons_empty_preflight_immediately() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = "# Doc\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        assert_eq!(
+            agent_doc_repair_io::cancel_preflight_cycle_after_run_cancel(
                 &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
                 &doc
             )
@@ -2096,6 +2115,7 @@ mod tests {
         )
         .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        age_cycle_state(&doc, STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
 
         let repaired = run(&doc).unwrap();
         assert_eq!(
@@ -2106,6 +2126,26 @@ mod tests {
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "repair_preflight_stale_lock");
+    }
+
+    #[test]
+    fn recover_protects_fresh_preflight_started_cycle_when_hashes_match() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = "---\nsession: test\n---\n\nbody\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        assert_eq!(run(&doc).unwrap(), RepairOutcome::Noop);
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
+        assert_eq!(state.last_event, "preflight_started");
     }
 
     #[test]
@@ -2131,6 +2171,7 @@ mod tests {
         )
         .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        age_cycle_state(&doc, STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
 
         let repaired = run(&doc).unwrap();
         assert_eq!(repaired, RepairOutcome::TemplateNormalized);
@@ -2473,6 +2514,7 @@ mod tests {
         init_git_repo(root, &doc);
         let state =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        age_cycle_state(&doc, STALE_EMPTY_PREFLIGHT_TTL_SECS + 1);
 
         // Only the queue churned (halt: auto stripped + queue_active cleared +
         // body drained). The exchange/response is byte-identical. Commit it so

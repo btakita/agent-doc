@@ -41,7 +41,7 @@ pub trait CloseoutEffects {
         self.enforce_clean_closeout(file)
     }
 
-    fn cancel_preflight_cycle(&self, file: &Path) -> Result<()>;
+    fn cancel_preflight_cycle(&self, file: &Path) -> Result<agent_doc_turn::repair::CancelOutcome>;
 
     fn detect_jb_cache_conflict_cancel_recoverable(&self, file: &Path) -> Result<bool>;
 
@@ -1711,11 +1711,25 @@ pub fn apply_closeout_recovery(
     match state {
         CloseoutRecoveryState::Clean => Ok(RecoveryApplication::NothingToDo),
         CloseoutRecoveryState::OpenEmptyPreflight => {
-            effects.cancel_preflight_cycle(file)?;
-            Ok(RecoveryApplication::Applied {
-                state,
-                action: "abandoned the empty preflight cycle".to_string(),
-            })
+            match effects.cancel_preflight_cycle(file)? {
+                agent_doc_turn::repair::CancelOutcome::Abandoned => {
+                    Ok(RecoveryApplication::Applied {
+                        state,
+                        action: "abandoned the empty preflight cycle".to_string(),
+                    })
+                }
+                agent_doc_turn::repair::CancelOutcome::NoOpenCycle => {
+                    Ok(RecoveryApplication::NothingToDo)
+                }
+                agent_doc_turn::repair::CancelOutcome::Protected => {
+                    Ok(RecoveryApplication::NotApplied {
+                        state,
+                        reason: "empty preflight may still belong to a generating run; cancellation was not proven".to_string(),
+                        recommended: "cancel the harness run first, then retry closeout recovery"
+                            .to_string(),
+                    })
+                }
+            }
         }
         CloseoutRecoveryState::BoundaryOnlyDrift => {
             effects.commit(file)?;

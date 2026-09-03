@@ -1184,6 +1184,35 @@ fn write_codex_owner_session(root: &Path, doc: &Path) {
     agent_doc_session_registry_io::save_in(root, &registry).unwrap();
 }
 
+fn write_codex_actor_record(root: &Path, doc: &Path) {
+    let document_id = doc.canonicalize().unwrap().to_string_lossy().to_string();
+    let actor = agent_doc_controller::actor::ActorRecord {
+        document_id,
+        session_id: "session-recursive".to_string(),
+        generation: 1,
+        pane_id: "%77".to_string(),
+        window_id: "@7".to_string(),
+        harness: "codex".to_string(),
+        state: agent_doc_controller::actor::ActorState::Busy,
+        last_transition: agent_doc_controller::actor::ActorLastTransition {
+            caller: "test".to_string(),
+            reason: "owner_session".to_string(),
+            timestamp: 1,
+            prior_generation: 0,
+            new_generation: 1,
+        },
+    };
+    agent_doc_controller_io::project_controller::store_actor_record(root, Some(0), &actor).unwrap();
+    agent_doc_preflight_io::gc::record_auto_gc_run(
+        root,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    )
+    .unwrap();
+}
+
 fn save_active_queue_turn_scope(doc: &Path, id: &str, exchange_tail_floor: usize) {
     let scope = TurnScope::for_driver_with_exchange_tail(
         Some(Address::node("queue", 0, &format!("queue:0:{id}:0"))),
@@ -1340,6 +1369,7 @@ fn preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit() 
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
     write_codex_owner_session(tmp.path(), &doc);
+    write_codex_actor_record(tmp.path(), &doc);
     save_active_queue_turn_scope(&doc, "active", 1);
     cycle_state::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
 

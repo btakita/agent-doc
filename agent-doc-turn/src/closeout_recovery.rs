@@ -403,7 +403,7 @@ pub fn closeout_recovery_command(input: CloseoutRecoveryCommandInput) -> Option<
             format!("`agent-doc commit {f}` to update the nested parent submodule pointer")
         }
         CloseoutRecoveryState::OpenEmptyPreflight => format!(
-            "`agent-doc cancel {f}` — an empty diagnostic preflight cycle with no captured response; abandoning it leaves no document drift"
+            "`agent-doc session cancel-turn {f}` — first interrupt the owning harness run; the cancellation receipt may then abandon its empty diagnostic preflight without document drift"
         ),
         CloseoutRecoveryState::QueueMetadataDrift => format!(
             "`agent-doc commit {f}` (queue / `queue_active` / status metadata only — user/response content is unchanged, no response body to write)"
@@ -1189,7 +1189,7 @@ mod tests {
             (
                 OpenEmptyPreflight,
                 "open_empty_preflight",
-                "agent-doc cancel",
+                "agent-doc session cancel-turn",
             ),
             (
                 QueueMetadataDrift,

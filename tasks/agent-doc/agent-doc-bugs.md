@@ -119,6 +119,21 @@ Fixed the shared Agent Doc defects and the affected live state.
 - I did not patch, resubmit, recycle, or force contracts.md. Its controller-owned closeout remained authoritative, and the @tmstorm reviewer request remains queued and undrained.
 
 Verification: all affected crate suites pass, repository-wide `make check` passes, and `make install` rebuilt/installed the binary, native library, JetBrains package, and VS Code package. Runtime commit `143e73cff` and workspace pointer commit `ab3aa2b29` are pushed. GitHub Actions run `33654305421` was still running `make check` and `tmux-ci` without a surfaced failure at closeout.
+
+### Re: Agent Doc closeout authority and response thrash — gpt-5
+
+Fixed and shipped agent-doc 0.35.322.
+
+- Route now uses the generation-fenced live actor record as the transport authority. Desired/frontmatter harness projections can request a switch but cannot cause Claude, Codex, or OpenCode prompt/probe syntax to be sent to a different live child.
+- Every successful initial spawn, recycle adoption, and harness switch now writes the normalized actual child identity back to that record. This closes the observed `default`-record/Claude-child wedge and restores the correct shared `input_required` path used by JetBrains prompts.
+- Generic closeout recovery no longer abandons a fresh empty preflight while its response may still be generating. Matching file hashes cannot bypass the stale-age fence, and same-owner reentry is allowed only when the current pane and harness match the actor record.
+- Completed free-text queue strikes settle without waiting on an advisory editor save, preventing an answered head from being redispatched. Together, these changes stop the abandon/regenerate response thrash seen at the end of `contracts.md`.
+- The Compact Exchange scaffold repair remains fail-closed for ambiguous content; this document's typed queue is empty and its exchange parses cleanly now, so no binary conversation scaffold remains embedded in `agent:queue`.
+- `infra.md` is clean with its completed heads consumed. In `contracts.md`, the stale answered head was struck and committed and its response landed once; the remaining missing-response status belongs to the newly entered prompt, which remains intact for its own cycle.
+
+The verified 0.35.322 binary, native library, JetBrains 0.2.372 package, and VS Code package are installed. IDEA 2026.1 must be restarted once to activate the installed plugin generation; safe supervisor/controller recycling is already requested and will occur at an idle boundary without interrupting live work.
+
+Verification: 9,188 tests passed, release projection and documentation audit passed, and all formal model checks passed. Source commit `e4f6d1eef` and workspace commit `9ebc736fb` are pushed. GitHub CI run `33704789115` is in progress with no surfaced failure at closeout.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

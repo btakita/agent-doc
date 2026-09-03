@@ -1,5 +1,7 @@
 ---
 agent_doc_session: a94c7d23-e171-482f-93f4-530b7f2c436f
+resume:
+  codex: 01a05da3-e4c6-7713-bc93-024c04bd6d7a
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -14,6 +16,7 @@ prompt_presets:
   '#next-steps': ''
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: start
 ---
 
 ## Status
@@ -185,19 +188,57 @@ Git:
 The fix remains fail-closed: authority-only settlement applies solely to committed `free_text_strike` intents with complete response and queue-delta proof. Other divergence still requires normal editor/disk convergence.
 
 The Chromium Windows packages are published in [v0.3.1](https://github.com/btakita/chromium-bridge/releases/tag/v0.3.1). Its agent-doc response is safely retained in editor/controller authority, but IntelliJ 0.2.371 has not saved it to disk. Plugin 0.2.372 is installed; please restart/reload IntelliJ, then tell me and I’ll complete the pending commit check.
+
+### Re: Fix contracts.md Run Agent Doc stall — gpt-5
+
+Fixed and released agent-doc 0.35.321.
+
+Runtime recovery completed first:
+
+- `contracts.md`: repaired the retained response, removed only the already-answered free-text queue residue (`What is the PR review + merge order?`) through the binary-owned component path, committed it, and proved the closeout with `session-check`. The next runnable queue item then started and completed. After the release install, the stale supervisor was replaced in continue mode; the session is now generation 13, `alive-idle`, `prompt_ready=true`, with controller and supervisor both mapped to the installed binary.
+- `backend.md`: cleared the stale runtime state and interrupted-clear residue. `session-check` repaired its historical committed-capture snapshot drift and now reports the latest cycle committed. Its one remaining queue head is intentionally deferred for operator proof rather than a runnable item being stranded. Controller and supervisor freshness both match the installed binary.
+
+The root cause was an explicit `PassThroughPlainTrigger` exception in route admission. An editor `Run Agent Doc` could submit a new bare trigger while the prior cycle still owned an unresolved response/component closeout. The new preflight then correctly refused admission, leaving the user-facing session looking wedged; repeated observation could not repair the ordering violation.
+
+The fix removes that exception. Every routed trigger now crosses the same closeout boundary before tmux submission:
+
+- no open cycle → dispatch normally;
+- open cycle → perform the existing single recovery attempt, then await the controller's closeout projection edge;
+- terminal/superseded cycle → dispatch;
+- unresolved cycle after the bounded wait → fail closed without injecting another turn.
+
+Plain triggers remain plain after admission: one tmux text-plus-submit operation, no prompt-derived queue mutation, and no pane-capture or dispatch-start polling.
+
+Architecture contract:
+
+- Invariant: route cannot report a new Run as dispatched while a prior response or retained component write remains open.
+- Policy owner: `agent-doc-controller` classifies the closeout gate; `agent-doc-route-io` performs only the classified effects.
+- Reactive topology: document/cycle authority → controller closeout projection → terminal state edge → route injection → dispatch receipt.
+- Imperative audit: the existing one-shot recovery attempt remains; long-lived progress is controller-state-driven. No new polling loop, SQLite arbitration path, side channel, or unsafe disk-authority fallback was added.
+
+Verification passed:
+
+- controller closeout-policy regression;
+- routed-I/O plain-Run/open-cycle regression;
+- full `make check`;
+- prior CI and tmux-CI inspection were green;
+- exact committed checkout installed successfully, including editor packages, followed by library reload and controller recycle.
+
+Published `agent-doc` commit `2ae58cba8` and tag `v0.35.321`; CI, Release, and PyPI workflows were observed after dispatch without waiting on them. Concurrent uncommitted closeout/repair work that appeared later in the shared submodule was preserved and excluded from this release.
 <!-- agent:boundary:28f7ea75 -->
 <!-- /agent:exchange -->
 ###
 
 ## Queue
 
-<!-- agent:queue go -->
-- Please add a windows package that can be installed.
+<!-- agent:queue priority -->
+- 🚧 do [#fixcontractsrun]
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
+- [ ] 🚧 [#fixcontractsrun] Fix contracts.md Run Agent Doc stall
 <!-- /agent:backlog -->
 
 ## Review

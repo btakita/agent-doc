@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a068ac-ce18-7510-95e9-161237197ac8
+  codex: 01a06968-fa62-7f60-8995-9bed0ae35544
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -134,6 +134,32 @@ Fixed [backend.md](/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/back
 - Returned document ownership to Claude pane `%25`.
 
 Agent Doc did see the item; `[operator-verify]` intentionally prevented automatic execution until your explicit authorization.
+❯ 🚧 Fix Run Agent Doc on backend.md issue. I deleted the agent:queue opening tag then readded it (not sure if that is the cause):
+❯ `refusing to route /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md through pane %0 because it now runs another document; tmux focus was preserved`
+
+### Re: backend.md pane routing and auto-sync — gpt-5
+
+Fixed both failures behind the backend.md behavior.
+
+The deleted/re-added agent:queue opening tag could have exposed the timing, but it was not the root cause. Route and exact-visible sync trusted stale actor/registry/layout projections for pane %0 even though that pane's live process owned this bugs document. After provisioning/moving the correct backend pane, sync could also leave its old window ID in the actor and registry, which made later editor-to-tmux focus synchronization refuse the otherwise-correct pane.
+
+The ownership rule now treats the live pane process as the final guard: an alive pane running another agent-doc document is never reusable from a stale projection. Layout observation likewise reports that physical owner ahead of stale structural-effect or actor rows. After every structural sync, the effect publishes each moved/provisioned pane's live tmux window back to both the document actor and durable registry before returning convergence.
+
+Live recovery and verification completed:
+
+- %0 remains attached to tasks/agent-doc/agent-doc-bugs.md; it was not commandeered.
+- backend.md was recovered into %78 in @3 (agent-doc).
+- Backend actor, registry, and tmux now all agree on %78 / @3.
+- agent-doc session doctor reports no issues.
+- agent-doc focus for backend.md selects %78.
+- The isolated tmux rebind regression passes.
+- Full make check passed all 9,195 tests plus docs and model checks.
+- make install installed the repaired CLI/library and editor packages.
+- Private-name hygiene scan was clean; latest remote CI on main is green.
+
+The Project Controller remains the single layout-policy owner. The transition is now: observe desired editor layout → reject any foreign live process owner → reconcile/provision without disturbing that owner → publish physical pane/window receipts → allow focus only from the converged projection. No polling or second policy owner was added.
+
+Code commit: 35129fc89 (fix: reject stale tmux pane projections).
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -143,6 +169,7 @@ Agent Doc did see the item; `[operator-verify]` intentionally prevented automati
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 do [#fixrunbackend]
 Please fix agent-doc causes of turn closeout not completing in backend.md. I was typing in the queue while the turn was closing:
 ```
   Verified by reproducing in a clean worktree at 628bf4ac with the submodule at its own pin 2cd516e, then running the
@@ -166,6 +193,8 @@ Please fix agent-doc causes of turn closeout not completing in backend.md. I was
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
+- [ ] 🚧 [#fixrunbackend] Fix Run Agent Doc on backend.md issue. I deleted the agent:queue opening tag then readded it (not sure if that is the cause):
+`refusing to route /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md through pane %0 because it now runs another document; tmux focus was preserved`
 <!-- /agent:backlog -->
 
 ## Review

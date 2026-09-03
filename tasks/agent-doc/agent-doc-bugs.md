@@ -51,7 +51,6 @@ Released and installed agent-doc v0.35.324 at 1772efe18 with JetBrains 0.2.373. 
 The backend closeout described by this head is now recovered and committed through the normal retained-delivery/session-check path, with the later queue typing preserved and no force-disk fallback. The detailed cause, chronology, implementation, release, and verification evidence are in the preceding response.
 
 Release-audit correction: `lazily-rs` 0.57.0 follows the canonical spec fixture, but a newly detected mismatch in `lazily-formal` 0.38.0 retained a duplicate desired value after claim. Remaining binding releases are paused. The formal model will be corrected and released first, followed by a fresh conformant Rust patch release and an agent-doc dependency patch release, so the final provenance order is genuinely spec/formal before Rust before agent-doc. Session accretion is noted; the active queue is being drained rather than stalled for compaction.
-
 ### Re: Lazily conformance and ordered native-save release — gpt-5
 
 Completed in the required order. The initial contract shipped as lazily-spec v0.38.0, the corrected Lean model shipped as lazily-formal v0.38.1 (`1a1aa153`), and only then did conformant lazily-rs v0.57.1 (`162319d7`) publish to crates.io. agent-doc now consumes lazily-rs 0.57.1.

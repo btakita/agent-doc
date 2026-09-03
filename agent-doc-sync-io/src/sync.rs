@@ -395,6 +395,20 @@ pub fn repair_pane_window_binding(file: &Path) -> Result<Option<String>> {
 }
 
 fn refresh_drifted_pane_window_binding(tmux: &Tmux, file: &Path) -> Result<Option<String>> {
+    refresh_drifted_pane_window_binding_with_origin(
+        tmux,
+        file,
+        "session-doctor",
+        "live_window_rebind",
+    )
+}
+
+fn refresh_drifted_pane_window_binding_with_origin(
+    tmux: &Tmux,
+    file: &Path,
+    caller: &str,
+    reason: &str,
+) -> Result<Option<String>> {
     let base_dir = match agent_doc_fs::find_project_root_canonical(file) {
         Some(root) => root,
         None => return Ok(None),
@@ -434,8 +448,8 @@ fn refresh_drifted_pane_window_binding(tmux: &Tmux, file: &Path) -> Result<Optio
             &record.session_id,
             &record.pane_id,
             &live_window,
-            "session-doctor",
-            "live_window_rebind",
+            caller,
+            reason,
         )?;
     }
     if registry_drifted {
@@ -449,6 +463,39 @@ fn refresh_drifted_pane_window_binding(tmux: &Tmux, file: &Path) -> Result<Optio
         recorded,
         live_window,
     )))
+}
+
+/// Publish the physical pane window observed after layout reconciliation.
+///
+/// tmux preserves a pane id while `join-pane`, `move-pane`, and `break-pane`
+/// change its window. The structural effect therefore has to refresh the actor
+/// and registry projections before returning success; otherwise focus sync sees
+/// a permanently stale window even though the pane is visibly in place.
+fn refresh_synced_pane_window_bindings(
+    tmux: &Tmux,
+    file_panes: &[(PathBuf, String)],
+) -> Result<Vec<String>> {
+    let mut seen = std::collections::HashSet::new();
+    let mut notes = Vec::new();
+    for (file, _) in file_panes {
+        if !seen.insert(file.clone()) {
+            continue;
+        }
+        if let Some(note) = refresh_drifted_pane_window_binding_with_origin(
+            tmux,
+            file,
+            "sync",
+            "post_layout_live_window_rebind",
+        )? {
+            sync_log(&format!(
+                "post_sync_window_binding_rebound file={} note={}",
+                file.display(),
+                note
+            ));
+            notes.push(note);
+        }
+    }
+    Ok(notes)
 }
 
 /// The window the durable registry records for `pane`, if it has an entry.
@@ -943,10 +990,37 @@ fn load_live_authoritative_actor_record_for_file_uncached(
     )
     .ok()
     .flatten()?;
-    if !tmux.pane_alive(&record.pane_id) {
+    if !pane_projection_is_reusable_for_document(tmux, &record.pane_id, file) {
         return None;
     }
     Some(record)
+}
+
+fn pane_projection_reuse_allowed(pane_alive: bool, pane_runs_other_document: bool) -> bool {
+    pane_alive && !pane_runs_other_document
+}
+
+/// Decide whether a controller/registry projection may be reused as physical
+/// pane ownership for `file`.
+///
+/// A live tmux id is not sufficient: pane ids are server-global and a stale
+/// actor or registry projection can outlive the document session that used to
+/// own it. Reusing that projection would relabel another document's live pane,
+/// make the layout observer report false convergence, and then make editor
+/// routing fail at the final foreign-owner guard. Physical process ownership is
+/// therefore the freshness witness at every exact-visible reuse boundary.
+fn pane_projection_is_reusable_for_document(tmux: &Tmux, pane_id: &str, file: &Path) -> bool {
+    let pane_alive = tmux.pane_alive(pane_id);
+    let pane_runs_other_document =
+        pane_alive && pane_runs_other_document_owner(tmux, pane_id, file);
+    if pane_runs_other_document {
+        sync_log(&format!(
+            "stale_pane_projection_rejected file={} pane={} reason=foreign_document_owner",
+            file.display(),
+            pane_id,
+        ));
+    }
+    pane_projection_reuse_allowed(pane_alive, pane_runs_other_document)
 }
 
 /// `#ownershipbindingfirst`: resolve the actor record from the document path
@@ -1127,7 +1201,9 @@ fn resolve_actor_pane_after_content(
         None => Ok(None),
     };
     Ok(match observed {
-        Ok(Some(binding)) if tmux.pane_alive(&binding.pane_id) => {
+        Ok(Some(binding))
+            if pane_projection_is_reusable_for_document(tmux, &binding.pane_id, file_path) =>
+        {
             sync_log(&format!(
                 "exact_visible_cross_root_actor_projection_reused file={} pane={} generation={}",
                 file_path.display(),
@@ -3147,7 +3223,7 @@ fn run_with_options_internal_at_root(
             // through to the full fail-closed proof path below.
             if exact_visible_projection
                 && let Some(binding) = reactive_actor_bindings.get(file_path)
-                && tmux.pane_alive(&binding.pane_id)
+                && pane_projection_is_reusable_for_document(tmux, &binding.pane_id, file_path)
             {
                 sync_log(&format!(
                     "exact_visible_actor_projection_reused file={} pane={} generation={}",
@@ -3193,7 +3269,13 @@ fn run_with_options_internal_at_root(
                                 .flatten(),
                             Err(_) => None,
                         })
-                        .filter(|binding| tmux.pane_alive(&binding.pane_id))
+                        .filter(|binding| {
+                            pane_projection_is_reusable_for_document(
+                                tmux,
+                                &binding.pane_id,
+                                file_path,
+                            )
+                        })
                         .map(|binding| {
                             (
                                 binding.session_id,
@@ -3209,7 +3291,9 @@ fn run_with_options_internal_at_root(
                     )
                     .ok()
                     .flatten()
-                    .filter(|entry| tmux.pane_alive(&entry.pane))
+                    .filter(|entry| {
+                        pane_projection_is_reusable_for_document(tmux, &entry.pane, file_path)
+                    })
                     .map(|entry| (entry.session_id, entry.pane, 0, "registry"))
                 };
                 if let Some((session_id, pane_id, generation, source)) = reused {
@@ -3248,7 +3332,13 @@ fn run_with_options_internal_at_root(
                     None => Ok(None),
                 };
                 match observed {
-                    Ok(Some(binding)) if tmux.pane_alive(&binding.pane_id) => {
+                    Ok(Some(binding))
+                        if pane_projection_is_reusable_for_document(
+                            tmux,
+                            &binding.pane_id,
+                            file_path,
+                        ) =>
+                    {
                         sync_log(&format!(
                             "safe_passive_cross_root_actor_projection_reused file={} pane={} generation={}",
                             file_path.display(),
@@ -3441,7 +3531,11 @@ fn run_with_options_internal_at_root(
                 {
                     crate::runtime_effects()?
                         .ensure_cross_root_document_pane(&owner_root, file_path)
-                        .map(|pane| pane.filter(|pane| tmux.pane_alive(pane)))
+                        .map(|pane| {
+                            pane.filter(|pane| {
+                                pane_projection_is_reusable_for_document(tmux, pane, file_path)
+                            })
+                        })
                 } else {
                     Ok(None)
                 };
@@ -4543,6 +4637,9 @@ fn run_with_options_internal_at_root(
         &result.file_panes,
         &proof_cache,
     );
+    for note in refresh_synced_pane_window_bindings(tmux, &result.file_panes)? {
+        eprintln!("[sync] {}", note);
+    }
 
     // Post-sync: validate session state (report only, no kill).
     // Disabled --fix because auto_start with context_session intentionally places
@@ -6076,6 +6173,16 @@ mod tests {
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
     use tmux_router::IsolatedTmux;
+
+    #[test]
+    fn exact_visible_projection_rejects_live_pane_owned_by_another_document() {
+        assert!(pane_projection_reuse_allowed(true, false));
+        assert!(!pane_projection_reuse_allowed(false, false));
+        assert!(
+            !pane_projection_reuse_allowed(true, true),
+            "pane liveness must not let a stale actor or registry projection relabel a foreign document owner"
+        );
+    }
 
     #[test]
     fn destructive_repair_throttle_roundtrips_in_state_db_without_stamp() {
@@ -10326,14 +10433,24 @@ mod tests {
             "seed_stale_binding",
         )
         .unwrap();
+        sessions::register_full_with_cwd_in(
+            root,
+            "bound-session",
+            &pane,
+            &file_key,
+            pane_pid_from_tmux(&iso, &pane).unwrap(),
+            STALE_WINDOW,
+            &root.to_string_lossy(),
+        )
+        .unwrap();
         assert_ne!(
             live_window, STALE_WINDOW,
             "fixture must actually be drifted"
         );
 
-        let note = refresh_drifted_pane_window_binding(&iso, &doc)
-            .unwrap()
-            .expect("a drifted binding must be repaired");
+        let notes = refresh_synced_pane_window_bindings(&iso, &[(doc.clone(), pane.clone())])
+            .expect("post-sync receipt must repair a drifted binding");
+        let note = notes.first().expect("a drifted binding must be repaired");
         assert!(
             note.contains(STALE_WINDOW),
             "the note names the stale window: {note}"
@@ -10345,6 +10462,11 @@ mod tests {
             .expect("record survives the rebind");
         assert_eq!(record.window_id, live_window);
         assert_eq!(record.pane_id, pane, "the pane binding itself is unchanged");
+        assert_eq!(
+            registry_window_for_pane(root, &pane).unwrap().as_deref(),
+            Some(live_window.as_str()),
+            "the durable registry follows the same physical observation"
+        );
 
         // Idempotent: a converged binding is not a repair, so a second pass
         // reports nothing rather than rewriting on every doctor run.

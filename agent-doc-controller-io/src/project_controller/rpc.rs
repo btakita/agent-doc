@@ -17623,6 +17623,30 @@ fn layout_sync_state_actual_document_for_pane(
     effect_file_panes: &[(String, String)],
     pane_id: &str,
 ) -> String {
+    let process_owner = live_pane_process_owner_document(tmux, pane_id, project_root);
+    layout_sync_state_actual_document_from_observations(
+        project_root,
+        process_owner.as_deref(),
+        actor_store,
+        effect_file_panes,
+        pane_id,
+    )
+}
+
+fn layout_sync_state_actual_document_from_observations(
+    project_root: &Path,
+    process_owner: Option<&Path>,
+    actor_store: &BTreeMap<String, agent_doc_controller::actor::ActorRecord>,
+    effect_file_panes: &[(String, String)],
+    pane_id: &str,
+) -> String {
+    // Structural receipts and actor bindings are projections of earlier
+    // effects. A live route-owned process is the physical observation and must
+    // win when those projections still name a pane that another document has
+    // since claimed, including a document owned by a different project root.
+    if let Some(process_owner) = process_owner {
+        return canonical_layout_document_id(project_root, &process_owner.to_string_lossy());
+    }
     if let Some((file, _)) = effect_file_panes
         .iter()
         .find(|(_, assigned_pane)| assigned_pane == pane_id)
@@ -17635,7 +17659,7 @@ fn layout_sync_state_actual_document_for_pane(
     {
         return canonical_layout_document_id(project_root, &record.document_id);
     }
-    active_pane_process_owner_document(tmux, pane_id, project_root).unwrap_or_default()
+    String::new()
 }
 
 #[derive(Default)]
@@ -20036,6 +20060,22 @@ fn active_pane_process_owner_document(
     pane_id: &str,
     project_root: &Path,
 ) -> Option<String> {
+    let canonical = live_pane_process_owner_document(tmux, pane_id, project_root)?;
+    let owner_root = agent_doc_project_root_io::project_root_containing(&canonical)?;
+    if owner_root != project_root {
+        return None;
+    }
+    Some(agent_doc_session_actor_io::canonical_document_id_in(
+        project_root,
+        &canonical.to_string_lossy(),
+    ))
+}
+
+fn live_pane_process_owner_document(
+    tmux: &tmux_router::Tmux,
+    pane_id: &str,
+    fallback_root: &Path,
+) -> Option<PathBuf> {
     if !agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(tmux, pane_id) {
         return None;
     }
@@ -20046,17 +20086,11 @@ fn active_pane_process_owner_document(
     let candidate = if raw_path.is_absolute() {
         raw_path
     } else {
-        project_root.join(raw_path)
+        agent_doc_tmux_io::pane_current_path(tmux, pane_id)
+            .unwrap_or_else(|| fallback_root.to_path_buf())
+            .join(raw_path)
     };
-    let canonical = candidate.canonicalize().ok()?;
-    let owner_root = agent_doc_project_root_io::project_root_containing(&canonical)?;
-    if owner_root != project_root {
-        return None;
-    }
-    Some(agent_doc_session_actor_io::canonical_document_id_in(
-        project_root,
-        &canonical.to_string_lossy(),
-    ))
+    candidate.canonicalize().ok()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24575,6 +24609,25 @@ mod tests {
                 "%2",
             ),
             "/repo/nested/tasks/secondary.md"
+        );
+    }
+
+    #[test]
+    fn tmux_layout_observation_prefers_live_process_owner_over_stale_effect_assignment() {
+        let project_root = Path::new("/repo");
+        let actor_store = BTreeMap::new();
+        let effect_file_panes = vec![("/repo/tasks/backend.md".to_string(), "%0".to_string())];
+
+        assert_eq!(
+            layout_sync_state_actual_document_from_observations(
+                project_root,
+                Some(Path::new("/other/tasks/agent-doc-bugs.md")),
+                &actor_store,
+                &effect_file_panes,
+                "%0",
+            ),
+            "/other/tasks/agent-doc-bugs.md",
+            "a stale structural assignment must not make a foreign live pane look converged",
         );
     }
 

@@ -2220,9 +2220,19 @@ struct ControllerDocumentGraphs {
     /// are Sources; this one Computed is the decision plane.
     retained_transition_state: lazily::ThreadSafeComputedMap<String, RetainedTransitionState>,
     /// The effect-bearing projection of [`Self::retained_transition_state`].
-    /// Waiting and conflict states deliberately project no effect.
+    /// Conflict states deliberately project no effect. Awaiting editor/disk
+    /// convergence projects a latest-durable native-save intent.
     retained_transition_effect:
         lazily::ThreadSafeComputedMap<String, Option<RetainedTransitionEffect>>,
+    /// Per-document latest-value egress state for native editor persistence.
+    /// The controller graph owns policy and Lazily owns supersession, one-flight
+    /// claiming, retry retention, the durable frontier, and generation fencing.
+    retained_persistence:
+        lazily::ThreadSafeLatestDurableProjection<String, RetainedPersistenceProjection>,
+    /// Non-authoritative I/O driver for claimed persistence envelopes. It
+    /// prevents an editor update RPC from synchronously waiting on a save that
+    /// is correctly queued behind that same update in the editor lane.
+    retained_persistence_sender: Arc<OnceLock<std::sync::mpsc::Sender<RetainedPersistenceCommand>>>,
     /// Controller-local record of the exact successfully published effect
     /// frontier. Delivery version and controller generation are part of the
     /// typed identity, so a changed frontier can retry while an unchanged one
@@ -2498,6 +2508,7 @@ fn project_document_turn_authority(
 /// decide, projection applies. It holds a [`std::sync::Weak`] because the
 /// runtime owns the graph that owns the effect that calls it; a strong handle
 /// would be a reference cycle that never drops the controller.
+#[derive(Clone)]
 struct RetainedWriteSettleSink {
     project_root: PathBuf,
     runtime: std::sync::Weak<ControllerRuntime>,
@@ -2517,6 +2528,21 @@ struct RetainedDeliveryObservation {
 struct RetainedDeliveryActivation {
     intent_id: String,
     controller_generation: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RetainedPersistenceProjection {
+    file: PathBuf,
+    content_hash: String,
+    content_len: usize,
+    delivery_version: u64,
+    controller_generation: u64,
+}
+
+#[derive(Clone, Debug)]
+struct RetainedPersistenceCommand {
+    document_hash: String,
+    envelope: lazily::LatestDurableEnvelope<String, RetainedPersistenceProjection>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2586,6 +2612,7 @@ enum RetainedTransitionState {
     AwaitingConvergence {
         intent_id: String,
         delivery_version: u64,
+        persistence: RetainedPersistenceProjection,
     },
     ApplyTarget(RetainedTransitionProjection),
     TargetVisible {
@@ -2608,6 +2635,7 @@ enum RetainedTransitionState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum RetainedTransitionEffect {
     ObserveCurrentDelivery(RetainedDeliveryActivation),
+    PersistLatest(RetainedPersistenceProjection),
     ApplyTarget(RetainedTransitionProjection),
     ResumeCloseout(RetainedResumeSignal),
     SettleMaterializedCapture(RetainedResumeSignal),
@@ -2619,6 +2647,9 @@ impl RetainedTransitionState {
             Self::AwaitingDelivery(activation) => Some(
                 RetainedTransitionEffect::ObserveCurrentDelivery(activation.clone()),
             ),
+            Self::AwaitingConvergence { persistence, .. } => {
+                Some(RetainedTransitionEffect::PersistLatest(persistence.clone()))
+            }
             Self::ApplyTarget(transition) => {
                 Some(RetainedTransitionEffect::ApplyTarget(transition.clone()))
             }
@@ -2632,7 +2663,6 @@ impl RetainedTransitionState {
             | Self::Idle
             | Self::AwaitingController { .. }
             | Self::AwaitingLiveEditor { .. }
-            | Self::AwaitingConvergence { .. }
             | Self::TargetVisible { .. }
             | Self::Conflict { .. } => None,
         }
@@ -2773,6 +2803,67 @@ impl RetainedWriteSettleSink {
                     ),
                 );
                 None
+            }
+        }
+    }
+
+    /// Deliver the current canonical editor revision to the native save sink.
+    /// The editor owns physical FIFO ordering; this sink reports only an exact
+    /// save-and-disk receipt as applied so Lazily can retain every other result.
+    fn persist_current_delivery(
+        &self,
+        document_hash: &str,
+        projection: &RetainedPersistenceProjection,
+    ) -> bool {
+        let outcome = agent_doc_crdt_relay_io::request_native_save_for_current_projection(
+            &projection.file,
+            &projection.content_hash,
+            projection.content_len,
+        );
+        match outcome {
+            Ok(outcome) if outcome.notified > 0 => {
+                agent_doc_ops_log_io::log_op(
+                    &projection.file,
+                    &format!(
+                        "retained_persistence_applied document_hash={document_hash} generation={} epoch={} content_hash={} content_len={} routes_found={} routes_applied={}",
+                        projection.controller_generation,
+                        projection.delivery_version,
+                        projection.content_hash,
+                        projection.content_len,
+                        outcome.found,
+                        outcome.notified,
+                    ),
+                );
+                true
+            }
+            Ok(outcome) => {
+                agent_doc_ops_log_io::log_op(
+                    &projection.file,
+                    &format!(
+                        "retained_persistence_retryable document_hash={document_hash} generation={} epoch={} content_hash={} content_len={} routes_found={} routes_applied={} build_mismatches={} reason=no_exact_native_save_receipt",
+                        projection.controller_generation,
+                        projection.delivery_version,
+                        projection.content_hash,
+                        projection.content_len,
+                        outcome.found,
+                        outcome.notified,
+                        outcome.build_mismatches.len(),
+                    ),
+                );
+                false
+            }
+            Err(error) => {
+                agent_doc_ops_log_io::log_op(
+                    &projection.file,
+                    &format!(
+                        "retained_persistence_retryable document_hash={document_hash} generation={} epoch={} content_hash={} content_len={} reason=native_save_request_failed error={error:#}",
+                        projection.controller_generation,
+                        projection.delivery_version,
+                        projection.content_hash,
+                        projection.content_len,
+                    ),
+                );
+                false
             }
         }
     }
@@ -3105,6 +3196,8 @@ impl ControllerDocumentGraphs {
             verdict: lazily::ThreadSafeComputedMap::new(&ctx),
             retained_transition_state: lazily::ThreadSafeComputedMap::new(&ctx),
             retained_transition_effect: lazily::ThreadSafeComputedMap::new(&ctx),
+            retained_persistence: lazily::ThreadSafeLatestDurableProjection::new(&ctx, 1),
+            retained_persistence_sender: Arc::new(OnceLock::new()),
             retained_transition_published_frontier: lazily::ThreadSafeSourceMap::new(&ctx),
             compact_resume: lazily::ThreadSafeComputedMap::new(&ctx),
             compact_resume_applied: lazily::ThreadSafeSourceMap::new(&ctx),
@@ -3136,10 +3229,38 @@ impl ControllerDocumentGraphs {
     /// Bind the settle effects' durable sink. Called once, right after the
     /// runtime enters its `Arc`.
     fn install_settle_sink(&self, project_root: PathBuf, runtime: &Arc<ControllerRuntime>) {
-        let _ = self.settle_sink.set(RetainedWriteSettleSink {
+        let sink = RetainedWriteSettleSink {
             project_root,
             runtime: Arc::downgrade(runtime),
-        });
+        };
+        let _ = self.settle_sink.set(sink.clone());
+        if self.retained_persistence_sender.get().is_none() {
+            let (sender, receiver) = std::sync::mpsc::channel::<RetainedPersistenceCommand>();
+            let worker_sink = sink.clone();
+            match std::thread::Builder::new()
+                .name("agent-doc-retained-persistence".to_string())
+                .spawn(move || {
+                    while let Ok(command) = receiver.recv() {
+                        let applied = worker_sink.persist_current_delivery(
+                            &command.document_hash,
+                            &command.envelope.value,
+                        );
+                        let Some(runtime) = worker_sink.runtime.upgrade() else {
+                            break;
+                        };
+                        runtime
+                            .document_graphs
+                            .complete_retained_persistence(command, applied);
+                    }
+                }) {
+                Ok(_) => {
+                    let _ = self.retained_persistence_sender.set(sender);
+                }
+                Err(error) => {
+                    eprintln!("[controller] failed to start retained-persistence worker: {error}");
+                }
+            }
+        }
         let mut document_hashes = self
             .settle_effects
             .lock()
@@ -3965,6 +4086,65 @@ impl ControllerDocumentGraphs {
         effects.insert(key, effect);
     }
 
+    fn complete_retained_persistence(&self, command: RetainedPersistenceCommand, applied: bool) {
+        let key = command.document_hash;
+        let envelope = command.envelope;
+        self.ctx.batch(|ctx| {
+            let outcome = if applied {
+                format!(
+                    "ack={:?}",
+                    self.retained_persistence.ack_applied(
+                        ctx,
+                        &key,
+                        envelope.generation,
+                        envelope.epoch,
+                    )
+                )
+            } else {
+                format!(
+                    "failure={:?}",
+                    self.retained_persistence.fail_retryable(
+                        ctx,
+                        &key,
+                        envelope.generation,
+                        envelope.epoch,
+                    )
+                )
+            };
+            let newer_pending = self
+                .retained_persistence
+                .state(&key)
+                .and_then(|state| state.desired)
+                .is_some_and(|desired| desired.epoch > envelope.epoch);
+            if applied || newer_pending {
+                // Advancing this process-local frontier schedules any newer
+                // candidate that arrived while the exact envelope was in
+                // flight. A failed current epoch stays retained and waits for
+                // a meaningful delivery/generation edge instead of spinning.
+                self.retained_transition_published_frontier.set(
+                    ctx,
+                    key.clone(),
+                    Some(RetainedTransitionEffect::PersistLatest(
+                        envelope.value.clone(),
+                    )),
+                );
+            }
+            agent_doc_ops_log_io::log_op(
+                &envelope.value.file,
+                &format!(
+                    "retained_persistence_completed document_hash={} generation={} epoch={} applied={} {} newer_pending={} durable_through={:?}",
+                    key,
+                    envelope.generation,
+                    envelope.epoch,
+                    applied,
+                    outcome,
+                    newer_pending,
+                    self.retained_persistence.durable_through(&key),
+                ),
+            );
+        });
+    }
+
     /// Apply the sole effect-bearing projection of the retained-transition
     /// state table. Replica RPCs publish Sources only; this Effect is the one
     /// place that observes activation state, submits a guarded Base -> Target
@@ -3980,6 +4160,8 @@ impl ControllerDocumentGraphs {
         let key = document_hash.to_string();
         let effect_map = self.retained_transition_effect.clone();
         let delivery = self.retained_delivery.clone();
+        let persistence = self.retained_persistence.clone();
+        let persistence_sender = self.retained_persistence_sender.clone();
         let published_frontier = self.retained_transition_published_frontier.clone();
         let sink = self.settle_sink.clone();
         let effect_key = key.clone();
@@ -3998,6 +4180,105 @@ impl ControllerDocumentGraphs {
                     };
                     published_frontier.set(ctx, effect_key.clone(), Some(projected_effect));
                     delivery.set(ctx, effect_key.clone(), Some(observation));
+                }
+                RetainedTransitionEffect::PersistLatest(projection) => {
+                    let generation = projection.controller_generation;
+                    if matches!(
+                        persistence.reconnect(ctx, generation),
+                        lazily::LatestDurableReconnect::StaleGeneration { .. }
+                    ) {
+                        return;
+                    }
+                    let upsert = persistence.upsert_desired(
+                        ctx,
+                        effect_key.clone(),
+                        projection.delivery_version,
+                        projection.clone(),
+                    );
+                    match upsert {
+                        lazily::LatestDurableUpsert::StaleEpoch { current } => {
+                            agent_doc_ops_log_io::log_op(
+                                &projection.file,
+                                &format!(
+                                    "retained_persistence_ignored document_hash={} generation={} epoch={} current_epoch={} reason=stale_epoch",
+                                    effect_key,
+                                    generation,
+                                    projection.delivery_version,
+                                    current,
+                                ),
+                            );
+                            return;
+                        }
+                        lazily::LatestDurableUpsert::EpochConflict => {
+                            agent_doc_ops_log_io::log_op(
+                                &projection.file,
+                                &format!(
+                                    "retained_persistence_ignored document_hash={} generation={} epoch={} reason=epoch_conflict",
+                                    effect_key, generation, projection.delivery_version,
+                                ),
+                            );
+                            return;
+                        }
+                        lazily::LatestDurableUpsert::AlreadyDurable { .. } => {
+                            published_frontier.set(
+                                ctx,
+                                effect_key.clone(),
+                                Some(projected_effect),
+                            );
+                            return;
+                        }
+                        lazily::LatestDurableUpsert::Accepted
+                        | lazily::LatestDurableUpsert::Unchanged => {}
+                    }
+                    let lazily::LatestDurableClaim::Claimed(envelope) =
+                        persistence.claim(ctx, &effect_key, generation)
+                    else {
+                        // Busy means an earlier accepted effect still owns the
+                        // one permitted flight. Empty/stale claims likewise
+                        // remain un-published and are retried on the next
+                        // meaningful delivery or generation edge.
+                        return;
+                    };
+                    let command = RetainedPersistenceCommand {
+                        document_hash: effect_key.clone(),
+                        envelope,
+                    };
+                    let Some(sender) = persistence_sender.get() else {
+                        let failure = persistence.fail_retryable(
+                            ctx,
+                            &effect_key,
+                            command.envelope.generation,
+                            command.envelope.epoch,
+                        );
+                        agent_doc_ops_log_io::log_op(
+                            &command.envelope.value.file,
+                            &format!(
+                                "retained_persistence_retained document_hash={} generation={} epoch={} failure={failure:?} reason=egress_worker_unavailable",
+                                effect_key,
+                                command.envelope.generation,
+                                command.envelope.epoch,
+                            ),
+                        );
+                        return;
+                    };
+                    if let Err(error) = sender.send(command) {
+                        let command = error.0;
+                        let failure = persistence.fail_retryable(
+                            ctx,
+                            &effect_key,
+                            command.envelope.generation,
+                            command.envelope.epoch,
+                        );
+                        agent_doc_ops_log_io::log_op(
+                            &command.envelope.value.file,
+                            &format!(
+                                "retained_persistence_retained document_hash={} generation={} epoch={} failure={failure:?} reason=egress_worker_disconnected",
+                                effect_key,
+                                command.envelope.generation,
+                                command.envelope.epoch,
+                            ),
+                        );
+                    }
                 }
                 RetainedTransitionEffect::ApplyTarget(transition) => {
                     if sink.project_retained_transition(&effect_key, transition) {
@@ -4080,6 +4361,13 @@ fn retained_transition_state(
         return RetainedTransitionState::AwaitingConvergence {
             intent_id: intent.intent_id.clone(),
             delivery_version: delivery.delivery_version,
+            persistence: RetainedPersistenceProjection {
+                file: delivery.file.clone(),
+                content_hash: delivery.content_hash.clone(),
+                content_len: delivery.content.len(),
+                delivery_version: delivery.delivery_version,
+                controller_generation,
+            },
         };
     }
 
@@ -13693,12 +13981,43 @@ agent:queue\n\
         match state.effect() {
             None => "none",
             Some(RetainedTransitionEffect::ObserveCurrentDelivery(_)) => "observe_current_delivery",
+            Some(RetainedTransitionEffect::PersistLatest(_)) => "persist_latest",
             Some(RetainedTransitionEffect::ApplyTarget(_)) => "apply_target",
             Some(RetainedTransitionEffect::ResumeCloseout(_)) => "resume_closeout",
             Some(RetainedTransitionEffect::SettleMaterializedCapture(_)) => {
                 "settle_materialized_capture"
             }
         }
+    }
+
+    #[test]
+    fn unconverged_delivery_projects_the_exact_latest_durable_native_save_revision() {
+        let transition = retained_resume_projection("doc-retained-persistence");
+        let visible = "# Queue\n\noperator edit 🛰\n";
+        let state = retained_transition_state(
+            Some(&transition),
+            Some(&RetainedDeliveryObservation {
+                file: PathBuf::from("/work/task.md"),
+                content: Arc::from(visible),
+                content_hash: agent_doc_hash::content_hash(visible),
+                live_editors: 1,
+                delivery_converged: false,
+                delivery_version: 12,
+            }),
+            7,
+        );
+
+        let Some(RetainedTransitionEffect::PersistLatest(projection)) = state.effect() else {
+            panic!("unconverged live delivery must retain a latest-durable persist effect");
+        };
+        assert_eq!(projection.file, PathBuf::from("/work/task.md"));
+        assert_eq!(
+            projection.content_hash,
+            agent_doc_hash::content_hash(visible)
+        );
+        assert_eq!(projection.content_len, visible.len());
+        assert_eq!(projection.delivery_version, 12);
+        assert_eq!(projection.controller_generation, 7);
     }
 
     #[test]
@@ -13808,7 +14127,7 @@ agent:queue\n\
                 Some(delivery(base, 1, false)),
                 1,
                 "awaiting_convergence",
-                "none",
+                "persist_latest",
             ),
             (
                 "base visible",

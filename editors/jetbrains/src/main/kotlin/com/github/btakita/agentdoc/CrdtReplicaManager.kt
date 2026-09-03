@@ -43,6 +43,7 @@ internal fun nativeReloadRemainingWaitMillis(deadlineNanos: Long, nowNanos: Long
 private const val CRDT_EDT_WARN_MS = 50L
 private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L
 private const val CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS = 2_000L
+private const val CRDT_AWAIT_PERSIST_CURRENT_TIMEOUT_MS = 5_000L
 private const val CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS = 1_000L
 private const val CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS = 30_000L
 private const val LOCAL_EDITOR_FLUSH_QUIET_MS = 16L
@@ -2086,28 +2087,65 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         expectedContentHash: String,
         expectedContentLen: Int,
     ): Boolean {
-        val forwarder = forwarders[filePath] ?: return false
-        if (!forwarder.attached) return false
-        val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return false
-        val document = FileDocumentManager.getInstance().getDocument(targetFile) ?: return false
-        val visibleText = document.text
-        if (
-            visibleText.toByteArray(Charsets.UTF_8).size != expectedContentLen ||
-            !contentHash(visibleText).equals(expectedContentHash, ignoreCase = true) ||
-            forwarder.replicaText() != visibleText
-        ) {
-            requestUrgentRemoteDrain(filePath, "persist-current-visible-mismatch")
+        fun reject(reason: String, detail: String = ""): Boolean {
+            log.warn(
+                "[crdt-replica] native persist-current rejected reason=$reason file=$filePath " +
+                    "expected_hash=$expectedContentHash expected_len=$expectedContentLen$detail",
+            )
             return false
+        }
+
+        if (disposed.get()) return reject("manager_disposed")
+        val forwarder = forwarders[filePath] ?: return reject("forwarder_missing")
+        if (!forwarder.attached) return reject("forwarder_detached")
+        val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath)
+            ?: return reject("virtual_file_missing")
+        val document = FileDocumentManager.getInstance().getDocument(targetFile)
+            ?: return reject("document_missing")
+        val visibleText = document.text
+        val visibleLen = visibleText.toByteArray(Charsets.UTF_8).size
+        val visibleHash = contentHash(visibleText)
+        val replicaText = forwarder.replicaText()
+        val replicaHash = replicaText?.let { contentHash(it) } ?: "missing"
+        if (visibleLen != expectedContentLen) {
+            requestUrgentRemoteDrain(filePath, "persist-current-visible-length-mismatch")
+            return reject(
+                "visible_length_mismatch",
+                " visible_hash=$visibleHash visible_len=$visibleLen replica_hash=$replicaHash",
+            )
+        }
+        if (!visibleHash.equals(expectedContentHash, ignoreCase = true)) {
+            requestUrgentRemoteDrain(filePath, "persist-current-visible-hash-mismatch")
+            return reject(
+                "visible_hash_mismatch",
+                " visible_hash=$visibleHash visible_len=$visibleLen replica_hash=$replicaHash",
+            )
+        }
+        if (replicaText != visibleText) {
+            requestUrgentRemoteDrain(filePath, "persist-current-visible-mismatch")
+            return reject(
+                "replica_visible_mismatch",
+                " visible_hash=$visibleHash visible_len=$visibleLen replica_hash=$replicaHash",
+            )
         }
         return try {
             FileDocumentManager.getInstance().saveDocument(document)
+            val diskText = readRawDiskText(filePath)
             val exact =
                 forwarders[filePath] === forwarder &&
                 forwarder.attached &&
                 document.text == visibleText &&
                 forwarder.replicaText() == visibleText &&
-                readRawDiskText(filePath) == visibleText
-            if (!exact) return false
+                diskText == visibleText
+            if (!exact) {
+                requestUrgentRemoteDrain(filePath, "persist-current-post-save-mismatch")
+                return reject(
+                    "post_save_projection_mismatch",
+                    " visible_hash=${contentHash(document.text)} " +
+                        "replica_hash=${forwarder.replicaText()?.let { contentHash(it) } ?: "missing"} " +
+                        "disk_hash=${diskText?.let { contentHash(it) } ?: "missing"}",
+                )
+            }
             documentWorkers.forDocument(filePath).execute {
                 if (
                     !disposed.get() &&
@@ -3120,22 +3158,58 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         ): Boolean {
             if (project.isDisposed) return false
             val manager = instances[project] ?: return false
-            val result = AtomicBoolean(false)
-            val persist = {
-                result.set(
-                    manager.persistCurrentVisibleRevision(
-                        filePath,
-                        expectedContentHash,
-                        expectedContentLen,
-                    ),
-                )
-            }
             if (SwingUtilities.isEventDispatchThread()) {
-                persist()
-            } else {
-                ApplicationManager.getApplication().invokeAndWait { persist() }
+                manager.log.warn(
+                    "[crdt-replica] native persist-current rejected reason=edt_cannot_wait_for_document_lane " +
+                        "file=$filePath expected_hash=$expectedContentHash expected_len=$expectedContentLen",
+                )
+                return false
             }
-            return result.get()
+            return try {
+                // Native save is an operation on the same per-document lane as
+                // accepted local and remote CRDT updates. FIFO submission makes
+                // the save observe every update accepted before this command.
+                manager.documentWorkers.forDocument(filePath).submit<Boolean> {
+                    val result = AtomicBoolean(false)
+                    ApplicationManager.getApplication().invokeAndWait {
+                        result.set(
+                            manager.persistCurrentVisibleRevision(
+                                filePath,
+                                expectedContentHash,
+                                expectedContentLen,
+                            ),
+                        )
+                    }
+                    result.get()
+                }.get(CRDT_AWAIT_PERSIST_CURRENT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            } catch (_: TimeoutException) {
+                manager.log.warn(
+                    "[crdt-replica] native persist-current rejected reason=document_lane_timeout " +
+                        "file=$filePath expected_hash=$expectedContentHash expected_len=$expectedContentLen " +
+                        "timeout_ms=$CRDT_AWAIT_PERSIST_CURRENT_TIMEOUT_MS",
+                )
+                false
+            } catch (_: RejectedExecutionException) {
+                manager.log.warn(
+                    "[crdt-replica] native persist-current rejected reason=document_lane_unavailable " +
+                        "file=$filePath expected_hash=$expectedContentHash expected_len=$expectedContentLen",
+                )
+                false
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                manager.log.warn(
+                    "[crdt-replica] native persist-current rejected reason=document_lane_interrupted " +
+                        "file=$filePath expected_hash=$expectedContentHash expected_len=$expectedContentLen",
+                )
+                false
+            } catch (failure: RuntimeException) {
+                manager.log.warn(
+                    "[crdt-replica] native persist-current rejected reason=document_lane_failure " +
+                        "file=$filePath expected_hash=$expectedContentHash expected_len=$expectedContentLen",
+                    failure,
+                )
+                false
+            }
         }
 
         /**

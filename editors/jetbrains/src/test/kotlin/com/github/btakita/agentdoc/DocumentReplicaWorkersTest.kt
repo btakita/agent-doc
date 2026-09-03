@@ -47,4 +47,28 @@ class DocumentReplicaWorkersTest {
             assertTrue(workers.awaitTermination(2_000L))
         }
     }
+
+    @Test
+    fun `persist command follows every accepted update on its document lane`() {
+        val workers = DocumentReplicaWorkers(idleThreadTimeoutMs = 50L)
+        val order = CopyOnWriteArrayList<String>()
+
+        try {
+            val lane = workers.forDocument("/project/session.md")
+            lane.execute { order += "accepted-local-update" }
+            lane.execute { order += "accepted-remote-update" }
+            lane.submit<Boolean> {
+                order += "persist-current"
+                true
+            }.get(1, TimeUnit.SECONDS)
+
+            assertEquals(
+                listOf("accepted-local-update", "accepted-remote-update", "persist-current"),
+                order.toList(),
+            )
+        } finally {
+            workers.shutdownNow()
+            assertTrue(workers.awaitTermination(2_000L))
+        }
+    }
 }

@@ -111,14 +111,25 @@ class CrdtReplicaProjectionFrontierTest {
         val body = manager
             .substringAfter("private fun persistCurrentVisibleRevision(")
             .substringBefore("private fun reconcileRemotePersistence(")
+        val commandBody = manager
+            .substringAfter("fun persistCurrentVisibleRevision(\n            project: Project,")
+            .substringBefore("/**\n         * `#ctrlkillreregister`")
 
-        assertTrue(body.contains("visibleText.toByteArray(Charsets.UTF_8).size != expectedContentLen"))
-        assertTrue(body.contains("forwarder.replicaText() != visibleText"))
+        assertTrue(body.contains("visibleLen != expectedContentLen"))
+        assertTrue(body.contains("replicaText != visibleText"))
         assertTrue(body.contains("saveDocument(document)"))
-        assertTrue(body.contains("readRawDiskText(filePath) == visibleText"))
+        assertTrue(body.contains("diskText == visibleText"))
+        assertTrue(body.contains("\"visible_hash_mismatch\""))
+        assertTrue(body.contains("\"post_save_projection_mismatch\""))
         assertTrue(
             body.contains("projectSettledVisibleState(filePath, forwarder, visibleText, true)"),
         )
+        val laneSubmit = commandBody.indexOf("manager.documentWorkers.forDocument(filePath).submit<Boolean>")
+        val edtSave = commandBody.indexOf("ApplicationManager.getApplication().invokeAndWait")
+        assertTrue("persist-current must enter the per-document FIFO lane", laneSubmit >= 0)
+        assertTrue("EDT save must run from inside that lane", edtSave > laneSubmit)
+        assertTrue(commandBody.contains("reason=document_lane_timeout"))
+        assertTrue(commandBody.contains("reason=edt_cannot_wait_for_document_lane"))
         assertFalse(body.contains("applyMinimalDocumentEditUtil("))
         assertFalse(body.contains("reloadFromDisk("))
     }

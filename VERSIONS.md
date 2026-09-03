@@ -2,6 +2,22 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.324
+
+- **Fix: retained native saves follow the document update lane and remain retryable.**
+
+The controller now derives a latest-durable persistence projection for an
+unconverged retained response instead of leaving that state without an effect.
+Lazily owns per-document desired epochs, one in-flight command, supersession,
+retryable failure, durable receipts, and controller-generation fencing; a
+non-authoritative egress worker performs the blocking editor call without
+forming an update-RPC/save-RPC cycle. JetBrains queues that save on the same
+per-document FIFO as accepted local and remote CRDT updates before entering the
+EDT, and reports typed rejection evidence for every failed guard. A later edit
+therefore supersedes an older pending save without being overwritten, while a
+rejected current save remains eligible for reconciliation rather than wedging
+closeout.
+
 ## 0.35.323
 
 - **Fix: Compact Exchange repairs an exact response welded into review state.**

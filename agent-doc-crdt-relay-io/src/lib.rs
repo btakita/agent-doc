@@ -3808,7 +3808,19 @@ pub fn request_native_save_for_current_projection(
                 notified = 1;
                 break;
             }
-            Ok(false) => {}
+            Ok(false) => {
+                agent_doc_ops_log_io::log_op(
+                    &canonical,
+                    &format!(
+                        "native_editor_save_request_rejected file={} editor_pid={} editor_id={} content_hash={} content_len={} reason=editor_receipt_rejected",
+                        canonical.display(),
+                        route.editor_pid,
+                        route.editor_id,
+                        expected_content_hash,
+                        expected_content_len,
+                    ),
+                );
+            }
             Err(error) => {
                 if agent_doc_ipc_io::is_ipc_build_mismatch_error(&error) {
                     build_mismatches.push(route.clone());

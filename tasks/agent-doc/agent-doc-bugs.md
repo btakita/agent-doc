@@ -68,7 +68,7 @@ Please fix agent-doc causes of turn closeout not completing in backend.md. I was
 - / 0 FAIL, the pinned-publication test with HAIVEN_CONTRACTS_ROOT scoped to ./cmd/contractpublish only, go vet, go
   build, all exit 0 — then confirmed on GitHub's runners. Pushed with --force-with-lease; temp worktree removed.
   Two things need you:
-  1. The document closeout is deferred, not lost. agent-doc respond reports editor_projection_pending — the editor
+  1. ~~The document closeout is deferred, not lost. agent-doc respond reports editor_projection_pending — the editor~~
      acknowledged the canonical content (df8a7991…) but hasn't projected its native save to disk. The retained intent
      1788462227612561795-1-df8a7991… commits itself once delivery converges; the binary explicitly forbids re-sending,
      forcing disk, or recycling, so I stopped after six session-check polls over ~2 minutes, all still INTERRUPTED. A

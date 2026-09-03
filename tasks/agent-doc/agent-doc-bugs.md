@@ -51,6 +51,24 @@ Released and installed agent-doc v0.35.324 at 1772efe18 with JetBrains 0.2.373. 
 The backend closeout described by this head is now recovered and committed through the normal retained-delivery/session-check path, with the later queue typing preserved and no force-disk fallback. The detailed cause, chronology, implementation, release, and verification evidence are in the preceding response.
 
 Release-audit correction: `lazily-rs` 0.57.0 follows the canonical spec fixture, but a newly detected mismatch in `lazily-formal` 0.38.0 retained a duplicate desired value after claim. Remaining binding releases are paused. The formal model will be corrected and released first, followed by a fresh conformant Rust patch release and an agent-doc dependency patch release, so the final provenance order is genuinely spec/formal before Rust before agent-doc. Session accretion is noted; the active queue is being drained rather than stalled for compaction.
+
+### Re: Lazily conformance and ordered native-save release — gpt-5
+
+Completed in the required order. The initial contract shipped as lazily-spec v0.38.0, the corrected Lean model shipped as lazily-formal v0.38.1 (`1a1aa153`), and only then did conformant lazily-rs v0.57.1 (`162319d7`) publish to crates.io. agent-doc now consumes lazily-rs 0.57.1.
+
+The original native-save rejection was not caused by your updates: the first rejection occurred at 15:03:48, while the next observed user typing began at 15:05:04. The updates exposed the second ordering flaw, but did not cause the first failure. The agent-doc causes were (1) `AwaitingConvergence` derived no owned persistence retry and (2) JetBrains native save ran immediately on the EDT outside the per-document operation lane, so it could overtake accepted CRDT updates.
+
+The fix uses one domain authority and one effect driver. The Controller retains the latest desired durable revision and emits commands; a non-authoritative egress worker performs blocking save I/O. JetBrains queues native save behind every previously accepted update on the same per-document FIFO, then enters the EDT and checks the exact visible/replica/disk revision. A save rejection is typed and retryable. This avoids a second command actor with competing state while preserving physical command order.
+
+Lazily now supplies that reusable policy as `LatestDurableProjectionCore`: per-key monotone desired epochs, latest-value conflation, one in-flight claim, retryable failure, exact durable acknowledgement, stale-receipt safety, and reconnect generation fencing. Core/reactive/thread-safe/async surfaces exist where the binding supports those execution models; GDScript correctly exposes core plus synchronous reactive only.
+
+The released bindings are Rust 0.57.1, Python 0.40.0, Kotlin 0.41.2, JavaScript 0.32.0, Dart 0.30.0, Zig 0.34.1, Go 0.26.0, C++ 0.28.0, C# 0.5.0, and GDScript 0.1.0; React 0.2.0 wraps the JavaScript implementation. Every native binding replays the canonical 22-step/two-scenario fixture across its supported surfaces. lazily-spec v0.38.1 (`d05f958e`) records the primitive as shipped in all ten binding columns, and its coverage guard validated 477 shipped marks against 10/10 ledgers. The audit caught and corrected Kotlin's missing `egress` ledger scope before the final spec release.
+
+agent-doc itself was released and installed as v0.35.327 (`4ee1cc948`). Beyond the ordered save path and retained retry, v0.35.325 added exact-span recovered-queue consumption. Dogfooding then exposed two recovery-instruction bugs: a committed residue must first open a repair cycle with `preflight`, and the response-free strike must close with `agent-doc commit`, not response-materializing `write --commit`. Those fixes shipped in 0.35.326/0.35.327. Full verification passed: 9,193 Rust tests, 254 skipped, all formal models, documentation/version audits, eight live tmux tests, PyPI publication, and the six-platform binary release.
+
+The wedged session is recovered through the normal path and reports `committed (commit_success)`. No response was resubmitted, no force-disk write was used, and the later user text was preserved. Safe supervisor recycle is queued for the next idle boundary. IntelliJ still reports live plugin 0.2.372; restart the IDE to activate the already installed 0.2.373 package.
+
+One distribution-only blocker remains: React v0.2.0 has a green CI run and GitHub release, but its first npm publication cannot occur until npm credentials or a trusted publisher are configured. Rust's crates.io package is live; its failed OIDC automation attempt is likewise only release-workflow debt because the authenticated manual publish succeeded.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

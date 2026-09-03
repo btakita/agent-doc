@@ -68,6 +68,52 @@ agent-doc itself was released and installed as v0.35.327 (`4ee1cc948`). Beyond t
 The wedged session is recovered through the normal path and reports `committed (commit_success)`. No response was resubmitted, no force-disk write was used, and the later user text was preserved. Safe supervisor recycle is queued for the next idle boundary. IntelliJ still reports live plugin 0.2.372; restart the IDE to activate the already installed 0.2.373 package.
 
 One distribution-only blocker remains: React v0.2.0 has a green CI run and GitHub release, but its first npm publication cannot occur until npm credentials or a trusted publisher are configured. Rust's crates.io package is live; its failed OIDC automation attempt is likewise only release-workflow debt because the authenticated manual publish succeeded.
+
+### Re: Response
+
+Implemented, released, and recovered.
+
+The native-save wedge was not caused by your edits. The first rejection occurred at 15:03:48; your next observed typing began at 15:05:04. Later edits made older saves legitimately stale, but exposed agent-doc’s ordering flaw:
+
+- Native save bypassed the per-document update queue.
+- `AwaitingConvergence` did not retain an owned persistence retry.
+- A rejected save therefore had no reliable path forward.
+
+The fix is:
+
+- Controller remains the sole domain authority and emits persistence effects.
+- A non-authoritative egress worker performs blocking I/O.
+- JetBrains queues save behind accepted updates on the same per-document FIFO, then enters the EDT.
+- Lazily owns latest-durable policy: conflation, monotone epochs, one in-flight claim, retry, exact acknowledgement, stale-receipt rejection, and generation fencing.
+
+The release gate was honored: lazily-spec 0.38.0 → corrected lazily-formal 0.38.1 → conformant lazily-rs 0.57.1. A coverage-only lazily-spec 0.38.1 followed after all ports were verified.
+
+Released bindings:
+
+| Binding | Version |
+|---|---:|
+| Rust | 0.57.1 |
+| Python | 0.40.0 |
+| Kotlin | 0.41.2 |
+| JavaScript | 0.32.0 |
+| Dart | 0.30.0 |
+| Zig | 0.34.1 |
+| Go | 0.26.0 |
+| C++ | 0.28.0 |
+| C# | 0.5.0 |
+| GDScript | 0.1.0 |
+| React adapter | 0.2.0 |
+
+lazily-spec’s coverage guard validated 477 shipped claims against 10/10 native binding ledgers. Every binding replays the canonical latest-durable fixture across its supported execution surfaces.
+
+Dogfooding also exposed and fixed two additional agent-doc recovery defects: exact-span queue consumption and the response-free `preflight → commit` recovery path. [agent-doc v0.35.327](https://github.com/btakita/agent-doc/releases/tag/v0.35.327) is released, PyPI-visible, installed locally, and passed 9,193 tests, formal checks, eight live tmux tests, and the six-platform release build.
+
+The session in [agent-doc-bugs.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md) is clean and reports `committed (commit_success)`. No response was resubmitted and no force-disk recovery was used.
+
+Two operator items remain:
+
+- Restart IntelliJ to activate the already-installed JetBrains plugin 0.2.373; the live IDE still reports 0.2.372.
+- React’s GitHub release and CI are green, but first-time npm publication requires npm credentials or trusted-publisher configuration. All implementation work itself is complete.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

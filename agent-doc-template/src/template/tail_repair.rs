@@ -352,6 +352,129 @@ fn queue_prompt_quote_blocks(body: &str) -> Vec<Vec<String>> {
     blocks
 }
 
+fn latest_exchange_queue_response_scaffold(body: &str) -> Option<&str> {
+    let mut lines = Vec::new();
+    let mut offset = 0usize;
+    for segment in body.split_inclusive('\n') {
+        let start = offset;
+        offset += segment.len();
+        lines.push((start, offset, segment));
+    }
+    if offset < body.len() {
+        lines.push((offset, body.len(), &body[offset..]));
+    }
+
+    let heading = lines.iter().rposition(|(_, _, segment)| {
+        let (line, _) = line_and_newline(segment);
+        line.trim_start().starts_with("### Re:")
+    })?;
+
+    let mut first = heading;
+    while first > 0 {
+        let (line, _) = line_and_newline(lines[first - 1].2);
+        let trimmed = line.trim();
+        if trimmed.is_empty() || canonical_queue_prompt_quote_line(line).is_some() {
+            first -= 1;
+        } else {
+            break;
+        }
+    }
+    while first < heading {
+        let (line, _) = line_and_newline(lines[first].2);
+        if !line.trim().is_empty() {
+            break;
+        }
+        first += 1;
+    }
+
+    let (first_line, _) = line_and_newline(lines.get(first)?.2);
+    let canonical_first = canonical_queue_prompt_quote_line(first_line)?;
+    if !canonical_first.starts_with("> **Queue prompt:**") {
+        return None;
+    }
+    let marker = first_line.find("> **Queue prompt:**")?;
+    let start = lines[first].0 + marker;
+
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(heading + 1)
+        .find_map(|(_, (line_start, _, segment))| {
+            let (line, _) = line_and_newline(segment);
+            let trimmed = line.trim_start();
+            (trimmed.starts_with("### Re:") || trimmed.starts_with("<!-- agent:boundary:"))
+                .then_some(*line_start)
+        })
+        .unwrap_or(body.len());
+
+    (start < end).then_some(&body[start..end])
+}
+
+fn review_weld_reconstructs_id_backed_item(before: &str, after: &str) -> bool {
+    let prefix = before.rsplit_once('\n').map_or(before, |(_, line)| line);
+    let suffix = after.split_once('\n').map_or(after, |(line, _)| line);
+    prefix.trim() == "- [/]"
+        && suffix.chars().next().is_some_and(char::is_whitespace)
+        && suffix.trim_start().starts_with("[#")
+}
+
+/// Repair one exact response turn welded into an `agent:review` item when the
+/// same bytes already exist as the latest complete turn in `agent:exchange`.
+///
+/// Removal is allowed only when it reconstructs a single `- [/] [#id] ...`
+/// row. Non-identical, repeated, code/comment-contained, or otherwise
+/// ambiguous matches remain untouched so the integrity guard fails closed.
+pub fn repair_exchange_proven_response_scaffold_inside_review(doc: &str) -> Result<Option<String>> {
+    let Ok(components) = element::parse(doc) else {
+        return Ok(None);
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return Ok(None);
+    };
+    let Some(review) = components
+        .iter()
+        .find(|component| component.name == "review")
+    else {
+        return Ok(None);
+    };
+    let Some(scaffold) = latest_exchange_queue_response_scaffold(exchange.content(doc)) else {
+        return Ok(None);
+    };
+
+    let code_ranges = element::find_code_ranges(doc);
+    let comment_ranges = element::find_non_agent_html_comment_ranges(doc);
+    let ignored = |position: usize| {
+        code_ranges
+            .iter()
+            .chain(comment_ranges.iter())
+            .any(|&(start, end)| position >= start && position < end)
+    };
+    let review_body = review.content(doc);
+    let matches: Vec<usize> = review_body
+        .match_indices(scaffold)
+        .map(|(position, _)| position)
+        .filter(|position| !ignored(review.open_end + position))
+        .collect();
+    let [position] = matches.as_slice() else {
+        return Ok(None);
+    };
+    let before = &review_body[..*position];
+    let after = &review_body[*position + scaffold.len()..];
+    if !review_weld_reconstructs_id_backed_item(before, after) {
+        return Ok(None);
+    }
+
+    let mut repaired_body = String::with_capacity(review_body.len() - scaffold.len());
+    repaired_body.push_str(before);
+    repaired_body.push_str(after);
+    let repaired = review.replace_content(doc, &repaired_body);
+    element::parse(&repaired).context("exchange-proven review repair broke component structure")?;
+    Ok(Some(repaired))
+}
+
 /// Repair only a provably duplicated binary queue-prompt quote scaffold that
 /// was stranded inside `agent:queue` by a torn editor/controller projection.
 ///
@@ -1299,6 +1422,89 @@ mod tests {
         let error = guard_no_conversation_content_inside_tracked_components(document)
             .expect_err("welded response debris must fail closed");
         assert!(error.to_string().contains("agent:review"));
+    }
+
+    #[test]
+    fn repair_exchange_proven_response_scaffold_reconstructs_review_item() {
+        let document = concat!(
+            "<!-- agent:exchange -->\n",
+            "> **Queue prompt:** In PR 12, `infra` should be `haiven-infra`.\n\n",
+            "### Re: PR 12 infra → haiven-infra — fable-5\n\n",
+            "Fixed and pushed: commit `9579906`.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/]> **Queue prompt:** In PR 12, `infra` should be `haiven-infra`.\n\n",
+            "### Re: PR 12 infra → haiven-infra — fable-5\n\n",
+            "Fixed and pushed: commit `9579906`.\n",
+            " [#plcite] After haiven-payments-ledger PR #4, update citations.\n",
+            "<!-- /agent:review -->\n",
+        );
+
+        let repaired = repair_exchange_proven_response_scaffold_inside_review(document)
+            .unwrap()
+            .expect("the exact exchange-proven weld should repair");
+
+        assert!(
+            repaired.contains(
+                "- [/] [#plcite] After haiven-payments-ledger PR #4, update citations.\n"
+            )
+        );
+        assert_eq!(repaired.matches("> **Queue prompt:**").count(), 1);
+        assert_eq!(repaired.matches("### Re: PR 12").count(), 1);
+        guard_no_conversation_content_inside_tracked_components(&repaired).unwrap();
+    }
+
+    #[test]
+    fn repair_exchange_proven_response_scaffold_leaves_nonidentical_review_weld_fail_closed() {
+        let document = concat!(
+            "<!-- agent:exchange -->\n",
+            "> **Queue prompt:** do [#one]\n\n",
+            "### Re: one — gpt-5\n\n",
+            "Canonical response.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/]> **Queue prompt:** do [#one]\n\n",
+            "### Re: one — gpt-5\n\n",
+            "Different response.\n",
+            " [#review] Preserve this row.\n",
+            "<!-- /agent:review -->\n",
+        );
+
+        assert_eq!(
+            repair_exchange_proven_response_scaffold_inside_review(document).unwrap(),
+            None
+        );
+        guard_no_conversation_content_inside_tracked_components(document)
+            .expect_err("a non-identical response must remain corrupt");
+    }
+
+    #[test]
+    fn repair_exchange_proven_response_scaffold_rejects_multiple_review_matches() {
+        let scaffold = concat!(
+            "> **Queue prompt:** do [#one]\n\n",
+            "### Re: one — gpt-5\n\n",
+            "Canonical response.\n",
+        );
+        let document = format!(
+            concat!(
+                "<!-- agent:exchange -->\n",
+                "{scaffold}",
+                "<!-- agent:boundary:abc123 -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:review -->\n",
+                "- [/]{scaffold} [#one] First row.\n",
+                "- [/]{scaffold} [#two] Second row.\n",
+                "<!-- /agent:review -->\n",
+            ),
+            scaffold = scaffold,
+        );
+
+        assert_eq!(
+            repair_exchange_proven_response_scaffold_inside_review(&document).unwrap(),
+            None
+        );
     }
 
     #[test]

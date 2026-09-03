@@ -692,22 +692,35 @@ fn run_in_controller_scoped(
     if replay_repaired_content != semantic_base_content {
         agent_doc_ops_log_io::log_op(file, "compact_repaired_stranded_duplicate_response_heading");
     }
-    let semantic_base_content = if let Some(repaired) =
-        agent_doc_template::repair_duplicate_queue_prompt_scaffold_inside_queue(
+    let review_repaired_content = if let Some(repaired) =
+        agent_doc_template::repair_exchange_proven_response_scaffold_inside_review(
             &replay_repaired_content,
         )? {
-        agent_doc_ops_log_io::log_op(file, "compact_repaired_duplicate_queue_prompt_scaffold");
+        agent_doc_ops_log_io::log_op(
+            file,
+            "compact_repaired_exchange_proven_response_scaffold_inside_review",
+        );
         repaired
     } else {
         replay_repaired_content
     };
+    let semantic_base_content = if let Some(repaired) =
+        agent_doc_template::repair_duplicate_queue_prompt_scaffold_inside_queue(
+            &review_repaired_content,
+        )? {
+        agent_doc_ops_log_io::log_op(file, "compact_repaired_duplicate_queue_prompt_scaffold");
+        repaired
+    } else {
+        review_repaired_content
+    };
     // Compact is not an arbitrary repair command. The only normalization before
     // the integrity gate removes either a proven-empty replay heading whose
-    // answered twin already has a body or an exchange-proven queue-prompt quote
-    // isolated among queue rows. Gate the resulting exact realtime/disk
-    // authority before creating tags, composing captures, mutating CRDT state,
-    // or committing. This prevents a no-op compact from laundering any other
-    // malformed document into HEAD.
+    // answered twin already has a body, one exact exchange-proven response weld
+    // that reconstructs an ID-backed review row, or an exchange-proven
+    // queue-prompt quote isolated among queue rows. Gate the resulting exact
+    // realtime/disk authority before creating tags, composing captures,
+    // mutating CRDT state, or committing. This prevents a no-op compact from
+    // laundering any other malformed document into HEAD.
     agent_doc_lint_io::validate_integrity_on_content_with_logger(
         file,
         &semantic_base_content,
@@ -3108,16 +3121,25 @@ mod tests {
     }
 
     #[test]
-    fn compact_repairs_exchange_proven_queue_prompt_scaffold_before_integrity_gate() {
+    fn compact_repairs_exchange_proven_conversation_scaffolds_before_integrity_gate() {
         let source = include_str!("lib.rs");
-        let repair = "repair_duplicate_queue_prompt_scaffold_inside_queue";
+        let review_repair = "repair_exchange_proven_response_scaffold_inside_review";
+        let queue_repair = "repair_duplicate_queue_prompt_scaffold_inside_queue";
         let integrity = "validate_integrity_on_content_with_logger";
-        let repair_position = source.find(repair).expect("compact repair wiring");
+        let review_position = source
+            .find(review_repair)
+            .expect("compact review repair wiring");
+        let queue_position = source
+            .find(queue_repair)
+            .expect("compact queue repair wiring");
         let integrity_position = source.find(integrity).expect("compact integrity gate");
 
         assert!(
-            repair_position < integrity_position,
-            "the narrow scaffold repair must run before compact's fail-closed integrity gate"
+            review_position < queue_position && queue_position < integrity_position,
+            "the narrow scaffold repairs must run before compact's fail-closed integrity gate"
+        );
+        assert!(
+            source.contains("compact_repaired_exchange_proven_response_scaffold_inside_review")
         );
         assert!(source.contains("compact_repaired_duplicate_queue_prompt_scaffold"));
     }

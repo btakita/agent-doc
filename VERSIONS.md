@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.323
+
+- **Fix: Compact Exchange repairs an exact response welded into review state.**
+
+Before the semantic integrity gate, compact can now remove one byte-identical
+copy of the latest complete queue-prompt/response turn when a torn projection
+welded it between `- [/]` and an ID-backed review item. The repair requires the
+canonical turn to remain in `agent:exchange`, reconstructs exactly one valid
+`- [/] [#id] ...` row, and ignores code/comment examples. Non-identical,
+repeated, or structurally ambiguous copies still fail closed.
+
 ## 0.35.322
 
 - **Fix: live actor transport no longer follows a stale desired-harness projection.**

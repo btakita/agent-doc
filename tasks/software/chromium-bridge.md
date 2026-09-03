@@ -16,7 +16,7 @@ prompt_presets:
   '#next-steps': ''
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -238,20 +238,31 @@ Fixed, released, installed, and pushed.
 - Installed from the exact committed checkout and recycled the runtimes.
 - Pushed agent-doc, tag `v0.35.321`, and agent-loop main through `5b1d1fbd34`.
 - Concurrent unrelated worktree changes were preserved and excluded.
+
+### Re: Fix contracts.md Run Agent Doc stall follow-up — gpt-5
+
+> **Queue prompt:**
+>
+> do [#fixcontractsrun]
+
+
+Verified this task is already implemented: release commit `2ae58cba8` is an ancestor of the current agent-doc 0.35.322 tree, so the 0.35.321 closeout-before-Run admission fix remains active.
+
+The live check did uncover a newer operational stall in `contracts.md`: its cycle had reached `write_applied`, but the editor was still registered while the controller replica was missing. Fail-closed disk refusal was correct. `agent-doc admin reload-lib` re-registered the current 0.35.322 editor library, and one `agent-doc repair` then found the response already present, retired the retained intent, and committed cycle `cycle-1788399957470` (`commit_already_current`).
+
+No repository files were changed in this follow-up, so no test suite was rerun. Verification was the released-fix ancestry check, current binary version check, successful replica reload, repair completion, and committed live-cycle status. The exchange is large (211 lines), but the queue is active, so I did not interrupt it for compaction.
 <!-- agent:boundary:28f7ea75 -->
 <!-- /agent:exchange -->
 ###
 
 ## Queue
 
-<!-- agent:queue priority -->
-- 🚧 do [#fixcontractsrun]
+<!-- agent:queue priority start -->
 <!-- /agent:queue -->
 
 ## Pending / Not Built
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#fixcontractsrun] Fix contracts.md Run Agent Doc stall
 <!-- /agent:backlog -->
 
 ## Review

@@ -193,7 +193,6 @@ Please fix agent-doc causes of turn closeout not completing in backend.md. I was
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#fixrunbackend] Fix Run Agent Doc on backend.md issue. I deleted the agent:queue opening tag then readded it (not sure if that is the cause):
 `refusing to route /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md through pane %0 because it now runs another document; tmux focus was preserved`
 <!-- /agent:backlog -->
 

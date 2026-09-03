@@ -177,8 +177,9 @@ pub fn route_via_authoritative_actor(
     } else {
         AuthoritativeActorDispatchIntent::PromptAware
     };
-    // A plain editor trigger is a pass-through steering signal. It never
-    // inherits prompt-bearing work derived before this authoritative boundary.
+    // A plain editor trigger is transport-only after route admission. It never
+    // inherits prompt-bearing work derived before this authoritative boundary,
+    // but it still drains any prior open closeout before transport begins.
     let prompt_context = if matches!(
         dispatch_intent,
         AuthoritativeActorDispatchIntent::PlainTrigger
@@ -200,8 +201,7 @@ pub fn route_via_authoritative_actor(
         )
     })?;
     match closeout_drain {
-        RouteCloseoutDrainOutcome::NoOpenCycle
-        | RouteCloseoutDrainOutcome::PlainTriggerPassThrough => {}
+        RouteCloseoutDrainOutcome::NoOpenCycle => {}
         RouteCloseoutDrainOutcome::Recovered(outcome) => {
             eprintln!(
                 "[route] drained open closeout for {} before reroute ({})",

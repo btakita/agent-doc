@@ -473,8 +473,8 @@ pub const fn classify_queue_dispatch_start_observation(
 /// harness is the process reading input, so `agent-doc <file>` is a *prompt*
 /// that the harness `UserPromptSubmit` hook admits and answers with an
 /// in-binary preflight — the same session continues. The route path has always
-/// dispatched exactly this trigger into live owned panes
-/// (`route_dispatch_drain_plain_trigger_pass_through`), and
+/// dispatched exactly this trigger into live owned panes after route admission,
+/// and
 /// `agent_doc_queue::idle_drain`'s own contract test already asserted the
 /// payload is `agent-doc <file>`.
 ///

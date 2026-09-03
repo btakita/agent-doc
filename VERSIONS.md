@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.321
+
+- **Fix: Run Agent Doc no longer overtakes an unresolved closeout.**
+
+Plain dispatch-only editor triggers now cross the same controller-projected
+closeout boundary as prompt-aware routes. If the prior cycle still owns an
+unresolved response or retained component write, route performs the existing
+single recovery attempt and waits for the controller state edge; it dispatches
+only after terminal settlement and otherwise fails closed. Once admitted, the
+plain trigger keeps its single tmux text-plus-submit transport semantics without
+adding pane-capture or dispatch-start polling.
+
 ## 0.35.320
 
 - **Fix: a committed free-text queue strike no longer waits on an advisory editor save.**

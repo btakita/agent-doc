@@ -178,16 +178,6 @@ pub fn apply_routed_dispatch_closeout_policy(
         RouteCloseoutDrainPolicy::DrainBeforeDispatch => {
             drain_open_closeout_before_routed_dispatch(file, effects)
         }
-        RouteCloseoutDrainPolicy::PassThroughPlainTrigger => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "route_dispatch_drain_plain_trigger_pass_through file={}",
-                    file.display()
-                ),
-            );
-            Ok(RouteCloseoutDrainOutcome::PlainTriggerPassThrough)
-        }
     }
 }
 

@@ -2528,13 +2528,15 @@ mod tests {
     }
 
     #[test]
-    fn plain_run_trigger_passes_through_an_open_closeout() {
+    fn plain_run_trigger_drains_an_open_closeout_before_dispatch() {
         use agent_doc_controller::dispatch::RouteCloseoutDrainOutcome as DrainOutcome;
 
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("route-block.md");
         let content = "---\nagent_doc_session: test\n---\n\n";
-        write_open_cycle_route_doc(&doc, content);
+        std::fs::create_dir_all(doc.parent().unwrap().join(".agent-doc")).unwrap();
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let outcome = super::apply_routed_dispatch_closeout_policy(
             &doc,
@@ -2543,12 +2545,16 @@ mod tests {
             super::route_closeout_drain_effects(super::route_repair_closeout),
         )
         .unwrap();
-        assert_eq!(outcome, DrainOutcome::PlainTriggerPassThrough);
+        assert_eq!(
+            outcome,
+            DrainOutcome::Recovered("empty_preflight_cancelled".to_string())
+        );
         assert!(
-            agent_doc_cycle_state_io::load(&doc)
+            !agent_doc_cycle_state_io::load(&doc)
                 .unwrap()
                 .unwrap()
-                .is_open()
+                .is_open(),
+            "plain Run must terminalize an open cycle before dispatch"
         );
     }
 

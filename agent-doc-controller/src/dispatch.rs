@@ -757,20 +757,16 @@ pub const fn classify_direct_pane_submit_policy(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteCloseoutDrainPolicy {
     DrainBeforeDispatch,
-    PassThroughPlainTrigger,
 }
 
+/// Every routed trigger must cross the prior cycle's terminal closeout boundary.
+/// Plain triggers remain transport-only after admission, but they may not overtake
+/// an unresolved response or retained component write.
 pub const fn classify_route_closeout_drain_policy(
-    mode: ReopenMode,
-    intent: AuthoritativeActorDispatchIntent,
+    _mode: ReopenMode,
+    _intent: AuthoritativeActorDispatchIntent,
 ) -> RouteCloseoutDrainPolicy {
-    if matches!(mode, ReopenMode::DispatchOnly)
-        && matches!(intent, AuthoritativeActorDispatchIntent::PlainTrigger)
-    {
-        RouteCloseoutDrainPolicy::PassThroughPlainTrigger
-    } else {
-        RouteCloseoutDrainPolicy::DrainBeforeDispatch
-    }
+    RouteCloseoutDrainPolicy::DrainBeforeDispatch
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3252,7 +3248,6 @@ pub fn direct_pane_can_enter_existing_draft(facts: DirectPaneExistingDraftSubmit
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RouteCloseoutDrainOutcome {
     NoOpenCycle,
-    PlainTriggerPassThrough,
     Recovered(String),
     Blocked(String),
 }
@@ -6679,13 +6674,13 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     }
 
     #[test]
-    fn closeout_drain_policy_passes_through_plain_editor_trigger() {
+    fn closeout_drain_policy_drains_before_plain_editor_trigger() {
         assert_eq!(
             classify_route_closeout_drain_policy(
                 ReopenMode::DispatchOnly,
                 AuthoritativeActorDispatchIntent::PlainTrigger,
             ),
-            RouteCloseoutDrainPolicy::PassThroughPlainTrigger,
+            RouteCloseoutDrainPolicy::DrainBeforeDispatch,
         );
     }
 

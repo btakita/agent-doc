@@ -213,6 +213,7 @@ in the `agent:done archive=...done.md` target as completed-history proof for
 backlog replay and as known identifiers for the coined-ID guard after inline
 history is reaped. Invalid archive targets fail closed instead of being ignored.
 - No-partial-reap invariant: if a completed tracked item is followed by malformed flush-left spill such as pasted command/diff transcript lines, reap/archive the whole logical block with that parent item. Do not delete only the tracked parent line and leave orphan prose behind in the live backlog.
+- No-partial-remove invariant: direct tracked-item removal follows the same logical-block boundary as reaping. It removes malformed flush-left spill through the next tracked item or structural heading/component boundary, while preserving that later structural postlude.
 4. Commit the rewritten component as part of the existing boundary-maintenance commit.
 
 **Migration of existing items:** `agent-doc migrate` is deterministic only: it

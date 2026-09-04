@@ -390,6 +390,44 @@ impl PendingLayout {
         Self { segments }
     }
 
+    /// Remove matching items together with any malformed flush-left spill that
+    /// belongs to their block. The spill boundary is the same conservative
+    /// boundary used by completed-item reaping: tracked items, headings, and
+    /// component structure are preserved.
+    fn remove_items_with_trailing_spill<F>(&self, mut matches_item: F) -> Self
+    where
+        F: FnMut(&PendingItem) -> bool,
+    {
+        let mut segments = Vec::with_capacity(self.segments.len());
+        let mut index = 0usize;
+        while index < self.segments.len() {
+            match &self.segments[index] {
+                PendingSegment::Item { item, .. } if matches_item(item) => {
+                    index += 1;
+                    while let Some(PendingSegment::Text(raw)) = self.segments.get(index) {
+                        let Some((_removed_text, keep_text)) =
+                            split_reapable_trailing_text_segment(raw)
+                        else {
+                            segments.push(PendingSegment::Text(raw.clone()));
+                            index += 1;
+                            break;
+                        };
+                        index += 1;
+                        if !keep_text.is_empty() {
+                            segments.push(PendingSegment::Text(keep_text));
+                            break;
+                        }
+                    }
+                }
+                segment => {
+                    segments.push(segment.clone());
+                    index += 1;
+                }
+            }
+        }
+        Self { segments }
+    }
+
     /// Drop non-item segments that match a known splice signature, returning
     /// them so the caller can log what it deleted (`#adbacklogorphanseg`).
     ///
@@ -1358,13 +1396,7 @@ pub fn op_remove_matching_tracked_line(body: &str, target: &str, contains: bool)
     };
 
     if layout.items().iter().any(&matches_item) {
-        let next = layout.replace_items(|item| {
-            if matches_item(item) {
-                None
-            } else {
-                Some(item.clone())
-            }
-        });
+        let next = layout.remove_items_with_trailing_spill(matches_item);
         return (preserve_trailing_newline_shape(body, next.render()), true);
     }
 
@@ -7297,6 +7329,42 @@ mod tests {
 
         assert!(removed);
         assert_eq!(updated, "- [ ] [#two] Second\n");
+    }
+
+    #[test]
+    fn remove_matching_tracked_line_takes_flush_left_spill_with_the_item() {
+        let body = concat!(
+            "- [ ] [#one] First issue:\n",
+            "`quoted text from the issue`\n",
+            "```\n",
+            "captured command output\n",
+            "```\n",
+            "- [ ] [#two] Second\n",
+        );
+
+        let (updated, removed) = op_remove_matching_tracked_line(body, "one", false);
+
+        assert!(removed);
+        assert_eq!(updated, "- [ ] [#two] Second\n");
+    }
+
+    #[test]
+    fn remove_matching_tracked_line_preserves_structural_postlude_after_spill() {
+        let body = concat!(
+            "- [ ] [#one] First issue:\n",
+            "orphaned command output\n",
+            "### Operator notes\n",
+            "Keep this prose.\n",
+            "- [ ] [#two] Second\n",
+        );
+
+        let (updated, removed) = op_remove_matching_tracked_line(body, "one", false);
+
+        assert!(removed);
+        assert_eq!(
+            updated,
+            "### Operator notes\nKeep this prose.\n- [ ] [#two] Second\n"
+        );
     }
 
     #[test]

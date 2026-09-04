@@ -1731,6 +1731,26 @@ mod tests {
     }
 
     #[test]
+    fn remove_does_not_leave_flush_left_item_spill_in_document() {
+        let (_tmp, doc) = doc_with_pending(concat!(
+            "- [ ] [#one] First issue:\n",
+            "`quoted text from the issue`\n",
+            "```\n",
+            "captured command output\n",
+            "```\n",
+            "- [ ] [#two] Second\n",
+        ));
+
+        force_pending(|| remove(&doc, "one", false));
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(!content.contains("[#one]"), "{content}");
+        assert!(!content.contains("quoted text from the issue"), "{content}");
+        assert!(!content.contains("captured command output"), "{content}");
+        assert!(content.contains("[#two]"), "{content}");
+    }
+
+    #[test]
     fn add_rejects_explicit_id_colliding_with_prompt_preset() {
         // #preset-item-id-collision-enforce: an explicit id matching a
         // prompt_presets key must fail closed at mutation time.

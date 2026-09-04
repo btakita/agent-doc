@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.330
+
+- **Fix: tracked-item removal cannot orphan multiline backlog evidence.**
+
+Granular backlog removal now owns the complete logical item block. When malformed
+flush-left quote, command, or diff text follows the removed parent, agent-doc
+removes that spill through the next tracked item or structural boundary instead
+of leaving invalid prose behind. Structural headings and their postlude remain
+untouched.
+
 ## 0.35.329
 
 - **Fix: visible-write snapshots cannot copy responses into the queue.**

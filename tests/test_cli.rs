@@ -32539,7 +32539,8 @@ fn restart_agent_refreshes_same_harness_config_and_degrades_failed_exact_resume(
         );
     }
     assert!(
-        !runtime.contains("reason=claim_conflict_or_transcript_missing note=keeping_running_lineage"),
+        !runtime
+            .contains("reason=claim_conflict_or_transcript_missing note=keeping_running_lineage"),
         "a verified-missing transcript must not be folded into the claim-conflict keep-lineage path",
     );
     for required in [

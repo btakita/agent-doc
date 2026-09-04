@@ -277,8 +277,8 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
     // explicit request, without a list marker or `~~~prompt` wrapper. That is
     // one lossless multiline task, not a collection of inert noise lines. Keep
     // the recovery deliberately narrow: every queue-native directive still
-    // wins, the Markdown fence must be balanced, and prose after the final
-    // fence must be an unmistakable request. This admits the live
+    // wins, the Markdown fence must be balanced, and prose before the first or
+    // after the final fence must be an unmistakable request. This admits the live
     // `backend.md` shape without promoting arbitrary pasted console output.
     if let Some((start_line, end_line, text)) = recover_unwrapped_fenced_prompt(&lines) {
         return Ok(vec![(
@@ -302,6 +302,41 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
 
         if trimmed.is_empty() {
             i += 1;
+            continue;
+        }
+
+        // A recovered prose + fenced-evidence task can follow already-completed
+        // queue rows. Re-run the narrow recovery against the remaining suffix
+        // before parsing any list-looking lines inside the evidence fence.
+        if let Some((relative_start, relative_end, text)) =
+            recover_unwrapped_fenced_prompt(&lines[i..])
+        {
+            debug_assert_eq!(relative_start, 0);
+            let end_i = i + relative_end;
+            entries.push((
+                QueueEntry::Prompt(QueuePrompt {
+                    text,
+                    multiline: true,
+                    indent: 0,
+                    ordered_marker: None,
+                }),
+                span(i, end_i + 1),
+            ));
+            i = end_i + 1;
+            continue;
+        }
+
+        // Ordinary Markdown evidence fences are inert queue content. Consume a
+        // balanced block as one Freeform entry so bullets and ordered lines in
+        // pasted logs can never become independent queue prompts.
+        if let Some(closer) = markdown_code_fence_marker(trimmed)
+            && let Some(close_idx) = (i + 1..lines.len()).find(|&j| lines[j].trim() == closer)
+        {
+            entries.push((
+                QueueEntry::Freeform(lines[i..=close_idx].join("\n")),
+                span(start_i, close_idx + 1),
+            ));
+            i = close_idx + 1;
             continue;
         }
 
@@ -335,7 +370,11 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
         // the marker as data lets `render` preserve every operator-authored byte
         // while the ordered-list projection derives `after=` edges.
         if let Some((indent, ordered_marker, rest)) = split_list_item(item_line) {
-            let entry = if let Some(completed) = parse_completed_inline(rest) {
+            let entry = if rest.trim().is_empty() {
+                // An editor's trailing `- ` placeholder carries no work. Keep
+                // its bytes, but never surface an empty runnable queue head.
+                QueueEntry::Freeform(line.to_string())
+            } else if let Some(completed) = parse_completed_inline(rest) {
                 QueueEntry::Completed(QueuePrompt {
                     text: completed.to_string(),
                     multiline: false,
@@ -507,7 +546,9 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
 /// keep their existing semantics.
 fn recover_unwrapped_fenced_prompt(lines: &[&str]) -> Option<(usize, usize, String)> {
     let start_line = lines.iter().position(|line| !line.trim().is_empty())?;
-    let end_line = lines.iter().rposition(|line| !line.trim().is_empty())?;
+    let end_line = lines
+        .iter()
+        .rposition(|line| !line.trim().is_empty() && !line_is_empty_list_placeholder(line))?;
 
     let mut open_fence: Option<&'static str> = None;
     let mut first_fence_line = None;
@@ -539,7 +580,7 @@ fn recover_unwrapped_fenced_prompt(lines: &[&str]) -> Option<(usize, usize, Stri
     }
     let first_fence_line = first_fence_line?;
     let last_fence_line = last_fence_line?;
-    if first_fence_line <= start_line || last_fence_line >= end_line {
+    if first_fence_line <= start_line {
         return None;
     }
     if !lines[start_line..first_fence_line]
@@ -549,13 +590,19 @@ fn recover_unwrapped_fenced_prompt(lines: &[&str]) -> Option<(usize, usize, Stri
         return None;
     }
 
+    let request_prefix = lines[start_line..first_fence_line]
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
     let request_tail = lines[last_fence_line + 1..=end_line]
         .iter()
         .map(|line| line.trim())
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join(" ");
-    if !tail_is_explicit_request(&request_tail) {
+    if !tail_is_explicit_request(&request_prefix) && !tail_is_explicit_request(&request_tail) {
         return None;
     }
 
@@ -564,6 +611,10 @@ fn recover_unwrapped_fenced_prompt(lines: &[&str]) -> Option<(usize, usize, Stri
         end_line,
         lines[start_line..=end_line].join("\n"),
     ))
+}
+
+fn line_is_empty_list_placeholder(line: &str) -> bool {
+    split_list_item(line).is_some_and(|(_, _, rest)| rest.trim().is_empty())
 }
 
 fn markdown_code_fence_marker(line: &str) -> Option<&'static str> {
@@ -585,7 +636,7 @@ fn line_has_queue_native_syntax(line: &str) -> bool {
         _ => line,
     };
     crate::queue_command::is_slash_command(trimmed)
-        || split_list_item(item_line).is_some()
+        || split_list_item(item_line).is_some_and(|(_, _, rest)| !rest.trim().is_empty())
         || trimmed
             .strip_prefix("preset ")
             .is_some_and(|rest| !rest.trim().is_empty())
@@ -4638,6 +4689,46 @@ mod tests {
             0..body.trim_end_matches('\n').len() + 1,
             "the recovered prompt owns the exact visible source span"
         );
+    }
+
+    /// Regression for the live `backend.md` closeout report: completed rows may
+    /// precede a request whose evidence contains list-looking console text, and
+    /// an editor may leave a trailing empty list placeholder. The report is one
+    /// head; neither the evidence bullets nor the placeholder are runnable.
+    #[test]
+    fn parse_recovers_prefixed_request_after_completed_rows_without_dispatching_fenced_bullets() {
+        let task = concat!(
+            "Please fix agent-doc causes of turn closeout not completing in backend.md.\n",
+            "```\n",
+            "Verified the prior work.\n",
+            "- / 0 FAIL, the pinned-publication test\n",
+            "2. #stalewtclean remains deferred\n",
+            "```"
+        );
+        let body = format!("- ~~do [#fixed]~~\n{task}\n- \n");
+        let entries = parse(&body).unwrap();
+        let parsed_prompts = prompts(&entries);
+
+        assert_eq!(parsed_prompts.len(), 1);
+        assert_eq!(parsed_prompts[0].text, task);
+        assert!(parsed_prompts[0].multiline);
+        assert!(matches!(entries.first(), Some(QueueEntry::Completed(_))));
+        assert!(matches!(entries.last(), Some(QueueEntry::Freeform(line)) if line == "- "));
+    }
+
+    #[test]
+    fn balanced_markdown_evidence_fence_keeps_list_looking_lines_inert() {
+        let body = concat!(
+            "route diagnostics\n",
+            "```\n",
+            "- / 0 FAIL, not a queue prompt\n",
+            "2. still diagnostic output\n",
+            "```\n",
+        );
+        let entries = parse(body).unwrap();
+
+        assert!(prompts(&entries).is_empty());
+        assert_eq!(render(&entries), body);
     }
 
     #[test]

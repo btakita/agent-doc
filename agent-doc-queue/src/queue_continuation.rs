@@ -1373,6 +1373,32 @@ mod tests {
     }
 
     #[test]
+    fn required_continuation_returns_prefixed_request_not_a_bullet_inside_its_fence() {
+        let task = concat!(
+            "Please fix the backend closeout failure.\n",
+            "```\n",
+            "- / 0 FAIL, diagnostic only\n",
+            "2. #stale diagnostic only\n",
+            "```"
+        );
+        let content = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+                "## Queue\n\n<!-- agent:queue go -->\n",
+                "- ~~do [#fixed]~~\n{}\n- \n",
+                "<!-- /agent:queue -->\n"
+            ),
+            task
+        );
+
+        let continuation = required_continuation(&content, Some(&content))
+            .unwrap()
+            .expect("the prefixed fenced task is a ready continuation");
+        assert_eq!(continuation.head_prompt, task);
+        assert_eq!(continuation.head_id, None);
+    }
+
+    #[test]
     fn required_continuation_none_when_snapshot_head_was_modified() {
         let snapshot = doc_with_backlog(&["do [#a]"], &["- [ ] [#a] first"]);
         let current = doc_with_backlog(&["do [#b]"], &["- [ ] [#b] changed"]);

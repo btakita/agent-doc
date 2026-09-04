@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.328
+
+- **Fix: fenced closeout reports remain one queue prompt.**
+
+The canonical queue parser now recovers an operator request that precedes a
+balanced Markdown evidence fence even when completed queue rows come first. It
+treats list-looking lines inside ordinary evidence fences and trailing empty
+list placeholders as inert content, so continuation selects the complete report
+and exact-span closeout drains only that report instead of dispatching its pasted
+bullets as new work.
+
 ## 0.35.327
 
 - **Fix: queue-residue recovery closes response-free repair cycles with `commit`.**

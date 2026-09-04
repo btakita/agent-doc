@@ -2482,6 +2482,48 @@ mod core_tests {
     }
 
     #[test]
+    fn prefixed_fenced_head_after_completed_row_consumes_as_single_head_and_drains() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.md");
+        let prompt = concat!(
+            "Please fix the backend closeout failure.\n",
+            "```text\n",
+            "- / 0 FAIL, diagnostic only\n",
+            "2. #stale diagnostic only\n",
+            "```"
+        );
+        let content = format!(
+            concat!(
+                "---\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: queue recovery — opus\n\n",
+                "> **Queue prompt:** {}\n\n",
+                "Diagnosed and fixed.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue priority go -->\n",
+                "- ~~do [#fixed]~~\n",
+                "{}\n",
+                "- \n",
+                "<!-- /agent:queue -->\n",
+            ),
+            prompt, prompt
+        );
+        std::fs::write(&file, &content).unwrap();
+
+        let outcome =
+            consume_free_text_queue_prompts_with_outcome(&file, 1, true, &TestQueueConsumeEffects)
+                .expect("the recovered head must be span-addressable")
+                .expect("the recovered head should be consumed");
+        assert_eq!(outcome.consumed_count, 1);
+        assert_eq!(outcome.consumed_text, prompt);
+        assert!(outcome.drained);
+
+        let after = std::fs::read_to_string(&file).unwrap();
+        assert!(after.contains("queue: stop"));
+        assert!(after.contains("<!-- agent:queue priority go -->\n<!-- /agent:queue -->"));
+    }
+
+    #[test]
     fn registered_preset_head_is_strikeable_like_free_text() {
         // #qpresetstrike: a bare queue head that is a registered `prompt_presets`
         // token has no backlog row, so `--done <id>` fails and `queue consume`

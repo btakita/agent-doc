@@ -1158,7 +1158,10 @@ mod tests {
         let commit = residue_message
             .find("agent-doc commit doc.md")
             .expect("the response-free repair cycle must cross the commit boundary directly");
-        assert!(preflight < commit, "preflight must be ordered before commit");
+        assert!(
+            preflight < commit,
+            "preflight must be ordered before commit"
+        );
         assert!(!residue_message.contains("agent-doc write --commit doc.md"));
         assert!(residue_message.contains("without resubmitting the response"));
         assert!(residue_message.contains("#qresiduecommittedhint"));

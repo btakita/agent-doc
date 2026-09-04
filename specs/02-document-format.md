@@ -102,6 +102,7 @@ The `agent:queue` component holds a batch of prompts consumed sequentially. It i
 | Single-line | `- do #fix1` | Bare `- ` prefix at column 0. A single stray leading backtick (`` `- text ``, a common code-span mistype) is normalized to `- text` so the item parses as a prompt and self-heals on re-render instead of being silently skipped as inert text (`#queue-line-leading-backtick-drop`). |
 | Multi-line (tilde) | `~~~prompt`...`~~~` | Fenced with `~~~prompt` opener |
 | Multi-line (dash) | `---`...`---` | Fenced with bare `---` |
+| Recovered evidence task | Explicit request before or after a balanced Markdown code fence | One exact-span multiline prompt; list-looking evidence inside the fence is never a separate prompt |
 | Start fence | `--- start [at <datetime>]` | Activation signal (consumed on use) |
 | Stop fence | `--- stop` | Breakpoint (consumed when reached) |
 
@@ -141,7 +142,8 @@ When the queue drains to empty: `auto` is stripped from the opening tag, `queue_
 4. `--- start`, `--- start <time>`, `--- start at <time>`, `~~~start` → start fence.
 5. `--- stop`, `~~~stop` → stop fence.
 6. Blank lines between items are ignored.
-7. Content outside list items, fences, or control fences is a parse error.
+7. Content outside list items, prompt fences, or control fences is inert `Freeform`; a balanced ordinary Markdown code fence is one inert block, so list-looking lines inside pasted evidence are never prompts.
+8. A narrow recovery recognizes non-native prose plus a balanced Markdown code fence as one exact-span multiline prompt when an explicit request appears before or after the fence and no later non-empty queue-native item exists. Already-completed rows may precede it. A trailing empty list placeholder does not block recovery and is never runnable.
 
 Single-line list prompts and canonical multiline prompt fences are one ordered,
 AST-addressable item sequence. Node-keyed consumption of a multiline live item

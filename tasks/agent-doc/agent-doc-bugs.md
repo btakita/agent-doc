@@ -274,6 +274,19 @@ Fixed and recovered.
 - Agent-doc closeout committed and `session-check` passed.
 
 Restart IntelliJ IDEA once to activate the newly installed Kotlin plugin build.
+
+### Re: Response
+
+Restart verified:
+
+- IDEA loaded Agent Doc plugin `0.2.373`.
+- Fresh editor replicas registered successfully.
+- `admin.md` is active in pane `%79`.
+- Claude remains on `fable`.
+- Supervisor is healthy with `restart_count=0`.
+- No stale conversation-ID loop or File Cache Conflict is present.
+
+The current busy status is a real `admin.md` turn in preflight, so I left it running.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

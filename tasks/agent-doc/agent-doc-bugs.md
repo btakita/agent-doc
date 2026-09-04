@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -68,6 +68,18 @@ Architecture closeout:
 The committed `admin.md` document still contains the correct response and its newer engineering-estimate queue prompt, so I did not overwrite the foreign-owned live buffer manually. Installing 0.35.329 requested safe idle-boundary supervisor/controller recycling, which activates the repaired adoption path.
 
 Verification passed: the exact fused multiline regression, the write-runtime authority/redelivery regression, the workflow architecture ownership test, `cargo fmt --all -- --check`, and the full `make check` gate. The 0.35.329 CLI, shared library, JetBrains plugin, and VSCodium extension are installed locally. Publication remains held by the existing PyPI-quota status.
+
+### Re: malformed backlog residue — gpt-5
+
+> **Queue prompt:** This document backlog shows my quoted text from another issue and is not well-formed.
+
+Fixed. The backlog is clear again. The quote and command log were orphaned when granular item removal deleted only a tracked parent line and left its flush-left evidence behind.
+
+agent-doc 0.35.330 makes the tracked-work parser the single policy owner for removal boundaries. Removing a matched item now removes its indented continuation plus malformed flush-left quote, log, or diff spill through the next tracked item or structural boundary; headings, components, and other structural postludes remain untouched.
+
+Architecture closeout: the invariant is that deleting a tracked work item deletes its complete logical block and cannot orphan flush-left evidence. `PendingLayout` and `op_remove_matching_tracked_line` own that policy. The transition tests cover matched items with indented continuation, matched items with flush-left spill, preservation at structural boundaries, and unchanged nonmatches. This remains a pure one-shot document transform, so no lifecycle state or Source/Computed/Effect topology is needed; the I/O adapter invokes the policy owner.
+
+Verification passed: focused `agent-doc-element-backlog` tests, the backlog I/O regression, the full `make check` gate, and the final `make install`. The implementation is committed as `07fefad93` (`fix(backlog): remove multiline item spill`).
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -77,8 +89,6 @@ Verification passed: the exact fused multiline regression, the write-runtime aut
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Run Agent Doc on admin.md wrote the response into the agent:queue.~~
-- This document backlog shows my quoted text from another issue and is not well-formed.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

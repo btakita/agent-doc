@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a06968-fa62-7f60-8995-9bed0ae35544
+  codex: 01a06a8e-e82a-7f03-bf7b-44573dc317fb
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -32,6 +32,23 @@ Issue #47 fixed on main as 0.35.303; release tag held pending PyPI quota decisio
 Compacted content:
 - Archived 12 response topic(s): / 0 FAIL, the pinned-publication test with HAIVEN_CONTRACTS_ROOT scoped to ./cmd/contractpublish only, go vet, go; / 0 FAIL, the pinned-publication test with HAIVEN_CONTRACTS_ROOT scoped to ./cmd/contractpublish only, go vet, go; Lazily conformance and ordered native-save release; 9 more
 - Prior summary/context: prior compacted content: Archived 8 response topic(s): Compact Exchange and session recovery; Response; do [#jetbrain...
+
+### Re: fenced closeout reports becoming queue work — gpt-5
+
+> **Queue prompt:** / 0 FAIL, the pinned-publication test with HAIVEN_CONTRACTS_ROOT scoped to ./cmd/contractpublish only, go vet, go
+
+Fixed in agent-doc 0.35.328 (`93e04437e`). The malformed admission happened because the canonical queue parser could recover a prose-plus-fence task only when it occupied the whole component and placed an explicit request after the fence. With completed rows before the report, a request before the fence, and a trailing empty `- ` editor placeholder, parsing fell through and promoted list-looking lines inside the pasted evidence to independent queue prompts.
+
+The parser now recovers that suffix as one lossless multiline prompt, accepts an unmistakable request on either side of a balanced evidence fence, keeps ordinary balanced Markdown fences inert, and treats an empty list placeholder as non-runnable content. Continuation and queue-consumption regressions prove the complete report is selected and only its exact source span is drained.
+
+Architecture closeout:
+
+- Invariant: evidence inside a balanced Markdown fence never gains queue authority; only the surrounding explicit operator request is runnable, and consumption is limited to its exact parser-owned span.
+- Policy owner: `agent-doc-queue::document_queue::parse_spans` owns raw queue bytes to typed `Prompt`/`Freeform` classification. Continuation and queue I/O consume that typed projection rather than reinterpreting Markdown.
+- Transition path: operator bytes → typed queue entries → computed live head → continuation → exact-span consume/commit. The concurrent operator replacement of this queue remained authoritative and was not overwritten.
+- Reactive topology: source state is the current document body and operator revision; computed state is parser entries, head identity, and drainability; effects are continuation dispatch and exact-span persistence. No one-shot repair path or duplicate policy owner was added.
+
+Verification passed: focused `agent-doc-queue` and `agent-doc-queue-io` suites, `cargo fmt --all -- --check`, and the full `make check`. `make install` installed CLI 0.35.328 and requested a safe idle-boundary controller recycle. The latest visible CI run was green; the new commit will be pushed after this binary-owned closeout, while tag/publication remains held by the document’s existing PyPI-quota status.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -41,28 +58,8 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#fixissuesclaim]~~
-- ~~do [#fixrunbackend]~~
-Please fix agent-doc causes of turn closeout not completing in backend.md. I was typing in the queue while the turn was closing:
-```
-  Verified by reproducing in a clean worktree at 628bf4ac with the submodule at its own pin 2cd516e, then running the
-  preflight workflow's steps in order at both heads — task tidy + git diff --exit-code clean, go test ./... 25 packages
-- / 0 FAIL, the pinned-publication test with HAIVEN_CONTRACTS_ROOT scoped to ./cmd/contractpublish only, go vet, go
-  build, all exit 0 — then confirmed on GitHub's runners. Pushed with --force-with-lease; temp worktree removed.
-  Two things need you:
-  1. ~~The document closeout is deferred, not lost. agent-doc respond reports editor_projection_pending — the editor~~
-     acknowledged the canonical content (df8a7991…) but hasn't projected its native save to disk. The retained intent
-     1788462227612561795-1-df8a7991… commits itself once delivery converges; the binary explicitly forbids re-sending,
-     forcing disk, or recycling, so I stopped after six session-check polls over ~2 minutes, all still INTERRUPTED. A
-     save in the editor should converge it. Contributing factor worth knowing: the lint gate blocked the first two
-     attempts on a pre-existing stray go attribute on <!-- agent:backlog priority go --> (queue-only, ignored, also
-     flagged by preflight), and removing it required a disk edit under the live buffer — which is plausibly what the
-     editor is now reconciling.
-  2. ⏭️ #stalewtclean bit again. I couldn't rebase #413 to drop its now-redundant harness hunk because
-     feat/studio-exposure-vocabulary is still checked out by ~/.claude/jobs/93c87c28/tmp/be-studio. Not urgent — git
-     drops that hunk automatically (a trial rebase reported dropping … patch contents already upstream), and #413/#416
-     stay green and MERGEABLE meanwhile.
-```
+- Run Agent Doc on admin.md wrote the response into the agent:queue.
+- This document backlog shows my quoted text from another issue and is not well-formed.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

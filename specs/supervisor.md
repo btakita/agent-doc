@@ -120,6 +120,13 @@ preserves the very child the operator asked to replace. The decoded intent
 remains attached to the pending restart until the old child exits. On a
 same-harness continue restart, it authorizes the new iteration to validate and
 adopt the current document's exact `resume.<active-harness>` binding. The
+same boundary also adopts the re-resolved launch arguments and environment, so
+same-harness model/config edits apply to the replacement child. A locally
+verified missing transcript retires that exact lineage and performs one fresh,
+auto-triggered launch instead of invoking the harness with a known-bad id. If an
+unverifiable exact resume still exits nonzero before establishing its handoff,
+the next launch degrades to fresh rather than repeating that id through crash
+backoff. The
 persisted `resume:` value is a harness-keyed map (`claude`, `codex`, `opencode`),
 and restart/cold-recovery paths must never read another harness's entry. Legacy
 scalar values are interpreted only for the document's active harness and migrate
@@ -131,7 +138,7 @@ controller recycles never refresh lineage from frontmatter.
 
 A restart iteration that re-resolves the harness records its outcome in
 `.agent-doc/logs/ops.log` whether or not the harness changed
-(`agent_restart_performed` / `agent_restart_respec_inert` /
+(`agent_restart_performed` / `agent_restart_respec_refreshed` /
 `agent_restart_respec_failed` / `agent_restart_respec_skipped`), so "the restart
 came back on the old agent" is answerable from the log instead of inferred.
 

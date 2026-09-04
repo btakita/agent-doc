@@ -26300,6 +26300,7 @@ fn test_agent_doc_claim_io_routes_document_reads_through_runtime_authority() {
         "std::fs::write(file, &updated_content)",
         "std::fs::write(file, &updated)",
         "std::fs::write(file, &scaffolded)",
+        "agent_doc_sync_io::resync::prune()",
     ] {
         assert!(
             !claim_source.contains(forbidden),
@@ -32508,4 +32509,48 @@ fn retained_write_boundary_flags_are_typed_at_development_call_sites() {
         guard < capture_boundary,
         "historical retained effects must reject before response capture/admission",
     );
+}
+
+#[test]
+fn restart_agent_refreshes_same_harness_config_and_degrades_failed_exact_resume() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/run.rs")).unwrap();
+    let same_harness_start = runtime
+        .find("Unchanged harness (the common case): preserve compatible")
+        .expect("same-harness restart branch");
+    let same_harness_end = runtime[same_harness_start..]
+        .find("agent_restart_respec_failed")
+        .map(|offset| same_harness_start + offset)
+        .expect("same-harness restart branch end");
+    let same_harness = &runtime[same_harness_start..same_harness_end];
+
+    for required in [
+        "base_args = restart_spec.fresh_base_args.clone()",
+        "resolved_env = restart_spec.resolved_env.clone()",
+        "degrade_resume_if_transcript_missing(",
+        "session_lineage.clear_proven_missing(&requested_id)",
+        "auto_trigger_next_launch = true",
+        "agent_restart_respec_refreshed",
+    ] {
+        assert!(
+            same_harness.contains(required),
+            "same-harness Restart Agent must refresh config and retire a verified-missing resume id: {required}",
+        );
+    }
+    assert!(
+        !runtime.contains("reason=claim_conflict_or_transcript_missing note=keeping_running_lineage"),
+        "a verified-missing transcript must not be folded into the claim-conflict keep-lineage path",
+    );
+    for required in [
+        "attempted_exact_resume_id = Some(id.to_string())",
+        "auto_trigger && attempted_exact_resume_id.is_some()",
+        "else if failed_resume",
+        "resume_restart_fresh_after_nonzero",
+    ] {
+        assert!(
+            runtime.contains(required),
+            "a nonzero failed exact-resume handoff must degrade to one fresh launch: {required}",
+        );
+    }
 }

@@ -17,9 +17,9 @@
 //!
 //! ## Spec
 //! - `run(file, options, effects)` is the sole public entry point.
-//! - Prunes stale registry entries via `agent_doc_sync_io::resync::prune()` before any resolution.
 //! - Calls `validate_file_claim(file)` to remove dead-pane entries for this specific
-//!   file and log why the re-claim was needed (complements the bulk prune).
+//!   file and log why the re-claim was needed. Explicit claim never runs the global
+//!   resync/prune path, so its latency is not proportional to unrelated live panes.
 //! - Canonicalises the file path to handle CWD drift (e.g. when called from a
 //!   submodule directory).
 //! - Window resolution when `--window` is provided:
@@ -251,8 +251,6 @@ pub fn run(
     if isolate {
         return run_isolate(file);
     }
-    let _ = agent_doc_sync_io::resync::prune(); // Clean stale entries before window resolution
-
     // Check for stale claims on this specific file and log if found
     validate_file_claim(file);
 
@@ -632,9 +630,9 @@ pub fn run(
 /// remove it so the new claim can proceed cleanly. This handles the common case
 /// of stale claims after a machine restart (tmux pane IDs are reassigned).
 ///
-/// Called after `agent_doc_sync_io::resync::prune()` which handles bulk dead-pane removal. This
-/// function provides file-specific logging so the user sees *why* a re-claim
-/// was needed rather than getting a silent no-op.
+/// This is intentionally file-scoped: explicit claim must not run the global
+/// resync/prune path or wait on unrelated panes before it fences and mutates the
+/// requested document.
 fn validate_file_claim(file: &Path) {
     let file_str = file.to_string_lossy();
     let registry_path = agent_doc_session_registry_io::registry_path();

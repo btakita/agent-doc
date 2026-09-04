@@ -5,9 +5,61 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.editor.ex.EditorEx
+import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.vfs.VirtualFile
+
+/**
+ * Keeps explicit claim mutations from racing an editable IntelliJ buffer.
+ *
+ * Claim may scaffold an empty document through the external CLI before that document has a CRDT
+ * replica. Save the one target document, fail closed if it remains dirty, and temporarily put all
+ * of its editor views in viewer mode. The synchronous VFS refresh happens before editing is
+ * restored, so IntelliJ observes the CLI write as a clean reload instead of a File Cache Conflict.
+ */
+internal class ClaimDocumentFence private constructor(
+    private val file: VirtualFile,
+    private val editorsToRestore: List<EditorEx>,
+) {
+    companion object {
+        fun acquire(project: Project, file: VirtualFile): ClaimDocumentFence {
+            val fileDocumentManager = FileDocumentManager.getInstance()
+            val document = fileDocumentManager.getDocument(file)
+            if (document != null) {
+                fileDocumentManager.saveDocument(document)
+                check(!fileDocumentManager.isDocumentUnsaved(document)) {
+                    "the active document is still unsaved after saveDocument"
+                }
+            }
+
+            val editorsToRestore = FileEditorManager.getInstance(project)
+                .getEditors(file)
+                .filterIsInstance<TextEditor>()
+                .mapNotNull { it.editor as? EditorEx }
+                .filterNot { it.isViewer }
+            editorsToRestore.forEach { it.isViewer = true }
+            return ClaimDocumentFence(file, editorsToRestore)
+        }
+    }
+
+    fun release(afterRelease: (() -> Unit)? = null) {
+        try {
+            if (file.isValid) file.refresh(false, false)
+        } finally {
+            ApplicationManager.getApplication().invokeLater {
+                editorsToRestore.forEach { editor ->
+                    if (!editor.isDisposed) editor.isViewer = false
+                }
+                afterRelease?.invoke()
+            }
+        }
+    }
+}
 
 /**
  * Action that claims the focused .md file and syncs the tmux layout.
@@ -29,6 +81,8 @@ class ClaimAction : AnAction() {
 
     companion object {
         private val LOG = Logger.getInstance(ClaimAction::class.java)
+
+        internal const val CLAIM_PROCESS_TIMEOUT_MS = 30_000L
 
         /** Stable marker prefix emitted by `agent-doc claim` on a cross-session reject. */
         const val CROSS_SESSION_REJECT_MARKER = "[claim] cross-session-reject"
@@ -107,28 +161,77 @@ class ClaimAction : AnAction() {
             }
         }
 
-        Thread {
+        launchClaim(
+            project,
+            file,
+            cwd,
+            relativePath,
+            position,
+            force = false,
+            newPane = false,
+            allowCrossSessionPrompt = true,
+        )
+    }
+
+    private fun launchClaim(
+        project: Project,
+        file: VirtualFile,
+        cwd: String,
+        relativePath: String,
+        position: String?,
+        force: Boolean,
+        newPane: Boolean,
+        allowCrossSessionPrompt: Boolean,
+    ) {
+        val fence = try {
+            ClaimDocumentFence.acquire(project, file)
+        } catch (failure: Throwable) {
+            TerminalUtil.notifyError(
+                project,
+                "Claim was not started because IDEA could not save the active document: ${failure.message}",
+            )
+            return
+        }
+
+        ApplicationManager.getApplication().executeOnPooledThread {
+            var pendingReject: CrossSessionReject? = null
             try {
                 TmuxPaneFocusSync.recordCurrentTmuxFocus(project)
                 val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
                 val (exitCode, output) = runClaim(
-                    cwd, agentDoc, relativePath, position, force = false, newPane = false,
+                    cwd, agentDoc, relativePath, position, force, newPane,
                 )
                 if (exitCode == 0) {
                     TerminalUtil.showHint(project, output.ifEmpty { "Claimed $relativePath" })
                     SyncLayoutAction.syncLayout(project, notify = false, noAutostart = false)
-                    return@Thread
-                }
-                val reject = parseCrossSessionReject(output)
-                if (reject != null) {
-                    promptCrossSessionChoice(project, cwd, agentDoc, relativePath, position, reject)
                 } else {
-                    TerminalUtil.notifyError(project, "Claim failed (exit $exitCode):\n$output")
+                    val reject = parseCrossSessionReject(output)
+                    if (allowCrossSessionPrompt && reject != null) {
+                        pendingReject = reject
+                    } else {
+                        TerminalUtil.notifyError(project, "Claim failed (exit $exitCode):\n$output")
+                    }
                 }
             } catch (ex: Exception) {
                 TerminalUtil.notifyError(project, "Failed to run agent-doc claim: ${ex.message}")
+            } finally {
+                val reject = pendingReject
+                fence.release {
+                    if (reject != null) {
+                        val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
+                        promptCrossSessionChoice(
+                            project,
+                            file,
+                            cwd,
+                            agentDoc,
+                            relativePath,
+                            position,
+                            reject,
+                        )
+                    }
+                }
             }
-        }.start()
+        }
     }
 
     /** Run `agent-doc claim <rel> [--force] [--position P]`; returns (exitCode, merged output). */
@@ -142,27 +245,31 @@ class ClaimAction : AnAction() {
     ): Pair<Int, String> {
         val cmd = buildClaimCommand(agentDoc, relativePath, position, force, newPane)
         LOG.debug("claim: ${cmd.joinToString(" ")}")
-        val process = ProcessBuilder(cmd)
-            .directory(java.io.File(cwd))
-            .redirectErrorStream(true)
-            .start()
-        val output = process.inputStream.bufferedReader().readText().trim()
-        return process.waitFor() to output
+        val result = SyncLayoutAction.runCommandWithTimeout(cmd, cwd, CLAIM_PROCESS_TIMEOUT_MS)
+        val output = if (result.timedOut) {
+            listOf(result.output, "Claim timed out after ${CLAIM_PROCESS_TIMEOUT_MS / 1_000} seconds")
+                .filter { it.isNotEmpty() }
+                .joinToString("\n")
+        } else {
+            result.output
+        }
+        return result.exitCode to output
     }
 
     /** Run `agent-doc session set <session>`; returns (exitCode, merged output). */
     private fun runSessionSet(cwd: String, agentDoc: String, session: String): Pair<Int, String> {
-        val process = ProcessBuilder(listOf(agentDoc, "session", "set", session))
-            .directory(java.io.File(cwd))
-            .redirectErrorStream(true)
-            .start()
-        val output = process.inputStream.bufferedReader().readText().trim()
-        return process.waitFor() to output
+        val result = SyncLayoutAction.runCommandWithTimeout(
+            listOf(agentDoc, "session", "set", session),
+            cwd,
+            CLAIM_PROCESS_TIMEOUT_MS,
+        )
+        return result.exitCode to result.output
     }
 
     /** Show the cross-session recovery dialog on the EDT and dispatch the chosen recovery. */
     private fun promptCrossSessionChoice(
         project: Project,
+        file: VirtualFile,
         cwd: String,
         agentDoc: String,
         relativePath: String,
@@ -181,15 +288,15 @@ class ClaimAction : AnAction() {
             )
             when (choice) {
                 0 -> runClaimChoice(
-                    project, cwd, agentDoc, relativePath, position,
+                    project, file, cwd, agentDoc, relativePath, position,
                     switchTo = null, force = false, newPane = true,
                 )
                 1 -> runClaimChoice(
-                    project, cwd, agentDoc, relativePath, position,
+                    project, file, cwd, agentDoc, relativePath, position,
                     switchTo = null, force = true, newPane = false,
                 )
                 2 -> runClaimChoice(
-                    project, cwd, agentDoc, relativePath, position,
+                    project, file, cwd, agentDoc, relativePath, position,
                     switchTo = reject.paneSession, force = false, newPane = false,
                 )
                 else -> { /* Cancel — leave the file unclaimed, no mutation */ }
@@ -204,6 +311,7 @@ class ClaimAction : AnAction() {
      */
     private fun runClaimChoice(
         project: Project,
+        file: VirtualFile,
         cwd: String,
         agentDoc: String,
         relativePath: String,
@@ -212,31 +320,41 @@ class ClaimAction : AnAction() {
         force: Boolean,
         newPane: Boolean,
     ) {
-        Thread {
-            try {
-                TmuxPaneFocusSync.recordCurrentTmuxFocus(project)
-                if (switchTo != null) {
-                    val (setExit, setOut) = runSessionSet(cwd, agentDoc, switchTo)
+        if (switchTo != null) {
+            ApplicationManager.getApplication().executeOnPooledThread {
+                val (setExit, setOut) = runSessionSet(cwd, agentDoc, switchTo)
+                ApplicationManager.getApplication().invokeLater {
                     if (setExit != 0) {
-                        TerminalUtil.notifyError(project, "Switch project session failed (exit $setExit):\n$setOut")
-                        return@Thread
+                        TerminalUtil.notifyError(
+                            project,
+                            "Switch project session failed (exit $setExit):\n$setOut",
+                        )
+                    } else {
+                        launchClaim(
+                            project,
+                            file,
+                            cwd,
+                            relativePath,
+                            position,
+                            force,
+                            newPane,
+                            allowCrossSessionPrompt = false,
+                        )
                     }
                 }
-                val (exitCode, output) = runClaim(
-                    cwd, agentDoc, relativePath, position, force = force, newPane = newPane,
-                )
-                if (exitCode == 0) {
-                    TerminalUtil.showHint(project, output.ifEmpty { "Claimed $relativePath" })
-                } else {
-                    TerminalUtil.notifyError(project, "Claim failed (exit $exitCode):\n$output")
-                }
-                if (shouldSyncLayoutAfterClaim(exitCode)) {
-                    SyncLayoutAction.syncLayout(project, notify = false, noAutostart = false)
-                }
-            } catch (ex: Exception) {
-                TerminalUtil.notifyError(project, "Failed to run agent-doc claim: ${ex.message}")
             }
-        }.start()
+            return
+        }
+        launchClaim(
+            project,
+            file,
+            cwd,
+            relativePath,
+            position,
+            force,
+            newPane,
+            allowCrossSessionPrompt = false,
+        )
     }
 
     override fun update(e: AnActionEvent) {

@@ -3,6 +3,7 @@ package com.github.btakita.agentdoc
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 
@@ -39,21 +40,42 @@ class ForceClaimAction : AnAction() {
             }
         }
 
-        Thread {
+        val fence = try {
+            ClaimDocumentFence.acquire(project, file)
+        } catch (failure: Throwable) {
+            TerminalUtil.notifyError(
+                project,
+                "Force claim was not started because IDEA could not save the active document: ${failure.message}",
+            )
+            return
+        }
+
+        ApplicationManager.getApplication().executeOnPooledThread {
             try {
                 TmuxPaneFocusSync.recordCurrentTmuxFocus(project)
                 val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
-                val cmd = mutableListOf(agentDoc, "claim", relativePath, "--force")
-                if (position != null) {
-                    cmd.addAll(listOf("--position", position))
-                }
+                val cmd = ClaimAction.buildClaimCommand(
+                    agentDoc,
+                    relativePath,
+                    position,
+                    force = true,
+                    newPane = false,
+                )
                 LOG.debug("force-claim: ${cmd.joinToString(" ")}")
-                val process = ProcessBuilder(cmd)
-                    .directory(java.io.File(cwd))
-                    .redirectErrorStream(true)
-                    .start()
-                val output = process.inputStream.bufferedReader().readText().trim()
-                val exitCode = process.waitFor()
+                val result = SyncLayoutAction.runCommandWithTimeout(
+                    cmd,
+                    cwd,
+                    ClaimAction.CLAIM_PROCESS_TIMEOUT_MS,
+                )
+                val output = if (result.timedOut) {
+                    listOf(
+                        result.output,
+                        "Force claim timed out after ${ClaimAction.CLAIM_PROCESS_TIMEOUT_MS / 1_000} seconds",
+                    ).filter { it.isNotEmpty() }.joinToString("\n")
+                } else {
+                    result.output
+                }
+                val exitCode = result.exitCode
                 if (exitCode == 0) {
                     TerminalUtil.showHint(project, output.ifEmpty { "Force-claimed $relativePath" })
                     SyncLayoutAction.syncLayout(project, notify = false, noAutostart = false)
@@ -62,8 +84,10 @@ class ForceClaimAction : AnAction() {
                 }
             } catch (ex: Exception) {
                 TerminalUtil.notifyError(project, "Failed to run agent-doc claim --force: ${ex.message}")
+            } finally {
+                fence.release()
             }
-        }.start()
+        }
     }
 
     override fun update(e: AnActionEvent) {

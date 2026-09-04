@@ -1148,10 +1148,9 @@ pub fn run_with_reap_policy_resume_and_harness(
             // the operator changed `agent:` (e.g. claude→opencode) the resolved
             // binary now DIFFERS from the running one: swap in the new spec and force
             // a FRESH spawn (a harness change must never adopt the old child).
-            //
-            // INERT for an unchanged `agent:`: the re-resolved binary matches, so we
-            // skip the swap entirely and the same-harness restart path is byte-for-
-            // byte unchanged (no spec swap, `pending_adopt` untouched, no marker).
+            // An unchanged harness still adopts the newly resolved args and
+            // environment so model/config edits take effect at this explicit child
+            // replacement boundary.
             let restart_fm = agent_doc_document_realtime_io::try_resolve_current_document_content(
                 file,
                 "start_runtime_restart_frontmatter",
@@ -1250,44 +1249,57 @@ pub fn run_with_reap_policy_resume_and_harness(
                                 &mut session_log,
                             );
                         }
-                        // Unchanged harness (the common case) — INERT, no swap.
-                        //
-                        // Record it anyway. "The restart came back on the OLD
-                        // agent" is only diagnosable if the log distinguishes
-                        // "re-read the document and it still says `claude`" from
-                        // "never re-read it at all" — an inert arm that logs
-                        // nothing makes those two identical after the fact, and
-                        // the operator's `agent:` edit is exactly what is in
-                        // question.
+                        // Unchanged harness (the common case): preserve compatible
+                        // conversation lineage, but adopt the current launch config.
                         Ok(restart_spec) => {
+                            harness = restart_spec.harness.clone();
+                            base_args = restart_spec.fresh_base_args.clone();
+                            resolved_env = restart_spec.resolved_env.clone();
+                            capability_proof_frontmatter = restart_fm.clone();
+                            let _ = shared.next_capability_proof_epoch();
+                            shared.set_capability_proof_gate(
+                                if restart_spec.capability_proof_required {
+                                    CapabilityProofGate::Pending
+                                } else {
+                                    CapabilityProofGate::NotRequired
+                                },
+                                None,
+                            );
+                            if let Some(handle) = capability_proof_thread.take()
+                                && handle.is_finished()
+                            {
+                                let _ = handle.join();
+                            }
+                            capability_proof_thread = configure_managed_capability_proof_for_spec(
+                                &shared,
+                                &restart_spec,
+                                &capability_proof_frontmatter,
+                                &global_config,
+                                false,
+                                None,
+                                &mut session_log,
+                            );
+
                             if refresh_resume_from_frontmatter
                                 && !first_run
                                 && let Some(id) = restart_fm.resume_for_harness(&harness.binary)
                             {
-                                let requested =
-                                    Some(agent_doc_harness::ResumeRequest::Id(id.to_string()));
+                                let requested_id = id.to_string();
+                                let requested = Some(agent_doc_harness::ResumeRequest::Id(
+                                    requested_id.clone(),
+                                ));
                                 let claimed = resolve_resume_claim_for_start(&canonical, requested);
-                                let validated = claimed.and_then(|request| {
-                                    let agent_doc_harness::ResumeRequest::Id(id) = request else {
-                                        return None;
-                                    };
-                                    let transcript_missing =
-                                        std::env::var_os("HOME").is_some_and(|home| {
-                                            let cwd = project_root.to_string_lossy().to_string();
-                                            let dir = agent_doc_harness::session_transcript_dir(
-                                                &harness.session_transcript_layout,
-                                                &PathBuf::from(home),
-                                                &cwd,
-                                            );
-                                            agent_doc_harness::resume_id_transcript_exists(
-                                                dir.as_deref(),
-                                                &id,
-                                            ) == Some(false)
-                                        });
-                                    (!transcript_missing).then_some(id)
-                                });
+                                let claim_admitted = claimed.is_some();
+                                let validated = degrade_resume_if_transcript_missing(
+                                    &canonical,
+                                    &project_root,
+                                    &harness,
+                                    claimed,
+                                    &mut session_log,
+                                    route_owned,
+                                );
                                 match validated {
-                                    Some(id) => {
+                                    Some(agent_doc_harness::ResumeRequest::Id(id)) => {
                                         let changed = session_lineage
                                             .replace_from_operator_restart(id.clone());
                                         log_event(
@@ -1304,15 +1316,36 @@ pub fn run_with_reap_policy_resume_and_harness(
                                             ),
                                         );
                                     }
-                                    None => {
+                                    None if claim_admitted => {
+                                        let cleared =
+                                            session_lineage.clear_proven_missing(&requested_id);
+                                        first_run = true;
+                                        auto_trigger_next_launch = true;
+                                        policy.reset();
+                                        failed_restart_tracker.reset();
                                         log_event(
                                             &mut session_log,
-                                            "agent_restart_resume_refresh_rejected reason=claim_conflict_or_transcript_missing note=keeping_running_lineage",
+                                            &format!(
+                                                "agent_restart_resume_missing id={requested_id} cleared={cleared} action=spawn_fresh_and_trigger"
+                                            ),
                                         );
                                         agent_doc_ops_log_io::log_op(
                                             file,
                                             &format!(
-                                                "agent_restart_resume_refresh_rejected file={} reason=claim_conflict_or_transcript_missing note=keeping_running_lineage",
+                                                "agent_restart_resume_missing file={} id={requested_id} cleared={cleared} action=spawn_fresh_and_trigger",
+                                                file.display(),
+                                            ),
+                                        );
+                                    }
+                                    None | Some(agent_doc_harness::ResumeRequest::Latest) => {
+                                        log_event(
+                                            &mut session_log,
+                                            "agent_restart_resume_refresh_rejected reason=claim_conflict note=keeping_running_lineage",
+                                        );
+                                        agent_doc_ops_log_io::log_op(
+                                            file,
+                                            &format!(
+                                                "agent_restart_resume_refresh_rejected file={} reason=claim_conflict note=keeping_running_lineage",
                                                 file.display()
                                             ),
                                         );
@@ -1322,7 +1355,7 @@ pub fn run_with_reap_policy_resume_and_harness(
                             agent_doc_ops_log_io::log_op(
                                 file,
                                 &format!(
-                                    "agent_restart_respec_inert file={} running_harness={} resolved_harness={} resolved_from={} note=no_harness_change",
+                                    "agent_restart_respec_refreshed file={} running_harness={} resolved_harness={} resolved_from={} note=launch_config_adopted",
                                     file.display(),
                                     harness.binary,
                                     restart_spec.harness.binary,
@@ -1378,6 +1411,7 @@ pub fn run_with_reap_policy_resume_and_harness(
             child_launch_plan(first_run, auto_trigger_next_launch, fresh_harness_switch);
         auto_trigger_next_launch = false;
         let auto_trigger = launch_plan.auto_trigger;
+        let mut attempted_exact_resume_id = None;
         let args = if launch_plan.restart_requested {
             if session_lineage.active_id().is_none()
                 && let Some(projected) = latest_codex_session_projection(&canonical, &harness)
@@ -1406,6 +1440,7 @@ pub fn run_with_reap_policy_resume_and_harness(
             if let Some(id) = session_lineage.active_id()
                 && let Some(restart_args) = harness.exact_resume_args(&base_args, id)?
             {
+                attempted_exact_resume_id = Some(id.to_string());
                 start_console_status(
                     &mut session_log,
                     route_owned,
@@ -2013,7 +2048,7 @@ pub fn run_with_reap_policy_resume_and_harness(
         );
         let ctrl_d_forwarded = shared.ctrl_d_forwarded.load(Ordering::Relaxed);
         let failed_resume = supervisor_resume_handoff_failed(
-            auto_trigger,
+            auto_trigger && attempted_exact_resume_id.is_some(),
             ctrl_d_forwarded,
             matches!(
                 auto_trigger_outcome,
@@ -2303,6 +2338,22 @@ pub fn run_with_reap_policy_resume_and_harness(
                 }
                 if !with_continue {
                     first_run = true;
+                } else if failed_resume {
+                    let cleared = attempted_exact_resume_id
+                        .as_deref()
+                        .is_some_and(|id| session_lineage.clear_proven_missing(id));
+                    first_run = true;
+                    auto_trigger_next_launch = auto_trigger;
+                    policy.reset();
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "resume_restart_fresh_after_nonzero outcome={} cleared={} restart_count={}",
+                            auto_trigger_outcome.as_str(),
+                            cleared,
+                            restart_count + 1
+                        ),
+                    );
                 }
                 restart_count += 1;
             }

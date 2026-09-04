@@ -19,7 +19,7 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-Issue #47 fixed on main as 0.35.303; release tag held pending PyPI quota decision.
+Fenced closeout queue parsing fixed as 0.35.328; release tag held pending PyPI quota decision.
 <!-- /agent:status -->
 
 ## Exchange
@@ -49,6 +49,25 @@ Architecture closeout:
 - Reactive topology: source state is the current document body and operator revision; computed state is parser entries, head identity, and drainability; effects are continuation dispatch and exact-span persistence. No one-shot repair path or duplicate policy owner was added.
 
 Verification passed: focused `agent-doc-queue` and `agent-doc-queue-io` suites, `cargo fmt --all -- --check`, and the full `make check`. `make install` installed CLI 0.35.328 and requested a safe idle-boundary controller recycle. The latest visible CI run was green; the new commit will be pushed after this binary-owned closeout, while tag/publication remains held by the document’s existing PyPI-quota status.
+
+### Re: response copied into `agent:queue` — gpt-5
+
+> **Queue prompt:** Run Agent Doc on admin.md wrote the response into the agent:queue.
+
+Fixed in agent-doc 0.35.329 (`511ae8ab0`). The failure was in visible-write snapshot adoption, not in the `admin.md` queue parser. A stale 8,019-byte editor projection fused the already-answered prompt and its `### Re:` response into `agent:queue`; because the number of prompts did not increase, the existing prompt-duplication guard accepted that projection and displaced the newer canonical queue head.
+
+Snapshot adoption now compares the candidate queue with the assistant response in canonical `content_ours`. If response prose appears as a standalone queue entry or as a line inside malformed queue freeform, adoption is blocked, `content_ours` remains authoritative, the rejected editor state is fingerprinted, and the canonical projection is redelivered. The same pure classifier strengthens the existing `session-check` backstop while retaining the regression that permits an assistant response to discuss a queue prompt mid-sentence.
+
+Architecture closeout:
+
+- Invariant: assistant response prose may materialize only in `agent:exchange`; `agent:queue` remains operator-owned.
+- Policy owner: the visible-write snapshot-adoption guard in `agent-doc-write-converge-io`.
+- Transition path: candidate editor projection plus canonical `content_ours` → component-aware contamination classification → blocked adoption → canonical snapshot plus bad-state fingerprint → editor redelivery.
+- Reactive topology: source state is the candidate projection and canonical exchange; computed state is the contamination set; effects are the blocked-adoption record, proof-failure/recycle signal, and canonical redelivery. There is no one-shot bypass.
+
+The committed `admin.md` document still contains the correct response and its newer engineering-estimate queue prompt, so I did not overwrite the foreign-owned live buffer manually. Installing 0.35.329 requested safe idle-boundary supervisor/controller recycling, which activates the repaired adoption path.
+
+Verification passed: the exact fused multiline regression, the write-runtime authority/redelivery regression, the workflow architecture ownership test, `cargo fmt --all -- --check`, and the full `make check` gate. The 0.35.329 CLI, shared library, JetBrains plugin, and VSCodium extension are installed locally. Publication remains held by the existing PyPI-quota status.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -58,7 +77,7 @@ Verification passed: focused `agent-doc-queue` and `agent-doc-queue-io` suites, 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Run Agent Doc on admin.md wrote the response into the agent:queue.
+- ~~Run Agent Doc on admin.md wrote the response into the agent:queue.~~
 - This document backlog shows my quoted text from another issue and is not well-formed.
 <!-- /agent:queue -->
 

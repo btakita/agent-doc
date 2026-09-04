@@ -474,9 +474,10 @@ pub fn queue_response_contamination_guard_result(contaminated: &[String]) -> Gua
 /// Free-text queue prompt candidates that appear copied from assistant response
 /// prose in the same exchange body.
 ///
-/// `#qcontamquote`: the match is anchored to the **start of a response line**,
-/// not to a substring anywhere in the body. Contamination is a queue entry that
-/// *is* a response line — the live repro enqueued
+/// `#qcontamquote`: matches are anchored to the **start of a line**, not to a
+/// substring anywhere in the body. Contamination is either a queue entry that
+/// *is* a response line, or a malformed multiline queue entry with a response
+/// line embedded in it. The original live repro enqueued
 /// `- Yes. I drove the already-authenticated Google Ads browser session ...`
 /// verbatim. A response that merely *mentions* a queue item mid-sentence is
 /// the opposite thing, and it is what a good response does: `SKILL.md` tells
@@ -490,33 +491,56 @@ pub fn queue_response_contamination_candidates(
     queue_body: &str,
     exchange_body: &str,
 ) -> Vec<String> {
-    let Ok(entries) = agent_doc_queue::document_queue::parse(queue_body) else {
-        return Vec::new();
-    };
     let response_text = agent_doc_turn::closeout_signal::assistant_response_text(exchange_body);
     if response_text.trim().is_empty() {
         return Vec::new();
     }
 
     let mut contaminated = Vec::new();
-    for prompt in agent_doc_queue::document_queue::prompts(&entries) {
-        let text = prompt.text.trim();
-        if text.is_empty() || agent_doc_queue::queue_command::is_queue_directive_prompt(text) {
-            continue;
+    if let Ok(entries) = agent_doc_queue::document_queue::parse(queue_body) {
+        for prompt in agent_doc_queue::document_queue::prompts(&entries) {
+            let text = prompt.text.trim();
+            if text.is_empty() || agent_doc_queue::queue_command::is_queue_directive_prompt(text) {
+                continue;
+            }
+            if agent_doc_queue::queue_command::mentions_slash_command_reference(text) {
+                continue;
+            }
+            let normalized = agent_doc_turn::closeout_signal::normalized_prompt_for_match(text);
+            if normalized.chars().count() < 20 {
+                continue;
+            }
+            let needle: String = normalized.chars().take(40).collect();
+            if response_text
+                .lines()
+                .any(|line| line.trim_start().starts_with(&needle))
+            {
+                contaminated.push(text.chars().take(80).collect::<String>());
+            }
         }
-        if agent_doc_queue::queue_command::mentions_slash_command_reference(text) {
-            continue;
-        }
-        let normalized = agent_doc_turn::closeout_signal::normalized_prompt_for_match(text);
-        if normalized.chars().count() < 20 {
-            continue;
-        }
-        let needle: String = normalized.chars().take(40).collect();
-        if response_text
+    }
+
+    // A malformed visible-write projection can fuse a completed response into
+    // queue freeform rather than a parseable prompt. Compare line starts in the
+    // raw queue body as a fail-closed fallback; the response extractor has
+    // already removed headings, comments, and blockquoted prompt echoes.
+    if contaminated.is_empty() {
+        let queue_line_prefixes = queue_body
             .lines()
-            .any(|line| line.trim_start().starts_with(&needle))
+            .map(agent_doc_turn::closeout_signal::normalized_prompt_for_match)
+            .filter(|line| line.chars().count() >= 40)
+            .map(|line| line.chars().take(40).collect::<String>())
+            .collect::<std::collections::HashSet<_>>();
+        if let Some(response_line) = response_text
+            .lines()
+            .map(agent_doc_turn::closeout_signal::normalized_prompt_for_match)
+            .filter(|line| line.chars().count() >= 40)
+            .find(|response_line| {
+                let needle: String = response_line.chars().take(40).collect();
+                queue_line_prefixes.contains(&needle)
+            })
         {
-            contaminated.push(text.chars().take(80).collect::<String>());
+            contaminated.push(response_line.chars().take(80).collect::<String>());
         }
     }
 
@@ -944,6 +968,21 @@ mod tests {
         assert_eq!(
             queue_response_contamination_candidates(&queue, &exchange),
             vec![prose.chars().take(80).collect::<String>()]
+        );
+    }
+
+    #[test]
+    fn queue_response_contamination_flags_response_embedded_in_multiline_prompt() {
+        let response =
+            "Done — all 9 child stories now have concrete implementation notes and RICE scores.";
+        let queue = format!(
+            "- Assume the PRs are reviewed.> **Queue prompt:** Assume the PRs are reviewed.\n\n### Re: HAVN-587 story descriptions + RICE\n\n{response}\n"
+        );
+        let exchange = format!("### Re: HAVN-587 story descriptions + RICE\n\n{response}\n");
+
+        assert_eq!(
+            queue_response_contamination_candidates(&queue, &exchange),
+            vec![response.chars().take(80).collect::<String>()]
         );
     }
 

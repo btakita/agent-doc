@@ -25,9 +25,11 @@ use agent_doc_write_converge_io::{
     AlreadyAppliedSocketSnapshotContext, checkpoint_ipc_baseline_nonfatal,
     clear_ipc_socket_ack_timeouts, dedupe_ipc_snapshot_content, full_content_ipc_scope_allows,
     guard_ipc_snapshot_adoption_against_live_prompt_drift,
-    guard_ipc_snapshot_adoption_against_prompt_duplication, ipc_repair_decision_from_visible_write,
-    log_full_content_ipc_disabled, log_ipc_snapshot_adoption_allowed,
-    log_ipcfullprompt_corruption_if_any, mark_visible_write_live_buffer_synced_after_write,
+    guard_ipc_snapshot_adoption_against_prompt_duplication,
+    guard_ipc_snapshot_adoption_against_response_contamination,
+    ipc_repair_decision_from_visible_write, log_full_content_ipc_disabled,
+    log_ipc_snapshot_adoption_allowed, log_ipcfullprompt_corruption_if_any,
+    mark_visible_write_live_buffer_synced_after_write,
     materialize_missing_response_for_socket_visible_write_drift,
     persist_already_applied_socket_content_ours_snapshot,
     poll_visible_write_content_lazily_event_or_projection,
@@ -551,6 +553,14 @@ fn try_ipc_inner(
                         content_ours,
                         &mut repair_decision,
                     );
+                    let contamination_fired =
+                        guard_ipc_snapshot_adoption_against_response_contamination(
+                            file,
+                            visible_source,
+                            Some(&patch_id),
+                            content_ours,
+                            &mut repair_decision,
+                        );
                     let missing_response_repair =
                         materialize_missing_response_for_socket_visible_write_drift(
                             file,
@@ -567,7 +577,7 @@ fn try_ipc_inner(
                         baseline,
                         content_ours,
                         &repair_decision,
-                        drift_fired || dup_fired || missing_response_repair,
+                        drift_fired || dup_fired || contamination_fired || missing_response_repair,
                     );
                     log_ipcfullprompt_corruption_if_any(
                         file,

@@ -1378,7 +1378,112 @@ pub fn guard_ipc_snapshot_adoption_against_prompt_duplication(
         ),
     );
     let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
-    decision.replace_snapshot_with_content_ours_for_prompt_duplication(ours, bad_state);
+    decision.replace_snapshot_with_content_ours_for_ipc_contamination(ours, bad_state);
+    true
+}
+
+/// Reject a visible-write snapshot whose queue contains assistant response
+/// prose from the canonical exchange. Queue entries are operator-owned; a
+/// response may materialize only in `agent:exchange`.
+pub fn guard_ipc_snapshot_adoption_against_response_contamination(
+    file: &Path,
+    source: &str,
+    patch_id: Option<&str>,
+    content_ours: Option<&str>,
+    decision: &mut IpcRepairDecision,
+) -> bool {
+    if decision.snap_source == IpcSnapshotSource::ContentOurs {
+        return false;
+    }
+    let Some(ours) = content_ours else {
+        return false;
+    };
+    if let Some(reason) = agent_doc_element::element::structural_corruption_reason(ours) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "content_ours_adoption_refused_structural file={} source={} patch_id={} reason={} guard=response_contamination content_ours_len={} content_ours_hash={}",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                reason,
+                ours.len(),
+                agent_doc_hash::content_hash(ours),
+            ),
+        );
+        return false;
+    }
+    let Ok(candidate_components) = agent_doc_element::element::parse(&decision.snapshot_content)
+    else {
+        return false;
+    };
+    let Ok(canonical_components) = agent_doc_element::element::parse(ours) else {
+        return false;
+    };
+    let Some(queue) = candidate_components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return false;
+    };
+    let Some(exchange) = canonical_components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return false;
+    };
+    let contaminated = agent_doc_workflow::session_check::queue_response_contamination_candidates(
+        queue.content(&decision.snapshot_content),
+        exchange.content(ours),
+    );
+    if contaminated.is_empty() {
+        return false;
+    }
+
+    let prior_source = decision.snap_source.label();
+    let bad_state = decision.snapshot_content.clone();
+    log_flow_event(
+        file,
+        agent_doc_flow::types::FlowEvent::new(
+            agent_doc_flow::types::FlowName::DocumentMutation,
+            agent_doc_flow::types::FlowStage::IpcSnapshotAdoption,
+            agent_doc_flow::types::FlowOutcome::Blocked,
+        )
+        .with_reason("response_contamination_in_visible_write"),
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipc_snapshot_adoption_blocked file={} source={} patch_id={} snap_source={} reason=response_contamination_in_visible_write contamination_count={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
+            file.display(),
+            source,
+            patch_id.unwrap_or("-"),
+            prior_source,
+            contaminated.len(),
+            decision.snapshot_content.len(),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
+            ours.len(),
+            agent_doc_hash::content_hash(ours)
+        ),
+    );
+    log_ipc_proof_failure_with_recycle(
+        file,
+        source,
+        patch_id,
+        "response_contamination_in_visible_write",
+        "content_ours_snapshot_and_visible_repair",
+        &format!(
+            "snap_source={} contamination_count={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
+            prior_source,
+            contaminated.len(),
+            decision.snapshot_content.len(),
+            agent_doc_hash::content_hash(&decision.snapshot_content),
+            ours.len(),
+            agent_doc_hash::content_hash(ours)
+        ),
+    );
+    let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
+    decision.replace_snapshot_with_content_ours_for_ipc_contamination(ours, bad_state);
     true
 }
 

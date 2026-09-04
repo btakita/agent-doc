@@ -666,7 +666,7 @@ impl IpcRepairDecision {
         }
     }
 
-    pub fn replace_snapshot_with_content_ours_for_prompt_duplication(
+    pub fn replace_snapshot_with_content_ours_for_ipc_contamination(
         &mut self,
         content_ours: &str,
         bad_state: String,

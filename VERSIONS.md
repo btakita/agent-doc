@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.329
+
+- **Fix: visible-write snapshots cannot copy responses into the queue.**
+
+Snapshot adoption now compares the candidate `agent:queue` with the canonical
+`agent:exchange` before granting editor-buffer authority. A candidate containing
+assistant response prose as either a standalone prompt or malformed multiline
+queue freeform is rejected, `content_ours` remains canonical, and the corrected
+projection is redelivered. The shared classifier also strengthens the
+`session-check` backstop without treating mid-sentence prompt discussion as
+contamination.
+
 ## 0.35.328
 
 - **Fix: fenced closeout reports remain one queue prompt.**

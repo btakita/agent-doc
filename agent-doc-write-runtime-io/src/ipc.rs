@@ -15,8 +15,10 @@ use agent_doc_ipc_protocol::{IpcDiskRepairReason, IpcRepairDecision, IpcSnapshot
 use agent_doc_write_converge_io::try_semantic_merge_convergence;
 #[cfg(test)]
 use agent_doc_write_converge_io::{
-    guard_ipc_snapshot_adoption_against_live_prompt_drift, ipc_repair_decision_from_visible_write,
-    log_ipc_snapshot_adoption_allowed, log_ipcfullprompt_corruption_if_any,
+    guard_ipc_snapshot_adoption_against_live_prompt_drift,
+    guard_ipc_snapshot_adoption_against_response_contamination,
+    ipc_repair_decision_from_visible_write, log_ipc_snapshot_adoption_allowed,
+    log_ipcfullprompt_corruption_if_any,
     materialize_missing_response_for_socket_visible_write_drift,
     poll_visible_write_content_lazily_event,
     reconcile_visible_write_snapshot_to_newer_operator_buffer,
@@ -449,6 +451,45 @@ mod visible_write_content_snapshot_tests {
         );
         assert_eq!(decision.disk_repair_reason, None);
         assert!(decision.editor_bad_state.is_none());
+    }
+
+    #[test]
+    fn guard_response_contamination_restores_canonical_queue_and_redelivers() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("admin.md");
+        let response =
+            "Done — all 9 child stories now have concrete implementation notes and RICE scores.";
+        let content_ours = format!(
+            "<!-- agent:exchange -->\n### Re: HAVN-587 story descriptions + RICE\n\n{response}\n<!-- /agent:exchange -->\n<!-- agent:queue auto -->\n- I want to push back on the engineering time estimates.\n<!-- /agent:queue -->\n"
+        );
+        let candidate = format!(
+            "<!-- agent:exchange -->\n### Re: HAVN-587 story descriptions + RICE\n\n{response}\n<!-- /agent:exchange -->\n<!-- agent:queue auto -->\n- Assume the PRs are reviewed.> **Queue prompt:** Assume the PRs are reviewed.\n\n### Re: HAVN-587 story descriptions + RICE\n\n{response}\n<!-- /agent:queue -->\n"
+        );
+        let mut decision = IpcRepairDecision::lazily_visible_write(candidate.clone());
+
+        let blocked = guard_ipc_snapshot_adoption_against_response_contamination(
+            &file,
+            "socket_visible_write_content",
+            Some("p-contamination"),
+            Some(&content_ours),
+            &mut decision,
+        );
+
+        assert!(blocked);
+        assert_eq!(decision.snap_source, IpcSnapshotSource::ContentOurs);
+        assert_eq!(decision.snapshot_content, content_ours);
+        assert_eq!(
+            decision.disk_repair_reason,
+            Some(IpcDiskRepairReason::IpcDedupe)
+        );
+        assert_eq!(
+            decision
+                .editor_bad_state
+                .as_ref()
+                .map(|state| state.content.as_str()),
+            Some(candidate.as_str())
+        );
+        assert!(decision.redeliver_editor);
     }
 
     #[test]

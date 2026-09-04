@@ -175,6 +175,88 @@ Fixed and committed as `35129fc89`.
 - Agent-doc response committed; session-check passed.
 
 The removed/re-added queue tag likely exposed the race but was not the root cause.
+❯ 🚧 Fix agent-doc issues with  Claim for Tmux Pane on admin.md
+```
+[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
+[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
+[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
+[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
+[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
+[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
+[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
+[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
+resync: stash pane %29 is unregistered but still hosts live supervisor tsift-v0.1 — skipping kill
+[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
+[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
+[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
+[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
+[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
+[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
+[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
+[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
+resync: stash pane %28 is unregistered but still hosts live supervisor d818612d-3614-4c43-b5ec-83923406aa46 — skipping kill
+[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
+[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
+[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
+[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
+[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
+[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
+[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
+[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
+resync: stash pane %44 is unregistered but still hosts live supervisor d076f48f-239e-4d31-95b9-ddaa58e0e1da — skipping kill
+[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
+[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
+[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
+[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
+[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
+[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
+[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
+[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
+resync: stash pane %75 is unregistered but still hosts live supervisor be20dd6e-31ce-4f16-93ed-42c9c2a21b98 — skipping kill
+[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
+[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
+[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
+[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
+[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
+[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
+[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
+[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
+resync: stash pane %49 is unregistered but still hosts live supervisor 62fe1f41-886c-4f3d-b6fa-48d46106ec27 — skipping kill
+[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
+[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
+[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
+[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
+[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
+[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
+[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
+[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
+resync: stash pane %71 is unregistered but still hosts live supervisor a94c7d23-e171-482f-93f4-530b7f2c436f — skipping kill
+[claim] auto-scaffolding empty file: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/admin.md
+[commit] file is in submodule /home/brian/work/btakita/agent-loop/src/haiven-dev - running git ops there
+[commit] repositioned boundary in snapshot
+[commit] repositioned boundary in working tree
+[perf] commit.reposition: 1656ms
+[perf] commit.staging (hash_object+update-index): 8ms
+```
+
+### Re: do [#fixissuesclaim]
+
+> **Queue prompt:**
+>
+> do [#fixissuesclaim]
+
+
+Fixed the Claim, File Cache Conflict, and Restart Agent failures.
+
+Claim was globally pruning/recovering every pane before handling the requested file. That caused the repeated sync output and delayed the empty admin.md scaffold long enough for IDEA's open buffer to diverge. Explicit claim now performs only file-scoped validation. The JetBrains Claim and Force Claim actions save only the target document, fail closed if it remains dirty, make all views of that file temporarily read-only, run the CLI off the EDT with a 30-second bound, synchronously refresh the file, and only then restore editing. This prevents plugin-owned scaffolding from racing typing into another File Cache Conflict. The accidental 6 never reached disk, and admin.md's scaffold was preserved.
+
+Restart Agent had two independent defects: a same-harness restart retained the old launch arguments, so the claude_model: fable edit was ignored, and a missing transcript ID was kept as running lineage. Claude exited 1, while the nonzero crash path retried that exact ID indefinitely. Same-harness restarts now adopt current model arguments/environment; locally verified missing transcripts retire the ID and launch fresh once. A defensive handoff guard also converts an unverified exact resume that exits before a prompt into one fresh retry.
+
+Live admin.md recovery succeeded in pane %79. Its supervisor is healthy with restart_count=0, and the Claude child is running --model fable with new conversation cc093b42-df62-4f17-b336-8d5add825802. backend.md's earlier pane/window auto-sync repair remains installed and verified.
+
+Verification passed: targeted Rust and JetBrains tests, all 9,196 make check tests, documentation/release checks, formal models, signed plugin build/install, private-name scan, and the latest GitHub CI tmux leg. Installed the CLI, native library, JetBrains package, and VS Code package. Restart IntelliJ IDEA once to activate this newly installed Kotlin plugin build.
+
+Code commits: c79254097 (agent-doc) and 04e4af996 (workspace pointer).
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -184,7 +266,8 @@ The removed/re-added queue tag likely exposed the race but was not the root caus
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#fixrunbackend]
+- ~~do [#fixissuesclaim]~~
+- ~~do [#fixrunbackend]~~
 Please fix agent-doc causes of turn closeout not completing in backend.md. I was typing in the queue while the turn was closing:
 ```
   Verified by reproducing in a clean worktree at 628bf4ac with the submodule at its own pin 2cd516e, then running the
@@ -209,6 +292,68 @@ Please fix agent-doc causes of turn closeout not completing in backend.md. I was
 
 <!-- agent:backlog -->
 `refusing to route /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md through pane %0 because it now runs another document; tmux focus was preserved`
+```
+[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
+[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
+[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
+[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
+[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
+[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
+[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
+[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
+resync: stash pane %29 is unregistered but still hosts live supervisor tsift-v0.1 — skipping kill
+[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
+[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
+[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
+[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
+[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
+[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
+[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
+[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
+resync: stash pane %28 is unregistered but still hosts live supervisor d818612d-3614-4c43-b5ec-83923406aa46 — skipping kill
+[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
+[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
+[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
+[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
+[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
+[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
+[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
+[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
+resync: stash pane %44 is unregistered but still hosts live supervisor d076f48f-239e-4d31-95b9-ddaa58e0e1da — skipping kill
+[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
+[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
+[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
+[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
+[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
+[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
+[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
+[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
+resync: stash pane %75 is unregistered but still hosts live supervisor be20dd6e-31ce-4f16-93ed-42c9c2a21b98 — skipping kill
+[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
+[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
+[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
+[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
+[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
+[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
+[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
+[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
+resync: stash pane %49 is unregistered but still hosts live supervisor 62fe1f41-886c-4f3d-b6fa-48d46106ec27 — skipping kill
+[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
+[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
+[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
+[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
+[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
+[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
+[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
+[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
+resync: stash pane %71 is unregistered but still hosts live supervisor a94c7d23-e171-482f-93f4-530b7f2c436f — skipping kill
+[claim] auto-scaffolding empty file: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/admin.md
+[commit] file is in submodule /home/brian/work/btakita/agent-loop/src/haiven-dev - running git ops there
+[commit] repositioned boundary in snapshot
+[commit] repositioned boundary in working tree
+[perf] commit.reposition: 1656ms
+[perf] commit.staging (hash_object+update-index): 8ms
+```
 <!-- /agent:backlog -->
 
 ## Review

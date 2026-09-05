@@ -59,8 +59,9 @@ use serde::{Deserialize, Serialize};
 
 use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
 use agent_doc_document_realtime::crdt_relay::{
-    AwarenessState, DiskChangeOutcome, DocumentOpDeltaOutcome, PendingReplicaUpdate, RelayHub,
-    ReplicaDeliverySnapshot, RetainedCanonicalProjection, mint_client_id,
+    AwarenessState, DiskChangeOutcome, DocumentOpDeltaOutcome, DocumentOpOriginFence,
+    PendingReplicaUpdate, RelayHub, ReplicaDeliverySnapshot, RetainedCanonicalProjection,
+    mint_client_id,
 };
 use agent_doc_document_realtime::watch_authority::{
     WatchAction, WatchDelivery, decide_watch_action,
@@ -3436,23 +3437,59 @@ pub fn apply_document_op_delta_for_file_in_lineage(
     lineage: Option<&str>,
     delta: &[u8],
 ) -> Result<Option<DocumentOpDeltaOutcome>> {
-    let Some(outcome) = with_existing_hub(file, |hub| {
-        hub.apply_document_op_delta_in_lineage(lineage, delta)
+    let Some(result) = with_existing_hub(file, |hub| -> Result<_> {
+        let outcome = hub.apply_document_op_delta_in_lineage(lineage, delta)?;
+        let fence = if outcome.requires_origin_projection() {
+            // A stale-lineage outcome is terminal even if its historical body is
+            // unreadable. Preserve that ACK-safe behavior; a valid frame also
+            // supplies the causal peer evidence needed to fence its live author.
+            let origin_ids: Vec<_> = agent_doc_merge::crdt_sync::decode_update_ops(delta)
+                .map(|ops| {
+                    ops.into_iter()
+                        // An insertion is authored by `id.peer()`. A deletion
+                        // retains the inserted character id and records its
+                        // author in the newer delete clock, so fence the latter.
+                        .map(|op| op.deleted.unwrap_or(op.id).peer())
+                        .collect()
+                })
+                .unwrap_or_default();
+            hub.fence_registered_document_op_origins(origin_ids)?
+        } else {
+            DocumentOpOriginFence::default()
+        };
+        Ok((outcome, fence))
     })?
     else {
         return Ok(None);
     };
-    let outcome = outcome?;
+    let (outcome, fence) = result?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_document_op_delta_ingested file={} authority=multi_replica outcome={:?} frame_lineage={} delta_len={}",
+            "crdt_document_op_delta_ingested file={} authority=multi_replica outcome={:?} frame_lineage={} delta_len={} fenced_registered_origins={} projections_queued={}",
             file.display(),
             outcome,
             lineage.unwrap_or("legacy-unscoped"),
             delta.len(),
+            fence.registered_origins,
+            fence.projections_queued,
         ),
     );
+    if fence.projections_queued > 0
+        && let Err(err) = signal_crdt_replica_event(
+            file,
+            CrdtReplicaEventReason::CanonicalProjection,
+            fence.registered_origins,
+        )
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_event_signal_failed file={} reason=stale_document_op_origin_projection error={err}",
+                file.display(),
+            ),
+        );
+    }
     Ok(Some(outcome))
 }
 
@@ -5122,8 +5159,121 @@ mod tests {
             );
             assert!(!canonical.contains("late retired generation"));
             assert_eq!(hub.live_count(), 1);
+            assert!(!hub.awaits_canonical_projection(refresh_id));
         })
         .unwrap();
+    }
+
+    /// Regression for a native save that rebuilt the canonical lineage between
+    /// the reliable document-op frame and the same editor's direct update. The
+    /// stale reliable frame must causally fence that still-current replica before
+    /// its partial queue buffer can arrive on the second transport.
+    fn assert_quarantined_document_op_fences_partial_queue_update(
+        case: &str,
+        scoped_lineage: bool,
+        expected: DocumentOpDeltaOutcome,
+    ) {
+        let file_name = format!("{case}-document-op-origin-fence.md");
+        let (_dir, doc) = temp_doc(&file_name);
+        let base = concat!(
+            "---\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, base).unwrap();
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let identity = format!(
+            "jetbrains-{}-{case}-partial-queue:/tmp/{file_name}",
+            std::process::id(),
+        );
+        let (client_id, bootstrap) =
+            register_replica_for_file_with_liveness(&doc, &identity, |_| true)
+                .unwrap()
+                .expect("editor replica should attach");
+        let old_lineage = current_lineage_for_file(&doc)
+            .unwrap()
+            .expect("initial lineage");
+
+        let partial_item = "- Fix the rebase + merge conflicts in";
+        let editor =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+        let frontier = editor.state_vector();
+        let close = "<!-- /agent:queue -->";
+        let byte_offset = editor.text().find(close).unwrap();
+        let char_offset = editor.text()[..byte_offset].chars().count() as u32;
+        editor.apply_local_edit(char_offset, 0, &format!("{partial_item}\n"));
+        let stale_delta = editor.diff(&frontier).unwrap();
+
+        let full_item =
+            "- Fix the rebase + merge conflicts + failed CI tasks on the haiven-backen PRs.";
+        let authoritative = base.replace(close, &format!("{full_item}\n{close}"));
+        assert_eq!(
+            adopt_authoritative_text_for_file(&doc, &authoritative).unwrap(),
+            Some(true),
+        );
+        assert_ne!(
+            current_lineage_for_file(&doc).unwrap().as_deref(),
+            Some(old_lineage.as_str()),
+        );
+
+        assert_eq!(
+            apply_document_op_delta_for_file_in_lineage(
+                &doc,
+                scoped_lineage.then_some(old_lineage.as_str()),
+                &stale_delta,
+            )
+            .unwrap(),
+            Some(expected),
+        );
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), authoritative);
+            assert!(hub.awaits_canonical_projection(client_id));
+        })
+        .unwrap();
+
+        let quarantined = relay_replica_update_for_file(&doc, &identity, &stale_delta)
+            .unwrap()
+            .expect("the fenced direct update is terminally handled");
+        assert!(quarantined.update.is_empty());
+        assert!(quarantined.targets.is_empty());
+        with_hub(&doc, |hub| {
+            let canonical = hub.canonical_text();
+            assert_eq!(canonical, authoritative);
+            assert_eq!(
+                canonical.lines().filter(|line| *line == full_item).count(),
+                1
+            );
+            assert_eq!(
+                canonical
+                    .lines()
+                    .filter(|line| *line == partial_item)
+                    .count(),
+                0,
+            );
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn stale_document_op_fences_same_replica_before_partial_queue_update() {
+        assert_quarantined_document_op_fences_partial_queue_update(
+            "stale",
+            true,
+            DocumentOpDeltaOutcome::StaleLineage,
+        );
+    }
+
+    #[test]
+    fn legacy_document_op_fences_same_replica_before_partial_queue_update() {
+        assert_quarantined_document_op_fences_partial_queue_update(
+            "legacy",
+            false,
+            DocumentOpDeltaOutcome::LegacyQuarantined,
+        );
     }
 
     #[test]

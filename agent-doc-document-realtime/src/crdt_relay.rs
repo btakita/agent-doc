@@ -282,6 +282,24 @@ pub enum DocumentOpDeltaOutcome {
     LegacyQuarantined,
 }
 
+impl DocumentOpDeltaOutcome {
+    /// Whether this terminal outcome must also fence the live replica(s) that
+    /// authored the rejected operations. A durable frame and a direct replica
+    /// update are two transports for the same CRDT intent; quarantining only the
+    /// durable copy would let the direct transport replay stale state.
+    pub const fn requires_origin_projection(self) -> bool {
+        matches!(self, Self::StaleLineage | Self::LegacyQuarantined)
+    }
+}
+
+/// Observable result of fencing registered replica origins after a durable
+/// document-op quarantine.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct DocumentOpOriginFence {
+    pub registered_origins: usize,
+    pub projections_queued: usize,
+}
+
 /// Controller-owned in-memory projection retained independently of a relay
 /// member generation. It is deliberately not serialized to the CRDT recovery
 /// sidecar: a relay recycle reattaches to this live value, while a cold process
@@ -920,6 +938,29 @@ impl RelayHub {
     pub fn require_canonical_projection(&mut self, client_id: u64) {
         self.canonical_projection_required
             .set(&self.ctx, client_id, true);
+    }
+
+    /// Fence each registered author of a quarantined durable document-op frame
+    /// and queue the current canonical projection as its repair receipt.
+    ///
+    /// The CRDT operation ids are the causal evidence. Unknown or retired peers
+    /// are ignored, so one stale frame cannot fence an unrelated live replica.
+    pub fn fence_registered_document_op_origins(
+        &mut self,
+        origin_ids: impl IntoIterator<Item = u64>,
+    ) -> Result<DocumentOpOriginFence> {
+        let mut unique = HashSet::new();
+        let mut result = DocumentOpOriginFence::default();
+        for client_id in origin_ids {
+            if !unique.insert(client_id) || !self.is_registered(client_id) {
+                continue;
+            }
+            result.registered_origins += 1;
+            if self.ensure_canonical_projection_receipt(client_id)? {
+                result.projections_queued += 1;
+            }
+        }
+        Ok(result)
     }
 
     /// Whether this relay generation has projected the controller canonical.

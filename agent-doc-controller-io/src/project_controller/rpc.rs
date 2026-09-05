@@ -10131,6 +10131,20 @@ fn connect_or_launch_with_claim_wait(
     launch_mode: LaunchMode,
     launch_claim_wait: Duration,
 ) -> Result<interprocess::local_socket::Stream> {
+    connect_or_launch_with_claim_wait_and_before_claim(
+        project_root,
+        launch_mode,
+        launch_claim_wait,
+        || {},
+    )
+}
+
+fn connect_or_launch_with_claim_wait_and_before_claim(
+    project_root: &Path,
+    launch_mode: LaunchMode,
+    launch_claim_wait: Duration,
+    before_claim: impl FnOnce(),
+) -> Result<interprocess::local_socket::Stream> {
     if let Ok(active_status) = status(project_root)
         && active_status.active
     {
@@ -10159,6 +10173,10 @@ fn connect_or_launch_with_claim_wait(
             );
         }
     }
+
+    // A phase hook keeps the claim-contention regression deterministic without
+    // adding timing or test-only global state to the production transition.
+    before_claim();
 
     // Block (bounded) on bootstrap-claim contention instead of failing fast: another
     // launcher (concurrent start, sibling document, or a just-execve'd self-recycle
@@ -27105,11 +27123,11 @@ mod tests {
         let (entering_tx, entering_rx) = std::sync::mpsc::channel::<()>();
         let caller_root = project_root.clone();
         let caller = std::thread::spawn(move || {
-            entering_tx.send(()).unwrap();
-            let stream = connect_or_launch_with_claim_wait(
+            let stream = connect_or_launch_with_claim_wait_and_before_claim(
                 &caller_root,
                 LaunchMode::Lazy,
                 Duration::from_secs(30),
+                || entering_tx.send(()).unwrap(),
             )?;
             drop(stream);
             Ok::<(), anyhow::Error>(())

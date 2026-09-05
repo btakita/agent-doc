@@ -2,6 +2,22 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.331
+
+- **Fix: stale durable editor ops fence their direct-update twin.**
+
+When a canonical rebuild rotates the CRDT lineage, rejecting a stale or legacy
+document-op frame now derives its author from typed operation ids and immediately
+queues that registered replica for canonical reprojection. The same editor can no
+longer replay its partial pre-rebuild buffer through `replica_update` and leave a
+duplicate queue prefix behind. Unknown peers and valid current-lineage frames do
+not fence unrelated replicas.
+
+- **Test: launch-claim contention uses an explicit phase barrier.** The controller
+  adoption regression now signals only after its pre-lock status check, removing
+  a CI race that could publish the test server early and bypass the contended
+  branch whose proof marker the test asserts.
+
 ## 0.35.330
 
 - **Fix: tracked-item removal cannot orphan multiline backlog evidence.**

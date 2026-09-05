@@ -609,6 +609,16 @@ the reliable-sync cursor. The lineage is checkpointed beside the `.yrs`
 projection with that projection's SHA-256; recovery preserves it only when the
 hash matches and otherwise mints a new fail-closed lineage.
 
+Quarantine covers both transports for the rejected intent. The receiver derives
+the author peer from the typed CRDT operation ids (the insertion id, or the
+newer delete clock for a deletion) and fences every matching registered replica
+for canonical projection before releasing the relay hub. A following direct
+`replica_update` from that peer is therefore a reproject-only transition until
+the editor visibly acknowledges the current canonical. Unknown or retired peers
+do not fence unrelated replicas, and a matching-lineage applied frame does not
+create a fence. This is causal provenance, not queue/exchange text deduplication:
+distinct operator items with a shared prefix remain valid document content.
+
 Compact Exchange uses that fence to discard pre-compaction operation history,
 not merely deletion tombstones. After the compacted target has converged through
 the normal editor path, closeout must prove every live member's visible content

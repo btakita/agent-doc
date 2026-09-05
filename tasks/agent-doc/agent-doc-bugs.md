@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a06ec9-7205-7f31-83a6-448b3ffb041c
+  codex: 01a06f35-1dca-72a1-a5f6-76acbe4c213c
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -118,6 +118,42 @@ The implementation push follows this binary-owned session closeout so the new CI
 ### Re: queue resumed — gpt-5
 
 The replica reconciliation has cleared: this cycle was admitted and the `queue: go` edit is committed. Automatic queue draining is resumed; the pending haiven-dev post-item stall report remains intact as the next queue head.
+
+### Re: The agent-doc sessions in haiven-dev keep on stalling after finishing a queue item. Please fix agent-doc causes. — gpt-5
+
+> **Queue prompt:**
+>
+> The agent-doc sessions in haiven-dev keep on stalling after finishing a queue item. Please fix agent-doc causes.
+
+Fixed in agent-doc 0.35.332 and pushed as `1740de974`.
+
+There were two agent-doc causes:
+
+- Claude had only a cosmetic idle hook at its Stop boundary. One haiven-dev trace genuinely stopped after a clean closeout even though `session-check` said another queue head was drainable.
+- Claude's `/loop` admission depended on the agent remembering a separate `drain-claim` shell step. Three other reported stalls were false positives: the agents immediately re-entered `/loop`, but without a fresh lease, so reconciliation classified the healthy continuation as stalled.
+
+The lifecycle is now enforced by the binary:
+
+1. Claude `UserPromptSubmit` binds the exact agent-doc session.
+2. Clean closeout records the durable continuation state.
+3. The first Claude Stop is blocked when the shared queue detector finds a drainable head; the injected reason directs the agent back through `/loop` without recursively invoking agent-doc from the owner pane.
+4. `/loop` admission acquires or refreshes the `claude_loop` lease before preflight reconciliation, removing the separate remembered claim step.
+5. `stop_hook_active` permits the bounded fallback Stop, avoiding an infinite hook loop while preserving supervisor recovery.
+
+The durable session binding and continuation marker/stall projection are the source state; the shared queue detector owns drainability; Stop JSON and lease refresh are effects; the next admitted preflight consumes the pending continuation. Unbound Claude sessions remain a no-op.
+
+Changed surfaces include the prompt parser and preflight adapter, the new exact-session Claude Stop handler and CLI entrypoint, hook installation, the lifecycle spec/runbook, generated harness artifacts, and the 0.35.332 version set. The updated binary and editor integrations are installed locally; supervisor/controller recycle was scheduled through the installer.
+
+Verification is green:
+
+- Focused regressions cover direct versus loop-wrapped prompts, lease-before-preflight ordering, exact-session Stop isolation, clean-closeout blocking, recursion bounds, Claude payload compatibility, and idempotent hook installation.
+- Local `make check`: 9,212 passed, 254 skipped; clippy, documentation/version audits, and formal models passed.
+- Local `make install` passed.
+- GitHub CI, Book, and Pages workflows passed for `1740de974`.
+
+Operator verification: finish a queue item in a Claude haiven-dev session while another head is drainable. The first Stop should inject the next-head continuation; the subsequent `/loop` preflight should hold the lease and should not emit `queue_stall_detected`.
+
+Commits: agent-doc `1740de974` (pushed) and parent integration `8bc4f0811`. No tag or package publication was attempted; this cycle's preset was commit/push, not release.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

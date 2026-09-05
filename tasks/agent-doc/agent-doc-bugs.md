@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: go
 ---
 
 ## Status
@@ -114,6 +114,10 @@ Verification:
 - Implementation commit: `776333556` (`fix(crdt): fence stale document op origins`).
 
 The implementation push follows this binary-owned session closeout so the new CI run contains the committed result.
+
+### Re: queue resumed — gpt-5
+
+The replica reconciliation has cleared: this cycle was admitted and the `queue: go` edit is committed. Automatic queue draining is resumed; the pending haiven-dev post-item stall report remains intact as the next queue head.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 

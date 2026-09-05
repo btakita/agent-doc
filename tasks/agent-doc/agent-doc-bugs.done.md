@@ -33,3 +33,4 @@
 - 2026-09-02 [#fixcausesflood] Please fix the agent-doc causes of the flood of `❯ > **Queue prompt:** Rename sdk-spike to haiven-sdk + update git references + directory name to haiven-sdk.` in contracts.md.
 - 2026-09-03 [#fixdocscommand] Fix docs.md "agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: refusing semantically corrupt canonical target for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/docs.md; current Lazily/editor authority is unchanged and pending intents remain retained: binary conversation scaffold is embedded inside `agent:review`; refusing to treat response text as tracked component content"
 - 2026-09-03 [#fixissuesclaim] Fix agent-doc issues with  Claim for Tmux Pane on admin.md
+- 2026-09-04 [#fixcausespartial] Fix agent-doc causes of partial duplicate queue item `- Fix the rebase + merge conflicts in`.

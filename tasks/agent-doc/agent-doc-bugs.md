@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a06a8e-e82a-7f03-bf7b-44573dc317fb
+  codex: 01a06ec9-7205-7f31-83a6-448b3ffb041c
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -80,6 +80,40 @@ agent-doc 0.35.330 makes the tracked-work parser the single policy owner for rem
 Architecture closeout: the invariant is that deleting a tracked work item deletes its complete logical block and cannot orphan flush-left evidence. `PendingLayout` and `op_remove_matching_tracked_line` own that policy. The transition tests cover matched items with indented continuation, matched items with flush-left spill, preservation at structural boundaries, and unchanged nonmatches. This remains a pure one-shot document transform, so no lifecycle state or Source/Computed/Effect topology is needed; the I/O adapter invokes the policy owner.
 
 Verification passed: focused `agent-doc-element-backlog` tests, the backlog I/O regression, the full `make check` gate, and the final `make install`. The implementation is committed as `07fefad93` (`fix(backlog): remove multiline item spill`).
+
+### Re: do [#fixcausespartial] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#fixcausespartial]
+
+
+Implemented and committed agent-doc 0.35.331.
+
+Root cause: after a native save rebuilt the canonical CRDT lineage, the reliable document-op plane correctly returned `StaleLineage`, but that terminal outcome only advanced the durable ACK cursor. It did not fence the still-registered editor that authored the same operations. The editor could therefore replay its partial pre-rebuild buffer over `replica_update`; component reconciliation preserved the full queue item and the stale prefix as two distinct list rows.
+
+Architecture contract:
+
+- Invariant: rejecting a stale-lineage or post-rotation legacy document-op frame must fence every registered author peer before another transport can relay the same intent; canonical text remains on the current lineage.
+- Policy owner: `DocumentOpDeltaOutcome` classifies quarantine, and `RelayHub::fence_registered_document_op_origins` owns the registered-origin projection transition. Queue/exchange normalizers do not infer duplicates from text.
+- Evidence: typed CRDT operation ids identify insertion authors; delete clocks identify deletion authors. Unknown or retired peers are ignored, and matching-lineage frames do not create a fence.
+- Reactive topology: durable frame outcome plus author ids publishes the canonical-projection-required source and queues a projection receipt; the existing direct-update decision observes that source and becomes reproject-only until visible receipt clears it.
+- Imperative audit: the missing effect was in the relay-I/O bridge, which previously only logged `StaleLineage`/`LegacyQuarantined`. It now publishes the projection transition while holding the hub, then signals the existing replica event boundary. No polling, wire-schema change, or prompt-prefix heuristic was added.
+- Allowed surfaces were limited to realtime relay policy, relay I/O, the realtime workflow spec, and regression tests. The foreign active session document was left untouched.
+
+Regression coverage recreates the exact partial item `- Fix the rebase + merge conflicts in`, rotates to a canonical document containing the full item, rejects the old durable frame, then submits its direct-update twin. Both stale-lineage and legacy-unscoped cases now leave exactly one full item and zero partial rows. Existing coverage also proves an unknown retired author does not fence the current replica and a current-lineage replay stays idempotent.
+
+The latest prior CI run exposed a separate test race: its claimed pre-lock synchronization signal fired before the function call. An explicit post-status/pre-claim phase hook now makes that contention test deterministic; it passed 10 consecutive focused runs.
+
+Verification:
+
+- `cargo test -p agent-doc-document-realtime`: 266 passed.
+- `cargo test -p agent-doc-crdt-relay-io`: 78 passed.
+- Final-tree `make check`: 9,207 passed, 254 skipped; release projection, docs audit, and all TLA+ models passed.
+- `make install`: installed CLI/native library 0.35.331 plus the local JetBrains and VS Code packages.
+- Implementation commit: `776333556` (`fix(crdt): fence stale document op origins`).
+
+The implementation push follows this binary-owned session closeout so the new CI run contains the committed result.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -92,69 +126,6 @@ Verification passed: focused `agent-doc-element-backlog` tests, the backlog I/O 
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-`refusing to route /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md through pane %0 because it now runs another document; tmux focus was preserved`
-```
-[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
-[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
-[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
-[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
-[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
-[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
-[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
-[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
-resync: stash pane %29 is unregistered but still hosts live supervisor tsift-v0.1 — skipping kill
-[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
-[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
-[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
-[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
-[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
-[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
-[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
-[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
-resync: stash pane %28 is unregistered but still hosts live supervisor d818612d-3614-4c43-b5ec-83923406aa46 — skipping kill
-[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
-[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
-[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
-[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
-[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
-[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
-[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
-[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
-resync: stash pane %44 is unregistered but still hosts live supervisor d076f48f-239e-4d31-95b9-ddaa58e0e1da — skipping kill
-[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
-[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
-[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
-[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
-[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
-[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
-[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
-[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
-resync: stash pane %75 is unregistered but still hosts live supervisor be20dd6e-31ce-4f16-93ed-42c9c2a21b98 — skipping kill
-[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
-[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
-[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
-[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
-[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
-[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
-[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
-[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
-resync: stash pane %49 is unregistered but still hosts live supervisor 62fe1f41-886c-4f3d-b6fa-48d46106ec27 — skipping kill
-[sync] recovered live pane %78 for session 99322dd7 via supervisor pid 2017537
-[sync] recovered live pane %23 for session 77b2c07f via path provenance pid=3097040 instance=7a3f6ada-9074-4761-bc95-9ddcd89b7d43
-[sync] recovered live pane %26 for session 61630da2 via path provenance pid=2631427 instance=444b4ece-5cac-4d2f-b866-d4ef3ef66f66
-[sync] recovered live pane %66 for session 7dac5d22 via supervisor pid 1438336
-[sync] recovered live pane %6 for session b69e5aeb via path provenance pid=461543 instance=a5893829-5635-4610-a29d-7ea04fc460cc
-[sync] recovered live pane %48 for session ec731628 via path provenance pid=2333568 instance=4dedea42-6258-475e-97f5-03544f8deb5d
-[sync] recovered live pane %42 for session 643b6182 via supervisor pid 524689
-[sync] recovered live pane %54 for session 77a8226b via path provenance pid=2666325 instance=f27aadb5-d76e-48e2-b312-ee692125d0c7
-resync: stash pane %71 is unregistered but still hosts live supervisor a94c7d23-e171-482f-93f4-530b7f2c436f — skipping kill
-[claim] auto-scaffolding empty file: /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/admin.md
-[commit] file is in submodule /home/brian/work/btakita/agent-loop/src/haiven-dev - running git ops there
-[commit] repositioned boundary in snapshot
-[commit] repositioned boundary in working tree
-[perf] commit.reposition: 1656ms
-[perf] commit.staging (hash_object+update-index): 8ms
-```
 <!-- /agent:backlog -->
 
 ## Review

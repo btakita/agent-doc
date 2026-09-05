@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -123,6 +123,7 @@ The implementation push follows this binary-owned session closeout so the new CI
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 The agent-doc sessions in haiven-dev keep on stalling after finishing a queue item. Please fix agent-doc causes.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

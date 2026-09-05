@@ -73,6 +73,61 @@ impl AutoStartMode {
     }
 }
 
+/// Already-observed candidates for a windowless tmux layout target.
+///
+/// The IO adapters resolve pane ids, live sessions, and project configuration;
+/// this value keeps the authority order pure and shared by route and sync.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LayoutSessionCandidates {
+    pub explicit: Option<String>,
+    pub focused_actor: Option<String>,
+    pub current_agent_doc: Option<String>,
+    pub scoped_project: Option<String>,
+    pub fallback: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutSessionAuthority {
+    Explicit,
+    FocusedActor,
+    CurrentAgentDoc,
+    ScopedProject,
+    Fallback,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LayoutSessionDecision {
+    pub session: String,
+    pub authority: LayoutSessionAuthority,
+}
+
+/// Select a tmux session without consulting process-global terminal context.
+///
+/// A live focused actor outranks the caller's current terminal: controller
+/// recycle may replace the controller process and its ambient `TMUX_PANE`, but
+/// must not relocate a surviving document actor as a consequence.
+pub fn select_layout_session(candidates: LayoutSessionCandidates) -> Option<LayoutSessionDecision> {
+    let ordered = [
+        (LayoutSessionAuthority::Explicit, candidates.explicit),
+        (
+            LayoutSessionAuthority::FocusedActor,
+            candidates.focused_actor,
+        ),
+        (
+            LayoutSessionAuthority::CurrentAgentDoc,
+            candidates.current_agent_doc,
+        ),
+        (
+            LayoutSessionAuthority::ScopedProject,
+            candidates.scoped_project,
+        ),
+        (LayoutSessionAuthority::Fallback, candidates.fallback),
+    ];
+    ordered.into_iter().find_map(|(authority, session)| {
+        session.map(|session| LayoutSessionDecision { session, authority })
+    })
+}
+
 /// Trim an optional CLI scope argument and treat empty strings as absent.
 pub fn normalize_scope_arg(value: Option<&str>) -> Option<&str> {
     value.and_then(|s| {
@@ -715,6 +770,36 @@ mod tests {
     fn auto_start_mode_reports_stable_log_labels() {
         assert_eq!(AutoStartMode::Full.log_label(), "full");
         assert_eq!(AutoStartMode::SafePassive.log_label(), "safe-passive");
+    }
+
+    #[test]
+    fn layout_session_selection_preserves_focused_actor_across_controller_context_change() {
+        let decision = select_layout_session(LayoutSessionCandidates {
+            explicit: None,
+            focused_actor: Some("terminal-owner".to_string()),
+            current_agent_doc: Some("replacement-controller".to_string()),
+            scoped_project: Some("configured".to_string()),
+            fallback: Some("fallback".to_string()),
+        })
+        .unwrap();
+
+        assert_eq!(decision.session, "terminal-owner");
+        assert_eq!(decision.authority, LayoutSessionAuthority::FocusedActor);
+    }
+
+    #[test]
+    fn layout_session_selection_keeps_explicit_target_above_actor_binding() {
+        let decision = select_layout_session(LayoutSessionCandidates {
+            explicit: Some("operator-target".to_string()),
+            focused_actor: Some("actor-owner".to_string()),
+            current_agent_doc: Some("ambient".to_string()),
+            scoped_project: None,
+            fallback: None,
+        })
+        .unwrap();
+
+        assert_eq!(decision.session, "operator-target");
+        assert_eq!(decision.authority, LayoutSessionAuthority::Explicit);
     }
 
     #[test]

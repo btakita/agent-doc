@@ -55,33 +55,32 @@ pub(crate) fn resolve_preferred_session_for_layout(
     focus: Option<&Path>,
     log_prefix: &str,
 ) -> Option<String> {
-    if let Some(ctx) = normalize_context_session(context_session) {
-        return Some(ctx.to_string());
-    }
-
-    if let Some(current) = current_agent_doc_session(tmux) {
-        return Some(current);
-    }
-
+    let explicit = normalize_context_session(context_session).map(str::to_string);
+    let current_agent_doc = current_agent_doc_session(tmux);
     let focus_owned = focus.map(|path| path.to_string_lossy().into_owned());
-    if let Some(scope_root) =
-        agent_doc_sync::shared_sync_scope_root(col_args, focus_owned.as_deref())
-        && let Some(session) =
+    let scoped_project = agent_doc_sync::shared_sync_scope_root(col_args, focus_owned.as_deref())
+        .and_then(|scope_root| {
             agent_doc_sync_io::sync::configured_session_for_root(tmux, &scope_root)
-    {
-        return Some(session);
-    }
-
-    resolve_preferred_session(tmux, None, log_prefix)
+        });
+    let fallback = resolve_preferred_session(tmux, None, log_prefix);
+    agent_doc_sync::select_layout_session(agent_doc_sync::LayoutSessionCandidates {
+        explicit,
+        focused_actor: None,
+        current_agent_doc,
+        scoped_project,
+        fallback,
+    })
+    .map(|decision| decision.session)
 }
 
 /// Single source of truth for target session resolution.
 ///
 /// Priority:
 /// 1. `context_session` if provided (from sync --window)
-/// 2. Current tmux session when it already has an `agent-doc` window
-/// 3. config.toml `tmux_session` if the session is alive (user explicitly pinned via `session set`)
-/// 4. Fallback to current tmux session or harness-specific fallback name (auto-detect)
+/// 2. Focused live actor session when controller sync supplied an actor binding
+/// 3. Current tmux session when it already has an `agent-doc` window
+/// 4. config.toml `tmux_session` if the session is alive (user explicitly pinned via `session set`)
+/// 5. Fallback to current tmux session or harness-specific fallback name (auto-detect)
 ///
 /// Session config is never auto-written. Only `agent-doc session set <name>` pins a session.
 /// `agent-doc session clear` returns to auto-detect mode.

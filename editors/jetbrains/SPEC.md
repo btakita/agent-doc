@@ -169,15 +169,16 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 - Repeating `Run Agent Doc` while an `editor_route` request is still in flight coalesces with that request instead of canceling and recreating route/controller work. The duplicate click is recorded as deduped and gets an already-dispatching hint; a fresh click is eligible as soon as the bounded request completes.
 - That JetBrains request-level coalescing must not leak into controller admission for an already-authorized operator reopen. `managed_reopen` and `dispatch_only_reopen` bypass stale same-generation in-flight dispatch receipts so a fresh `Run Agent Doc` request cannot settle successfully without reaching the pane; automatic/non-operator redispatches remain coalesced.
 - `Run Agent Doc` and `Clear Session Context` are serialized per document in the JetBrains action layer before route/clear work is submitted. Repeated Run clicks coalesce with the first alive `editor_route` request; `Clear Session Context` preempts a still-dispatching Run by canceling the in-flight request and then running the normal binary-owned `agent-doc session clear <relative-path>` path. If Run is clicked while a normal clear command is already running, the latest Run intent is queued and starts only after the clear completes synchronously. A clear accepted for deferred delivery by the binary does not release the queued Run immediately.
-- Before Run or an autostarting Sync submits controller work, the plugin calls
-  `agent-doc tmux ensure <FILE> --json`. The strict JSON receipt is parsed from
-  stdout only; stderr diagnostics must remain a separate channel so version or
-  controller notices cannot corrupt it. An already-attached external client is
-  left authoritative and opens no IDE tab. A detached session opens or reuses
-  one live `agent-doc` tab through `TerminalToolWindowManager`, executes the
-  binary-provided attach command, and then resumes dispatch. The Terminal plugin
-  is optional; when it is absent or its API fails, a notification exposes the
-  exact attach command with a Copy action and dispatch remains available.
+- `Run Agent Doc` submits its controller-owned `editor_route` directly and never
+  creates, attaches, selects, focuses, or reveals an IDE terminal tab. The
+  controller route owns cold start and preserves the live actor's tmux session.
+  An autostarting Sync may call `agent-doc tmux ensure <FILE> --json`; its strict
+  JSON receipt is parsed from stdout only, with stderr kept separate. An
+  already-attached client remains authoritative even when a surviving IDE tab
+  exists, so Sync does not reveal that tab. For a detached session whose host is
+  `ide`, Sync may reuse or create one live `agent-doc` tab, execute the
+  binary-provided attach command, and then resume. The Terminal plugin remains
+  optional; failures expose the exact attach command with a Copy action.
 - If route fails only because the authoritative actor is still in its startup window, `Run Agent Doc` performs one short retry before surfacing the final route failure. This includes dispatch-only `latest run is still booting ... (timed_out)` results; active-turn blockers get a still-running notification, and protected-input blockers such as shell history search are not retried. Repeated clicks while that bounded retry is active coalesce with it.
 - A stale startup record must not keep a settled actor in the boot wait. If the requested pane's authoritative actor is `Ready`, dispatch-eligible, and the pane has a recognized busy or interactive blocker, routing exits startup probing and applies the normal busy/queue policy.
 - If route succeeds by queueing a prompt behind an already-busy authoritative actor instead of injecting a duplicate trigger, `Run Agent Doc` must surface a visible queued/still-running warning rather than treating the route request as silent success. Repeating `Run Agent Doc` after editing that same prompt must replace the sole live route-owned `agent:queue` prompt instead of leaving stale wording queued behind the active turn. The plugin accepts the new `active agent:queue` route diagnostic and the older `agent:queue auto` wording for compatibility.

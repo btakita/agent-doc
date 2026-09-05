@@ -28,6 +28,14 @@ class IdeTerminalCoordinatorTest {
                 existingTabAlive = false,
             ),
         )
+        assertEquals(
+            IdeTerminalAttachDecision.NOOP_EXTERNAL_ATTACHED,
+            decideIdeTerminalAttach(
+                terminalHost = "none",
+                sessionAttached = true,
+                existingTabAlive = true,
+            ),
+        )
     }
 
     @Test

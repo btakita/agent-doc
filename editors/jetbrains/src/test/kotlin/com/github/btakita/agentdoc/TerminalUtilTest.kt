@@ -73,6 +73,8 @@ class TerminalUtilTest {
         val source = Paths.get(
             "src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt"
         ).toFile().readText()
+        val runRoute = source.substringAfter("internal fun sendToTerminal(")
+            .substringBefore("internal fun buildEditorRouteRequestCommand(")
 
         assertTrue(source.contains("attempt?.recordIfCurrent(\"route_prepare\")"))
         assertTrue(source.contains("attempt?.recordIfCurrent(\"route_command_built\", command = cmd)"))
@@ -85,6 +87,10 @@ class TerminalUtilTest {
         assertFalse(source.contains("ProcessBuilder(cmd)"))
         assertFalse(source.contains("\"route_retryable_starting\""))
         assertTrue(source.contains("attempt?.finishIfCurrent(stage, command = cmd, error = finalError)"))
+        assertFalse(
+            "Run Agent Doc must not create, attach, select, or reveal an IDE terminal",
+            runRoute.contains("IdeTerminalCoordinator"),
+        )
     }
 
     @Test

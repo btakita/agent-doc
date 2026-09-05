@@ -17583,9 +17583,10 @@ fn test_jetbrains_run_agent_doc_uses_cp_editor_route_rpc() {
             && terminal_util.contains("attemptId = attempt?.id")
             && terminal_util.contains("routeKey = attempt?.routeKey")
             && terminal_util.contains("transport=cp")
+            && !terminal_util.contains("IdeTerminalCoordinator.ensureAndAttach(")
             && !terminal_util.contains("ProcessBuilder(cmd)")
             && !terminal_util.contains("val cmd = buildRunRouteCommand("),
-        "JetBrains Run Agent Doc must not launch the route dispatch CLI from the plugin"
+        "JetBrains Run Agent Doc must use controller routing without launching a CLI or revealing an IDE terminal"
     );
 }
 

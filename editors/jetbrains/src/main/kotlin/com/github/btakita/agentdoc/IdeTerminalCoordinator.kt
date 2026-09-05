@@ -25,7 +25,6 @@ internal data class IdeTerminalEnsureOutcome(
 internal enum class IdeTerminalAttachDecision {
     NOOP_EXTERNAL_ATTACHED,
     NOOP_CONFIGURED_HOST,
-    FOCUS_EXISTING,
     ATTACH_EXISTING,
     CREATE_AND_ATTACH,
 }
@@ -49,7 +48,6 @@ internal fun decideIdeTerminalAttach(
     sessionAttached: Boolean,
     existingTabAlive: Boolean,
 ): IdeTerminalAttachDecision = when {
-    sessionAttached && existingTabAlive -> IdeTerminalAttachDecision.FOCUS_EXISTING
     sessionAttached -> IdeTerminalAttachDecision.NOOP_EXTERNAL_ATTACHED
     terminalHost != "ide" -> IdeTerminalAttachDecision.NOOP_CONFIGURED_HOST
     existingTabAlive -> IdeTerminalAttachDecision.ATTACH_EXISTING
@@ -57,7 +55,7 @@ internal fun decideIdeTerminalAttach(
 }
 
 /**
- * Headless tmux bootstrap shared by Run/Sync editor actions. The binary owns
+ * Headless tmux bootstrap for autostarting Sync editor actions. The binary owns
  * session selection and creation; this coordinator only chooses the IDE
  * presentation after reading that receipt.
  */
@@ -114,8 +112,6 @@ internal object IdeTerminalCoordinator {
                     when (decideIdeTerminalAttach(outcome.terminalHost, outcome.attached, existingAlive)) {
                         IdeTerminalAttachDecision.NOOP_EXTERNAL_ATTACHED -> Unit
                         IdeTerminalAttachDecision.NOOP_CONFIGURED_HOST -> Unit
-                        IdeTerminalAttachDecision.FOCUS_EXISTING ->
-                            IdeTerminalHost.focusExisting(project)
                         IdeTerminalAttachDecision.ATTACH_EXISTING ->
                             IdeTerminalHost.attachExisting(project, outcome.attachCommand)
                         IdeTerminalAttachDecision.CREATE_AND_ATTACH ->

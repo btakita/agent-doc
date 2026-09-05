@@ -540,10 +540,28 @@ pub(crate) fn derive_pane_layout_projection(
         observed.generation == desired.generation
             && !observed.report.operator_owned_documents.is_empty()
     });
+    let operator_focus_changed = observed.as_ref().is_some_and(|observed| {
+        observed.generation == desired.generation
+            && observed.report.reason == "focus_pane_mismatch"
+            && observed.report.expected_focus_pane.is_some()
+            && observed.report.active_pane.is_some()
+    });
+    // Editor route projections are authoritative for their first application,
+    // then become observations of the operator-owned tmux surface. A controller
+    // recycle, delayed identical editor observation, or drift survey must not
+    // replay an already-converged generation over a later manual pane move or
+    // pane selection. A genuinely new editor intent gets a new generation and
+    // an Idle receipt, so it still crosses the effect boundary once.
+    let settled_editor_projection_drift = desired.invocation.caller_kind == "projection"
+        && receipt.generation == desired.generation
+        && receipt.phase == PaneLayoutEffectPhase::Converged
+        && (operator_owned_settled || operator_focus_changed);
     let focus_settled = desired.invocation.focus.is_none()
         || (receipt.generation == desired.generation
             && (!receipt.focus_required || receipt.focus_applied));
-    if desired.invocation.caller_kind == "automatic" && operator_owned_settled {
+    if (desired.invocation.caller_kind == "automatic" && operator_owned_settled)
+        || settled_editor_projection_drift
+    {
         return PaneLayoutProjection::OperatorOwned(desired);
     }
     if focus_settled && layout_settled {
@@ -15651,6 +15669,77 @@ revised operator request
         assert!(
             matches!(proj, PaneLayoutProjection::OperatorOwned(_)),
             "actor-store mutations must not invalidate operator-owned (got {proj:?})"
+        );
+    }
+
+    #[test]
+    fn settled_editor_projection_does_not_undo_manual_pane_selection() {
+        let mut desired = lane_desired(10);
+        desired.invocation.caller_kind = "projection".to_string();
+        let bindings = vec![lane_binding("/p/a.md", 1)];
+        let mut observation = lane_synced_observation(10, &bindings);
+        observation.report.synced = false;
+        observation.report.reason = "focus_pane_mismatch".to_string();
+        observation.report.expected_focus_pane = Some("%1".to_string());
+        observation.report.active_pane = Some("%2".to_string());
+
+        let projection = derive_pane_layout_projection(
+            Some(desired),
+            bindings.clone(),
+            Some(observation),
+            lane_converged_receipt(10, &bindings),
+        );
+
+        assert!(
+            matches!(projection, PaneLayoutProjection::OperatorOwned(_)),
+            "manual focus after projection convergence must remain operator-owned (got {projection:?})"
+        );
+    }
+
+    #[test]
+    fn settled_editor_projection_does_not_stash_manually_added_actor_pane() {
+        let mut desired = lane_desired(10);
+        desired.invocation.caller_kind = "projection".to_string();
+        let bindings = vec![lane_binding("/p/a.md", 1)];
+        let mut observation = lane_synced_observation(10, &bindings);
+        observation.report.synced = false;
+        observation.report.reason = "pane_count_mismatch".to_string();
+        observation.report.operator_owned_documents = vec!["/p/operator.md".to_string()];
+
+        let projection = derive_pane_layout_projection(
+            Some(desired),
+            bindings.clone(),
+            Some(observation),
+            lane_converged_receipt(10, &bindings),
+        );
+
+        assert!(
+            matches!(projection, PaneLayoutProjection::OperatorOwned(_)),
+            "a manual live actor pane added after convergence must not be stashed (got {projection:?})"
+        );
+    }
+
+    #[test]
+    fn new_editor_projection_may_reconcile_before_operator_ownership_begins() {
+        let mut desired = lane_desired(10);
+        desired.invocation.caller_kind = "projection".to_string();
+        let bindings = vec![lane_binding("/p/a.md", 1)];
+        let mut observation = lane_synced_observation(10, &bindings);
+        observation.report.synced = false;
+        observation.report.reason = "pane_count_mismatch".to_string();
+        observation.report.operator_owned_documents = vec!["/p/operator.md".to_string()];
+        let receipt = PaneLayoutEffectReceipt {
+            generation: 10,
+            actor_bindings: bindings.clone(),
+            ..PaneLayoutEffectReceipt::default()
+        };
+
+        let projection =
+            derive_pane_layout_projection(Some(desired), bindings, Some(observation), receipt);
+
+        assert!(
+            matches!(projection, PaneLayoutProjection::NeedsEffect(_)),
+            "a new editor projection must apply once before later drift becomes operator-owned (got {projection:?})"
         );
     }
 }

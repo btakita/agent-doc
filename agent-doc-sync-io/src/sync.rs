@@ -561,7 +561,7 @@ pub fn repair_file_state_with_tmux(tmux: &Tmux, file: &Path) -> Result<Vec<Strin
     let mut actions = Vec::new();
 
     let columns = vec![canonical.to_string_lossy().to_string()];
-    if let Some(session_name) = resolve_sync_target_session(tmux, None, &columns, None)
+    if let Some(session_name) = resolve_sync_target_session(tmux, None, &columns, None, &[])
         && repair_layout(tmux, &session_name, "agent-doc")?.repaired()
     {
         // `#syncdoctorconverged`: report the action only when the pass actually
@@ -2152,29 +2152,77 @@ pub fn configured_session_for_root(tmux: &Tmux, root: &Path) -> Option<String> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ActorPanePlacement {
+    session: String,
+    in_agent_doc_window: bool,
+}
+
+fn focused_actor_session_from_bindings(
+    focus: Option<&str>,
+    actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
+    mut pane_placement: impl FnMut(&str) -> Option<ActorPanePlacement>,
+) -> Option<String> {
+    let focus = agent_doc_sync::normalize_scope_arg(focus)?;
+    let mut focused = None;
+    let mut visible_layout = None;
+    for binding in actor_bindings {
+        let Some(placement) = pane_placement(&binding.pane_id) else {
+            continue;
+        };
+        if placement.session.trim().is_empty() {
+            continue;
+        }
+        if binding.document_path == focus {
+            focused = Some(placement.clone());
+        }
+        if placement.in_agent_doc_window && visible_layout.is_none() {
+            visible_layout = Some(placement);
+        }
+    }
+    focused
+        .as_ref()
+        .filter(|placement| placement.in_agent_doc_window)
+        .or(visible_layout.as_ref())
+        .or(focused.as_ref())
+        .map(|placement| placement.session.clone())
+}
+
 fn resolve_sync_target_session(
     tmux: &Tmux,
     window: Option<&str>,
     col_args: &[String],
     focus: Option<&str>,
+    actor_bindings: &[agent_doc_controller_io::project_controller::ControllerTmuxActorBinding],
 ) -> Option<String> {
-    let context_session = window.and_then(|target| session_name_for_target_window(tmux, target));
-    if context_session.is_some() {
-        return resolve_preferred_session(tmux, context_session.as_deref(), "[sync]");
-    }
-
-    if let Some(current) = current_agent_doc_session_name(tmux) {
-        return Some(current);
-    }
-
-    if let Some(scope_root) = agent_doc_sync::shared_sync_scope_root(col_args, focus) {
-        if let Some(session) = configured_session_for_root(tmux, &scope_root) {
-            return Some(session);
-        }
-        return current_tmux_session_name(tmux);
-    }
-
-    resolve_preferred_session(tmux, None, "[sync]")
+    let explicit = window.and_then(|target| session_name_for_target_window(tmux, target));
+    let focused_actor = focused_actor_session_from_bindings(focus, actor_bindings, |pane_id| {
+        let session = tmux.pane_session(pane_id).ok()?;
+        let window = tmux.pane_window(pane_id).ok()?;
+        let in_agent_doc_window =
+            agent_doc_tmux_io::target_window_name(tmux, &window).as_deref() == Some("agent-doc");
+        Some(ActorPanePlacement {
+            session,
+            in_agent_doc_window,
+        })
+    });
+    let current_agent_doc = current_agent_doc_session_name(tmux);
+    let scoped_project = agent_doc_sync::shared_sync_scope_root(col_args, focus)
+        .and_then(|scope_root| configured_session_for_root(tmux, &scope_root));
+    let fallback = resolve_preferred_session(tmux, None, "[sync]");
+    let decision =
+        agent_doc_sync::select_layout_session(agent_doc_sync::LayoutSessionCandidates {
+            explicit,
+            focused_actor,
+            current_agent_doc,
+            scoped_project,
+            fallback,
+        })?;
+    sync_log(&format!(
+        "layout_session_selected session={} authority={:?}",
+        decision.session, decision.authority
+    ));
+    Some(decision.session)
 }
 
 fn resolve_agent_doc_window_id(
@@ -2745,7 +2793,8 @@ fn run_with_options_internal_at_root(
         auto_start_mode,
     );
     let window_resolution_start = Instant::now();
-    let target_session = resolve_sync_target_session(tmux, window, &col_args, focus);
+    let target_session =
+        resolve_sync_target_session(tmux, window, &col_args, focus, reactive_actor_bindings);
     let full_sync = matches!(auto_start_mode, AutoStartMode::Full);
     let doctor_repair_candidate = if full_sync {
         sync_doctor_repair_candidate(&col_args, focus)
@@ -9015,7 +9064,7 @@ mod tests {
             "the current client session should be the most recently created one"
         );
         assert_eq!(
-            resolve_sync_target_session(&iso, None, &[], None).as_deref(),
+            resolve_sync_target_session(&iso, None, &[], None, &[]).as_deref(),
             Some("0"),
             "windowless sync should keep a live project tmux_session pin when the current session has no agent-doc window"
         );
@@ -9048,11 +9097,121 @@ mod tests {
             "the current client session should be the most recently created one"
         );
         assert_eq!(
-            resolve_sync_target_session(&iso, None, &[], None).as_deref(),
+            resolve_sync_target_session(&iso, None, &[], None, &[]).as_deref(),
             Some("1"),
             "windowless sync should follow the current live agent-doc window before the configured pin"
         );
     }
+
+    #[test]
+    fn focused_actor_session_uses_joined_binding_instead_of_ambient_context() {
+        let bindings = vec![
+            agent_doc_controller_io::project_controller::ControllerTmuxActorBinding {
+                document_path: "/workspace/tasks/focused.md".to_string(),
+                session_id: "document-session".to_string(),
+                pane_id: "%23".to_string(),
+                generation: 13,
+            },
+        ];
+
+        let session = focused_actor_session_from_bindings(
+            Some("/workspace/tasks/focused.md"),
+            &bindings,
+            |pane_id| {
+                (pane_id == "%23").then(|| ActorPanePlacement {
+                    session: "terminal-owner".to_string(),
+                    in_agent_doc_window: true,
+                })
+            },
+        );
+
+        assert_eq!(session.as_deref(), Some("terminal-owner"));
+    }
+
+    #[test]
+    fn stashed_focus_uses_visible_sibling_actor_session() {
+        let bindings = vec![
+            agent_doc_controller_io::project_controller::ControllerTmuxActorBinding {
+                document_path: "/workspace/tasks/agent-doc-bugs.md".to_string(),
+                session_id: "root-session".to_string(),
+                pane_id: "%0".to_string(),
+                generation: 1,
+            },
+            agent_doc_controller_io::project_controller::ControllerTmuxActorBinding {
+                document_path: "/workspace/tasks/focused.md".to_string(),
+                session_id: "document-session".to_string(),
+                pane_id: "%23".to_string(),
+                generation: 13,
+            },
+        ];
+
+        let session = focused_actor_session_from_bindings(
+            Some("/workspace/tasks/focused.md"),
+            &bindings,
+            |pane_id| match pane_id {
+                "%0" => Some(ActorPanePlacement {
+                    session: "terminal-owner".to_string(),
+                    in_agent_doc_window: true,
+                }),
+                "%23" => Some(ActorPanePlacement {
+                    session: "replacement-controller".to_string(),
+                    in_agent_doc_window: false,
+                }),
+                _ => None,
+            },
+        );
+
+        assert_eq!(session.as_deref(), Some("terminal-owner"));
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn windowless_sync_preserves_focused_actor_session_across_controller_recycle_context() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let focus = tmp.path().join("focused.md");
+        let focus = focus.to_string_lossy().to_string();
+        let iso = IsolatedTmux::new("sync-windowless-focused-actor-session");
+        let _controller_pane = iso
+            .new_session("replacement-controller", tmp.path())
+            .unwrap();
+        iso.raw_cmd(&[
+            "rename-window",
+            "-t",
+            "replacement-controller:0",
+            "agent-doc",
+        ])
+        .unwrap();
+        let actor_pane = iso.new_session("terminal-owner", tmp.path()).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "terminal-owner:0", "agent-doc"])
+            .unwrap();
+        let bindings = vec![
+            agent_doc_controller_io::project_controller::ControllerTmuxActorBinding {
+                document_path: focus.clone(),
+                session_id: "document-session".to_string(),
+                pane_id: actor_pane,
+                generation: 13,
+            },
+        ];
+
+        assert_eq!(
+            current_tmux_session_name(&iso).as_deref(),
+            Some("replacement-controller"),
+            "the recycled controller context should differ from the actor owner"
+        );
+        assert_eq!(
+            resolve_sync_target_session(
+                &iso,
+                None,
+                std::slice::from_ref(&focus),
+                Some(&focus),
+                &bindings,
+            )
+            .as_deref(),
+            Some("terminal-owner"),
+            "the focused live actor must outrank the recycled controller's ambient tmux session"
+        );
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn windowless_sync_falls_back_to_current_session_when_project_pin_dead() {
@@ -9074,7 +9233,7 @@ mod tests {
             "the live attached session should still be discoverable"
         );
         assert_eq!(
-            resolve_sync_target_session(&iso, None, &[], None).as_deref(),
+            resolve_sync_target_session(&iso, None, &[], None, &[]).as_deref(),
             Some("1"),
             "a dead project pin should fall back to the current live session"
         );
@@ -9129,6 +9288,7 @@ mod tests {
                 None,
                 &columns,
                 Some(child_doc.to_string_lossy().as_ref()),
+                &[],
             )
             .as_deref(),
             Some("4"),

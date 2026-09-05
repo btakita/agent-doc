@@ -3661,6 +3661,8 @@ enum HookAction {
     CodexUserPromptSubmit,
     /// Enforce the Codex end-of-turn `session-check` guard (stdin JSON hook payload)
     CodexStop,
+    /// Keep a clean Claude queue closeout draining (stdin JSON hook payload)
+    ClaudeStop,
     /// Block a tool call that would write an untracked `#id` into source or a
     /// commit message (`PreToolUse` stdin JSON hook payload)
     CoinedIdPreToolUse,
@@ -5940,6 +5942,7 @@ fn try_main() -> anyhow::Result<()> {
             }
             HookAction::CodexUserPromptSubmit => preflight_hook::handle_codex_user_prompt_submit(),
             HookAction::CodexStop => agent_doc_codex_stop_io::handle_stop(),
+            HookAction::ClaudeStop => agent_doc_codex_stop_io::handle_claude_stop(),
             HookAction::CoinedIdPreToolUse => {
                 agent_doc_hooks_io::coined_id_pretooluse::handle_pretooluse()
             }

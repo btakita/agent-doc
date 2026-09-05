@@ -69,6 +69,23 @@ struct StopInput {
     stop_hook_active: bool,
 }
 
+/// Claude Code's Stop payload. Claude does not expose a turn id, so its guard
+/// is deliberately narrower than the Codex recovery hook: it only enforces a
+/// clean closeout's already-durable queue-continuation decision.
+#[derive(Debug, Clone, Deserialize)]
+struct ClaudeStopInput {
+    session_id: String,
+    cwd: String,
+    #[serde(default)]
+    stop_hook_active: bool,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+struct ClaudeStopBlock {
+    decision: &'static str,
+    reason: String,
+}
+
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(untagged)]
 enum StopResponse {
@@ -149,6 +166,92 @@ pub fn handle_stop() -> Result<()> {
         std::process::exit(0);
     }
     Ok(())
+}
+
+/// Claude Code Stop boundary for a completed queue item.
+///
+/// The ordinary Claude Stop hook was previously cosmetic (`turn-status idle`),
+/// leaving the model free to emit a final answer after `session-check` had
+/// durably proven another drainable queue head. Bindings are exact-session
+/// scoped so an unrelated Claude conversation can never inherit this work.
+pub fn handle_claude_stop() -> Result<()> {
+    let response = match read_stdin_payload()
+        .and_then(|payload| {
+            serde_json::from_str::<ClaudeStopInput>(&payload).context("parse Claude Stop JSON")
+        })
+        .and_then(|input| apply_claude_stop(&input))
+    {
+        Ok(response) => response
+            .map(|response| serde_json::to_value(response).expect("serialize Claude Stop block"))
+            .unwrap_or_else(|| serde_json::json!({})),
+        Err(err) => serde_json::to_value(ClaudeStopBlock {
+            decision: "block",
+            reason: format!(
+                "agent-doc Claude Stop hook failed closed while checking queue continuation: {err:#}. Do not send the final answer; report this hook failure to the operator."
+            ),
+        })?,
+    };
+    println!("{}", serde_json::to_string(&response)?);
+    Ok(())
+}
+
+fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopBlock>> {
+    let cwd = PathBuf::from(&input.cwd);
+    let Some((_loaded_root, state)) = load_bound_session_for_stop(&cwd, &input.session_id)? else {
+        return Ok(None);
+    };
+    let file = PathBuf::from(&state.doc_path);
+    if !file.exists() {
+        return Ok(None);
+    }
+
+    // A continuation marker or the session-check stall projection proves that
+    // the prior item reached a clean closeout. This avoids redirecting an
+    // unfinished response back through `/loop` merely because its current head
+    // remains visible in the document.
+    let continuation_proven =
+        agent_doc_queue_io::continuation_marker::load_continuation_marker(&file)?.is_some()
+            || agent_doc_controller_io::project_controller::
+                queue_drain_stall_continuation_pending_for_file(&file)?
+                .is_some();
+    if !continuation_proven {
+        return Ok(None);
+    }
+    let Some(prompt) = active_auto_queue_prompt(&file)? else {
+        return Ok(None);
+    };
+
+    if input.stop_hook_active {
+        // Claude explicitly requires Stop hooks to break their own recursion.
+        // The route-owned supervisor and stall projection remain the bounded
+        // fallback if the model ignored the first block instead of invoking the
+        // loop skill as directed.
+        agent_doc_ops_log_io::log_op(
+            &file,
+            &format!(
+                "claude_stop_queue_continuation_repeat head_bytes={} action=allow_bounded_fallback",
+                prompt.len(),
+            ),
+        );
+        return Ok(None);
+    }
+
+    let _ =
+        agent_doc_queue_io::continuation_marker::record_continuation_requested_head(&file, &prompt);
+    agent_doc_ops_log_io::log_op(
+        &file,
+        &format!(
+            "claude_stop_queue_continuation head_bytes={} source=exact_session_binding action=block_and_loop",
+            prompt.len(),
+        ),
+    );
+    Ok(Some(ClaudeStopBlock {
+        decision: "block",
+        reason: format!(
+            "agent-doc Stop hook kept the active queue moving for {disp}. The completed cycle durably proved another drainable head: {prompt:?}. Do not send the final answer. Invoke the `loop` skill now with args `agent-doc {disp}`; its `/loop` admission claims the drain-owner lease before preflight. Do NOT shell-run `agent-doc {disp}` from the owner pane.",
+            disp = file.display(),
+        ),
+    }))
 }
 
 fn apply_stop_within_budget(input: StopInput, budget: std::time::Duration) -> Result<StopHookRun> {
@@ -2906,6 +3009,60 @@ Reviewed the gated items.\n\
         let root = project_root_for(dir.path()).unwrap();
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert_eq!(state.last_auto_queue_head.as_deref(), Some("do #fix1"));
+    }
+
+    #[test]
+    fn claude_stop_blocks_clean_closeout_and_names_loop_reentry() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["fix the next queue item"]);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
+            .expect("continuation required");
+
+        let response = apply_claude_stop(&ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap()
+        .expect("clean Claude closeout must keep draining");
+
+        assert_eq!(response.decision, "block");
+        assert!(response.reason.contains("fix the next queue item"));
+        assert!(response.reason.contains("`loop` skill"));
+        assert!(response.reason.contains("Do NOT shell-run `agent-doc"));
+    }
+
+    #[test]
+    fn claude_stop_is_exact_session_scoped_and_recursion_bounded() {
+        let dir = setup_project();
+        let doc = write_auto_queue_doc(&dir, &["fix the next queue item"]);
+        init_git_repo(dir.path(), &doc);
+        track_doc(&dir, &doc, "");
+        agent_doc_queue_io::queue_continuation::reconcile_marker(&doc, "session-check")
+            .expect("continuation required");
+
+        assert!(
+            apply_claude_stop(&ClaudeStopInput {
+                session_id: "another-claude-session".to_string(),
+                cwd: dir.path().display().to_string(),
+                stop_hook_active: false,
+            })
+            .unwrap()
+            .is_none(),
+            "an unrelated Claude session must not inherit this document"
+        );
+        assert!(
+            apply_claude_stop(&ClaudeStopInput {
+                session_id: "codex-session".to_string(),
+                cwd: dir.path().display().to_string(),
+                stop_hook_active: true,
+            })
+            .unwrap()
+            .is_none(),
+            "the hook must not recursively block its own second Stop"
+        );
     }
 
     #[test]

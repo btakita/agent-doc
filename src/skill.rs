@@ -139,7 +139,7 @@ After a successful `agent-doc finalize` / `agent-doc write --commit` cycle whose
 - `preflight.queue_trigger == "auto"` **or** `preflight.queue_trigger == "persisted"` — `auto` is a start trigger only; once the queue is active, a persisted-active queue (`queue_active: true` with no `auto` attribute) is equally continuation-eligible (`#active-queue-persisted-no-continue`). Do not require the `auto` attribute to keep draining an already-active queue.
 - `preflight.queue_prompts.len() >= 1`
 - `preflight.user_intent_prompt_changes` is empty (a real user prompt mid-loop takes precedence; do NOT auto-loop over it). Managed-component state edits — queue activity toggle, queue item add/strike, backlog/review/done item edits, `queue_active:` frontmatter flip — are filtered out of `user_intent_prompt_changes` so routine session bookkeeping does not block the auto-loop. Likewise, an edit the affectedness classifier scopes as independent of the current turn (`op_affectedness.turn_affected == false`, `#queue-no-stop-unrelated-edit`) is filtered out — an edit unrelated to the active turn never halts the drain; only a real user prompt, which edits the in-scope `exchange` tail and classifies as turn-affecting, preempts.
-When all of these hold, first run `agent-doc drain-claim <FILE>` to claim the drain-owner lease, then invoke the `Skill` tool with `skill: "loop"` and `args: "agent-doc <FILE>"` to drive the next cycle from the same Claude Code session. The `drain-claim` step (#kp5z / #qflood) tells the supervisor idle-queue watch that `/loop` owns this drain, so it defers instead of *also* injecting `agent-doc <FILE>` into the input queue and flooding it with duplicate triggers. The lease is short-TTL and self-expiring — if the loop stops, the supervisor resumes draining on its own; you never need to release it manually. `/loop` self-paces the next invocation and terminates naturally when the queue drains, when the user interrupts, when `agent_doc_queue_max_iterations` (frontmatter or `.agent-doc/config.toml`) is hit, or when the environment hard-cap `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` (default `50`) is exceeded. **A `/loop` re-entry seals its own cycle contract — do NOT stop for this (`#loopcontractseal`).** It arrives as an ordinary submitted prompt, so the `UserPromptSubmit` hook runs binary-owned preflight for it exactly as for an operator-typed trigger, including the `/loop agent-doc <FILE>` and `/loop <interval> agent-doc <FILE>` wrapper shapes the loop skill re-arms with. A genuinely absent marker is a harness-admission defect to repair (a binary predating 0.35.188 rejects the wrapped shape) — fail closed and say so; never recreate admission by shelling `agent-doc preflight` from the model turn, and never hand drainable heads back to the operator as if the missing contract were a valid stop reason.
+When all of these hold, invoke the `Skill` tool with `skill: "loop"` and `args: "agent-doc <FILE>"` to drive the next cycle from the same Claude Code session. The binary claims the `claude_loop` drain-owner lease as part of each `/loop agent-doc <FILE>` admission, before preflight reconciles the prior continuation, so do not run a separate `agent-doc drain-claim`. That lease tells the supervisor idle-queue watch that `/loop` owns this drain, so it defers instead of *also* injecting `agent-doc <FILE>` into the input queue and flooding it with duplicate triggers. The lease is short-TTL and self-expiring — if the loop stops, the supervisor resumes draining on its own; you never need to release it manually. `/loop` self-paces the next invocation and terminates naturally when the queue drains, when the user interrupts, when `agent_doc_queue_max_iterations` (frontmatter or `.agent-doc/config.toml`) is hit, or when the environment hard-cap `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` (default `50`) is exceeded. **A `/loop` re-entry seals its own cycle contract — do NOT stop for this (`#loopcontractseal`).** It arrives as an ordinary submitted prompt, so the `UserPromptSubmit` hook runs binary-owned preflight for it exactly as for an operator-typed trigger, including the `/loop agent-doc <FILE>` and `/loop <interval> agent-doc <FILE>` wrapper shapes the loop skill re-arms with. A genuinely absent marker is a harness-admission defect to repair (a binary predating 0.35.188 rejects the wrapped shape) — fail closed and say so; never recreate admission by shelling `agent-doc preflight` from the model turn, and never hand drainable heads back to the operator as if the missing contract were a valid stop reason.
 **Do not defer a drainable queued item to a "fresh" or "focused cycle" (`#drain-no-defer`).** During an active queue drain, "this deserves its own focused/clean/fully-verified cycle" is a **stall, not valid closeout** — the drain IS the cycle sequence, and context growth between items is the supervisor's job, not a reason for you to stop. When `session_accretion` reports high accretion (`level: warn`/`block`, over `clear_threshold`) while `queue_active == true`, do **not** hand the remaining items back, ask the operator to compact, or pause for a clean session: finish the current item and keep looping. The CP/supervisor resets context between items — its idle-boundary recycle promotes a fresh binary, and the drain re-dispatches the next item to a freshly-`/clear`ed agent so each runs with clean context. You keep finalizing + looping; the supervisor owns the `/clear`. Only a genuinely operator-gated item (a required live editor/pane proof, an external approval/CI outage) may be left for the operator and tagged so go-mode defers it (`#goqueuestall`); an **agent-drainable** item is never deferred to "a fresh cycle."
 
 Skip the auto-loop on any failed closeout, `session-check` interruption, or `lint-gate` block — those need explicit operator attention. Skip when `preflight.queue_active == false` (queue drained or halted) **or `preflight.queue_continuation_required == false`** (no *in-session*-loop-drainable head — `[operator-verify]`, `[focused-cycle]`, or noise heads remain; looping would just churn a no-op `#qchurn` cycle, so report the remaining heads in one line and stop without pausing or punting). As of `#qcontdrain`, `[clean-session]` heads are loop-drainable and therefore keep `queue_continuation_required == true` — do **not** stop the loop on them; drain them in place. High session-accretion is **not** in that skip list — it is handled by the supervisor `/clear`-and-continue path above, not by stopping. **Stopping ≠ stalling — read `ui_outcome` (`#qfocsup`):** `deferred_for_supervisor_drain` (`yield_to_supervisor_clear_and_continue`) means a `[focused-cycle]` head remains that the CP/supervisor clear-and-continue path drains (it force-`/clear`s + re-dispatches to a fresh context — why the in-session loop yields it instead of running mid-drift), so just end your turn for the supervisor to take over and report "yielding to supervisor," never an operator stall (treating it as operator-gated is what wrongly idles the queue); `deferred_for_operator_proof` (`operator_proof_required`) means only `[operator-verify]`/noise heads remain (need a human / clearing) so report and stop; `no_drainable_work` means fully drained.
@@ -1369,6 +1369,9 @@ const COINED_ID_PRETOOLUSE_COMMAND: &str = "agent-doc hook coined-id-pre-tool-us
 /// only a bare `agent-doc <FILE>` first line and no-ops on everything else, so
 /// it cannot perturb an ordinary prompt.
 const PREFLIGHT_USER_PROMPT_COMMAND: &str = "agent-doc hook preflight-user-prompt-submit";
+/// Consequential Claude Stop boundary: a clean closeout with a durable next
+/// queue head is not allowed to become a final answer.
+const CLAUDE_STOP_COMMAND: &str = "agent-doc hook claude-stop";
 
 /// `timeout` written onto installed Claude/Codex `UserPromptSubmit` preflight hooks.
 ///
@@ -1385,6 +1388,7 @@ pub(crate) const PREFLIGHT_HOOK_TIMEOUT_SECS: u64 = 120;
 /// returns its own fail-closed JSON response first; this larger deadline exists
 /// only so the harness never discards that response.
 pub(crate) const CODEX_STOP_HOOK_TIMEOUT_SECS: u64 = 60;
+pub(crate) const CLAUDE_STOP_HOOK_TIMEOUT_SECS: u64 = 15;
 
 /// The harness timeout is the outer bound and the binary's own budget the inner
 /// one. If they ever crossed, the harness would kill the hook before it could
@@ -1407,12 +1411,10 @@ const TURN_STATUS_IDLE_COMMAND: &str = "agent-doc turn-status idle";
 /// and additive (existing hooks, including the SessionStart autoclaim hook, are
 /// preserved).
 ///
-/// `UserPromptSubmit` → `turn-status active` (turn start); `Stop` **and**
-/// `SessionStart` → `turn-status idle`. The double clear is the reliability
-/// belt-and-suspenders: the Stop hook here does only trivial, idempotent,
-/// best-effort work (clear a pane title) — unlike the consequential Codex closeout
-/// Stop hook — so a missed Stop can only leave a stale cosmetic title, and the
-/// SessionStart clear self-heals it at the next session start.
+/// `UserPromptSubmit` → `turn-status active` (turn start); `Stop` runs both the
+/// consequential queue-continuation guard and `turn-status idle`; `SessionStart`
+/// → `turn-status idle`. The title clear remains trivial and idempotent, while
+/// the queue guard is exact-session scoped and consults durable closeout state.
 /// OpenCode plugin that drives the monitor: `chat.message` (a new user message =
 /// turn start) → `turn-status active`; the `session.idle` bus event (turn end) →
 /// `turn-status idle`. Best-effort — `agent-doc turn-status` no-ops outside tmux.
@@ -1587,6 +1589,13 @@ fn merge_claude_turn_status_hooks(path: &Path) -> Result<()> {
         None,
     );
     ensure_codex_hook_command(hooks_map, "Stop", TURN_STATUS_IDLE_COMMAND, None, None);
+    ensure_codex_hook_command(
+        hooks_map,
+        "Stop",
+        CLAUDE_STOP_COMMAND,
+        Some("Checking agent-doc queue continuation"),
+        Some(CLAUDE_STOP_HOOK_TIMEOUT_SECS),
+    );
     ensure_codex_hook_command(
         hooks_map,
         "SessionStart",
@@ -1872,6 +1881,16 @@ mod tests {
             .expect("preflight hook entry")
     }
 
+    fn claude_stop_hook_entry(settings: &serde_json::Value) -> &serde_json::Value {
+        settings["hooks"]["Stop"]
+            .as_array()
+            .expect("Stop entries")
+            .iter()
+            .flat_map(|entry| entry["hooks"].as_array().expect("hooks array"))
+            .find(|hook| hook["command"] == serde_json::json!(CLAUDE_STOP_COMMAND))
+            .expect("Claude Stop hook entry")
+    }
+
     /// `#hookcontractlost`: an untimed Claude hook defaults to 30s and discards
     /// its output on expiry, which is exactly the silent no-contract state the
     /// admission-failure marker exists to remove. Preflight measured 23-34s on a
@@ -1888,6 +1907,10 @@ mod tests {
         assert_eq!(
             preflight_hook_entry(&parsed)["timeout"],
             serde_json::json!(PREFLIGHT_HOOK_TIMEOUT_SECS)
+        );
+        assert_eq!(
+            claude_stop_hook_entry(&parsed)["timeout"],
+            serde_json::json!(CLAUDE_STOP_HOOK_TIMEOUT_SECS)
         );
     }
 
@@ -3102,7 +3125,17 @@ mod tests {
         assert!(
             cmds(&claude, "UserPromptSubmit").contains(&TURN_STATUS_ACTIVE_COMMAND.to_string())
         );
-        assert!(cmds(&claude, "Stop").contains(&TURN_STATUS_IDLE_COMMAND.to_string()));
+        let claude_stop = cmds(&claude, "Stop");
+        assert!(claude_stop.contains(&TURN_STATUS_IDLE_COMMAND.to_string()));
+        assert!(claude_stop.contains(&CLAUDE_STOP_COMMAND.to_string()));
+        assert_eq!(
+            claude_stop
+                .iter()
+                .filter(|command| command.as_str() == CLAUDE_STOP_COMMAND)
+                .count(),
+            1,
+            "the consequential Claude Stop guard must stay idempotent"
+        );
         let ss = cmds(&claude, "SessionStart");
         assert!(
             ss.contains(&"agent-doc autoclaim".to_string()),

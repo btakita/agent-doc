@@ -46,6 +46,20 @@ Cross-session event coordination via `agent-kit` hooks (v0.3).
 
 In one binary-owned invocation, `UserPromptSubmit` first makes session tracking durable and then runs preflight for a valid trigger. Its stdout cycle contract ends with the admission success marker and an explicit directive to continue in the current turn without shell-running `agent-doc <FILE>`; Codex injects that context into the arriving turn. Tracking or preflight failures emit diagnostics without the marker. It recognizes both bare `agent-doc <FILE>` reopen prompts and session invocations with same-line or following-line directive bodies, such as `agent-doc <FILE> #code-review` or `agent-doc <FILE>` followed by `do #id ...`. A bare invocation with no body remains a no-op when the document snapshot is unchanged unless an active `agent:queue` supplies the next prompt. Tracked directive bodies and active queue head prompts are exposed to preflight/plan as synthetic prompt diffs so they cannot be lost behind `no_changes=true`.
 
+**Claude queue-continuation bridge:** the Claude `UserPromptSubmit` hook stores an
+exact `session_id` → document binding before it admits an agent-doc cycle. A
+successful `/loop agent-doc <FILE>` admission atomically refreshes the
+`claude_loop` drain-owner lease before preflight reconciles the prior closeout;
+lease ownership must not depend on the model remembering a separate shell
+command. The installed Claude `Stop` hook consults that exact-session binding,
+the durable continuation marker (or session-check stall projection), and the
+shared live continuation detector. When a clean closeout still has a drainable
+head, the first Stop returns `decision=block` with the exact head and directs the
+same Claude session through the loop skill. A `stop_hook_active=true` re-entry
+must pass through to avoid recursive hook loops; the route supervisor remains
+the bounded fallback. Missing binding or missing continuation proof is a no-op,
+so unrelated Claude sessions never inherit ambient queue work.
+
 The admission invariant is one harness-native prompt, admitted once, in its owning pane. The user-level hook is the policy owner; the process-entry recursion guard remains a late imperative exception for genuine nested process starts. Required transitions are:
 
 | Input state | Transition |

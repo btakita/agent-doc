@@ -28,6 +28,16 @@
             "type": "command"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "command": "agent-doc hook claude-stop",
+            "statusMessage": "Checking agent-doc queue continuation",
+            "timeout": 15,
+            "type": "command"
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [

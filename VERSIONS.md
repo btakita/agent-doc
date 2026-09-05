@@ -2,6 +2,23 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.332
+
+- **Fix: Claude queue drains cannot silently finish between items.**
+
+Claude `UserPromptSubmit` now records the exact session-to-document binding used
+by a consequential `Stop` hook. When a clean closeout leaves a binary-detected
+drainable queue head, the first Stop is blocked with that exact head and the
+same session is directed through the loop skill. Unbound sessions remain
+unaffected, and `stop_hook_active` bounds hook recursion while the supervisor
+retains fallback ownership.
+
+- **Fix: loop admission owns its drain lease.** A recognized
+  `/loop agent-doc <FILE>` trigger now claims the `claude_loop` lease before
+  preflight reconciles the prior continuation. Healthy same-turn drains no
+  longer depend on the model remembering a separate `agent-doc drain-claim`
+  shell command, eliminating false `queue_stall_detected` reports.
+
 ## 0.35.331
 
 - **Fix: stale durable editor ops fence their direct-update twin.**

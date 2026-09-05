@@ -166,6 +166,10 @@ fn session_state_key(session_id: &str) -> String {
 #[derive(Debug, Deserialize)]
 pub struct UserPromptSubmitInput {
     pub session_id: String,
+    /// Codex supplies a per-turn id; Claude Code does not. Session binding and
+    /// Claude's continuation Stop guard only require the exact session id, so
+    /// an absent turn id is a valid empty value for that harness.
+    #[serde(default)]
     pub turn_id: String,
     pub cwd: String,
     pub prompt: String,
@@ -775,6 +779,20 @@ mod tests {
         assert_eq!(PathBuf::from(state.doc_path), doc);
         assert_eq!(state.last_turn_id, "turn-1");
         assert_eq!(state.last_prompt, format!("agent-doc {}", doc.display()));
+    }
+
+    #[test]
+    fn claude_user_prompt_payload_may_omit_turn_id() {
+        let input: UserPromptSubmitInput = serde_json::from_value(serde_json::json!({
+            "session_id": "claude-session",
+            "cwd": "/tmp/project",
+            "prompt": "/agent-doc task.md",
+            "hook_event_name": "UserPromptSubmit"
+        }))
+        .unwrap();
+
+        assert_eq!(input.turn_id, "");
+        assert_eq!(input.session_id, "claude-session");
     }
 
     #[test]

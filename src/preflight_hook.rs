@@ -10,7 +10,9 @@
 
 use std::path::{Path, PathBuf};
 
-use agent_doc_hooks_io::preflight_user_prompt_submit::{invoked_document, resolve_document};
+use agent_doc_hooks_io::preflight_user_prompt_submit::{
+    AgentDocInvocation, invoked_agent_doc, invoked_document, resolve_document,
+};
 
 /// Printed after the injected contract has been produced successfully.
 ///
@@ -145,9 +147,10 @@ fn run_preflight_for_prompt(
     cwd: &Path,
     admitted_directive: Option<&str>,
 ) -> HookAdmission {
-    let Some(target) = invoked_document(prompt) else {
+    let Some(invocation) = invoked_agent_doc(prompt) else {
         return HookAdmission::NotATrigger;
     };
+    let target = invocation.document.clone();
     // `#hooktriggerunresolved`: this used to collapse into `NotATrigger`, which
     // is silence — and silence is what the whole `#hookcontractlost` design
     // exists to prevent. `invoked_document` already matched, so the prompt IS an
@@ -176,6 +179,18 @@ fn run_preflight_for_prompt(
         return HookAdmission::Failed;
     };
 
+    // `/loop` is itself the authoritative loop-admission transition. Claiming
+    // here makes the continuation lease a binary-owned effect, rather than a
+    // preceding shell command the model can forget. The claim must precede
+    // preflight because preflight reconciles the prior clean closeout's pending
+    // continuation and classifies a missing lease as a queue stall.
+    if let Err(err) = claim_loop_drain_owner(&invocation, &file) {
+        let err = err.context("claim Claude loop drain-owner lease");
+        eprintln!("[agent-doc] preflight hook failed: {err:#}");
+        emit_admission_failure(&file.display().to_string(), &err);
+        return HookAdmission::Failed;
+    }
+
     match run_preflight_within_budget(&file, hook_admission_budget()) {
         Ok(contract) => {
             // The marker seals a successfully produced contract. It must not
@@ -198,6 +213,16 @@ fn run_preflight_for_prompt(
             HookAdmission::Failed
         }
     }
+}
+
+fn claim_loop_drain_owner(invocation: &AgentDocInvocation, file: &Path) -> anyhow::Result<()> {
+    if !invocation.loop_wrapped {
+        return Ok(());
+    }
+    agent_doc_queue_io::drain_owner::refresh_drain_owner_lease(
+        &file.to_string_lossy(),
+        agent_doc_queue_io::drain_owner::DRAIN_OWNER_CLAUDE_LOOP,
+    )
 }
 
 /// Run preflight, converting a budget overrun into a named refusal.
@@ -294,26 +319,30 @@ pub fn handle_user_prompt_submit() -> anyhow::Result<()> {
             return Ok(());
         }
     };
-    let input = match serde_json::from_str::<serde_json::Value>(&payload) {
-        Ok(input) => input,
-        Err(err) => {
-            eprintln!("[agent-doc] preflight hook JSON parse failed: {err}");
-            return Ok(());
+    let input =
+        match serde_json::from_str::<agent_doc_codex_hook_io::UserPromptSubmitInput>(&payload) {
+            Ok(input) => input,
+            Err(err) => {
+                eprintln!("[agent-doc] preflight hook JSON parse failed: {err}");
+                return Ok(());
+            }
+        };
+    let cwd = PathBuf::from(&input.cwd);
+
+    // Claude's Stop hook needs the same exact-session document binding as
+    // Codex. Persist it before admission so a cycle is never opened without a
+    // Stop boundary capable of finding the document again.
+    if let Err(err) = agent_doc_codex_hook_io::apply_user_prompt_submit(&input) {
+        eprintln!("[agent-doc] Claude session tracking failed: {err:#}");
+        if invoked_document(&input.prompt).is_some() {
+            emit_admission_failure(&input.cwd, &err.context("Claude session tracking failed"));
         }
-    };
-    let prompt = input
-        .get("prompt")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    let cwd = input
-        .get("cwd")
-        .and_then(serde_json::Value::as_str)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        return Ok(());
+    }
 
     // Every outcome is already reported to the agent and the operator inside
     // `run_preflight_for_prompt`, so a refusal never blocks an ordinary prompt.
-    run_preflight_for_prompt(prompt, &cwd, None);
+    run_preflight_for_prompt(&input.prompt, &cwd, None);
     Ok(())
 }
 
@@ -390,6 +419,25 @@ mod tests {
         assert_eq!(
             run_preflight_for_prompt("/loop check the deploy", dir.path(), None),
             HookAdmission::NotATrigger,
+        );
+    }
+
+    #[test]
+    fn loop_admission_claims_lease_before_preflight() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        std::fs::write(&file, "# Session\n").unwrap();
+        let invocation = invoked_agent_doc("/loop agent-doc task.md").unwrap();
+
+        claim_loop_drain_owner(&invocation, &file).unwrap();
+
+        let lease =
+            agent_doc_queue_io::drain_owner::read_drain_owner_lease(&file.to_string_lossy())
+                .expect("loop admission must hold a drain-owner lease");
+        assert_eq!(
+            lease.owner,
+            agent_doc_queue_io::drain_owner::DRAIN_OWNER_CLAUDE_LOOP
         );
     }
     use super::*;

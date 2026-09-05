@@ -57,7 +57,18 @@ const NON_CYCLE_SUBCOMMANDS: &[&str] = &[
     "help",
 ];
 
-/// The document an `agent-doc` invocation prompt targets, if any.
+/// A recognized session-cycle invocation.
+///
+/// Keeping the wrapper fact beside the target lets the hook adapter claim the
+/// Claude loop lease before preflight reconciles the preceding continuation.
+/// The parser remains effect-free; lease ownership stays at the binary edge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentDocInvocation {
+    pub document: String,
+    pub loop_wrapped: bool,
+}
+
+/// The `agent-doc` session-cycle invocation represented by a prompt, if any.
 ///
 /// Recognizes the three harness spellings of the trigger — `/agent-doc <FILE>`
 /// (Claude Code, OpenCode) and `agent-doc <FILE>` (Codex, direct) — and nothing
@@ -78,12 +89,13 @@ const NON_CYCLE_SUBCOMMANDS: &[&str] = &[
 /// optional interval token the skill accepts — is consumed before matching. Only
 /// this one wrapper is recognized; every other leading word still means the
 /// prompt merely mentions the command.
-pub fn invoked_document(prompt: &str) -> Option<String> {
+pub fn invoked_agent_doc(prompt: &str) -> Option<AgentDocInvocation> {
     let first_line = prompt.trim().lines().next()?.trim();
     let mut words = first_line.split_whitespace().peekable();
     let command = words.next()?;
     let command = command.strip_prefix('/').unwrap_or(command);
-    let command = if command == "loop" {
+    let loop_wrapped = command == "loop";
+    let command = if loop_wrapped {
         // An interval is optional in `/loop [interval] <prompt>`; a bare
         // `/loop 5m` with no prompt simply runs out of words below.
         if words.peek().is_some_and(|word| is_loop_interval(word)) {
@@ -109,7 +121,15 @@ pub fn invoked_document(prompt: &str) -> Option<String> {
     if target.starts_with('-') || !target.ends_with(".md") {
         return None;
     }
-    Some(target.to_string())
+    Some(AgentDocInvocation {
+        document: target.to_string(),
+        loop_wrapped,
+    })
+}
+
+/// Compatibility projection for callers that only need the document.
+pub fn invoked_document(prompt: &str) -> Option<String> {
+    invoked_agent_doc(prompt).map(|invocation| invocation.document)
 }
 
 /// A `/loop` interval token: `<digits><s|m|h|d>`, per the `loop` skill's own
@@ -163,6 +183,14 @@ mod tests {
     /// draining, so the queue stalls with work still on it.
     #[test]
     fn the_queue_auto_loop_reentry_is_the_same_trigger() {
+        assert_eq!(
+            invoked_agent_doc("/loop agent-doc tasks/plan.md"),
+            Some(AgentDocInvocation {
+                document: "tasks/plan.md".to_string(),
+                loop_wrapped: true,
+            }),
+            "the effect adapter must be able to claim the loop lease before preflight"
+        );
         assert_eq!(
             invoked_document("/loop agent-doc tasks/plan.md"),
             Some("tasks/plan.md".to_string()),
@@ -223,6 +251,17 @@ mod tests {
             invoked_document("loop over agent-doc tasks/plan.md"),
             None,
             "prose after `loop` is not the trigger"
+        );
+    }
+
+    #[test]
+    fn a_direct_trigger_is_not_mislabeled_as_loop_owned() {
+        assert_eq!(
+            invoked_agent_doc("agent-doc tasks/plan.md"),
+            Some(AgentDocInvocation {
+                document: "tasks/plan.md".to_string(),
+                loop_wrapped: false,
+            })
         );
     }
 

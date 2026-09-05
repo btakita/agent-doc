@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -154,6 +154,29 @@ Verification is green:
 Operator verification: finish a queue item in a Claude haiven-dev session while another head is drainable. The first Stop should inject the next-head continuation; the subsequent `/loop` preflight should hold the lease and should not emit `queue_stall_detected`.
 
 Commits: agent-doc `1740de974` (pushed) and parent integration `8bc4f0811`. No tag or package publication was attempted; this cycle's preset was commit/push, not release.
+
+### Re: In contracts.md, I ran ! agent-doc admin recycle and the agent-doc tmux window went away. Restore the runtime as soon as you diagnose the issue. The fix the agent-doc causes. — gpt-5
+
+Restored immediately and fixed at all three owning boundaries.
+
+- The live `contracts.md` runtime never died: actor generation 13 and pane `%23` remained healthy. I moved its `@36` `agent-doc` window back to tmux session `0`, joined `%23` into `0:0`, and selected it. After the fixed controller observed it repeatedly, `0:0 @36` still held `%23` as the active pane. Both controller PID 3956015 and supervisor PID 3097040 now run the installed binary inode and report fresh/ready.
+- Recycle root cause: the replacement controller inherited its ambient `TMUX_PANE` from an IDE-owned session and windowless sync selected that ambient session before consulting the generation-fenced actor bindings. Sync now derives session authority from the focused live actor, then a visible desired sibling, before ambient/controller context. A stashed focused actor cannot pull an already-visible shared `agent-doc` window into another session.
+- Manual-pane reversion root cause: an editor `projection` generation remained structurally authoritative after it had converged, so later pane selection or an added live actor pane was treated as drift and replayed. Editor projection is now apply-once per generation. Once that exact generation converges, later focus/cardinality drift is operator-owned; a genuinely new editor observation creates a new generation and may reconcile once.
+- IDEA terminal root cause: JetBrains `Run Agent Doc` explicitly called `IdeTerminalCoordinator.ensureAndAttach` before its controller route, and the shared attach decision activated a surviving IDE terminal tab even when the tmux session already had an attached client. Run now submits `editor_route` directly and never creates, attaches, selects, focuses, or reveals an IDE terminal. Autostarting Sync retains terminal bootstrap, but any attached client wins even if an IDE tab still exists.
+
+The authority order and post-convergence ownership rules are specified in `specs/07-session-tmux-commands.md` and the JetBrains spec. Regression coverage includes pure session-selection tests, stashed-focus/visible-sibling tests, a live isolated-tmux recycle-context test, controller projection tests for manual selection and manual pane addition, and JetBrains tests for direct Run routing plus attached-session terminal suppression.
+
+Verification and publication:
+
+- Full `make check`: passed on the final combined tree.
+- Targeted JetBrains and Rust regression suites: passed.
+- `make install`: passed; binary, native library, JetBrains plugin package, and VS Code extension installed. The corrected Kotlin plugin takes effect after the required IDEA plugin restart.
+- Product commit `b8d6192d5` (`fix: preserve operator tmux placement`) pushed to `origin/main`; GitHub CI run 33947369512 is in progress.
+- Parent submodule integration commit: `3aa58a4d8`. The parent branch has 377 unrelated local commits, so I did not push that unrelated history.
+
+> **Queue prompt:**
+>
+> In contracts.md, I ran `! agent-doc admin recycle` and the agent-doc tmux window went away. Restore the runtime as soon as you diagnose the issue. The fix the agent-doc causes.
 <!-- agent:boundary:65937e75 -->
 <!-- /agent:exchange -->
 
@@ -162,8 +185,9 @@ Commits: agent-doc `1740de974` (pushed) and parent integration `8bc4f0811`. No t
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 The agent-doc sessions in haiven-dev keep on stalling after finishing a queue item. Please fix agent-doc causes.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+- In contracts.md, I ran `! agent-doc admin recycle` and the agent-doc tmux window went away. Restore the runtime as soon as 
+ you diagnose the issue. The fix the agent-doc causes.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

@@ -111,6 +111,27 @@ Supervisor log clones now share a synchronized append handle rather than cloning
 Verification passed: focused SQLite/controller/log/supervisor/start/preflight/session-accretion tests, formatting and diff checks, the public-repo private-name denylist, and the full `make check` matrix. The CLI, native library, bundled skills, JetBrains package, and VS Code package were installed; `agent-doc --version` reports 0.35.336. The architecture-first plan is recorded in `tasks/agent-doc/plan-long-lived-state-pressure.md` and the relevant control-plane, state-backbone, and supervisor specs are updated.
 
 Committed and pushed to `main` as `eb1e36cfd` (`fix(runtime): bound long-lived state pressure`). CI runs `34018884314`, `34018884273`, and `34018884456` were in progress at closeout.
+
+### Re: #fixcausesrun — gpt-5
+
+> **Queue prompt:**
+>
+> do [#fixcausesrun]
+
+
+> **Queue prompt:**
+>
+> Fix agent-doc causes of Run Agent Doc issue on dev.md: `editor route layout did not converge before dispatch: operator_owned_layout`
+
+Fixed and released locally as agent-doc `0.35.338` in public subrepo commit `167c33255` (`fix(route): reopen operator-owned layout intents`).
+
+The runtime wedge came from reusing an identical desired pane-layout generation across separate foreground Run commands. Once an operator changed the previously converged layout, that old generation correctly projected the terminal `OperatorOwned` state. Every later Run reused the same generation and receipt, so the retained effect could never become eligible again and dispatch failed immediately.
+
+The invariant is now explicit: every foreground editor Run publishes a fresh layout-intent generation before dispatch, even when its canonical layout is identical to the retained desired value. `ControllerPaneLayoutGraph` owns that policy through typed `PaneLayoutPublication::{CoalesceIdentical, FreshIntent}` transitions. Background/state-frame publication still coalesces identical values; foreground routing uses `FreshIntent`, invalidates stale observation/receipt facts, derives `NeedsEffect`, performs the retained layout effect, observes convergence, and only then dispatches. Non-convergence still fails closed. The one foreground tmux survey remains the physical-state ingress because tmux provides no push stream; no polling loop was added.
+
+Regression coverage recreates a previously converged generation that drifts to `OperatorOwned`, then proves that an identical foreground intent receives a higher generation and re-enters `NeedsEffect`. The existing end-to-end route test now repeats the same request and verifies the second dispatch uses a fresh generation. Routing and control-plane specs were updated with the invariant, owner, topology, and transition table.
+
+Verification passed: both focused regressions, all pane-layout tests, non-test `cargo check`, formatting, version synchronization, private-name and diff checks, and full `make check` (9,233 tests passed; 255 skipped; audits plus Lean/TLA checks passed). `make install` installed `0.35.338`, marked 17 supervisors and 8 controllers for safe idle-boundary recycle, and installed the matching VS Code and JetBrains packages. Restart a running JetBrains IDE to activate its updated package.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 

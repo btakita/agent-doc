@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a073ec-e819-7bd3-a292-ccc16b25bc14
+  codex: 01a0754d-5499-7160-ac2b-09ad05ea0ece
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -67,6 +67,29 @@ Important safeguards:
 - Stress-test thousands of retries and reloads while asserting bounded disk usage, replay time, and descriptor count.
 
 That is the right scope for the queued `#mrhstatepressure` task.
+
+### Re: #mrhsyncslowpath — gpt-5
+
+Completed and shipped the cross-root sync slow-path fix as agent-doc 0.35.335.
+
+The ownership invariant remains fail-closed: the project controller owns actor and structural pane evidence, while sync may only consult an already-running owner controller through a read-only adapter. Structural file→pane receipts are now a retained reactive Source joined with desired layout and live actors in the same pure Computed. The former worker-side imperative append is gone; receipt evidence is constrained to the current structural shape, actor evidence wins on overlap, and focus-only generations can safely reuse an unchanged assignment.
+
+The interactive fallback now makes at most one owner-controller request with a caller-owned 250 ms deadline, with no retry and no lazy controller launch. `Found`, `Missing`, and `DeadlineExceeded` are typed outcomes; missing or timed-out evidence falls through the existing ownership checks. The post-content path cannot issue a second cross-root lookup.
+
+Transition coverage now proves:
+
+- unchanged structure plus focus-only change reuses the structural receipt;
+- changed layout structure or changed actor bindings rejects reuse;
+- receipt publication invalidates and re-derives the retained binding projection;
+- a non-responsive owner controller returns `DeadlineExceeded` after one bounded request;
+- exact-visible post-content resolution performs zero repeat actor lookups;
+- live cross-root exact-visible sync reuses the owner pane without creating a replacement session.
+
+Window-resolution telemetry is split into target-session, agent-doc-window, and layout-observation subphases while retaining the aggregate meter. The latest measured safe-passive sample was 19 ms total (7 ms + 2 ms + 8 ms), below the 250 ms budget.
+
+Verification passed: `make check`, formatting and diff checks, focused controller/sync regressions, the ignored live-tmux cross-root regression, release-version audit, and the public-repo private-name denylist scan. The CLI, native library, Codex/Claude/OpenCode/Cursor skills, JetBrains package, and VS Code package were installed at 0.35.335; running supervisors/controllers were marked for normal idle-boundary recycle. No data migration is required.
+
+Committed and pushed to `main` as `767eddd8b` (`fix(sync): bound cross-root ownership lookup`). The new CI run `34017106312` was queued at closeout; the preceding main CI run `34012077142` completed successfully.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 
@@ -76,13 +99,12 @@ That is the right scope for the queued `#mrhstatepressure` task.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#mrhstatepressure]
-- do [#mrhsyncslowpath]
+- ⏭️ do [#mrhstatepressure]
+- ~~do [#mrhsyncslowpath]~~
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
 - [ ] [#mrhstatepressure] [P0] /enqueue Bound long-lived session state and log growth: compact terminal accepted-only dispatch receipts and state events, and rotate per-session and ops logs so monsterrodholders.md cannot replay 1,356 stale receipts or hit EMFILE; preserve audit cursors and add a stress regression.
-- [ ] [#mrhsyncslowpath] [P1] /enqueue Finish the remaining cross-root auto-sync latency protections in src/agent-doc/tasks/agent-doc/plan-sync-slow-path-latency.md: bound actor lookup without retries, project controller-proven cross-root bindings reactively, remove redundant round trips, and measure the window-resolution outlier; verify monsterrodholders.md navigation remains sub-second and never creates a new session when a live owner exists.
 <!-- /agent:backlog -->
 
 ## Review

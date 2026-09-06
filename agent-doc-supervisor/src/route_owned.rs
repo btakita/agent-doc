@@ -1,9 +1,10 @@
-//! Pure route-owned supervisor completion policy.
+//! Pure route-owned supervisor lifecycle and completion policy.
 //!
-//! This module decides whether a route-owned supervisor pane should reap itself
-//! after a committed document cycle. It does not read documents, inspect panes,
-//! spawn processes, or write logs; callers provide the liveness facts gathered
-//! from their effectful adapters.
+//! This module owns queue-control admission for route-owned startup and decides
+//! whether a route-owned supervisor pane should reap itself after a committed
+//! document cycle. It does not read documents, inspect panes, spawn processes,
+//! or write logs; callers provide the lifecycle and liveness facts gathered from
+//! their effectful adapters.
 
 use std::{fmt, str::FromStr};
 
@@ -68,6 +69,91 @@ impl FromStr for RouteOwnedReapPolicy {
             }),
         }
     }
+}
+
+/// Why a new route-owned supervisor lifecycle is being started.
+///
+/// Layout provisioning may create an idle harness owner so an editor projection
+/// can converge, but it never carries a prompt dispatch. Queue control therefore
+/// fences `Dispatch` while allowing `LayoutProvision`; the idle supervisor's
+/// queue watcher continues to honor the same pause before any later dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RouteOwnedStartPurpose {
+    #[default]
+    Dispatch,
+    LayoutProvision,
+}
+
+impl RouteOwnedStartPurpose {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Dispatch => "dispatch",
+            Self::LayoutProvision => "layout_provision",
+        }
+    }
+}
+
+impl fmt::Display for RouteOwnedStartPurpose {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Dispatch => "dispatch",
+            Self::LayoutProvision => "layout-provision",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseRouteOwnedStartPurposeError {
+    value: String,
+}
+
+impl fmt::Display for ParseRouteOwnedStartPurposeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "invalid route-owned start purpose {:?}; expected dispatch or layout-provision",
+            self.value
+        )
+    }
+}
+
+impl std::error::Error for ParseRouteOwnedStartPurposeError {}
+
+impl FromStr for RouteOwnedStartPurpose {
+    type Err = ParseRouteOwnedStartPurposeError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "dispatch" => Ok(Self::Dispatch),
+            "layout-provision" | "layout_provision" => Ok(Self::LayoutProvision),
+            _ => Err(ParseRouteOwnedStartPurposeError {
+                value: value.to_string(),
+            }),
+        }
+    }
+}
+
+/// Typed lifecycle admission presented to durable queue-control policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteOwnedStartAdmission {
+    NewSession(RouteOwnedStartPurpose),
+    SupervisorReentry,
+}
+
+/// Whether effective queue control blocks this route-owned lifecycle edge.
+///
+/// This is the single policy owner shared by route provisioning and the spawned
+/// `agent-doc start` process, closing their pause-vs-start race without making a
+/// layout projection retry forever.
+pub const fn route_owned_start_blocked_by_queue_control(
+    route_owned: bool,
+    admission: RouteOwnedStartAdmission,
+) -> bool {
+    route_owned
+        && matches!(
+            admission,
+            RouteOwnedStartAdmission::NewSession(RouteOwnedStartPurpose::Dispatch)
+        )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -353,6 +439,44 @@ fn route_owned_line_is_response_heading(line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queue_control_blocks_dispatch_but_not_layout_provision_or_reentry() {
+        assert!(route_owned_start_blocked_by_queue_control(
+            true,
+            RouteOwnedStartAdmission::NewSession(RouteOwnedStartPurpose::Dispatch),
+        ));
+        assert!(!route_owned_start_blocked_by_queue_control(
+            true,
+            RouteOwnedStartAdmission::NewSession(RouteOwnedStartPurpose::LayoutProvision),
+        ));
+        assert!(!route_owned_start_blocked_by_queue_control(
+            true,
+            RouteOwnedStartAdmission::SupervisorReentry,
+        ));
+        assert!(!route_owned_start_blocked_by_queue_control(
+            false,
+            RouteOwnedStartAdmission::NewSession(RouteOwnedStartPurpose::Dispatch),
+        ));
+    }
+
+    #[test]
+    fn route_owned_start_purpose_round_trips_cli_values() {
+        assert_eq!(
+            "dispatch".parse::<RouteOwnedStartPurpose>().unwrap(),
+            RouteOwnedStartPurpose::Dispatch
+        );
+        assert_eq!(
+            "layout-provision"
+                .parse::<RouteOwnedStartPurpose>()
+                .unwrap(),
+            RouteOwnedStartPurpose::LayoutProvision
+        );
+        assert_eq!(
+            RouteOwnedStartPurpose::LayoutProvision.to_string(),
+            "layout-provision"
+        );
+    }
 
     fn reap_effect(cycle: &str, reason: &str) -> RouteOwnedReapEffect {
         RouteOwnedReapEffect {

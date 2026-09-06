@@ -466,6 +466,7 @@ markdown file, sync must expand that one-column projection from the project
 ### Sync-specific invariants
 
 - `provision_pane` is the passive sync-specific pane-creation path. It chooses split direction by column position and does not block on prompt readiness.
+- Queue control fences autonomous route dispatch, not structural editor-layout ownership. A binary-owned provision-only sync may create and start an idle keep-alive owner while queue control is paused or draining, but it must preserve a typed `layout-provision` purpose through both route admission and the spawned `agent-doc start` lifecycle check. The initial sync sends no reopen, and the supervisor's queue watcher must continue honoring queue control before any later dispatch. An unchanged desired projection must settle after the pane becomes observable instead of retrying the blocked allocation on a timer.
 - Full/manual sync uses the strict provision-and-route variant: it resolves and creates the pane in the intended tmux session, registers it, waits for harness dispatch readiness, and submits the document route as one fallible controller command. A readiness or submit failure must keep the terminal command non-applied and expose its diagnostic to the caller.
 - When sync creates new panes it should prefer splitting in the visible `agent-doc` window, not beside a stash pane when a visible anchor exists.
 - Post-sync registration must fail closed if one pane would be mirrored back into the registry for multiple documents.

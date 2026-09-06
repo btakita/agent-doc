@@ -2260,6 +2260,14 @@ enum Commands {
             default_value_t = agent_doc_supervisor::route_owned::RouteOwnedReapPolicy::Auto
         )]
         route_owned_reap_policy: agent_doc_supervisor::route_owned::RouteOwnedReapPolicy,
+        /// Internal route-owned startup purpose. Layout provisioning may start
+        /// an idle owner while queue control continues to fence dispatch.
+        #[arg(
+            long = "route-owned-start-purpose",
+            hide = true,
+            default_value_t = agent_doc_supervisor::route_owned::RouteOwnedStartPurpose::Dispatch,
+        )]
+        route_owned_start_purpose: agent_doc_supervisor::route_owned::RouteOwnedStartPurpose,
     },
     /// Route agent-doc command to the correct tmux pane
     Route {
@@ -4393,6 +4401,7 @@ fn try_main() -> anyhow::Result<()> {
             fresh,
             route_owned,
             route_owned_reap_policy,
+            route_owned_start_purpose,
         } => {
             // Default is resume-if-recorded, matching `restart-supervisor`'s
             // continue-mode default: with no flags at all, still attempt the
@@ -4412,11 +4421,12 @@ fn try_main() -> anyhow::Result<()> {
                     }),
                 )
             };
-            if agent_doc_start_io::bootstrap_start_inside_tmux_if_needed(
+            if agent_doc_start_io::bootstrap_start_inside_tmux_if_needed_with_purpose(
                 &file,
                 force,
                 route_owned,
                 route_owned_reap_policy,
+                route_owned_start_purpose,
                 resume.as_ref(),
                 harness.as_deref(),
             )?
@@ -4431,6 +4441,7 @@ fn try_main() -> anyhow::Result<()> {
                     route_owned_reap_policy,
                     resume,
                     harness,
+                    route_owned_start_purpose,
                 )
             }
         }

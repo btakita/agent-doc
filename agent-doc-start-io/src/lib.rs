@@ -10,6 +10,10 @@ use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_session_registry_io::registration as sessions;
 use agent_doc_supervisor::{
     lifecycle::start_session_retryable_during_recycle,
+    route_owned::{
+        RouteOwnedStartAdmission, RouteOwnedStartPurpose,
+        route_owned_start_blocked_by_queue_control,
+    },
     session_owner::{
         ExistingPaneConflictFacts, ExistingSessionPaneAction,
         format_existing_pane_conflict_error as format_existing_pane_conflict_error_from_facts,
@@ -207,6 +211,26 @@ pub fn bootstrap_start_inside_tmux_if_needed(
     resume: Option<&agent_doc_harness::ResumeRequest>,
     harness_override: Option<&str>,
 ) -> Result<Option<TmuxEnsureOutcome>> {
+    bootstrap_start_inside_tmux_if_needed_with_purpose(
+        file,
+        force,
+        route_owned,
+        route_owned_reap_policy,
+        RouteOwnedStartPurpose::Dispatch,
+        resume,
+        harness_override,
+    )
+}
+
+pub fn bootstrap_start_inside_tmux_if_needed_with_purpose(
+    file: &Path,
+    force: bool,
+    route_owned: bool,
+    route_owned_reap_policy: agent_doc_supervisor::route_owned::RouteOwnedReapPolicy,
+    route_owned_start_purpose: RouteOwnedStartPurpose,
+    resume: Option<&agent_doc_harness::ResumeRequest>,
+    harness_override: Option<&str>,
+) -> Result<Option<TmuxEnsureOutcome>> {
     if agent_doc_tmux_io::in_tmux() {
         return Ok(None);
     }
@@ -244,6 +268,7 @@ pub fn bootstrap_start_inside_tmux_if_needed(
         force,
         route_owned,
         route_owned_reap_policy,
+        route_owned_start_purpose,
         resume,
         harness_override,
     )?;
@@ -487,6 +512,7 @@ fn start_reexec_command(
     force: bool,
     route_owned: bool,
     route_owned_reap_policy: agent_doc_supervisor::route_owned::RouteOwnedReapPolicy,
+    route_owned_start_purpose: RouteOwnedStartPurpose,
     resume: Option<&agent_doc_harness::ResumeRequest>,
     harness_override: Option<&str>,
 ) -> Result<String> {
@@ -516,6 +542,10 @@ fn start_reexec_command(
         args.push("--route-owned".to_string());
         args.push("--route-owned-reap-policy".to_string());
         args.push(route_owned_reap_policy.to_string());
+        if route_owned_start_purpose != RouteOwnedStartPurpose::Dispatch {
+            args.push("--route-owned-start-purpose".to_string());
+            args.push(route_owned_start_purpose.to_string());
+        }
     }
     Ok(args.join(" "))
 }
@@ -583,8 +613,14 @@ impl StartRuntimeAdmission {
 fn should_enforce_route_owned_queue_control(
     route_owned: bool,
     admission: StartRuntimeAdmission,
+    start_purpose: RouteOwnedStartPurpose,
 ) -> bool {
-    route_owned && !admission.preserves_session_lifecycle()
+    let admission = if admission.preserves_session_lifecycle() {
+        RouteOwnedStartAdmission::SupervisorReentry
+    } else {
+        RouteOwnedStartAdmission::NewSession(start_purpose)
+    };
+    route_owned_start_blocked_by_queue_control(route_owned, admission)
 }
 
 fn validate_supervisor_reentry_actor(
@@ -992,11 +1028,28 @@ pub fn prepare_start_runtime_with_harness(
     route_owned: bool,
     harness_override: Option<&str>,
 ) -> Result<StartRuntime> {
+    prepare_start_runtime_with_harness_and_purpose(
+        file,
+        force,
+        route_owned,
+        RouteOwnedStartPurpose::Dispatch,
+        harness_override,
+    )
+}
+
+pub fn prepare_start_runtime_with_harness_and_purpose(
+    file: &Path,
+    force: bool,
+    route_owned: bool,
+    start_purpose: RouteOwnedStartPurpose,
+    harness_override: Option<&str>,
+) -> Result<StartRuntime> {
     prepare_start_runtime_with_admission(
         file,
         force,
         route_owned,
         StartRuntimeAdmission::NewSession,
+        start_purpose,
         harness_override,
     )
 }
@@ -1017,6 +1070,7 @@ pub fn prepare_start_runtime_reentry(
         force,
         route_owned,
         StartRuntimeAdmission::SupervisorReexecPreservingChild,
+        RouteOwnedStartPurpose::Dispatch,
         None,
     )
 }
@@ -1026,6 +1080,7 @@ fn prepare_start_runtime_with_admission(
     force: bool,
     route_owned: bool,
     admission: StartRuntimeAdmission,
+    start_purpose: RouteOwnedStartPurpose,
     harness_override: Option<&str>,
 ) -> Result<StartRuntime> {
     if !file.exists() {
@@ -1043,7 +1098,7 @@ fn prepare_start_runtime_with_admission(
     // command itself was already submitted. Re-check durable queue control at
     // the lifecycle boundary to close the pause-vs-route race. Supervisor
     // exec-reentry is exempt because it preserves an already-running child.
-    if should_enforce_route_owned_queue_control(route_owned, admission)
+    if should_enforce_route_owned_queue_control(route_owned, admission, start_purpose)
         && let Some(control) = agent_doc_sqlite::state_store::load_effective_queue_control_for_path(
             &project_root,
             &canonical,
@@ -1964,14 +2019,22 @@ mod tests {
         assert!(should_enforce_route_owned_queue_control(
             true,
             StartRuntimeAdmission::NewSession,
+            RouteOwnedStartPurpose::Dispatch,
         ));
         assert!(!should_enforce_route_owned_queue_control(
             true,
             StartRuntimeAdmission::SupervisorReexecPreservingChild,
+            RouteOwnedStartPurpose::Dispatch,
+        ));
+        assert!(!should_enforce_route_owned_queue_control(
+            true,
+            StartRuntimeAdmission::NewSession,
+            RouteOwnedStartPurpose::LayoutProvision,
         ));
         assert!(!should_enforce_route_owned_queue_control(
             false,
             StartRuntimeAdmission::NewSession,
+            RouteOwnedStartPurpose::Dispatch,
         ));
     }
 
@@ -2399,6 +2462,7 @@ auto_start_tmux = false
             true,
             true,
             agent_doc_supervisor::route_owned::RouteOwnedReapPolicy::KeepAlive,
+            RouteOwnedStartPurpose::LayoutProvision,
             Some(&agent_doc_harness::ResumeRequest::Id(
                 "conversation-id".into(),
             )),
@@ -2411,5 +2475,6 @@ auto_start_tmux = false
         assert!(command.contains("--harness codex"));
         assert!(command.contains("--resume conversation-id"));
         assert!(command.contains("--route-owned-reap-policy keep-alive"));
+        assert!(command.contains("--route-owned-start-purpose layout-provision"));
     }
 }

@@ -18604,6 +18604,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     .unwrap();
     let supervisor_config =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/config.rs")).unwrap();
+    let supervisor_route_owned =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/route_owned.rs")).unwrap();
     let supervisor_io_config =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/config.rs")).unwrap();
     let fs_lib = fs::read_to_string(manifest_dir.join("agent-doc-fs/src/lib.rs")).unwrap();
@@ -18782,7 +18784,14 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             && orchestration_start_run.contains(
                 "prepare_start_runtime_reentry(file, force, route_owned)?"
             )
-            && orchestration_start_run.contains("prepare_start_runtime(file, force, route_owned)?"),
+            && orchestration_start_run.contains(
+                "prepare_start_runtime_with_harness_and_purpose("
+            )
+            && start_io_source.contains("route_owned_start_blocked_by_queue_control(")
+            && supervisor_route_owned.contains("pub enum RouteOwnedStartPurpose")
+            && supervisor_route_owned.contains("pub enum RouteOwnedStartAdmission")
+            && supervisor_route_owned
+                .contains("pub const fn route_owned_start_blocked_by_queue_control("),
         "agent-doc-start-io should own start admission/session-owner IO while start/run.rs calls it directly"
     );
     for forbidden in [

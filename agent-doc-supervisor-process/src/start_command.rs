@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use agent_doc_harness::ResumeRequest;
-use agent_doc_supervisor::route_owned::RouteOwnedReapPolicy;
+use agent_doc_supervisor::route_owned::{RouteOwnedReapPolicy, RouteOwnedStartPurpose};
 
 fn shell_quote_arg(raw: &str) -> String {
     if !raw.is_empty()
@@ -29,6 +29,9 @@ fn shell_quote_arg(raw: &str) -> String {
 #[derive(Debug, Clone)]
 pub struct RouteOwnedStartOptions {
     pub reap_policy: RouteOwnedReapPolicy,
+    /// Preserve whether this command may dispatch work or only establish the
+    /// editor's durable pane/session owner.
+    pub start_purpose: RouteOwnedStartPurpose,
     /// Resume the harness conversation instead of starting a fresh one.
     ///
     /// A supervisor restart that escalates to a cold start must still honour
@@ -41,6 +44,7 @@ impl RouteOwnedStartOptions {
     pub fn new(reap_policy: RouteOwnedReapPolicy) -> Self {
         Self {
             reap_policy,
+            start_purpose: RouteOwnedStartPurpose::Dispatch,
             resume: None,
         }
     }
@@ -63,6 +67,10 @@ pub fn route_owned_start_command_with_options(
         shell_quote_arg(agent_doc_bin),
         options.reap_policy,
     );
+    if options.start_purpose != RouteOwnedStartPurpose::Dispatch {
+        cmd.push_str(" --route-owned-start-purpose ");
+        cmd.push_str(&options.start_purpose.to_string());
+    }
     // `--resume` takes an OPTIONAL value (`num_args = 0..=1`), so a bare
     // `--resume <file>` makes clap swallow the document path as the resume ID and
     // then reject the command for a missing `<FILE>`. Use the `=` form for an id
@@ -122,6 +130,7 @@ mod tests {
                 Path::new("tasks/doc.md"),
                 &RouteOwnedStartOptions {
                     reap_policy: RouteOwnedReapPolicy::Auto,
+                    start_purpose: RouteOwnedStartPurpose::Dispatch,
                     resume: Some(ResumeRequest::Latest),
                 },
             ),
@@ -140,6 +149,7 @@ mod tests {
                 Path::new("tasks/doc.md"),
                 &RouteOwnedStartOptions {
                     reap_policy: RouteOwnedReapPolicy::Auto,
+                    start_purpose: RouteOwnedStartPurpose::Dispatch,
                     resume: Some(ResumeRequest::Id("conv 42".into())),
                 },
             ),
@@ -156,6 +166,7 @@ mod tests {
             Path::new("tasks/doc.md"),
             &RouteOwnedStartOptions {
                 reap_policy: RouteOwnedReapPolicy::Auto,
+                start_purpose: RouteOwnedStartPurpose::Dispatch,
                 resume: Some(ResumeRequest::Latest),
             },
         );
@@ -216,6 +227,24 @@ mod tests {
                 RouteOwnedReapPolicy::KeepAlive,
             ),
             "/usr/local/bin/agent-doc start --route-owned --route-owned-reap-policy keep-alive tasks/doc.md"
+        );
+    }
+
+    #[test]
+    fn route_owned_start_command_preserves_layout_provision_purpose() {
+        let command = route_owned_start_command_with_options(
+            "agent-doc",
+            Path::new("tasks/doc.md"),
+            &RouteOwnedStartOptions {
+                reap_policy: RouteOwnedReapPolicy::KeepAlive,
+                start_purpose: RouteOwnedStartPurpose::LayoutProvision,
+                resume: None,
+            },
+        );
+
+        assert_eq!(
+            command,
+            "agent-doc start --route-owned --route-owned-reap-policy keep-alive --route-owned-start-purpose layout-provision tasks/doc.md"
         );
     }
 }

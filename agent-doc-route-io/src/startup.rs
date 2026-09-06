@@ -28,7 +28,10 @@ use agent_doc_controller::dispatch::{
     RoutedDispatchStartProof, duplicate_pane_policy_error_message, fresh_route_admission_timeout,
 };
 use agent_doc_harness::{HarnessConfig, ResumeRequest};
-use agent_doc_supervisor::route_owned::RouteOwnedReapPolicy;
+use agent_doc_supervisor::route_owned::{
+    RouteOwnedReapPolicy, RouteOwnedStartAdmission, RouteOwnedStartPurpose,
+    route_owned_start_blocked_by_queue_control,
+};
 use agent_doc_tmux::is_first_column;
 use tmux_router::Tmux;
 
@@ -531,28 +534,50 @@ pub fn auto_start_in_session_with_lock_mode(
     let cwd = agent_doc_git_io::dirs::resolve_pane_cwd(file);
     let registry_base_dir = agent_doc_project_root_io::project_root_or_file_parent(file)
         .unwrap_or_else(|_| cwd.clone());
-    // Queue control is operator authority over autonomous work. Enforce it
-    // before registry reuse or pane allocation so editor layout/reload events
-    // cannot dispatch into an existing harness or resurrect a stopped one.
+    // Queue control is operator authority over autonomous work. A provision-only
+    // layout edge may establish an idle owner, but a dispatching start remains
+    // fenced. The spawned start process re-checks this same typed policy to close
+    // the pause-vs-start race.
+    let start_purpose = if skip_wait {
+        RouteOwnedStartPurpose::LayoutProvision
+    } else {
+        RouteOwnedStartPurpose::Dispatch
+    };
     if let Some(control) = agent_doc_sqlite::state_store::load_effective_queue_control_for_path(
         &registry_base_dir,
         file,
     )? {
         let reason = control.reason.as_deref().unwrap_or("unspecified");
+        if route_owned_start_blocked_by_queue_control(
+            true,
+            RouteOwnedStartAdmission::NewSession(start_purpose),
+        ) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_auto_start_blocked_by_queue_control file={} state={} reason={} purpose={}",
+                    file.display(),
+                    control.state,
+                    reason.replace(' ', "_"),
+                    start_purpose.as_str(),
+                ),
+            );
+            anyhow::bail!(
+                "automatic route start for {} is blocked while queue control is {} ({}); resume queue control before starting a routed harness",
+                file.display(),
+                control.state,
+                reason,
+            );
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "route_auto_start_blocked_by_queue_control file={} state={} reason={}",
+                "route_layout_provision_allowed_by_queue_control file={} state={} reason={} purpose={}",
                 file.display(),
                 control.state,
-                reason.replace(' ', "_")
+                reason.replace(' ', "_"),
+                start_purpose.as_str(),
             ),
-        );
-        anyhow::bail!(
-            "automatic route start for {} is blocked while queue control is {} ({}); resume queue control before starting a routed harness",
-            file.display(),
-            control.state,
-            reason,
         );
     }
     let existing_registration = agent_doc_session_registry_io::lookup(session_id)?;
@@ -824,6 +849,7 @@ pub fn auto_start_in_session_with_lock_mode(
             Path::new(&start_path),
             &agent_doc_supervisor_process::start_command::RouteOwnedStartOptions {
                 reap_policy,
+                start_purpose,
                 resume: resume.clone(),
             },
         );

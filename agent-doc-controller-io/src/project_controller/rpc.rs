@@ -22251,6 +22251,8 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                         &agent_doc_supervisor_process::start_command::RouteOwnedStartOptions {
                             reap_policy:
                                 agent_doc_supervisor::route_owned::RouteOwnedReapPolicy::Auto,
+                            start_purpose:
+                                agent_doc_supervisor::route_owned::RouteOwnedStartPurpose::Dispatch,
                             resume: resume.clone(),
                         },
                     );

@@ -114,6 +114,12 @@ existing rows are never rewritten.
 in `.agent-doc/state.db`; session logs and `ops.log` are append-only diagnostics.
 Normal route, start, sync, clear, restart, and queue-dispatch paths must not treat logs as write
 authorities once the controller record exists.
+- The pure route-owned lifecycle policy distinguishes a dispatching new session,
+  a provision-only editor-layout session, and supervisor reentry. Effective queue
+  control blocks only the dispatching new-session transition. Route provisioning
+  and the spawned start process must apply the same typed decision so a pause race
+  cannot dispatch work, while an idle structural owner can still converge the
+  desired pane layout and quiesce its reconciliation effect.
 - The in-memory actor map is a write-through cache of SQLite state. A successful
   mutation updates memory and commits one SQLite transaction before reporting an
   accepted state-changing result.

@@ -1,12 +1,11 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use agent_doc_start_io::{
-    log_event, prepare_start_runtime, prepare_start_runtime_reentry, start_console_status,
-};
+use agent_doc_start_io::{log_event, prepare_start_runtime_reentry, start_console_status};
 use agent_doc_supervisor::{
     agent_change::harness_change_forces_fresh_spawn,
     lifecycle::{BootResumeAction, boot_resume_action},
+    route_owned::RouteOwnedStartPurpose,
     run_loop::{PostChildExitAction, child_launch_plan, post_child_exit_action},
     session_lineage::HarnessSessionLineage,
 };
@@ -624,6 +623,7 @@ pub fn run_with_reap_policy_and_resume(
         route_owned_reap_policy,
         resume,
         None,
+        RouteOwnedStartPurpose::Dispatch,
     )
 }
 
@@ -634,6 +634,7 @@ pub fn run_with_reap_policy_resume_and_harness(
     route_owned_reap_policy: RouteOwnedReapPolicy,
     resume: Option<agent_doc_harness::ResumeRequest>,
     harness_override: Option<String>,
+    route_owned_start_purpose: RouteOwnedStartPurpose,
 ) -> Result<()> {
     // A live child handed across `execve` means this invocation replaces only
     // the supervisor transport. Detect it before start admission so that
@@ -659,14 +660,21 @@ pub fn run_with_reap_policy_resume_and_harness(
         prepare_start_runtime_reentry(file, force, route_owned)?
     } else {
         if let Some(harness_override) = harness_override.as_deref() {
-            agent_doc_start_io::prepare_start_runtime_with_harness(
+            agent_doc_start_io::prepare_start_runtime_with_harness_and_purpose(
                 file,
                 force,
                 route_owned,
+                route_owned_start_purpose,
                 Some(harness_override),
             )?
         } else {
-            prepare_start_runtime(file, force, route_owned)?
+            agent_doc_start_io::prepare_start_runtime_with_harness_and_purpose(
+                file,
+                force,
+                route_owned,
+                route_owned_start_purpose,
+                None,
+            )?
         }
     };
     let _stderr_redirect = stderr_redirect;

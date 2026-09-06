@@ -8561,13 +8561,12 @@ fn handle_editor_route_rpc(
         layout_invocation.focus.as_deref() == Some(routed_document.as_str()),
         "editor route refused before layout publication: focused document does not match routed document"
     );
-    let mut sync_request = empty_controller_request("sync_tmux_layout");
-    sync_request.file = Some(canonical.clone());
-    sync_request.diagnostic_payload = Some(
-        serde_json::to_string(&layout_invocation)
-            .context("serialize editor route layout projection")?,
-    );
-    let layout_receipt = handle_sync_tmux_layout(bootstrap, runtime, sync_request)?;
+    let layout_receipt = handle_sync_tmux_layout_invocation(
+        bootstrap,
+        runtime,
+        layout_invocation,
+        PaneLayoutPublication::FreshIntent,
+    )?;
     anyhow::ensure!(
         tmux_layout_command_applied(&layout_receipt),
         "editor route layout did not converge before dispatch: {}",
@@ -17910,8 +17909,13 @@ fn handle_editor_surface_observe(
         match &receipt.intent {
             SurfaceIntent::Sync { columns, document } => {
                 let invocation = automatic_editor_surface_sync_invocation(columns, document);
-                let _ =
-                    publish_pane_layout_desired_invocation(bootstrap, runtime, invocation, None);
+                let _ = publish_pane_layout_desired_invocation(
+                    bootstrap,
+                    runtime,
+                    invocation,
+                    None,
+                    PaneLayoutPublication::CoalesceIdentical,
+                );
             }
             // A tab switch within the same layout resolves + `select-pane`s the
             // target pane directly — a single tmux command, no socket round-trip.
@@ -18823,6 +18827,7 @@ fn pane_layout_desired_projection_worker(
                 &runtime,
                 invocation,
                 Some(frame.plane_version),
+                PaneLayoutPublication::CoalesceIdentical,
             )?;
             Ok(bootstrap)
         });
@@ -20600,7 +20605,13 @@ fn publish_pane_layout_desired(
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
     let invocation: ControllerTmuxLayoutSyncInvocation =
         serde_json::from_str(&payload_json).context("parse sync tmux layout invocation")?;
-    publish_pane_layout_desired_invocation(bootstrap, runtime, invocation, None)
+    publish_pane_layout_desired_invocation(
+        bootstrap,
+        runtime,
+        invocation,
+        None,
+        PaneLayoutPublication::CoalesceIdentical,
+    )
 }
 
 fn publish_pane_layout_desired_invocation(
@@ -20608,6 +20619,7 @@ fn publish_pane_layout_desired_invocation(
     runtime: &ControllerRuntime,
     mut invocation: ControllerTmuxLayoutSyncInvocation,
     source_plane_version: Option<u64>,
+    publication: PaneLayoutPublication,
 ) -> Result<(PaneLayoutDesired, ControllerTmuxLayoutSyncInvocation)> {
     if bootstrap.handoff_state != ControllerHandoffState::Stable {
         anyhow::bail!(
@@ -20632,7 +20644,8 @@ fn publish_pane_layout_desired_invocation(
     store_layout_state(&bootstrap.project_root, &desired_columns)?;
     invocation.columns = desired_columns;
 
-    let desired = runtime.set_pane_layout_desired(invocation.clone(), source_plane_version);
+    let desired =
+        runtime.set_pane_layout_desired(invocation.clone(), source_plane_version, publication);
     publish_pane_layout_status(runtime);
     Ok((desired, invocation))
 }
@@ -20689,6 +20702,26 @@ pub(crate) fn handle_sync_tmux_layout(
     request: ControllerRequest,
 ) -> Result<ControllerTmuxLayoutSyncReceipt> {
     let (desired, invocation) = publish_pane_layout_desired(bootstrap, runtime, request)?;
+    await_sync_tmux_layout_projection(bootstrap, runtime, desired, invocation)
+}
+
+fn handle_sync_tmux_layout_invocation(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    invocation: ControllerTmuxLayoutSyncInvocation,
+    publication: PaneLayoutPublication,
+) -> Result<ControllerTmuxLayoutSyncReceipt> {
+    let (desired, invocation) =
+        publish_pane_layout_desired_invocation(bootstrap, runtime, invocation, None, publication)?;
+    await_sync_tmux_layout_projection(bootstrap, runtime, desired, invocation)
+}
+
+fn await_sync_tmux_layout_projection(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    desired: PaneLayoutDesired,
+    invocation: ControllerTmuxLayoutSyncInvocation,
+) -> Result<ControllerTmuxLayoutSyncReceipt> {
     #[cfg(any(test, feature = "test-support"))]
     {
         let _ = desired;
@@ -23766,18 +23799,25 @@ mod tests {
             ),
         };
 
-        let result = handle_editor_route_rpc(&bootstrap, runtime.as_ref(), request).unwrap();
+        let result =
+            handle_editor_route_rpc(&bootstrap, runtime.as_ref(), request.clone()).unwrap();
         assert_eq!(result.exit_code, 0);
-        let desired = runtime.pane_layout_desired().unwrap();
+        let first = runtime.pane_layout_desired().unwrap();
         assert_eq!(
-            desired.invocation.columns,
+            first.invocation.columns,
             vec![file.canonicalize().unwrap().display().to_string()]
         );
         assert_eq!(
-            desired.invocation.focus.as_deref(),
+            first.invocation.focus.as_deref(),
             Some(file.canonicalize().unwrap().display().to_string().as_str())
         );
-        assert_eq!(desired.invocation.caller_kind, "projection");
+        assert_eq!(first.invocation.caller_kind, "projection");
+
+        let repeated = handle_editor_route_rpc(&bootstrap, runtime.as_ref(), request).unwrap();
+        assert_eq!(repeated.exit_code, 0);
+        let second = runtime.pane_layout_desired().unwrap();
+        assert!(second.generation > first.generation);
+        assert_eq!(second.invocation, first.invocation);
     }
 
     #[test]

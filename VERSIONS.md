@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.338
+
+- **Fix: repeated Run Agent Doc actions recover from operator-owned layout drift.**
+
+Each foreground editor route now publishes a fresh desired-layout generation,
+even when its canonical columns and focus equal the retained value. That resets
+the generation-scoped observation and effect receipt, so a prior converged
+generation later classified as operator-owned cannot become a permanent route
+wedge. Automatic and background layout observations still coalesce identical
+values.
+
 ## 0.35.337
 
 - **Fix: native editor saves get a bounded reconciliation window before preflight refuses admission.**

@@ -833,6 +833,18 @@ struct ControllerPaneLayoutGraph {
     wait_lock: Mutex<()>,
 }
 
+/// Publication semantics for the retained desired-layout Source.
+///
+/// Background observations coalesce identical values so editor event storms do
+/// not manufacture work. A foreground command is a new operator intent even
+/// when its value matches the retained Source: it must get a new generation so
+/// a previously terminal `OperatorOwned` projection cannot wedge later Runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PaneLayoutPublication {
+    CoalesceIdentical,
+    FreshIntent,
+}
+
 impl ControllerPaneLayoutGraph {
     fn new_in(
         scope: &agent_doc_state_scope::ProcessScope,
@@ -932,13 +944,39 @@ impl ControllerPaneLayoutGraph {
 
     fn set_desired(
         &self,
+        invocation: ControllerTmuxLayoutSyncInvocation,
+        source_plane_version: Option<u64>,
+    ) -> PaneLayoutDesired {
+        self.set_desired_with_publication(
+            invocation,
+            source_plane_version,
+            PaneLayoutPublication::CoalesceIdentical,
+        )
+    }
+
+    fn set_fresh_desired(
+        &self,
+        invocation: ControllerTmuxLayoutSyncInvocation,
+        source_plane_version: Option<u64>,
+    ) -> PaneLayoutDesired {
+        self.set_desired_with_publication(
+            invocation,
+            source_plane_version,
+            PaneLayoutPublication::FreshIntent,
+        )
+    }
+
+    fn set_desired_with_publication(
+        &self,
         mut invocation: ControllerTmuxLayoutSyncInvocation,
         source_plane_version: Option<u64>,
+        publication: PaneLayoutPublication,
     ) -> PaneLayoutDesired {
         if invocation.caller_kind.is_empty() {
             invocation.caller_kind = "projection".to_string();
         }
-        if let Some(mut current) = self.ctx.get(&self.desired)
+        if publication == PaneLayoutPublication::CoalesceIdentical
+            && let Some(mut current) = self.ctx.get(&self.desired)
             && current.invocation == invocation
         {
             if source_plane_version > current.source_plane_version {
@@ -5030,9 +5068,16 @@ impl ControllerRuntime {
         &self,
         invocation: ControllerTmuxLayoutSyncInvocation,
         source_plane_version: Option<u64>,
+        publication: PaneLayoutPublication,
     ) -> PaneLayoutDesired {
-        self.pane_layout_graph
-            .set_desired(invocation, source_plane_version)
+        match publication {
+            PaneLayoutPublication::CoalesceIdentical => self
+                .pane_layout_graph
+                .set_desired(invocation, source_plane_version),
+            PaneLayoutPublication::FreshIntent => self
+                .pane_layout_graph
+                .set_fresh_desired(invocation, source_plane_version),
+        }
     }
 
     fn pane_layout_desired(&self) -> Option<PaneLayoutDesired> {
@@ -8402,6 +8447,37 @@ mod tests {
             graph.state_projection().unwrap().source_plane_version,
             Some(82)
         );
+    }
+
+    #[test]
+    fn foreground_pane_layout_intent_reopens_an_operator_owned_generation() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(
+            &scope,
+            Vec::new(),
+            actor_graph.live_bindings_handle(),
+        );
+        let invocation = pane_layout_desired_for_test(1).invocation;
+        let first = graph.set_desired(invocation.clone(), None);
+        graph.record_receipt(lane_converged_receipt(first.generation, &[]));
+        let mut operator_owned = lane_synced_observation(first.generation, &[]);
+        operator_owned.report.synced = false;
+        operator_owned.report.operator_owned_documents = vec!["/p/a.md".to_string()];
+        graph.record_observation(operator_owned);
+        assert!(matches!(
+            graph.projection(),
+            PaneLayoutProjection::OperatorOwned(_)
+        ));
+
+        let fresh = graph.set_fresh_desired(invocation, None);
+
+        assert!(fresh.generation > first.generation);
+        assert!(matches!(
+            graph.projection(),
+            PaneLayoutProjection::NeedsEffect(current)
+                if current.generation == fresh.generation
+        ));
     }
 
     #[test]

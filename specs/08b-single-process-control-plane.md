@@ -74,8 +74,10 @@ projections, and tmux transcript inference.
   on a timer. Matching columns are not terminal proof when focus is present:
   the effect receipt must also prove the final input-revision-fenced pane
   selection. Desired publication is last-write-wins: an identical value retains
-  its generation, pending stale input revisions collapse to the newest value,
-  and supersession is checked before and immediately after an unavoidable
+  its generation for coalescible automatic/background observations, while each
+  foreground command creates a fresh intent generation and resets its observed
+  and effect-receipt inputs. Pending stale input revisions collapse to the newest
+  value, and supersession is checked before and immediately after an unavoidable
   in-flight structural effect. A focus-only change reuses the latest
   structurally converged file-to-pane assignment only when its actor bindings
   still match, selects the pane first, and does not serialize behind another

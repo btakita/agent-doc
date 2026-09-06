@@ -101,7 +101,12 @@ columns, it may materialize focus only into one unique explicit empty-column
 placeholder. The controller then publishes exact-visible desired state and
 waits for tmux convergence before dispatching. A missing layout, zero or
 multiple candidate empty slots, or a routed document outside the converged
-columns fails closed before desired-state publication or dispatch.
+columns fails closed before desired-state publication or dispatch. Every
+foreground `Run Agent Doc` publication is a fresh intent generation, even when
+its canonical columns and focus equal the retained desired value. This resets
+the observation/effect receipt for that intent so a prior terminal
+`operator_owned` projection cannot wedge repeated Run actions; automatic editor
+surface observations still coalesce identical values.
 
 Claude artifact UI must be distinguished by stable shape rather than session-owned text. A bare `⧉ <label>` chip is an attachment on an otherwise idle composer and is skipped while locating the real dispatch-ready prompt; the label is arbitrary. The active picker is blocked only when `Enter to open` and a `claude.ai/code/artifact/...` URL are both visible.
 

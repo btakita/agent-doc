@@ -276,6 +276,14 @@ race class instead of papering over each symptom.
   disk-write authority and a genuinely degraded session routes through the
   file-IPC patch queue (plugin still applies via Document API) rather than a raw
   disk write that would manufacture a File Cache Conflict.
+- **Repair receipt canonicalization.** A binary-authored component repair is
+  applied downstream without publishing a programmatic editor delta upstream.
+  Once the exact content-bearing receipt arrives, the write path projects that
+  repaired target through the controller canonical compare-and-swap using the
+  retained pre-repair canonical cut, then validates the receipt and permits disk
+  settlement. If an operator delta advances canonical state first, the CAS fails
+  closed and the captured operation remains retained; editor visibility alone
+  never replaces canonical state.
 - **Compact CRDT wire with rolling compatibility.** Replica bootstrap, deltas,
   relay frames, and the existing string FFI seam carry a UTF-8-safe compact
   envelope (`ADCR1:` + base64 of zstd-compressed MessagePack operations). Readers

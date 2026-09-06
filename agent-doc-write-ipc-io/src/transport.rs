@@ -98,6 +98,46 @@ fn fold_visible_write_into_canonical(
     Ok(())
 }
 
+/// A repaired editor receipt is downstream proof of a binary-authored component
+/// replay, but programmatic editor changes intentionally do not feed back into
+/// the canonical CRDT replica. Project the repaired target through the canonical
+/// compare-and-swap boundary before validating the receipt. The pre-repair
+/// canonical cut is retained as `expected_current`, so a concurrent operator
+/// delta fails closed instead of being overwritten.
+pub(super) fn fold_repaired_visible_write_into_canonical(
+    file: &Path,
+    patch_id: &str,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+) -> Result<()> {
+    if expected_current != content {
+        let write = agent_doc_document_realtime_io::apply_cp_write_through_relay_authority(
+            file,
+            expected_current,
+            content,
+            source,
+        )?;
+        anyhow::ensure!(
+            write.is_some(),
+            "{source}: repaired visible write for {} lost its attached canonical relay before projection",
+            file.display(),
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ipc_visible_write_repair_canonical_promoted file={} patch_id={} source={} expected_hash={} target_hash={}",
+                file.display(),
+                patch_id,
+                source,
+                agent_doc_hash::content_hash(expected_current),
+                agent_doc_hash::content_hash(content),
+            ),
+        );
+    }
+    fold_visible_write_into_canonical(file, patch_id, content, source)
+}
+
 fn log_ipc_proof_failure(
     file: &Path,
     source: &str,
@@ -637,6 +677,7 @@ fn try_ipc_inner(
                         socket_editor_id.as_deref(),
                         &mut repair_decision,
                     );
+                    let repaired_visible_write = repair_decision.disk_repair_reason.is_some();
                     agent_doc_write_converge_io::repair_ipc_decision_visible_state(
                         effects,
                         file,
@@ -676,17 +717,38 @@ fn try_ipc_inner(
                         });
                     }
                     if repair_decision.snap_source.is_visible_write_proven() {
-                        // Fold the content-bearing editor ACK into the canonical relay
-                        // before asking whether disk materialization is safe. A controller
-                        // recycle may leave a durable editor owner with zero registered
-                        // replicas; in that shape the Lazily receipt is the only complete
-                        // content proof and disk must not be used to rediscover it.
-                        fold_visible_write_into_canonical(
-                            file,
-                            &patch_id,
-                            &repair_decision.snapshot_content,
-                            "socket_visible_write",
-                        )?;
+                        // A repair can replay the response directly through an editor
+                        // component patch. Programmatic editor mutations do not publish
+                        // operator deltas, so explicitly project that proven repair through
+                        // the canonical CAS before validating it. Ordinary receipts remain
+                        // validation-only and can never replace canonical state.
+                        if repaired_visible_write {
+                            let expected_current = ipc_before_content.as_deref().ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "socket_visible_write: repaired editor receipt for {} has no retained canonical base",
+                                    file.display(),
+                                )
+                            })?;
+                            fold_repaired_visible_write_into_canonical(
+                                file,
+                                &patch_id,
+                                expected_current,
+                                &repair_decision.snapshot_content,
+                                "socket_visible_write_repair",
+                            )?;
+                        } else {
+                            // Fold the content-bearing editor ACK into the canonical relay
+                            // before asking whether disk materialization is safe. A controller
+                            // recycle may leave a durable editor owner with zero registered
+                            // replicas; in that shape the Lazily receipt is the only complete
+                            // content proof and disk must not be used to rediscover it.
+                            fold_visible_write_into_canonical(
+                                file,
+                                &patch_id,
+                                &repair_decision.snapshot_content,
+                                "socket_visible_write",
+                            )?;
+                        }
                         let proof = visible_write_disk_proof(
                             file,
                             socket_editor_id.as_deref(),

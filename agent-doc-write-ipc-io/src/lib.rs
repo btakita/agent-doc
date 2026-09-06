@@ -490,6 +490,79 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    fn repaired_visible_write_projects_canonical_before_receipt_validation() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".git")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("session.md");
+        let canonical_before = "<!-- agent:exchange -->\nnew prompt\n<!-- /agent:exchange -->\n";
+        let repaired = "<!-- agent:exchange -->\nnew prompt\n### Re: fixed — gpt-5\nDone.\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, canonical_before).unwrap();
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
+            "repair-test-editor",
+            canonical_before,
+        );
+
+        super::transport::fold_repaired_visible_write_into_canonical(
+            &doc,
+            "repair-patch",
+            canonical_before,
+            repaired,
+            "test_repair",
+        )
+        .unwrap();
+
+        let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+            &doc,
+            "test_repair_verify",
+        )
+        .unwrap();
+        assert_eq!(current, repaired);
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("ipc_visible_write_repair_canonical_promoted"));
+    }
+
+    #[test]
+    fn repaired_visible_write_cas_preserves_concurrent_operator_delta() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".git")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("session.md");
+        let stale_base = "<!-- agent:exchange -->\nold prompt\n<!-- /agent:exchange -->\n";
+        let operator_advanced =
+            "<!-- agent:exchange -->\nnew operator prompt\n<!-- /agent:exchange -->\n";
+        let stale_repair = "<!-- agent:exchange -->\nold prompt\n### Re: stale — gpt-5\nDone.\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, operator_advanced).unwrap();
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
+            "repair-test-editor",
+            operator_advanced,
+        );
+
+        let error = super::transport::fold_repaired_visible_write_into_canonical(
+            &doc,
+            "repair-patch",
+            stale_base,
+            stale_repair,
+            "test_repair",
+        )
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("expected_hash=")
+                && error.to_string().contains("current_hash="),
+            "canonical CAS should expose the concurrent-cut refusal: {error:#}"
+        );
+        let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+            &doc,
+            "test_repair_verify",
+        )
+        .unwrap();
+        assert_eq!(current, operator_advanced);
+    }
+
+    #[test]
     fn build_ipc_patches_json_seeded_boundary_is_stable_across_rebuilds() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("agent-doc-bugs2.md");

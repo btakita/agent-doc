@@ -41,6 +41,7 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Please look into monsterrodholder.md issues over the past few days. Are they all fixed? Addh any more work to fix monsterrodholder.md session crashing into the backlog + queue.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

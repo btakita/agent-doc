@@ -64,7 +64,7 @@ I am not declaring the session fully hardened. The logs show 1,356 old accepted-
 
 <!-- agent:backlog -->
 - [ ] [#mrhstatepressure] [P0] /enqueue Bound long-lived session state and log growth: compact terminal accepted-only dispatch receipts and state events, and rotate per-session and ops logs so monsterrodholders.md cannot replay 1,356 stale receipts or hit EMFILE; preserve audit cursors and add a stress regression.
-- [ ] [#mrhsyncslowpath] [P1] Finish the remaining cross-root auto-sync latency protections in src/agent-doc/tasks/agent-doc/plan-sync-slow-path-latency.md: bound actor lookup without retries, project controller-proven cross-root bindings reactively, remove redundant round trips, and measure the window-resolution outlier; verify monsterrodholders.md navigation remains sub-second and never creates a new session when a live owner exists.
+- [ ] [#mrhsyncslowpath] [P1] /enqueue Finish the remaining cross-root auto-sync latency protections in src/agent-doc/tasks/agent-doc/plan-sync-slow-path-latency.md: bound actor lookup without retries, project controller-proven cross-root bindings reactively, remove redundant round trips, and measure the window-resolution outlier; verify monsterrodholders.md navigation remains sub-second and never creates a new session when a live owner exists.
 <!-- /agent:backlog -->
 
 ## Review

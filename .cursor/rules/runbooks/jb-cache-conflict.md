@@ -40,6 +40,15 @@ Response-only finalize uses the same derived settlement. A durable `ResponseCell
 
 The durable visible-write receipt carries the complete editor-visible content. Hashes are validation and lookup fields only. A legacy hash-only receipt cannot authorize current-buffer publication or whole-document adoption; the controller reprojects its retained canonical revision instead.
 
+A live-prompt-drift component replay is a binary-authored repair, not an
+operator delta. The plugin therefore applies it downstream without publishing
+the programmatic edit back into canonical state. After the exact content-bearing
+receipt arrives, the binary must project the repaired target through the
+controller canonical compare-and-swap using the retained pre-repair cut, then
+validate the receipt. A concurrent operator delta invalidates that cut and
+retains the operation; the repaired editor buffer never replaces canonical
+state by observation alone.
+
 Delivery proof is not a disk-projection lock. If the canonical document advances
 after the proof but before disk projection, the binary retains the original
 projection base and complete target, rebases that same intent over the new editor

@@ -49,6 +49,24 @@ I am not declaring the session fully hardened. The logs show 1,356 old accepted-
 
 1. `#mrhstatepressure` — compact terminal receipt/state history, rotate logs, preserve audit cursors, and stress-test against replay growth and file-descriptor exhaustion.
 2. `#mrhsyncslowpath` — finish the remaining cross-root latency work already specified in `src/agent-doc/tasks/agent-doc/plan-sync-slow-path-latency.md`, including bounded no-retry lookup, reactive proven bindings, redundant-round-trip removal, and sub-second/no-spurious-session verification.
+
+### Re: Response
+
+Yes. Use two separate mechanisms:
+
+- Automatic log rotation: rotate by size, around 16–32 MiB; compress old segments; retain roughly 30 days or a fixed storage budget.
+- Regular state cleanup: run during idle periods or after successful closeout when thresholds are exceeded. Compact only terminal receipts/events below an acknowledged high-water mark.
+
+Important safeguards:
+
+- Never rotate or compact during an open cycle, retained response, or editor reconciliation.
+- Preserve audit IDs, cursors, and recent recovery checkpoints.
+- Use atomic rotation with a project-level lock.
+- Keep cleanup off the navigation/sync hot path.
+- Track open file descriptors separately—rotation alone will not fix an FD leak.
+- Stress-test thousands of retries and reloads while asserting bounded disk usage, replay time, and descriptor count.
+
+That is the right scope for the queued `#mrhstatepressure` task.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 

@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.337
+
+- **Fix: native editor saves get a bounded reconciliation window before preflight refuses admission.**
+
+When disk contains a newer native save while a live registered editor still
+reports the merge baseline, queue maintenance now signals typed replica
+re-registration and re-observes the editor-owned cut for a bounded retry budget.
+Convergence proceeds without rewriting disk, including concurrent queue/backlog
+priority attributes; a cut that never converges retains the typed fail-closed
+admission error.
+
 ## 0.35.336
 
 - **Fix: long-lived sessions keep state, logs, and descriptors bounded.**

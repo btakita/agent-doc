@@ -2690,6 +2690,69 @@ fn request_queue_editor_replica_reregister(file: &Path) -> String {
     }
 }
 
+/// A native editor save can reach disk one observation before the editor's
+/// registered CRDT cut catches up. Keep editor authority fail-closed, but give
+/// the typed re-registration request the same bounded chance to converge that
+/// missing/sync-pending replicas already receive.
+fn observe_queue_authority_after_native_save_with_bounded_retry(
+    file: &Path,
+    source: &str,
+    attempts: u32,
+    mut observe: impl FnMut(&Path) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>>,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    let attempts = attempts.max(1);
+    let mut observed = observe(file);
+    for attempt in 1..=attempts {
+        let newer_disk = match &observed {
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
+                text, live_editors, ..
+            })) if *live_editors > 0 => disk_edit_newer_than_registered_authority(file, text)
+                .map_err(|err| {
+                    QueueAuthorityUnavailable::new(format!(
+                        "could not verify retained queue authority: {err:#}"
+                    ))
+                })?,
+            _ => return observed,
+        };
+        let Some(disk) = newer_disk else {
+            return observed;
+        };
+        let authority = match &observed {
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => text,
+            _ => unreachable!("newer_disk is only populated for a live current authority"),
+        };
+        let reregister = request_queue_editor_replica_reregister(file);
+        let admission = if attempt < attempts {
+            "retrying"
+        } else {
+            "refused"
+        };
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_authority_stale_behind_disk file={} source={} authority_hash={} disk_hash={} attempt={}/{} editor_replica_reregister={} admission={}",
+                file.display(),
+                source,
+                agent_doc_hash::short_content_hash(authority),
+                agent_doc_hash::short_content_hash(&disk),
+                attempt,
+                attempts,
+                reregister,
+                admission,
+            ),
+        );
+        if attempt == attempts {
+            return Err(QueueAuthorityUnavailable::new(format!(
+                "registered editor authority remained an older baseline cut while disk contained a newer native save after {attempts} bounded observations; editor replica re-registration {reregister}"
+            ))
+            .into());
+        }
+        std::thread::sleep(QUEUE_AUTHORITY_RETRY_BACKOFF);
+        observed = observe(file);
+    }
+    observed
+}
+
 pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
     // #sqedit-race Phase 2: defer ALL queue maintenance mutation while a different,
     // live process holds a fresh queue-edit lease (a direct `queue prune-noise` /
@@ -2713,43 +2776,20 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         return Ok(QueueState::default());
     }
     let (mut content, authority_queue_unresolved_prompts) =
-        match current_text_via_preflight_authority_retrying(file, "preflight_queue_maintenance") {
+        match observe_queue_authority_after_native_save_with_bounded_retry(
+            file,
+            "preflight_queue_maintenance",
+            queue_authority_attempts(),
+            |file| {
+                current_text_via_preflight_authority_retrying(file, "preflight_queue_maintenance")
+            },
+        ) {
             Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
+                text, semantics, ..
+            })) => (
                 text,
-                live_editors,
-                semantics,
-                ..
-            })) => {
-                if live_editors > 0 {
-                    let newer_disk = disk_edit_newer_than_registered_authority(file, &text)
-                        .map_err(|err| {
-                            QueueAuthorityUnavailable::new(format!(
-                                "could not verify retained queue authority: {err:#}"
-                            ))
-                        })?;
-                    if let Some(disk) = newer_disk {
-                        let reregister = request_queue_editor_replica_reregister(file);
-                        agent_doc_ops_log_io::log_op(
-                            file,
-                            &format!(
-                                "queue_authority_stale_behind_disk file={} authority_hash={} disk_hash={} editor_replica_reregister={} admission=refused",
-                                file.display(),
-                                agent_doc_hash::short_content_hash(&text),
-                                agent_doc_hash::short_content_hash(&disk),
-                                reregister,
-                            ),
-                        );
-                        return Err(QueueAuthorityUnavailable::new(format!(
-                            "registered editor authority is an older baseline cut while disk contains a newer native save; editor replica re-registration {reregister}"
-                        ))
-                        .into());
-                    }
-                }
-                (
-                    text,
-                    semantics.map(|semantics| semantics.queue_unresolved_prompts),
-                )
-            }
+                semantics.map(|semantics| semantics.queue_unresolved_prompts),
+            ),
             Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) | Ok(None) => {
                 match std::fs::read_to_string(file) {
                     Ok(content) => (content, None),
@@ -5805,6 +5845,72 @@ mod tests {
         assert!(
             current_text_status_token(&Err(anyhow::anyhow!("boom"))).starts_with("error:"),
             "an observation error must still be instrumented"
+        );
+    }
+
+    #[test]
+    fn queue_authority_reobserves_native_save_until_editor_cut_converges() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: go\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- is the integration runnable?\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let saved = baseline
+            .replace(
+                "<!-- agent:queue go -->",
+                "<!-- agent:queue go priority -->",
+            )
+            .replace("<!-- agent:backlog -->", "<!-- agent:backlog priority -->");
+        std::fs::write(&doc, &saved).unwrap();
+
+        let mut calls = 0usize;
+        let observed =
+            observe_queue_authority_after_native_save_with_bounded_retry(&doc, "test", 3, |_| {
+                calls += 1;
+                let text = if calls < 3 { baseline } else { &saved };
+                Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
+                    text: text.to_string(),
+                    live_editors: 1,
+                    delivery_converged: true,
+                    delivery_version: calls as u64,
+                    semantics: None,
+                }))
+            })
+            .unwrap();
+
+        assert_eq!(calls, 3, "the stale editor cut must be re-observed");
+        match observed {
+            Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => {
+                assert_eq!(
+                    text, saved,
+                    "the converged editor cut retains both priorities"
+                );
+            }
+            other => panic!("expected converged editor authority, got {other:?}"),
+        }
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            saved,
+            "preflight reconciliation must never rewrite the native save"
         );
     }
 

@@ -505,8 +505,10 @@ Before emitting queue state, preflight may:
   never an empty/default queue state. When a live registered authority still equals
   the merge baseline but disk differs, disk is evidence of a newer native editor
   save—not substitute authority. Preflight requests typed editor-replica
-  re-registration, preserves disk byte-for-byte, and refuses to start a response
-  until the retained authority becomes current.
+  re-registration and re-observes the editor-owned cut for the same bounded retry
+  budget used by other transient authority states. It proceeds when that cut
+  converges, preserves disk byte-for-byte throughout, and refuses to start a
+  response if the retry budget expires.
 
 ### Post-commit queue consumption
 

@@ -601,23 +601,33 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
         &self,
         project_root: &Path,
         file: &Path,
-    ) -> anyhow::Result<
-        Option<agent_doc_controller_io::project_controller::ControllerTmuxActorBinding>,
-    > {
-        Ok(
-            agent_doc_controller_io::project_controller::authoritative_actor_binding(
-                project_root,
-                file,
-            )?
-            .map(|record| {
+        deadline: std::time::Duration,
+    ) -> anyhow::Result<agent_doc_sync_io::CrossRootDocumentPaneObservation> {
+        use agent_doc_controller_io::project_controller::AuthoritativeActorBindingObservation;
+        use agent_doc_sync_io::CrossRootDocumentPaneObservation;
+
+        Ok(match agent_doc_controller_io::project_controller::authoritative_actor_binding_with_deadline(
+            project_root,
+            file,
+            deadline,
+        )? {
+            AuthoritativeActorBindingObservation::Found(record) => {
+                CrossRootDocumentPaneObservation::Found(
                 agent_doc_controller_io::project_controller::ControllerTmuxActorBinding {
                     document_path: record.document_id,
                     session_id: record.session_id,
                     pane_id: record.pane_id,
                     generation: record.generation,
-                }
-            }),
-        )
+                },
+                )
+            }
+            AuthoritativeActorBindingObservation::Missing => {
+                CrossRootDocumentPaneObservation::Missing
+            }
+            AuthoritativeActorBindingObservation::DeadlineExceeded { deadline } => {
+                CrossRootDocumentPaneObservation::DeadlineExceeded { deadline }
+            }
+        })
     }
 
     fn ensure_cross_root_document_pane(

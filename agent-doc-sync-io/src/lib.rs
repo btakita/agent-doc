@@ -314,6 +314,13 @@ pub enum SyncSessionCheckStatus {
     Interrupted(String),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CrossRootDocumentPaneObservation {
+    Found(agent_doc_controller_io::project_controller::ControllerTmuxActorBinding),
+    Missing,
+    DeadlineExceeded { deadline: Duration },
+}
+
 pub trait SyncRuntimeEffects: Send + Sync + 'static {
     fn resolve_current_document(&self, file: &Path, source: &str) -> Result<String>;
 
@@ -347,7 +354,8 @@ pub trait SyncRuntimeEffects: Send + Sync + 'static {
         &self,
         project_root: &Path,
         file: &Path,
-    ) -> Result<Option<agent_doc_controller_io::project_controller::ControllerTmuxActorBinding>>;
+        deadline: Duration,
+    ) -> Result<CrossRootDocumentPaneObservation>;
 
     /// Ask the controller that owns `project_root` to ensure `file` has an actor
     /// pane, returning the controller-proven pane binding. This is an effect:
@@ -622,17 +630,20 @@ impl SyncRuntimeEffects for TestSyncRuntimeEffects {
         &self,
         project_root: &Path,
         file: &Path,
-    ) -> Result<Option<agent_doc_controller_io::project_controller::ControllerTmuxActorBinding>>
-    {
+        _deadline: Duration,
+    ) -> Result<CrossRootDocumentPaneObservation> {
         Ok(
-            agent_doc_session_registry_io::lookup_file_entry_in(project_root, file)?.map(|entry| {
-                agent_doc_controller_io::project_controller::ControllerTmuxActorBinding {
-                    document_path: file.display().to_string(),
-                    session_id: entry.session_id,
-                    pane_id: entry.pane,
-                    generation: 0,
-                }
-            }),
+            match agent_doc_session_registry_io::lookup_file_entry_in(project_root, file)? {
+                Some(entry) => CrossRootDocumentPaneObservation::Found(
+                    agent_doc_controller_io::project_controller::ControllerTmuxActorBinding {
+                        document_path: file.display().to_string(),
+                        session_id: entry.session_id,
+                        pane_id: entry.pane,
+                        generation: 0,
+                    },
+                ),
+                None => CrossRootDocumentPaneObservation::Missing,
+            },
         )
     }
 

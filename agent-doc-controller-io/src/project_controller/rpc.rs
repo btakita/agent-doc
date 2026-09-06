@@ -662,12 +662,24 @@ fn read_controller_response_line_with_timeout<R: BufRead>(
     match reader.read_line(response) {
         Ok(0) => anyhow::bail!("project controller closed connection without a response"),
         Ok(_) => Ok(()),
-        Err(err) if is_timeout_error(&err) => anyhow::bail!(
-            "timed out after {:.1}s waiting for project controller response",
-            timeout.as_secs_f32()
-        ),
+        Err(err) if is_timeout_error(&err) => Err(std::io::Error::new(
+            ErrorKind::TimedOut,
+            format!(
+                "timed out after {:.1}s waiting for project controller response",
+                timeout.as_secs_f32()
+            ),
+        )
+        .into()),
         Err(err) => Err(err).context("failed to read project controller response"),
     }
+}
+
+fn controller_request_deadline_exceeded(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(is_timeout_error)
+    })
 }
 
 fn controller_transport_drop_is_retryable(err: &anyhow::Error) -> bool {
@@ -1560,6 +1572,59 @@ pub fn refresh_supervisor_lease(
     )
 }
 
+fn actor_binding_request(file: &Path) -> ControllerRequest {
+    ControllerRequest {
+        command: "actor_binding".to_string(),
+        file: Some(file.to_path_buf()),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: None,
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: None,
+    }
+}
+
+/// Observe a live actor binding through an already-running project controller,
+/// using one request and the caller's interactive deadline. This path never
+/// launches a controller and never retries a transport drop.
+pub fn authoritative_actor_binding_with_deadline(
+    project_root: &Path,
+    file: &Path,
+    deadline: Duration,
+) -> Result<AuthoritativeActorBindingObservation> {
+    if let Some(runtime) = local_controller_runtime_for_project(project_root)? {
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            project_root,
+            &file.to_string_lossy(),
+        );
+        return Ok(match runtime.actor_record(&document_id)? {
+            Some(record) => AuthoritativeActorBindingObservation::Found(record),
+            None => AuthoritativeActorBindingObservation::Missing,
+        });
+    }
+
+    match request_existing_controller_with_timeout::<ActorBindingResponse>(
+        project_root,
+        actor_binding_request(file),
+        deadline,
+    ) {
+        Ok(response) => Ok(match response.record {
+            Some(record) => AuthoritativeActorBindingObservation::Found(record),
+            None => AuthoritativeActorBindingObservation::Missing,
+        }),
+        Err(error) if controller_request_deadline_exceeded(&error) => {
+            Ok(AuthoritativeActorBindingObservation::DeadlineExceeded { deadline })
+        }
+        Err(error) => Err(error),
+    }
+}
+
 pub fn authoritative_actor_binding(
     project_root: &Path,
     file: &Path,
@@ -1584,24 +1649,7 @@ pub fn authoritative_actor_binding(
     {
         let response: ActorBindingResponse =
             retry_controller_transport_drop(file, "actor_binding", || {
-                request_controller(
-                    project_root,
-                    ControllerRequest {
-                        command: "actor_binding".to_string(),
-                        file: Some(file.to_path_buf()),
-                        session_id: None,
-                        pane_id: None,
-                        window_id: None,
-                        generation: None,
-                        state: None,
-                        caller: None,
-                        reason: None,
-                        supervisor_pid: None,
-                        supervisor_socket: None,
-                        command_kind: None,
-                        diagnostic_payload: None,
-                    },
-                )
+                request_controller(project_root, actor_binding_request(file))
             })?;
         Ok(response.record)
     }
@@ -19138,32 +19186,20 @@ fn pane_layout_effect_worker(
                 return;
             }
         };
+        // Actor-store bindings and prior structural file→pane receipts are one
+        // retained Computed. A receipt update invalidates this value and wakes
+        // the effect; the worker does not imperatively reconstruct authority.
         let actor_bindings = runtime.pane_layout_actor_bindings();
-        // `#tmuxautosyncreactive`: enrich with structural file→pane mappings so
-        // files WITHOUT active session actors (but with known panes from the
-        // previous sync) hit the ownership fast path instead of walking `/proc`
-        // (~300ms each). The previous sync's structural receipt already proved
-        // these pane assignments; reusing them makes the fast path cover every
-        // visible file, not just those with live session actors.
-        let actor_bindings = {
-            let mut enriched = actor_bindings;
-            let binding_files: std::collections::HashSet<String> =
-                enriched.iter().map(|b| b.document_path.clone()).collect();
-            for (file, pane) in runtime.pane_layout_structural_file_panes() {
-                if !binding_files.contains(&file) && !pane.is_empty() {
-                    enriched.push(ControllerTmuxActorBinding {
-                        document_path: file,
-                        session_id: String::new(),
-                        pane_id: pane,
-                        generation: desired.generation,
-                    });
-                }
-            }
-            enriched
-        };
         if desired.invocation.caller_kind == "automatic" {
             let observation_invocation = pane_layout_state_invocation(&desired);
-            let structural_file_panes = runtime.pane_layout_structural_file_panes();
+            // Structural receipt bindings use the established empty-session
+            // representation. Keep automatic observation on the same retained
+            // value instead of reaching around it to read the source directly.
+            let structural_file_panes = actor_bindings
+                .iter()
+                .filter(|binding| binding.session_id.is_empty())
+                .map(|binding| (binding.document_path.clone(), binding.pane_id.clone()))
+                .collect::<Vec<_>>();
             if let Ok(report) = tmux_layout_sync_state_for_invocation_with_effect_assignment(
                 &bootstrap,
                 &runtime,
@@ -26689,6 +26725,39 @@ mod tests {
             "{err:#}"
         );
     }
+
+    #[test]
+    fn actor_binding_observation_uses_one_caller_deadline_without_retry() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let document = dir.path().join("tasks/example.md");
+        let sock = socket_path(dir.path());
+        std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+        let name = sock.clone().to_fs_name::<GenericFilePath>().unwrap();
+        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let handle = std::thread::spawn(move || {
+            let _stream = listener.accept().unwrap();
+            let _ = released.recv();
+        });
+        let deadline = Duration::from_millis(50);
+
+        let started = Instant::now();
+        let observation =
+            authoritative_actor_binding_with_deadline(dir.path(), &document, deadline).unwrap();
+        let elapsed = started.elapsed();
+        drop(release);
+        handle.join().unwrap();
+
+        assert_eq!(
+            observation,
+            AuthoritativeActorBindingObservation::DeadlineExceeded { deadline }
+        );
+        assert!(
+            elapsed < deadline * 2,
+            "one bounded observation must not spend a second deadline on retry: {elapsed:?}"
+        );
+    }
+
     #[test]
     fn idle_controller_client_does_not_block_later_status_request() {
         let dir = tempfile::TempDir::new().unwrap();

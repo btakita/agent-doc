@@ -359,6 +359,18 @@ without structural provenance retain the operator-owned protection.
   resolution, move that pane into `W`, and keep the binding ephemeral. Missing
   foreign bindings fail closed: no parent-root registry write, content
   mutation, resume, or pane creation is allowed under `--no-autostart`.
+- A successful structural layout receipt is generation-fenced ownership
+  evidence. The controller must retain its file-to-pane assignments in a
+  Source and join them with live actor state and current desired documents in
+  the same binding Computed; an RPC worker must not imperatively append this
+  derived evidence to an invocation. A desired-state change invalidates stale
+  receipt assignments before the next effect runs.
+- When that retained binding projection misses for a nested-root document,
+  interactive sync may make exactly one read-only request to an already-running
+  owning controller. The request has a 250ms deadline, must not launch or retry
+  the controller, and emits `cross_root_binding_deadline_exceeded` before
+  falling through fail-closed. The same file must not repeat that request after
+  document-content resolution.
 - Post-sync registry updates must fail closed if tmux-router reports a
   geometry-only pane assignment that disagrees with a still-live authoritative
   actor pane for that document.

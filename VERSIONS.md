@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.335
+
+- **Fix: cross-root exact-visible sync stays within one interactive deadline.**
+
+Controller-proven structural file-to-pane receipts now participate in the
+retained pane-layout binding computation, generation-fenced by current desired
+documents. A missing nested-root binding makes one read-only request to an
+already-running owner controller with a 250 ms deadline and no retry or lazy
+launch; timeout falls through fail-closed and the post-content path cannot
+repeat the call. Window-resolution latency now reports target-session,
+agent-doc-window, and layout-observation subphases.
+
 ## 0.35.332
 
 - **Fix: Claude queue drains cannot silently finish between items.**

@@ -18,6 +18,9 @@ pub const SYNC_PRUNE_SUBPHASE_BUDGET: Duration = Duration::from_millis(250);
 pub const SYNC_LOCK_WAIT_LATENCY_BUDGET: Duration = Duration::from_millis(100);
 pub const SYNC_PRELOCK_ACTOR_FOCUS_BUDGET: Duration = Duration::from_millis(300);
 pub const SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET: Duration = Duration::from_millis(250);
+/// Interactive cross-root actor observation is a single, non-launching RPC.
+/// Exhaustion degrades to the next fail-closed ownership source.
+pub const SYNC_CROSS_ROOT_BINDING_DEADLINE: Duration = Duration::from_millis(250);
 pub const SYNC_PROJECTION_REFRESH_BUDGET: Duration = Duration::from_millis(250);
 pub const SYNC_OWNERSHIP_PROOF_BUDGET: Duration = Duration::from_millis(750);
 /// `#syncdoctorconverged`: the pre- and post-reconcile doctor repair passes.

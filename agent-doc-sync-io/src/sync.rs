@@ -193,6 +193,7 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 use tempfile::NamedTempFile;
 
+use crate::CrossRootDocumentPaneObservation;
 #[cfg(test)]
 use crate::SyncLockAcquire;
 use crate::acquire_sync_lock;
@@ -1153,7 +1154,6 @@ fn refresh_durable_registry_for_actor_record(
 /// exact-visible shapes, which are keyed off the editor projection rather than
 /// the actor store.
 fn resolve_actor_pane_after_content(
-    tmux: &Tmux,
     file_path: &Path,
     exact_visible_projection: bool,
     is_cross_root: bool,
@@ -1184,60 +1184,50 @@ fn resolve_actor_pane_after_content(
         ));
         return Ok(None);
     }
-    // `#tmuxautosyncreactive` / `#lazily-hot-path`: a cross-root file's pane is
-    // owned by its nested controller's reactive actor store. Ask that controller
-    // for the binding instead of the exhaustive `/proc` ownership walk. The
-    // editor tab-switch path runs with `auto_start_mode=Full`
-    // (`skip_autostart_diagnostics` is false), so the earlier
-    // `skip_autostart_diagnostics && is_cross_root` reactive branch does not
-    // fire, and the walk below measured 670ms-1.3s per cross-root file on this
-    // path. The owning controller's binding is the authority; a missing or dead
-    // binding falls through to the registry fallback, same as a failed walk.
-    let owner_root = agent_doc_project_root_io::project_root_containing(file_path);
-    let observed = match owner_root {
-        Some(owner_root) => {
-            crate::runtime_effects()?.resolve_cross_root_document_pane(&owner_root, file_path)
-        }
-        None => Ok(None),
-    };
-    Ok(match observed {
-        Ok(Some(binding))
-            if pane_projection_is_reusable_for_document(tmux, &binding.pane_id, file_path) =>
-        {
+    // The exact-visible pre-IPC branch already made the one permitted bounded
+    // owning-controller observation for this run. Repeating it here would turn
+    // a miss or deadline into a second serial round trip.
+    sync_log(&format!(
+        "exact_visible_cross_root_actor_lookup_not_repeated file={}",
+        file_path.display(),
+    ));
+    Ok(None)
+}
+
+fn observe_cross_root_document_pane(
+    owner_root: &Path,
+    file_path: &Path,
+    focus: Option<&str>,
+    auto_start_mode: AutoStartMode,
+    source: &str,
+) -> Result<Option<agent_doc_controller_io::project_controller::ControllerTmuxActorBinding>> {
+    let started = Instant::now();
+    let observation = crate::runtime_effects()?.resolve_cross_root_document_pane(
+        owner_root,
+        file_path,
+        agent_doc_sync::SYNC_CROSS_ROOT_BINDING_DEADLINE,
+    )?;
+    log_sync_latency(
+        focus,
+        "cross_root_actor_binding_rpc",
+        started.elapsed(),
+        agent_doc_sync::SYNC_CROSS_ROOT_BINDING_DEADLINE,
+        auto_start_mode,
+    );
+    Ok(match observation {
+        CrossRootDocumentPaneObservation::Found(binding) => Some(binding),
+        CrossRootDocumentPaneObservation::Missing => {
             sync_log(&format!(
-                "exact_visible_cross_root_actor_projection_reused file={} pane={} generation={}",
-                file_path.display(),
-                binding.pane_id,
-                binding.generation,
-            ));
-            Some(binding.pane_id)
-        }
-        Ok(Some(binding)) => {
-            sync_log(&format!(
-                "exact_visible_cross_root_actor_projection_dead file={} pane={} generation={}",
-                file_path.display(),
-                binding.pane_id,
-                binding.generation,
-            ));
-            None
-        }
-        Ok(None) => {
-            sync_log(&format!(
-                "exact_visible_cross_root_actor_projection_missing file={}",
+                "{source}_cross_root_actor_projection_missing file={}",
                 file_path.display(),
             ));
             None
         }
-        Err(error) => {
-            eprintln!(
-                "[sync] warning: owning-controller actor projection unavailable for {}: {}",
-                file_path.display(),
-                error,
-            );
+        CrossRootDocumentPaneObservation::DeadlineExceeded { deadline } => {
             sync_log(&format!(
-                "exact_visible_cross_root_actor_projection_failed file={} error={}",
+                "{source}_cross_root_actor_projection_deadline_exceeded file={} deadline_ms={}",
                 file_path.display(),
-                error,
+                deadline.as_millis(),
             ));
             None
         }
@@ -2793,8 +2783,16 @@ fn run_with_options_internal_at_root(
         auto_start_mode,
     );
     let window_resolution_start = Instant::now();
+    let target_session_start = Instant::now();
     let target_session =
         resolve_sync_target_session(tmux, window, &col_args, focus, reactive_actor_bindings);
+    log_sync_latency(
+        focus,
+        "window_target_session",
+        target_session_start.elapsed(),
+        SYNC_WINDOW_RESOLUTION_BUDGET,
+        auto_start_mode,
+    );
     let full_sync = matches!(auto_start_mode, AutoStartMode::Full);
     let doctor_repair_candidate = if full_sync {
         sync_doctor_repair_candidate(&col_args, focus)
@@ -2875,8 +2873,17 @@ fn run_with_options_internal_at_root(
     if window.is_none()
         && let Some(ref session_name) = target_session
     {
-        if let Some(resolved_window_id) =
-            resolve_agent_doc_window_id(tmux, session_name, "agent-doc")
+        let agent_doc_lookup_start = Instant::now();
+        let resolved_agent_doc_window =
+            resolve_agent_doc_window_id(tmux, session_name, "agent-doc");
+        log_sync_latency(
+            focus,
+            "window_agent_doc_lookup",
+            agent_doc_lookup_start.elapsed(),
+            SYNC_WINDOW_RESOLUTION_BUDGET,
+            auto_start_mode,
+        );
+        if let Some(resolved_window_id) = resolved_agent_doc_window
             && effective_window.as_deref() != Some(resolved_window_id.as_str())
         {
             if let Some(previous) = effective_window.as_deref() {
@@ -2896,6 +2903,7 @@ fn run_with_options_internal_at_root(
         }
     }
     let window = effective_window.as_deref();
+    let layout_observation_start = Instant::now();
     let remembered_layout = if saved_layout.len() >= 2 {
         saved_layout.clone()
     } else {
@@ -2913,6 +2921,13 @@ fn run_with_options_internal_at_root(
     } else {
         None
     };
+    log_sync_latency(
+        focus,
+        "window_layout_observation",
+        layout_observation_start.elapsed(),
+        SYNC_WINDOW_RESOLUTION_BUDGET,
+        auto_start_mode,
+    );
     log_sync_latency(
         focus,
         "window_resolution",
@@ -3311,12 +3326,27 @@ fn run_with_options_internal_at_root(
             if exact_visible_projection && !skip_autostart_diagnostics {
                 let reused: Option<(String, String, u64, &'static str)> = if is_cross_root {
                     agent_doc_project_root_io::project_root_containing(file_path)
-                        .and_then(|owner_root| match crate::runtime_effects() {
-                            Ok(effects) => effects
-                                .resolve_cross_root_document_pane(&owner_root, file_path)
-                                .ok()
-                                .flatten(),
-                            Err(_) => None,
+                        .and_then(|owner_root| {
+                            observe_cross_root_document_pane(
+                                &owner_root,
+                                file_path,
+                                hot_latency_focus,
+                                auto_start_mode,
+                                "exact_visible",
+                            )
+                            .unwrap_or_else(|error| {
+                                eprintln!(
+                                    "[sync] warning: owning-controller actor projection unavailable for {}: {}",
+                                    file_path.display(),
+                                    error,
+                                );
+                                sync_log(&format!(
+                                    "exact_visible_cross_root_actor_projection_failed file={} error={}",
+                                    file_path.display(),
+                                    error,
+                                ));
+                                None
+                            })
                         })
                         .filter(|binding| {
                             pane_projection_is_reusable_for_document(
@@ -3376,8 +3406,13 @@ fn run_with_options_internal_at_root(
                 // parent registry.
                 let owner_root = agent_doc_project_root_io::project_root_containing(file_path);
                 let observed = match owner_root {
-                    Some(owner_root) => crate::runtime_effects()?
-                        .resolve_cross_root_document_pane(&owner_root, file_path),
+                    Some(owner_root) => observe_cross_root_document_pane(
+                        &owner_root,
+                        file_path,
+                        hot_latency_focus,
+                        auto_start_mode,
+                        "safe_passive",
+                    ),
                     None => Ok(None),
                 };
                 match observed {
@@ -3539,7 +3574,6 @@ fn run_with_options_internal_at_root(
                     None => continue,
                 };
                 let pane = resolve_actor_pane_after_content(
-                    tmux,
                     file_path,
                     exact_visible_projection,
                     is_cross_root,
@@ -6222,6 +6256,16 @@ mod tests {
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
     use tmux_router::IsolatedTmux;
+
+    #[test]
+    fn exact_visible_cross_root_after_content_does_not_repeat_actor_lookup() {
+        let file = Path::new("/tmp/example-project/tasks/example.md");
+        assert_eq!(
+            resolve_actor_pane_after_content(file, true, true).unwrap(),
+            None,
+            "the one bounded pre-content observation owns this transition; a miss must fall through without another RPC",
+        );
+    }
 
     #[test]
     fn exact_visible_projection_rejects_live_pane_owned_by_another_document() {

@@ -224,6 +224,15 @@ pub struct ControllerTmuxActorBinding {
     pub generation: u64,
 }
 
+/// Typed outcome for the latency-bounded, observation-only actor lookup used by
+/// interactive cross-root layout reconciliation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AuthoritativeActorBindingObservation {
+    Found(agent_doc_controller::actor::ActorRecord),
+    Missing,
+    DeadlineExceeded { deadline: Duration },
+}
+
 impl ControllerTmuxLayoutSyncInvocation {
     pub fn routes_created_panes(&self) -> bool {
         !self.no_autostart && matches!(self.caller_kind.as_str(), "manual" | "projection")
@@ -412,6 +421,7 @@ impl From<&ControllerTmuxLayoutSyncInvocation> for PaneLayoutStructure {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PaneLayoutStructuralReceipt {
+    generation: u64,
     structure: PaneLayoutStructure,
     actor_bindings: Vec<ControllerTmuxActorBinding>,
     pub report: Option<ControllerTmuxLayoutSyncStateReport>,
@@ -718,6 +728,7 @@ impl ControllerActorGraph {
 fn derive_layout_actor_bindings(
     desired: Option<&PaneLayoutDesired>,
     actors: &ControllerActorStore,
+    structural_receipt: Option<&PaneLayoutStructuralReceipt>,
 ) -> Vec<ControllerTmuxActorBinding> {
     let Some(desired) = desired else {
         return Vec::new();
@@ -736,6 +747,7 @@ fn derive_layout_actor_bindings(
         .map(|record| record.window_id.as_str())
         .filter(|window| !window.is_empty())
         .collect::<BTreeSet<_>>();
+    let desired_document_set = desired_documents.iter().copied().collect::<BTreeSet<_>>();
     let mut seen = BTreeSet::new();
     let mut bindings = Vec::new();
     for document in desired_documents {
@@ -746,7 +758,7 @@ fn derive_layout_actor_bindings(
         let Some(record) = actors.get(document) else {
             continue;
         };
-        seen.insert(document);
+        seen.insert(document.to_string());
         bindings.push(ControllerTmuxActorBinding {
             document_path: document.to_string(),
             session_id: record.session_id.clone(),
@@ -757,7 +769,7 @@ fn derive_layout_actor_bindings(
     for record in actors.values() {
         if desired_windows.is_empty()
             || !desired_windows.contains(record.window_id.as_str())
-            || !seen.insert(record.document_id.as_str())
+            || !seen.insert(record.document_id.clone())
         {
             continue;
         }
@@ -767,6 +779,28 @@ fn derive_layout_actor_bindings(
             pane_id: record.pane_id.clone(),
             generation: record.generation,
         });
+    }
+    if let Some(receipt) = structural_receipt
+        .filter(|receipt| receipt.structure == PaneLayoutStructure::from(&desired.invocation))
+    {
+        for (document, pane) in &receipt.file_panes {
+            if pane.is_empty()
+                || !desired_document_set.contains(document.as_str())
+                || !seen.insert(document.clone())
+            {
+                continue;
+            }
+            // The prior structural effect already proved this exact
+            // file-to-pane assignment. Keep that proof in the process graph;
+            // the sync adapter revalidates pane liveness and document ownership
+            // before routing it.
+            bindings.push(ControllerTmuxActorBinding {
+                document_path: document.clone(),
+                session_id: String::new(),
+                pane_id: pane.clone(),
+                generation: receipt.generation,
+            });
+        }
     }
     bindings
 }
@@ -820,15 +854,17 @@ impl ControllerPaneLayoutGraph {
             },
         });
         let desired = ctx.source(initial_desired);
+        let structural_receipt = ctx.source(None);
         let desired_for_actor_bindings = desired;
+        let structural_receipt_for_actor_bindings = structural_receipt;
         let actor_bindings = ctx.computed(move |ctx| {
             let desired = ctx.get(&desired_for_actor_bindings);
             let actors = ctx.get(&live_actor_bindings);
-            derive_layout_actor_bindings(desired.as_ref(), &actors)
+            let structural_receipt = ctx.get(&structural_receipt_for_actor_bindings);
+            derive_layout_actor_bindings(desired.as_ref(), &actors, structural_receipt.as_ref())
         });
         let observed = ctx.source(None);
         let receipt = ctx.source(PaneLayoutEffectReceipt::default());
-        let structural_receipt = ctx.source(None);
         let applicable_receipt = ctx.computed(move |ctx| {
             let desired = ctx.get(&desired)?;
             let actor_bindings = ctx.get(&actor_bindings);
@@ -1062,13 +1098,11 @@ impl ControllerPaneLayoutGraph {
             .unwrap_or_default()
     }
 
-    /// The file→pane mapping from the last structural assignment, regardless of
-    /// generation (`#tmuxautosyncreactive`). Files without active agent-doc
-    /// sessions miss the actor-store fast path and fall through to a per-file
-    /// `/proc` walk (~300ms each). The previous sync's structural receipt
-    /// already knows their pane, so the worker enriches the invocation bindings
-    /// with this mapping to make the ownership fast path hit for every visible
-    /// file — not just those with live session actors.
+    /// Inspect the file→pane mapping retained from the last structural effect.
+    /// The binding Computed consumes this Source directly; this accessor exists
+    /// only for diagnostics and transition tests.
+    #[cfg(any(test, feature = "test-support"))]
+    #[allow(dead_code)]
     fn last_structural_file_panes(&self) -> Vec<(String, String)> {
         self.ctx
             .get(&self.structural_receipt)
@@ -1083,7 +1117,9 @@ impl ControllerPaneLayoutGraph {
     ) -> Option<PaneLayoutStructuralReceipt> {
         self.ctx.get(&self.structural_receipt).filter(|receipt| {
             receipt.structure == PaneLayoutStructure::from(&desired.invocation)
-                && receipt.actor_bindings.as_slice() == actor_bindings
+                && receipt.actor_bindings.iter().eq(actor_bindings
+                    .iter()
+                    .filter(|binding| !binding.session_id.is_empty()))
                 && !receipt.file_panes.is_empty()
         })
     }
@@ -1101,6 +1137,7 @@ impl ControllerPaneLayoutGraph {
         self.ctx.set(
             &self.structural_receipt,
             Some(PaneLayoutStructuralReceipt {
+                generation: desired.generation,
                 structure: PaneLayoutStructure::from(&desired.invocation),
                 actor_bindings,
                 report: report.filter(|report| report.synced),
@@ -5052,10 +5089,6 @@ impl ControllerRuntime {
         self.pane_layout_graph.actor_bindings()
     }
 
-    fn pane_layout_structural_file_panes(&self) -> Vec<(String, String)> {
-        self.pane_layout_graph.last_structural_file_panes()
-    }
-
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
     fn await_pane_layout_generation(
         &self,
@@ -7784,6 +7817,66 @@ mod tests {
         assert!(
             pane_graph.actor_bindings().is_empty(),
             "closing the actor Source must invalidate the pane-layout authority Computed"
+        );
+    }
+
+    #[test]
+    fn pane_layout_structural_receipt_is_generation_fenced_reactive_evidence() {
+        let root = tempfile::TempDir::new().unwrap();
+        let first_document = root.path().join("tasks/first.md").display().to_string();
+        let second_document = root.path().join("tasks/second.md").display().to_string();
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let pane_graph = ControllerPaneLayoutGraph::new_in(
+            &scope,
+            Vec::new(),
+            actor_graph.live_bindings_handle(),
+        );
+        let desired = pane_graph.set_desired(
+            ControllerTmuxLayoutSyncInvocation {
+                columns: vec![first_document.clone()],
+                window: Some("@1".to_string()),
+                focus: Some(first_document.clone()),
+                no_autostart: true,
+                exact_visible: true,
+                caller_kind: "automatic".to_string(),
+                actor_bindings: Vec::new(),
+            },
+            None,
+        );
+
+        pane_graph.record_structural_assignment(
+            &desired,
+            Vec::new(),
+            None,
+            vec![(first_document.clone(), "%51".to_string())],
+        );
+        assert_eq!(
+            pane_graph.actor_bindings(),
+            vec![ControllerTmuxActorBinding {
+                document_path: first_document,
+                session_id: String::new(),
+                pane_id: "%51".to_string(),
+                generation: desired.generation,
+            }],
+            "a structural effect receipt must invalidate and repopulate the retained binding Computed",
+        );
+
+        pane_graph.set_desired(
+            ControllerTmuxLayoutSyncInvocation {
+                columns: vec![second_document.clone()],
+                window: Some("@1".to_string()),
+                focus: Some(second_document),
+                no_autostart: true,
+                exact_visible: true,
+                caller_kind: "automatic".to_string(),
+                actor_bindings: Vec::new(),
+            },
+            None,
+        );
+        assert!(
+            pane_graph.actor_bindings().is_empty(),
+            "a prior generation's structural proof must not bind a document absent from current desired state",
         );
     }
 

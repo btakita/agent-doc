@@ -1,6 +1,7 @@
 # Plan — Sync slow-path latency (`#syncslowpath`)
 
-**Status:** Phase 0 landed 2026-08-07. Phases 1-4 open, ordered by measured cost.
+**Status:** Complete 2026-09-06. Phases 0-5 landed; Phase 2's proposed TTL cache was
+superseded by generation-fenced reactive structural evidence.
 
 ## Origin
 
@@ -89,7 +90,7 @@ Expected effect on the three runs above: ~1400ms → ~200ms for `ownership_proof
 
 ---
 
-## Phase 1 — Bound the cross-root fallback RPC
+## Phase 1 — Bound the cross-root fallback RPC — **LANDED**
 
 **The 11-second stall.** `haiven-dev.md` hits the in-memory fast path 131 of 138 syncs. In
 the other 7 the binding is absent and sync calls `resolve_cross_root_document_pane`
@@ -112,7 +113,12 @@ An interactive tab switch must never inherit a 10s budget. `ownership_proof`'s o
 Regression: a fake controller that never answers must leave the sync inside its ownership
 budget, and must not route an unproven pane.
 
-## Phase 2 — Cross-sync binding cache
+Landed: interactive cross-root observation uses one request to an already-running controller,
+with a 250ms caller deadline, no lazy launch, and no transport retry. Deadline expiry is a typed
+observation that logs explicitly and falls through without claiming ownership. The silent-peer
+regression asserts the call returns before a second deadline could be spent.
+
+## Phase 2 — Cross-sync binding cache — **SUPERSEDED**
 
 `SyncProofCache` lives for **one sync run**. A file whose in-memory binding is missing
 re-pays the full lookup on every subsequent sync, so a degraded nested controller is an
@@ -126,7 +132,12 @@ re-pays the full lookup on every subsequent sync, so a degraded nested controlle
 Prior art in-repo: `37d4d0d1d` did exactly this for the `/proc` ownership walk
 ("share /proc ownership walk across syncs via process-wide TTL cache").
 
-## Phase 3 — Carry cross-root bindings in the editor projection
+The cache was intentionally not added. Phase 3 now retains the controller-proven structural
+receipt in the reactive graph, eliminating the routine cross-sync lookup without introducing a
+second TTL/invalidation policy that could outlive ownership. The rare fallback is bounded by
+Phase 1, including negative/deadline outcomes.
+
+## Phase 3 — Carry cross-root bindings in the editor projection — **LANDED**
 
 `reactive_actor_bindings` excludes cross-root entries by construction (`sync.rs`, the
 "Cross-root pane ownership stays with the nested controller" comment). That is why a
@@ -140,7 +151,12 @@ stalls.
 - Target: the 131/138 in-memory hit rate for cross-root files becomes ~100%, and Phases 1-2
   become the rare fallback rather than the routine one.
 
-## Phase 4 — Redundant cross-root round-trip
+Landed: the structural-effect receipt is a Source carrying its desired generation and
+file-to-pane assignments. The pane-layout binding Computed joins that receipt with current
+desired documents and live actors. The effect worker consumes the Computed result directly;
+the prior imperative post-read enrichment was removed.
+
+## Phase 4 — Redundant cross-root round-trip — **LANDED**
 
 When `exact_visible_projection && is_cross_root` reaches `resolve_actor_pane_after_content`,
 the pre-IPC reuse branch **already** called `resolve_cross_root_document_pane` for that file
@@ -148,12 +164,21 @@ and got nothing. The second call re-pays the same RPC — including its timeout 
 already observed this run. Phase 0 documented this; Phase 2's negative caching makes it
 cheap, but the call should be removed outright once that lands.
 
-## Phase 5 — `window_resolution` outlier
+Landed: the exact-visible pre-content transition owns the sole bounded observation. A miss or
+deadline reaches the post-content transition as already-observed evidence and cannot issue a
+second controller call.
+
+## Phase 5 — `window_resolution` outlier — **INSTRUMENTATION LANDED**
 
 p50 60ms, p90 75ms, but **max 2,699ms** (21:40:46), and it alternates 2ms/60ms between two
 sync sources in bursts. Not yet diagnosed — the 60ms floor on one of the two sources looks
 like a fixed wait, matching the flat 97ms profile `controller_actor_lookup` shows. Worth one
 measurement pass before deciding whether it needs work.
+
+The aggregate now has three attributable subphases: `window_target_session`,
+`window_agent_doc_lookup`, and `window_layout_observation`. They retain the aggregate
+`window_resolution` meter and its budget, so the next field outlier identifies the responsible
+boundary rather than requiring another speculative change.
 
 ## Verification
 

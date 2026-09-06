@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -58,11 +58,12 @@ I am not declaring the session fully hardened. The logs show 1,356 old accepted-
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 Please look into monsterrodholder.md issues over the past few days. Are they all fixed? Addh any more work to fix monsterrodholder.md session crashing into the backlog + queue.
+- do [#mrhstatepressure]
+- do [#mrhsyncslowpath]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#mrhstatepressure] [P0] Bound long-lived session state and log growth: compact terminal accepted-only dispatch receipts and state events, and rotate per-session and ops logs so monsterrodholders.md cannot replay 1,356 stale receipts or hit EMFILE; preserve audit cursors and add a stress regression.
+- [ ] [#mrhstatepressure] [P0] /enqueue Bound long-lived session state and log growth: compact terminal accepted-only dispatch receipts and state events, and rotate per-session and ops logs so monsterrodholders.md cannot replay 1,356 stale receipts or hit EMFILE; preserve audit cursors and add a stress regression.
 - [ ] [#mrhsyncslowpath] [P1] Finish the remaining cross-root auto-sync latency protections in src/agent-doc/tasks/agent-doc/plan-sync-slow-path-latency.md: bound actor lookup without retries, project controller-proven cross-root bindings reactively, remove redundant round trips, and measure the window-resolution outlier; verify monsterrodholders.md navigation remains sub-second and never creates a new session when a live owner exists.
 <!-- /agent:backlog -->
 

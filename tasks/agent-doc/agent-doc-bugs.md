@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -90,6 +90,27 @@ Window-resolution telemetry is split into target-session, agent-doc-window, and 
 Verification passed: `make check`, formatting and diff checks, focused controller/sync regressions, the ignored live-tmux cross-root regression, release-version audit, and the public-repo private-name denylist scan. The CLI, native library, Codex/Claude/OpenCode/Cursor skills, JetBrains package, and VS Code package were installed at 0.35.335; running supervisors/controllers were marked for normal idle-boundary recycle. No data migration is required.
 
 Committed and pushed to `main` as `767eddd8b` (`fix(sync): bound cross-root ownership lookup`). The new CI run `34017106312` was queued at closeout; the preceding main CI run `34012077142` completed successfully.
+
+### Re: #mrhstatepressure — gpt-5
+
+> **Queue prompt:**
+>
+> do [#mrhstatepressure]
+
+
+Completed and shipped the long-lived state-pressure fix as agent-doc 0.35.336.
+
+Controller restart now reconciles accepted-only/start-unproven dispatch receipts once, persists one exact deduplicated `dispatch_receipt_reconcile` crash marker per receipt, and then deletes only those marker-proven terminal rows in 5,000-row batches. Failed and start-proven receipts remain. A 2,000-receipt regression proves the second reload has neither stale replay nor duplicate audit markers.
+
+State-event retention keeps the existing live PID-scoped editor acknowledgement watermark. Eligible events strictly below the minimum acknowledged cursor are deleted in 5,000-row batches inside the same transaction; a missing live acknowledgement still pins deletion, no-live-peer state still deletes nothing, and the exact cursor row plus durable high-water mark remain. A 12,050-event regression proves the multi-batch boundary.
+
+Long-lived `ops.log`, `cycles.jsonl`, and per-session logs now rotate at 32 MiB only after a durable cycle-closeout entry, with admission-time cleanup for legacy oversized session logs. Filesystem-owned rotation uses a project lock, retains one zstd-compressed segment plus the active tail, and exposes a rotation-aware reader used by restart metrics, session-boundary detection, and proof verification. Open cycles, retained-response persistence, editor reconciliation, navigation, and sync never trigger cleanup.
+
+Supervisor log clones now share a synchronized append handle rather than cloning file descriptors. Writes take the rotation lock and reopen the active inode after rollover; separate resource-pressure telemetry reports the process descriptor count at admission and child launch/restart boundaries. A 2,000-clone stress regression proves constant log descriptors and complete readable history across rotation.
+
+Verification passed: focused SQLite/controller/log/supervisor/start/preflight/session-accretion tests, formatting and diff checks, the public-repo private-name denylist, and the full `make check` matrix. The CLI, native library, bundled skills, JetBrains package, and VS Code package were installed; `agent-doc --version` reports 0.35.336. The architecture-first plan is recorded in `tasks/agent-doc/plan-long-lived-state-pressure.md` and the relevant control-plane, state-backbone, and supervisor specs are updated.
+
+Committed and pushed to `main` as `eb1e36cfd` (`fix(runtime): bound long-lived state pressure`). CI runs `34018884314`, `34018884273`, and `34018884456` were in progress at closeout.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 
@@ -99,12 +120,9 @@ Committed and pushed to `main` as `767eddd8b` (`fix(sync): bound cross-root owne
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#mrhstatepressure]
-- ~~do [#mrhsyncslowpath]~~
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#mrhstatepressure] [P0] /enqueue Bound long-lived session state and log growth: compact terminal accepted-only dispatch receipts and state events, and rotate per-session and ops logs so monsterrodholders.md cannot replay 1,356 stale receipts or hit EMFILE; preserve audit cursors and add a stress regression.
 <!-- /agent:backlog -->
 
 ## Review

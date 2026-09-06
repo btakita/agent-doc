@@ -132,6 +132,10 @@ The invariant is now explicit: every foreground editor Run publishes a fresh lay
 Regression coverage recreates a previously converged generation that drifts to `OperatorOwned`, then proves that an identical foreground intent receives a higher generation and re-enters `NeedsEffect`. The existing end-to-end route test now repeats the same request and verifies the second dispatch uses a fresh generation. Routing and control-plane specs were updated with the invariant, owner, topology, and transition table.
 
 Verification passed: both focused regressions, all pane-layout tests, non-test `cargo check`, formatting, version synchronization, private-name and diff checks, and full `make check` (9,233 tests passed; 255 skipped; audits plus Lean/TLA checks passed). `make install` installed `0.35.338`, marked 17 supervisors and 8 controllers for safe idle-boundary recycle, and installed the matching VS Code and JetBrains packages. Restart a running JetBrains IDE to activate its updated package.
+
+### Re: Response
+
+Restart confirmed. The updated JetBrains plugin is active; Book and Pages checks passed, while the full CI suite is still running without reported failures. You can retry **Run Agent Doc** on `dev.md`.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 

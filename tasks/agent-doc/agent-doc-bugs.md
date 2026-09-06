@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a06f35-1dca-72a1-a5f6-76acbe4c213c
+  codex: 01a073ec-e819-7bd3-a292-ccc16b25bc14
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -173,11 +173,64 @@ Verification and publication:
 - `make install`: passed; binary, native library, JetBrains plugin package, and VS Code extension installed. The corrected Kotlin plugin takes effect after the required IDEA plugin restart.
 - Product commit `b8d6192d5` (`fix: preserve operator tmux placement`) pushed to `origin/main`; GitHub CI run 33947369512 is in progress.
 - Parent submodule integration commit: `3aa58a4d8`. The parent branch has 377 unrelated local commits, so I did not push that unrelated history.
+- GitHub Actions run `34010967526` was in progress with no failure when this response was written; the prior `main` CI run was green.
+- Across a 10-second live sample, the relevant retry-event counters stayed flat (`10309 → 10309` in this project and `11206 → 11206` in the document's owning project). The now-idle owning controller averaged 0.7% of one CPU core.
+- Public-repository private-name denylist and `git diff --check` passed.
+- Release build/install passed for the CLI, shared library, JetBrains plugin, and VS Code extension.
+- Full `make check` passed.
+- Focused policy, command-rendering, start-admission, reexec, and architecture-boundary tests passed.
+- Operator verification: the installed 0.35.333 controllers automatically recreated `monsterrodholders.md` in pane `%88`; both its controller and supervisor match the installed binary inode; its original document-scoped pause and reason remain intact.
+- Edited surfaces: pure supervisor policy and tests, start command rendering and tests, route/start runtime plumbing, CLI parsing, source-contract coverage, and the tmux/control-plane specifications.
+- Imperative boundaries: route startup classifies `skip_wait` as `layout-provision`; start-command rendering carries the typed hidden CLI value; start I/O applies the same typed admission decision. Queue watching remains the later dispatch fence.
+- Reactive topology: editor surface source → desired pane-layout projection → structural layout effect → observed pane/receipt source. Successful provision updates the observation, removes the mismatch, and quiesces the effect.
+- Transition rows:
+- Policy owner: `agent-doc-supervisor::route_owned` owns the pure `RouteOwnedStartPurpose`, `RouteOwnedStartAdmission`, and `route_owned_start_blocked_by_queue_control` decision.
+- Invariant: queue control gates autonomous command dispatch, not generation-fenced structural ownership needed to realize the desired editor layout. Once the pane is observable, an unchanged desired projection must settle and stop timer retries.
 
 > **Queue prompt:**
 >
 > In contracts.md, I ran `! agent-doc admin recycle` and the agent-doc tmux window went away. Restore the runtime as soon as you diagnose the issue. The fix the agent-doc causes.
-<!-- agent:boundary:65937e75 -->
+> **Queue prompt:**
+>
+> Why is agent-doc thrashing in the background? Please make agent-doc more efficient when idle. Also, agent-doc is not auto-syncing the tmux pane with monsterrodholder.md. monsterrodholder.md has had many issues. Please fix these issues.
+
+### Re: Idle efficiency and tmux auto-sync — gpt-5
+
+Fixed and shipped in agent-doc 0.35.333.
+
+The thrash and the missing tmux pane were the same convergence bug. The editor surface correctly kept `monsterrodholders.md` in the desired layout, but its queue was intentionally paused for operator-gated work. Route startup treated that pause as a reason to reject every startup, including the provision-only startup used by layout sync. Because no pane could be created, the observed layout never matched the desired layout and both project controllers retried the structural effect every five seconds indefinitely.
+
+The queue pause now fences autonomous command dispatch without fencing structural pane/supervisor provisioning. Provision-only startup carries a typed `layout-provision` purpose across both process boundaries, creates an idle route-owned supervisor without sending an initial reopen command, and leaves the idle queue watcher responsible for honoring the existing pause before any later dispatch.
+
+Architecture closeout:
+
+- Invariant: queue control gates autonomous command dispatch, not generation-fenced structural ownership needed to realize the desired editor layout. Once the pane is observable, an unchanged desired projection must settle and stop timer retries.
+- Policy owner: `agent-doc-supervisor::route_owned` owns the pure `RouteOwnedStartPurpose`, `RouteOwnedStartAdmission`, and `route_owned_start_blocked_by_queue_control` decision.
+- Transition rows:
+
+  | Admission | Effective queue pause | Result |
+  | --- | --- | --- |
+  | route-owned new `dispatch` session | active | blocked |
+  | route-owned new `layout-provision` session | active | idle supervisor allowed; no reopen |
+  | route-owned supervisor reentry | active | allowed |
+  | non-route-owned startup | active | unchanged/allowed |
+
+- Reactive topology: editor surface source → desired pane-layout projection → structural layout effect → observed pane/receipt source. Successful provision updates the observation, removes the mismatch, and quiesces the effect.
+- Imperative boundaries: route startup classifies `skip_wait` as `layout-provision`; start-command rendering carries the typed hidden CLI value; start I/O applies the same typed admission decision. Queue watching remains the later dispatch fence.
+- Edited surfaces: pure supervisor policy and tests, start command rendering and tests, route/start runtime plumbing, CLI parsing, source-contract coverage, and the tmux/control-plane specifications.
+- Operator verification: the installed 0.35.333 controllers automatically recreated `monsterrodholders.md` in pane `%88`; both its controller and supervisor match the installed binary inode; its original document-scoped pause and reason remain intact.
+
+Validation:
+
+- Focused policy, command-rendering, start-admission, reexec, and architecture-boundary tests passed.
+- Full `make check` passed.
+- Release build/install passed for the CLI, shared library, JetBrains plugin, and VS Code extension.
+- Public-repository private-name denylist and `git diff --check` passed.
+- Across a 10-second live sample, the relevant retry-event counters stayed flat (`10309 → 10309` in this project and `11206 → 11206` in the document's owning project). The now-idle owning controller averaged 0.7% of one CPU core.
+- GitHub Actions run `34010967526` was in progress with no failure when this response was written; the prior `main` CI run was green.
+
+Product commit `7365e3ceb` (`fix: quiesce paused layout provisioning`) was pushed to `agent-doc/main`. Superproject integration commit `f07eba70c` is local only because the superproject branch already contains 400 unrelated unpushed commits.
+<!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 
 <!--
@@ -185,9 +238,8 @@ Verification and publication:
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-- In contracts.md, I ran `! agent-doc admin recycle` and the agent-doc tmux window went away. Restore the runtime as soon as 
- you diagnose the issue. The fix the agent-doc causes.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 Why is agent-doc thrashing in the background? Please make agent-doc more efficient when idle. Also, agent-doc is not auto-syncing the tmux pane with monsterrodholder.md. monsterrodholder.md has had many issues. Please fix these issues.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

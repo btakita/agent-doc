@@ -148,7 +148,7 @@ use agent_doc_queue::queue::{
     idle_queue_context_reset_decision, idle_queue_drain_decision,
 };
 use agent_doc_queue_io::queue_consume;
-use agent_doc_start_io::log_event;
+use agent_doc_start_io::{SessionLog, log_event};
 use agent_doc_supervisor::auto_trigger::{
     AutoTriggerCooldownAction, AutoTriggerMonitor, AutoTriggerNoPromptAction, AutoTriggerOutcome,
     AutoTriggerStopOutcome, CapabilityProofGate, auto_trigger_clear_cooldown_action,
@@ -237,7 +237,7 @@ fn record_session_startup_miss(
     path: &Path,
     shared: &SupervisorShared,
     harness: &agent_doc_harness::HarnessConfig,
-    session_log: &mut Option<std::fs::File>,
+    session_log: &mut Option<SessionLog>,
     reason: &str,
 ) {
     let pane = shared.inject_pane.as_deref().unwrap_or("child_pty");
@@ -290,7 +290,7 @@ fn clear_matching_turn_status_projection(
     file: &Path,
     shared: &SupervisorShared,
     reason: &str,
-    session_log: &mut Option<std::fs::File>,
+    session_log: &mut Option<SessionLog>,
 ) -> bool {
     let Some(marker) = agent_doc_turn_status_io::read_turn_active_marker_for_file(file) else {
         return false;
@@ -346,7 +346,7 @@ fn turn_active_for_owned_pane_with_idle_evidence(
     file: &Path,
     shared: &SupervisorShared,
     _prompt_visible: bool,
-    _session_log: &mut Option<std::fs::File>,
+    _session_log: &mut Option<SessionLog>,
 ) -> bool {
     let Some(marker) = agent_doc_turn_status_io::read_turn_active_marker_for_file(file) else {
         return false;
@@ -367,7 +367,7 @@ fn complete_idle_queue_slash_command_head(
     file: &Path,
     expected_head: &str,
     command: &str,
-    session_log: &mut Option<std::fs::File>,
+    session_log: &mut Option<SessionLog>,
 ) -> bool {
     match queue_consume::consume_queue_prompt_force_disk(
         file,
@@ -480,7 +480,7 @@ enum PromptEofPolicy {
 }
 
 fn prompt_for_restart_or_quit(
-    session_log: &mut Option<std::fs::File>,
+    session_log: &mut Option<SessionLog>,
     prompt_kind: &str,
     prompt_text: &str,
     quit_event: &str,
@@ -1187,7 +1187,7 @@ fn spawn_auto_trigger_thread(
     stop: Arc<AtomicBool>,
     file: String,
     harness: agent_doc_harness::HarnessConfig,
-    mut session_log: Option<std::fs::File>,
+    mut session_log: Option<SessionLog>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("auto-trigger".into())
@@ -1436,7 +1436,7 @@ fn clear_cooldown_blocks_auto_dispatch(
     path: &Path,
     harness: &agent_doc_harness::HarnessConfig,
     source: &str,
-    session_log: &mut Option<std::fs::File>,
+    session_log: &mut Option<SessionLog>,
     logged: &mut bool,
 ) -> bool {
     match queue_context_clear_blocks_auto_dispatch(path) {
@@ -1614,7 +1614,7 @@ struct ManagedCapabilityProofTask {
     env: std::collections::HashMap<String, String>,
     frontmatter: frontmatter::Frontmatter,
     global_config: agent_doc_config::Config,
-    session_log: Option<std::fs::File>,
+    session_log: Option<SessionLog>,
 }
 
 fn spawn_managed_capability_proof_thread(

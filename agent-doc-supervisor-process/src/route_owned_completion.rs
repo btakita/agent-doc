@@ -5,7 +5,6 @@
 //! its owned pane. Callers provide the live supervisor state through a narrow
 //! trait so this crate does not depend on orchestration internals.
 
-use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,8 +21,6 @@ use agent_doc_supervisor::route_owned::{
 
 pub const ROUTE_OWNED_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(500);
 pub const ROUTE_OWNED_READY_BUSY_RECONCILE_TICKS: u32 = 4;
-
-pub type SessionLogEventFn = fn(&mut Option<File>, &str);
 
 pub struct RouteOwnedCompletionConfig {
     pub file: PathBuf,
@@ -118,16 +115,17 @@ pub fn load_route_owned_cycle_state(
     agent_doc_cycle_state_io::load_with_closeout_projection(file)
 }
 
-pub fn spawn_route_owned_completion_thread<S>(
+pub fn spawn_route_owned_completion_thread<S, L>(
     state: Arc<S>,
     config: RouteOwnedCompletionConfig,
     completed: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
-    mut session_log: Option<File>,
-    log_session_event: SessionLogEventFn,
+    mut session_log: Option<L>,
+    log_session_event: fn(&mut Option<L>, &str),
 ) -> std::thread::JoinHandle<()>
 where
     S: RouteOwnedCompletionState,
+    L: Send + 'static,
 {
     std::thread::Builder::new()
         .name("route-owned-completion".into())

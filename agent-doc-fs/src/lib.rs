@@ -2,6 +2,23 @@ use anyhow::{Context, Result};
 use std::path::{Component, Path, PathBuf};
 
 pub mod install_freshness;
+pub mod rotating_log;
+
+pub use rotating_log::{SharedAppendLog, read_rotated_log, rotate_log_if_oversized};
+
+/// Current process descriptor count where the platform exposes a stable procfs
+/// view. Kept separate from log-size telemetry because rotation cannot diagnose
+/// or repair an unrelated descriptor leak.
+#[cfg(target_os = "linux")]
+pub fn open_file_descriptor_count() -> Option<usize> {
+    let count = std::fs::read_dir("/proc/self/fd").ok()?.flatten().count();
+    Some(count.saturating_sub(1)) // exclude the read_dir handle itself
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn open_file_descriptor_count() -> Option<usize> {
+    None
+}
 
 const SNAPSHOT_DIR: &str = ".agent-doc/snapshots";
 const LOCK_DIR: &str = ".agent-doc/locks";

@@ -114,7 +114,10 @@ reconciliation therefore prevent a crashed IDE from pinning the watermark
 forever. With no live registrations there is no peer watermark and this path
 deletes no events. The row at the minimum is retained as the monotonic
 per-document high-water anchor, and existing fact-specific count caps remain a
-bounded-storage backstop.
+bounded-storage backstop. Eligible rows are deleted in bounded batches inside
+the same acknowledgement transaction, so a large ledger cannot require one
+unbounded SQL delete while the exact cursor anchor and durable high-water mark
+remain intact.
 
 ## Projections
 

@@ -517,6 +517,25 @@ Auto-trigger provenance is lifecycle-bound to a single restart iteration:
 
 This keeps the existing `.agent-doc/logs/<session>.log` contract intact for any downstream tooling (`agent-doc logs`, dashboards) and avoids a second log file to rotate.
 
+Long-lived log storage is bounded independently from open-cycle behavior:
+
+- active `ops.log`, `cycles.jsonl`, and per-session logs rotate at 32 MiB;
+- each active file retains one zstd-compressed segment, forming a fixed storage
+  budget while keeping the most recent audit history;
+- rotation uses the project log directory's `.rotation.lock`; shared supervisor
+  writers take the same lock for appends, reopen the active inode after a
+  rollover, and all cloned handles share one writer instead of cloning file
+  descriptors;
+- automatic rotation is scheduled only after a durable cycle-closeout entry,
+  with an admission-time check for legacy oversized session logs. It is never
+  triggered by navigation, sync, an open cycle, retained-response persistence,
+  or editor reconciliation;
+- log consumers concatenate the retained segment and active tail, including
+  crash-recovery staging files, so restart metrics, session-boundary detection,
+  and proof-marker verification retain their audit window;
+- supervisor telemetry reports open file-descriptor count separately from log
+  byte thresholds at admission and child launch/restart boundaries.
+
 ### Idle-queue watch (`#jb-run-agent-doc-busy-queue-dispatch-deadlock`)
 
 When a busy-pane `Run Agent Doc` route cannot inject into an active turn, it

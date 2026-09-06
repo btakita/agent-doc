@@ -12,6 +12,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
+pub use agent_doc_fs::{SharedAppendLog, read_rotated_log, rotate_log_if_oversized};
+
 /// Structured cycle log entry for reproducible operation tracking.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CycleEntry {
@@ -32,9 +34,10 @@ pub struct CycleEntry {
     pub file_hash: Option<String>,
 }
 
-/// Maximum size (bytes) an individual best-effort log (`ops.log`,
-/// `cycles.jsonl`) may reach before it is rotated aside.
-pub const LOG_ROTATE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+/// Maximum active size for a best-effort operation or supervisor-session log.
+/// The one retained compressed segment keeps total storage bounded while still
+/// preserving recent recovery evidence across a rotation boundary.
+pub const LOG_ROTATE_MAX_BYTES: u64 = 32 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OpsLogTracking<'a> {
@@ -239,38 +242,17 @@ pub fn log_cycle(
     let _ = append_cycle_log_for_file(file, op, snapshot_content, file_content);
 }
 
-/// Best-effort size-based rotation for an append-only log.
-fn rotate_log_if_oversized(log_path: &Path, max_bytes: u64) {
-    let len = match std::fs::metadata(log_path) {
-        Ok(meta) => meta.len(),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
-        Err(e) => {
-            eprintln!("[ops-log] stat of {} failed: {e}", log_path.display());
-            return;
-        }
-    };
-    if len < max_bytes {
-        return;
-    }
-    let Some(name) = log_path.file_name().and_then(|n| n.to_str()) else {
-        eprintln!(
-            "[ops-log] cannot rotate {}: non-UTF-8 file name",
-            log_path.display()
-        );
-        return;
-    };
-    let rotated = log_path.with_file_name(format!("{name}.1"));
-    if let Err(e) = std::fs::rename(log_path, &rotated) {
-        eprintln!(
-            "[ops-log] rotation of {} -> {} failed: {e}",
-            log_path.display(),
-            rotated.display()
-        );
-    }
-}
-
 fn logs_dir(project_root: &Path) -> PathBuf {
     project_root.join(".agent-doc/logs")
+}
+
+fn rotate_completed_cycle_logs(project_root: &Path, session_id: Option<&str>, max_bytes: u64) {
+    let logs_dir = logs_dir(project_root);
+    let _ = rotate_log_if_oversized(&logs_dir.join("ops.log"), max_bytes);
+    let _ = rotate_log_if_oversized(&logs_dir.join("cycles.jsonl"), max_bytes);
+    if let Some(session_id) = session_id.filter(|session_id| !session_id.is_empty()) {
+        let _ = rotate_log_if_oversized(&logs_dir.join(format!("{session_id}.log")), max_bytes);
+    }
 }
 
 pub fn append_ops_log_at_project(
@@ -281,7 +263,6 @@ pub fn append_ops_log_at_project(
     let logs_dir = logs_dir(project_root);
     std::fs::create_dir_all(&logs_dir).ok()?;
     let log_path = logs_dir.join("ops.log");
-    rotate_log_if_oversized(&log_path, LOG_ROTATE_MAX_BYTES);
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -335,22 +316,22 @@ pub fn append_cycle_entry_at_project(project_root: &Path, entry: &CycleEntry) ->
     let logs_dir = logs_dir(project_root);
     std::fs::create_dir_all(&logs_dir).ok()?;
     let log_path = logs_dir.join("cycles.jsonl");
-    rotate_log_if_oversized(&log_path, LOG_ROTATE_MAX_BYTES);
     let json = serde_json::to_string(entry).ok()?;
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&log_path)
         .ok()?;
-    writeln!(f, "{json}").ok()
-}
+    writeln!(f, "{json}").ok()?;
+    drop(f);
 
-fn read_optional_text(path: &Path) -> Result<Option<String>> {
-    match std::fs::read_to_string(path) {
-        Ok(content) => Ok(Some(content)),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(err.into()),
-    }
+    // A cycle entry is appended only after the operation reached its durable
+    // closeout boundary, keeping maintenance off navigation/sync and away from
+    // open-cycle or retained-response reconciliation.
+    let document = project_root.join(&entry.file);
+    let session_id = cached_session_id(&document);
+    rotate_completed_cycle_logs(project_root, session_id.as_deref(), LOG_ROTATE_MAX_BYTES);
+    Some(())
 }
 
 fn ops_log_context_for_file(file: &Path) -> Result<Option<(PathBuf, String, String)>> {
@@ -362,7 +343,7 @@ fn ops_log_context_for_file(file: &Path) -> Result<Option<(PathBuf, String, Stri
         return Ok(None);
     };
     let log_path = project_root.join(".agent-doc/logs/ops.log");
-    let Some(content) = read_optional_text(&log_path)? else {
+    let Some(content) = read_rotated_log(&log_path)? else {
         return Ok(None);
     };
     Ok(Some((
@@ -550,17 +531,21 @@ mod tests {
     }
 
     #[test]
-    fn rotate_log_moves_oversized_file_to_backup() {
+    fn rotate_log_compresses_oversized_file_and_preserves_reader_order() {
         let tmp = tempfile::TempDir::new().unwrap();
         let log_path = tmp.path().join("ops.log");
         std::fs::write(&log_path, "0123456789").unwrap();
 
-        rotate_log_if_oversized(&log_path, 10);
+        assert!(rotate_log_if_oversized(&log_path, 10).unwrap());
+        std::fs::write(&log_path, "active").unwrap();
 
-        assert!(!log_path.exists());
-        let backup = tmp.path().join("ops.log.1");
+        assert!(log_path.exists());
+        let backup = tmp.path().join("ops.log.1.zst");
         assert!(backup.exists());
-        assert_eq!(std::fs::read_to_string(&backup).unwrap(), "0123456789");
+        assert_eq!(
+            read_rotated_log(&log_path).unwrap().unwrap(),
+            "0123456789active"
+        );
     }
 
     #[test]
@@ -569,10 +554,10 @@ mod tests {
         let log_path = tmp.path().join("ops.log");
         std::fs::write(&log_path, "small").unwrap();
 
-        rotate_log_if_oversized(&log_path, 64);
+        assert!(!rotate_log_if_oversized(&log_path, 64).unwrap());
 
         assert!(log_path.exists());
-        assert!(!tmp.path().join("ops.log.1").exists());
+        assert!(!tmp.path().join("ops.log.1.zst").exists());
         assert_eq!(std::fs::read_to_string(&log_path).unwrap(), "small");
     }
 
@@ -580,14 +565,19 @@ mod tests {
     fn rotate_log_replaces_existing_backup() {
         let tmp = tempfile::TempDir::new().unwrap();
         let log_path = tmp.path().join("ops.log");
-        let backup = tmp.path().join("ops.log.1");
-        std::fs::write(&backup, "stale-backup").unwrap();
+        let backup = tmp.path().join("ops.log.1.zst");
+        std::fs::write(&log_path, "stale-backup").unwrap();
+        assert!(rotate_log_if_oversized(&log_path, 1).unwrap());
+        assert!(backup.exists());
         std::fs::write(&log_path, "fresh-oversized").unwrap();
 
-        rotate_log_if_oversized(&log_path, 1);
+        assert!(rotate_log_if_oversized(&log_path, 1).unwrap());
 
-        assert!(!log_path.exists());
-        assert_eq!(std::fs::read_to_string(&backup).unwrap(), "fresh-oversized");
+        assert!(log_path.exists());
+        assert_eq!(
+            read_rotated_log(&log_path).unwrap().unwrap(),
+            "fresh-oversized"
+        );
     }
 
     #[test]
@@ -595,10 +585,65 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let log_path = tmp.path().join("ops.log");
 
-        rotate_log_if_oversized(&log_path, 10);
+        assert!(!rotate_log_if_oversized(&log_path, 10).unwrap());
 
         assert!(!log_path.exists());
-        assert!(!tmp.path().join("ops.log.1").exists());
+        assert!(!tmp.path().join("ops.log.1.zst").exists());
+    }
+
+    #[test]
+    fn shared_append_log_clones_share_one_descriptor_and_follow_rotation() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let log_path = tmp.path().join("session.log");
+        let mut log = SharedAppendLog::open(&log_path).unwrap();
+        let mut clones = (0..2_000)
+            .map(|_| log.try_clone().unwrap())
+            .collect::<Vec<_>>();
+
+        #[cfg(target_os = "linux")]
+        {
+            let canonical = log_path.canonicalize().unwrap();
+            let matching = std::fs::read_dir("/proc/self/fd")
+                .unwrap()
+                .flatten()
+                .filter_map(|entry| std::fs::read_link(entry.path()).ok())
+                .filter(|target| target == &canonical)
+                .count();
+            assert_eq!(matching, 1, "2,001 handles must retain one descriptor");
+        }
+
+        writeln!(log, "before").unwrap();
+        assert!(rotate_log_if_oversized(&log_path, 1).unwrap());
+        writeln!(clones.last_mut().unwrap(), "after").unwrap();
+        assert_eq!(
+            read_rotated_log(&log_path).unwrap().unwrap(),
+            "before\nafter\n"
+        );
+        assert!(!tmp.path().join("session.log.1.raw").exists());
+    }
+
+    #[test]
+    fn completed_cycle_rotation_bounds_ops_cycle_and_session_logs_together() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let logs = tmp.path().join(".agent-doc/logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        for name in ["ops.log", "cycles.jsonl", "session-1.log"] {
+            std::fs::write(logs.join(name), format!("{name}-history\n")).unwrap();
+        }
+
+        rotate_completed_cycle_logs(tmp.path(), Some("session-1"), 1);
+
+        for name in ["ops.log", "cycles.jsonl", "session-1.log"] {
+            let active = logs.join(name);
+            assert_eq!(std::fs::metadata(&active).unwrap().len(), 0);
+            assert!(logs.join(format!("{name}.1.zst")).exists());
+            assert!(
+                read_rotated_log(&active)
+                    .unwrap()
+                    .unwrap()
+                    .contains(&format!("{name}-history"))
+            );
+        }
     }
 
     #[test]

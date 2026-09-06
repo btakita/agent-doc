@@ -583,13 +583,15 @@ fn session_id_short(session_id: &str) -> &str {
     session_id.get(..8).unwrap_or(session_id)
 }
 
+pub type SessionLog = agent_doc_ops_log_io::SharedAppendLog;
+
 pub struct StartRuntime {
     pub session_id: String,
     pub fm: frontmatter::Frontmatter,
     pub global_config: agent_doc_config::Config,
     pub canonical: PathBuf,
     pub project_root: PathBuf,
-    pub session_log: Option<std::fs::File>,
+    pub session_log: Option<SessionLog>,
     pub stderr_redirect: SupervisorStderrRedirect,
     pub harness: agent_doc_harness::HarnessConfig,
     pub pane_id: String,
@@ -775,14 +777,14 @@ fn resolve_start_session_identity(
     )
 }
 
-pub fn log_event(log: &mut Option<std::fs::File>, msg: &str) {
+pub fn log_event(log: &mut Option<SessionLog>, msg: &str) {
     if let Some(f) = log {
         let _ = writeln!(f, "[{}] {}", timestamp(), msg);
     }
 }
 
 pub fn start_console_status(
-    session_log: &mut Option<std::fs::File>,
+    session_log: &mut Option<SessionLog>,
     route_owned: bool,
     message: impl AsRef<str>,
 ) {
@@ -800,18 +802,18 @@ pub fn start_console_status(
     }
 }
 
-pub fn open_session_log(file: &Path, session_id: &str) -> Option<std::fs::File> {
+pub fn open_session_log(file: &Path, session_id: &str) -> Option<SessionLog> {
     let path = agent_doc_supervisor_io::startup_miss::supervisor_session_log_path(file, session_id)
         .ok()
         .flatten()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok()?;
     }
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .ok()
+    let _ = agent_doc_ops_log_io::rotate_log_if_oversized(
+        &path,
+        agent_doc_ops_log_io::LOG_ROTATE_MAX_BYTES,
+    );
+    SessionLog::open(path).ok()
 }
 
 fn timestamp() -> String {
@@ -833,7 +835,7 @@ fn disk_document_allows_pre_admission_pane_guard(file: &Path) -> bool {
 }
 
 struct StartAdmissionLaunchLog<'a> {
-    session_log: &'a mut Option<std::fs::File>,
+    session_log: &'a mut Option<SessionLog>,
     route_owned: bool,
 }
 
@@ -1186,6 +1188,16 @@ fn prepare_start_runtime_with_admission(
     )?;
     let global_config = agent_doc_config::load().unwrap_or_default();
     let mut session_log = open_session_log(&canonical, &session_id);
+    if let Some(open_file_descriptors) = agent_doc_fs::open_file_descriptor_count() {
+        log_event(
+            &mut session_log,
+            &format!(
+                "supervisor_resource_pressure open_file_descriptors={open_file_descriptors} \
+                 log_rotate_max_bytes={}",
+                agent_doc_ops_log_io::LOG_ROTATE_MAX_BYTES
+            ),
+        );
+    }
     if assigned_missing_session_uuid {
         start_console_status(
             &mut session_log,
@@ -1508,7 +1520,7 @@ fn prepare_start_runtime_with_admission(
 
 fn close_stale_start_actors(
     project_root: &Path,
-    session_log: &mut Option<std::fs::File>,
+    session_log: &mut Option<SessionLog>,
     route_owned: bool,
 ) {
     match agent_doc_controller_io::project_controller::close_stale_starting_actors_for_caller(
@@ -1553,7 +1565,7 @@ fn report_harness_resolution(
     fm: &frontmatter::Frontmatter,
     global_config: &agent_doc_config::Config,
     harness: &agent_doc_harness::HarnessConfig,
-    session_log: &mut Option<std::fs::File>,
+    session_log: &mut Option<SessionLog>,
     route_owned: bool,
 ) {
     let (source, _resolved_name) = if fm.agent.is_some() {
@@ -1603,7 +1615,7 @@ fn ensure_inside_tmux(file: &Path) -> Result<()> {
 
 fn clear_superseded_startup_miss(
     file: &Path,
-    session_log: &mut Option<std::fs::File>,
+    session_log: &mut Option<SessionLog>,
     route_owned: bool,
 ) -> Result<()> {
     if let Some((miss, supersession)) =
@@ -1824,7 +1836,7 @@ struct StartControllerSessionInput<'a> {
     pane_window: &'a str,
     start_generation: u64,
     harness: &'a str,
-    session_log: &'a mut Option<std::fs::File>,
+    session_log: &'a mut Option<SessionLog>,
 }
 
 struct StartSupervisorRegistryPublication<'a> {
@@ -1835,7 +1847,7 @@ struct StartSupervisorRegistryPublication<'a> {
     pane_id: &'a str,
     pane_window: &'a str,
     supervisor_instance_id: &'a str,
-    session_log: &'a mut Option<std::fs::File>,
+    session_log: &'a mut Option<SessionLog>,
     route_owned: bool,
 }
 
@@ -2156,15 +2168,13 @@ mod tests {
 
     #[test]
     fn start_console_status_suppresses_route_owned_stderr_by_default() {
-        let mut log = tempfile::tempfile().unwrap();
-        let mut cloned = Some(log.try_clone().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.log");
+        let mut cloned = Some(SessionLog::open(&path).unwrap());
         start_console_status(&mut cloned, true, "[start] harness resolved: binary=codex");
         drop(cloned);
 
-        use std::io::{Read, Seek, SeekFrom};
-        log.seek(SeekFrom::Start(0)).unwrap();
-        let mut content = String::new();
-        log.read_to_string(&mut content).unwrap();
+        let content = std::fs::read_to_string(path).unwrap();
         assert!(
             content.contains("start_console_status route_owned=true printed=false"),
             "{content}"
@@ -2330,7 +2340,7 @@ mod tests {
             "---\nagent_doc_session: efs\nagent: codex\n---\nBody\n",
         )
         .unwrap();
-        let mut session_log = Some(tempfile::tempfile().unwrap());
+        let mut session_log = None;
 
         publish_start_supervisor_registry(StartSupervisorRegistryPublication {
             file: &doc,

@@ -1,7 +1,9 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use agent_doc_start_io::{log_event, prepare_start_runtime_reentry, start_console_status};
+use agent_doc_start_io::{
+    SessionLog, log_event, prepare_start_runtime_reentry, start_console_status,
+};
 use agent_doc_supervisor::{
     agent_change::harness_change_forces_fresh_spawn,
     lifecycle::{BootResumeAction, boot_resume_action},
@@ -114,7 +116,7 @@ fn degrade_resume_if_transcript_missing(
     project_root: &Path,
     harness: &agent_doc_harness::HarnessConfig,
     resume: Option<agent_doc_harness::ResumeRequest>,
-    session_log: &mut Option<std::fs::File>,
+    session_log: &mut Option<SessionLog>,
     route_owned: bool,
 ) -> Option<agent_doc_harness::ResumeRequest> {
     let Some(agent_doc_harness::ResumeRequest::Id(id)) = &resume else {
@@ -506,7 +508,7 @@ fn wait_for_restart_backoff(
 }
 
 struct StartRunLaunchLog<'a> {
-    session_log: &'a mut Option<std::fs::File>,
+    session_log: &'a mut Option<SessionLog>,
     route_owned: bool,
 }
 
@@ -538,7 +540,7 @@ fn configure_managed_capability_proof_for_spec(
     global_config: &agent_doc_config::Config,
     preserved_child_survived: bool,
     preserved_proof_contract: Option<&str>,
-    session_log: &mut Option<std::fs::File>,
+    session_log: &mut Option<SessionLog>,
 ) -> Option<std::thread::JoinHandle<()>> {
     let proof_epoch = shared.next_capability_proof_epoch();
     if !spec.capability_proof_required {
@@ -1138,6 +1140,15 @@ pub fn run_with_reap_policy_resume_and_harness(
     let mut child_launch_count: u32 = 0;
     let _actor_context = agent_doc_run_context_io::actor_context(canonical.clone());
     let supervisor_exit_reason = loop {
+        if let Some(open_file_descriptors) = agent_doc_fs::open_file_descriptor_count() {
+            log_event(
+                &mut session_log,
+                &format!(
+                    "supervisor_resource_pressure open_file_descriptors={open_file_descriptors} \
+                     child_launch_count={child_launch_count} restart_count={restart_count}"
+                ),
+            );
+        }
         let mut fresh_harness_switch = false;
         if child_launch_count > 0 {
             let restart_reason = if first_run {
@@ -2470,7 +2481,7 @@ mod tests {
         // SAFETY: single-threaded test-local env mutation.
         unsafe { std::env::set_var("HOME", &home) };
 
-        let mut log: Option<std::fs::File> = None;
+        let mut log: Option<SessionLog> = None;
         let missing = degrade_resume_if_transcript_missing(
             &doc,
             &project_root,
@@ -2730,13 +2741,7 @@ mod tests {
     fn route_owned_start_status_logs_without_printing_by_default() {
         let tmp = TempDir::new().unwrap();
         let log_path = tmp.path().join("session.log");
-        let mut log = Some(
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)
-                .unwrap(),
-        );
+        let mut log = Some(SessionLog::open(&log_path).unwrap());
 
         start_console_status(&mut log, true, "[start] harness resolved: binary=codex");
         drop(log);

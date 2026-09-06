@@ -5762,6 +5762,13 @@ fn reconcile_open_dispatch_receipts_after_restart(
             Some(&marker_payload),
         )?;
     }
+    let compacted = state_store::compact_reconciled_dispatch_attempts_in_db(conn)?;
+    if compacted > 0 {
+        eprintln!(
+            "[controller-recovery] compacted_terminal_dispatch_receipts={compacted} \
+             audit=crash_recovery_markers"
+        );
+    }
     Ok(())
 }
 
@@ -11991,7 +11998,7 @@ agent:queue\n\
     }
 
     #[test]
-    fn controller_restart_recovery_upserts_open_dispatch_markers() {
+    fn controller_restart_recovery_compacts_thousands_of_terminal_dispatch_receipts() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/restart-flood.md");
@@ -12023,7 +12030,8 @@ agent:queue\n\
             },
         };
         store_actor_record(dir.path(), None, &record).unwrap();
-        let receipt_count = 5_i64;
+        let receipt_count = 2_000_i64;
+        conn.execute_batch("BEGIN IMMEDIATE").unwrap();
         for index in 0..receipt_count {
             state_store::insert_dispatch_attempt_in_db(
                 &conn,
@@ -12041,6 +12049,7 @@ agent:queue\n\
             )
             .unwrap_or_else(|err| panic!("insert open dispatch attempt {index}: {err}"));
         }
+        conn.execute_batch("COMMIT").unwrap();
         drop(conn);
 
         let mut bootstrap = test_bootstrap(&dir);
@@ -12067,6 +12076,12 @@ agent:queue\n\
             )
             .unwrap();
         assert_eq!(dedupe_key_count, receipt_count);
+        let retained_receipts: i64 = conn
+            .query_row("SELECT COUNT(*) FROM dispatch_attempts", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(retained_receipts, 0, "durably marked receipts are terminal");
         drop(conn);
 
         let mut bootstrap = test_bootstrap(&dir);
@@ -12076,6 +12091,12 @@ agent:queue\n\
 
         conn = open_state_db(dir.path()).unwrap();
         assert_eq!(marker_count(&conn), receipt_count);
+        let retained_receipts: i64 = conn
+            .query_row("SELECT COUNT(*) FROM dispatch_attempts", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(retained_receipts, 0, "reload must not recreate replay work");
     }
 
     #[test]

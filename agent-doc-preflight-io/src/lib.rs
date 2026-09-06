@@ -2002,7 +2002,11 @@ fn run_gate_verify_with_options(
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     let ops_log = agent_doc_project_root_io::project_root_containing(&canonical)
         .or_else(|| canonical.parent().map(std::path::Path::to_path_buf))
-        .and_then(|root| std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).ok())
+        .and_then(|root| {
+            agent_doc_ops_log_io::read_rotated_log(&root.join(".agent-doc/logs/ops.log"))
+                .ok()
+                .flatten()
+        })
         .unwrap_or_default();
 
     let mut results = Vec::new();

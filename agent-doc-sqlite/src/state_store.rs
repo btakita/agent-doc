@@ -3475,17 +3475,25 @@ pub fn prune_state_events_to_live_peer_watermark_in_db(
             .map(|peer_key| acked_by_peer.get(peer_key).copied().unwrap_or(0))
             .min()
     };
-    let deleted_event_rows = match minimum_acked_version {
-        Some(version) if version > 0 => transaction.execute(
-            "DELETE FROM state_events \
-             WHERE document_hash = ?1 AND document_version < ?2",
-            params![
-                document_hash,
-                sqlite_i64(version, "state-event live-peer watermark")?
-            ],
-        )?,
-        _ => 0,
-    };
+    let mut deleted_event_rows = 0;
+    if let Some(version) = minimum_acked_version.filter(|version| *version > 0) {
+        let version = sqlite_i64(version, "state-event live-peer watermark")?;
+        loop {
+            let deleted = transaction.execute(
+                "DELETE FROM state_events \
+                 WHERE rowid IN (\
+                     SELECT rowid FROM state_events \
+                     WHERE document_hash = ?1 AND document_version < ?2 \
+                     ORDER BY document_version LIMIT 5000\
+                 )",
+                params![document_hash, version],
+            )?;
+            deleted_event_rows += deleted;
+            if deleted == 0 {
+                break;
+            }
+        }
+    }
     transaction
         .commit()
         .context("commit state-event watermark retention transaction")?;
@@ -4035,6 +4043,49 @@ pub fn insert_dispatch_attempt_in_db(
         ],
     )?;
     sqlite_u64(conn.last_insert_rowid(), "dispatch receipt id")
+}
+
+/// Delete accepted-only receipts only after restart reconciliation has
+/// durably materialized the exact receipt id as a crash-recovery marker.
+///
+/// The marker is the bounded audit record; retaining both rows made every
+/// restart replay the same terminal receipts forever. Failed and start-proven
+/// attempts are not eligible, nor is any receipt whose marker write failed.
+pub fn compact_reconciled_dispatch_attempts_in_db(conn: &Connection) -> Result<usize> {
+    let mut deleted_total = 0;
+    loop {
+        let deleted = conn
+            .execute(
+                r#"
+                DELETE FROM dispatch_attempts
+                WHERE id IN (
+                    SELECT attempt.id
+                    FROM dispatch_attempts AS attempt
+                    WHERE attempt.failed_stage IS NULL
+                      AND COALESCE(attempt.result_status, '') IN ('accepted', 'queued', 'running')
+                      AND (
+                          COALESCE(attempt.proof_scope, '') = 'accepted_only'
+                          OR attempt.dispatch_start_proven = 0
+                      )
+                      AND EXISTS (
+                          SELECT 1
+                          FROM crash_recovery_markers AS marker
+                          WHERE marker.marker_kind = 'dispatch_receipt_reconcile'
+                            AND marker.dedupe_key =
+                                'dispatch_receipt_reconcile:receipt:' || attempt.id
+                      )
+                    LIMIT 5000
+                )
+                "#,
+                [],
+            )
+            .context("compact reconciled accepted-only dispatch receipts")?;
+        deleted_total += deleted;
+        if deleted == 0 {
+            break;
+        }
+    }
+    Ok(deleted_total)
 }
 
 pub fn insert_projection_diagnostic(
@@ -6376,6 +6427,49 @@ mod tests {
             state_event_document_high_water_in_db(&conn, "docA")?,
             6,
             "retention preserves the monotonic high-water anchor"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn live_peer_watermark_compacts_thousands_in_batches_without_moving_cursor() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        conn.execute_batch("BEGIN IMMEDIATE")?;
+        for version in 1..=12_050 {
+            let event_id = format!("stress-event-{version}");
+            insert_state_event_in_db(
+                &conn,
+                &StateEventInsert {
+                    event_id: &event_id,
+                    document_hash: "stress-doc",
+                    domain: "document",
+                    fact_type: "write_applied",
+                    payload_json: "{}",
+                },
+            )?;
+        }
+        conn.execute_batch("COMMIT")?;
+        record_state_event_peer_ack_in_db(&conn, "stress-doc", 404, "jetbrains-stress", 12_000)?;
+
+        let outcome = prune_state_events_to_live_peer_watermark_in_db(
+            &conn,
+            "stress-doc",
+            &[(404, "jetbrains-stress".to_string())],
+        )?;
+        assert_eq!(outcome.minimum_acked_version, Some(12_000));
+        assert_eq!(outcome.deleted_event_rows, 11_999);
+        let (count, minimum, maximum): (i64, i64, i64) = conn.query_row(
+            "SELECT COUNT(*), MIN(document_version), MAX(document_version) \
+             FROM state_events WHERE document_hash = 'stress-doc'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!((count, minimum, maximum), (51, 12_000, 12_050));
+        assert_eq!(
+            state_event_document_high_water_in_db(&conn, "stress-doc")?,
+            12_050,
+            "compaction must preserve the monotonic audit cursor"
         );
         Ok(())
     }

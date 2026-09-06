@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.336
+
+- **Fix: long-lived sessions keep state, logs, and descriptors bounded.**
+
+Controller restart now compacts terminal accepted-only dispatch receipts only
+after retaining their exact crash-recovery markers, while acknowledged state
+events delete in bounded batches without losing cursor anchors. Completed-cycle
+log rotation keeps one compressed 32 MiB segment plus the active tail under a
+project lock; rotation-aware readers retain audit continuity, shared supervisor
+log handles avoid descriptor multiplication, and descriptor pressure has
+separate telemetry.
+
 ## 0.35.335
 
 - **Fix: cross-root exact-visible sync stays within one interactive deadline.**

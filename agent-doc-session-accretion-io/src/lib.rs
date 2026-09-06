@@ -177,7 +177,7 @@ pub fn recent_cycle_metrics(file: &Path, now: u64) -> Result<(usize, usize)> {
     let Some(path) = cycles_log_path(file)? else {
         return Ok((0, 0));
     };
-    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_ops_log_io::read_rotated_log(&path)? else {
         return Ok((0, 0));
     };
     let Some(relative_file) = relative_file_key(file) else {
@@ -228,7 +228,7 @@ pub fn recent_restart_metrics(file: &Path, session_id: &str, now: u64) -> Result
     let Some(path) = session_log_path(file, session_id)? else {
         return Ok(0);
     };
-    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_ops_log_io::read_rotated_log(&path)? else {
         return Ok(0);
     };
     Ok(recent_restart_count_from_session_log(&content, now))

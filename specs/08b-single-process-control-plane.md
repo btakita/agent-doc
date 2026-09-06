@@ -608,7 +608,10 @@ the dispatch actor and produce receipts.
 - Open dispatch receipts are reconciled before accepting new work. Receipts with
   no external side-effect proof may be retried idempotently; receipts with
   ambiguous side-effect proof become `Blocked` with a repair action instead of
-  being replayed blindly.
+  being replayed blindly. Once the exact `dispatch_receipt_reconcile` crash
+  marker is durable, terminal accepted-only/start-unproven receipt rows are
+  deleted in bounded batches. The marker remains the audit record, and later
+  controller generations must not replay or recreate the compacted receipt.
 - Supervisor leases carry heartbeat timestamps and child identity. A live child
   with a matching fresh lease may be reattached; a stale lease is closed or
   marked blocked according to the same startup/ready guards used by route.

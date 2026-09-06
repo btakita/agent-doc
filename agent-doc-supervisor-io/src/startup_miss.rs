@@ -355,7 +355,7 @@ pub fn session_log_status(file: &Path, session_id: &str) -> Result<Option<Sessio
     let Some(path) = supervisor_session_log_path(file, session_id)? else {
         return Ok(None);
     };
-    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_rotated_log(&path)? else {
         return Ok(None);
     };
     Ok(agent_doc_supervisor::startup_miss::session_log_status_from_content(&content))
@@ -389,7 +389,7 @@ fn session_log_has_event_after_latest_start_matching(
     let Some(path) = supervisor_session_log_path(file, session_id)? else {
         return Ok(false);
     };
-    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_rotated_log(&path)? else {
         return Ok(false);
     };
     Ok(
@@ -425,7 +425,7 @@ pub fn recent_session_loss_window_at(
     let Some(path) = supervisor_session_log_path(file, session_id)? else {
         return Ok(None);
     };
-    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_rotated_log(&path)? else {
         return Ok(None);
     };
     Ok(agent_doc_supervisor::startup_miss::recent_session_loss_window_at(&content, now_epoch_secs))
@@ -453,7 +453,7 @@ pub fn count_recent_session_loss_events_at(
     let Some(path) = supervisor_session_log_path(file, session_id)? else {
         return Ok(0);
     };
-    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
+    let Some(content) = agent_doc_fs::read_rotated_log(&path)? else {
         return Ok(0);
     };
     Ok(
@@ -855,6 +855,29 @@ mod tests {
                     .to_string()
             )
         );
+    }
+
+    #[test]
+    fn session_log_status_preserves_start_across_compressed_rotation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = setup_project(tmp.path());
+        let log_path = tmp.path().join(".agent-doc/logs/session-rotated.log");
+        std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &log_path,
+            "[1] session_start file=test.md pane=%52 session=session-rotated generation=7\n\
+             [2] codex_start mode=resume restart_count=3\n",
+        )
+        .unwrap();
+        assert!(agent_doc_fs::rotate_log_if_oversized(&log_path, 1).unwrap());
+        std::fs::write(&log_path, "[3] ipc_started project_root=/tmp/project\n").unwrap();
+
+        let status = session_log_status(&doc, "session-rotated")
+            .unwrap()
+            .expect("segment-aware session status");
+        assert_eq!(status.latest_start_pane.as_deref(), Some("%52"));
+        assert_eq!(status.latest_run_timestamp, Some(2));
+        assert!(status.latest_session_open());
     }
 
     #[test]

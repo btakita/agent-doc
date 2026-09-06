@@ -6593,6 +6593,7 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
     let ops_log_io_dependencies = ops_log_io_manifest["dependencies"].as_table().unwrap();
     for required in [
         "agent-doc-cycle-state-io",
+        "agent-doc-fs",
         "agent-doc-frontmatter",
         "agent-doc-git-io",
         "agent-doc-hash",
@@ -6609,7 +6610,6 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
         );
     }
     for forbidden in [
-        "agent-doc-fs",
         "agent-doc-orchestration",
         "agent-doc-sqlite",
         "agent-doc-tmux-io",
@@ -6632,7 +6632,7 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
     for required in [
         "pub struct CycleEntry",
         "pub const LOG_ROTATE_MAX_BYTES",
-        "fn rotate_log_if_oversized(",
+        "pub use agent_doc_fs::{SharedAppendLog, read_rotated_log, rotate_log_if_oversized};",
         "pub struct OpsLogTracking",
         "pub fn log_op(",
         "pub fn log_cycle(",
@@ -7912,7 +7912,7 @@ fn test_agent_doc_session_accretion_owns_pure_policy() {
         "agent_doc_supervisor_io::startup_miss::load_startup_miss(file)",
         "serde_json::from_str::<agent_doc_ops_log_io::CycleEntry>",
         "agent_doc_log_time::parse_log_timestamp",
-        "agent_doc_fs::read_optional_text(",
+        "agent_doc_ops_log_io::read_rotated_log(",
     ] {
         assert!(
             focused_io_source.contains(required_snippet),

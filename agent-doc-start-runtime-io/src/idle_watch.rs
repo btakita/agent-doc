@@ -1310,7 +1310,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
     stop: Arc<AtomicBool>,
     file: String,
     harness: agent_doc_harness::HarnessConfig,
-    mut session_log: Option<std::fs::File>,
+    mut session_log: Option<agent_doc_start_io::SessionLog>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("idle-queue-watch".into())

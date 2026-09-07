@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.340
+
+- **Fix: quiescent supervisors no longer rescan unchanged documents.**
+
+Idle queue safety reconciliation still re-observes the controller's compact
+document revision, but an unchanged revision no longer bypasses either the
+agent-frontmatter gate or the full queue/pane projection once per minute. Full
+CRDT text materialization and downstream projection now run only at startup or
+after a revision/delivery transition, preventing fleets of idle supervisors
+from producing synchronized controller, log, and CPU bursts.
+
 ## 0.35.339
 
 - **Fix: completed live harness switches stay authoritative.**

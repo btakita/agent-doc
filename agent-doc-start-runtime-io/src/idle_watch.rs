@@ -138,45 +138,51 @@ const CONVERGENCE_GATE_TIMEOUT_MS: u64 = 30_000;
 /// queue-drain readiness prompt (~one probe per window per document).
 const IDLE_WATCH_CONTROLLER_BACKOFF: std::time::Duration = std::time::Duration::from_secs(30);
 /// A quiescent session keeps the cheap installed-binary probe at 500ms, but
-/// bounds pane inspection, full CRDT text reads, and reconciliation to this
-/// interval. A stable blocked queue head is quiescent too: retrying the same
-/// controller/model projection twice a second cannot make it dispatchable.
+/// bounds pane inspection and reconciliation to this interval. A stable blocked
+/// queue head is quiescent too: retrying the same controller/model projection
+/// twice a second cannot make it dispatchable.
 const IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL: std::time::Duration =
     std::time::Duration::from_secs(5);
-/// Even with an unchanged compact revision, periodically rerun the authoritative
-/// full-text queue projection as a fail-safe against missed external signals.
-const IDLE_WATCH_FULL_RECONCILE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+/// Periodically re-observe the compact authoritative revision as a fail-safe
+/// against missed external signals. An unchanged identity must not fan this
+/// source check into full queue/frontmatter/pane projection work.
+const IDLE_WATCH_SAFETY_REVISION_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 const IDLE_WATCH_ZOMBIE_REAP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 const DOCUMENT_DELIVERY_WAKE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(500);
 
 #[derive(Debug, Default)]
 struct AgentChangeFrontmatterRefresh {
     revision: Option<String>,
-    refreshed_at: Option<std::time::Instant>,
+    initialized: bool,
 }
 
 impl AgentChangeFrontmatterRefresh {
-    fn due(&self, revision: Option<&str>, now: std::time::Instant) -> bool {
-        self.revision.as_deref() != revision
-            || self.refreshed_at.is_none_or(|refreshed_at| {
-                now.duration_since(refreshed_at) >= IDLE_WATCH_FULL_RECONCILE_INTERVAL
-            })
+    fn due(&self, revision: Option<&str>) -> bool {
+        !self.initialized || self.revision.as_deref() != revision
     }
 
-    fn record(&mut self, revision: Option<&str>, now: std::time::Instant) {
+    fn record(&mut self, revision: Option<&str>) {
         self.revision = revision.map(str::to_owned);
-        self.refreshed_at = Some(now);
+        self.initialized = true;
     }
 }
 
-fn idle_watch_document_reconcile_due(
+fn idle_watch_revision_observation_due(
     delivery_edge_pending: bool,
-    last_full_reconcile: Option<std::time::Instant>,
+    last_safety_revision_observation: Option<std::time::Instant>,
     now: std::time::Instant,
 ) -> bool {
     delivery_edge_pending
-        || last_full_reconcile
-            .is_none_or(|last| now.duration_since(last) >= IDLE_WATCH_FULL_RECONCILE_INTERVAL)
+        || last_safety_revision_observation
+            .is_none_or(|last| now.duration_since(last) >= IDLE_WATCH_SAFETY_REVISION_INTERVAL)
+}
+
+fn idle_watch_projection_reconcile_due(
+    queue_state_observed: bool,
+    delivery_edge_pending: bool,
+    revision_changed: bool,
+) -> bool {
+    !queue_state_observed || delivery_edge_pending || revision_changed
 }
 
 fn record_idle_watch_queue_observation_attempt(
@@ -1525,7 +1531,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     );
                 }
             });
-            let mut last_full_reconcile: Option<std::time::Instant> = None;
+            let mut last_safety_revision_observation: Option<std::time::Instant> = None;
             let mut last_zombie_reap: Option<std::time::Instant> = None;
             let mut agent_change_frontmatter_refresh = AgentChangeFrontmatterRefresh::default();
         // `#binaryownedfinalize`: once finalize has durably captured a
@@ -1934,15 +1940,15 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     last_quiescent_maintenance = None;
                 }
                 if actor_ready_fast && !urgent_maintenance && maintenance_due {
-                    let full_reconcile_due = last_full_reconcile.is_none_or(|last| {
-                        now.duration_since(last) >= IDLE_WATCH_FULL_RECONCILE_INTERVAL
+                    let safety_revision_due = last_safety_revision_observation.is_none_or(|last| {
+                        now.duration_since(last) >= IDLE_WATCH_SAFETY_REVISION_INTERVAL
                     });
                     // Stable live documents arrive here for other bounded
                     // maintenance every five seconds. That is not evidence the
                     // queue projection changed, so do not probe the controller.
-                    if !idle_watch_document_reconcile_due(
+                    if !idle_watch_revision_observation_due(
                         document_delivery_edge_due,
-                        last_full_reconcile,
+                        last_safety_revision_observation,
                         now,
                     ) {
                         last_quiescent_maintenance = Some(now);
@@ -1977,15 +1983,18 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         suppress_controller_observation,
                     ));
                     let revision_changed = revision_state.projection_stale();
-                    if queue_state_observed
-                        && !document_delivery_edge_due
-                        && !revision_changed
-                        && !full_reconcile_due
-                    {
+                    if !idle_watch_projection_reconcile_due(
+                        queue_state_observed,
+                        document_delivery_edge_due,
+                        revision_changed,
+                    ) {
+                        if safety_revision_due {
+                            last_safety_revision_observation = Some(now);
+                        }
                         last_quiescent_maintenance = Some(now);
                         continue;
                     }
-                    last_full_reconcile = Some(now);
+                    last_safety_revision_observation = Some(now);
                 }
                 // `#capproofbg`: a *pending* managed-capability proof no longer
                 // stalls the idle-queue dispatch. Drain dispatch proceeds
@@ -2261,11 +2270,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // `#agentfrontmatterrevisiongate`: materializing that authority is
                 // a full CRDT/controller read. Reuse the idle watch's cheap revision
                 // fingerprint so an unavailable queue authority cannot pull the same
-                // unchanged text twice a second; the periodic reconcile remains the
-                // fail-safe for a missed revision edge.
+                // unchanged text twice a second. The periodic reconcile re-observes
+                // the compact revision as its fail-safe; it must not bypass an
+                // unchanged identity and fan full-document reads across every idle
+                // supervisor.
                 let agent_change_revision = revision_state.tracking().last_observed;
                 let agent_change_refresh_due = agent_change_frontmatter_refresh
-                    .due(agent_change_revision.as_deref(), now);
+                    .due(agent_change_revision.as_deref());
                 let agent_change_view = (agent_change_restart_enabled && agent_change_refresh_due).then(|| {
                     match agent_doc_document_realtime_io::try_resolve_current_document_content(
                         &path,
@@ -2280,7 +2291,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 });
                 if agent_change_view.is_some() {
                     agent_change_frontmatter_refresh
-                        .record(agent_change_revision.as_deref(), now);
+                        .record(agent_change_revision.as_deref());
                 }
                 if let Some((content, authoritative_view)) = agent_change_view
                     && let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content)
@@ -4982,36 +4993,54 @@ mod tests {
     use super::*;
 
     #[test]
-    fn agent_change_frontmatter_refresh_is_revision_and_interval_gated() {
-        let now = std::time::Instant::now();
+    fn agent_change_frontmatter_refresh_is_revision_gated_across_safety_reconciles() {
         let mut refresh = AgentChangeFrontmatterRefresh::default();
 
-        assert!(refresh.due(Some("sv-1"), now));
-        refresh.record(Some("sv-1"), now);
-        assert!(!refresh.due(Some("sv-1"), now + std::time::Duration::from_secs(59)));
-        assert!(refresh.due(Some("sv-2"), now + std::time::Duration::from_secs(1)));
-        assert!(refresh.due(Some("sv-1"), now + IDLE_WATCH_FULL_RECONCILE_INTERVAL));
+        assert!(refresh.due(Some("sv-1")));
+        refresh.record(Some("sv-1"));
+        assert!(!refresh.due(Some("sv-1")));
+        assert!(
+            !refresh.due(Some("sv-1")),
+            "a bounded safety reconcile must not bypass unchanged content identity"
+        );
+        assert!(refresh.due(Some("sv-2")));
+        refresh.record(Some("sv-2"));
+        assert!(!refresh.due(Some("sv-2")));
+
+        let mut unavailable = AgentChangeFrontmatterRefresh::default();
+        assert!(unavailable.due(None));
+        unavailable.record(None);
+        assert!(!unavailable.due(None));
+        assert!(unavailable.due(Some("sv-1")));
     }
 
     #[test]
     fn stable_document_maintenance_does_not_schedule_controller_reconcile() {
         let observed = std::time::Instant::now();
 
-        assert!(!idle_watch_document_reconcile_due(
+        assert!(!idle_watch_revision_observation_due(
             false,
             Some(observed),
             observed + IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL,
         ));
-        assert!(idle_watch_document_reconcile_due(
+        assert!(idle_watch_revision_observation_due(
             true,
             Some(observed),
             observed + IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL,
         ));
-        assert!(idle_watch_document_reconcile_due(
+        assert!(idle_watch_revision_observation_due(
             false,
             Some(observed),
-            observed + IDLE_WATCH_FULL_RECONCILE_INTERVAL,
+            observed + IDLE_WATCH_SAFETY_REVISION_INTERVAL,
         ));
+    }
+
+    #[test]
+    fn unchanged_safety_revision_does_not_force_projection_reconcile() {
+        assert!(!idle_watch_projection_reconcile_due(true, false, false));
+        assert!(idle_watch_projection_reconcile_due(false, false, false));
+        assert!(idle_watch_projection_reconcile_due(true, true, false));
+        assert!(idle_watch_projection_reconcile_due(true, false, true));
     }
 
     #[test]
@@ -5231,13 +5260,13 @@ mod tests {
     /// expensive work than to miss a change.
     ///
     /// The intent was right and the mechanism was wrong. Missing a change is
-    /// already covered — [`IDLE_WATCH_FULL_RECONCILE_INTERVAL`] reruns the
-    /// authoritative projection every 60s regardless of what the probe said. So
-    /// the invalidate-on-failure rule bought no safety that was not already
-    /// there, and it cost a feedback loop: an unanswerable probe means the
-    /// controller is struggling, and the response was to issue the expensive
-    /// controller RPCs every 500ms instead of every 60s, up to 120x the intended
-    /// load, aimed at the process that was already failing to keep up.
+    /// already covered — [`IDLE_WATCH_SAFETY_REVISION_INTERVAL`] reruns the
+    /// compact authoritative identity observation every 60s. So the
+    /// invalidate-on-failure rule bought no safety that was not already there,
+    /// and it cost a feedback loop: an unanswerable probe means the controller
+    /// is struggling, and the response was to issue the expensive controller
+    /// RPCs every 500ms instead of every 60s, up to 120x the intended load,
+    /// aimed at the process that was already failing to keep up.
     #[test]
     fn an_unanswerable_probe_does_not_invalidate_the_full_projection() {
         let first = IdleWatchDocumentRevision::Disk {
@@ -5268,8 +5297,8 @@ mod tests {
         state.observe(RevisionObservation::Unresolved);
         assert!(
             !state.projection_stale(),
-            "an unanswered probe must not invalidate: the 60s full reconcile is \
-             the fail-safe, and escalating here feeds the wedge instead"
+            "an unanswered probe must not invalidate: the 60s compact revision \
+             observation is the fail-safe, and escalating here feeds the wedge instead"
         );
 
         state.observe(RevisionObservation::Suppressed);

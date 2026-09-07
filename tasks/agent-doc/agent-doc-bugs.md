@@ -4,7 +4,7 @@ resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
   codex: 01a0754d-5499-7160-ac2b-09ad05ea0ece
 agent: codex
-claude_model: opus
+claude_model: fable
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
@@ -136,6 +136,14 @@ Verification passed: both focused regressions, all pane-layout tests, non-test `
 ### Re: Response
 
 Restart confirmed. The updated JetBrains plugin is active; Book and Pages checks passed, while the full CI suite is still running without reported failures. You can retry **Run Agent Doc** on `dev.md`.
+
+### Re: Response
+
+Continuation cannot be admitted because `cont` did not trigger a new binary preflight contract. Please invoke:
+
+`agent-doc tasks/agent-doc/agent-doc-bugs.md`
+
+again after the editor replica has re-registered.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 
@@ -145,6 +153,7 @@ Restart confirmed. The updated JetBrains plugin is active; Book and Pages checks
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Please fix background thrashing caused by agent-doc idle sessions.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

@@ -144,6 +144,21 @@ Continuation cannot be admitted because `cont` did not trigger a new binary pref
 `agent-doc tasks/agent-doc/agent-doc-bugs.md`
 
 again after the editor replica has re-registered.
+
+### Re: Response
+
+Fixed and live-unwedged.
+
+- Root cause: supervisor harness switches updated SQLite directly while the controller retained stale `codex` state, repeatedly reopening a completed handoff.
+- Fix: harness writeback now atomically updates the controller’s actor source and durable record, fenced by session/pane/generation. See [rpc.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-controller-io/src/project_controller/rpc.rs:1515) and [lib.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-start-runtime-io/src/lib.rs:2138).
+- Released and installed `agent-doc 0.35.339`.
+- `dev.md` is now `ready`, generation 2, correctly bound to `claude-code`; controller and supervisor run the current binary.
+- Both `priority` markers remain intact.
+- `make check` and focused regressions passed.
+- Commit `5445702d2` pushed to `main`; CI was in progress at last check.
+- The public subrepo is clean.
+
+I did not fabricate a response cycle in `agent-doc-bugs.md`; its earlier admission never opened a cycle.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 

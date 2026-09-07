@@ -159,6 +159,28 @@ Fixed and live-unwedged.
 - The public subrepo is clean.
 
 I did not fabricate a response cycle in `agent-doc-bugs.md`; its earlier admission never opened a cycle.
+
+### Re: background agent-doc process thrashing — gpt-5
+
+> **Queue prompt:** There are still many background agent-doc processes thrashing.
+
+Fixed and shipped in agent-doc 0.35.340.
+
+The root cause was the quiescent supervisor's 60-second safety timer crossing the compact-revision boundary. Even when the controller reported the exact same document revision, every supervisor forced a full authoritative frontmatter read and then continued through the queue/pane projection. With roughly fifteen retained supervisors, that produced a fleet-wide thundering herd: the pre-fix supervisors averaged about 24% CPU in aggregate, individual one-second samples spiked to 8–13%, and the project controller averaged roughly 12–15%. The ops log independently showed one full `idle_watch_agent_change_frontmatter` read batch per idle document per minute.
+
+The runtime now keeps the authority chain explicit: the controller's compact `CurrentRevision` is the source, revision/delivery change is the invalidation policy, and full Markdown/frontmatter plus downstream queue/pane work are effects. The bounded safety pass may re-observe the compact revision, but an unchanged identity cannot trigger either effect. Initial observation, a real revision transition, or a delivery edge still reconciles normally. Regression coverage proves both the frontmatter gate and the projection gate, including unavailable-to-current revision recovery.
+
+Verification is green:
+
+- `cargo test -p agent-doc-start-runtime-io` passed.
+- Final `make check` passed the full workspace, documentation/projection audits, deterministic simulations, and all six TLA+ model checks.
+- `cargo fmt --all --check` passed.
+- `make install` installed the CLI, native library, skills, JetBrains plugin, and VS Code extension.
+- A final 70-second live sample across the former timer boundary showed the updated `dev.md` supervisor averaging 0.67% CPU, peaking at 4%, with its full-document read counter unchanged at 362. Active older turns are intentionally not killed; supervisors still mapped to the prior deleted inode will self-exec 0.35.340 at their next safe boundary.
+
+The earlier Run Agent Doc wedge on `dev.md` also remains cleared: `agent-doc session-check` reports its cycle committed, `queue_continuation_required=false`, and `no_drainable_work`.
+
+Public commit `fabbbae67` (`fix(runtime): keep idle reconciliation revision-driven`) is pushed to `main`. The new GitHub CI run is in progress; the immediately preceding red run was an unrelated wall-clock-sensitive IPC timeout after 9,148 passing tests, while the same complete gate passed locally.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 
@@ -168,7 +190,6 @@ I did not fabricate a response cycle in `agent-doc-bugs.md`; its earlier admissi
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Please fix background thrashing caused by agent-doc idle sessions.
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

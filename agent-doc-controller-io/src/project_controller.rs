@@ -5964,6 +5964,20 @@ pub struct LifecycleRequest {
     pub reason: String,
 }
 
+/// Generation-fenced update of the transport harness owned by a live actor.
+///
+/// Harness identity is part of the controller's authoritative actor record, so
+/// supervisors must publish a completed in-place harness switch through the
+/// controller rather than writing the SQLite projection behind its back.
+#[derive(Clone, Debug, Serialize)]
+pub struct ActorHarnessRequest {
+    pub file: PathBuf,
+    pub session_id: String,
+    pub pane_id: String,
+    pub generation: u64,
+    pub harness: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct SupervisorHeartbeatRequest {
     pub file: PathBuf,

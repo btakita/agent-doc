@@ -1512,6 +1512,49 @@ pub fn mark_lifecycle(
     )
 }
 
+/// Publish the transport harness selected by a live supervisor through the
+/// controller-owned actor source and its durable SQLite sink in one mutation.
+pub fn set_actor_harness(
+    project_root: &Path,
+    request: ActorHarnessRequest,
+) -> Result<agent_doc_controller::actor::ActorRecord> {
+    let controller_request = ControllerRequest {
+        command: "set_actor_harness".to_string(),
+        file: Some(request.file),
+        session_id: Some(request.session_id),
+        pane_id: Some(request.pane_id),
+        window_id: None,
+        generation: Some(request.generation),
+        state: None,
+        caller: Some("supervisor".to_string()),
+        reason: Some("agent_harness_switch_writeback".to_string()),
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(request.harness),
+    };
+
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.to_path_buf(),
+            socket_path: socket_path(project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity()?),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        handle_set_actor_harness(&bootstrap, None, controller_request)
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
+    request_controller(project_root, controller_request)
+}
+
 pub fn refresh_supervisor_lease(
     project_root: &Path,
     request: SupervisorHeartbeatRequest,
@@ -12847,6 +12890,11 @@ pub(crate) fn handle_request_locked(
             Some(runtime.as_ref()),
             request,
         )),
+        "set_actor_harness" => controller_envelope(handle_set_actor_harness(
+            &bootstrap_snapshot,
+            Some(runtime.as_ref()),
+            request,
+        )),
         "supervisor_heartbeat" => controller_envelope(handle_supervisor_heartbeat(
             &bootstrap_snapshot,
             Some(runtime.as_ref()),
@@ -16855,6 +16903,83 @@ pub(crate) fn handle_mark_lifecycle(
             state.as_str(),
             caller,
             reason
+        ),
+    );
+    Ok(record)
+}
+
+pub(crate) fn handle_set_actor_harness(
+    bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
+    request: ControllerRequest,
+) -> Result<agent_doc_controller::actor::ActorRecord> {
+    let file = request_file(&request)?;
+    let session_id = request_string(&request.session_id, "session_id")?;
+    let pane_id = request_string(&request.pane_id, "pane_id")?;
+    let generation = request_u64(request.generation, "generation")?;
+    let harness = agent_doc_harness::normalize_harness_name(&request_string(
+        &request.diagnostic_payload,
+        "harness",
+    )?);
+    if harness.trim().is_empty() || harness == "default" {
+        anyhow::bail!("actor harness writeback requires a concrete harness identity");
+    }
+    let caller = request
+        .caller
+        .as_deref()
+        .unwrap_or("supervisor")
+        .to_string();
+    let reason = request
+        .reason
+        .as_deref()
+        .unwrap_or("agent_harness_switch_writeback")
+        .to_string();
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &bootstrap.project_root,
+        &file.to_string_lossy(),
+    );
+    let current = actor_record_from_authority(bootstrap, runtime, &document_id)?
+        .with_context(|| format!("missing authoritative actor record for {document_id}"))?;
+    if current.session_id != session_id
+        || current.pane_id != pane_id
+        || current.generation != generation
+    {
+        anyhow::bail!(
+            "stale actor harness writeback for {}: session {} generation {} pane {} no longer owns current session {} generation {} pane {}",
+            document_id,
+            session_id,
+            generation,
+            pane_id,
+            current.session_id,
+            current.generation,
+            current.pane_id,
+        );
+    }
+
+    let mut record = current.clone();
+    record.harness = harness;
+    record.last_transition = agent_doc_controller::actor::ActorLastTransition {
+        caller,
+        reason,
+        timestamp: timestamp_secs(),
+        prior_generation: current.generation,
+        new_generation: current.generation,
+    };
+    let record = store_actor_record_for_runtime(
+        &bootstrap.project_root,
+        Some(current.generation),
+        &record,
+        runtime,
+    )?;
+    agent_doc_ops_log_io::log_op(
+        &file,
+        &format!(
+            "controller_actor_harness_writeback file={} session={} pane={} generation={} harness={} authority=controller_actor_source",
+            file.display(),
+            record.session_id,
+            record.pane_id,
+            record.generation,
+            record.harness,
         ),
     );
     Ok(record)
@@ -28006,7 +28131,7 @@ mod tests {
     }
 
     #[test]
-    fn controller_runtime_publishes_actor_source_after_durable_commit() {
+    fn controller_runtime_publishes_actor_and_harness_updates_before_lifecycle_reuse() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/memory-auth.md");
@@ -28051,6 +28176,74 @@ mod tests {
         let memory_record = runtime.actor_record(&doc_id).unwrap().unwrap();
         assert_eq!(memory_record.session_id, "session-memory-auth");
         assert_eq!(memory_record.pane_id, "%88");
+
+        // A supervisor's completed in-place harness switch must update the
+        // controller source and durable sink together. The old direct-SQLite
+        // write left this in-memory record at `codex`; the next lifecycle write
+        // then restored that stale harness and every Run request re-entered the
+        // already-completed handoff path.
+        let set_harness = ControllerRequest {
+            command: "set_actor_harness".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-memory-auth".to_string()),
+            pane_id: Some("%88".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: Some("supervisor".to_string()),
+            reason: Some("agent_harness_switch_writeback".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some("claude".to_string()),
+        };
+        let response = handle_request_locked(
+            &(serde_json::to_string(&set_harness).unwrap() + "\n"),
+            &runtime,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<agent_doc_controller::actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        assert_eq!(envelope.data.as_ref().unwrap().harness, "claude-code");
+        assert_eq!(
+            runtime.actor_record(&doc_id).unwrap().unwrap().harness,
+            "claude-code"
+        );
+        assert_eq!(
+            load_actor_record(dir.path(), &doc_id)
+                .unwrap()
+                .unwrap()
+                .harness,
+            "claude-code"
+        );
+
+        let lifecycle = ControllerRequest {
+            command: "mark_lifecycle".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-memory-auth".to_string()),
+            pane_id: Some("%88".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: Some("ready".to_string()),
+            caller: Some("supervisor".to_string()),
+            reason: Some("idle_pane_reconcile".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request_locked(
+            &(serde_json::to_string(&lifecycle).unwrap() + "\n"),
+            &runtime,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<agent_doc_controller::actor::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        assert_eq!(envelope.data.as_ref().unwrap().harness, "claude-code");
 
         let status = ControllerRequest {
             command: "status".to_string(),

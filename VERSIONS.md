@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.339
+
+- **Fix: completed live harness switches stay authoritative.**
+
+Supervisor harness writeback now goes through the owning controller, which
+atomically persists the actor record and publishes the updated record to the
+controller's in-memory actor source. Later routes and lifecycle writes can no
+longer reuse a stale pre-switch harness, falsely reopen a boundary handoff, and
+wedge repeated Run Agent Doc actions.
+
 ## 0.35.338
 
 - **Fix: repeated Run Agent Doc actions recover from operator-owned layout drift.**

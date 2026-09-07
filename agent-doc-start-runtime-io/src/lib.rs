@@ -1933,6 +1933,19 @@ impl SessionActorRuntime {
             },
         )
     }
+
+    fn set_harness(&self, harness: &str) -> Result<agent_doc_controller::actor::ActorRecord> {
+        agent_doc_controller_io::project_controller::set_actor_harness(
+            &self.project_root,
+            agent_doc_controller_io::project_controller::ActorHarnessRequest {
+                file: self.file.clone(),
+                session_id: self.session_id.clone(),
+                pane_id: self.pane_id.clone(),
+                generation: self.generation,
+                harness: harness.to_string(),
+            },
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -2127,28 +2140,24 @@ impl SupervisorShared {
     /// transport on initial spawn/adoption as well as after an in-loop `agent:`
     /// switch (`#actorharnessinitialwriteback` / `#actorharnessrecordwriteback`).
     ///
-    /// Two stores must move together, and the second one is the whole point:
-    ///   1. the in-memory identity, read by IPC `state` and the tmux submit profile;
-    ///   2. the PERSISTED authoritative actor record, read by `route`.
+    /// Two authorities must move together, and the second one is the whole point:
+    ///   1. the supervisor-local identity, read by IPC `state` and the tmux submit profile;
+    ///   2. the controller-owned actor source, atomically published with its durable sink
+    ///      and read by `route` plus later lifecycle transitions.
     ///
     /// Updating only (1) is what let a completed codex->claude switch keep deferring:
-    /// the record still said `codex`, and `transition_state_*` carries the stored
-    /// harness forward on every later lifecycle transition, so nothing ever corrected
-    /// it. The record write is best-effort — a failure here must not abort a restart
-    /// that already spawned the new harness — but it is logged loudly rather than
-    /// swallowed, since a silent failure reintroduces exactly this bug.
+    /// the controller source still said `codex`, and `transition_state_*` carried that
+    /// stored harness forward on every later lifecycle transition, so nothing ever
+    /// corrected it. The record write is best-effort — a failure here must not abort a
+    /// restart that already spawned the new harness — but it is logged loudly rather
+    /// than swallowed, since a silent failure reintroduces exactly this bug.
     fn set_current_harness(&self, harness_binary: &str) {
         self.harness_authority
             .set_active_actor_harness(harness_binary);
         let Some(runtime) = self.actor_runtime.as_ref() else {
             return;
         };
-        match agent_doc_session_actor_io::set_record_harness_direct(
-            &runtime.file,
-            &runtime.session_id,
-            &runtime.pane_id,
-            harness_binary,
-        ) {
+        match runtime.set_harness(harness_binary) {
             Ok(record) => {
                 agent_doc_ops_log_io::log_op(
                     &runtime.file,

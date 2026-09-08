@@ -50,9 +50,32 @@ pub fn pane_title_for_status(active: bool, stale: bool) -> String {
     }
 }
 
+/// Refresh only the supervisor decoration; adoption must preserve the child turn title.
+pub fn pane_title_with_freshness(title: &str, stale: bool) -> String {
+    let base = title
+        .strip_prefix(STALE_SUPERVISOR_PANE_MARKER)
+        .map(|title| title.strip_prefix(' ').unwrap_or(title))
+        .unwrap_or(title);
+    match (stale, base.is_empty()) {
+        (false, _) => base.to_string(),
+        (true, true) => STALE_SUPERVISOR_PANE_MARKER.to_string(),
+        (true, false) => format!("{STALE_SUPERVISOR_PANE_MARKER} {base}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adoption_refresh_preserves_active_idle_and_custom_titles() {
+        for title in ["", TURN_ACTIVE_PANE_TITLE, "custom title"] {
+            let stale = pane_title_with_freshness(title, true);
+            assert_eq!(pane_title_with_freshness(&stale, true), stale);
+            assert_eq!(pane_title_with_freshness(&stale, false), title);
+            assert_eq!(pane_title_with_freshness(title, false), title);
+        }
+    }
 
     #[test]
     fn pane_title_active_names_turn_in_progress() {

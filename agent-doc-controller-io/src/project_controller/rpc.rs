@@ -19315,14 +19315,9 @@ fn pane_layout_effect_worker(
         let actor_bindings = runtime.pane_layout_actor_bindings();
         if desired.invocation.caller_kind == "automatic" {
             let observation_invocation = pane_layout_state_invocation(&desired);
-            // Structural receipt bindings use the established empty-session
-            // representation. Keep automatic observation on the same retained
-            // value instead of reaching around it to read the source directly.
-            let structural_file_panes = actor_bindings
-                .iter()
-                .filter(|binding| binding.session_id.is_empty())
-                .map(|binding| (binding.document_path.clone(), binding.pane_id.clone()))
-                .collect::<Vec<_>>();
+            // Ownership is a retained join over effect receipts and live actors,
+            // independent of current-layout reuse and nonempty session IDs.
+            let structural_file_panes = runtime.pane_layout_owned_assignments();
             if let Ok(report) = tmux_layout_sync_state_for_invocation_with_effect_assignment(
                 &bootstrap,
                 &runtime,
@@ -25026,6 +25021,41 @@ mod tests {
         let actor_store = BTreeMap::from([(outgoing.clone(), actor)]);
         let physical_panes = vec!["%1".to_string(), "%2".to_string()];
         let expected_documents = vec!["/project/tasks/current.md".to_string()];
+
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actors = ControllerActorGraph::new_in(&scope, actor_store.clone());
+        let graph =
+            ControllerPaneLayoutGraph::new_in(&scope, Vec::new(), actors.live_bindings_handle());
+        let mut invocation = ControllerTmuxLayoutSyncInvocation {
+            columns: vec![outgoing.clone()],
+            window: None,
+            focus: None,
+            no_autostart: false,
+            exact_visible: true,
+            caller_kind: "automatic".into(),
+            actor_bindings: Vec::new(),
+        };
+        let old = graph.set_desired(invocation.clone(), None);
+        graph.record_structural_assignment(
+            &old,
+            graph.actor_bindings(),
+            None,
+            vec![(outgoing.clone(), "%2".into())],
+        );
+        invocation.columns = expected_documents.clone();
+        graph.set_desired(invocation, None);
+        // This is the worker's actual evidence path, including a nonempty actor
+        // session and a changed desired layout. Neither may drop ownership.
+        assert!(
+            layout_sync_state_operator_owned_documents(
+                project_root,
+                &expected_documents,
+                &physical_panes,
+                &actor_store,
+                &graph.ctx.get(&graph.owned_assignments),
+            )
+            .is_empty()
+        );
 
         assert_eq!(
             layout_sync_state_operator_owned_documents(

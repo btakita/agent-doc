@@ -364,7 +364,11 @@ without structural provenance retain the operator-owned protection.
   Source and join them with live actor state and current desired documents in
   the same binding Computed; an RPC worker must not imperatively append this
   derived evidence to an invocation. A desired-state change invalidates stale
-  receipt assignments before the next effect runs.
+  receipt assignments for structural reuse before the next effect runs. It
+  does not erase ownership: a separate process-scoped Computed joins retained
+  physical assignment receipts with current actor bindings, including outgoing
+  documents and actors with nonempty session IDs. Layout drift invalidates
+  geometry reuse only; actor rebinding retires obsolete ownership proof.
 - When that retained binding projection misses for a nested-root document,
   interactive sync may make exactly one read-only request to an already-running
   owning controller. The request has a 250ms deadline, must not launch or retry

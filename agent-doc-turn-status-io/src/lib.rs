@@ -104,34 +104,65 @@ pub fn turn_active_for_pane(base: &Path, pane: &str) -> bool {
 
 /// Publish the stale-supervisor flag in the project state database.
 /// Best-effort cross-process channel for the supervisor → turn-status hook.
-pub fn set_supervisor_stale_marker(base: &Path, stale: bool) -> Result<()> {
+pub fn set_supervisor_stale_marker(base: &Path, pane: &str, stale: bool) -> Result<()> {
     let conn = open_state_db(base)?;
     if stale {
         upsert_coordination_lease_in_db(
             &conn,
             &CoordinationLeaseRecord {
                 scope_kind: SUPERVISOR_STALE_SCOPE.to_string(),
-                scope_id: PROJECT_SCOPE_ID.to_string(),
+                scope_id: pane.to_string(),
                 holder: "stale".to_string(),
                 holder_pid: Some(std::process::id()),
                 heartbeat_secs: now_secs(),
             },
         )
     } else {
-        clear_coordination_lease_in_db(&conn, SUPERVISOR_STALE_SCOPE, PROJECT_SCOPE_ID).map(|_| ())
+        clear_coordination_lease_in_db(&conn, SUPERVISOR_STALE_SCOPE, pane).map(|_| ())
     }
 }
 
 /// True when the stale-supervisor marker is present under `base` (`#suptmuxstale`).
 /// Read-only display probe — absent / unreadable reads as fresh (not stale).
-pub fn supervisor_stale(base: &Path) -> bool {
+pub fn supervisor_stale(base: &Path, pane: &str) -> bool {
     let Ok(conn) = open_state_db(base) else {
         return false;
     };
-    load_coordination_lease_from_db(&conn, SUPERVISOR_STALE_SCOPE, PROJECT_SCOPE_ID)
+    load_coordination_lease_from_db(&conn, SUPERVISOR_STALE_SCOPE, pane)
         .ok()
         .flatten()
         .is_some()
+}
+
+/// Effect sink for the process-owned freshness projection. This marker is display
+/// output only, never authority for recycle or turn admission.
+pub fn project_supervisor_freshness(base: &Path, pane: &str, stale: bool) -> Result<()> {
+    set_supervisor_stale_marker(base, pane, stale)?;
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    let output = tmux
+        .cmd()
+        .args(["display-message", "-p", "-t", pane, "#{pane_title}"])
+        .output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "failed to read pane {pane} title: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let title = String::from_utf8_lossy(&output.stdout);
+    let title = title.trim_end_matches(['\r', '\n']);
+    let updated = agent_doc_turn::turn_status::pane_title_with_freshness(title, stale);
+    if updated != title {
+        let output = tmux
+            .cmd()
+            .args(["select-pane", "-t", pane, "-T", &updated])
+            .output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "failed to update pane {pane} title: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
 }
 
 fn set_pane_title(pane: &str, title: &str) {
@@ -151,7 +182,7 @@ fn set_pane_title(pane: &str, title: &str) {
 /// Set a specific tmux pane's border title from turn/stale-supervisor state.
 /// Best-effort: tmux failures are logged and ignored.
 pub fn set_pane_title_for_status(base: &Path, pane: &str, active: bool) {
-    let title = pane_title_for_status(active, supervisor_stale(base));
+    let title = pane_title_for_status(active, supervisor_stale(base, pane));
     set_pane_title(pane, &title);
 }
 
@@ -176,7 +207,7 @@ pub fn run(active: bool) -> anyhow::Result<()> {
     // the route-owned supervisor has published its `binary_stale` probe on disk.
     // Read-only display; absent/unreadable marker reads as fresh.
     let stale = resolve_marker_base()
-        .map(|base| supervisor_stale(&base))
+        .map(|base| supervisor_stale(&base, &pane))
         .unwrap_or(false);
     let title = pane_title_for_status(active, stale);
     set_pane_title(&pane, &title);
@@ -241,15 +272,21 @@ mod tests {
         let base = dir.path();
         std::fs::create_dir_all(base.join(".agent-doc")).unwrap();
 
-        assert!(!supervisor_stale(base), "fresh before any marker");
+        assert!(!supervisor_stale(base, "%7"), "fresh before any marker");
 
-        set_supervisor_stale_marker(base, true).unwrap();
-        assert!(supervisor_stale(base), "stale after marker write");
+        set_supervisor_stale_marker(base, "%7", true).unwrap();
+        assert!(supervisor_stale(base, "%7"), "stale after marker write");
+        assert!(!supervisor_stale(base, "%8"), "another pane is independent");
+        set_supervisor_stale_marker(base, "%8", false).unwrap();
+        assert!(
+            supervisor_stale(base, "%7"),
+            "fresh sibling cannot clear stale owner"
+        );
 
-        set_supervisor_stale_marker(base, false).unwrap();
-        assert!(!supervisor_stale(base), "fresh after marker clear");
+        set_supervisor_stale_marker(base, "%7", false).unwrap();
+        assert!(!supervisor_stale(base, "%7"), "fresh after marker clear");
         // Clearing an absent marker is a no-op, not an error.
-        set_supervisor_stale_marker(base, false).unwrap();
+        set_supervisor_stale_marker(base, "%7", false).unwrap();
     }
 
     #[test]

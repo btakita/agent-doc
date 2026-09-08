@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.343
+
+- **Fix: stale supervisor titles converge after an upgrade.** Freshness now drives
+  a process-scoped title effect, including child-preserving adoption. Display
+  markers are pane-local; a sibling supervisor cannot set or clear another
+  pane's warning. Updating freshness preserves the child's existing turn title.
+- **Fix: automatic tmux sync retains outgoing-pane ownership.** Structural
+  assignment receipts feed a separate ownership projection across tab switches
+  and superseded layout effects. Changing desired columns or invalidating reuse
+  no longer misclassifies a pane agent-doc placed as operator-owned. Actor
+  rebinding retires obsolete proof; unmanaged panes remain protected.
+
 ## 0.35.342
 
 - **Fix: rejected replica recovery preserves the current editor connection.**

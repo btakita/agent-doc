@@ -6,6 +6,11 @@ Edit a markdown file, press a hotkey, and the tool diffs your changes, sends the
 
 > **Alpha Software** — actively developed; APIs and frontmatter format may change between versions.
 
+Supervisor freshness warnings are pane-local and refresh on binary-state changes,
+including child-preserving upgrades, without changing the child's turn title.
+Automatic editor layout sync retains proof of outgoing pane assignments across
+tab switches; layout-reuse invalidation does not erase controller ownership.
+
 > **Single-user only.** agent-doc operates on the local filesystem with no access control. Use a private git repository. See the [Security](#security) section for details.
 
 ## Install

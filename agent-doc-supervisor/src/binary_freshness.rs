@@ -34,6 +34,7 @@ pub struct BinaryFreshnessState {
     ctx: ThreadSafeContext,
     observation: Source<BinaryFreshnessObservation>,
     stale: Computed<bool>,
+    projection_receipt: Source<Option<Result<bool, String>>>,
 }
 
 impl BinaryFreshnessState {
@@ -42,10 +43,12 @@ impl BinaryFreshnessState {
         let ctx = scope.ctx().clone();
         let observation = ctx.source(BinaryFreshnessObservation::default());
         let stale = ctx.computed(move |ctx| ctx.get(&observation).is_stale());
+        let projection_receipt = ctx.source(None);
         Self {
             ctx,
             observation,
             stale,
+            projection_receipt,
         }
     }
 
@@ -58,11 +61,45 @@ impl BinaryFreshnessState {
     pub fn stale(&self) -> bool {
         self.ctx.get(&self.stale)
     }
+
+    /// Project freshness at startup and on changes, including child-preserving reexec.
+    pub fn on_change(
+        &self,
+        sink: impl Fn(bool) -> Result<(), String> + Send + Sync + 'static,
+    ) -> lazily::Effect {
+        let stale = self.stale;
+        let receipt = self.projection_receipt;
+        self.ctx.effect(move |ctx| {
+            let stale = ctx.get(&stale);
+            ctx.set(&receipt, Some(sink(stale).map(|()| stale)));
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn freshness_effect_initializes_adoption_and_only_projects_transitions() {
+        let scope = ProcessScope::new();
+        let state = BinaryFreshnessState::new_in(&scope);
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let _effect = state.on_change(move |stale| {
+            sink.lock().unwrap().push(stale);
+            Ok(())
+        });
+        let stale = BinaryFreshnessObservation {
+            identity_stale: true,
+            ..Default::default()
+        };
+        state.observe(stale);
+        state.observe(stale);
+        state.observe(BinaryFreshnessObservation::default());
+        assert_eq!(*seen.lock().unwrap(), vec![false, true, false]);
+        assert_eq!(state.ctx.get(&state.projection_receipt), Some(Ok(false)));
+    }
 
     #[test]
     fn stale_projection_tracks_identity_and_inode_observations() {

@@ -820,6 +820,9 @@ struct ControllerPaneLayoutGraph {
     observed: Source<Option<PaneLayoutObservation>>,
     receipt: Source<PaneLayoutEffectReceipt>,
     structural_receipt: Source<Option<PaneLayoutStructuralReceipt>>,
+    // Ownership survives a desired-layout change; structural reuse does not.
+    assignments: Source<BTreeMap<String, String>>,
+    owned_assignments: Computed<Vec<(String, String)>>,
     applicable_receipt: Computed<Option<PaneLayoutEffectReceipt>>,
     projection: Computed<PaneLayoutProjection>,
     effect: Mutex<Option<lazily::Effect>>,
@@ -867,6 +870,26 @@ impl ControllerPaneLayoutGraph {
         });
         let desired = ctx.source(initial_desired);
         let structural_receipt = ctx.source(None);
+        let assignments = ctx.source(BTreeMap::<String, String>::new());
+        let owned_assignments = ctx.computed(move |ctx| {
+            let actors = ctx.get(&live_actor_bindings);
+            ctx.get(&assignments)
+                .into_iter()
+                .filter(|(document, pane)| {
+                    // A later actor rebind retires the old receipt. Unknown actors
+                    // are allowed for cross-root effects; the tmux adapter still
+                    // proves physical visibility and ownership before moving panes.
+                    actors.get(document).is_none_or(|actor| {
+                        actor.pane_id == *pane
+                            && actor.state != agent_doc_controller::actor::ActorState::Closed
+                    }) && !actors.values().any(|actor| {
+                        actor.pane_id == *pane
+                            && actor.document_id != *document
+                            && actor.state != agent_doc_controller::actor::ActorState::Closed
+                    })
+                })
+                .collect::<Vec<_>>()
+        });
         let desired_for_actor_bindings = desired;
         let structural_receipt_for_actor_bindings = structural_receipt;
         let actor_bindings = ctx.computed(move |ctx| {
@@ -889,10 +912,22 @@ impl ControllerPaneLayoutGraph {
         let observed_for_projection = observed;
         let receipt_for_projection = receipt;
         let projection = ctx.computed(move |ctx| {
+            let owned = ctx.get(&owned_assignments);
+            let mut observation: Option<PaneLayoutObservation> = ctx.get(&observed_for_projection);
+            if let Some(observation) = &mut observation {
+                observation
+                    .report
+                    .operator_owned_documents
+                    .retain(|document| {
+                        !owned.iter().any(|(file, pane)| {
+                            file == document && observation.report.panes.contains(pane)
+                        })
+                    });
+            }
             derive_pane_layout_projection(
                 ctx.get(&desired_for_projection),
                 ctx.get(&actor_bindings_for_projection),
-                ctx.get(&observed_for_projection),
+                observation,
                 ctx.get(&receipt_for_projection),
             )
         });
@@ -919,6 +954,8 @@ impl ControllerPaneLayoutGraph {
             observed,
             receipt,
             structural_receipt,
+            assignments,
+            owned_assignments,
             applicable_receipt,
             projection,
             effect: Mutex::new(Some(effect)),
@@ -1172,6 +1209,14 @@ impl ControllerPaneLayoutGraph {
         if file_panes.is_empty() {
             return;
         }
+        // An effect can finish after supersession. Its physical assignment is
+        // still ours, even though it must not qualify as reuse of the new layout.
+        let mut assignments = self.ctx.get(&self.assignments);
+        for (document, pane) in &file_panes {
+            assignments.retain(|file, assigned| file == document || assigned != pane);
+            assignments.insert(document.clone(), pane.clone());
+        }
+        self.ctx.set(&self.assignments, assignments);
         self.ctx.set(
             &self.structural_receipt,
             Some(PaneLayoutStructuralReceipt {
@@ -5134,6 +5179,12 @@ impl ControllerRuntime {
         self.pane_layout_graph.actor_bindings()
     }
 
+    fn pane_layout_owned_assignments(&self) -> Vec<(String, String)> {
+        self.pane_layout_graph
+            .ctx
+            .get(&self.pane_layout_graph.owned_assignments)
+    }
+
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
     fn await_pane_layout_generation(
         &self,
@@ -7797,6 +7848,57 @@ mod tests {
                 new_generation: 7,
             },
         }
+    }
+
+    #[test]
+    fn layout_ownership_survives_tab_switch_and_retires_on_actor_rebind() {
+        use agent_doc_controller::actor::ActorState;
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let document = "/project/tasks/outgoing.md".to_string();
+        let actor = actor_record_for_test(&document, "%2", ActorState::Ready);
+        let actors =
+            ControllerActorGraph::new_in(&scope, BTreeMap::from([(document.clone(), actor)]));
+        let graph =
+            ControllerPaneLayoutGraph::new_in(&scope, Vec::new(), actors.live_bindings_handle());
+        let mut invocation = pane_layout_desired_for_test(1).invocation;
+        invocation.columns = vec![document.clone()];
+        let old = graph.set_desired(invocation.clone(), None);
+        let bindings = graph.actor_bindings();
+        graph.record_structural_assignment(
+            &old,
+            bindings,
+            None,
+            vec![(document.clone(), "%2".into())],
+        );
+        invocation.columns = vec!["/project/tasks/incoming.md".into()];
+        let new = graph.set_desired(invocation, None);
+        assert!(
+            graph
+                .reusable_structural_receipt(&new, &graph.actor_bindings())
+                .is_none()
+        );
+        assert_eq!(
+            graph.ctx.get(&graph.owned_assignments),
+            vec![(document.clone(), "%2".into())]
+        );
+        // Invalidating reusable geometry does not erase who placed the pane.
+        graph.ctx.set(&graph.structural_receipt, None);
+        assert_eq!(
+            graph.ctx.get(&graph.owned_assignments),
+            vec![(document.clone(), "%2".into())]
+        );
+        let rebound = actor_record_for_test(&document, "%3", ActorState::Ready);
+        actors.set(BTreeMap::from([(document.clone(), rebound)]));
+        assert!(graph.ctx.get(&graph.owned_assignments).is_empty());
+        // A superseded worker may return late; its old pane cannot override
+        // current actor ownership or re-enable structural reuse.
+        graph.record_structural_assignment(&old, Vec::new(), None, vec![(document, "%2".into())]);
+        assert!(graph.ctx.get(&graph.owned_assignments).is_empty());
+        assert!(
+            graph
+                .reusable_structural_receipt(&new, &graph.actor_bindings())
+                .is_none()
+        );
     }
 
     #[test]

@@ -1387,6 +1387,18 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // mapping an old executable at start.
             let recycle_auto_enabled =
                 agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled(&path);
+            // Freshness is process-scoped, not a project-wide flag or a title
+            // refreshed only by the next harness hook. Adoption runs this effect
+            // immediately without resetting the surviving child's turn status.
+            let _freshness_title_effect = shared.inject_pane.clone().map(|pane| {
+                let base = agent_doc_project_root_io::resolve_ipc_project_root(&path);
+                shared.binary_freshness.on_change(move |stale| {
+                    agent_doc_turn_status_io::project_supervisor_freshness(&base, &pane, stale).map_err(|error| {
+                        eprintln!("[idle-watch] warning: freshness projection for {pane} failed: {error:#}");
+                        format!("{error:#}")
+                    })
+                })
+            });
             let recycle_grace = agent_doc_controller_io::project_controller::recycle_idle_grace();
             let mut recycle_stale_since: Option<std::time::Instant> = None;
             let mut recycle_detected_logged = false;
@@ -3043,31 +3055,6 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     );
                     log_event(&mut session_log, &event);
                     agent_doc_ops_log_io::log_op(&path, &event);
-                }
-                // `#supkill-bg` — publish the live staleness probe so the IPC `Restart`
-                // handler can decide drain-reexec vs immediate relaunch without
-                // recomputing it.
-                shared.binary_freshness.observe(
-                    agent_doc_supervisor::binary_freshness::BinaryFreshnessObservation {
-                        identity_stale: supervisor_stale,
-                        ..Default::default()
-                    },
-                );
-                // `#suptmuxstale` — publish the same staleness probe as an on-disk
-                // marker so the `turn-status` hook (a separate short-lived process in
-                // the agent pane that cannot read this in-memory atomic) can decorate
-                // the pane turn-in-progress title with a `⚠ STALE SUPERVISOR` warning.
-                // Best-effort display surface — never let a marker write fail the watch.
-                if let Some(base) = path
-                    .canonicalize()
-                    .ok()
-                    .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical))
-                    && let Err(e) =
-                        agent_doc_turn_status_io::set_supervisor_stale_marker(&base, supervisor_stale)
-                {
-                    eprintln!(
-                        "[idle-watch] warning: failed to update stale-supervisor marker: {e:#}"
-                    );
                 }
                 // `#supkill-bg` blue/green drain-and-supersede: an explicit
                 // `restart-supervisor` routed to the in-place reexec path

@@ -1,5 +1,12 @@
 # agent-doc Functional Specification
 
+- Supervisor freshness display is a process-scoped effect of binary freshness.
+  Its pane-local marker is display output, never recycle authority; adoption
+  refreshes the warning without clearing the surviving child's turn title.
+- Automatic layout ownership is a retained receipt/actor Computed separate from
+  structural reuse: tab switches and geometry drift cannot erase outgoing
+  ownership, while actor rebinding invalidates obsolete pane proof.
+
 - Retained-projection replica registration must preserve two independent facts:
   the bootstrap shape and causal frontier coverage. A durable canonical receipt
   may force a full bootstrap, but the controller must still compare the editor's

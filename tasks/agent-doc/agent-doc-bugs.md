@@ -189,7 +189,7 @@ Public commit `fabbbae67` (`fix(runtime): keep idle reconciliation revision-driv
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

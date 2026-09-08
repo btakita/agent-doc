@@ -181,6 +181,10 @@ Verification is green:
 The earlier Run Agent Doc wedge on `dev.md` also remains cleared: `agent-doc session-check` reports its cycle committed, `queue_continuation_required=false`, and `no_drainable_work`.
 
 Public commit `fabbbae67` (`fix(runtime): keep idle reconciliation revision-driven`) is pushed to `main`. The new GitHub CI run is in progress; the immediately preceding red run was an unrelated wall-clock-sensitive IPC timeout after 9,148 passing tests, while the same complete gate passed locally.
+
+### Re: Response
+
+Restart noted. Agent-doc 0.35.342 is installed. The agent-doc check found no new document edits or queued work; the previous cycle is committed. No document changes were needed.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 

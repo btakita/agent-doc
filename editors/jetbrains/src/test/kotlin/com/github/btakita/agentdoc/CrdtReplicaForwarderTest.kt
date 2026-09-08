@@ -21,6 +21,34 @@ import org.junit.Test
 class CrdtReplicaForwarderTest {
 
     @Test
+    fun `stale replacement precondition is sent before native registration`() {
+        val node = FakeNode()
+        var capturedHash: String? = null
+        var legacyRegistrationCalled = false
+        val transport = object : ReplicaTransport by CapturingTransport() {
+            override fun register(filePath: String, identity: String, stateVector: ByteArray?, expectedCanonicalHash: String?): ReplicaRegisterAck? {
+                capturedHash = expectedCanonicalHash
+                return null
+            }
+            override fun register(filePath: String, identity: String): ReplicaRegisterAck? {
+                legacyRegistrationCalled = true
+                return null
+            }
+        }
+        val forwarder = CrdtReplicaForwarder(
+            filePath = "/tmp/sample-session.md",
+            identity = "jetbrains-4242:sample:refresh-1",
+            node = node,
+            transport = transport,
+            expectedCanonicalHash = "captured-base-hash",
+        )
+        assertFalse(forwarder.register())
+        assertEquals("captured-base-hash", capturedHash)
+        assertFalse(legacyRegistrationCalled)
+        assertFalse(node.opened)
+    }
+
+    @Test
     fun `controller replica payload carries process liveness proof`() {
         val payload = controllerReplicaPayload(
             method = "replica_register",

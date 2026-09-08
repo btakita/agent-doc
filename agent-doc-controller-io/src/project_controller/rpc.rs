@@ -7658,6 +7658,7 @@ struct ControllerCrdtReplicaPayload {
     identity: Option<String>,
     #[serde(default)]
     state_vector_b64: Option<String>,
+    expected_canonical_hash: Option<String>,
     update_b64: Option<String>,
     content_hash: Option<String>,
     /// The projected revision has completed the editor's native save and is
@@ -9526,23 +9527,15 @@ fn controller_crdt_replica_data(
             let resolved_editor_pid = payload
                 .editor_pid
                 .or_else(|| agent_doc_crdt_relay_io::editor_process_id_from_identity(identity));
-            let registration = match resolved_editor_pid {
-                Some(editor_pid) => {
-                    agent_doc_crdt_relay_io::register_editor_replica_for_file_incremental_with_projection_mode(
-                        canonical,
-                        identity,
-                        retained_state_vector.as_deref(),
-                        editor_pid,
-                        durable_projection_retained,
-                    )?
-                }
-                None => agent_doc_crdt_relay_io::register_replica_for_file_incremental_with_projection_mode(
+            let registration =
+                agent_doc_crdt_relay_io::register_replica_for_file_with_precondition(
                     canonical,
                     identity,
                     retained_state_vector.as_deref(),
+                    resolved_editor_pid,
                     durable_projection_retained,
-                )?,
-            };
+                    payload.expected_canonical_hash.as_deref(),
+                )?;
             match registration {
                 Some(registration) => {
                     if durable_projection_retained {
@@ -30820,6 +30813,66 @@ mod tests {
     }
 
     #[test]
+    fn replica_registration_rpc_preserves_the_peer_when_captured_base_is_stale() {
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("sample-session.md");
+        std::fs::write(&file, "---\nagent_doc_session: sample\n---\nbody\n").unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let identity = format!(
+            "jetbrains-{}-guarded:{}",
+            std::process::id(),
+            canonical.display()
+        );
+        let payload: ControllerCrdtReplicaPayload = serde_json::from_value(serde_json::json!({
+            "method": "replica_register", "editor_pid": std::process::id(),
+        }))
+        .unwrap();
+        let original = controller_crdt_replica_data(
+            None,
+            &canonical,
+            ControllerCrdtReplicaMethod::Register,
+            &identity,
+            &payload,
+        )
+        .unwrap();
+        let stale: ControllerCrdtReplicaPayload = serde_json::from_value(serde_json::json!({
+            "method": "replica_register", "editor_pid": std::process::id(),
+            "expected_canonical_hash": "stale-captured-base",
+        }))
+        .unwrap();
+        let error = controller_crdt_replica_data(
+            None,
+            &canonical,
+            ControllerCrdtReplicaMethod::Register,
+            &format!("{identity}:refresh-1"),
+            &stale,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("replica_register_canonical_precondition_failed")
+        );
+        let retried = controller_crdt_replica_data(
+            None,
+            &canonical,
+            ControllerCrdtReplicaMethod::Register,
+            &identity,
+            &payload,
+        )
+        .unwrap();
+        assert_eq!(retried["client_id"], original["client_id"]);
+        assert!(matches!(
+            agent_doc_crdt_relay_io::current_text_for_file(&canonical).unwrap(),
+            agent_doc_crdt_relay_io::CurrentText::Current {
+                live_editors: 1,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn retained_capture_is_rearmed_when_a_live_editor_replica_registers() {
         let _env = reliable_sync_env_lock();
         let dir = tempfile::TempDir::new().unwrap();
@@ -30887,6 +30940,7 @@ mod tests {
             method: ControllerCrdtReplicaMethod::Register,
             identity: None,
             state_vector_b64,
+            expected_canonical_hash: None,
             update_b64: None,
             content_hash: None,
             disk_persisted: false,
@@ -30990,6 +31044,7 @@ mod tests {
                 method: ControllerCrdtReplicaMethod::Pull,
                 identity: Some("jetbrains:prior-controller".into()),
                 state_vector_b64: None,
+                expected_canonical_hash: None,
                 update_b64: None,
                 content_hash: None,
                 disk_persisted: false,

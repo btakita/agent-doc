@@ -77,6 +77,7 @@ class CrdtReplicaForwarder(
     // injectable seam lightweight for isolated transport/native-node tests.
     ownershipContext: ThreadSafeContext = ThreadSafeContext(),
     private val resumeState: ReplicaResumeState? = null,
+    private val expectedCanonicalHash: String? = null,
 ) {
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaForwarder::class.java)
     private var pushedVersion: ByteArray? = null
@@ -136,7 +137,7 @@ class CrdtReplicaForwarder(
         lastRegisterFailureReason = null
         try {
             val registerStarted = System.nanoTime()
-            val ack = transport.register(filePath, identity, resumeState?.stateVector).also {
+            val ack = transport.register(filePath, identity, resumeState?.stateVector, expectedCanonicalHash).also {
                 logSlow("transport.register", registerStarted, details = "ok=${it != null}")
             }
             if (ack == null) {
@@ -579,6 +580,15 @@ interface ReplicaTransport {
         stateVector: ByteArray?,
     ): ReplicaRegisterAck? = register(filePath, identity)
 
+    /** Captured-base precondition must be enforced before replacing membership. */
+    fun register(
+        filePath: String,
+        identity: String,
+        stateVector: ByteArray?,
+        expectedCanonicalHash: String?,
+    ): ReplicaRegisterAck? =
+        if (expectedCanonicalHash == null) register(filePath, identity, stateVector) else null
+
     /**
      * Human-readable reason the most recent [register] returned null (socket
      * unavailable, `ok=false`, missing `client_id`, …), or null if unknown. Lets the
@@ -640,9 +650,19 @@ class CpSocketReplicaTransport(
         filePath: String,
         identity: String,
         stateVector: ByteArray?,
+    ): ReplicaRegisterAck? = register(filePath, identity, stateVector, null)
+
+    override fun register(
+        filePath: String,
+        identity: String,
+        stateVector: ByteArray?,
+        expectedCanonicalHash: String?,
     ): ReplicaRegisterAck? {
         val response = send(
             controllerRequest("replica_register", filePath, identity) {
+                expectedCanonicalHash?.let { expected ->
+                    it.addProperty("expected_canonical_hash", expected)
+                }
                 if (stateVector != null) {
                     it.addProperty(
                         "state_vector_b64",

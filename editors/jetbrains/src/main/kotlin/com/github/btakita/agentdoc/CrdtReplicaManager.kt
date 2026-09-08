@@ -2593,6 +2593,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             cached?.let { return it }
         }
         if (!bypassRegisterBackoff && !shouldAttemptRegister(filePath)) return cached
+        if (
+            expectedEditorTextAtSwap != null &&
+            (editorBufferText(filePath) != expectedEditorTextAtSwap ||
+                (!allowPendingLocalAtSwap && hasPendingLocal(filePath)))
+        ) return cached
         val root = resolveProjectRoot(filePath) ?: return null
         val baseIdentity = "${EditorIdentity.id}:$filePath"
         val identity = if (replaceCached && cached != null) {
@@ -2613,6 +2618,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             transport = CpSocketReplicaTransport(root),
             ownershipContext = ownershipContext,
             resumeState = retainedResumeState,
+            expectedCanonicalHash = expectedCanonicalTextAtSwap?.let(::contentHash),
         )
         if (!forwarder.register()) {
             recordRegisterFailure(filePath, forwarder.lastRegisterFailureReason ?: "controller-register")

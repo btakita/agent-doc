@@ -1761,29 +1761,44 @@ pub fn register_editor_replica_for_file_incremental_with_projection_mode(
     editor_pid: u32,
     force_full_bootstrap: bool,
 ) -> Result<Option<ReplicaRegistration>> {
-    let doc = file.display().to_string();
-    agent_doc_document_realtime::editor_open_docs::editor_open_docs().mark_open(&doc, true);
-    agent_doc_document_realtime::editor_attach::editor_attach().attach(&doc, editor_pid);
-    match register_replica_for_file_incremental_with_liveness(
+    register_replica_for_file_with_precondition(
+        file,
+        identity,
+        retained_state_vector,
+        Some(editor_pid),
+        force_full_bootstrap,
+        None,
+    )
+}
+
+/// Atomically reject a stale replacement before retiring its predecessor.
+/// The optional hash describes the canonical base of a captured editor delta.
+pub fn register_replica_for_file_with_precondition(
+    file: &Path,
+    identity: &str,
+    retained_state_vector: Option<&[u8]>,
+    editor_pid: Option<u32>,
+    force_full_bootstrap: bool,
+    expected_canonical_hash: Option<&str>,
+) -> Result<Option<ReplicaRegistration>> {
+    let result = register_replica_for_file_incremental_with_liveness_and_precondition(
         file,
         identity,
         retained_state_vector,
         force_full_bootstrap,
-        Some(editor_pid),
+        editor_pid,
+        expected_canonical_hash,
         agent_doc_reliable_sync_io::process_pid_is_live,
-    ) {
-        Ok(Some(registration)) => Ok(Some(registration)),
-        Ok(None) => {
-            agent_doc_document_realtime::editor_attach::editor_attach()
-                .detach_pid(&doc, editor_pid);
-            Ok(None)
-        }
-        Err(error) => {
-            agent_doc_document_realtime::editor_attach::editor_attach()
-                .detach_pid(&doc, editor_pid);
-            Err(error)
-        }
+    );
+    // Failed admission is not an editor-close event. Publish the explicit PID
+    // only after success, preserving every prior attachment on rejection.
+    if matches!(&result, Ok(Some(_)))
+        && let Some(pid) = editor_pid
+    {
+        agent_doc_document_realtime::editor_attach::editor_attach()
+            .attach(&file.display().to_string(), pid);
     }
+    result
 }
 
 #[cfg(test)]
@@ -1813,6 +1828,26 @@ fn register_replica_for_file_incremental_with_liveness(
     registering_editor_pid: Option<u32>,
     is_pid_live: impl Fn(u32) -> bool,
 ) -> Result<Option<ReplicaRegistration>> {
+    register_replica_for_file_incremental_with_liveness_and_precondition(
+        file,
+        identity,
+        retained_state_vector,
+        force_full_bootstrap,
+        registering_editor_pid,
+        None,
+        is_pid_live,
+    )
+}
+
+fn register_replica_for_file_incremental_with_liveness_and_precondition(
+    file: &Path,
+    identity: &str,
+    retained_state_vector: Option<&[u8]>,
+    force_full_bootstrap: bool,
+    registering_editor_pid: Option<u32>,
+    expected_canonical_hash: Option<&str>,
+    is_pid_live: impl Fn(u32) -> bool,
+) -> Result<Option<ReplicaRegistration>> {
     let authority = authority_for_file(&file.display().to_string());
     // `replica_register` is itself a process-scoped proof that an editor has
     // this document open. Do not require the separately-pushed reliable-sync
@@ -1837,6 +1872,10 @@ fn register_replica_for_file_incremental_with_liveness(
     let registration_lock = replica_registration_lock(&document_hash)?;
     let _registration_guard = registration_lock.lock();
     let client_id = mint_client_id(identity);
+    anyhow::ensure!(
+        expected_canonical_hash.is_none() || hub_handle(&document_hash).is_some(),
+        "replica_register_canonical_precondition_failed: live canonical model unavailable; existing replica preserved"
+    );
     // Gather under the metadata lock, then release it before taking the hub
     // lock. This lock order is deliberate: registration and deregistration can
     // never deadlock each other by holding both registries at once.
@@ -1847,11 +1886,6 @@ fn register_replica_for_file_incremental_with_liveness(
     retired_client_ids.extend(superseded_client_ids.iter().copied());
     retired_client_ids.sort_unstable();
     retired_client_ids.dedup();
-    // Publish the new logical generation before changing hub membership. From
-    // this point a late frame from the retired forwarder is fenced. A new-
-    // generation update racing the remainder of registration can safely exercise
-    // the existing idempotent reattach path against the same client id.
-    record_replica_identity(&document_hash, client_id, identity, &retired_client_ids)?;
     let (
         bootstrap,
         canonical_state_vector,
@@ -1860,6 +1894,18 @@ fn register_replica_for_file_incremental_with_liveness(
         canonical_covers_retained_frontier,
         canonical_content_hash,
     ) = with_hub_seeded_from_file(file, |hub| {
+        // Check the command's captured base in the same live-hub transition as
+        // generation retirement. Checking after register in the plugin is too
+        // late: rejecting the replacement then removes the only remaining peer.
+        if let Some(expected) = expected_canonical_hash {
+            anyhow::ensure!(
+                agent_doc_hash::content_hash(&hub.canonical_text()) == expected,
+                "replica_register_canonical_precondition_failed: captured canonical base is stale; existing replica preserved"
+            );
+        }
+        // Metadata readers release their lock before entering the hub. Publish
+        // the successor only after its precondition passes, before membership.
+        record_replica_identity(&document_hash, client_id, identity, &retired_client_ids)?;
         // Causal coverage is independent of bootstrap shape. A retained
         // canonical projection forces a full bootstrap, but the supplied
         // native frontier still proves whether adopting that bootstrap can
@@ -5317,6 +5363,104 @@ mod tests {
             !attach.is_attached(&file_str),
             "the final identity for the PID closes its attachment"
         );
+    }
+
+    #[test]
+    fn stale_replacement_precondition_preserves_current_replica_and_authority() {
+        struct NoopWatcher;
+        impl agent_doc_document_realtime::editor_attach::ProcessExitWatcher for NoopWatcher {
+            fn watch(&self, _pid: u32) {}
+        }
+        agent_doc_document_realtime::editor_attach::editor_attach()
+            .install_watcher(std::sync::Arc::new(NoopWatcher));
+        let (_dir, doc) = temp_doc("registration-captured-base.md");
+        seed_live_reliable_sync_open(&doc.display().to_string());
+        let pid = std::process::id();
+        let identity = format!("jetbrains-{pid}-base:{}", doc.display());
+        let original = register_editor_replica_for_file_incremental(&doc, &identity, None, pid)
+            .unwrap()
+            .unwrap();
+        let canonical = with_hub(&doc, |hub| hub.canonical_text()).unwrap();
+        let replacement_identity = format!("{identity}:refresh-1");
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let error = register_replica_for_file_with_precondition(
+            &doc,
+            &replacement_identity,
+            None,
+            Some(pid),
+            true,
+            Some(&agent_doc_hash::content_hash("a stale captured base")),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("replica_register_canonical_precondition_failed")
+        );
+        assert!(
+            agent_doc_document_realtime::editor_attach::editor_attach()
+                .is_attached(&doc.display().to_string())
+        );
+        assert!(
+            logical_replica_generation_is_current(&hash, &identity, original.client_id).unwrap()
+        );
+        with_hub(&doc, |hub| {
+            assert!(hub.is_registered(original.client_id));
+            assert!(!hub.is_registered(mint_client_id(&replacement_identity)));
+            assert_eq!(hub.canonical_text(), canonical);
+            assert_eq!(hub.live_count(), 1);
+        })
+        .unwrap();
+        // A late cleanup for the rejected candidate cannot remove the winner.
+        assert!(!deregister_editor_replica_for_file(&doc, &replacement_identity, pid).unwrap());
+        assert!(matches!(
+            current_text_for_file(&doc).unwrap(),
+            CurrentText::Current {
+                live_editors: 1,
+                ..
+            }
+        ));
+        let replacement = register_replica_for_file_with_precondition(
+            &doc,
+            &replacement_identity,
+            None,
+            Some(pid),
+            true,
+            Some(&agent_doc_hash::content_hash(&canonical)),
+        )
+        .unwrap()
+        .unwrap();
+        with_hub(&doc, |hub| {
+            assert!(!hub.is_registered(original.client_id));
+            assert!(hub.is_registered(replacement.client_id));
+            assert_eq!(hub.canonical_text(), canonical);
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn captured_base_registration_never_bootstraps_a_missing_model_from_disk() {
+        let (_dir, doc) = temp_doc("registration-missing-model.md");
+        seed_live_reliable_sync_open(&doc.display().to_string());
+        let on_disk = std::fs::read_to_string(&doc).unwrap();
+        let error = register_replica_for_file_with_precondition(
+            &doc,
+            "intellij:missing-base",
+            None,
+            None,
+            true,
+            Some(&agent_doc_hash::content_hash(&on_disk)),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("live canonical model unavailable")
+        );
+        assert!(!hub_is_allocated_for_test(
+            &agent_doc_fs::document_state_hash(&doc).unwrap()
+        ));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), on_disk);
     }
 
     #[test]

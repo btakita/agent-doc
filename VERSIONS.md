@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.342
+
+- **Fix: rejected replica recovery preserves the current editor connection.**
+
+Canonical rebootstrap carries the captured base hash into the controller's
+registration transaction. A stale or missing live base is rejected before the
+existing replica is retired, preventing recovery from deleting the document
+model and stranding route activation or preflight. JetBrains also skips a
+replacement when pending local edits already make its captured view unusable.
+Editor authority continues to refuse disk fallback.
+
 ## 0.35.341
 
 - **Fix: Stop hooks reuse successful strict replay closeout.**

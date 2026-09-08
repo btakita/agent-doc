@@ -1102,7 +1102,17 @@ fn repair_with_force_disk_override<
         && outcome != RepairOutcome::StalePreflightCycleAbandoned
         && agent_doc_git_io::status::is_in_git_repo(file)
     {
-        (effects.complete_required_closeout)(file)?;
+        if !outcome.replayed_response()
+            || !agent_doc_flow_io::closeout::replay_closeout_still_proven(
+                file,
+                &agent_doc_document_realtime_io::try_resolve_current_document_content(
+                    file,
+                    "repair_replay_terminal_receipt",
+                )?,
+            )?
+        {
+            (effects.complete_required_closeout)(file)?;
+        }
     } else if !outcome.repaired()
         && let agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) =
             (effects.inspect_session)(file)?

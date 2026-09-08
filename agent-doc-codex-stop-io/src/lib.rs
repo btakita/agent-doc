@@ -950,6 +950,18 @@ fn try_recover_repeated_queue_head_response(
         });
     }
 
+    if repair_outcome.replayed_response()
+        && agent_doc_flow_io::closeout::replay_closeout_still_proven(
+            file,
+            &current_document_content(file, "codex_stop_queue_replay_terminal_receipt")?,
+        )?
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            "codex_stop_repeated_queue_recovery_success source=strict_replay_receipt",
+        );
+        return Ok(RepeatedQueueHeadRecovery::Recovered { note });
+    }
     match agent_doc_closeout_runtime_io::complete_required_closeout(file, false) {
         Ok(true) => {
             note.push_str(" The hook finished the commit boundary automatically.");
@@ -1311,6 +1323,21 @@ fn attempt_stop_closeout(
         return Ok(StopCloseAttempt::StillOpen { note });
     }
 
+    // Strict repair replay already runs the required commit/session-check path.
+    // Consume that receipt only while it still matches: queue maintenance or
+    // operator edits after replay must cross a new closeout boundary.
+    if repair_outcome.replayed_response()
+        && agent_doc_flow_io::closeout::replay_closeout_still_proven(
+            file,
+            &current_document_content(file, "codex_stop_replay_terminal_receipt")?,
+        )?
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            "codex_stop_auto_close_success source=strict_replay_receipt",
+        );
+        return Ok(StopCloseAttempt::Closed);
+    }
     match agent_doc_closeout_runtime_io::complete_required_closeout(file, false) {
         Ok(true) => {
             note.push_str(" The hook finished the commit boundary automatically.");
@@ -4070,11 +4097,52 @@ Reviewed the gated items.\n\
             .expect("fresh cycle capture");
         assert_eq!(capture.cycle_id, closed.cycle_id);
         assert!(capture.response_body.contains("Unpersisted answer."));
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("codex_stop_auto_close_success source=strict_replay_receipt"),
+            "Stop must consume strict repair's successful closeout receipt"
+        );
+        assert_eq!(
+            ops.matches("terminal_closeout_proof_recorded ").count(),
+            1,
+            "the post-commit follow-up must run only one full closeout"
+        );
+        let current = fs::read_to_string(&doc).unwrap();
+        assert!(agent_doc_flow_io::closeout::replay_closeout_still_proven(&doc, &current).unwrap());
+        assert!(
+            !agent_doc_flow_io::closeout::replay_closeout_still_proven(
+                &doc,
+                &format!("{current}\nA new operator edit.\n"),
+            )
+            .unwrap(),
+            "an intervening visible edit must invalidate receipt reuse"
+        );
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &format!("{current}\nChanged baseline.\n"),
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        assert!(
+            !agent_doc_flow_io::closeout::replay_closeout_still_proven(&doc, &current).unwrap(),
+            "changed snapshot evidence must invalidate receipt reuse"
+        );
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &current,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         assert!(
             agent_doc_capture_io::load_by_id(&doc, &previous.cycle_id)
                 .unwrap()
                 .is_none(),
             "the new response must not be captured under the terminal predecessor"
+        );
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        assert!(
+            !agent_doc_flow_io::closeout::replay_closeout_still_proven(&doc, &current).unwrap(),
+            "a new cycle must supersede the old receipt even with unchanged content"
         );
     }
 

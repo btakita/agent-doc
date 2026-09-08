@@ -324,6 +324,39 @@ pub fn cycle_already_committed(file: &Path) -> Option<String> {
     }
 }
 
+/// Consume strict replay's terminal receipt without repeating its commit and
+/// session-check effects. This is a one-shot return-boundary check, not a cached
+/// readiness decision: any intervening edit or newer cycle requires closeout.
+pub fn replay_closeout_still_proven(file: &Path, current: &str) -> Result<bool> {
+    let Some(document) = agent_doc_cycle_state_io::load_document_projection(file)? else {
+        return Ok(false);
+    };
+    let Some(cycle_id) = document.closeout.cycle_id.as_deref() else {
+        return Ok(false);
+    };
+    let Some(proof) = document.proof.terminal_closeouts.get(cycle_id) else {
+        return Ok(false);
+    };
+    if document.closeout.phase != Some(agent_doc_turn::CyclePhase::Committed)
+        || proof.capture_id != document.closeout.capture_id
+        || proof.response_sha256 != document.closeout.response_sha256
+        || !proof.response_materialized_in_head
+        || proof.file_hash != proof.snapshot_hash
+        || proof.snapshot_hash != proof.head_hash
+    {
+        return Ok(false);
+    }
+    let Some(snapshot) = agent_doc_snapshot_io::load_document_baseline(file)? else {
+        return Ok(false);
+    };
+    let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
+        return Ok(false);
+    };
+    Ok(agent_doc_hash::content_hash(current) == proof.file_hash
+        && agent_doc_hash::content_hash(&snapshot) == proof.snapshot_hash
+        && agent_doc_hash::content_hash(&head) == proof.head_hash)
+}
+
 /// Diagnostic information about a "stuck captured cycle" — a cycle whose
 /// `cycle_state` advanced to `Committed` but whose captured response body is
 /// not present in HEAD or in a compact archive referenced by HEAD for the

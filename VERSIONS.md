@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.341
+
+- **Fix: Stop hooks reuse successful strict replay closeout.**
+
+Automatic follow-up writeback and queue recovery no longer repeat the full
+commit/session-check pass after repair has already completed strict closeout.
+Repair and Stop consume the existing terminal proof only for the same committed
+cycle/capture with unchanged authority, snapshot, and Git content. Missing proof,
+later edits, or a newer cycle retain the full closeout path. This prevents a
+successful writeback from exhausting the Stop hook's 45-second internal budget
+on duplicate verification.
+
 ## 0.35.340
 
 - **Fix: quiescent supervisors no longer rescan unchanged documents.**

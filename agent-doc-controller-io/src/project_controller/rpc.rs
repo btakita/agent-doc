@@ -4251,13 +4251,56 @@ pub fn supervisor_recycle_requested(
     )
 }
 
+/// File-scoped lifecycle calls must retain the supervisor's document identity.
+/// Sibling supervisors can reexec independently inside the same project.
+fn request_supervisor_recycle_for_file(
+    file: &Path,
+    command: &str,
+    reason: Option<&str>,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Ok(Default::default());
+    };
+    if reason.is_some() {
+        ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    }
+    let stream = match connect(&project_root) {
+        Ok(stream) => stream,
+        Err(err) if reason.is_some() => return Err(err),
+        Err(_) => return Ok(Default::default()),
+    };
+    let timeout = if command == "supervisor_recycle_wait_settled" {
+        SUPERVISOR_RECYCLE_SETTLE_WAIT.saturating_add(CONTROLLER_RPC_TIMEOUT)
+    } else {
+        CONTROLLER_RPC_TIMEOUT
+    };
+    request_controller_on_stream_with_timeout(
+        &project_root,
+        ControllerRequest {
+            command: command.to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("supervisor".to_string()),
+            reason: reason.map(str::to_string),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+        timeout,
+        stream,
+    )
+}
+
 pub fn supervisor_recycle_requested_for_file(
     file: &Path,
     reason: &str,
 ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
-    let project_root = agent_doc_project_root_io::project_root_containing(file)
-        .with_context(|| format!("no project root found for {}", file.display()))?;
-    supervisor_recycle_requested(&project_root, reason)
+    request_supervisor_recycle_for_file(file, "supervisor_recycle_requested", Some(reason))
 }
 
 pub fn supervisor_recycle_started(
@@ -4289,9 +4332,7 @@ pub fn supervisor_recycle_started_for_file(
     file: &Path,
     reason: &str,
 ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
-    let project_root = agent_doc_project_root_io::project_root_containing(file)
-        .with_context(|| format!("no project root found for {}", file.display()))?;
-    supervisor_recycle_started(&project_root, reason)
+    request_supervisor_recycle_for_file(file, "supervisor_recycle_started", Some(reason))
 }
 
 pub fn supervisor_recycle_settled(
@@ -4323,9 +4364,7 @@ pub fn supervisor_recycle_settled_for_file(
     file: &Path,
     reason: &str,
 ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
-    let project_root = agent_doc_project_root_io::project_root_containing(file)
-        .with_context(|| format!("no project root found for {}", file.display()))?;
-    supervisor_recycle_settled(&project_root, reason)
+    request_supervisor_recycle_for_file(file, "supervisor_recycle_settled", Some(reason))
 }
 
 pub fn supervisor_recycle_status(
@@ -4357,10 +4396,7 @@ pub fn supervisor_recycle_status(
 pub fn supervisor_recycle_status_for_file(
     file: &Path,
 ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
-    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
-        return Ok(agent_doc_state_backbone::SupervisorRecycleProjection::default());
-    };
-    supervisor_recycle_status(&project_root)
+    request_supervisor_recycle_for_file(file, "supervisor_recycle_status", None)
 }
 
 pub fn supervisor_recycle_pending(project_root: &Path) -> bool {
@@ -4633,10 +4669,7 @@ pub fn wait_for_supervisor_recycle_settle(
 pub fn wait_for_supervisor_recycle_settle_for_file(
     file: &Path,
 ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
-    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
-        return Ok(agent_doc_state_backbone::SupervisorRecycleProjection::default());
-    };
-    wait_for_supervisor_recycle_settle(&project_root)
+    request_supervisor_recycle_for_file(file, "supervisor_recycle_wait_settled", None)
 }
 
 pub fn ensure_controller_running_for_file(file: &Path) -> Result<()> {
@@ -9218,6 +9251,16 @@ struct FocusDocumentPaneCommandPayload {
     missing_pane_policy: MissingFocusPanePolicy,
 }
 
+impl FocusDocumentPaneCommandPayload {
+    fn effective_policy(&self) -> MissingFocusPanePolicy {
+        if self.no_promotion {
+            MissingFocusPanePolicy::ObserveOnly
+        } else {
+            self.missing_pane_policy
+        }
+    }
+}
+
 fn empty_controller_request(command: &str) -> ControllerRequest {
     ControllerRequest {
         command: command.to_string(),
@@ -9345,14 +9388,14 @@ fn dispatch_command_submit_payload(
             {
                 return CommandSubmitDispatchResult::rejected(command, format!("{err:#}"));
             }
-            let _guard_flags = (payload.project_root.as_deref(), payload.no_promotion);
+            let focus_policy = payload.effective_policy();
             let mut focus_request = empty_controller_request(command);
             focus_request.file = Some(PathBuf::from(payload.document_path));
             match handle_focus_document_pane_with_policy(
                 bootstrap,
                 Some(runtime),
                 focus_request,
-                payload.missing_pane_policy,
+                focus_policy,
                 focus_fence,
             ) {
                 Ok(receipt) => {
@@ -12691,10 +12734,21 @@ pub(crate) fn handle_request_locked(
             runtime.as_ref(),
             request,
         )),
-        "supervisor_recycle_status" => controller_envelope(runtime.supervisor_recycle_projection()),
-        "supervisor_recycle_wait_settled" => controller_envelope(
-            runtime.wait_for_supervisor_recycle_settle(SUPERVISOR_RECYCLE_SETTLE_WAIT),
-        ),
+        "supervisor_recycle_status" => {
+            controller_envelope(runtime.supervisor_recycle_projection_for(
+                supervisor_recycle_request_document_hash(&bootstrap_snapshot, &request).as_deref(),
+            ))
+        }
+        "supervisor_recycle_wait_settled" => {
+            let hash = supervisor_recycle_request_document_hash(&bootstrap_snapshot, &request);
+            controller_envelope(match hash.as_deref() {
+                Some(hash) => runtime.wait_for_supervisor_recycle_settle_for(
+                    Some(hash),
+                    SUPERVISOR_RECYCLE_SETTLE_WAIT,
+                ),
+                None => runtime.wait_for_supervisor_recycle_settle(SUPERVISOR_RECYCLE_SETTLE_WAIT),
+            })
+        }
         "state_event_append" => controller_envelope(handle_state_event_append(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -15837,13 +15891,25 @@ fn closeout_advance_outcome(
     Ok(())
 }
 
+fn supervisor_recycle_request_document_hash(
+    bootstrap: &ControllerBootstrap,
+    request: &ControllerRequest,
+) -> Option<String> {
+    request.file.as_ref().map(|file| {
+        agent_doc_hash::document_id_for_path(&canonical_controller_request_file(bootstrap, file))
+    })
+}
+
 fn append_and_apply_state_event(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     event: agent_doc_state_backbone::StateEvent,
 ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    let document_hash = (event.document_hash()
+        != agent_doc_state_backbone::PROJECT_SUPERVISOR_DOCUMENT_HASH)
+        .then(|| event.document_hash().to_string());
     append_apply_state_event(bootstrap, runtime, event)?;
-    runtime.supervisor_recycle_projection()
+    runtime.supervisor_recycle_projection_for(document_hash.as_deref())
 }
 
 pub(crate) fn handle_supervisor_recycle_requested(
@@ -15851,7 +15917,11 @@ pub(crate) fn handle_supervisor_recycle_requested(
     runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
-    let current = runtime.supervisor_recycle_projection()?;
+    let document_hash = supervisor_recycle_request_document_hash(bootstrap, &request);
+    let current = runtime.supervisor_recycle_projection_for(document_hash.as_deref())?;
+    let event_hash = document_hash
+        .as_deref()
+        .unwrap_or(agent_doc_state_backbone::PROJECT_SUPERVISOR_DOCUMENT_HASH);
     // The statechart only arms `Requested` from `Settled`; a request that races an
     // already-requested or in-flight recycle is a no-op (idempotent), so don't burn
     // an epoch or rewrite the reason.
@@ -15867,9 +15937,12 @@ pub(crate) fn handle_supervisor_recycle_requested(
         .as_deref()
         .unwrap_or("supervisor_recycle_requested");
     let event = agent_doc_state_backbone::StateEvent::new(
-        supervisor_recycle_event_id("requested", recycle_epoch),
+        format!(
+            "{}:{event_hash}",
+            supervisor_recycle_event_id("requested", recycle_epoch)
+        ),
         agent_doc_state_backbone::StateFact::SupervisorRecycleRequested {
-            document_hash: agent_doc_state_backbone::PROJECT_SUPERVISOR_DOCUMENT_HASH.to_string(),
+            document_hash: event_hash.to_string(),
             reason: reason.to_string(),
             recycle_epoch,
             marked_secs: timestamp_secs(),
@@ -15879,7 +15952,7 @@ pub(crate) fn handle_supervisor_recycle_requested(
     agent_doc_ops_log_io::log_op(
         &bootstrap.project_root,
         &format!(
-            "supervisor_recycle_graph_requested reason={} recycle_epoch={} phase={:?}",
+            "supervisor_recycle_graph_requested document_hash={event_hash} reason={} recycle_epoch={} phase={:?}",
             reason, projection.recycle_epoch, projection.phase
         ),
     );
@@ -15891,16 +15964,23 @@ pub(crate) fn handle_supervisor_recycle_started(
     runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
-    let current = runtime.supervisor_recycle_projection()?;
+    let document_hash = supervisor_recycle_request_document_hash(bootstrap, &request);
+    let current = runtime.supervisor_recycle_projection_for(document_hash.as_deref())?;
+    let event_hash = document_hash
+        .as_deref()
+        .unwrap_or(agent_doc_state_backbone::PROJECT_SUPERVISOR_DOCUMENT_HASH);
     let recycle_epoch = current.recycle_epoch.saturating_add(1);
     let reason = request
         .reason
         .as_deref()
         .unwrap_or("supervisor_recycle_started");
     let event = agent_doc_state_backbone::StateEvent::new(
-        supervisor_recycle_event_id("started", recycle_epoch),
+        format!(
+            "{}:{event_hash}",
+            supervisor_recycle_event_id("started", recycle_epoch)
+        ),
         agent_doc_state_backbone::StateFact::SupervisorRecycleStarted {
-            document_hash: agent_doc_state_backbone::PROJECT_SUPERVISOR_DOCUMENT_HASH.to_string(),
+            document_hash: event_hash.to_string(),
             reason: reason.to_string(),
             recycle_epoch,
             marked_secs: timestamp_secs(),
@@ -15910,7 +15990,7 @@ pub(crate) fn handle_supervisor_recycle_started(
     agent_doc_ops_log_io::log_op(
         &bootstrap.project_root,
         &format!(
-            "supervisor_recycle_graph_started reason={} recycle_epoch={} phase={:?}",
+            "supervisor_recycle_graph_started document_hash={event_hash} reason={} recycle_epoch={} phase={:?}",
             reason, projection.recycle_epoch, projection.phase
         ),
     );
@@ -15922,7 +16002,11 @@ pub(crate) fn handle_supervisor_recycle_settled(
     runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
-    let current = runtime.supervisor_recycle_projection()?;
+    let document_hash = supervisor_recycle_request_document_hash(bootstrap, &request);
+    let current = runtime.supervisor_recycle_projection_for(document_hash.as_deref())?;
+    let event_hash = document_hash
+        .as_deref()
+        .unwrap_or(agent_doc_state_backbone::PROJECT_SUPERVISOR_DOCUMENT_HASH);
     if matches!(
         current.phase,
         agent_doc_state_backbone::SupervisorRecyclePhase::Settled
@@ -15935,9 +16019,12 @@ pub(crate) fn handle_supervisor_recycle_settled(
         .as_deref()
         .unwrap_or("supervisor_recycle_settled");
     let event = agent_doc_state_backbone::StateEvent::new(
-        supervisor_recycle_event_id("settled", recycle_epoch),
+        format!(
+            "{}:{event_hash}",
+            supervisor_recycle_event_id("settled", recycle_epoch)
+        ),
         agent_doc_state_backbone::StateFact::SupervisorRecycleSettled {
-            document_hash: agent_doc_state_backbone::PROJECT_SUPERVISOR_DOCUMENT_HASH.to_string(),
+            document_hash: event_hash.to_string(),
             reason: reason.to_string(),
             recycle_epoch,
             marked_secs: timestamp_secs(),
@@ -15947,7 +16034,7 @@ pub(crate) fn handle_supervisor_recycle_settled(
     agent_doc_ops_log_io::log_op(
         &bootstrap.project_root,
         &format!(
-            "supervisor_recycle_graph_settled reason={} recycle_epoch={} phase={:?}",
+            "supervisor_recycle_graph_settled document_hash={event_hash} reason={} recycle_epoch={} phase={:?}",
             reason, projection.recycle_epoch, projection.phase
         ),
     );
@@ -18069,7 +18156,7 @@ fn handle_editor_surface_observe(
                     bootstrap,
                     Some(runtime),
                     focus_request,
-                    MissingFocusPanePolicy::ResumeLatest,
+                    MissingFocusPanePolicy::ObserveOnly,
                     None,
                 );
                 // The editor focus lane needs the real tmux receipt to prove
@@ -20286,15 +20373,15 @@ enum FocusDocumentPaneEffect {
 
 /// Apply the tmux half of a selected-document focus intent.
 ///
-/// A pane parked in the stash is a valid live owner, but it is not selectable
-/// from the visible `agent-doc` window. Surface it inside the same fenced effect,
-/// then re-observe its window before selecting. The re-observation prevents a
-/// failed or racing promotion from reporting success and from selecting inside
-/// the stash.
+/// Selection-only editor focus leaves stashed panes to the structural layout
+/// owner. An explicit recovery policy may surface a stashed pane inside this
+/// fenced effect, then re-observe its window before selecting. Re-observation
+/// prevents a failed or racing promotion from selecting inside the stash.
 fn apply_focus_document_pane_effect(
     pane_id: &str,
     expected_window: Option<&str>,
     desktop_editor_active: bool,
+    allow_promotion: bool,
     observe_pane_window: impl Fn(&str) -> Option<String>,
     promote_pane: impl FnOnce(&str) -> Result<bool>,
     select_pane: impl FnOnce(&str) -> Result<()>,
@@ -20307,7 +20394,9 @@ fn apply_focus_document_pane_effect(
         pane_window.as_deref() == expected_window && expected_window.is_some()
     };
     if !pane_is_visible(observe_pane_window(pane_id))
-        && (!promote_pane(pane_id)? || !pane_is_visible(observe_pane_window(pane_id)))
+        && (!allow_promotion
+            || !promote_pane(pane_id)?
+            || !pane_is_visible(observe_pane_window(pane_id)))
     {
         return Ok(FocusDocumentPaneEffect::PaneNotVisible);
     }
@@ -20515,6 +20604,7 @@ fn handle_focus_document_pane_with_policy(
             &pane_id,
             window_id.as_deref(),
             focus_fence.is_none() || desktop_editor_focus_state() != DesktopEditorFocusState::Other,
+            missing_pane_policy == MissingFocusPanePolicy::ResumeLatest,
             |pane| tmux.pane_window(pane).ok(),
             |pane| runtime_effects()?.promote_pane_to_agent_doc_window(&tmux, pane),
             |pane| tmux.select_pane(pane),
@@ -20647,6 +20737,61 @@ mod desktop_editor_focus_tests {
     }
 
     #[test]
+    fn observe_only_focus_cannot_add_a_third_pane() {
+        for window in ["@stash", "@agent-doc"] {
+            let selected = Cell::new(false);
+            let outcome = apply_focus_document_pane_effect(
+                "%64",
+                Some("@agent-doc"),
+                true,
+                false,
+                |_| Some(window.to_string()),
+                |_| panic!("selection-only focus must never promote a pane"),
+                |_| {
+                    selected.set(true);
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(selected.get(), window == "@agent-doc");
+            assert_eq!(
+                outcome,
+                if window == "@agent-doc" {
+                    FocusDocumentPaneEffect::Focused
+                } else {
+                    FocusDocumentPaneEffect::PaneNotVisible
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn no_promotion_disables_missing_actor_provisioning_even_with_legacy_resume_policy() {
+        let payload: FocusDocumentPaneCommandPayload = serde_json::from_value(serde_json::json!({
+            "document_path": "/tmp/session.md", "no_promotion": true,
+            "missing_pane_policy": "resume_latest"
+        }))
+        .unwrap();
+        assert_eq!(
+            payload.effective_policy(),
+            MissingFocusPanePolicy::ObserveOnly
+        );
+        assert!(!rejected_focus_should_resume_latest(
+            payload.effective_policy(),
+            FocusPaneRejectReason::MissingActorRecord,
+            Some("session")
+        ));
+        let explicit = FocusDocumentPaneCommandPayload {
+            no_promotion: false,
+            ..payload
+        };
+        assert_eq!(
+            explicit.effective_policy(),
+            MissingFocusPanePolicy::ResumeLatest
+        );
+    }
+
+    #[test]
     fn document_focus_promotes_stashed_pane_before_selecting_it() {
         let live_window = Cell::new("@stash");
         let promoted = Cell::new(false);
@@ -20655,6 +20800,7 @@ mod desktop_editor_focus_tests {
         let effect = apply_focus_document_pane_effect(
             "%64",
             Some("@agent-doc"),
+            true,
             true,
             |_| Some(live_window.get().to_string()),
             |pane| {
@@ -20683,6 +20829,7 @@ mod desktop_editor_focus_tests {
             "%64",
             Some("@agent-doc"),
             true,
+            true,
             |_| Some("@stash".to_string()),
             |_| Ok(true),
             |_| {
@@ -20704,6 +20851,7 @@ mod desktop_editor_focus_tests {
             "%64",
             Some("@agent-doc"),
             false,
+            true,
             |_| Some("@stash".to_string()),
             |_| {
                 promoted.set(true);

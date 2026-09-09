@@ -12,3 +12,4 @@
 0.35.350	Cold tmux bootstrap, claim identity, and socket isolation	shared-core; existing stdout-only native bootstrap	shared-core; direct native discovery	staged	make check; isolated claim/start regressions
 0.35.351	Unanswered exchange prompt recovery	shared-core	shared-core	staged	make check; repeated preflight and git prompt preservation regressions
 0.35.352	Preserve fresh prompts with reused response headings	shared-core	shared-core	staged	make check; exact queue-echo and repeated commit regressions
+0.35.353	Document-scoped recycle, clear repaint proof, and selection-only editor focus	shared-core	shared-core	staged	make check; make tmux-ci; sibling isolation, delayed repaint, and three-pane focus regressions

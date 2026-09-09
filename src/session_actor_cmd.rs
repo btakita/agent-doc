@@ -23,15 +23,16 @@ use agent_doc_turn_executor_tmux::context_clear::{
     busy_clear_already_deferred_message, busy_clear_deferred_message, busy_clear_refusal_message,
     context_clear_command_visible_in_active_input, context_clear_history_proves_cleared_state,
     context_clear_submit_blocked_line, context_clear_submit_blocked_message,
-    context_clear_submit_observation_line, context_clear_submit_poll_status,
-    context_clear_submit_resubmit_proof_line, context_clear_submit_retry_action,
-    interrupt_clear_timeout_message, operator_interrupt_key_plan, operator_interrupt_step_delay,
-    protected_clear_refusal_message, terminal_editor_command,
+    context_clear_submit_observation_line, context_clear_submit_resubmit_proof_line,
+    context_clear_submit_retry_action, interrupt_clear_timeout_message,
+    operator_interrupt_key_plan, operator_interrupt_step_delay, protected_clear_refusal_message,
+    terminal_editor_command,
 };
 use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, Tmux};
 
 const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_normalized_submit";
 const CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT: Duration = Duration::from_millis(900);
+const CLEAR_DIRECT_SUBMIT_RENDER_TIMEOUT: Duration = Duration::from_secs(10);
 const CLEAR_DIRECT_SUBMIT_ACCEPTANCE_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_DEFAULT: usize = 1;
 const CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_ENV: &str =
@@ -2269,12 +2270,13 @@ fn upgrade_unobserved_clear_from_pane_history(
             return ContextClearSubmitStatus::Unobserved;
         }
     };
-    let proven = context_clear_history_proves_cleared_state(
-        &history,
-        command,
-        CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
-        |line| harness_config.is_dispatch_ready_prompt_line(line),
-    );
+    let proven = live_pane_prompt_ready_at_cursor(&harness_config, &history, None)
+        && context_clear_history_proves_cleared_state(
+            &history,
+            command,
+            CONTEXT_CLEAR_CLEARED_STATE_MAX_HISTORY_LINES,
+            |line| harness_config.is_dispatch_ready_prompt_line(line),
+        );
     let retained_lines = history
         .lines()
         .filter(|line| !line.trim().is_empty())
@@ -2313,7 +2315,8 @@ fn poll_context_clear_submit_acceptance(
     let mut last_capture: Option<(bool, usize, String)> = None;
     let mut poll_state = ContextClearSubmitPollState::default();
     let mut capture_failed = false;
-    while start.elapsed() < CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT {
+    let mut observation_budget = CLEAR_DIRECT_SUBMIT_RENDER_TIMEOUT;
+    while start.elapsed() < observation_budget {
         match agent_doc_tmux_io::capture_pane(tmux, pane) {
             Ok(content) => {
                 let command_visible =
@@ -2326,10 +2329,19 @@ fn poll_context_clear_submit_acceptance(
                     .map(|pre_hash| pre_hash != capture_hash)
                     .unwrap_or(false);
                 last_capture = Some((command_visible, capture_len, capture_hash));
-                if context_clear_submit_poll_status(
+                observation_budget =
+                    agent_doc_turn_executor_tmux::context_clear::context_clear_observation_budget(
+                        &content,
+                        CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT,
+                        CLEAR_DIRECT_SUBMIT_RENDER_TIMEOUT,
+                    );
+                let prompt_ready =
+                    live_pane_prompt_ready_at_cursor(&harness_config, &content, None);
+                if agent_doc_turn_executor_tmux::context_clear::context_clear_submit_frame_status(
                     &mut poll_state,
                     command_visible,
                     content_changed_since_delivery,
+                    prompt_ready,
                 )
                 .is_some()
                 {
@@ -2365,8 +2377,6 @@ fn poll_context_clear_submit_acceptance(
     let (status, command_visible) = if let Some((visible, _, _)) = last_capture.as_ref() {
         if *visible {
             (ContextClearSubmitStatus::StillVisible, true)
-        } else if poll_state.saw_submission_evidence() {
-            (ContextClearSubmitStatus::Accepted, false)
         } else {
             (ContextClearSubmitStatus::Unobserved, false)
         }
@@ -2381,7 +2391,11 @@ fn poll_context_clear_submit_acceptance(
     // Before reporting the unknown, ask the state question the operator would:
     // does the pane still hold a conversation? Retained scrollback keeps it
     // blocked; an empty pane means the desired end state holds either way.
-    let status = if status == ContextClearSubmitStatus::Unobserved {
+    let status = if status == ContextClearSubmitStatus::Unobserved
+        && observation_budget == CLEAR_DIRECT_SUBMIT_RENDER_TIMEOUT
+    {
+        ContextClearSubmitStatus::Unrendered
+    } else if status == ContextClearSubmitStatus::Unobserved {
         upgrade_unobserved_clear_from_pane_history(tmux, pane, file, harness, command, phase)
     } else {
         status
@@ -5614,7 +5628,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             "-t",
             &pane,
             &format!(
-                "sh -c 'touch \"{}\"; IFS= read -r line; printf \"%s\" \"$line\" > \"{}\"; touch \"{}\"; printf \"\\ncleared\\n\"; while IFS= read -r line; do :; done'",
+                "sh -c 'touch \"{}\"; IFS= read -r line; printf \"%s\" \"$line\" > \"{}\"; touch \"{}\"; printf \"\\033[2J\\033[H\"; sleep 1.2; printf \"❯ \"; while IFS= read -r line; do :; done'",
                 ready_path.display(),
                 output_path.display(),
                 done_path.display()
@@ -5630,6 +5644,9 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             "fixture must prove the line-reader is ready before sending `/clear`",
         );
 
+        // The fixture repaints after the ordinary 900ms budget. Neither its
+        // blank screen nor the echoed command may count as accepted submission.
+        let started = Instant::now();
         send_clear_to_pane(
             &iso,
             &ProvenPane::from_verified_live_owner(pane.clone()),
@@ -5637,6 +5654,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             "claude",
         )
         .unwrap();
+        assert!(started.elapsed() >= Duration::from_millis(1200));
         for _ in 0..40 {
             if done_path.exists() {
                 break;

@@ -2022,8 +2022,10 @@ pub(crate) struct ControllerRuntime {
     /// `#stategraphjoin` / `#retainedsettlereactive` — one reactive graph per
     /// open document.
     ///
-    /// `supervisor_recycle_graph` above is process-scoped because there is one
-    /// supervisor. Retained-write settlement is **per document**, so each
+    /// `supervisor_recycle_graph` above retains the project-level compatibility
+    /// projection. Live supervisor readiness is keyed by document in this graph,
+    /// because multiple supervisors share a project. Retained-write settlement is
+    /// likewise **per document**, so each
     /// document owns a [`DocumentScope`](agent_doc_state_scope::DocumentScope)
     /// whose drop takes that document's cells with it.
     ///
@@ -2295,6 +2297,10 @@ struct ControllerDocumentGraphs {
     /// `#closeoutterminalreactive`: the durable closeout facts and observed
     /// clock edge are keyed controller sources. The timer may wake a waiter,
     /// but only the Computed gate decides whether the incumbent still blocks.
+    supervisor_recycle: lazily::ThreadSafeComputedMap<
+        String,
+        agent_doc_state_backbone::SupervisorRecycleProjection,
+    >,
     closeout_cycle_id: lazily::ThreadSafeSourceMap<String, Option<String>>,
     closeout_owner: lazily::ThreadSafeSourceMap<
         String,
@@ -3324,6 +3330,7 @@ impl ControllerDocumentGraphs {
         let ctx = scope.ctx().clone();
         Self {
             projection: lazily::ThreadSafeSourceMap::new(&ctx),
+            supervisor_recycle: lazily::ThreadSafeComputedMap::new(&ctx),
             closeout_cycle_id: lazily::ThreadSafeSourceMap::new(&ctx),
             closeout_owner: lazily::ThreadSafeSourceMap::new(&ctx),
             closeout_now_secs: lazily::ThreadSafeSourceMap::new(&ctx),
@@ -3359,6 +3366,27 @@ impl ControllerDocumentGraphs {
             settle_sink: Arc::new(OnceLock::new()),
             ctx,
         }
+    }
+
+    fn supervisor_recycle(
+        &self,
+        document_hash: &str,
+    ) -> agent_doc_state_backbone::SupervisorRecycleProjection {
+        self.projection
+            .get_or_insert_with(&self.ctx, document_hash.to_string(), |_, _| None);
+        let projections = self.projection.clone();
+        let handle = self.supervisor_recycle.get_or_insert_handle(
+            &self.ctx,
+            document_hash.to_string(),
+            move |ctx, key| {
+                projections
+                    .observe(ctx, key)
+                    .flatten()
+                    .map(|document| document.supervisor.recycle)
+                    .unwrap_or_default()
+            },
+        );
+        self.ctx.get(&handle)
     }
 
     fn projection_handle(
@@ -5567,6 +5595,16 @@ impl ControllerRuntime {
         Ok(self.supervisor_recycle_graph.projection())
     }
 
+    fn supervisor_recycle_projection_for(
+        &self,
+        document_hash: Option<&str>,
+    ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+        match document_hash {
+            Some(hash) => Ok(self.document_graphs.supervisor_recycle(hash)),
+            None => self.supervisor_recycle_projection(),
+        }
+    }
+
     fn document_state_projection(
         &self,
         document_hash: &str,
@@ -5583,11 +5621,25 @@ impl ControllerRuntime {
         &self,
         timeout: Duration,
     ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+        self.wait_for_supervisor_recycle_settle_for(None, timeout)
+    }
+
+    fn wait_for_supervisor_recycle_settle_for(
+        &self,
+        document_hash: Option<&str>,
+        timeout: Duration,
+    ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
         let started = Instant::now();
         let mut memory = self.memory.lock();
         loop {
-            let projection = self.supervisor_recycle_graph.projection();
-            if !self.supervisor_recycle_graph.in_flight() {
+            let projection = self.supervisor_recycle_projection_for(document_hash)?;
+            let in_flight = match document_hash {
+                Some(_) => {
+                    projection.phase == agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
+                }
+                None => self.supervisor_recycle_graph.in_flight(),
+            };
+            if !in_flight {
                 return Ok(projection);
             }
             let elapsed = started.elapsed();
@@ -12868,6 +12920,88 @@ agent:queue\n\
         );
 
         assert_eq!(waiter.join().unwrap()["phase"], "terminal");
+    }
+
+    #[test]
+    fn file_recycle_events_isolate_siblings_and_wake_own_waiter() {
+        use agent_doc_state_backbone::SupervisorRecyclePhase;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap =
+            preparing_runtime_bootstrap(dir.path(), ControllerHandoffState::Stable, None);
+        let runtime = Arc::new(runtime_for_bootstrap(bootstrap.clone()));
+        let first = dir.path().join("first.md");
+        let second = dir.path().join("second.md");
+        std::fs::write(&first, "# first").unwrap();
+        std::fs::write(&second, "# second").unwrap();
+        let request = |file: &Path| -> ControllerRequest {
+            serde_json::from_value(serde_json::json!({
+                "command": "supervisor_recycle_started", "file": file, "reason": "test_reexec"
+            }))
+            .unwrap()
+        };
+        let first_hash = agent_doc_hash::document_id_for_path(&first);
+        let second_hash = agent_doc_hash::document_id_for_path(&second);
+        // Materialize the reactive read before its first input arrives.
+        assert_eq!(
+            runtime
+                .supervisor_recycle_projection_for(Some(&first_hash))
+                .unwrap()
+                .phase,
+            SupervisorRecyclePhase::Settled
+        );
+        rpc::handle_supervisor_recycle_started(&bootstrap, &runtime, request(&second)).unwrap();
+        assert_eq!(
+            runtime
+                .wait_for_supervisor_recycle_settle_for(Some(&first_hash), Duration::ZERO)
+                .unwrap()
+                .phase,
+            SupervisorRecyclePhase::Settled
+        );
+        rpc::handle_supervisor_recycle_started(&bootstrap, &runtime, request(&first)).unwrap();
+        assert!(
+            runtime
+                .wait_for_supervisor_recycle_settle_for(Some(&first_hash), Duration::ZERO)
+                .is_err()
+        );
+        rpc::handle_supervisor_recycle_settled(&bootstrap, &runtime, request(&second)).unwrap();
+        assert!(
+            runtime
+                .wait_for_supervisor_recycle_settle_for(Some(&first_hash), Duration::ZERO)
+                .is_err()
+        );
+        let waiting_runtime = runtime.clone();
+        let waiting_hash = first_hash.clone();
+        let waiter = std::thread::spawn(move || {
+            waiting_runtime
+                .wait_for_supervisor_recycle_settle_for(Some(&waiting_hash), Duration::from_secs(2))
+                .unwrap()
+        });
+        rpc::handle_supervisor_recycle_settled(&bootstrap, &runtime, request(&first)).unwrap();
+        assert_eq!(
+            waiter.join().unwrap().phase,
+            SupervisorRecyclePhase::Settled
+        );
+        assert_eq!(
+            runtime
+                .supervisor_recycle_projection_for(Some(&second_hash))
+                .unwrap()
+                .phase,
+            SupervisorRecyclePhase::Settled
+        );
+        // The legacy global latch cannot poison an unrelated file route.
+        let mut global = request(&first);
+        global.file = None;
+        rpc::handle_supervisor_recycle_started(&bootstrap, &runtime, global).unwrap();
+        assert_eq!(
+            runtime.supervisor_recycle_projection().unwrap().phase,
+            SupervisorRecyclePhase::InFlight
+        );
+        assert!(
+            runtime
+                .wait_for_supervisor_recycle_settle_for(Some(&first_hash), Duration::ZERO)
+                .is_ok()
+        );
     }
 
     fn preparing_runtime_bootstrap(

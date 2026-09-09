@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.353
+
+- **Fix: isolate supervisor recycle readiness by document.** File-scoped routes
+  no longer inherit a sibling supervisor's replacement flag. Lifecycle events,
+  reactive projections and settlement waiters retain canonical document identity.
+- **Fix: wait for clear-command repaint evidence.** Blank terminal frames receive
+  a bounded rendering window and cannot acknowledge a clear or cause a duplicate
+  resend. Submission proof requires a rendered dispatch-ready prompt.
+- **Fix: editor focus cannot create a third pane.** Selection-only focus honors
+  `no_promotion`, does not revive missing sessions, and leaves pane placement to
+  the layout worker. Explicit operator recovery retains its existing behavior.
+
 ## 0.35.352
 
 - **Fix: fresh questions survive reused response headings.** Historical captures

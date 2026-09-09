@@ -29,6 +29,7 @@ pub enum ContextClearSubmitStatus {
     StillVisible,
     Unobserved,
     CaptureFailed,
+    Unrendered,
 }
 
 impl ContextClearSubmitStatus {
@@ -39,6 +40,7 @@ impl ContextClearSubmitStatus {
             Self::StillVisible => "command_still_visible",
             Self::Unobserved => "submission_unobserved",
             Self::CaptureFailed => "capture_failed",
+            Self::Unrendered => "pane_not_rendered",
         }
     }
 
@@ -53,6 +55,7 @@ impl ContextClearSubmitStatus {
             Self::StillVisible => Some("prompt_not_submitted"),
             Self::Unobserved => Some("submit_unobserved"),
             Self::CaptureFailed => Some("submit_unverified_capture_failed"),
+            Self::Unrendered => Some("submit_unverified_unrendered"),
             Self::Accepted | Self::AcceptedClearedState => None,
         }
     }
@@ -65,6 +68,7 @@ impl ContextClearSubmitStatus {
             Self::StillVisible => "clear_command_not_consumed",
             Self::Unobserved => "clear_submission_unobserved",
             Self::CaptureFailed => "clear_submit_capture_failed",
+            Self::Unrendered => "wait_for_pane_render",
             Self::Accepted | Self::AcceptedClearedState => "none",
         }
     }
@@ -73,6 +77,7 @@ impl ContextClearSubmitStatus {
         match self {
             Self::StillVisible => "restore_idle_prompt_and_retry",
             Self::Unobserved | Self::CaptureFailed => "verify_pane_state_then_retry",
+            Self::Unrendered => "wait_for_pane_render",
             Self::Accepted | Self::AcceptedClearedState => "none",
         }
     }
@@ -149,6 +154,38 @@ impl ContextClearSubmitPollState {
     pub const fn saw_submission_evidence(self) -> bool {
         self.saw_command_visible || self.saw_changed_absent
     }
+}
+
+/// A blank repaint is absence of terminal evidence, never a submitted clear.
+/// Keep the ordinary stuck-draft budget short, but let an unrendered terminal
+/// finish drawing before deciding to resend a destructive control command.
+pub fn context_clear_observation_budget(
+    content: &str,
+    ordinary: Duration,
+    rendering: Duration,
+) -> Duration {
+    if content
+        .lines()
+        .all(|line| crate::prompt::strip_ansi(line).trim().is_empty())
+    {
+        rendering
+    } else {
+        ordinary
+    }
+}
+
+/// Only a settled prompt can prove a command disappeared. Blank redraws,
+/// spinners and unrelated output changes cannot acknowledge the clear.
+pub fn context_clear_submit_frame_status(
+    state: &mut ContextClearSubmitPollState,
+    command_visible: bool,
+    content_changed_since_delivery: bool,
+    prompt_ready: bool,
+) -> Option<ContextClearSubmitStatus> {
+    if !command_visible && !prompt_ready {
+        return None;
+    }
+    context_clear_submit_poll_status(state, command_visible, content_changed_since_delivery)
 }
 
 pub fn context_clear_submit_poll_status(
@@ -308,6 +345,7 @@ pub fn context_clear_submit_resubmit_proof_line(
         ContextClearSubmitStatus::StillVisible => "still_visible",
         ContextClearSubmitStatus::Unobserved => "unobserved",
         ContextClearSubmitStatus::CaptureFailed => "capture_failed",
+        ContextClearSubmitStatus::Unrendered => "pane_not_rendered",
     };
     format!(
         "session_clear_submit_resubmit file={} pane={} harness={} action={} key={} attempt={} max_attempts={} result={} elapsed_ms={}",
@@ -360,6 +398,9 @@ pub fn context_clear_submit_blocked_message(
     // the command; for an unobserved submit the prompt may already be idle and
     // the real question is whether the clear ran at all.
     let remedy = match observation.status {
+        ContextClearSubmitStatus::Unrendered => format!(
+            "The {harness} pane stayed blank while awaiting its repaint. No duplicate clear was sent; wait for the prompt to render and check its context"
+        ),
         ContextClearSubmitStatus::Unobserved => format!(
             "No submission evidence was seen in either direction, so whether the clear ran is unknown. Check the {harness} pane before retrying — run Clear Session Context again if the context is still there"
         ),
@@ -567,6 +608,77 @@ mod tests {
 
     fn is_dispatch_ready_prompt_line(line: &str) -> bool {
         matches!(line.trim(), ">" | "›" | "❯")
+    }
+
+    #[test]
+    fn blank_repaint_waits_for_ready_clear_receipt() {
+        let ordinary = Duration::from_millis(900);
+        let rendering = Duration::from_secs(10);
+        let mut state = ContextClearSubmitPollState::default();
+        assert_eq!(
+            context_clear_observation_budget("\n", ordinary, rendering),
+            rendering
+        );
+        assert_eq!(
+            context_clear_submit_frame_status(&mut state, false, true, false),
+            None
+        );
+        assert!(!state.saw_submission_evidence());
+        assert_eq!(
+            context_clear_submit_frame_status(&mut state, false, true, true),
+            Some(ContextClearSubmitStatus::Accepted)
+        );
+        assert_eq!(
+            context_clear_observation_budget("› /clear", ordinary, rendering),
+            ordinary
+        );
+    }
+
+    #[test]
+    fn unrendered_clear_never_retries_or_reports_success() {
+        let observation = ContextClearSubmitObservation {
+            status: ContextClearSubmitStatus::Unrendered,
+            elapsed: Duration::from_secs(10),
+            command_visible: false,
+        };
+        assert!(!observation.status.is_accepted());
+        assert_eq!(
+            context_clear_submit_retry_action(ContextClearSubmitRetryFacts {
+                observation,
+                pending_draft_enter_resubmit: true,
+                attempts_sent: 0,
+                max_attempts: 4,
+            }),
+            None
+        );
+        assert!(
+            context_clear_submit_blocked_message(
+                "session.md",
+                "%1",
+                "codex",
+                "/clear",
+                "test",
+                observation
+            )
+            .contains("No duplicate clear was sent")
+        );
+    }
+
+    #[test]
+    fn visible_command_then_blank_is_not_submission_proof() {
+        let mut state = ContextClearSubmitPollState::default();
+        assert_eq!(
+            context_clear_submit_frame_status(&mut state, true, true, true),
+            None
+        );
+        assert_eq!(
+            context_clear_submit_frame_status(&mut state, false, true, false),
+            None
+        );
+        assert_eq!(
+            context_clear_submit_frame_status(&mut state, false, false, true),
+            Some(ContextClearSubmitStatus::Accepted)
+        );
     }
 
     #[test]

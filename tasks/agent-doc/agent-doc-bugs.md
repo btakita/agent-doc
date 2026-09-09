@@ -67,7 +67,6 @@ The original `backend.md` compact recovered independently in commit `fb5d356`, r
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#fixhttpsgithub] Fix GH https://github.com/btakita/agent-doc/issues/49 + https://github.com/btakita/agent-doc/issues/51. release + publish
 <!-- /agent:backlog -->
 
 ## Review

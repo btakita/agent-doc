@@ -12,14 +12,14 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
 
-0.35.350 installed, committed, pushed, and tagged. GH #49/#51 closed; the visible editor window has two agent panes. Full check and tmux suite passed. Release/CI workflows are running; PyPI publication remains subject to the existing storage quota blocker.
+0.35.353: clear, recycle, and three-pane fixes installed and verified; release push follows closeout.
 <!-- /agent:status -->
 
 ## Exchange
@@ -93,6 +93,23 @@ The release executable and native library are installed and byte-for-byte verifi
 Source commits `0453a3282` and `c7b3023ed` are pushed, with tag `v0.35.352`. CI and release workflows are running. The earlier CI package-index failure cleared on retry. PyPI still has the existing 10 GB quota blocker, retained in `#pypi345quota`.
 
 Architecture and verification notes: [prompt preservation plan](plan-unstarted-exchange-commit.md).
+
+### Re: Clear, recycle, and three-pane layout fixes — gpt-6
+
+> **Queue prompt:**
+> do [#fixcommandfailed]
+
+Fixed both reported command failures and the additional three-pane layout issue in **0.35.353**, committed as `069a0498b`.
+
+- Clear submission now waits through a blank terminal repaint for a rendered, dispatch-ready prompt. Blank output cannot prove acceptance or trigger a duplicate clear. A persistent blank returns the specific `pane_not_rendered` outcome; a visible stuck draft retains its bounded submit repair.
+- File-scoped recycle RPCs retain canonical document identity through requested, started, settled, status, and wait. A sibling supervisor's reexec cannot block this document or settle its waiter. Live verification showed this document settled while the legacy project-wide flag remained in flight.
+- Editor focus can select an existing visible pane, but cannot revive a missing session or promote a stashed pane. `no_promotion=true` overrides legacy resume policy. This closes the stale-focus path that added a third pane immediately after two-column layout convergence.
+
+The recycle readiness check now observes a keyed Computed derived from the existing document Source; producer events wake its waiters. The retained layout worker continues to own structural placement. Clear's bounded tmux sampling remains the actorless boundary exception because that direct-pane command has no retained output subscription. Architecture and evidence are recorded in [the implementation plan](plan-clear-proof-recycle-scope.md).
+
+`make check tmux-ci` passed: **9,269 workspace tests and 21 isolated tmux tests**, plus editor parity, native peer integration, and formal checks. Regressions cover sibling recycle isolation, delayed blank repaint, missing-session focus, and stashed-pane focus. `make install-full` completed; installed executable and native library matched the release artifacts byte-for-byte, and both editor packages installed. Both affected project controllers completed handoff and match the installed binary. The live window remained at two panes across further document switches.
+
+The source tree is clean. Workspace commit `28f9b4784` records the plan, generated skill versions, and source pointer. Main and release-tag pushes follow this document closeout. The previous CI run passed; the existing PyPI project-storage quota failure remains tracked in `#pypi345quota`, updated for this release. No additional implementation follow-up is needed.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 
@@ -102,18 +119,16 @@ Architecture and verification notes: [prompt preservation plan](plan-unstarted-e
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#fixcommandfailed]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#fixcommandfailed] Fix "agent-doc command failed (exit 1): Error: session_clear codex command `/clear` for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md was not proven submitted in pane %48 after supervisor_ipc_command_repair_acceptance (result=submission_unobserved, command_visible=false); treating Clear Session Context as not submitted. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=verify_pane_state_then_retry unblocker=clear_submission_unobserved. No submission evidence was seen in either direction, so whether the clear ran is unknown. Check the codex pane before retrying — run Clear Session Context again if the context is still there" and `dispatch-only codex reopen refused to inject into pane %159 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle`
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
 - [/] [#compactdevreplica] [operator-verify] Reconnect the editor replica for src/haiven-dev/tasks/dev.md and verify its retained compact continuation commits. Installed 0.35.349 fixes local event ingress and native-save continuation; live read and supported recovery still report editor_attached_model_missing. Reopen the document or restart the editor, then observe the existing continuation; do not repeat Compact Exchange or force disk.
-- [/] [#pypi345quota] [operator-verify] Publish agent-doc v0.35.352 to PyPI after quota space is available. Uploads through v0.35.350 failed with HTTP 400 because the project reached its 10 GB storage limit; the v0.35.352 workflow is running. Unblocks: obtain a quota increase or explicitly approve old-release cleanup, then rerun the latest PyPI workflow and verify uploaded artifacts.
+- [/] [#pypi345quota] [operator-verify] Publish agent-doc v0.35.353 to PyPI after quota space is available. The v0.35.352 upload failed with HTTP 400 because the project reached its 10 GB storage limit; v0.35.353 publication follows the release tag. Unblocks: obtain a quota increase or explicitly approve old-release cleanup, then rerun the latest PyPI workflow and verify uploaded artifacts.
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.
 - [/] [#harnessswitchverify] [operator-verify] #harnessswitchstorm remains unverified. The 2026-08-25 fpe.md attempt was invalidated by a stale live JetBrains plugin generation: ops.log showed controller_crdt_replica_refusal_storm (25 refusals), editor_absent/disk authority, agent_restart_respec_inert to Claude, then old_harness=claude -> new_harness=codex only after save. Unblocks after make install, restart the JetBrains IDE host, repeat the unsaved claude <-> codex switch, and prove exactly one spawn plus agent_restart_deferred reason=non_authoritative_document_view.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

@@ -19,7 +19,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-0.35.345 runtime and JetBrains 0.2.375 installed. Fixes committed/pushed/tagged; mandatory plugin parity gates and release ledger added. PyPI quota blocker tracked as #pypi345quota; IntelliJ restart remains operator verification.
+0.35.350 installed, committed, pushed, and tagged. GH #49/#51 closed; the visible editor window has two agent panes. Full check and tmux suite passed. Release/CI workflows are running; PyPI publication remains subject to the existing storage quota blocker.
 <!-- /agent:status -->
 
 ## Exchange
@@ -54,6 +54,24 @@ Regression coverage includes pending delivery → visible target → native save
 Source commit: `91d022aa8`; workspace plan/install mirrors: `a44e0cc89`. Release/tag publication follows this response closeout. The latest observed CI run was still in progress.
 
 The original `backend.md` compact recovered independently in commit `fb5d356`, retaining its `20260909-043501` archive reference. Architecture and evidence: [plan-compact-save-layout-dispatch.md](plan-compact-save-layout-dispatch.md).
+
+### Re: GH #49/#51 and the extra shell panes — gpt-6
+
+> **Queue prompt:** Fix GH https://github.com/btakita/agent-doc/issues/49 + https://github.com/btakita/agent-doc/issues/51. release + publish
+
+Implemented and installed **0.35.350**. Source commit `aaaa6b6cb` and tag `v0.35.350` are pushed; both GitHub issues are closed.
+
+- **#51:** the server-identity observer now represents an absent server or empty bootstrap reply explicitly. It preserves the previous identity and registry until a valid observation can apply the existing initialize/keep/replace policy. Malformed nonempty identities, executable failures, and failed queries against a live server retain errors. The four reported start tests passed locally even before this change; the new direct-observer tests cover the missing absence boundary independently.
+- **#49:** the native path stdout/stderr fix already shipped in 0.35.345 and remains covered by the test that seeds a newer release notice. This release fixes an additional UUID gap: claim persists its generated identity before occupied-pane and cross-root provisioning. Documentation now distinguishes the official compatibility builds from binaries built against a newer local glibc.
+- **Extra panes:** my initial claim regression exposed a socket-isolation defect and created two idle shells on the live server. I verified their exact temporary-directory ownership and removed them. Socket selection now belongs to the shared tmux constructor, so claim, route, and startup stay on the selected server. The current editor window has exactly two agent panes (`%159` and `%54`).
+
+The policy owners remain the registry observation adapter, pure identity transition policy, claim's authority-backed initialization, and shared tmux constructor. These are bounded startup/protocol operations; no new retry loop, cache, or disconnected reactive graph was added. Existing document authority and provisioning effects remain the lifecycle boundary. No changing derived state was extracted into a new Computed because these changes handle one-shot bootstrap observations before the managed session exists.
+
+**Verification:** `make check` passed **9,259 tests**, with 256 skipped, including editor parity, native peers, simulator, and formal gates. `make tmux-ci` passed. New coverage checks absence without losing prior identity, later replacement cleanup, malformed replies, launch/query failures, and the claim UUID/provisioning boundary. The installed optimized CLI and native library match their release artifacts byte-for-byte; JetBrains 0.2.376 and VS Code 0.2.70 packages are installed, and the workspace controller recycled successfully. An installed-binary smoke created and reused a fresh isolated tmux server while leaving every default-server pane unchanged.
+
+**Publication:** GitHub Release, PyPI, and CI workflows were in progress at the latest observation. The tag is published; release artifacts are not yet verified. PyPI's latest completed upload failed at the project storage limit, and no versions after 0.35.343 are currently present. The existing quota review item now tracks 0.35.350; no old artifacts were deleted.
+
+Workspace plan and installed-skill mirrors: `dec03ee5e`. Architecture and scope: [plan-gh49-gh51-bootstrap.md](plan-gh49-gh51-bootstrap.md). The queue is currently stopped and empty; that operator state is preserved.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 

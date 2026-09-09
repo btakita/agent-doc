@@ -27,96 +27,11 @@ queue: stop
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260909-001651.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20260909-043527.md`*
 
 Compacted content:
-- Archived 10 response topic(s): monsterrodholder.md stability; Response; #mrhsyncslowpath; 7 more
-- Prior summary/context: prior compacted content: Archived 8 response topic(s): fenced closeout reports becoming queue work; response copied i...
-
-### Re: Response
-
-Fixed and installed **0.35.344**.
-
-- Auto-sync now retains managed-pane ownership across tab changes; live layouts are converging automatically.
-- STALE SUPERVISOR titles are pane-scoped and reactively refreshed.
-- Upgrade requests survive history compaction, and acknowledgments stop repeated recycling.
-- All 16 supervisors adopted the installed binary, preserving their harness children. No forced restart was needed.
-
-Ownership decisions now live in the controller’s reactive graph; the legacy recycle ledger remains a compatibility boundary for older supervisors.
-
-Verification: 9,242 tests, 8 live tmux tests, and CI passed. Changes are pushed and tagged; GitHub Release/PyPI publishing is running.
-
-[operator-verify] Switch editor tabs once to confirm the visible pane behavior.
-
-### Re: #fixqueueitem — gpt-6
-
-Fixed the missing queue-completion evidence path in agent-doc **0.35.345**.
-
-The previous closeout used a generic `### Re: Response` heading without identifying its free-text queue prompt. The conservative completion matcher therefore had no exact answer evidence and left the item active. Strict write now rejects that shape before capture and names the exact `> **Queue prompt:**` quote required with the result or concrete deferral. Selection alone still cannot mark unfinished work complete.
-
-`agent-doc-queue::queue_closeout_guard` owns this pure policy. Tests cover missing evidence, an exact answer, an explicit deferral, unselected/struck/id-backed heads, foreign exchange steering, and rejection without capture or document mutation. The existing document-scoped completion Computed and Effect still own the strike. Pre-capture validation is an immutable-candidate check with no new cache or retry loop; an already-captured stream is not revalidated against later selection changes.
-
-### Re: #fixhttpsgithub — gpt-6
-
-> **Queue prompt:**
->
-> do [#fixhttpsgithub]. Ensure plugin parity for the last few releases. Also track what we have parity on and ensure we are always at parity.
-
-
-> **Queue prompt:**
->
-> do [#fixqueueitem]
-
-
-Fixed [issue #50](https://github.com/btakita/agent-doc/issues/50), committed and pushed as **dfb9db790**, and tagged **v0.35.345**. The CLI/native library and editor packages are installed locally; JetBrains **0.2.375** contains the loader fix.
-
-`lib-path` now skips startup upgrade notices. JetBrains parses stdout only and inherits stderr separately, so warnings from older binaries cannot become library paths or fill an unread stderr pipe. Failed resolution records the candidate, exit status, and existence check. The subprocess remains an actorless bootstrap boundary; no polling or controller policy was added.
-
-Verification passed: **9,245 Rust tests**, **507 JetBrains tests**, full `make check` including release audits and formal checks, formatting, private-name checks, signed plugin build, and `make install-full`. The seeded newer-release cache regression proves the library-path output stays clean. CI and GitHub Release workflows were in progress when inspected after the push.
-
-**PyPI publication remains externally blocked.** The preceding upload failed with HTTP 400 because `agent-doc` reached its **10 GB project storage limit**. The new tag triggered PyPI again, but quota space is still required. Gated **#fixhttpsgithub** retains the remaining step: obtain a quota increase or approved storage cleanup, then rerun `gh workflow run PyPI --ref v0.35.345`. No additional backlog follow-up is needed because that item owns the full remaining publication step.
-
-The existing **#restartintellijidea** review item now names plugin 0.2.375; restart IntelliJ to activate its Kotlin loader change. Plan and ownership notes: `src/agent-doc/tasks/agent-doc/plan-queue-response-evidence-and-lib-path.md`.
-
-### Re: plugin parity and publication tracking — gpt-6
-
-> Ensure plugin parity for the last few releases. Also track what we have parity on and ensure we are always at parity.
-
-Audited **0.35.340–0.35.345** and added a mandatory parity gate. `editors/release-parity.tsv` now records each release's JetBrains/VS Code impact and evidence; `editors/plugin-parity.tsv` remains the capability owner. `editors/PARITY.md` explains the coverage and its limits.
-
-`make check` now runs both plugin unit suites and the real JetBrains/VS Code native-peer/controller test. The release audit rejects a missing current-version ledger entry or a required capability that either supported plugin declares unsupported. CI installs Java 21 and Node dependencies and runs that same gate. Positive and negative audit probes passed.
-
-The recent supervisor, layout, recycle, and queue changes share their Rust policy owner across both editors. The 0.35.342 stale-replacement refusal is controller-owned; JetBrains also has its local-edit precheck. For issue #50, JetBrains now separates subprocess streams, while VS Code discovers the native library directly. Optional lossless-tree support remains JetBrains-only, typed intents and Zed's native-peer contract remain staged, and host-dependent behavior remains conditional. Verification covers required capabilities and native transports; optional features and IDE UI behavior retain the documented differences.
-
-Committed and pushed as **5dc7659a6**. The expanded full `make check` passed: **9,245 Rust tests**, **507 JetBrains tests**, **179 VS Code tests**, and the real native-peer/controller test. The installed **0.35.345** runtime and JetBrains **0.2.375** package contain the runtime fixes; this follow-up strengthens verification and tracking.
-
-Correction to the prior publication note: closeout reaped `#fixhttpsgithub`, so the unfinished PyPI upload is now preserved under the dedicated gated **#pypi345quota** item. The **10 GB project quota** remains the external blocker. The existing **#restartintellijidea** item retains the live plugin activation check.
-
-### Re: six tmux panes for a two-pane editor split — gpt-6
-
-Fixed and verified the live layout: two editor columns now have two equally sized tmux panes. The four extra sessions were moved into the managed stash, preserving their running agents.
-
-The repair path could pull the stashed panes back into the visible window because tmux automatic renaming made the stash look like a duplicate managed window. Layout repair now pins automatic-rename and allow-rename off for its managed visible/stash windows before consolidation. Unrelated windows retain their settings. Repeated repair coverage proves the two-visible/four-stashed arrangement remains stable. The extracted repair tests now run in `make tmux-ci`.
-
-The pane fix was committed and pushed as **ca7d1de27**, tagged **v0.35.346**, and is included in installed **0.35.347**. Architecture contract: `src/agent-doc/tasks/agent-doc/plan-managed-window-name-stability.md`. The existing layout owner still reconciles editor intent; no additional polling or competing layout owner was introduced.
-
-### Re: recycle dispatch and Restart Agent session recording — gpt-6
-
-Your session-recording suspicion was correct. An external `/clear` prompt could record the agent-doc document UUID into the hook ledger, where the newest row was later mistaken for the Codex thread ID. Hook records now retain identity provenance: genuine harness identity can supply resume arguments, while external document prompts remain available for prompt tracking without replacing the resume ID. Legacy external-clear rows are excluded too.
-
-The affected contracts document now records Codex thread **01a083de-04c8-7aa2-b658-f396653fd33a**. Its saved Codex transcript exists, and the supervisor's resume log uses that same ID. **77b2c07f-79ac-4e62-b9cb-b20a8902de14** remains the document session UUID; it is no longer selected as the Codex resume ID. Regression tests cover newer external clears, legacy records, turnless genuine hooks, parked bindings, and documents without a genuine harness identity.
-
-The recycle refusal had two causes: the client timed out before the supervisor's settlement deadline, and compilation marked the supervisor as recycling before re-exec began. The settlement RPC now permits the full server deadline plus transport margin, and the guard starts at the actual re-exec boundary. Waiting reads the existing retained recycle projection. The hot-reload input guard remains active while replacement is actually underway. A delayed local-socket regression proves the reply can arrive beyond the ordinary RPC deadline.
-
-Mandatory editor parity testing also exposed a VS Code native reload failure: Koffi retained named struct registrations across unload. **VS Code 0.2.70**, now installed, uses anonymous ABI descriptors. The real native-peer test exercises two disconnected reloads followed by reconnect and offline-edit reconciliation.
-
-Architecture contract: `src/agent-doc/tasks/agent-doc/plan-recycle-dispatch-and-thread-identity.md`; updated behavior is specified in `src/agent-doc/specs/07-session-tmux-commands.md`. The existing ProcessScope, Source, Computed, and Effect owners retain lifecycle and projection authority. Hook persistence and the one-shot settlement RPC remain external adapters; neither creates a second state owner or retry loop. The contract records identity, recycle, and reconnect transitions and their verification evidence.
-
-Committed and pushed as **5b62eafc0**, tagged **v0.35.347**. Runtime/native **0.35.347** and VS Code **0.2.70** are installed; JetBrains remains **0.2.375**. The workspace pointer and generated skill versions were committed separately as **a4616c6ec**.
-
-Final `make check` passed: **9,249 Rust tests**, both editor unit suites, real native-peer/controller coverage with repeated reloads, and release/formal checks. Expanded `make tmux-ci` passed, including all 13 extracted layout-repair tests. Live checks confirm the two-pane layout and correct saved thread identity. CI **34302782998** was in progress and Release **34302783725** was queued when inspected after push; local verification is complete.
-
-The existing PyPI quota follow-up **#pypi345quota** now names v0.35.347. Publication still requires quota space after the earlier HTTP 400 at the 10 GB project limit. No additional backlog follow-up is needed because that item owns the remaining publication step. The existing JetBrains host-activation check remains in **#restartintellijidea**.
+- Archived 6 response topic(s): Response; #fixqueueitem; #fixhttpsgithub; 3 more
+- Prior summary/context: prior compacted content: Archived 10 response topic(s): monsterrodholder.md stability; Response; #mrhsyncslowpath; 7 ...
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 
@@ -126,6 +41,7 @@ The existing PyPI quota follow-up **#pypi345quota** now names v0.35.347. Publica
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

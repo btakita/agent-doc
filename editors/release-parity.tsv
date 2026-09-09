@@ -10,3 +10,4 @@
 0.35.348	Truthful attached-editor replica recovery receipt	bounded synchronous attach receipt plus verified latch rearm; plugin 0.2.376	existing awaited native attach plus shared verified latch rearm	staged	make check; make cross-editor-simworld
 0.35.349	Compact save/commit, local event ingress, and layout worker activation	shared-core	shared-core	staged	make check (native peers, editor parity, retained-save and layout activation regressions)
 0.35.350	Cold tmux bootstrap, claim identity, and socket isolation	shared-core; existing stdout-only native bootstrap	shared-core; direct native discovery	staged	make check; isolated claim/start regressions
+0.35.351	Unanswered exchange prompt recovery	shared-core	shared-core	staged	make check; repeated preflight and git prompt preservation regressions

@@ -44,6 +44,10 @@
   Lazily/editor authority; the candidate is then rebased onto that current cut
   so all unowned operator bytes survive. An owned mismatch blocks commit, and a
   live editor never grants authority to merge an independent disk candidate.
+  An empty/no-op ownership journal or drift in an unowned exchange falls back
+  to the snapshot-selective commit guard. An already committed response cannot
+  authorize absorbing a new unanswered prompt. Failed-launch recovery leaves
+  that prompt uncommitted and actionable on repeated preflight attempts.
 - A capacity-paused or otherwise detached closeout must reconcile exact pending
   editor operations before treating an on-disk document equal to the cycle base
   as evidence that no concurrent edit occurred. The on-disk bytes remain the

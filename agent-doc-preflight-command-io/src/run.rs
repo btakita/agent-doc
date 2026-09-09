@@ -4494,8 +4494,19 @@ mod tests {
     }
     #[test]
     fn preflight_abandons_stale_empty_preflight_started_prompt_drift_without_capture() {
+        for per_component in [false, true] {
+            assert_failed_launch_prompt_survives_retries(per_component);
+        }
+    }
+
+    fn assert_failed_launch_prompt_survives_retries(per_component: bool) {
         let dir = setup_project();
         let root = dir.path();
+        std::fs::write(
+            root.join(".agent-doc/config.toml"),
+            format!("per_component_convergence = {per_component}\n"),
+        )
+        .unwrap();
         let doc = root.join("session.md");
         let snapshot = concat!(
             "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
@@ -4530,13 +4541,38 @@ mod tests {
             "do [#root-empty-preflight]. spec-test-build-install-commit-push\n<!-- agent:boundary:abc123 -->\n",
         );
         std::fs::write(&doc, &live).unwrap();
-        age_cycle_state(
-            &doc,
-            agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS + 1,
-        );
+        for _ in 0..3 {
+            age_cycle_state(
+                &doc,
+                agent_doc_turn::repair::STALE_EMPTY_PREFLIGHT_TTL_SECS + 1,
+            );
 
-        run(&doc).unwrap();
+            run(&doc).unwrap();
 
+            let head = Command::new("git")
+                .current_dir(root)
+                .args(["show", "HEAD:session.md"])
+                .output()
+                .unwrap();
+            assert!(head.status.success());
+            assert!(!String::from_utf8_lossy(&head.stdout).contains("root-empty-preflight"));
+            assert!(
+                std::fs::read_to_string(&doc)
+                    .unwrap()
+                    .contains("root-empty-preflight")
+            );
+            let diff = agent_doc_diff_io::compute(
+                &agent_doc_snapshot_io::DiffBaselineStore::new(agent_doc_ops_log_io::log_op),
+                &doc,
+            )
+            .unwrap()
+            .expect("the unanswered prompt must remain actionable");
+            assert!(
+                agent_doc_diff::classify_prompt_bearing_changes(&diff)
+                    .iter()
+                    .any(|change| change.text.contains("root-empty-preflight"))
+            );
+        }
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
         assert_ne!(

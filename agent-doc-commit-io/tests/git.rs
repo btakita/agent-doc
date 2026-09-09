@@ -1604,6 +1604,18 @@ Duplicate replay should stay live.
     }
     #[test]
     fn commit_does_not_absorb_out_of_band_user_prompt() {
+        for per_component in [false, true] {
+            for old_capture in [false, true] {
+                for prompt in [
+                    "❯ follow-up question",
+                    "Can you answer this follow-up question?\n```text\nexample context\n```",
+                ] {
+                    assert_unanswered_prompt_preserved(per_component, old_capture, prompt);
+                }
+            }
+        }
+    }
+    fn assert_unanswered_prompt_preserved(per_component: bool, old_capture: bool, prompt: &str) {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
@@ -1638,6 +1650,11 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
 
+        fs::write(
+            root.join(".agent-doc/config.toml"),
+            format!("per_component_convergence = {per_component}\n"),
+        )
+        .unwrap();
         let doc = root.join("session.md");
         let snapshot = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
@@ -1663,6 +1680,19 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
 
+        if old_capture {
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot))
+                .unwrap();
+            agent_doc_capture_io::capture_response(&doc, "### Re: older\nold body\n").unwrap();
+            agent_doc_cycle_state_io::mark_committed(
+                &doc,
+                "commit_success",
+                Some(snapshot),
+                Some(snapshot),
+            )
+            .unwrap();
+        }
+
         let file = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
             ### Re: older\n\
@@ -1670,9 +1700,12 @@ Duplicate replay should stay live.
             ❯ follow-up question\n\
             <!-- agent:boundary:newid -->\n\
             <!-- /agent:exchange -->\n";
+        let file = file.replace("❯ follow-up question", prompt);
         fs::write(&doc, file).unwrap();
 
-        commit(&doc).expect("commit should succeed even when there's nothing new to stage");
+        for _ in 0..3 {
+            commit(&doc).expect("retry should preserve the unanswered prompt");
+        }
 
         let show = Command::new("git")
             .current_dir(root)
@@ -1696,7 +1729,7 @@ Duplicate replay should stay live.
 
         let working = fs::read_to_string(&doc).unwrap();
         assert!(
-            working.contains("❯ follow-up question"),
+            working.contains(prompt),
             "working tree should retain the user prompt:\n{working}"
         );
     }

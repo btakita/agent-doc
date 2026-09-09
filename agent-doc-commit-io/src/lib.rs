@@ -156,6 +156,27 @@ fn plan_owned_component_commit_rebase<'a>(
         owned_component_names.extend(changed);
     }
 
+    // No write is not ownership of the current document. In particular, a
+    // failed harness launch leaves only the operator's unanswered prompt.
+    if owned_component_names.is_empty() {
+        return Ok(OwnedComponentCommitRebase::WholeDocumentFallback {
+            reason: "no_owned_component_changes",
+        });
+    }
+    if !owned_component_names.contains("exchange")
+        && agent_doc_document::authority_hashes::changed_component_names(
+            agent_target,
+            operator_current,
+        )?
+        .contains("exchange")
+    {
+        // Let the normal unanswered-prompt guard decide whether exchange drift
+        // can be absorbed. A queue-only write cannot bypass that guard.
+        return Ok(OwnedComponentCommitRebase::WholeDocumentFallback {
+            reason: "unowned_exchange_drift",
+        });
+    }
+
     let candidate = agent_doc_document::authority_hashes::rebase_owned_component_commit_candidate(
         agent_target,
         operator_current,
@@ -1581,16 +1602,21 @@ where
                 active_response_target.as_deref(),
             )
         {
-            let captured_response_materialized =
+            let uncommitted_response_materialized =
                 active_response_body
                     .as_deref()
                     .is_some_and(|response_body| {
                         agent_doc_turn::response_replay::response_materialized_in_content(
                             response_body,
                             &file_content,
-                        )
+                        ) && !head_doc.as_deref().is_some_and(|head| {
+                            agent_doc_turn::response_replay::response_materialized_in_content(
+                                response_body,
+                                head,
+                            )
+                        })
                     });
-            if captured_response_materialized {
+            if uncommitted_response_materialized {
                 eprintln!(
                     "[commit] rebasing the captured response onto newer operator prompt drift for {}",
                     file.display()
@@ -1619,7 +1645,7 @@ where
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "snapshot_absorb_skipped_prompt_target file={} reason={} old_snap_len={} new_snap_len={} captured_response_materialized=false",
+                        "snapshot_absorb_skipped_prompt_target file={} reason={} old_snap_len={} new_snap_len={} uncommitted_response_materialized=false",
                         file.display(),
                         reason,
                         snap_len,
@@ -2562,6 +2588,38 @@ mod controller_commit_scope_tests {
             "<!-- agent:exchange -->\n{exchange}\n<!-- /agent:exchange -->\n\
              <!-- agent:queue -->\n{queue}\n<!-- /agent:queue -->\n"
         )
+    }
+
+    #[test]
+    fn per_component_commit_without_owned_changes_keeps_prompt_guard() {
+        let target = component_document("old response", "- queued work");
+        let current = component_document("old response\nNew question?", "- queued work");
+        for transitions in [vec![], vec![(Some(target.as_str()), target.as_str())]] {
+            assert_eq!(
+                plan_owned_component_commit_rebase(&target, &current, transitions).unwrap(),
+                OwnedComponentCommitRebase::WholeDocumentFallback {
+                    reason: "no_owned_component_changes"
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn per_component_queue_write_cannot_absorb_unowned_exchange_prompt() {
+        let expected = component_document("old response", "- queued work");
+        let target = component_document("old response", "- updated queue");
+        let current = component_document("old response\nNew question?", "- updated queue");
+        assert_eq!(
+            plan_owned_component_commit_rebase(
+                &target,
+                &current,
+                [(Some(expected.as_str()), target.as_str())],
+            )
+            .unwrap(),
+            OwnedComponentCommitRebase::WholeDocumentFallback {
+                reason: "unowned_exchange_drift"
+            }
+        );
     }
 
     #[test]

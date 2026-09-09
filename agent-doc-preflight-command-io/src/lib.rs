@@ -19,8 +19,10 @@
 //!   For any open prior cycle, preflight auto-attempts `agent_doc_repair_io::run` +
 //!   `git::commit(file)` before diffing again. For an open `preflight_started`
 //!   cycle with no recoverable response and unresolved prompt-bearing drift,
-//!   preflight fails closed before the no-op commit path can mark an empty
-//!   cycle committed. Non-prompt drift may still use the narrow no-op closeout
+//!   preflight fails closed while fresh; once stale, repair abandons the empty
+//!   cycle and preserves the unanswered prompt as an uncommitted, actionable
+//!   diff for the next run. Abandonment does not authorize a recovery commit.
+//!   Non-prompt drift may still use the narrow no-op closeout
 //!   that stages the snapshot only and leaves later live working-tree edits
 //!   uncommitted; if that closeout still cannot prove the prior cycle is durable,
 //!   preflight fails closed instead of diffing again.

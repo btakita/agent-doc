@@ -2,6 +2,14 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.351
+
+- **Fix: failed harness launches preserve unanswered exchange prompts.**
+  Component commit rebasing requires actual owned changes and defers unowned
+  exchange drift to the prompt guard. A previously committed response cannot
+  authorize committing a fresh question. Stale empty-cycle recovery preserves
+  the uncommitted prompt and its actionable diff across repeated retries.
+
 ## 0.35.350
 
 - **Fix: cold tmux identity observation accepts an absent server (#51).** Empty

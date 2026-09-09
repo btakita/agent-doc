@@ -967,6 +967,11 @@ pub fn enforce_cycle_completion_with_mode(
         );
 
         let recovered = match effects.repair(file) {
+            Ok(agent_doc_turn::repair::RepairOutcome::StalePreflightCycleAbandoned) => {
+                // Abandonment preserves an unanswered prompt, not a response
+                // image to commit. The next preflight must still see its diff.
+                return Ok((true, false));
+            }
             Ok(outcome) => outcome.repaired(),
             Err(e) => {
                 let message = e.to_string();
@@ -1060,6 +1065,11 @@ pub fn enforce_cycle_completion_with_mode(
     }
 
     let recovered = match effects.repair(file) {
+        Ok(agent_doc_turn::repair::RepairOutcome::StalePreflightCycleAbandoned) => {
+            // Abandonment preserves an unanswered prompt, not a response
+            // image to commit. The next preflight must still see its diff.
+            return Ok((true, false));
+        }
         Ok(outcome) => outcome.repaired(),
         Err(e) => {
             let message = e.to_string();
@@ -5556,6 +5566,7 @@ mod tests {
     #[derive(Default)]
     struct TestPreflightCycleCompletionEffects {
         repair_calls: std::cell::Cell<usize>,
+        repair_outcome: Option<agent_doc_turn::repair::RepairOutcome>,
         commit_calls: std::cell::Cell<usize>,
         recovery_calls: std::cell::Cell<usize>,
         gate_reads: std::cell::Cell<usize>,
@@ -5573,7 +5584,9 @@ mod tests {
     impl PreflightCycleCompletionEffects for TestPreflightCycleCompletionEffects {
         fn repair(&self, _file: &Path) -> Result<agent_doc_turn::repair::RepairOutcome> {
             self.repair_calls.set(self.repair_calls.get() + 1);
-            Ok(agent_doc_turn::repair::RepairOutcome::Noop)
+            Ok(self
+                .repair_outcome
+                .unwrap_or(agent_doc_turn::repair::RepairOutcome::Noop))
         }
 
         fn commit(&self, _file: &Path) -> Result<bool> {
@@ -10996,6 +11009,27 @@ mod tests {
         assert_eq!(p.step.as_deref(), Some("preflight_started"));
         assert_eq!(p.turn_id.as_deref(), Some("#fmrunid-wire"));
         assert_ne!(p.run_id.as_deref(), Some("stale-mirror"));
+    }
+
+    #[test]
+    fn enforce_cycle_completion_does_not_commit_an_abandoned_prompt() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        let content = "<!-- agent:exchange -->\nNew question?\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let effects = TestPreflightCycleCompletionEffects {
+            repair_outcome: Some(
+                agent_doc_turn::repair::RepairOutcome::StalePreflightCycleAbandoned,
+            ),
+            ..Default::default()
+        };
+        assert_eq!(
+            enforce_cycle_completion(&doc, &effects).unwrap(),
+            (true, false)
+        );
+        assert_eq!(effects.repair_calls.get(), 1);
+        assert_eq!(effects.commit_calls.get(), 0);
     }
 
     #[test]

@@ -10,7 +10,7 @@ use agent_doc_state_backbone::{StateEvent, StateFact, SupervisorRecyclePhase};
 use agent_doc_supervisor::recycle_request::{
     RecycleRequest, recycle_request, recycle_request_is_fresh,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -28,9 +28,7 @@ pub fn request_recycle(file: &str, reason: &str) -> Result<()> {
         &identity.project_root,
         &identity.document_hash,
     )?;
-    let recycle_epoch = ledger
-        .document_epoch(&identity.document_hash)
-        .saturating_add(1);
+    let recycle_epoch = next_recycle_epoch(&ledger, &identity.document_hash)?;
     let marked_secs = now_secs();
     let event = StateEvent::new(
         format!(
@@ -44,8 +42,35 @@ pub fn request_recycle(file: &str, reason: &str) -> Result<()> {
             marked_secs,
         },
     );
-    crate::state_events::append_event(&identity.project_root, &event)?;
+    anyhow::ensure!(
+        crate::state_events::append_event(&identity.project_root, &event)?,
+        "recycle request generation collision for {} at epoch {recycle_epoch}",
+        identity.canonical_file.display(),
+    );
     Ok(())
+}
+
+/// Compatibility ledger high-water, not the number of retained events. History
+/// compaction can shrink `document_epoch`; it cannot unspend a recycle event ID.
+fn next_recycle_epoch(
+    ledger: &agent_doc_state_backbone::EventLedger,
+    document_hash: &str,
+) -> Result<u64> {
+    ledger
+        .events()
+        .iter()
+        .filter(|event| event.document_hash() == document_hash)
+        .filter_map(|event| match &event.fact {
+            StateFact::SupervisorRecycleRequested { recycle_epoch, .. }
+            | StateFact::SupervisorRecycleStarted { recycle_epoch, .. }
+            | StateFact::SupervisorRecycleSettled { recycle_epoch, .. } => Some(*recycle_epoch),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0)
+        .max(ledger.document_epoch(document_hash))
+        .checked_add(1)
+        .context("supervisor recycle generation exhausted")
 }
 
 /// Write (or refresh) a recycle-request for a document path.
@@ -106,9 +131,9 @@ fn clear_recycle_request_inner(file: &str) -> Result<()> {
     else {
         return Ok(());
     };
-    let recycle_epoch = ledger
-        .document_epoch(&identity.document_hash)
-        .saturating_add(1);
+    // Consume only the request we observed. A later request has a greater epoch
+    // and must survive this settlement even if its durable append wins the race.
+    let recycle_epoch = recycle.recycle_epoch;
     let event = StateEvent::new(
         format!(
             "supervisor-recycle-settled:{}:epoch-{recycle_epoch}",
@@ -130,6 +155,92 @@ fn clear_recycle_request_inner(file: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compacted_history_cannot_reuse_or_regress_recycle_generations() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "body").unwrap();
+        let identity = crate::state_events::document_state_identity(&file)
+            .unwrap()
+            .unwrap();
+        // Only two history rows remain, but epoch 9000 has already been spent.
+        for (id, fact) in [
+            (
+                "historical-request",
+                StateFact::SupervisorRecycleRequested {
+                    document_hash: identity.document_hash.clone(),
+                    reason: "old_install".into(),
+                    recycle_epoch: 9000,
+                    marked_secs: 1,
+                },
+            ),
+            (
+                "historical-settle",
+                StateFact::SupervisorRecycleSettled {
+                    document_hash: identity.document_hash.clone(),
+                    reason: "old_install".into(),
+                    recycle_epoch: 9000,
+                    marked_secs: 2,
+                },
+            ),
+        ] {
+            crate::state_events::append_event(dir.path(), &StateEvent::new(id, fact)).unwrap();
+        }
+        request_recycle_for_doc(&file, "new_install").unwrap();
+        assert_eq!(
+            read_recycle_request(file.to_str().unwrap()).unwrap().reason,
+            "new_install"
+        );
+        let ledger =
+            crate::state_events::load_document_ledger_shared(dir.path(), &identity.document_hash)
+                .unwrap();
+        assert_eq!(
+            ledger
+                .project_document(&identity.document_hash)
+                .unwrap()
+                .supervisor
+                .recycle
+                .recycle_epoch,
+            9001
+        );
+        clear_recycle_request(file.to_str().unwrap());
+        assert!(read_recycle_request(file.to_str().unwrap()).is_none());
+        request_recycle_for_doc(&file, "next_install").unwrap();
+        assert_eq!(
+            read_recycle_request(file.to_str().unwrap()).unwrap().reason,
+            "next_install"
+        );
+    }
+
+    #[test]
+    fn late_settlement_cannot_consume_a_newer_install_request() {
+        let mut ledger = agent_doc_state_backbone::EventLedger::new();
+        for epoch in [9001, 9002] {
+            ledger.append(StateEvent::new(
+                format!("request-{epoch}"),
+                StateFact::SupervisorRecycleRequested {
+                    document_hash: "doc".into(),
+                    reason: "install".into(),
+                    recycle_epoch: epoch,
+                    marked_secs: epoch,
+                },
+            ));
+        }
+        ledger.append(StateEvent::new(
+            "late-settle",
+            StateFact::SupervisorRecycleSettled {
+                document_hash: "doc".into(),
+                reason: "consumed_old_request".into(),
+                recycle_epoch: 9001,
+                marked_secs: 9003,
+            },
+        ));
+        let projection = ledger.project_document("doc").unwrap().supervisor.recycle;
+        assert_eq!(projection.phase, SupervisorRecyclePhase::Requested);
+        assert_eq!(projection.recycle_epoch, 9002);
+    }
 
     #[test]
     fn request_then_read_roundtrips_a_fresh_request() {

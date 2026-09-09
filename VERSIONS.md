@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.344
+
+- **Fix: install recycle requests survive compacted history.** Request epochs
+  advance beyond every retained recycle epoch, not the current event count.
+  Compaction can no longer cause silent event-ID collisions or requests below
+  the supervisor's generation fence. A refused append is reported as failure.
+- **Fix: recycle settlement acknowledges only the observed request.** A delayed
+  settlement cannot consume a newer install request. Successful fresh-image
+  child adoption also settles requests that an older count-based host could
+  not clear, avoiding repeated replacement after a rolling upgrade.
+
 ## 0.35.343
 
 - **Fix: stale supervisor titles converge after an upgrade.** Freshness now drives

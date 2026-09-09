@@ -1,5 +1,11 @@
 # agent-doc Functional Specification
 
+- Cross-version supervisor recycle requests use a retained recycle-epoch high
+  water mark, independent of compacted event counts. Settlement names the exact
+  observed request epoch; a late settlement cannot consume a newer request.
+  A fresh replacement acknowledges an uncleared legacy request only after
+  successfully adopting its surviving child.
+
 - Supervisor freshness display is a process-scoped effect of binary freshness.
   Its pane-local marker is display output, never recycle authority; adoption
   refreshes the warning without clearing the surviving child's turn title.

@@ -1593,11 +1593,21 @@ pub fn run_with_reap_policy_resume_and_harness(
                         state.child_pid, state.master_fd
                     ),
                 );
-                agent_doc_supervisor_process::pty::PtySession::adopt(
+                let adopted = agent_doc_supervisor_process::pty::PtySession::adopt(
                     state.master_fd,
                     state.child_pid,
                 )
-                .with_context(|| "failed to adopt harness child across supervisor reexec")?
+                .with_context(|| "failed to adopt harness child across supervisor reexec")?;
+                // Cold adoption is the completion receipt for an older host
+                // whose count-based clear could not cross the retained epoch
+                // fence. Settle only the observed request, after successful
+                // adoption and proof that this image is current.
+                if !shared.refresh_binary_stale() {
+                    agent_doc_supervisor_io::recycle_request::clear_recycle_request(
+                        &canonical.to_string_lossy(),
+                    );
+                }
+                adopted
             }
 
             #[cfg(not(unix))]

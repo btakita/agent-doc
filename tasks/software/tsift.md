@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -48,13 +48,29 @@ Compacted content:
 Recorded the updated Codex resume ID. The queue remains stopped; issue #25 is pending.
 
 Workspace verification: `make check` failed in `corky-core` library tests (`make` exit 2; log: `.tsift/artifacts/tart-2ff5828b2d.test.log`). No source changes were made. The latest GitHub Actions run passed; no workflow named `CI` exists in this workspace. The stale agent-doc install warning remains advisory for its owning development cycle.
+
+
+### Re: Issue #25 fixed and v0.1.97 published — gpt-6
+
+> **Queue prompt:** Fix https://github.com/btakita/tsift/issues/25 + release + publish
+
+Fixed and closed [issue #25](https://github.com/btakita/tsift/issues/25) in commit `4e8af21`, pushed to `main` and tagged `v0.1.97`.
+
+- `large_projection` remains visible as an informational check; an otherwise healthy doctor report now returns `ok` with no repair commands. Genuine warnings and fail-closed checks retain their severity.
+- Compaction and retention share one count result. Reports distinguish retained tombstones from compaction count-scan rows; cached counts report zero scanned rows. Regression coverage denies graph-row reads to prove the cached storage path, and the legacy fallback uses SQL primary-key probes instead of collecting all live keys in memory. Other doctor integrity checks still run.
+- Ordinary source-watermark drift recommends incremental refresh in status, doctor, and read diagnostics; projection-version and schema failures retain rebuild guidance.
+
+Verification passed: `make check` with 1,835 Rust tests, Clippy, OpenCode plugin tests and packaging checks, plus [CI](https://github.com/btakita/tsift/actions/runs/34296745413). The spec and regression tests are updated. Built and installed locally; `tsift --version` reports `0.1.97`.
+
+[Release v0.1.97](https://github.com/btakita/tsift/releases/tag/v0.1.97) includes Linux, macOS, and Windows binaries and checksums. [Publication](https://github.com/btakita/tsift/actions/runs/34296745682) passed: crates.io uploaded all 26 crates (`published=26 skipped=0`), verified individually at v0.1.97 and not yanked; npm confirms `opencode-tsift@0.1.97`.
+
+The clean release worktree is `/tmp/tsift-issue-25`. The original checkout retains its preexisting uncommitted changes.
 <!-- agent:boundary:b8ec92e9:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Fix https://github.com/btakita/tsift/issues/25 + release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

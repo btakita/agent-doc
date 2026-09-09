@@ -2,6 +2,14 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.352
+
+- **Fix: fresh questions survive reused response headings.** Historical captures
+  cannot satisfy a new prompt merely through heading similarity. Post-commit
+  cleanup now requires an exact echo of a missing committed queue proof, keeping
+  new questions and ambiguous batch requests visible for the next response.
+  Includes the failed-launch prompt-preservation fix from 0.35.351.
+
 ## 0.35.351
 
 - **Fix: failed harness launches preserve unanswered exchange prompts.**

@@ -48,6 +48,9 @@
   to the snapshot-selective commit guard. An already committed response cannot
   authorize absorbing a new unanswered prompt. Failed-launch recovery leaves
   that prompt uncommitted and actionable on repeated preflight attempts.
+  Post-commit cleanup cannot use response-heading similarity as answer proof.
+  Queue-echo repair requires an exact prompt from a missing committed queue
+  proof; a prompt appended while that proof remains visible is preserved.
 - A capacity-paused or otherwise detached closeout must reconcile exact pending
   editor operations before treating an on-disk document equal to the cycle base
   as evidence that no concurrent edit occurred. The on-disk bytes remain the

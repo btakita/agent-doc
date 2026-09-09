@@ -440,13 +440,20 @@ pub fn reconcile_postcommit_exchange_to_head(working: &str, head: &str) -> Optio
 }
 
 fn stale_prompt_targets_are_committed_queue_echoes(head_body: &str, working_body: &str) -> bool {
-    let (head_without_queue_proofs, _) = remove_committed_queue_prompt_proofs(head_body);
-    let (working_without_queue_proofs, _) = remove_committed_queue_prompt_proofs(working_body);
-    let response_headings = response_heading_match_keys(&head_without_queue_proofs);
+    let (head_without_queue_proofs, head_proofs) = remove_committed_queue_prompt_proofs(head_body);
+    let (working_without_queue_proofs, working_proofs) =
+        remove_committed_queue_prompt_proofs(working_body);
+    // A response heading is not proof that a newly typed question was answered.
+    // Only repair a missing committed queue proof echoed as an exact prompt.
+    let missing_proofs: HashSet<String> =
+        head_proofs.difference(&working_proofs).cloned().collect();
+    if missing_proofs.is_empty() {
+        return false;
+    }
     let (working_without_stale_prompts, removed_prompt_target) = remove_stale_prompt_target_lines(
         &working_without_queue_proofs,
         &head_without_queue_proofs,
-        &response_headings,
+        &missing_proofs,
     );
     if !removed_prompt_target {
         return false;
@@ -455,15 +462,14 @@ fn stale_prompt_targets_are_committed_queue_echoes(head_body: &str, working_body
         == compact_exchange_for_compare(&working_without_stale_prompts)
 }
 
-fn remove_committed_queue_prompt_proofs(body: &str) -> (String, bool) {
+fn remove_committed_queue_prompt_proofs(body: &str) -> (String, HashSet<String>) {
     let mut out = String::with_capacity(body.len());
     let mut in_queue_prompt = false;
-    let mut removed = false;
+    let mut proofs = HashSet::new();
     for line in body.lines() {
         let trimmed = line.trim();
         if trimmed == "> **Queue prompt:**" {
             in_queue_prompt = true;
-            removed = true;
             continue;
         }
         if !in_queue_prompt {
@@ -474,8 +480,11 @@ fn remove_committed_queue_prompt_proofs(body: &str) -> (String, bool) {
         if trimmed.is_empty() {
             continue;
         }
-        if trimmed.starts_with('>') {
-            removed = true;
+        if let Some(quoted) = trimmed.strip_prefix('>') {
+            let proof = normalized_prompt_line(quoted);
+            if !proof.is_empty() {
+                proofs.insert(proof);
+            }
             continue;
         } else {
             in_queue_prompt = false;
@@ -484,16 +493,16 @@ fn remove_committed_queue_prompt_proofs(body: &str) -> (String, bool) {
         }
     }
     if body.ends_with('\n') || out.is_empty() {
-        (out, removed)
+        (out, proofs)
     } else {
-        (out.trim_end_matches('\n').to_string(), removed)
+        (out.trim_end_matches('\n').to_string(), proofs)
     }
 }
 
 fn remove_stale_prompt_target_lines(
     body: &str,
     head_without_queue_proofs: &str,
-    response_headings: &[String],
+    missing_proofs: &HashSet<String>,
 ) -> (String, bool) {
     let head_prompt_targets: HashSet<String> = head_without_queue_proofs
         .lines()
@@ -505,7 +514,7 @@ fn remove_stale_prompt_target_lines(
     for line in body.lines() {
         if line.trim_start().starts_with('❯')
             && !head_prompt_targets.contains(line.trim())
-            && prompt_target_matches_response_heading(line, response_headings)
+            && missing_proofs.contains(&normalized_prompt_line(line))
         {
             removed = true;
             continue;
@@ -518,64 +527,6 @@ fn remove_stale_prompt_target_lines(
     } else {
         (out.trim_end_matches('\n').to_string(), removed)
     }
-}
-
-fn response_heading_match_keys(body: &str) -> Vec<String> {
-    body.lines()
-        .filter_map(response_heading_match_key)
-        .collect()
-}
-
-fn response_heading_match_key(line: &str) -> Option<String> {
-    let normalized = normalize_transient_agent_doc_markers(line);
-    let trimmed = normalized.trim_start();
-    let hash_count = trimmed.chars().take_while(|&ch| ch == '#').count();
-    if !(1..=6).contains(&hash_count) {
-        return None;
-    }
-    let rest = trimmed.get(hash_count..)?.trim_start();
-    let title = rest.strip_prefix("Re:")?.trim();
-    let title = title
-        .split(" — ")
-        .next()
-        .unwrap_or(title)
-        .split(" - ")
-        .next()
-        .unwrap_or(title);
-    let key = prompt_match_key(title);
-    if key.is_empty() { None } else { Some(key) }
-}
-
-fn prompt_target_matches_response_heading(line: &str, response_headings: &[String]) -> bool {
-    let prompt = prompt_match_key(&normalized_prompt_line(line));
-    if prompt.is_empty() {
-        return false;
-    }
-    response_headings.iter().any(|heading| {
-        if heading.is_empty() {
-            return false;
-        }
-        if prompt == *heading || prompt.contains(heading) || heading.contains(&prompt) {
-            return true;
-        }
-        let heading_tokens = heading.split_whitespace().collect::<Vec<_>>();
-        heading_tokens.len() >= 2 && heading_tokens.iter().all(|token| prompt.contains(token))
-    })
-}
-
-fn prompt_match_key(text: &str) -> String {
-    text.chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() {
-                ch.to_ascii_lowercase()
-            } else {
-                ' '
-            }
-        })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn compact_exchange_for_compare(body: &str) -> Vec<String> {
@@ -1131,7 +1082,7 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_postcommit_exchange_adopts_head_when_batch_prompt_echo_is_only_live_drift() {
+    fn reconcile_postcommit_exchange_preserves_batch_wording_without_exact_queue_proof() {
         let head = doc_with_queue_and_exchange(
             "",
             "❯ why did the queue stop?\n\n### Re: queued batch - gpt-5\n\n> **Queue prompt:**\n>\n> do [#cspe]\n>\n> do [#ctes]\n\nChanged paths: specs.md.\nCommands: cargo test queue_batch.\nVerification: passed.",
@@ -1141,17 +1092,31 @@ mod tests {
             "❯ why did the queue stop?\n\n### Re: queued batch - gpt-5 (HEAD)\n\n> **Queue prompt:**\n>\n> do [#cspe]\n>\n> do [#ctes]\n\nChanged paths: specs.md.\nCommands: cargo test queue_batch.\nVerification: passed.\n❯ Handle the whole queued batch in this response.",
         );
 
-        let reconciled = reconcile_postcommit_exchange_to_head(&working, &head)
-            .expect("batch prompt target echo must reconcile to HEAD exchange");
+        assert!(
+            reconcile_postcommit_exchange_to_head(&working, &head).is_none(),
+            "batch wording that resembles a response heading is still a new prompt"
+        );
+    }
 
-        assert!(
-            !reconciled.contains("Handle the whole queued batch"),
-            "stale batch prompt target must be removed:\n{reconciled}"
-        );
-        assert!(
-            reconciled.contains("> do [#cspe]"),
-            "committed queue proof should remain:\n{reconciled}"
-        );
+    #[test]
+    fn reconcile_postcommit_exchange_preserves_fresh_prompts_reusing_response_headings() {
+        let proof = "\n\n> **Queue prompt:**\n>\n> older follow-up question";
+        for (head_proof, working_proof, prompt) in [
+            ("", "", "older follow-up question"),
+            (proof, proof, "older follow-up question"),
+            (proof, "", "older follow-up question again"),
+        ] {
+            let head =
+                doc_with_queue_and_exchange("", &format!("### Re: older\n\nAnswered.{head_proof}"));
+            let working = doc_with_queue_and_exchange(
+                "",
+                &format!("### Re: older\n\nAnswered.{working_proof}\n❯ {prompt}"),
+            );
+            assert!(
+                reconcile_postcommit_exchange_to_head(&working, &head).is_none(),
+                "a new question must survive even when an old heading or retained queue proof matches"
+            );
+        }
     }
 
     #[test]

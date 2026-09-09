@@ -1608,6 +1608,7 @@ Duplicate replay should stay live.
             for old_capture in [false, true] {
                 for prompt in [
                     "❯ follow-up question",
+                    "❯ older follow-up question",
                     "Can you answer this follow-up question?\n```text\nexample context\n```",
                 ] {
                     assert_unanswered_prompt_preserved(per_component, old_capture, prompt);
@@ -1730,7 +1731,8 @@ Duplicate replay should stay live.
         let working = fs::read_to_string(&doc).unwrap();
         assert!(
             working.contains(prompt),
-            "working tree should retain the user prompt:\n{working}"
+            "working tree should retain the user prompt:\n{working}\nops: {}",
+            fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default()
         );
     }
     #[test]

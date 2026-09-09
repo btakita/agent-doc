@@ -1327,6 +1327,13 @@ where
     let cycle_state_for_commit = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let active_response_body =
         captured_response_body_for_commit(file, cycle_state_for_commit.as_ref());
+    // A retained historical capture is replay evidence, not an answer to a
+    // newly typed prompt, even when its heading matches the new question.
+    let uncommitted_response_body = active_response_body.as_deref().filter(|body| {
+        !head_doc.as_deref().is_some_and(|head| {
+            agent_doc_turn::response_replay::response_materialized_in_content(body, head)
+        })
+    });
     let captured_response_materialized = active_response_body.as_deref().is_some_and(|body| {
         agent_doc_turn::response_replay::response_materialized_in_content(body, &file_content)
     });
@@ -1446,7 +1453,7 @@ where
     let has_dropped_queue_prompt_evidence = cycle_state_for_commit
         .as_ref()
         .is_some_and(|state| !state.dropped_queue_prompts.is_empty());
-    let active_response_target = active_response_body.as_deref().and_then(|response_body| {
+    let active_response_target = uncommitted_response_body.and_then(|response_body| {
         agent_doc_turn::response_text::response_prompt_target_from_re_heading(response_body)
     });
     if ipc_snapshot_adoption_blocked
@@ -1602,20 +1609,12 @@ where
                 active_response_target.as_deref(),
             )
         {
-            let uncommitted_response_materialized =
-                active_response_body
-                    .as_deref()
-                    .is_some_and(|response_body| {
-                        agent_doc_turn::response_replay::response_materialized_in_content(
-                            response_body,
-                            &file_content,
-                        ) && !head_doc.as_deref().is_some_and(|head| {
-                            agent_doc_turn::response_replay::response_materialized_in_content(
-                                response_body,
-                                head,
-                            )
-                        })
-                    });
+            let uncommitted_response_materialized = uncommitted_response_body.is_some_and(|body| {
+                agent_doc_turn::response_replay::response_materialized_in_content(
+                    body,
+                    &file_content,
+                )
+            });
             if uncommitted_response_materialized {
                 eprintln!(
                     "[commit] rebasing the captured response onto newer operator prompt drift for {}",

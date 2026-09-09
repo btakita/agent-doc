@@ -1527,7 +1527,7 @@ pub fn repair_layout(
     let output = agent_doc_tmux_io::list_windows(
         tmux,
         Some(&format!("{}:", session_name)),
-        "#{window_id} #{window_panes} #{window_height} #{window_name}",
+        "#{window_id} #{window_panes} #{window_height} #{automatic-rename} #{allow-rename} #{window_name}",
     );
     let window_list = match output {
         Ok(s) => s,
@@ -1541,26 +1541,32 @@ pub fn repair_layout(
     };
     let mut mutated = false;
 
-    // Parse windows into (id, pane_count, height, name).
+    // Parse window identity, sizing, and effective role-name options.
     struct WinInfo {
         id: String,
         name: String,
         _pane_count: usize,
         height: String,
+        automatic_rename: bool,
+        allow_rename: bool,
     }
     let windows: Vec<WinInfo> = window_list
         .lines()
         .filter_map(|line| {
-            let mut parts = line.splitn(4, ' ');
+            let mut parts = line.splitn(6, ' ');
             let id = parts.next()?.to_string();
             let pane_count: usize = parts.next()?.parse().ok()?;
             let height = parts.next()?.to_string();
+            let automatic_rename = parts.next()? == "1";
+            let allow_rename = parts.next()? == "1";
             let name = parts.next()?.to_string();
             Some(WinInfo {
                 id,
                 name,
                 _pane_count: pane_count,
                 height,
+                automatic_rename,
+                allow_rename,
             })
         })
         .collect();
@@ -1573,6 +1579,27 @@ pub fn repair_layout(
     for window in &windows {
         let agent_doc_owned =
             window.name == target_window_name || is_stash_window_name(&window.name);
+        // Pin role names before resize wakes children or consolidation surveys
+        // windows again. Otherwise tmux can rename a stash after its foreground
+        // `agent-doc` process and the next phase bulk-promotes its sessions.
+        if agent_doc_owned {
+            for (option, enabled) in [
+                ("automatic-rename", window.automatic_rename),
+                ("allow-rename", window.allow_rename),
+            ] {
+                if enabled {
+                    tmux.raw_cmd(&["set-window-option", "-t", &window.id, option, "off"])
+                        .with_context(|| {
+                            format!("pin managed window {} option {option}", window.id)
+                        })?;
+                    mutated = true;
+                    sync_log(&format!(
+                        "layout_repair_pinned_window_name window={} name={} option={option}",
+                        window.id, window.name
+                    ));
+                }
+            }
+        }
         if agent_doc_owned && window.height == STASH_JOIN_TEMP_HEIGHT {
             match agent_doc_tmux_io::resize_window_to_clients(tmux, &window.id) {
                 Ok(()) => {
@@ -7493,6 +7520,92 @@ mod tests {
             outcome,
             LayoutRepairOutcome::AlreadyConverged,
             "an already-correct layout must report AlreadyConverged, not a repair"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn repair_layout_pins_managed_names_without_promoting_stash() {
+        let iso = IsolatedTmux::new("sync-repair-stable-role-names");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let first = iso.new_session("test", tmp.path()).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"])
+            .unwrap();
+        iso.raw_cmd(&["split-window", "-dh", "-t", &first]).unwrap();
+        let visible = iso.pane_window(&first).unwrap();
+        let stash = iso.ensure_stash_window("test").unwrap();
+        for _ in 0..3 {
+            iso.raw_cmd(&["split-window", "-dv", "-t", &stash]).unwrap();
+        }
+        let other = iso
+            .raw_cmd(&[
+                "new-window",
+                "-d",
+                "-t",
+                "test:",
+                "-n",
+                "operator",
+                "-P",
+                "-F",
+                "#{window_id}",
+            ])
+            .unwrap()
+            .trim()
+            .to_string();
+        let visible_before = iso.list_window_panes(&visible).unwrap();
+        let stash_before = iso.list_window_panes(&stash).unwrap();
+        assert_eq!(visible_before.len(), 2);
+        assert_eq!(stash_before.len(), 4);
+        for (window, name) in [
+            (&visible, "agent-doc"),
+            (&stash, "stash"),
+            (&other, "operator"),
+        ] {
+            // Hold the observed name deterministic while automatic renaming is
+            // enabled; repair must disable the option, not rely on this format.
+            iso.raw_cmd(&[
+                "set-window-option",
+                "-t",
+                window,
+                "automatic-rename-format",
+                name,
+            ])
+            .unwrap();
+            for option in ["automatic-rename", "allow-rename"] {
+                iso.raw_cmd(&["set-window-option", "-t", window, option, "on"])
+                    .unwrap();
+            }
+        }
+        assert_eq!(
+            repair_layout(&iso, "test", "agent-doc").unwrap(),
+            LayoutRepairOutcome::Repaired
+        );
+        for window in [&visible, &stash, &other] {
+            for option in ["automatic-rename", "allow-rename"] {
+                let value = iso
+                    .raw_cmd(&["show-window-options", "-v", "-t", window, option])
+                    .unwrap();
+                assert_eq!(value.trim(), if window == &other { "on" } else { "off" });
+            }
+        }
+        // A subsequent child command name cannot rename this stash to agent-doc.
+        iso.raw_cmd(&[
+            "set-window-option",
+            "-t",
+            &stash,
+            "automatic-rename-format",
+            "agent-doc",
+        ])
+        .unwrap();
+        assert_eq!(
+            repair_layout(&iso, "test", "agent-doc").unwrap(),
+            LayoutRepairOutcome::AlreadyConverged
+        );
+        assert_eq!(iso.list_window_panes(&visible).unwrap(), visible_before);
+        assert_eq!(iso.list_window_panes(&stash).unwrap(), stash_before);
+        assert_eq!(
+            window_name_for_window_id(&iso, &stash).as_deref(),
+            Some("stash")
         );
     }
 

@@ -330,6 +330,10 @@ that effect as operator-owned merely because its actor is absent from the newer
 projection; it must reconcile or stash that pane. Truly operator-placed panes
 without structural provenance retain the operator-owned protection.
 - Protected outgoing on a 1-in/1-out reconcile preserves layout (`#jb-nav-3pane-promote-swap`): when the reconciler's SWAP fast path detects exactly one pane to attach and one to detach, and the outgoing pane is protected (busy / `protect_pane`), it must NOT fall through to ATTACH (join the incoming) while DETACH skips the protected outgoing pane — that grows the window to N+1 panes. Instead it preserves the current layout, leaves the incoming pane in its stash, and defers; the caller's deferred-retry resurfaces it once the busy pane frees. Keep this aligned in the `tmux-router` reconciler (`sync.rs`) and this spec.
+- Managed target/stash role names must be pinned by disabling
+  `automatic-rename` and `allow-rename` before repair resizes or consolidates
+  windows; process-title changes must not reclassify stash contents as duplicate
+  visible target panes. Already-pinned and unrelated windows retain their options.
 - Manual/full sync is also the operator repair surface behind editor
   `Sync Tmux Layout`: before reconciliation it runs file-scoped doctor repair for
   the focused/session document. That closes recoverable `jb_cache_conflict_cancel`

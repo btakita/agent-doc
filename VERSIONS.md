@@ -2,6 +2,14 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.346
+
+- **Fix: managed tmux window names survive child process changes.** Layout
+  repair disables automatic naming and application rename escapes on target and
+  stash windows before resizing or consolidating them. A stash can no longer
+  acquire its foreground process name and be merged into a two-column layout as
+  a duplicate `agent-doc` window. Unrelated window preferences are preserved.
+
 ## 0.35.345
 
 - **Fix: selected free-text queue closeout requires prompt evidence.** A generic

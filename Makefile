@@ -102,7 +102,8 @@ tmux-ci:
 	@set -e; \
 	test_agent_doc_bin="$$(pwd)/target/debug/agent-doc"; \
 	$(CARGO_CLEAN_ENV) cargo build --bin agent-doc --quiet; \
-	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test --all-targets -- --ignored --skip native_plugin_harnesses_peer_through_real_agent_doc_controller --test-threads="$(TMUX_TEST_THREADS)"
+	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test --all-targets -- --ignored --skip native_plugin_harnesses_peer_through_real_agent_doc_controller --test-threads="$(TMUX_TEST_THREADS)"; \
+	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test -p agent-doc-sync-io repair_layout_ -- --ignored --test-threads="$(TMUX_TEST_THREADS)"
 
 # Lint
 clippy:

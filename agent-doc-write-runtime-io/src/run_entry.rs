@@ -29,6 +29,28 @@ use agent_doc_turn::op_log::OpsLogEvent;
 // `content_ours_drops_operator_text` and `agent_doc_fs::preserve_dropped_operator_buffer`
 // remain available for diagnostics.
 
+fn enforce_selected_queue_response_contract(
+    baseline: Option<&str>,
+    current: &str,
+    response: &str,
+    flags: &WriteFlags,
+) -> Result<()> {
+    if !flags.strict_closeout {
+        return Ok(());
+    }
+    let missing =
+        agent_doc_queue::queue_closeout_guard::selected_free_text_heads_missing_response_evidence(
+            baseline, current, response,
+        )?;
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "[finalize] pre-write gate: selected free-text queue prompt lacks response evidence: {}. Include its exact `> **Queue prompt:**` quote and the completed result or concrete deferral before retrying. No response has been captured.",
+            missing.join("; ")
+        );
+    }
+    Ok(())
+}
+
 fn resolve_current_document_content(file: &Path, source: &str) -> Result<String> {
     agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
 }
@@ -525,6 +547,7 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
         &response,
         flags.has_metadata_only_mutation,
     )?;
+    enforce_selected_queue_response_contract(baseline, &current_content, &response, &flags)?;
 
     // Strip leading "## Assistant" heading if present — the write command adds its own
     let mut response = agent_doc_turn::response_text::strip_assistant_heading(&response);
@@ -753,6 +776,7 @@ pub(crate) fn run_template(
         &response,
         flags.has_metadata_only_mutation,
     )?;
+    enforce_selected_queue_response_contract(baseline, &current_content, &response, &flags)?;
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
     // Parse and validate patchback shape before any visible document mutation.
@@ -1152,6 +1176,12 @@ pub(crate) fn run_stream(
         &response,
         flags.has_metadata_only_mutation,
     )?;
+    // A mutation-bearing stream already validated the immutable preflight
+    // candidate before capture. Later selection changes cannot invalidate that
+    // retained response or ask the harness to recapture it.
+    if !flags.has_pending_mutation {
+        enforce_selected_queue_response_contract(baseline, &current_content, &response, &flags)?;
+    }
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
     if let Some(signal) =
@@ -2018,6 +2048,7 @@ fn capture_validated_stream_closeout_before_authority_resolution(
             &parsed.unmatched,
             true,
         )?;
+        enforce_selected_queue_response_contract(baseline, pre_capture_content, response, flags)?;
     }
 
     capture_closeout_mutation_plan_before_authority_resolution(file, response, flags)?;
@@ -2111,6 +2142,7 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
         &response,
         flags.has_metadata_only_mutation,
     )?;
+    enforce_selected_queue_response_contract(baseline, &current_content, &response, &flags)?;
 
     // Parse and validate patchback shape before any visible document mutation.
     let parsed = agent_doc_template_io::parse_template_patchback(
@@ -2998,6 +3030,28 @@ mod tests {
                 .is_none(),
             "shape validation must fail before a durable response_captured cycle exists"
         );
+
+        let selected = format!(
+            "{baseline}<!-- agent:queue go -->\n- 🚧 Fix the reported queue completion defect\n<!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, &selected).unwrap();
+        let err = capture_validated_stream_closeout_before_authority_resolution(
+            &doc,
+            Some(&selected),
+            false,
+            "<!-- patch:exchange -->\n### Re: Response\n\nFixed and installed. Tests passed.\n<!-- /patch:exchange -->\n",
+            &flags,
+        ).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("selected free-text queue prompt lacks response evidence")
+        );
+        assert!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), selected);
     }
 
     #[test]

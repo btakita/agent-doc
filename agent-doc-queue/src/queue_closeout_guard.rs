@@ -13,6 +13,38 @@ use agent_doc_element_backlog::backlog;
 
 use crate::{document_queue, queue_continuation, queue_directive, queue_heads, queue_response};
 
+/// Selected free-text work must be identified before a response is captured.
+/// A selection marker alone never proves completion; an exact quote allows
+/// the existing answer/deferral policy to make that separate decision.
+pub fn selected_free_text_heads_missing_response_evidence(
+    baseline: Option<&str>,
+    content: &str,
+    response: &str,
+) -> anyhow::Result<Vec<String>> {
+    if !element::parse(content)?
+        .iter()
+        .any(|component| component.name == "queue")
+    {
+        return Ok(Vec::new());
+    }
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")?;
+    Ok(nodes
+        .into_iter()
+        .filter(|node| {
+            !node.item.struck
+                && agent_doc_document::queue_projection::has_in_progress_marker(&node.item.text)
+                && queue_response::queue_prompt_text_is_free_text(content, &node.item.text)
+                && !crate::queue_consume::cycle_answered_foreign_exchange_prompt(
+                    baseline,
+                    content,
+                    &node.item.text,
+                )
+                && !queue_response::free_text_head_answered_by_response(response, &node.item.text)
+        })
+        .map(|node| strip_priority_markers(&node.item.text))
+        .collect())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueHeadRemovalProofSource {
     BacklogResolvedOrRemoved,
@@ -361,6 +393,76 @@ mod tests {
 
     fn set(ids: &[&str]) -> HashSet<String> {
         ids.iter().map(|id| id.to_string()).collect()
+    }
+
+    #[test]
+    fn selected_free_text_closeout_requires_exact_prompt_evidence() {
+        assert!(
+            selected_free_text_heads_missing_response_evidence(None, "No queue.", "Done.")
+                .unwrap()
+                .is_empty()
+        );
+        let head = "Fix https://github.com/example/sample/issues/49 + release + publish";
+        let content = doc(&format!("- 🚧 {head}\n- later work\n"), "");
+        let generic = "### Re: Response\n\nFixed and installed. Tests passed; release published.";
+        assert_eq!(
+            selected_free_text_heads_missing_response_evidence(Some(&content), &content, generic)
+                .unwrap(),
+            vec![head]
+        );
+        for outcome in [
+            "Fixed and installed.",
+            "This remains queued; blocked by unavailable credentials.",
+        ] {
+            let response =
+                format!("### Re: issue — gpt-5\n\n> **Queue prompt:** {head}\n\n{outcome}");
+            assert!(
+                selected_free_text_heads_missing_response_evidence(
+                    Some(&content),
+                    &content,
+                    &response
+                )
+                .unwrap()
+                .is_empty()
+            );
+        }
+        for queue in [
+            format!("- {head}\n"),
+            format!("- ~~🚧 {head}~~\n"),
+            "- 🚧 do [#task]\n".to_string(),
+        ] {
+            let content = doc(&queue, "");
+            assert!(
+                selected_free_text_heads_missing_response_evidence(
+                    Some(&content),
+                    &content,
+                    generic
+                )
+                .unwrap()
+                .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn selected_free_text_evidence_gate_preserves_foreign_exchange_steering() {
+        let baseline = format!(
+            "{}<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+            doc("- 🚧 Fix the queue closeout behavior\n", "")
+        );
+        let current = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "❯ Explain the native library path\n<!-- /agent:exchange -->",
+        );
+        assert!(
+            selected_free_text_heads_missing_response_evidence(
+                Some(&baseline),
+                &current,
+                "### Re: native path — gpt-5\n\nThe path comes from lib-path."
+            )
+            .unwrap()
+            .is_empty()
+        );
     }
 
     #[test]

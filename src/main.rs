@@ -5,7 +5,7 @@
 //! - Top-level struct `Cli` holds a single `Commands` subcommand enum (40+ variants).
 //! - `AgentDocMode` enum (`Append`, `Template`, `Stream`) is a `ValueEnum` used by `Convert`
 //!   and `Mode` subcommands; `Append` maps to inline format, `Template`/`Stream` to CRDT.
-//! - On startup, calls `upgrade::warn_if_outdated()` for all subcommands except `Upgrade`.
+//! - Startup upgrade notices are suppressed for `Upgrade` and the machine-only `LibPath` query.
 //! - Loads global config via `agent_doc_config::load()` before dispatching; config is threaded into
 //!   subcommands that accept an agent backend (`Run`, `Stream`, `Watch`, `Init`).
 //! - Each subcommand delegates immediately to its owning module or focused crate (`agent_doc_run_io::run`, `agent_doc_diff_io::run`, etc.);
@@ -4237,8 +4237,9 @@ fn try_main() -> anyhow::Result<()> {
         eprintln!("[agent-doc] {message}");
     }
 
-    // Warn about newer versions on startup, but skip if running the upgrade command itself.
-    if !matches!(cli.command, Commands::Upgrade) {
+    // `lib-path` is a machine-only bootstrap query. Neither stream may carry
+    // an unrelated upgrade notice (including when called by an older editor).
+    if !matches!(cli.command, Commands::Upgrade | Commands::LibPath) {
         upgrade::warn_if_outdated();
     }
 

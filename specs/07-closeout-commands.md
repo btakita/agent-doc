@@ -2,6 +2,15 @@
 
 # Closeout Commands
 
+Strict write entrypoints validate selected (`🚧`) free-text queue response
+evidence before capture, including early stream mutation-plan capture. A generic
+completion response with no exact prompt identification is rejected with the
+missing prompt and `> **Queue prompt:**` remedy. An exact answer or deferral
+quote passes to the existing terminal-completion policy; selection itself never
+authorizes a strike. Unselected, struck, id-backed, and foreign-exchange work is
+outside this gate. The pure policy owner is `queue_closeout_guard`; no new
+retry loop, cache, or state authority is introduced.
+
 ## Response checkpoints and sealing
 
 `response-checkpoint <FILE>` reads a cumulative response from stdin and accepts

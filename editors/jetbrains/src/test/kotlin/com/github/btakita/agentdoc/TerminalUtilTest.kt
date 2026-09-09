@@ -1150,6 +1150,9 @@ class TerminalUtilTest {
         assertTrue(resolver.contains("TerminalUtil.resolveAgentDoc()"))
         assertTrue(resolver.contains("TerminalUtil.agentDocResolutionAttempts()"))
         assertFalse(resolver.contains("ProcessBuilder(\"agent-doc\""))
+        assertFalse(resolver.contains("redirectErrorStream(true)"))
+        assertTrue(resolver.contains("redirectErrorStream(false)"))
+        assertTrue(resolver.contains("redirectError(ProcessBuilder.Redirect.INHERIT)"))
     }
 
     private class FakeRouteHandle(private var alive: Boolean) : TerminalUtil.InFlightRouteHandle {

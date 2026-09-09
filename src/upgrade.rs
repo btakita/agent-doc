@@ -7,7 +7,8 @@
 //!   2. `pip install --upgrade <crate>` fallback.
 //!
 //!   If all strategies fail, prints manual installation instructions and returns `Ok(())`.
-//! - `warn_if_outdated()` is called on every startup. Checks GitHub Releases with a 24-hour
+//! - `warn_if_outdated()` is skipped for upgrade and machine-only lib-path queries.
+//!   Other startup paths check GitHub Releases with a 24-hour
 //!   disk cache (`~/.cache/agent-doc/version-cache.json`) and prints a one-line warning
 //!   to stderr if a newer version is available. Silently swallows all errors.
 //! - Version comparison uses simple semver tuple ordering `(major, minor, patch)`.

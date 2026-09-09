@@ -224,6 +224,13 @@ A response-bound preflight invoked from the authoritative actor's own pane may r
 
 ## upgrade
 
+`lib-path` is a machine-only native bootstrap query: it prints exactly the
+existing platform library path on stdout and skips startup update checks and
+notices on both streams. Failure diagnostics remain on stderr. JetBrains must
+read only stdout for this protocol and inherit stderr separately, including
+when an older binary emits an upgrade notice. Rejected candidates report the
+exit code, stdout candidate, and existence check.
+
 `agent-doc upgrade` checks GitHub Releases for a newer version and upgrades through the prebuilt GitHub binary / `pip` cascade. The agent-doc Rust workspace is private and is not a crates.io upgrade source.
 
 The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.json`.

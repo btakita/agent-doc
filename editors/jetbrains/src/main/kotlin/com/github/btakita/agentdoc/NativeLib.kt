@@ -1462,7 +1462,12 @@ interface AgentDocLib : Library {
             LOG.info("[native] resolving lib-path executable=$executable attempts=[$attempts]")
             try {
                 val process =
-                    ProcessBuilder(executable, "lib-path").redirectErrorStream(true).start()
+                    ProcessBuilder(executable, "lib-path")
+                        .redirectErrorStream(false)
+                        // Keep diagnostics out of the path protocol and avoid an unread
+                        // stderr pipe blocking older binaries that emit startup notices.
+                        .redirectError(ProcessBuilder.Redirect.INHERIT)
+                        .start()
                 val output = process.inputStream.bufferedReader().readText().trim()
                 val exitCode = process.waitFor()
                 val path = output.lineSequence().firstOrNull()?.trim()
@@ -1471,7 +1476,9 @@ interface AgentDocLib : Library {
                 }
                 LOG.warn(
                     "[native] lib-path resolution failed executable=$executable " +
-                        "attempts=[$attempts] exit=$exitCode output=${output.ifBlank { "<empty>" }}",
+                        "attempts=[$attempts] exit=$exitCode " +
+                        "candidate=${path ?: "<missing>"} exists=${path?.let { File(it).exists() }} " +
+                        "stdout=${output.ifBlank { "<empty>" }} (stderr inherited separately)",
                 )
             } catch (e: Exception) {
                 LOG.warn(

@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.345
+
+- **Fix: selected free-text queue closeout requires prompt evidence.** A generic
+  final response can no longer silently leave selected work active: strict
+  write rejects it before capture with the exact prompt-quote remedy. Existing
+  answer/deferral matching and concurrent exchange steering stay authoritative.
+- **Fix: native library discovery survives newer releases (#50).** `lib-path`
+  skips startup update notices. JetBrains keeps stderr separate from the stdout
+  path protocol and records rejected candidates, exit status, and existence.
+  JetBrains package 0.2.375 includes the loader fix.
+
 ## 0.35.344
 
 - **Fix: install recycle requests survive compacted history.** Request epochs

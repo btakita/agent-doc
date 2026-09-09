@@ -811,9 +811,10 @@ fn derive_layout_actor_bindings(
 ///
 /// IDE observations set `desired`; tmux observations set `observed`; the
 /// `projection` Computed derives whether an effect is needed; and the retained
-/// Lazily Effect invokes the single tmux adapter sink. SQLite persists only the
-/// desired columns so a controller restart can rebuild this graph without
-/// treating tmux or a sidecar as authority.
+/// Lazily Effect invokes the single tmux adapter sink. Remembered columns remain
+/// available for explicit layout recall, but cannot seed live desired intent:
+/// another project may now own the shared tmux window. Only current editor or
+/// command ingress can authorize a layout effect after controller startup.
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 struct ControllerPaneLayoutGraph {
     ctx: ThreadSafeContext,
@@ -854,24 +855,10 @@ enum PaneLayoutPublication {
 impl ControllerPaneLayoutGraph {
     fn new_in(
         scope: &agent_doc_state_scope::ProcessScope,
-        persisted_columns: Vec<String>,
         live_actor_bindings: Computed<ControllerActorStore>,
     ) -> Self {
         let ctx = scope.ctx().clone();
-        let initial_desired = (!persisted_columns.is_empty()).then(|| PaneLayoutDesired {
-            generation: 1,
-            source_plane_version: None,
-            invocation: ControllerTmuxLayoutSyncInvocation {
-                columns: persisted_columns,
-                window: None,
-                focus: None,
-                no_autostart: false,
-                exact_visible: true,
-                caller_kind: "projection".to_string(),
-                actor_bindings: Vec::new(),
-            },
-        });
-        let desired = ctx.source(initial_desired);
+        let desired = ctx.source(None::<PaneLayoutDesired>);
         let structural_receipt = ctx.source(None);
         let assignments = ctx.source(BTreeMap::<String, String>::new());
         let owned_assignments = ctx.computed(move |ctx| {
@@ -968,8 +955,8 @@ impl ControllerPaneLayoutGraph {
             effect: Mutex::new(Some(effect)),
             sink,
             sink_ready,
-            next_generation: AtomicU64::new(2),
-            published_generation: Arc::new(AtomicU64::new(1)),
+            next_generation: AtomicU64::new(1),
+            published_generation: Arc::new(AtomicU64::new(0)),
             waiters: Condvar::new(),
             wait_lock: Mutex::new(()),
         }
@@ -4987,7 +4974,6 @@ impl ControllerRuntime {
         let (memory, actor_store) = ControllerMemoryState::load(&bootstrap.project_root)?;
         let scope = agent_doc_state_scope::ProcessScope::new();
         let actor_graph = ControllerActorGraph::new_in(&scope, actor_store);
-        let persisted_layout = load_layout_state(&bootstrap.project_root).unwrap_or_default();
         let supervisor_recycle_graph = ControllerSupervisorRecycleGraph::new_in(
             &scope,
             memory.state_projection.project_supervisor_recycle(),
@@ -5003,11 +4989,8 @@ impl ControllerRuntime {
             &scope,
             state_plane_first_version(bootstrap.controller_generation),
         );
-        let pane_layout_graph = ControllerPaneLayoutGraph::new_in(
-            &scope,
-            persisted_layout,
-            actor_graph.live_bindings_handle(),
-        );
+        let pane_layout_graph =
+            ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
         let editor_surface_graph =
             rpc::ControllerEditorSurfaceGraph::new(Arc::new(|project_root, intent| match intent {
@@ -7932,8 +7915,7 @@ mod tests {
         let actor = actor_record_for_test(&document, "%2", ActorState::Ready);
         let actors =
             ControllerActorGraph::new_in(&scope, BTreeMap::from([(document.clone(), actor)]));
-        let graph =
-            ControllerPaneLayoutGraph::new_in(&scope, Vec::new(), actors.live_bindings_handle());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
         let mut invocation = pane_layout_desired_for_test(1).invocation;
         invocation.columns = vec![document.clone()];
         let old = graph.set_desired(invocation.clone(), None);
@@ -7993,11 +7975,8 @@ mod tests {
             &scope,
             BTreeMap::from([(document_id.clone(), ready.clone())]),
         );
-        let pane_graph = ControllerPaneLayoutGraph::new_in(
-            &scope,
-            Vec::new(),
-            actor_graph.live_bindings_handle(),
-        );
+        let pane_graph =
+            ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
         pane_graph.set_desired(
             ControllerTmuxLayoutSyncInvocation {
                 columns: vec![document_string.clone()],
@@ -8069,11 +8048,8 @@ mod tests {
         let second_document = root.path().join("tasks/second.md").display().to_string();
         let scope = agent_doc_state_scope::ProcessScope::new();
         let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
-        let pane_graph = ControllerPaneLayoutGraph::new_in(
-            &scope,
-            Vec::new(),
-            actor_graph.live_bindings_handle(),
-        );
+        let pane_graph =
+            ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
         let desired = pane_graph.set_desired(
             ControllerTmuxLayoutSyncInvocation {
                 columns: vec![first_document.clone()],
@@ -8293,6 +8269,69 @@ mod tests {
     }
 
     #[test]
+    fn startup_layout_history_does_not_reclaim_shared_tmux_focus() {
+        struct RecordingSink(Arc<Mutex<Vec<PaneLayoutDesired>>>);
+        impl PaneLayoutProjectionSink for RecordingSink {
+            fn reconcile(&self, desired: PaneLayoutDesired) {
+                self.0.lock().push(desired);
+            }
+        }
+        let root = tempfile::TempDir::new().unwrap();
+        let columns = vec![
+            root.path()
+                .join("tasks/background.md")
+                .display()
+                .to_string(),
+        ];
+        store_layout_state(root.path(), &columns).unwrap();
+        let runs = Arc::new(Mutex::new(Vec::new()));
+        let runtime = ControllerRuntime::new(test_bootstrap(&root)).unwrap();
+        runtime
+            .pane_layout_graph
+            .install_sink(Arc::new(RecordingSink(runs.clone())));
+        assert!(
+            runs.lock().is_empty(),
+            "saved columns must not move or focus panes at startup"
+        );
+        assert_eq!(
+            runtime.pane_layout_projection(),
+            PaneLayoutProjection::Absent
+        );
+        let actor = actor_record_for_test(
+            &columns[0],
+            "%2",
+            agent_doc_controller::actor::ActorState::Ready,
+        );
+        runtime
+            .actor_graph
+            .set(BTreeMap::from([(columns[0].clone(), actor)]));
+        assert!(
+            runs.lock().is_empty(),
+            "actor hydration is not layout authorization"
+        );
+        assert_eq!(load_layout_state(root.path()).unwrap(), columns);
+        let mut invocation = pane_layout_desired_for_test(1).invocation;
+        invocation.columns = columns;
+        let desired = runtime.set_pane_layout_desired(
+            invocation,
+            Some(41),
+            PaneLayoutPublication::FreshIntent,
+        );
+        assert_eq!(runs.lock().last().unwrap().generation, desired.generation);
+        drop(runtime);
+        let restarted = ControllerRuntime::new(test_bootstrap(&root)).unwrap();
+        let count = runs.lock().len();
+        restarted
+            .pane_layout_graph
+            .install_sink(Arc::new(RecordingSink(runs.clone())));
+        assert_eq!(
+            runs.lock().len(),
+            count,
+            "restart cannot replay an old project's layout over newer editor intent"
+        );
+    }
+
+    #[test]
     fn pane_layout_sink_activation_and_fresh_routes_schedule_the_retained_effect() {
         struct RecordingSink(Arc<Mutex<Vec<u64>>>);
         impl PaneLayoutProjectionSink for RecordingSink {
@@ -8302,17 +8341,14 @@ mod tests {
         }
         let scope = agent_doc_state_scope::ProcessScope::new();
         let actors = ControllerActorGraph::new_in(&scope, BTreeMap::new());
-        let graph = ControllerPaneLayoutGraph::new_in(
-            &scope,
-            vec!["tasks/one.md".to_string()],
-            actors.live_bindings_handle(),
-        );
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
+        let live = graph.set_desired(pane_layout_desired_for_test(1).invocation, Some(40));
         let runs = Arc::new(Mutex::new(Vec::new()));
         graph.install_sink(Arc::new(RecordingSink(runs.clone())));
         assert_eq!(
             *runs.lock(),
-            vec![1],
-            "cold desired layout must activate the late-bound sink"
+            vec![live.generation],
+            "live intent received before sink installation must activate the late-bound sink"
         );
         let invocation = graph.desired().unwrap().invocation;
         let desired = graph.set_fresh_desired(invocation.clone(), None);
@@ -8635,11 +8671,7 @@ mod tests {
     fn pane_layout_status_correlates_to_the_exact_desired_plane_version() {
         let scope = agent_doc_state_scope::ProcessScope::new();
         let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
-        let graph = ControllerPaneLayoutGraph::new_in(
-            &scope,
-            Vec::new(),
-            actor_graph.live_bindings_handle(),
-        );
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
         let desired = pane_layout_desired_for_test(1);
         graph.set_desired(desired.invocation, Some(73));
 
@@ -8652,11 +8684,7 @@ mod tests {
     fn identical_pane_layout_desired_is_deduplicated_without_resetting_projection() {
         let scope = agent_doc_state_scope::ProcessScope::new();
         let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
-        let graph = ControllerPaneLayoutGraph::new_in(
-            &scope,
-            Vec::new(),
-            actor_graph.live_bindings_handle(),
-        );
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
         let invocation = pane_layout_desired_for_test(1).invocation;
         let first = graph.set_desired(invocation.clone(), Some(81));
         let duplicate = graph.set_desired(invocation, Some(82));
@@ -8673,11 +8701,7 @@ mod tests {
     fn foreground_pane_layout_intent_reopens_an_operator_owned_generation() {
         let scope = agent_doc_state_scope::ProcessScope::new();
         let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
-        let graph = ControllerPaneLayoutGraph::new_in(
-            &scope,
-            Vec::new(),
-            actor_graph.live_bindings_handle(),
-        );
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
         let invocation = pane_layout_desired_for_test(1).invocation;
         let first = graph.set_desired(invocation.clone(), None);
         graph.record_receipt(lane_converged_receipt(first.generation, &[]));
@@ -8704,11 +8728,7 @@ mod tests {
     fn structurally_converged_layout_is_reused_for_a_focus_only_generation() {
         let scope = agent_doc_state_scope::ProcessScope::new();
         let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
-        let graph = ControllerPaneLayoutGraph::new_in(
-            &scope,
-            Vec::new(),
-            actor_graph.live_bindings_handle(),
-        );
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
         let first = graph.set_desired(pane_layout_desired_for_test(1).invocation, Some(81));
         let assignment = vec![
             ("tasks/one.md".to_string(), "%1".to_string()),
@@ -8772,11 +8792,7 @@ mod tests {
     fn pane_layout_effect_assignment_is_fenced_by_desired_generation() {
         let scope = agent_doc_state_scope::ProcessScope::new();
         let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
-        let graph = ControllerPaneLayoutGraph::new_in(
-            &scope,
-            Vec::new(),
-            actor_graph.live_bindings_handle(),
-        );
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
         let first = graph.set_desired(pane_layout_desired_for_test(1).invocation, Some(81));
         let first_assignment = vec![("tasks/primary.md".to_string(), "%1".to_string())];
         graph.record_receipt(PaneLayoutEffectReceipt {
@@ -12852,11 +12868,8 @@ agent:queue\n\
             actor_graph.document_model_states_handle(),
             document_graphs.projection_handle(),
         );
-        let pane_layout_graph = ControllerPaneLayoutGraph::new_in(
-            &scope,
-            Vec::new(),
-            actor_graph.live_bindings_handle(),
-        );
+        let pane_layout_graph =
+            ControllerPaneLayoutGraph::new_in(&scope, actor_graph.live_bindings_handle());
         let async_editor_commands = ControllerAsyncEditorCommandGraph::new_in(&scope);
         let editor_surface_graph =
             rpc::ControllerEditorSurfaceGraph::new(Arc::new(|project_root, intent| match intent {

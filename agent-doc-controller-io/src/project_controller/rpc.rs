@@ -25397,8 +25397,7 @@ mod tests {
 
         let scope = agent_doc_state_scope::ProcessScope::new();
         let actors = ControllerActorGraph::new_in(&scope, actor_store.clone());
-        let graph =
-            ControllerPaneLayoutGraph::new_in(&scope, Vec::new(), actors.live_bindings_handle());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
         let mut invocation = ControllerTmuxLayoutSyncInvocation {
             columns: vec![outgoing.clone()],
             window: None,

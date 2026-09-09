@@ -3,8 +3,14 @@
 # Session Routing
 
 The controller's layout worker readiness is a reactive input. Binding the worker
-after controller startup must activate a restored desired layout even when its
-value is unchanged. Fresh editor routes still require convergence of their exact
+must activate live desired intent received before sink installation, even when
+its value is unchanged. Saved columns are layout recall data, not current intent:
+controller startup or recycle must not replay them into the desired Source or
+move/focus panes. A fresh editor publication or explicit layout command must
+authorize the first layout generation, including when it requests the same saved
+columns. Actor hydration alone never authorizes a layout. This prevents an idle
+project controller from reclaiming a shared tmux window from a newer layout.
+Fresh editor routes still require convergence of their exact
 layout generation before dispatch. Await diagnostics distinguish an unstarted
 effect, an in-flight effect, a pending retry, absent state, and operator ownership;
 every phase from another generation is superseded, including a converged phase.

@@ -15,3 +15,4 @@
 0.35.353	Document-scoped recycle, clear repaint proof, and selection-only editor focus	shared-core	shared-core	staged	make check; make tmux-ci; sibling isolation, delayed repaint, and three-pane focus regressions
 0.35.354	Live queue revision preservation and steering	shared-core; existing turn projection stream	shared-core; existing turn projection stream	staged	make check; stale-strike, done-ID revision, multiline steering and native-peer regressions
 0.35.355	Layout provisioning independent of focus and queue dispatch	shared-core	shared-core	staged	make check; make tmux-ci; paused queue provisioning and cross-project route policy regressions
+0.35.356	Startup layout recall does not authorize shared-window placement	shared-core	shared-core	staged	make check; make tmux-ci; saved-layout startup, actor hydration, restart, and late-sink activation regressions

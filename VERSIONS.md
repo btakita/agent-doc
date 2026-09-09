@@ -2,6 +2,11 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.356
+
+- Prevent controller startup and recycle from replaying a project's saved layout into a shared tmux window and stealing pane focus. Saved columns remain available for explicit recall; current editor or command intent authorizes placement.
+- Preserve late-bound layout worker activation for live intent, identical foreground reroutes, and generation-fenced convergence. Actor hydration alone cannot schedule a layout effect.
+
 ## 0.35.355
 
 - Add `gc --database-only` and its read-only dry-run usage report for explicit retained-history cleanup without session-file or actor effects.

@@ -827,6 +827,7 @@ struct ControllerPaneLayoutGraph {
     projection: Computed<PaneLayoutProjection>,
     effect: Mutex<Option<lazily::Effect>>,
     sink: Arc<OnceLock<Arc<dyn PaneLayoutProjectionSink>>>,
+    sink_ready: Source<bool>,
     next_generation: AtomicU64,
     /// The latest generation published by `set_desired`. The structural-effect
     /// worker binds its own generation against this so the sync body can bail
@@ -932,10 +933,14 @@ impl ControllerPaneLayoutGraph {
             )
         });
         let sink: Arc<OnceLock<Arc<dyn PaneLayoutProjectionSink>>> = Arc::new(OnceLock::new());
+        let sink_ready = ctx.source(false);
         let projection_for_effect = projection;
         let actor_bindings_for_effect = actor_bindings;
         let sink_for_effect = Arc::clone(&sink);
         let effect = ctx.effect(move |ctx| {
+            if !ctx.get(&sink_ready) {
+                return;
+            }
             let PaneLayoutProjection::NeedsEffect(desired) = ctx.get(&projection_for_effect) else {
                 return;
             };
@@ -960,6 +965,7 @@ impl ControllerPaneLayoutGraph {
             projection,
             effect: Mutex::new(Some(effect)),
             sink,
+            sink_ready,
             next_generation: AtomicU64::new(2),
             published_generation: Arc::new(AtomicU64::new(1)),
             waiters: Condvar::new(),
@@ -969,13 +975,11 @@ impl ControllerPaneLayoutGraph {
 
     #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
     fn install_sink(&self, sink: Arc<dyn PaneLayoutProjectionSink>) {
-        if self.sink.set(sink).is_ok()
-            && let Some(desired) = self.ctx.get(&self.desired)
-        {
-            // The effect ran once before its late-bound sink existed. Publishing
-            // the reconstructed desired fact again invalidates the Computed and
-            // lets the retained Effect drive restart recovery.
-            self.ctx.set(&self.desired, Some(desired));
+        if self.sink.set(sink).is_ok() {
+            // Sink availability is a lifecycle edge. Republishing an identical
+            // desired value leaves its Computed projection unchanged and cannot
+            // wake the effect that ran before the runtime was bound.
+            self.ctx.set(&self.sink_ready, true);
         }
     }
 
@@ -1236,8 +1240,9 @@ impl ControllerPaneLayoutGraph {
         loop {
             let projection = self.projection();
             let terminal = match &projection {
-                PaneLayoutProjection::OperatorOwned(desired)
-                | PaneLayoutProjection::Converged(desired) => desired.generation == generation,
+                // A terminal projection for another generation is supersession,
+                // not work this caller can keep waiting to converge.
+                PaneLayoutProjection::OperatorOwned(_) | PaneLayoutProjection::Converged(_) => true,
                 PaneLayoutProjection::NeedsEffect(desired)
                 | PaneLayoutProjection::Applying(desired)
                 | PaneLayoutProjection::RetryPending(desired) => desired.generation != generation,
@@ -2758,6 +2763,7 @@ enum RetainedTransitionState {
         target_hash: String,
         delivery_version: u64,
         controller_generation: u64,
+        persistence: RetainedPersistenceProjection,
     },
     SettledCloseoutReady(RetainedResumeSignal),
     ReconcileMaterializedCapture(RetainedResumeSignal),
@@ -2785,7 +2791,8 @@ impl RetainedTransitionState {
             Self::AwaitingDelivery(activation) => Some(
                 RetainedTransitionEffect::ObserveCurrentDelivery(activation.clone()),
             ),
-            Self::AwaitingConvergence { persistence, .. } => {
+            Self::AwaitingConvergence { persistence, .. }
+            | Self::TargetVisible { persistence, .. } => {
                 Some(RetainedTransitionEffect::PersistLatest(persistence.clone()))
             }
             Self::ApplyTarget(transition) => {
@@ -2801,7 +2808,6 @@ impl RetainedTransitionState {
             | Self::Idle
             | Self::AwaitingController { .. }
             | Self::AwaitingLiveEditor { .. }
-            | Self::TargetVisible { .. }
             | Self::Conflict { .. } => None,
         }
     }
@@ -4528,6 +4534,13 @@ fn retained_transition_state(
             target_hash: intent.target_hash.clone(),
             delivery_version: delivery.delivery_version,
             controller_generation,
+            persistence: RetainedPersistenceProjection {
+                file: delivery.file.clone(),
+                content_hash: delivery.content_hash.clone(),
+                content_len: delivery.content.len(),
+                delivery_version: delivery.delivery_version,
+                controller_generation,
+            },
         };
     }
     if let Some(
@@ -4650,6 +4663,13 @@ fn retained_transition_state(
             target_hash: projected_target_hash,
             delivery_version: delivery.delivery_version,
             controller_generation,
+            persistence: RetainedPersistenceProjection {
+                file: delivery.file.clone(),
+                content_hash: delivery.content_hash.clone(),
+                content_len: delivery.content.len(),
+                delivery_version: delivery.delivery_version,
+                controller_generation,
+            },
         };
     }
     RetainedTransitionState::ApplyTarget(RetainedTransitionProjection {
@@ -7810,7 +7830,7 @@ mod tests {
         assert!(!invocation("manual", true).routes_created_panes());
     }
 
-    fn pane_layout_desired_for_test(generation: u64) -> PaneLayoutDesired {
+    pub(super) fn pane_layout_desired_for_test(generation: u64) -> PaneLayoutDesired {
         PaneLayoutDesired {
             generation,
             source_plane_version: Some(41),
@@ -8215,6 +8235,36 @@ mod tests {
         authority_graph.release_subscription("shared-authority", "shared-document");
         assert!(authority_graph.effects.lock().is_empty());
         assert_eq!(authority_graph.projections.present_count(), 0);
+    }
+
+    #[test]
+    fn pane_layout_sink_activation_and_fresh_routes_schedule_the_retained_effect() {
+        struct RecordingSink(Arc<Mutex<Vec<u64>>>);
+        impl PaneLayoutProjectionSink for RecordingSink {
+            fn reconcile(&self, desired: PaneLayoutDesired) {
+                self.0.lock().push(desired.generation);
+            }
+        }
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actors = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(
+            &scope,
+            vec!["tasks/one.md".to_string()],
+            actors.live_bindings_handle(),
+        );
+        let runs = Arc::new(Mutex::new(Vec::new()));
+        graph.install_sink(Arc::new(RecordingSink(runs.clone())));
+        assert_eq!(
+            *runs.lock(),
+            vec![1],
+            "cold desired layout must activate the late-bound sink"
+        );
+        let invocation = graph.desired().unwrap().invocation;
+        let desired = graph.set_fresh_desired(invocation.clone(), None);
+        assert_eq!(runs.lock().last().copied(), Some(desired.generation));
+        let next = graph.set_fresh_desired(invocation, None);
+        assert_eq!(runs.lock().last().copied(), Some(next.generation));
+        assert_eq!(runs.lock().len(), 3);
     }
 
     #[test]
@@ -14344,6 +14394,61 @@ agent:queue\n\
     }
 
     #[test]
+    fn compact_visible_receipt_keeps_native_save_live_until_write_settlement() {
+        let mut projection = retained_resume_projection("compact-visible-save");
+        let target = "# Session\n\nCompacted exchange\n";
+        let intent = projection.document.pending_write.as_mut().unwrap();
+        intent.target_content = target.to_string();
+        intent.target_hash = agent_doc_hash::content_hash(target);
+        intent.continuation = None;
+        projection.closeout.captured_response = None;
+        projection.document.pending_compact_projection = Some(
+            agent_doc_state_backbone::DocumentCompactProjectionContinuation {
+                continuation_id: "compact-visible-save".to_string(),
+                file: "/work/session.md".to_string(),
+                live_content: target.to_string(),
+                committed_content: target.to_string(),
+                target_component: Some("exchange".to_string()),
+                commit: true,
+            },
+        );
+        let mut delivery = RetainedDeliveryObservation {
+            file: PathBuf::from("/work/session.md"),
+            content: Arc::from(target),
+            content_hash: agent_doc_hash::content_hash(target),
+            live_editors: 1,
+            delivery_converged: false,
+            delivery_version: 36,
+        };
+        assert!(matches!(
+            retained_transition_state(Some(&projection), Some(&delivery), 1).effect(),
+            Some(RetainedTransitionEffect::PersistLatest(_))
+        ));
+        delivery.delivery_converged = true;
+        delivery.delivery_version = 37;
+        let state = retained_transition_state(Some(&projection), Some(&delivery), 1);
+        let Some(RetainedTransitionEffect::PersistLatest(save)) = state.effect() else {
+            panic!("visible compact target must still request its exact native-save receipt");
+        };
+        assert_eq!(save.content_hash, delivery.content_hash);
+        assert_eq!(save.content_len, target.len());
+        assert_eq!(save.delivery_version, 37);
+        assert!(compact_resume_signal(Some(&projection), 1).is_none());
+        projection.document.pending_write = None;
+        assert!(
+            retained_transition_state(Some(&projection), Some(&delivery), 1)
+                .effect()
+                .is_none()
+        );
+        assert_eq!(
+            compact_resume_signal(Some(&projection), 1)
+                .unwrap()
+                .continuation_id,
+            "compact-visible-save"
+        );
+    }
+
+    #[test]
     fn retained_transition_state_table_covers_every_state_and_effect() {
         let base = "# Queue\n";
         let target = "# Queue\n\n### Re: done\n";
@@ -14466,7 +14571,7 @@ agent:queue\n\
                 Some(delivery(target, 1, true)),
                 1,
                 "target_visible",
-                "none",
+                "persist_latest",
             ),
             (
                 "target visible after the current cycle capture was recycled",
@@ -14474,7 +14579,7 @@ agent:queue\n\
                 Some(delivery(target, 1, true)),
                 1,
                 "target_visible",
-                "none",
+                "persist_latest",
             ),
             (
                 "legacy target visible without any retained continuation",
@@ -14482,7 +14587,7 @@ agent:queue\n\
                 Some(delivery(target, 1, true)),
                 1,
                 "target_visible",
-                "none",
+                "persist_latest",
             ),
             (
                 "settled target with an open captured closeout",
@@ -14898,7 +15003,7 @@ revised operator request
 
         let state = retained_transition_state(Some(&projection), Some(&visible), 2);
         assert_eq!(retained_transition_state_tag(&state), "target_visible");
-        assert_eq!(retained_transition_effect_tag(&state), "none");
+        assert_eq!(retained_transition_effect_tag(&state), "persist_latest");
         assert!(state.resume_signal().is_none());
         assert_eq!(
             state.transition_projection(),

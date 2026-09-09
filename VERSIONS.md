@@ -2,6 +2,21 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.349
+
+- **Fix: compact replies no longer wait on a full project-state replay.**
+  Controller-local continuation facts enter the same live graph as external
+  events before publication returns, with shared admission and deduplication.
+
+- **Fix: visible compact targets continue through native save and commit.**
+  Retained writes keep their exact latest-durable save effect after editor
+  visibility, including semantically rebased targets, until settlement enables
+  the compact continuation.
+- **Fix: restored layouts activate their controller worker.** Worker readiness
+  is an explicit reactive input rather than an unchanged desired-layout replay.
+  Editor-route diagnostics distinguish unstarted effects from retries and
+  immediately recognize superseded terminal generations.
+
 ## 0.35.348
 
 - **Fix: attached-editor replica recovery waits for a truthful receipt.** The

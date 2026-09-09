@@ -47,6 +47,15 @@ commands do not wait for the recycle and never interrupt an active turn.
 - Template-mode full exchange compaction must split the component at the live `agent:boundary` marker. Content before the boundary is archiveable and may be summarized; content after the boundary is unresolved live prompt drift and must remain visible in the working tree while staying out of the archive body, compact summary digest, saved snapshot, and closeout commit.
 - Template-mode partial exchange compaction follows the same unresolved-tail rule when keeping recent `### Re:` sections.
 - `--commit` closes compacted state through the normal binary-owned commit path. It commits only the compacted snapshot state; any unresolved post-boundary prompt left visible remains the next prompt-bearing diff for a later `agent-doc <FILE>` cycle.
+- Controller-local compact continuation facts must pass through the same typed
+  admission and deduplication boundary as external events and enter the existing
+  document graph before publication returns. Compact replies must not wait for
+  whole-project ledger rehydration to make a retained continuation visible.
+- Editor-visible compact text still requires an exact native-save receipt. Both
+  pending delivery and an already-visible retained target keep the latest-durable
+  save effect active until the write settles; visibility alone must not strand
+  the compact continuation before snapshot and commit. A semantically rebased
+  visible target saves that exact current text without emitting another CRDT write.
 - The controller must carry that intentional split as two targets through the whole transaction. Editor-buffer flush and relay fallback repair use the live target (including unresolved input); snapshot staging and post-commit HEAD verification use the committed target. Closeout must not force a whole-buffer relay rebootstrap when the live target is already converged, and must fail closed instead of overwriting a concurrent live-editor change.
 - If compact reaches the pre-write barrier while an earlier editor delivery is retained, it may subsume that pending projection only when the typed retained state and the relay's exact canonical text prove the same base used to derive the compact successor. The successor still requires normal CRDT compare-and-swap and editor-delivery settlement. Relay drift, detached authority, and unrelated errors remain fail-closed, and this state must not prescribe `commit` or `write --commit` because no response cycle owns the earlier projection.
 - The retry guidance for that pre-write-only refusal names the compact mutation:

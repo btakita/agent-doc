@@ -2635,15 +2635,17 @@ fn document_path_transition_request(
 ///
 /// Automatic runtime producers must use this ingress instead of appending the
 /// durable ledger directly. The controller appends and applies the event in one
-/// serialized turn. A controller-local producer uses the cold append seam to
-/// avoid self-IPC; the enclosing controller request refreshes the live graph
-/// before replying to its external caller.
+/// serialized turn. Controller-local producers enter that same typed boundary
+/// directly, so publication never requires self-IPC or a whole-project replay.
 pub fn publish_state_event(
     project_root: &Path,
     event: &agent_doc_state_backbone::StateEvent,
 ) -> Result<bool> {
     if agent_doc_state_wire::in_controller_request() {
-        return append_state_event(project_root, event);
+        let runtime = local_controller_runtime_for_project(project_root)?
+            .context("controller-local state publication requires its project's live runtime")?;
+        let bootstrap = runtime.bootstrap_snapshot()?;
+        return ingest_state_event(&bootstrap, &runtime, event.clone());
     }
     request_controller_with_timeout(
         project_root,
@@ -7378,10 +7380,9 @@ fn handle_compact_document_rpc(
         ),
     );
     let outcome = runtime_effects()?.compact_document(&canonical, invocation)?;
-    // Compact may admit a durable continuation from inside the runtime port.
-    // Rehydrate that state into the same per-document Lazily graph before this
-    // RPC returns; no caller retry or editor receipt drives the continuation.
-    runtime.refresh_memory()?;
+    // Runtime producers publish their continuation into the existing document
+    // graph before returning. Replaying the project ledger here would block the
+    // response on unrelated history and replace live state with a stale snapshot.
     serde_json::to_value(outcome).context("failed to serialize compact_document outcome")
 }
 
@@ -14511,6 +14512,15 @@ pub(crate) fn handle_state_event_append(
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
     let event: agent_doc_state_backbone::StateEvent =
         serde_json::from_str(&payload_json).context("parse state actor append payload")?;
+    ingest_state_event(bootstrap, runtime, event)
+}
+
+/// Shared authority for external RPC and controller-local event producers.
+fn ingest_state_event(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    event: agent_doc_state_backbone::StateEvent,
+) -> Result<bool> {
     let incoming_cycle = match &event.fact {
         agent_doc_state_backbone::StateFact::TurnIntentCheckpointed { cycle_id, .. }
         | agent_doc_state_backbone::StateFact::PreflightStarted { cycle_id, .. } => Some(cycle_id),
@@ -20866,31 +20876,11 @@ fn await_sync_tmux_layout_projection(
         refresh_pane_layout_observation_before_await(bootstrap, runtime, &desired);
         let projection =
             runtime.await_pane_layout_generation(desired.generation, PANE_LAYOUT_COMMAND_AWAIT);
-        let (applied, reason) = match projection {
-            PaneLayoutProjection::Converged(current)
-                if current.generation == desired.generation =>
-            {
-                (true, "observed_convergence".to_string())
-            }
-            PaneLayoutProjection::OperatorOwned(current)
-                if current.generation == desired.generation =>
-            {
-                (false, "operator_owned_layout".to_string())
-            }
-            PaneLayoutProjection::NeedsEffect(current)
-            | PaneLayoutProjection::Applying(current)
-            | PaneLayoutProjection::RetryPending(current)
-                if current.generation != desired.generation =>
-            {
-                (false, "superseded_by_newer_layout_state".to_string())
-            }
-            PaneLayoutProjection::Absent => (false, "desired_layout_state_absent".to_string()),
-            _ => (false, "projection_retry_pending".to_string()),
-        };
+        let (applied, reason) = pane_layout_await_outcome(&projection, desired.generation);
         let routes_created_panes = invocation.routes_created_panes();
         Ok(ControllerTmuxLayoutSyncReceipt {
             applied,
-            reason,
+            reason: reason.to_string(),
             columns: invocation.columns,
             window: invocation.window,
             focus: invocation.focus,
@@ -20907,6 +20897,28 @@ fn pane_layout_invocation_awaits_projection(
     invocation: &ControllerTmuxLayoutSyncInvocation,
 ) -> bool {
     invocation.caller_kind != "automatic" && !invocation.no_autostart
+}
+
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+fn pane_layout_await_outcome(
+    projection: &PaneLayoutProjection,
+    requested_generation: u64,
+) -> (bool, &'static str) {
+    let (current, applied, reason) = match projection {
+        PaneLayoutProjection::Absent => return (false, "desired_layout_state_absent"),
+        PaneLayoutProjection::Converged(current) => (current, true, "observed_convergence"),
+        PaneLayoutProjection::OperatorOwned(current) => (current, false, "operator_owned_layout"),
+        PaneLayoutProjection::NeedsEffect(current) => {
+            (current, false, "projection_effect_not_started")
+        }
+        PaneLayoutProjection::Applying(current) => (current, false, "projection_effect_in_flight"),
+        PaneLayoutProjection::RetryPending(current) => (current, false, "projection_retry_pending"),
+    };
+    if current.generation != requested_generation {
+        (false, "superseded_by_newer_layout_state")
+    } else {
+        (applied, reason)
+    }
 }
 
 /// Automatic surface `Sync` intents are already the sparse structural edge:
@@ -24258,6 +24270,49 @@ mod tests {
     }
 
     #[test]
+    fn layout_await_reports_actual_phase_and_fences_every_superseded_phase() {
+        let desired = super::super::tests::pane_layout_desired_for_test(7);
+        let cases = [
+            (
+                PaneLayoutProjection::NeedsEffect(desired.clone()),
+                false,
+                "projection_effect_not_started",
+            ),
+            (
+                PaneLayoutProjection::Applying(desired.clone()),
+                false,
+                "projection_effect_in_flight",
+            ),
+            (
+                PaneLayoutProjection::RetryPending(desired.clone()),
+                false,
+                "projection_retry_pending",
+            ),
+            (
+                PaneLayoutProjection::OperatorOwned(desired.clone()),
+                false,
+                "operator_owned_layout",
+            ),
+            (
+                PaneLayoutProjection::Converged(desired),
+                true,
+                "observed_convergence",
+            ),
+        ];
+        for (projection, applied, reason) in cases {
+            assert_eq!(pane_layout_await_outcome(&projection, 7), (applied, reason));
+            assert_eq!(
+                pane_layout_await_outcome(&projection, 6),
+                (false, "superseded_by_newer_layout_state")
+            );
+        }
+        assert_eq!(
+            pane_layout_await_outcome(&PaneLayoutProjection::Absent, 7),
+            (false, "desired_layout_state_absent")
+        );
+    }
+
+    #[test]
     fn published_tmux_layout_projection_is_a_successful_command_terminal() {
         let receipt = |applied, reason: &str| ControllerTmuxLayoutSyncReceipt {
             applied,
@@ -25536,6 +25591,60 @@ mod tests {
                 .map(|intent| intent.intent_id.as_str()),
             Some("intent-reactive-ingress")
         );
+    }
+
+    #[test]
+    fn controller_local_state_event_reaches_live_graph_without_project_reload() {
+        // A dedicated worker owns the same thread-local ingress context as a
+        // production request; no socket or ledger replay may supply the result.
+        std::thread::spawn(|| {
+            let dir = tempfile::TempDir::new().unwrap();
+            let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+            install_controller_request_thread_context(&runtime);
+            let document_hash = "local-compact-document".to_string();
+            // The compact mutation is retained until the editor's save receipt.
+            // Keep that frontier pending so the continuation cannot settle yet.
+            append_apply_state_event(
+                &runtime.bootstrap_snapshot().unwrap(),
+                &runtime,
+                agent_doc_state_backbone::StateEvent::new(
+                    "local-compact-write",
+                    agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+                        document_hash: document_hash.clone(),
+                        intent_id: "compact-write".to_string(),
+                        expected_hash: agent_doc_hash::content_hash("base"),
+                        expected_content: Some("base".to_string()),
+                        target_hash: agent_doc_hash::content_hash("live"),
+                        target_content: "live".to_string(),
+                        source: agent_doc_state_backbone::DocumentWriteSource::PendingWrite,
+                        reason: agent_doc_state_backbone::DocumentWriteDeferredReason::EditorProjectionPending,
+                    },
+                ),
+            ).unwrap();
+            let event = agent_doc_state_backbone::StateEvent::new(
+                "local-compact-continuation",
+                agent_doc_state_backbone::StateFact::DocumentCompactProjectionRetained {
+                    document_hash: document_hash.clone(),
+                    continuation_id: "compact-local".to_string(),
+                    file: dir.path().join("session.md").to_string_lossy().into_owned(),
+                    live_content: "live".to_string(),
+                    committed_content: "committed".to_string(),
+                    target_component: Some("exchange".to_string()),
+                    commit: true,
+                },
+            );
+
+            assert!(publish_state_event(dir.path(), &event).unwrap());
+            let projected = runtime.document_state_projection(&document_hash).unwrap();
+            assert!(
+                projected
+                    .is_some_and(|document| document.document.pending_compact_projection.is_some()),
+                "a local compact continuation must enter the live graph before its RPC returns"
+            );
+            assert!(!publish_state_event(dir.path(), &event).unwrap());
+        })
+        .join()
+        .unwrap();
     }
 
     #[test]

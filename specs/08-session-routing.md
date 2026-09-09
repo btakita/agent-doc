@@ -2,6 +2,13 @@
 
 # Session Routing
 
+The controller's layout worker readiness is a reactive input. Binding the worker
+after controller startup must activate a restored desired layout even when its
+value is unchanged. Fresh editor routes still require convergence of their exact
+layout generation before dispatch. Await diagnostics distinguish an unstarted
+effect, an in-flight effect, a pending retry, absent state, and operator ownership;
+every phase from another generation is superseded, including a converged phase.
+
 ## Registry
 
 The controller registry in `.agent-doc/state.db` maps each canonical document

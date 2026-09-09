@@ -3636,6 +3636,8 @@ fn run_with_options_internal_at_root(
                 });
                 let delegated_pane = if let Some(pane) = proven_live_pane {
                     Ok(Some((*pane).clone()))
+                } else if skip_autostart_diagnostics {
+                    Ok(None)
                 } else if let Some(owner_root) =
                     agent_doc_project_root_io::project_root_containing(file_path)
                 {

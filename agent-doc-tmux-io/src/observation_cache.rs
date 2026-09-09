@@ -134,6 +134,21 @@ pub fn observation_scope_stats() -> Option<ObservationScopeStats> {
     })
 }
 
+/// Observe completion of a tmux effect executed by another controller/thread.
+/// Its mutations bypass this thread's command adapters, so the receipt must
+/// invalidate structural snapshots and publish fresh process observations before
+/// the layout graph evaluates the returned pane binding. Also call on errors:
+/// a remote effect can mutate tmux before its response fails.
+pub fn observe_external_mutation() {
+    SCOPE.with(|scope| {
+        if let Some(state) = scope.borrow_mut().as_mut() {
+            state.reset_entries();
+        }
+    });
+    tmux_router::invalidate_pane_snapshot();
+    agent_doc_process_owner_io::refresh_process_observations();
+}
+
 impl Drop for TmuxObservationScope {
     fn drop(&mut self) {
         SCOPE.with(|scope| {
@@ -292,6 +307,46 @@ mod tests {
 
         assert_eq!(spawns, 2, "a mutation must force re-observation");
         assert_eq!(after, "after");
+    }
+
+    #[test]
+    fn remote_mutation_receipt_invalidates_structural_observations() {
+        let _scope = begin_observation_scope();
+        let command = read_cmd("%1");
+        let before = run_with_observation_cache(&command, || Ok("before".into())).unwrap();
+        assert_eq!(before, "before");
+        observe_external_mutation();
+        let after = run_with_observation_cache(&command, || Ok("after".into())).unwrap();
+        assert_eq!(after, "after");
+    }
+
+    #[test]
+    #[ignore = "requires tmux"]
+    fn remote_pane_creation_receipt_replaces_cached_missing_pane() {
+        let socket = format!("agent-doc-remote-receipt-{}", std::process::id());
+        let iso = tmux_router::IsolatedTmux::new(&socket);
+        let root = std::path::Path::new("/tmp");
+        let original = iso.new_session("test", root).unwrap();
+        let _observations = begin_observation_scope();
+        let _snapshot = tmux_router::begin_pane_snapshot_scope();
+        assert!(iso.pane_alive(&original));
+
+        // Remote controllers cannot invalidate the requesting thread's scope.
+        let created = std::thread::spawn(move || {
+            tmux_router::Tmux::default_server()
+                .with_server_socket(Some(socket))
+                .new_window("test", std::path::Path::new("/tmp"))
+                .unwrap()
+        })
+        .join()
+        .unwrap();
+        assert!(
+            !iso.pane_alive(&created),
+            "the old snapshot predates provisioning"
+        );
+        observe_external_mutation();
+        assert!(iso.pane_alive(&created));
+        assert_eq!(iso.pane_session(&created).unwrap(), "test");
     }
 
     #[test]

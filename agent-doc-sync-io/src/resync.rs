@@ -30,14 +30,14 @@
 //!   `purge_stash_windows` kills entire stash windows where all panes are idle
 //!   shells and the window is older than 30 seconds; `purge_unregistered_stash_panes`
 //!   kills individual unregistered idle shell panes in stash windows. Unregistered
-//!   agent panes in stash are preserved when they still prove ownership of
-//!   some registered document or still host a live supervisor session; otherwise
-//!   they are purged as orphaned. Automatic prune captures registered retained-dead
+//!   live agent panes are preserved even when registry/supervisor observations are
+//!   absent during a handoff; missing ownership is not exit proof.
+//!   Automatic prune captures registered retained-dead
 //!   pane diagnostics before removing their ownership rows and protects panes that
 //!   were registered at cleanup-pass start. A later pass may reap an unregistered
 //!   retained-dead pane in a non-stash window when another pane remains, so captured
 //!   diagnostics do not linger forever. `purge_orphaned_agent_panes` removes unregistered
-//!   agent-doc/claude/node panes from any window, but only when the window has at
+//!   retained-dead agent-doc/claude/node panes from any window, but only when the window has at
 //!   least one other pane (never orphans the last pane).
 //! - Process classification is delegated to `agent-doc-tmux`: agent foreground
 //!   commands are expected occupants of registered panes, bare shells are treated

@@ -139,7 +139,9 @@ Two modes:
 
 ## gc
 
-`agent-doc gc [--root DIR] [--dry-run]`
+`agent-doc gc [--root DIR] [--dry-run] [--database-only]`
+
+- `--database-only` skips file scanning, actor cleanup, and supervisor effects. It reports allocated/free bytes and ledger row counts, runs the existing superseded-history retention on database open, and reclaims sufficiently fragmented free pages. It preserves live recovery facts, queues, and session documents. Pairing it with `--dry-run` uses a read-only SQLite connection without schema initialization or retention; a missing database remains absent. Reported free bytes are reusable pages, not a promise that every byte will be returned to disk.
 
 - Garbage-collects orphaned cold snapshots, locks, hooks, repair diagnostics, sockets, and dead transactional rows under `.agent-doc/`.
 - The orphaned-socket cleanup keeps sockets whose supervisor PID is alive or whose socket still answers.

@@ -1486,6 +1486,42 @@ fn prune_converged_document_write_intents(conn: &Connection) -> Result<()> {
 /// running on a database that is merely a little fragmented.
 const STATE_DB_VACUUM_FREE_FRACTION: f64 = 0.25;
 
+/// Read-only allocation and ledger counts for explicit maintenance reporting.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StateDbUsage {
+    pub allocated_bytes: u64,
+    pub free_bytes: u64,
+    pub state_events: u64,
+    pub recovery_markers: u64,
+}
+
+/// Read-only maintenance preview. Do not use open_state_db here: opening through
+/// the normal initializer performs retention and would make a dry run mutate.
+pub fn inspect_state_db_usage(project_root: &Path) -> Result<StateDbUsage> {
+    let path = state_db_path(project_root);
+    if !path.exists() {
+        return Ok(StateDbUsage::default());
+    }
+    let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    conn.busy_timeout(STATE_DB_BUSY_TIMEOUT)?;
+    let transaction = conn.unchecked_transaction()?;
+    let count = |sql: &str| -> Result<u64> {
+        sqlite_u64(
+            transaction.query_row(sql, [], |row| row.get::<_, i64>(0))?,
+            "database usage",
+        )
+    };
+    let page_size = count("PRAGMA page_size")?;
+    let pages = count("PRAGMA page_count")?;
+    let free = count("PRAGMA freelist_count")?;
+    Ok(StateDbUsage {
+        allocated_bytes: pages * page_size,
+        free_bytes: free * page_size,
+        state_events: count("SELECT COUNT(*) FROM state_events")?,
+        recovery_markers: count("SELECT COUNT(*) FROM crash_recovery_markers")?,
+    })
+}
+
 /// Reclaim free pages in the project state db, returning the bytes released.
 ///
 /// `#statedbvacuum`: retention pruning (`#authorityfactretention`,

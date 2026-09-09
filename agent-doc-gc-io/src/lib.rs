@@ -18,6 +18,8 @@
 //! - Reaps detached project controllers whose temporary project root has been
 //!   removed.
 //! - `--dry-run` flag shows what would be deleted without deleting.
+//! - `--database-only` runs existing ledger retention and space reclamation
+//!   without scanning files or mutating actor/session lifecycle state.
 //!
 //! ## Agentic Contracts
 //! - `run(root, dry_run)` — scans `.agent-doc/` under `root`, removes orphaned files.
@@ -184,6 +186,42 @@ impl GcControllerEffects for NoopGcControllerEffects {
 pub fn run(root: Option<&Path>, dry_run: bool) -> Result<GcResult> {
     let mut effects = NoopGcControllerEffects;
     run_with_controller_effects(root, dry_run, &mut effects, GcControllerConfig::default())
+}
+
+/// Explicit, bounded database maintenance using the storage owner's existing
+/// superseded-fact retention rules. No controller or session-file effects.
+pub fn run_database_only(root: Option<&Path>, dry_run: bool) -> Result<()> {
+    let project_root = match root {
+        Some(root) => root.to_path_buf(),
+        None => agent_doc_project_root_io::project_root_from_cwd()?,
+    };
+    let before = agent_doc_sqlite::state_store::inspect_state_db_usage(&project_root)?;
+    eprintln!(
+        "[gc] database {}: allocated_bytes={} free_bytes={} state_events={} recovery_markers={}",
+        project_root.join(".agent-doc/state.db").display(),
+        before.allocated_bytes,
+        before.free_bytes,
+        before.state_events,
+        before.recovery_markers,
+    );
+    if dry_run {
+        eprintln!(
+            "[gc] Dry run: no database changes. Cleanup retains current recovery state, prunes superseded history, and reclaims space when fragmentation reaches the existing vacuum threshold."
+        );
+        return Ok(());
+    }
+    let reclaimed = agent_doc_sqlite::state_store::reclaim_state_db_free_space(&project_root)?;
+    let after = agent_doc_sqlite::state_store::inspect_state_db_usage(&project_root)?;
+    eprintln!(
+        "[gc] database cleanup: state_events={} -> {} recovery_markers={} -> {} reclaimed_bytes={} free_bytes={}",
+        before.state_events,
+        after.state_events,
+        before.recovery_markers,
+        after.recovery_markers,
+        reclaimed,
+        after.free_bytes,
+    );
+    Ok(())
 }
 
 pub fn run_with_controller_effects(

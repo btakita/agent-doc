@@ -480,10 +480,11 @@ without structural provenance retain the operator-owned protection.
 - Editor plugins may deduplicate repeated automatic selection/layout states, but
   a real markdown selection event must still reach the safe-passive
   reconciliation path even when its visible/focused signature matches the last
-  applied state. The immediate controller focus transition may resume the
-  document's latest durable session when its actor/supervisor or pane is
-  missing. The follow-up `sync --no-autostart` pass remains passive and only
-  reconciles the resumed owner into the observed layout.
+  applied state. Focus-only observations cannot resume missing sessions or
+  promote stashed panes. Structural layout intent owns provisioning; its
+  cross-project effect asks the owning controller for `provision_for_layout`,
+  which returns a live binding without selecting or promoting it. A
+  `sync --no-autostart` pass never requests missing-owner provisioning.
 - Safe-passive editor sync should not prove whether live unregistered agent
   panes in stash are still owned. Live agent-pane ownership proof and
   kill-or-preserve decisions belong to full sync/repair paths.
@@ -506,7 +507,7 @@ markdown file, sync must expand that one-column projection from the project
   generation-fence that receipt and republish its complete current surface as a
   forced structural edge. Other focus refusals remain non-structural failures.
 - Ordinary sync/preflight/finalize recovery paths must never kill a tmux pane. When sync observes a dead pane during missing-pane repair, it may capture diagnostics and keep the dead pane retained for manual inspection, but only explicit repair surfaces such as `fix` / `resync --fix` may escalate to pane-kill cleanup.
-- `resync --fix` orphan-agent cleanup must preserve non-stash panes that are registered, live-owner-proven, or supervisor-backed in their pane-local project root even when they are absent from the current project's registry.
+- Automatic stash and `resync --fix` orphan-agent cleanup must preserve live agent processes even when registry or supervisor observations are absent during a handoff. Missing ownership metadata is not exit proof. Orphan-agent reaping requires a retained-dead pane; existing dead-pane and idle-shell cleanup remains available.
 - Recent repeated `missing_pane` recoveries, unresolved startup-miss state, or a `registry_rebind` closeout whose recorded successor pane is still alive and rooted to the same document all block passive `--no-autostart` cold-start.
 - If any visible file stays blocked under passive `--no-autostart`, sync must preserve the current visible tmux layout and warn instead of reconciling the remaining foreign pane set into a new authoritative layout. This includes the live mixed-root replay shape where `tasks/agent-doc/agent-doc-bugs2.md` shares the visible `agent-doc` window with `src/session-share/tasks/claudescore-3.md`; a blocked sibling file must not let the remaining visible pane set collapse into a new authoritative layout.
 - A preserve-layout return that successfully reselects the requested already-visible focus pane must print `[sync] safe_passive_layout_preserved_reselected_focus ...` to command output, not only to `/tmp/agent-doc-sync.log`, so editor plugins can mark that focus handoff as applied.
@@ -516,6 +517,7 @@ markdown file, sync must expand that one-column projection from the project
 - `provision_pane` is the passive sync-specific pane-creation path. It chooses split direction by column position and does not block on prompt readiness.
 - Queue control fences autonomous route dispatch, not structural editor-layout ownership. A binary-owned provision-only sync may create and start an idle keep-alive owner while queue control is paused or draining, but it must preserve a typed `layout-provision` purpose through both route admission and the spawned `agent-doc start` lifecycle check. The initial sync sends no reopen, and the supervisor's queue watcher must continue honoring queue control before any later dispatch. An unchanged desired projection must settle after the pane becomes observable instead of retrying the blocked allocation on a timer.
 - Full/manual sync uses the strict provision-and-route variant: it resolves and creates the pane in the intended tmux session, registers it, waits for harness dispatch readiness, and submits the document route as one fallible controller command. A readiness or submit failure must keep the terminal command non-applied and expose its diagnostic to the caller.
+- A paused queue reduces manual layout startup to provision-only; it never resumes the queue to make geometry converge. Run Agent Doc publishes an `editor_route` layout intent that awaits exact layout convergence but does not dispatch newly created sibling panes. Only the selected document crosses the subsequent route boundary.
 - When sync creates new panes it should prefer splitting in the visible `agent-doc` window, not beside a stash pane when a visible anchor exists.
 - Post-sync registration must fail closed if one pane would be mirrored back into the registry for multiple documents.
 - Cross-session stash rescue is intentionally non-destructive: if a live stashed pane belongs to another tmux session, preserve it in place and report the mismatch instead of moving or killing it.

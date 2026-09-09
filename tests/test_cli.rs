@@ -22788,6 +22788,70 @@ fn test_agent_doc_tmux_owns_editor_column_split_policy() {
 }
 
 #[test]
+fn test_database_only_gc_prunes_history_and_dry_run_preserves_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("paused.md");
+    fs::write(
+        &file,
+        "---\nagent_doc_session: paused-gc\n---\nPending operator work\n",
+    )
+    .unwrap();
+    let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+    conn.execute_batch("BEGIN; WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<20005) INSERT INTO crash_recovery_markers(marker_kind,status,timestamp) SELECT 'audit','completed',x FROM n; COMMIT;").unwrap();
+    conn.execute("INSERT INTO state_events(event_id,document_hash,domain,fact_type,payload_json,timestamp) VALUES('live-intent','doc','document','document_write_deferred','{}',1)", []).unwrap();
+    conn.execute("INSERT INTO queue_controls(scope_kind,scope_id,state,reason,updated_at) VALUES('document','paused-gc','paused','operator pause',1)", []).unwrap();
+    drop(conn);
+    let db = dir.path().join(".agent-doc/state.db");
+    let before = fs::read(&db).unwrap();
+    let root = dir.path().to_str().unwrap();
+    agent_doc_cmd()
+        .args(["gc", "--root", root, "--database-only", "--dry-run"])
+        .assert()
+        .success();
+    assert_eq!(
+        fs::read(&db).unwrap(),
+        before,
+        "dry run must not initialize or prune the DB"
+    );
+    agent_doc_cmd()
+        .args(["gc", "--root", root, "--database-only"])
+        .assert()
+        .success();
+    let usage = agent_doc_sqlite::state_store::inspect_state_db_usage(dir.path()).unwrap();
+    assert_eq!(usage.recovery_markers, 20000);
+    assert_eq!(
+        usage.state_events, 1,
+        "live unresolved write intent must survive"
+    );
+    let conn = agent_doc_sqlite::state_store::Connection::open(&db).unwrap();
+    let pause: String = conn
+        .query_row(
+            "SELECT state FROM queue_controls WHERE scope_id='paused-gc'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(pause, "paused");
+    assert!(
+        fs::read_to_string(&file)
+            .unwrap()
+            .contains("Pending operator work")
+    );
+    let missing = tempfile::tempdir().unwrap();
+    agent_doc_cmd()
+        .args([
+            "gc",
+            "--root",
+            missing.path().to_str().unwrap(),
+            "--database-only",
+            "--dry-run",
+        ])
+        .assert()
+        .success();
+    assert!(!missing.path().join(".agent-doc").exists());
+}
+
+#[test]
 fn test_cross_root_sync_uses_owning_controller_effect_and_ephemeral_router_binding() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sync_lib = fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/lib.rs")).unwrap();
@@ -22804,7 +22868,7 @@ fn test_cross_root_sync_uses_owning_controller_effect_and_ephemeral_router_bindi
 
     for required in [
         "fn ensure_cross_root_document_pane(",
-        "focus_document_pane(project_root, file)?",
+        "ensure_layout_document_pane(",
         "cross_root_controller_pane_resolved",
         "pre_resolved_panes: Some(&pre_resolved_panes)",
     ] {

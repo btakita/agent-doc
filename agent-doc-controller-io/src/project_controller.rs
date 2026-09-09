@@ -562,8 +562,10 @@ pub(crate) fn derive_pane_layout_projection(
     // replay an already-converged generation over a later manual pane move or
     // pane selection. A genuinely new editor intent gets a new generation and
     // an Idle receipt, so it still crosses the effect boundary once.
-    let settled_editor_projection_drift = desired.invocation.caller_kind == "projection"
-        && receipt.generation == desired.generation
+    let settled_editor_projection_drift = matches!(
+        desired.invocation.caller_kind.as_str(),
+        "projection" | "editor_route"
+    ) && receipt.generation == desired.generation
         && receipt.phase == PaneLayoutEffectPhase::Converged
         && (operator_owned_settled || operator_focus_changed);
     let focus_settled = desired.invocation.focus.is_none()
@@ -1636,6 +1638,7 @@ pub struct ControllerRouteAutoStartInvocation<'a> {
     pub file_arg: &'a str,
     pub window: Option<&'a str>,
     pub policy: ControllerRouteAutoStartPolicy,
+    pub defer_focus_to_layout: bool,
     pub missing_pane: Option<ControllerMissingPaneObservation<'a>>,
     pub resume: Option<agent_doc_harness::ResumeRequest>,
 }
@@ -15662,6 +15665,19 @@ revised operator request
             observation("target"),
         );
         runtime.document_retained_write_observe_disk(&document_hash, &file, observation("target"));
+        // Native-save receipts may already be flushing this graph on their
+        // worker thread. Observe the published Effect receipt, not scheduler
+        // timing immediately after a Source update.
+        assert!(
+            !runtime
+                .subscribe_state_plane(
+                    rpc::CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
+                    None,
+                    0,
+                    Duration::from_secs(2),
+                )
+                .timed_out
+        );
         let wakes = runtime.captured_finalize_wakes.lock();
         let wake = wakes.get(&document_hash).unwrap();
         assert_eq!(wake.reason, "retained_settled_delivery_reactive");
@@ -15800,6 +15816,17 @@ revised operator request
             observation("target"),
         );
         runtime.document_retained_write_observe_disk(&document_hash, &file, observation("target"));
+        assert!(
+            !runtime
+                .subscribe_state_plane(
+                    rpc::CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
+                    None,
+                    0,
+                    Duration::from_secs(2),
+                )
+                .timed_out,
+            "settlement must publish the retained wake receipt"
+        );
         assert_eq!(
             runtime
                 .captured_finalize_wakes
@@ -16218,26 +16245,28 @@ revised operator request
 
     #[test]
     fn settled_editor_projection_does_not_undo_manual_pane_selection() {
-        let mut desired = lane_desired(10);
-        desired.invocation.caller_kind = "projection".to_string();
-        let bindings = vec![lane_binding("/p/a.md", 1)];
-        let mut observation = lane_synced_observation(10, &bindings);
-        observation.report.synced = false;
-        observation.report.reason = "focus_pane_mismatch".to_string();
-        observation.report.expected_focus_pane = Some("%1".to_string());
-        observation.report.active_pane = Some("%2".to_string());
+        for caller in ["projection", "editor_route"] {
+            let mut desired = lane_desired(10);
+            desired.invocation.caller_kind = caller.to_string();
+            let bindings = vec![lane_binding("/p/a.md", 1)];
+            let mut observation = lane_synced_observation(10, &bindings);
+            observation.report.synced = false;
+            observation.report.reason = "focus_pane_mismatch".to_string();
+            observation.report.expected_focus_pane = Some("%1".to_string());
+            observation.report.active_pane = Some("%2".to_string());
 
-        let projection = derive_pane_layout_projection(
-            Some(desired),
-            bindings.clone(),
-            Some(observation),
-            lane_converged_receipt(10, &bindings),
-        );
+            let projection = derive_pane_layout_projection(
+                Some(desired),
+                bindings.clone(),
+                Some(observation),
+                lane_converged_receipt(10, &bindings),
+            );
 
-        assert!(
-            matches!(projection, PaneLayoutProjection::OperatorOwned(_)),
-            "manual focus after projection convergence must remain operator-owned (got {projection:?})"
-        );
+            assert!(
+                matches!(projection, PaneLayoutProjection::OperatorOwned(_)),
+                "manual focus after projection convergence must remain operator-owned (got {projection:?})"
+            );
+        }
     }
 
     #[test]

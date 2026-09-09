@@ -4,6 +4,8 @@
 //! provisioning may use a pane from another root as a split-only anchor only
 //! when every visible pane proves ownership of a different agent-doc document;
 //! unknown ownership and same-document ownership remain fail-closed.
+//! Layout provisioning preserves paused queue control and uses an idle owner;
+//! restoring geometry never grants authority to dispatch queued work.
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -326,6 +328,23 @@ pub fn provision_and_route_pane(
     col_args: &[String],
     effects: RouteStartupEffects,
 ) -> Result<String> {
+    // Layout remains useful while autonomous work is paused. Provision an idle
+    // owner using the existing LayoutProvision start contract; never resume the
+    // queue merely to satisfy geometry. The child rechecks pause at startup.
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(file)?;
+    if agent_doc_sqlite::state_store::load_effective_queue_control_for_path(&project_root, file)?
+        .is_some()
+    {
+        return provision_pane(
+            tmux,
+            file,
+            session_id,
+            file_path,
+            context_session,
+            col_args,
+            effects,
+        );
+    }
     // Manual Sync Tmux Layout is an explicit operator action whose controller
     // and editor completion budgets are longer than the default 10s
     // responsiveness ceiling. Share one 30s route deadline across fresh-start

@@ -4062,6 +4062,59 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn manual_layout_provisions_paused_queue_without_dispatch_or_resume() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let _bin_guard = crate::tests::EnvGuard::set("AGENT_DOC_ROUTE_BIN", "/bin/echo");
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("paused.md");
+        std::fs::write(
+            &file,
+            "---\nagent_doc_session: paused-layout\nagent: codex\n---\n",
+        )
+        .unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        agent_doc_sqlite::state_store::upsert_queue_control_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueControlInsert {
+                scope_kind: "document",
+                scope_id: &file.to_string_lossy(),
+                state: "paused",
+                reason: Some("operator pause"),
+                operation_receipt_id: None,
+            },
+        )
+        .unwrap();
+        let iso = IsolatedTmux::new("route-paused-layout-provision");
+        let operator = iso.auto_start("test", dir.path()).unwrap();
+        let window = iso.pane_window(&operator).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", &window, "agent-doc"])
+            .unwrap();
+        let _focus_guard =
+            agent_doc_route_io::invocation::DeferStartupFocusToLayoutGuard::set(true);
+        let pane = agent_doc_route_io::startup::provision_and_route_pane(
+            &iso,
+            &file,
+            "paused-layout",
+            &file.to_string_lossy(),
+            Some("test"),
+            &[file.to_string_lossy().to_string()],
+            route_startup_effects(),
+        )
+        .unwrap();
+        assert!(iso.pane_alive(&pane));
+        assert_ne!(pane, operator);
+        assert_eq!(iso.active_pane("test").unwrap(), operator);
+        let control =
+            agent_doc_sqlite::state_store::load_effective_queue_control_for_path(dir.path(), &file)
+                .unwrap()
+                .unwrap();
+        assert_eq!(control.state, "paused");
+        assert_eq!(control.reason.as_deref(), Some("operator pause"));
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn layout_owned_provisioning_does_not_focus_intermediate_pane() {
         let dir = tempfile::tempdir().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());

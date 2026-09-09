@@ -2219,6 +2219,30 @@ pub fn observe_queue_authority(project_root: &Path, file: &Path, content: &str) 
 }
 
 pub fn focus_document_pane(project_root: &Path, file: &Path) -> Result<ControllerTmuxFocusReceipt> {
+    request_document_pane(project_root, file, MissingFocusPanePolicy::ObserveOnly)
+}
+
+/// Structural layout effects may restore an owner, but leave placement and focus
+/// to the calling layout generation. Editor focus observations use ObserveOnly.
+pub fn ensure_layout_document_pane(
+    project_root: &Path,
+    file: &Path,
+) -> Result<ControllerTmuxFocusReceipt> {
+    let receipt = request_document_pane(
+        project_root,
+        file,
+        MissingFocusPanePolicy::ProvisionForLayout,
+    );
+    agent_doc_tmux_io::observation_cache::observe_external_mutation();
+    receipt
+}
+
+fn request_document_pane(
+    project_root: &Path,
+    file: &Path,
+    policy: MissingFocusPanePolicy,
+) -> Result<ControllerTmuxFocusReceipt> {
+    let payload = FocusDocumentPaneCommandPayload::for_policy(project_root, file, policy);
     #[cfg(any(test, feature = "test-support"))]
     {
         let bootstrap = ControllerBootstrap {
@@ -2233,8 +2257,9 @@ pub fn focus_document_pane(project_root: &Path, file: &Path) -> Result<Controlle
             handoff_started_at: None,
             previous_controller_pid: None,
         };
-        handle_focus_document_pane(
+        handle_focus_document_pane_with_policy(
             &bootstrap,
+            None,
             ControllerRequest {
                 command: "focus_document_pane".to_string(),
                 file: Some(file.to_path_buf()),
@@ -2250,25 +2275,24 @@ pub fn focus_document_pane(project_root: &Path, file: &Path) -> Result<Controlle
                 command_kind: None,
                 diagnostic_payload: None,
             },
+            payload.effective_policy(),
+            None,
         )
     }
 
     #[cfg(not(any(test, feature = "test-support")))]
     {
         if command_plane_enabled() {
-            let payload = FocusDocumentPaneCommandPayload {
-                project_root: Some(project_root.display().to_string()),
-                document_path: file.display().to_string(),
-                no_promotion: true,
-                active_window_guard: true,
-                missing_pane_policy: MissingFocusPanePolicy::ResumeLatest,
-            };
             return request_command_submit_payload(
                 project_root,
                 Some(file.to_path_buf()),
                 "focus_document_pane",
                 "agent-doc.focus_document_pane.v1",
-                &format!("{}:selected-document-focus", project_root.display()),
+                &format!(
+                    "{}:document-pane:{policy:?}:{}",
+                    project_root.display(),
+                    file.display()
+                ),
                 CONTROLLER_RPC_TIMEOUT,
                 &payload,
             );
@@ -2288,7 +2312,7 @@ pub fn focus_document_pane(project_root: &Path, file: &Path) -> Result<Controlle
                 supervisor_pid: None,
                 supervisor_socket: None,
                 command_kind: None,
-                diagnostic_payload: None,
+                diagnostic_payload: Some(serde_json::to_string(&policy)?),
             },
         )
     }
@@ -9236,6 +9260,13 @@ enum MissingFocusPanePolicy {
     #[default]
     ObserveOnly,
     ResumeLatest,
+    ProvisionForLayout,
+}
+
+impl MissingFocusPanePolicy {
+    fn provisions_missing(self) -> bool {
+        matches!(self, Self::ResumeLatest | Self::ProvisionForLayout)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -9252,6 +9283,16 @@ struct FocusDocumentPaneCommandPayload {
 }
 
 impl FocusDocumentPaneCommandPayload {
+    fn for_policy(project_root: &Path, file: &Path, policy: MissingFocusPanePolicy) -> Self {
+        Self {
+            project_root: Some(project_root.display().to_string()),
+            document_path: file.display().to_string(),
+            no_promotion: policy == MissingFocusPanePolicy::ObserveOnly,
+            active_window_guard: policy != MissingFocusPanePolicy::ProvisionForLayout,
+            missing_pane_policy: policy,
+        }
+    }
+
     fn effective_policy(&self) -> MissingFocusPanePolicy {
         if self.no_promotion {
             MissingFocusPanePolicy::ObserveOnly
@@ -9536,7 +9577,7 @@ fn editor_route_layout_invocation(
         focus,
         no_autostart: false,
         exact_visible: true,
-        caller_kind: "projection".to_string(),
+        caller_kind: "editor_route".to_string(),
         actor_bindings: Vec::new(),
     })
 }
@@ -20138,7 +20179,7 @@ fn rejected_focus_should_resume_latest(
     reject_reason: FocusPaneRejectReason,
     session_id: Option<&str>,
 ) -> bool {
-    missing_pane_policy == MissingFocusPanePolicy::ResumeLatest
+    missing_pane_policy.provisions_missing()
         && session_id.is_some()
         && matches!(
             reject_reason,
@@ -20151,7 +20192,7 @@ fn missing_focus_pane_observation<'a>(
     pane_id: &'a str,
     last_known_window: Option<&'a str>,
 ) -> Option<ControllerMissingPaneObservation<'a>> {
-    (missing_pane_policy == MissingFocusPanePolicy::ResumeLatest && !pane_id.is_empty()).then_some(
+    (missing_pane_policy.provisions_missing() && !pane_id.is_empty()).then_some(
         ControllerMissingPaneObservation {
             pane_id,
             last_known_window: last_known_window.filter(|window| !window.is_empty()),
@@ -20409,13 +20450,13 @@ pub(crate) fn handle_focus_document_pane(
     bootstrap: &ControllerBootstrap,
     request: ControllerRequest,
 ) -> Result<ControllerTmuxFocusReceipt> {
-    handle_focus_document_pane_with_policy(
-        bootstrap,
-        None,
-        request,
-        MissingFocusPanePolicy::ResumeLatest,
-        None,
-    )
+    let policy = request
+        .diagnostic_payload
+        .as_deref()
+        .map(serde_json::from_str::<MissingFocusPanePolicy>)
+        .transpose()?
+        .unwrap_or(MissingFocusPanePolicy::ObserveOnly);
+    handle_focus_document_pane_with_policy(bootstrap, None, request, policy, None)
 }
 
 fn handle_focus_document_pane_with_policy(
@@ -20498,7 +20539,7 @@ fn handle_focus_document_pane_with_policy(
         }
     };
     if pane_id.is_empty() || !tmux.pane_alive(&pane_id) {
-        if missing_pane_policy == MissingFocusPanePolicy::ResumeLatest
+        if missing_pane_policy.provisions_missing()
             && let Some(session_id) = session_id.as_deref()
         {
             if focus_fence.is_some() {
@@ -20527,6 +20568,8 @@ fn handle_focus_document_pane_with_policy(
                     file_arg: &file_arg,
                     window: None,
                     policy: ControllerRouteAutoStartPolicy::ProvisionOnly,
+                    defer_focus_to_layout: missing_pane_policy
+                        == MissingFocusPanePolicy::ProvisionForLayout,
                     missing_pane: missing_focus_pane_observation(
                         missing_pane_policy,
                         &stale_pane,
@@ -20564,6 +20607,17 @@ fn handle_focus_document_pane_with_policy(
         return Ok(tmux_focus_receipt(
             false,
             "resumed_pane_not_alive",
+            Some(document_id),
+            Some(pane_id),
+            None,
+            None,
+            None,
+        ));
+    }
+    if missing_pane_policy == MissingFocusPanePolicy::ProvisionForLayout {
+        return Ok(tmux_focus_receipt(
+            false,
+            "layout_owner_provisioned",
             Some(document_id),
             Some(pane_id),
             None,
@@ -22730,6 +22784,7 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
             file_arg: &file_str,
             window: None,
             policy: ControllerRouteAutoStartPolicy::WaitForReady,
+            defer_focus_to_layout: false,
             missing_pane: None,
             resume,
         })
@@ -23960,7 +24015,11 @@ mod tests {
         assert_eq!(invocation.focus.as_deref(), Some("/repo/other.md"));
         assert!(invocation.exact_visible);
         assert!(!invocation.no_autostart);
-        assert_eq!(invocation.caller_kind, "projection");
+        assert_eq!(invocation.caller_kind, "editor_route");
+        assert!(
+            !invocation.routes_created_panes(),
+            "layout must not dispatch sibling work"
+        );
         assert!(pane_layout_invocation_awaits_projection(&invocation));
     }
 
@@ -24086,7 +24145,8 @@ mod tests {
             first.invocation.focus.as_deref(),
             Some(file.canonicalize().unwrap().display().to_string().as_str())
         );
-        assert_eq!(first.invocation.caller_kind, "projection");
+        assert_eq!(first.invocation.caller_kind, "editor_route");
+        assert!(!first.invocation.routes_created_panes());
 
         let repeated = handle_editor_route_rpc(&bootstrap, runtime.as_ref(), request).unwrap();
         assert_eq!(repeated.exit_code, 0);
@@ -24687,6 +24747,56 @@ mod tests {
     }
 
     #[test]
+    fn layout_provision_request_is_structural_without_stealing_focus_authority() {
+        let root = Path::new("/repo");
+        let file = root.join("tasks/paused.md");
+        let payload = FocusDocumentPaneCommandPayload::for_policy(
+            root,
+            &file,
+            MissingFocusPanePolicy::ProvisionForLayout,
+        );
+        let decoded: FocusDocumentPaneCommandPayload =
+            serde_json::from_str(&serde_json::to_string(&payload).unwrap()).unwrap();
+        assert_eq!(
+            decoded.effective_policy(),
+            MissingFocusPanePolicy::ProvisionForLayout
+        );
+        assert!(
+            !decoded.active_window_guard,
+            "layout receipt must not be canceled by a focus-only generation"
+        );
+        let focus = FocusDocumentPaneCommandPayload::for_policy(
+            root,
+            &file,
+            MissingFocusPanePolicy::ObserveOnly,
+        );
+        assert_eq!(
+            focus.effective_policy(),
+            MissingFocusPanePolicy::ObserveOnly
+        );
+        assert!(focus.active_window_guard);
+    }
+
+    #[test]
+    fn missing_layout_owner_reaches_provision_effect_while_focus_only_does_not() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("missing-layout-owner.md");
+        std::fs::write(
+            &file,
+            "---\nagent_doc_session: missing-layout-owner\nagent: codex\n---\n",
+        )
+        .unwrap();
+        let observed = focus_document_pane(dir.path(), &file).unwrap();
+        assert!(!observed.focused);
+        let error = ensure_layout_document_pane(dir.path(), &file).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("test runtime does not route auto-start"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
     fn focus_document_pane_missing_policy_is_a_closed_wire_enum() {
         let legacy: FocusDocumentPaneCommandPayload =
             serde_json::from_value(serde_json::json!({ "document_path": "/tmp/legacy.md" }))
@@ -24705,6 +24815,34 @@ mod tests {
             resume.missing_pane_policy,
             MissingFocusPanePolicy::ResumeLatest
         );
+        let layout: FocusDocumentPaneCommandPayload = serde_json::from_value(serde_json::json!({
+            "document_path": "/tmp/layout.md",
+            "no_promotion": false,
+            "missing_pane_policy": "provision_for_layout"
+        }))
+        .unwrap();
+        assert_eq!(
+            layout.effective_policy(),
+            MissingFocusPanePolicy::ProvisionForLayout
+        );
+        assert!(rejected_focus_should_resume_latest(
+            layout.effective_policy(),
+            FocusPaneRejectReason::ActorNotFocusable,
+            Some("closed-session")
+        ));
+        let focus_only = FocusDocumentPaneCommandPayload {
+            no_promotion: true,
+            ..layout
+        };
+        assert_eq!(
+            focus_only.effective_policy(),
+            MissingFocusPanePolicy::ObserveOnly
+        );
+        assert!(!rejected_focus_should_resume_latest(
+            focus_only.effective_policy(),
+            FocusPaneRejectReason::ActorNotFocusable,
+            Some("closed-session")
+        ));
         assert!(
             serde_json::from_value::<FocusDocumentPaneCommandPayload>(serde_json::json!({
                 "document_path": "/tmp/invalid.md",

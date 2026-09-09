@@ -2,6 +2,14 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.355
+
+- Add `gc --database-only` and its read-only dry-run usage report for explicit retained-history cleanup without session-file or actor effects.
+- Restore missing cross-project panes through layout provisioning instead of the focus-only API. Keep pane placement and focus with the retained layout generation.
+- Invalidate requesting-thread tmux observations when remote provisioning completes, so a newly created pane is not rejected using a pre-provisioning snapshot.
+- Preserve live agent panes during cleanup even when registration or supervisor discovery is temporarily absent during a handoff. Missing ownership metadata is not proof that a process exited.
+- Let paused queues retain idle panes without resuming work. Run Agent Doc converges the visible layout before dispatching its selected document, without dispatching sibling documents.
+
 ## 0.35.354
 
 - Preserve newer operator queue instructions when a stale response or maintenance write marks the old revision complete. Both component merge paths retain the correction; done-ID consumption also checks the observed queue revision.

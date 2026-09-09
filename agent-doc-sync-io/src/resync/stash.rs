@@ -365,12 +365,21 @@ pub(crate) fn purge_unregistered_stash_panes_bulk_with_supervisors_in_mode(
             continue;
         }
         match process_kind {
-            TmuxPaneProcessKind::IdleShell(_) | TmuxPaneProcessKind::Agent(_) => {
+            TmuxPaneProcessKind::IdleShell(_) => {
                 if let Err(e) = tmux.kill_pane(pane_id) {
                     eprintln!("resync: failed to kill stash pane {}: {}", pane_id, e);
                 } else {
                     killed_count += 1;
                 }
+            }
+            TmuxPaneProcessKind::Agent(_) => {
+                agent_doc_ops_log_io::log_op(
+                    &current_root,
+                    &format!(
+                        "stash_cleanup_preserved_live_agent pane={} reason=missing_ownership_is_not_exit_proof",
+                        pane_id
+                    ),
+                );
             }
             TmuxPaneProcessKind::Foreign(_) | TmuxPaneProcessKind::UnknownTransient => {}
         }
@@ -721,7 +730,7 @@ pub(crate) fn first_non_stash_pane(tmux: &Tmux, session_name: &str) -> Option<St
     None
 }
 
-/// Purge orphaned agent-doc/claude panes in ANY window (not just stash).
+/// Reap retained-dead orphaned agent panes in ANY window (not just stash).
 ///
 /// Targets panes that are:
 /// 1. Not registered in the durable registry
@@ -783,6 +792,19 @@ pub(crate) fn purge_orphaned_agent_panes_with_registry(
                 pane_process_kind_from_current_command(cmd),
                 TmuxPaneProcessKind::Agent(_)
             ) {
+                // Registry and supervisor discovery can be absent during a
+                // controller handoff. Only a retained dead pane proves exit;
+                // absence of ownership never authorizes killing a live agent.
+                if !tmux.pane_dead(pane_id) {
+                    agent_doc_ops_log_io::log_op(
+                        &current_root,
+                        &format!(
+                            "orphan_cleanup_preserved_live_agent pane={} reason=missing_ownership_is_not_exit_proof",
+                            pane_id
+                        ),
+                    );
+                    continue;
+                }
                 let pane_root = pane_project_root(tmux, pane_id);
                 let registered_in_pane_root = pane_root
                     .as_ref()
@@ -870,17 +892,23 @@ mod tests {
     use tmux_router::{IsolatedTmux, Registry as SessionRegistry, RegistryEntry as SessionEntry};
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn purge_unregistered_stash_panes_bulk_kills_unregistered_agent_without_live_owner() {
+    fn purge_unregistered_stash_panes_bulk_preserves_agent_without_ownership_metadata() {
         let iso = IsolatedTmux::new("resync-purge-agent-no-owner-bulk");
         let cwd = std::env::current_dir().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        let script = write_mock_agent_doc(dir.path());
+        let agent_bin = dir.path().join("agent-doc");
+        std::os::unix::fs::symlink("/bin/sleep", &agent_bin).unwrap();
 
         let pane1 = iso.auto_start("test", &cwd).unwrap();
         let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
-        iso.send_keys(&pane2, &format!("exec {}", script.display()))
+        iso.send_keys(&pane2, &format!("exec {} 60", agent_bin.display()))
             .unwrap();
-        let _ = wait_for_pane_contains(&iso, &pane2, "\n>", std::time::Duration::from_secs(3));
+        assert!(wait_for_pane_current_command(
+            &iso,
+            &pane2,
+            "agent-doc",
+            std::time::Duration::from_secs(3)
+        ));
         iso.stash_pane(&pane2, "test").unwrap();
         assert!(
             wait_for_pane_in_stash_window(&iso, "test", &pane2, std::time::Duration::from_secs(3)),
@@ -891,12 +919,8 @@ mod tests {
         let panes = fetch_all_pane_metadata(&iso);
         purge_unregistered_stash_panes_bulk(&iso, &windows, &panes);
         assert!(
-            wait_for_pane_dead(&iso, &pane2, std::time::Duration::from_secs(3)),
-            "bulk stash purge should kill unregistered agent panes with no live owner"
-        );
-        assert!(
-            !iso.pane_alive(&pane2),
-            "bulk stash purge should kill unregistered agent panes with no live owner"
+            iso.pane_alive(&pane2),
+            "missing registry and supervisor metadata must not authorize killing a live agent"
         );
     }
     #[test]
@@ -1043,27 +1067,31 @@ mod tests {
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn purge_orphan_agent_in_non_stash_window() {
-        // An unregistered agent-doc pane in a regular window (not stash) should be killed
-        // if the window has other panes.
+    fn purge_orphan_agent_in_non_stash_window_preserves_live_agent_without_metadata() {
         let iso = IsolatedTmux::new("resync-purge-orphan-agent");
-        let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let agent_bin = dir.path().join("agent-doc");
+        std::os::unix::fs::symlink("/bin/sleep", &agent_bin).unwrap();
+        let cwd = dir.path();
 
         // Create a session with 2 panes in the same window
-        let pane1 = iso.auto_start("test", &cwd).unwrap();
-        let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(500));
-
-        // pane2 is running a shell. We want to simulate an agent-doc process.
-        // Instead, we test the shell case: shells should NOT be killed by this function
-        // (only agent processes). Let's just verify the non-stash purge doesn't touch shells.
+        let pane1 = iso.auto_start("test", cwd).unwrap();
+        let pane2 = iso.split_window(&pane1, cwd, "-dh").unwrap();
+        iso.send_keys(&pane2, &format!("exec {} 60", agent_bin.display()))
+            .unwrap();
+        assert!(wait_for_pane_current_command(
+            &iso,
+            &pane2,
+            "agent-doc",
+            std::time::Duration::from_secs(3)
+        ));
         let registry = SessionRegistry::new();
         purge_orphaned_agent_panes_with_registry(&iso, &registry);
-        std::thread::sleep(std::time::Duration::from_millis(100));
-
-        // Both panes should survive (they're running shells, not agent processes)
         assert!(iso.pane_alive(&pane1), "shell pane1 should survive");
-        assert!(iso.pane_alive(&pane2), "shell pane2 should survive");
+        assert!(
+            iso.pane_alive(&pane2),
+            "live agent must survive absent ownership metadata"
+        );
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]

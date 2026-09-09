@@ -222,6 +222,9 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             invocation.policy,
             invocation.missing_pane,
         )?;
+        let _focus_guard = agent_doc_route_io::invocation::DeferStartupFocusToLayoutGuard::set(
+            invocation.defer_focus_to_layout,
+        );
         agent_doc_route_io::startup::auto_start_ext(
             invocation.tmux,
             invocation.file,
@@ -635,8 +638,10 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
         project_root: &Path,
         file: &Path,
     ) -> anyhow::Result<Option<String>> {
-        let receipt =
-            agent_doc_controller_io::project_controller::focus_document_pane(project_root, file)?;
+        let receipt = agent_doc_controller_io::project_controller::ensure_layout_document_pane(
+            project_root,
+            file,
+        )?;
         Ok(receipt.pane_id)
     }
 
@@ -2210,7 +2215,7 @@ enum Commands {
         #[arg(long)]
         root: Option<PathBuf>,
     },
-    /// Garbage-collect orphaned files in .agent-doc/
+    /// Garbage-collect orphaned files and retained database history in .agent-doc/
     Gc {
         /// Project root directory (auto-detected if omitted)
         #[arg(long)]
@@ -2218,6 +2223,9 @@ enum Commands {
         /// Show what would be deleted without deleting
         #[arg(long)]
         dry_run: bool,
+        /// Only prune superseded database history and reclaim free pages; leave files and actors alone
+        #[arg(long)]
+        database_only: bool,
     },
     /// List or restore a document's pre-mutation recovery checkpoints
     /// (pre-auto-run / pre-compact tags)
@@ -4383,7 +4391,14 @@ fn try_main() -> anyhow::Result<()> {
             restore,
             diff,
         } => agent_doc_git_io::checkpoint::run(&file, restore.as_deref(), diff.as_deref()),
-        Commands::Gc { root, dry_run } => {
+        Commands::Gc {
+            root,
+            dry_run,
+            database_only,
+        } => {
+            if database_only {
+                return agent_doc_gc_io::run_database_only(root.as_deref(), dry_run);
+            }
             let mut effects = CliGcControllerEffects;
             let result = agent_doc_gc_io::run_with_controller_effects(
                 root.as_deref(),

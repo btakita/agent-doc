@@ -496,14 +496,14 @@ mod tests {
     use agent_doc_supervisor_io::ipc::SupervisorIpc;
     use agent_doc_turn::closeout_recovery::CloseoutRecoveryState;
 
-    struct EnvGuard {
+    pub(crate) struct EnvGuard {
         key: &'static str,
         prior: Option<String>,
         _lock: agent_doc_test_support::ProcessGlobalLockGuard,
     }
 
     impl EnvGuard {
-        fn set(key: &'static str, value: &str) -> Self {
+        pub(crate) fn set(key: &'static str, value: &str) -> Self {
             let lock = agent_doc_test_support::env_lock();
             let prior = std::env::var(key).ok();
             unsafe {

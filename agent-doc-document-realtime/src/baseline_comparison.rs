@@ -331,9 +331,64 @@ impl<'a> BaselineComparison<'a> {
 /// single-directive path exactly; the common "operator added N prompts mid-turn"
 /// case yields all N so the agent addresses them together.
 pub fn realtime_steering_all_between(baseline: &str, current: &str) -> RealtimeSteeringSet {
+    let mut directives = exchange_steering_all_between(baseline, current).directives;
+    directives.extend(queue_steering_between(baseline, current));
+    RealtimeSteeringSet::new(directives)
+}
+
+/// Queue instructions have their own parser: the exchange guard deliberately
+/// excludes managed queue syntax. Compare complete prompt revisions, ignoring
+/// selection/priority decoration, completed rows, and reordering.
+fn queue_steering_between(baseline: &str, current: &str) -> Vec<RealtimeSteering> {
+    use agent_doc_queue::document_queue::{self, QueueEntry};
+    let entries = |content: &str| {
+        document_queue::parse(&agent_doc_queue::queue_prompt_drift::queue_component_text(
+            content,
+        ))
+        .expect("queue parser is tolerant")
+    };
+    let normalize = |text: &str| {
+        agent_doc_document::queue_projection::strip_priority_markers(text)
+            .replace("\r\n", "\n")
+            .trim()
+            .to_string()
+    };
+    let mut baseline_counts = BTreeMap::<String, usize>::new();
+    for entry in entries(baseline) {
+        if let QueueEntry::Prompt(prompt) = entry {
+            *baseline_counts.entry(normalize(&prompt.text)).or_default() += 1;
+        }
+    }
+    let mut directives = Vec::new();
+    for entry in entries(current) {
+        if let QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) = &entry {
+            let text = normalize(&prompt.text);
+            let count = baseline_counts.entry(text).or_default();
+            if *count > 0 {
+                *count -= 1;
+            } else if matches!(entry, QueueEntry::Prompt(_)) {
+                let verbatim = prompt.text.trim().to_string();
+                directives.push(RealtimeSteering::ContentEdit {
+                    preview: prompt_bearing_preview(&verbatim),
+                    verbatim,
+                });
+            }
+        }
+    }
+    // Adding independent queued work does not change the active request. Only
+    // replacement of an existing live revision belongs in this turn's steering
+    // set; ordinary additions remain owned by the normal queue drain.
+    if baseline_counts.values().any(|count| *count > 0) {
+        directives
+    } else {
+        Vec::new()
+    }
+}
+
+fn exchange_steering_all_between(baseline: &str, current: &str) -> RealtimeSteeringSet {
     match unresolved_prompt_delta(baseline, current) {
         UnresolvedPromptDelta::Deleted { .. } | UnresolvedPromptDelta::Reduced { .. } => {
-            return RealtimeSteeringSet::new(vec![realtime_steering_between(baseline, current)]);
+            return RealtimeSteeringSet::new(vec![exchange_steering_between(baseline, current)]);
         }
         UnresolvedPromptDelta::None | UnresolvedPromptDelta::AddedOrExpanded => {}
     }
@@ -370,6 +425,10 @@ pub fn realtime_steering_all_between(baseline: &str, current: &str) -> RealtimeS
 }
 
 pub fn realtime_steering_between(baseline: &str, current: &str) -> RealtimeSteering {
+    realtime_steering_all_between(baseline, current).primary()
+}
+
+fn exchange_steering_between(baseline: &str, current: &str) -> RealtimeSteering {
     match unresolved_prompt_delta(baseline, current) {
         UnresolvedPromptDelta::Deleted { baseline_prompt } => {
             return RealtimeSteering::PromptDeleted {
@@ -597,6 +656,80 @@ mod tests {
             ),
             prompt_tail
         )
+    }
+
+    #[test]
+    fn realtime_steering_detects_queue_revision_verbatim() {
+        let queue = |body: &str| {
+            format!(
+                "{}<!-- agent:queue -->\n{body}\n<!-- /agent:queue -->\n",
+                doc("")
+            )
+        };
+        let baseline = queue("- do [#task] old option");
+        let current = queue("- 🚧 do [#task] new option");
+        let set = realtime_steering_all_between(&baseline, &current);
+        assert_eq!(set.len(), 1);
+        assert!(
+            set.verbatim_aggregate()
+                .unwrap()
+                .contains("do [#task] new option")
+        );
+        assert_eq!(
+            realtime_steering_between(&baseline, &current),
+            set.primary()
+        );
+    }
+
+    #[test]
+    fn queue_steering_ignores_maintenance_and_retains_multiline_corrections() {
+        let queue = |body: &str| {
+            format!(
+                "{}<!-- agent:queue -->\n{body}\n<!-- /agent:queue -->\n",
+                doc("")
+            )
+        };
+        let baseline = queue("- do [#task]\n- Another request");
+        for body in [
+            "- 🚧 do [#task]\n- Another request",
+            "- Another request\n- 📌 do [#task]",
+            "- ~~do [#task]~~\n- Another request",
+            "- Another request",
+            "- do [#task]\n- Another request\n- Independent new request",
+        ] {
+            assert!(
+                !realtime_steering_all_between(&baseline, &queue(body)).is_present(),
+                "maintenance: {body}"
+            );
+        }
+        let current = queue(
+            "---\nUse the new option.\nKeep every line of this detail.\n---\n- Another request",
+        );
+        let set = realtime_steering_all_between(&baseline, &current);
+        assert_eq!(set.len(), 1);
+        assert_eq!(
+            set.primary().verbatim(),
+            Some("Use the new option.\nKeep every line of this detail.")
+        );
+        assert_eq!(set, realtime_steering_all_between(&baseline, &current));
+    }
+
+    #[test]
+    fn queue_and_exchange_steering_are_aggregated_together() {
+        let baseline = format!(
+            "{}<!-- agent:queue -->\n- Old request\n<!-- /agent:queue -->\n",
+            doc("❯ Pending question\n")
+        );
+        let current = baseline
+            .replace("❯ Pending question\n", "")
+            .replace("Old request", "Updated request");
+        let set = realtime_steering_all_between(&baseline, &current);
+        assert_eq!(set.len(), 2);
+        assert!(matches!(
+            set.directives()[0],
+            RealtimeSteering::PromptDeleted { .. }
+        ));
+        assert_eq!(set.directives()[1].verbatim(), Some("Updated request"));
     }
 
     #[test]

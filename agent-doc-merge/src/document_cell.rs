@@ -1100,6 +1100,18 @@ fn compose_occurrence(
             (Some(o), Some(t)) => {
                 if o == t {
                     Some(o.clone())
+                } else if ours.component == "queue"
+                    && base_map.get(id).is_some_and(|base| {
+                        crate::crdt::queue_instruction_text(t)
+                            != crate::crdt::queue_instruction_text(base)
+                            && crate::crdt::queue_instruction_text(o)
+                                == crate::crdt::queue_instruction_text(base)
+                    })
+                {
+                    // A lifecycle receipt applies to one instruction revision.
+                    // Preserve a newer operator revision before joining an old
+                    // completion or replaying selection decoration onto it.
+                    Some(t.clone())
                 } else if lifecycle_governed {
                     // Lifecycle-aware join (`Live < Struck`). Classify each side's
                     // visible lifecycle and join: if exactly one side is at the

@@ -24235,6 +24235,36 @@ mod tests {
     }
 
     #[test]
+    fn realtime_queue_revision_reaches_cycle_projection_and_retracts() {
+        let baseline = "<!-- agent:queue -->\n- do [#task] old option\n<!-- /agent:queue -->\n";
+        let current = baseline.replace("old option", "new option");
+        for (text, expected_count) in [(current.as_str(), 1), (baseline, 0)] {
+            let event = realtime_steering_event_for_text("doc", "cycle", baseline, text);
+            let agent_doc_state_backbone::StateFact::RealtimeSteeringObserved {
+                cycle_id,
+                steering,
+                content_hash,
+                ..
+            } = event.fact
+            else {
+                panic!("expected steering fact")
+            };
+            assert_eq!(cycle_id, "cycle");
+            assert_eq!(steering.count, expected_count);
+            assert_eq!(
+                steering.observed_content_hash.as_deref(),
+                Some(content_hash.as_str())
+            );
+            if expected_count > 0 {
+                assert_eq!(
+                    steering.elements.values().next().unwrap().verbatim,
+                    "do [#task] new option"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn realtime_steering_observes_mutation_and_visible_projection_edges() {
         assert!(replica_method_changes_realtime_steering_set(
             ControllerCrdtReplicaMethod::Update

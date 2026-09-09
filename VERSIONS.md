@@ -2,6 +2,11 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.354
+
+- Preserve newer operator queue instructions when a stale response or maintenance write marks the old revision complete. Both component merge paths retain the correction; done-ID consumption also checks the observed queue revision.
+- Include queue-only instruction replacements and complete multiline prompts in the existing realtime steering aggregate and editor turn projection. Selection markers, priority markers, reordering, and ordinary completion do not create new steering.
+
 ## 0.35.353
 
 - **Fix: isolate supervisor recycle readiness by document.** File-scoped routes

@@ -1398,6 +1398,18 @@ fn reconcile_component_body(
             (Some(o), Some(t)) => {
                 if o.text == t.text {
                     Some(o.text.clone())
+                } else if name == "queue"
+                    && o.key != PREAMBLE_KEY
+                    && in_b.is_some_and(|base| {
+                        queue_instruction_text(&t.text) != queue_instruction_text(&base.text)
+                            && queue_instruction_text(&o.text) == queue_instruction_text(&base.text)
+                    })
+                {
+                    // Completion/selection belongs to the observed instruction
+                    // revision. A live operator edit supersedes that revision;
+                    // joining its lifecycle with the stale strike would discard
+                    // the correction before the steering projection can see it.
+                    Some(t.text.clone())
                 } else if lifecycle_governed {
                     // Drive the matched item to its lawful state via the per-item
                     // lifecycle lattice (`Live < Struck`), exactly as the
@@ -1436,6 +1448,16 @@ fn reconcile_component_body(
         }
     }
     Some(out)
+}
+
+/// Complete queue instruction revision, excluding lifecycle decoration.
+pub(crate) fn queue_instruction_text(text: &str) -> String {
+    let mut lines = text.lines();
+    let first = normalize_item_text(lines.next().unwrap_or_default());
+    std::iter::once(first)
+        .chain(lines.map(|line| line.trim_end().to_string()))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Reconcile a matched-but-different list item through the per-item lifecycle
@@ -4186,6 +4208,29 @@ Second answer line three.
             1,
             "block 3 cross-spliced/duplicated:\n{merged}"
         );
+    }
+
+    #[test]
+    fn reconcile_queue_edit_supersedes_completion_of_old_revision() {
+        let base = doc_with_exchange_queue("Q.", "- do [#task] use the old option");
+        let ours = doc_with_exchange_queue(
+            "Q.\n\n### Re: task\n\nFinished the old request.",
+            "- ~~do [#task] use the old option~~",
+        );
+        for edited in [
+            "- do [#task] use the new option",
+            "- do [#task] use the old option\n  Also preserve the extra detail.",
+        ] {
+            let theirs = doc_with_exchange_queue("Q.", edited);
+            let state = CrdtDoc::from_text(&base).encode_state();
+            let merged = merge_by_component(Some(&state), &ours, &theirs).unwrap();
+            assert!(merged.contains(edited), "edited instruction lost: {merged}");
+            assert!(
+                !merged.contains("~~do [#task]"),
+                "new revision consumed: {merged}"
+            );
+            assert!(merged.contains("Finished the old request."));
+        }
     }
 
     #[test]

@@ -758,6 +758,13 @@ set keyed by SHA-256 identity over each directive kind and complete normalized
 body; its ordinal retains document order. Replica update and visible projection
 edges both refresh this set, so reconnects deduplicate stable directives and
 one directive can be retracted without removing its concurrent siblings.
+Queue-only instruction replacements participate in this same aggregate.
+Independent additions remain queued work and do not preempt the active turn. Compare complete parsed
+prompt revisions, including multiline bodies, while ignoring selection/priority
+decoration, reordering, and completed rows. A newer operator revision of a queue
+item supersedes completion of its old revision: maintenance and response rebases
+preserve the new live text instead of letting an old strike consume it. Ordinary
+completion of unchanged text retains the monotonic lifecycle join.
 Each observation also carries the controller-stamped canonical CRDT content
 hash. Session-check consumes the controller set directly for an open turn,
 including authoritative emptiness, only when that receipt matches the canonical

@@ -13,6 +13,51 @@ use agent_doc_element_backlog::backlog;
 
 use crate::{document_queue, queue_continuation, queue_directive, queue_heads, queue_response};
 
+/// A done-id receipt for an older queue revision cannot complete a correction
+/// with that same id. Missing baseline entries retain the explicit done-id
+/// compatibility path; an observed changed revision always stays actionable.
+pub fn done_ids_for_unchanged_queue_revisions(
+    baseline: Option<&str>,
+    current: &str,
+    done_ids: &[String],
+) -> Vec<String> {
+    let Some(baseline) = baseline else {
+        return done_ids.to_vec();
+    };
+    let revisions = |doc: &str| {
+        document_queue::parse(&crate::queue_prompt_drift::queue_component_text(doc))
+            .expect("queue parser is tolerant")
+            .into_iter()
+            .filter_map(|entry| match entry {
+                document_queue::QueueEntry::Prompt(prompt) => {
+                    let id = queue_response::queue_prompt_done_id(&prompt.text)?;
+                    Some((id, strip_priority_markers(&prompt.text).trim().to_string()))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let baseline = revisions(baseline);
+    let current = revisions(current);
+    let changed_ids = current
+        .iter()
+        .filter_map(|(id, text)| {
+            (baseline
+                .iter()
+                .any(|old| &old.0 == id && !current.contains(old))
+                && !baseline
+                    .iter()
+                    .any(|(old_id, old_text)| old_id == id && old_text == text))
+            .then_some(id.clone())
+        })
+        .collect::<HashSet<_>>();
+    done_ids
+        .iter()
+        .filter(|id| !changed_ids.contains(&queue_response::normalize_done_id(id)))
+        .cloned()
+        .collect()
+}
+
 /// Selected free-text work must be identified before a response is captured.
 /// A selection marker alone never proves completion; an exact quote allows
 /// the existing answer/deferral policy to make that separate decision.

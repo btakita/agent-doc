@@ -1010,6 +1010,14 @@ pub fn mark_completed_queue_prompts_for_done_ids(
     // `render` (whole-body normalization + done-id key fallback) so it keeps the
     // existing `converge_document_or_disk` write rather than node-only ops.
     let content = effects.current_document_content(file, "queue_done_id_mark")?;
+    let revision_baseline = load_snapshot_recovery_only(file, "queue done-id revision proof");
+    let eligible_done_ids =
+        agent_doc_queue::queue_closeout_guard::done_ids_for_unchanged_queue_revisions(
+            revision_baseline.as_deref(),
+            &content,
+            done_ids,
+        );
+    let done_ids = eligible_done_ids.as_slice();
     let components = element::parse(&content)?;
     let Some(queue_component) = components
         .iter()
@@ -1140,6 +1148,13 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
     done_ids: &[String],
     requested_free_text_count: usize,
 ) -> Result<Option<QueueConsumptionPlan>> {
+    let eligible_done_ids =
+        agent_doc_queue::queue_closeout_guard::done_ids_for_unchanged_queue_revisions(
+            snapshot_content,
+            content,
+            done_ids,
+        );
+    let done_ids = eligible_done_ids.as_slice();
     let (fm, _) = frontmatter::parse(content)?;
     if fm.queue_active != Some(true) {
         return Ok(None);
@@ -1771,6 +1786,24 @@ mod core_tests {
 
     fn consume_queue_prompt_force_disk(file: &Path) -> Result<Option<QueueConsumptionOutcome>> {
         super::consume_queue_prompt_force_disk(file, &TEST_EFFECTS)
+    }
+
+    #[test]
+    fn done_id_cannot_consume_an_edited_queue_revision() {
+        let baseline = "---\nqueue: go\n---\n<!-- agent:queue -->\n- do [#task] old option\n<!-- /agent:queue -->\n";
+        let current = baseline.replace("old option", "new option");
+        let plan = plan_queue_prompt_consumption_with_snapshot_and_count(
+            Path::new("sample.md"),
+            &current,
+            Some(baseline),
+            &["task".to_string()],
+            0,
+        )
+        .unwrap();
+        assert!(
+            plan.is_none(),
+            "old completion consumed the corrected queue instruction"
+        );
     }
 
     #[test]

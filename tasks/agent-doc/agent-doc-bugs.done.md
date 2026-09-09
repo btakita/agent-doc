@@ -38,3 +38,4 @@
 - 2026-09-06 [#mrhstatepressure] [P0] /enqueue Bound long-lived session state and log growth: compact terminal accepted-only dispatch receipts and state events, and rotate per-session and ops logs so monsterrodholders.md cannot replay 1,356 stale receipts or hit EMFILE; preserve audit cursors and add a stress regression.
 - 2026-09-06 [#fixcausesrun] Fix agent-doc causes of Run Agent Doc issue on dev.md: `editor route layout did not converge before dispatch: operator_owned_layout`
 - 2026-09-08 [#fixqueueitem] Fix agent:queue item was not struck upon completion in this file.
+- 2026-09-09 [#runfpecodex] Run Agent Doc on fpe.md had a Codex error...newer version of codex needed. The agent-doc issue is my agent:exchange prompt was committed. It should have been kept as uncommitted so I can run it next time or added into agent:queue. Either way is fine. Whatever is cleaner.

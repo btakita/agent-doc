@@ -72,6 +72,27 @@ The policy owners remain the registry observation adapter, pure identity transit
 **Publication:** GitHub Release, PyPI, and CI workflows were in progress at the latest observation. The tag is published; release artifacts are not yet verified. PyPI's latest completed upload failed at the project storage limit, and no versions after 0.35.343 are currently present. The existing quota review item now tracks 0.35.350; no old artifacts were deleted.
 
 Workspace plan and installed-skill mirrors: `dec03ee5e`. Architecture and scope: [plan-gh49-gh51-bootstrap.md](plan-gh49-gh51-bootstrap.md). The queue is currently stopped and empty; that operator state is preserved.
+
+### Re: #runfpecodex — unanswered prompts after a failed launch — gpt-6
+
+> **Queue prompt:**
+>
+> do [#runfpecodex]
+
+
+Fixed in **0.35.352**. Failed launches leave unanswered exchange prompts **uncommitted**, ready for the next Run Agent Doc invocation. The reported fpe.md question has since been answered, so it does not need a duplicate queue entry.
+
+Recovery had treated an empty component-write journal as permission to commit the current document. It could also treat an old capture as a new answer. Both paths now preserve the fresh prompt. A related regression showed that cleanup could delete a question just because it resembled an old response heading; cleanup now requires exact evidence of a missing committed queue prompt.
+
+The invariant is that recovery without a new answer preserves the operator's unanswered text and retry diff. Commit-io owns snapshot adoption, preflight retains the typed abandonment outcome, and document normalization owns queue-echo cleanup. The existing document-scoped Sources → Computed → Effects sequence remains intact. These checks operate on one immutable transaction cut, so they remain pure one-shot decisions; no new cache, polling loop, or disconnected graph was introduced. The fuzzy heading matcher was removed.
+
+**Verification:** `make check` passed: 9,263 tests, 256 skipped, plus editor parity, native cross-editor simulation, Lean and TLA checks. `make tmux-ci` passed all 21 selected tests. Coverage includes component convergence off/on, absent/old captures, plain and fenced prompts, reused headings, and three consecutive retries. The reused-heading regression failed before the fix and passed afterward.
+
+The release executable and native library are installed and byte-for-byte verified as 0.35.352. Both editor packages were synchronized; the workspace and affected project controllers were recycled. The live tmux window has two active agent-doc panes and no idle shells.
+
+Source commits `0453a3282` and `c7b3023ed` are pushed, with tag `v0.35.352`. CI and release workflows are running. The earlier CI package-index failure cleared on retry. PyPI still has the existing 10 GB quota blocker, retained in `#pypi345quota`.
+
+Architecture and verification notes: [prompt preservation plan](plan-unstarted-exchange-commit.md).
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 
@@ -90,7 +111,7 @@ Workspace plan and installed-skill mirrors: `dec03ee5e`. Architecture and scope:
 
 <!-- agent:review -->
 - [/] [#compactdevreplica] [operator-verify] Reconnect the editor replica for src/haiven-dev/tasks/dev.md and verify its retained compact continuation commits. Installed 0.35.349 fixes local event ingress and native-save continuation; live read and supported recovery still report editor_attached_model_missing. Reopen the document or restart the editor, then observe the existing continuation; do not repeat Compact Exchange or force disk.
-- [/] [#pypi345quota] [operator-verify] Publish agent-doc v0.35.345 to PyPI after quota space is available. The preceding upload failed with HTTP 400 because the project reached its 10 GB storage limit. Unblocks: obtain a quota increase or explicitly approve old-release cleanup, then run gh workflow run PyPI --ref v0.35.345 and verify uploaded artifacts.
+- [/] [#pypi345quota] [operator-verify] Publish agent-doc v0.35.352 to PyPI after quota space is available. Uploads through v0.35.350 failed with HTTP 400 because the project reached its 10 GB storage limit; the v0.35.352 workflow is running. Unblocks: obtain a quota increase or explicitly approve old-release cleanup, then rerun the latest PyPI workflow and verify uploaded artifacts.
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.
 - [/] [#harnessswitchverify] [operator-verify] #harnessswitchstorm remains unverified. The 2026-08-25 fpe.md attempt was invalidated by a stale live JetBrains plugin generation: ops.log showed controller_crdt_replica_refusal_storm (25 refusals), editor_absent/disk authority, agent_restart_respec_inert to Claude, then old_harness=claude -> new_harness=codex only after save. Unblocks after make install, restart the JetBrains IDE host, repeat the unsaved claude <-> codex switch, and prove exactly one spawn plus agent_restart_deferred reason=non_authoritative_document_view.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

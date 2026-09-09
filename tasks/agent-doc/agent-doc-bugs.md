@@ -77,6 +77,20 @@ Verification passed: **9,245 Rust tests**, **507 JetBrains tests**, full `make c
 **PyPI publication remains externally blocked.** The preceding upload failed with HTTP 400 because `agent-doc` reached its **10 GB project storage limit**. The new tag triggered PyPI again, but quota space is still required. Gated **#fixhttpsgithub** retains the remaining step: obtain a quota increase or approved storage cleanup, then rerun `gh workflow run PyPI --ref v0.35.345`. No additional backlog follow-up is needed because that item owns the full remaining publication step.
 
 The existing **#restartintellijidea** review item now names plugin 0.2.375; restart IntelliJ to activate its Kotlin loader change. Plan and ownership notes: `src/agent-doc/tasks/agent-doc/plan-queue-response-evidence-and-lib-path.md`.
+
+### Re: plugin parity and publication tracking — gpt-6
+
+> Ensure plugin parity for the last few releases. Also track what we have parity on and ensure we are always at parity.
+
+Audited **0.35.340–0.35.345** and added a mandatory parity gate. `editors/release-parity.tsv` now records each release's JetBrains/VS Code impact and evidence; `editors/plugin-parity.tsv` remains the capability owner. `editors/PARITY.md` explains the coverage and its limits.
+
+`make check` now runs both plugin unit suites and the real JetBrains/VS Code native-peer/controller test. The release audit rejects a missing current-version ledger entry or a required capability that either supported plugin declares unsupported. CI installs Java 21 and Node dependencies and runs that same gate. Positive and negative audit probes passed.
+
+The recent supervisor, layout, recycle, and queue changes share their Rust policy owner across both editors. The 0.35.342 stale-replacement refusal is controller-owned; JetBrains also has its local-edit precheck. For issue #50, JetBrains now separates subprocess streams, while VS Code discovers the native library directly. Optional lossless-tree support remains JetBrains-only, typed intents and Zed's native-peer contract remain staged, and host-dependent behavior remains conditional. Verification covers required capabilities and native transports; optional features and IDE UI behavior retain the documented differences.
+
+Committed and pushed as **5dc7659a6**. The expanded full `make check` passed: **9,245 Rust tests**, **507 JetBrains tests**, **179 VS Code tests**, and the real native-peer/controller test. The installed **0.35.345** runtime and JetBrains **0.2.375** package contain the runtime fixes; this follow-up strengthens verification and tracking.
+
+Correction to the prior publication note: closeout reaped `#fixhttpsgithub`, so the unfinished PyPI upload is now preserved under the dedicated gated **#pypi345quota** item. The **10 GB project quota** remains the external blocker. The existing **#restartintellijidea** item retains the live plugin activation check.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 

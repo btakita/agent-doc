@@ -5,12 +5,12 @@ import {
     CrdtReplicaForwarder,
     type ReplicaResumeState,
 } from './crdtReplica.js';
-import { NativeReplicaNode } from './native.js';
+import { NativeReplicaNode, forceReloadLib } from './native.js';
 
 export const CROSS_EDITOR_NATIVE_HARNESS_CAPABILITY = 'cross_editor_native_harness_v1';
 
 type HarnessCommand = {
-    command: 'attach' | 'edit' | 'pull' | 'disconnect' | 'reconnect' | 'text' | 'shutdown';
+    command: 'attach' | 'edit' | 'pull' | 'disconnect' | 'reload' | 'reconnect' | 'text' | 'shutdown';
     offset?: number;
     deleteLen?: number;
     insert?: string;
@@ -105,6 +105,11 @@ async function handle(command: HarnessCommand): Promise<boolean> {
             forwarder = newForwarder(retained);
             const registered = await forwarder.register();
             reply({ ok: registered, text: forwarder.replicaText() });
+            return true;
+        }
+        case 'reload': {
+            if (forwarder) throw new Error('disconnect before reloading native replicas');
+            reply({ ok: forceReloadLib(projectRoot) });
             return true;
         }
         case 'text': {

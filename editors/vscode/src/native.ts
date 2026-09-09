@@ -219,7 +219,7 @@ function resetBindings(): void {
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 export const EDITOR_PLUGIN_KIND = 'vscode';
 export const NATIVE_HOT_RELOAD_CAPABILITY = 'native_hot_reload_generation_v1';
-export const EDITOR_PLUGIN_VERSION = '0.2.69';
+export const EDITOR_PLUGIN_VERSION = '0.2.70';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
 const BOUNDED_EDITOR_SPLICES_CAPABILITY = 'bounded_editor_splices_v1';
@@ -410,18 +410,20 @@ let _replica_close: any = null;
 function bindFunctions(): void {
     if (_reposition_boundary_to_end && _normalize_template_structure) return;
 
-    // Define the FfiPatchResult struct
-    const FfiPatchResultType = koffi.struct('FfiPatchResult', {
+    // Koffi's named types survive library unloads. Keep these ABI descriptors
+    // anonymous so rebinding after a native reload cannot collide with the
+    // previous generation's process-global type registrations.
+    const FfiPatchResultType = koffi.struct({
         text: 'char*',
         error: 'char*',
     });
 
-    const FfiJsonResultType = koffi.struct('FfiJsonResult', {
+    const FfiJsonResultType = koffi.struct({
         json: 'char*',
         error: 'char*',
     });
 
-    const FfiProjectPathType = koffi.struct('FfiProjectPath', {
+    const FfiProjectPathType = koffi.struct({
         project_root: OWNED_C_STRING_POINTER,
         relative_path: OWNED_C_STRING_POINTER,
     });

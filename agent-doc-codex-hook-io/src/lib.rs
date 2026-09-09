@@ -76,6 +76,8 @@ fn find_git_root(path: &Path) -> Option<PathBuf> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionState {
     pub session_id: String,
+    #[serde(default)]
+    pub identity_origin: SessionIdentityOrigin,
     pub doc_path: String,
     pub last_turn_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -92,6 +94,30 @@ pub struct SessionState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_prompt_cycle: Option<PromptCycleObservation>,
     pub updated_at: u64,
+}
+
+/// Control prompts are keyed by document session, not by a Codex thread.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionIdentityOrigin {
+    #[default]
+    Legacy,
+    HarnessHook,
+    ExternalPrompt,
+}
+
+impl SessionState {
+    fn has_harness_identity(&self) -> bool {
+        match self.identity_origin {
+            SessionIdentityOrigin::HarnessHook => true,
+            SessionIdentityOrigin::ExternalPrompt => false,
+            // Before provenance was recorded, external /clear and /new rows
+            // had no turn ID. Keep parked legacy bindings and real hook turns.
+            SessionIdentityOrigin::Legacy => {
+                !self.last_turn_id.is_empty() || !prompt_requests_clear(&self.last_prompt)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -135,6 +161,7 @@ pub fn prompt_writeback_debt<'a>(state: &'a SessionState, turn_id: &str) -> Opti
 pub fn parked_session_state(state: &SessionState, updated_at: u64) -> SessionState {
     SessionState {
         session_id: state.session_id.clone(),
+        identity_origin: state.identity_origin,
         doc_path: state.doc_path.clone(),
         last_turn_id: String::new(),
         last_prompt: String::new(),
@@ -221,6 +248,7 @@ pub fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
     };
     let state = SessionState {
         session_id: input.session_id.clone(),
+        identity_origin: SessionIdentityOrigin::HarnessHook,
         doc_path: doc_path.display().to_string(),
         last_turn_id: input.turn_id.clone(),
         last_prompt: input.prompt.clone(),
@@ -310,7 +338,7 @@ pub fn load_prompt_for_current_session(file: &Path) -> Result<Option<String>> {
 /// Do not use this from an ambient Codex hook: it deliberately ignores the
 /// current thread and may return another thread's document binding.
 pub fn load_latest_prompt_for_file(file: &Path) -> Result<Option<String>> {
-    let Some(state) = load_latest_state_for_file(file)? else {
+    let Some(state) = load_latest_file_state_matching(file, |_| true)? else {
         return Ok(None);
     };
     if state.last_prompt.trim().is_empty() {
@@ -459,6 +487,7 @@ pub fn record_external_prompt_for_file(file: &Path, session_id: &str, prompt: &s
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let state = SessionState {
         session_id: session_id.to_string(),
+        identity_origin: SessionIdentityOrigin::ExternalPrompt,
         doc_path: canonical.display().to_string(),
         last_turn_id: String::new(),
         last_prompt: prompt.to_string(),
@@ -537,6 +566,13 @@ pub fn current_session_id() -> Option<String> {
 /// lags or is absent. It is not an ambient-hook lookup: those must remain keyed
 /// to the exact current Codex thread.
 pub fn load_latest_state_for_file(file: &Path) -> Result<Option<ActiveSessionState>> {
+    load_latest_file_state_matching(file, SessionState::has_harness_identity)
+}
+
+fn load_latest_file_state_matching(
+    file: &Path,
+    include: impl Fn(&SessionState) -> bool,
+) -> Result<Option<ActiveSessionState>> {
     let current_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let mut latest: Option<SessionState> = None;
 
@@ -549,6 +585,9 @@ pub fn load_latest_state_for_file(file: &Path) -> Result<Option<ActiveSessionSta
             let Ok(state) = serde_json::from_str::<SessionState>(&content) else {
                 continue;
             };
+            if !include(&state) {
+                continue;
+            }
             let state_file = PathBuf::from(&state.doc_path)
                 .canonicalize()
                 .unwrap_or_else(|_| PathBuf::from(&state.doc_path));
@@ -925,6 +964,7 @@ agent-doc {}\n",
         save_state(
             &root,
             &SessionState {
+                identity_origin: Default::default(),
                 session_id: "codex-session-old".to_string(),
                 doc_path: doc.display().to_string(),
                 last_turn_id: "turn-1".to_string(),
@@ -939,6 +979,7 @@ agent-doc {}\n",
         save_state(
             &root,
             &SessionState {
+                identity_origin: Default::default(),
                 session_id: "codex-session-new".to_string(),
                 doc_path: doc.display().to_string(),
                 last_turn_id: "turn-2".to_string(),
@@ -972,6 +1013,7 @@ agent-doc {}\n",
         save_state(
             &root,
             &SessionState {
+                identity_origin: Default::default(),
                 session_id: "codex-session-good".to_string(),
                 doc_path: doc.display().to_string(),
                 last_turn_id: "turn-1".to_string(),
@@ -986,6 +1028,82 @@ agent-doc {}\n",
 
         let loaded = load_latest_prompt_for_file(&doc).unwrap();
         assert_eq!(loaded.as_deref(), Some("/clear"));
+    }
+
+    #[test]
+    fn external_clear_records_prompt_without_replacing_codex_resume_identity() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        track_doc(&dir, &doc, "turn-1");
+        record_external_prompt_for_file(&doc, "document-session", "/clear").unwrap();
+        let mut external = load_state(dir.path(), "document-session").unwrap().unwrap();
+        external.updated_at += 1;
+        save_state(dir.path(), &external).unwrap();
+
+        assert_eq!(
+            load_latest_prompt_for_file(&doc).unwrap().as_deref(),
+            Some("/clear")
+        );
+        let resume = load_latest_prompt_state_for_file(&doc).unwrap().unwrap();
+        assert_eq!(resume.session_id, "codex-session");
+        let args = agent_doc_harness::HarnessConfig::codex()
+            .exact_resume_args(&[], &resume.session_id)
+            .unwrap()
+            .unwrap();
+        assert!(args.iter().any(|arg| arg == "codex-session"));
+        assert!(!args.iter().any(|arg| arg == "document-session"));
+
+        // Replaying a legacy external row (no provenance field) also cannot
+        // override the real thread, even though it is the newest prompt.
+        let mut legacy = serde_json::to_value(&external).unwrap();
+        legacy.as_object_mut().unwrap().remove("identity_origin");
+        let legacy: SessionState = serde_json::from_value(legacy).unwrap();
+        save_state(dir.path(), &legacy).unwrap();
+        assert_eq!(
+            load_latest_prompt_state_for_file(&doc)
+                .unwrap()
+                .unwrap()
+                .session_id,
+            "codex-session"
+        );
+    }
+
+    #[test]
+    fn turnless_hook_and_parked_hook_retain_harness_identity() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        track_doc(&dir, &doc, "");
+        apply_user_prompt_submit(&UserPromptSubmitInput {
+            session_id: "codex-session".into(),
+            turn_id: String::new(),
+            cwd: dir.path().display().to_string(),
+            prompt: "/clear".into(),
+        })
+        .unwrap();
+        let hook = load_state(dir.path(), "codex-session").unwrap().unwrap();
+        assert!(hook.has_harness_identity());
+        let parked = parked_session_state(&hook, hook.updated_at + 1);
+        save_state(dir.path(), &parked).unwrap();
+        record_external_prompt_for_file(&doc, "document-session", "/new").unwrap();
+        assert_eq!(
+            load_latest_prompt_state_for_file(&doc)
+                .unwrap()
+                .unwrap()
+                .session_id,
+            "codex-session"
+        );
+    }
+
+    #[test]
+    fn document_without_a_hook_cannot_resume_an_external_prompt_identity() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        record_external_prompt_for_file(&doc, "document-session", "/clear").unwrap();
+        assert!(load_latest_prompt_state_for_file(&doc).unwrap().is_none());
+        assert_eq!(
+            load_latest_prompt_for_file(&doc).unwrap().as_deref(),
+            Some("/clear")
+        );
     }
 
     #[test]

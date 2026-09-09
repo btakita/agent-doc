@@ -659,6 +659,13 @@ fn native_plugin_harnesses_peer_through_real_agent_doc_controller() {
     vscode
         .request(serde_json::json!({ "command": "disconnect" }))
         .unwrap();
+    // Rebinding twice must not re-register process-global named Koffi structs.
+    // Reconnect reconstructs native replicas from the retained encoded state.
+    for _ in 0..2 {
+        vscode
+            .request(serde_json::json!({ "command": "reload" }))
+            .unwrap();
+    }
     jetbrains
         .request(serde_json::json!({
             "command": "edit",

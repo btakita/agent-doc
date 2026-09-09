@@ -2949,21 +2949,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                         if do_install {
                             install_stale_since = None;
-                            // `#jbdisprecycle`: publish project mid-recycle BEFORE the
-                            // rebuild+install (which takes seconds) and the `execve`
-                            // that follows, so a concurrent `route` dispatch defers
-                            // instead of typing a trigger that the recycle drops
-                            // before submit. Refreshed at the reexec boundary; the
-                            // fresh supervisor settles it on watch-loop start.
-                            if let Err(err) =
-                                agent_doc_controller_io::project_controller::supervisor_recycle_started_for_file(
-                                &path,
-                                agent_doc_supervisor::recycle_inflight::RECYCLE_INFLIGHT_AUTO_INSTALL,
-                            ) {
-                                eprintln!(
-                                    "[agent-doc] warning: failed to publish recycle-inflight before auto-install: {err:#}"
-                                );
-                            }
+                            // Compilation leaves the existing supervisor and child
+                            // dispatchable. Publish InFlight only at the guarded
+                            // reexec boundary below; a failed/slow build must not
+                            // block every document in this project from reopening.
                             log_event(
                                 &mut session_log,
                                 &format!(

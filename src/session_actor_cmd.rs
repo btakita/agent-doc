@@ -5606,15 +5606,20 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         let output_path = dir.path().join("clear.txt");
         let ready_path = dir.path().join("clear.ready");
         let done_path = dir.path().join("clear.done");
-        iso.send_keys(
+        // Start the reader as the pane command. Typing its setup command into
+        // a just-created interactive shell races that shell's initialization.
+        iso.raw_cmd(&[
+            "respawn-pane",
+            "-k",
+            "-t",
             &pane,
             &format!(
-                "sh -lc 'touch \"{}\"; IFS= read -r line; printf \"%s\" \"$line\" > \"{}\"; touch \"{}\"'",
+                "sh -c 'touch \"{}\"; IFS= read -r line; printf \"%s\" \"$line\" > \"{}\"; touch \"{}\"; printf \"\\ncleared\\n\"; while IFS= read -r line; do :; done'",
                 ready_path.display(),
                 output_path.display(),
                 done_path.display()
             ),
-        )
+        ])
         .unwrap();
         let ready_deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         while std::time::Instant::now() < ready_deadline && !ready_path.exists() {

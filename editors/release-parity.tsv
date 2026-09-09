@@ -6,3 +6,4 @@
 0.35.344	Recycle request epochs and settlement	shared-core	shared-core	staged	make check
 0.35.345	Queue response evidence and native library bootstrap	stdout-only CLI bootstrap; plugin 0.2.375	direct native path discovery; no merged CLI stream	staged	make check (both unit suites, capability audit, native peers)
 0.35.346	Managed tmux role-name stability	shared-core	shared-core	staged	make check; make tmux-ci
+0.35.347	Codex identity provenance and recycle dispatch wait	shared-core	shared-core plus reload-safe ABI descriptors; plugin 0.2.70	staged	make check; make tmux-ci; repeated native reload/reconnect

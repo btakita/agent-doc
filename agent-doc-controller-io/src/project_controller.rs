@@ -5566,8 +5566,7 @@ impl ControllerRuntime {
         let started = Instant::now();
         let mut memory = self.memory.lock();
         loop {
-            let projection = memory.state_projection.project_supervisor_recycle();
-            self.supervisor_recycle_graph.set(projection.clone());
+            let projection = self.supervisor_recycle_graph.projection();
             if !self.supervisor_recycle_graph.in_flight() {
                 return Ok(projection);
             }

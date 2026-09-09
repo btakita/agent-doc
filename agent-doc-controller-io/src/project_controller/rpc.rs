@@ -4603,10 +4603,10 @@ pub fn route_submit_in_flight_for_file(file: &Path) -> Result<bool> {
 pub fn wait_for_supervisor_recycle_settle(
     project_root: &Path,
 ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
-    if connect(project_root).is_err() {
+    let Ok(stream) = connect(project_root) else {
         return Ok(agent_doc_state_backbone::SupervisorRecycleProjection::default());
-    }
-    request_controller(
+    };
+    request_controller_on_stream_with_timeout(
         project_root,
         ControllerRequest {
             command: "supervisor_recycle_wait_settled".to_string(),
@@ -4623,6 +4623,8 @@ pub fn wait_for_supervisor_recycle_settle(
             command_kind: None,
             diagnostic_payload: None,
         },
+        SUPERVISOR_RECYCLE_SETTLE_WAIT.saturating_add(CONTROLLER_RPC_TIMEOUT),
+        stream,
     )
 }
 
@@ -26911,6 +26913,37 @@ mod tests {
         assert!(
             err.to_string().contains("timed out") || format!("{err:#}").contains("timed out"),
             "{err:#}"
+        );
+    }
+
+    #[test]
+    fn recycle_settlement_reply_can_arrive_after_ordinary_rpc_deadline() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let sock = socket_path(dir.path());
+        std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+        let name = sock.to_fs_name::<GenericFilePath>().unwrap();
+        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        let server = std::thread::spawn(move || {
+            let stream = listener.accept().unwrap();
+            let (reader_half, mut writer_half) = stream.split();
+            let mut line = String::new();
+            BufReader::new(reader_half).read_line(&mut line).unwrap();
+            let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(request["command"], "supervisor_recycle_wait_settled");
+            std::thread::sleep(CONTROLLER_RPC_TIMEOUT + Duration::from_millis(100));
+            let projection = agent_doc_state_backbone::SupervisorRecycleProjection {
+                phase: agent_doc_state_backbone::SupervisorRecyclePhase::Settled,
+                ..Default::default()
+            };
+            let response = serde_json::json!({"ok": true, "data": projection});
+            writeln!(writer_half, "{response}").unwrap();
+            writer_half.flush().unwrap();
+        });
+        let result = wait_for_supervisor_recycle_settle(dir.path());
+        server.join().unwrap();
+        assert_eq!(
+            result.unwrap().phase,
+            agent_doc_state_backbone::SupervisorRecyclePhase::Settled
         );
     }
 

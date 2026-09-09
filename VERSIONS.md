@@ -2,6 +2,20 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.347
+
+- **Fix: VS Code native reload can rebind ABI structs.** Anonymous Koffi types
+  avoid duplicate global type names. The native-peer gate now reloads twice
+  before reconnecting retained replica state. VS Code package 0.2.70 includes it.
+- **Fix: control prompts cannot become Codex resume IDs.** The hook ledger
+  records identity provenance. External document-session `/clear`/`/new` rows
+  remain prompt/cooldown evidence but cannot mask an actual Codex thread;
+  legacy external-clear rows are excluded from resume recovery as well.
+- **Fix: reopen survives normal supervisor replacement waits.** The settlement
+  RPC client deadline includes the server's complete wait plus transport margin.
+  Compilation no longer marks the project mid-recycle; the actual reexec
+  boundary retains its injection guard and wakes waiters on settlement.
+
 ## 0.35.346
 
 - **Fix: managed tmux window names survive child process changes.** Layout

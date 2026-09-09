@@ -4,6 +4,19 @@
 
 This file covers the session-bound command surface: pane ownership, routing, sync/reconcile, stash handling, and tmux session selection.
 
+Codex resume recovery accepts harness-thread identity from hook observations,
+including parked bindings. Externally recorded document control prompts carry
+document-session identity and remain prompt/cooldown evidence only; they cannot
+override a Codex resume ID. Legacy external clear rows without a turn ID are
+excluded from thread recovery. Explicit hook provenance permits genuine hooks
+whose payload omits a turn ID.
+
+Supervisor compilation does not imply an unsafe injection boundary. Recycle
+`InFlight` is published at the actual replacement boundary and settled by the
+fresh watch loop. A reopen awaiting that transition uses the complete controller
+settlement budget plus transport margin; it never injects across an unsettled
+boundary or inherits the shorter ordinary-RPC deadline.
+
 ## start
 
 `agent-doc start <FILE> [--force]`

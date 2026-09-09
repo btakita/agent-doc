@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a087fd-0ff3-70a2-8bd5-58f14d433db9
+  codex: 01a0885a-185a-76c1-940b-1274f09972ad
 agent: codex
 claude_model: fable
 agent_doc_format: template
@@ -139,6 +139,32 @@ Main and release-tag pushes follow this document closeout. The latest completed 
 **PyPI publication remains blocked.** [The v0.35.354 upload](https://github.com/btakita/agent-doc/actions/runs/34408090473) failed with HTTP 400: the project reached its 10 GB storage limit. Updated the existing `#pypi345quota` review item with this confirmed failure. Publication needs a quota increase or explicitly approved old-release cleanup, followed by rerunning that workflow.
 
 [CI](https://github.com/btakita/agent-doc/actions/runs/34408090242) is still running. Previous local verification passed 9,275 tests. This cycle only verified publication status; it required no new source changes or version bump.
+
+### Re: #fixtmuxpane — gpt-6
+
+> **Queue prompt:** do [#fixtmuxpane]
+
+Fixed and installed **v0.35.355**, source commit `1834ccda6`.
+
+The missing-pane problem had three causes: cross-project layout used a focus-only API that could not create a pane; remote creation left the requesting thread's old tmux snapshot intact; cleanup could explicitly kill a live agent when registry/supervisor observations were temporarily missing. Layout now provisions through the owning controller, observes the remote mutation receipt, and preserves live agents through ownership gaps. A live trace proved the earlier `kill-pane`; after installation, ops recorded the preservation branch for `%189`, and the controller restored `%177` + `%189` with `observed_convergence` and `routes_created_panes=false`.
+
+Run Agent Doc still waits for its visible layout, but layout creation no longer dispatches sibling work. Paused queues can retain an idle owner. The existing queue pause and reason were preserved.
+
+**JSON and interrupted turns:** the scrolling JSON was historical Search Console tool output replayed by Codex on resume. There were no Restart Agent menu requests in the observed window. Supervisor handoffs at 19:27 and 19:29 preserved Codex PID 1150890; its latest turn completed at 19:32. Your continuation requirement is correct: keep a surviving turn, and re-trigger an interrupted open turn when the child dies during a handoff. Existing restart recovery tests verify that distinction and suppress duplicate dispatch. The cleanup defect was deleting the entire pane outside that normal recovery path.
+
+Added explicit database maintenance:
+
+```sh
+agent-doc gc --database-only --root /home/brian/work/btakita/agent-loop/src/boost-client
+```
+
+Add `--dry-run` for a read-only usage report. Cleanup retains current recovery state and prunes eligible superseded history using existing retention rules. The live database is about 40.4 MiB; this run found no further eligible rows or space above the existing vacuum threshold. Session files and queue control were preserved.
+
+Architecture: the existing ProcessScope layout graph owns structural intent, effects, and generation-fenced receipts; the project controller owns document panes. Removed the focus-only structural call, stale observation reuse after remote effects, and the invalid implication that missing ownership authorizes a kill. Startup admission and explicit DB maintenance remain one-shot boundary operations. Details and evidence: [implementation plan](plan-layout-provision-authority.md).
+
+Validation: **9,279 workspace tests passed**, native editor checks, `tmux-ci`, eight cleanup regressions, paused-queue and remote-snapshot regressions, and five restart-specific tests. Installed CLI/library match the final build. Source main and `v0.35.355` are pushed; CI is running, Release and PyPI workflows are queued. The existing PyPI 10 GB quota blocker remains tracked in `#pypi345quota`.
+
+During diagnosis, a Cargo registry token appeared in tool output. Tracing was stopped and the generated trace files were removed; rotate that token. No credential value was added to source or this document.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 
@@ -156,8 +182,9 @@ Main and release-tag pushes follow this document closeout. The latest completed 
 ## Review
 
 <!-- agent:review -->
+- [/] [#cargo355token] [operator-verify] Rotate the Cargo registry token exposed in diagnostic tool output during the pane-removal investigation. Tracing was stopped and generated trace files removed; no credential value is stored in this document or source.
 - [/] [#compactdevreplica] [operator-verify] Reconnect the editor replica for src/haiven-dev/tasks/dev.md and verify its retained compact continuation commits. Installed 0.35.349 fixes local event ingress and native-save continuation; live read and supported recovery still report editor_attached_model_missing. Reopen the document or restart the editor, then observe the existing continuation; do not repeat Compact Exchange or force disk.
-- [/] [#pypi345quota] [operator-verify] Publish agent-doc v0.35.354 to PyPI after quota space is available. The v0.35.354 upload failed with HTTP 400 because the project reached its 10 GB storage limit (https://github.com/btakita/agent-doc/actions/runs/34408090473). GitHub release v0.35.354 is published with all six platform packages. Unblocks: obtain a quota increase or explicitly approve old-release cleanup, then rerun the PyPI workflow and verify uploaded artifacts.
+- [/] [#pypi345quota] [operator-verify] Publish agent-doc v0.35.355 to PyPI after quota space is available. The prior v0.35.354 upload failed at the 10 GB project-storage limit (https://github.com/btakita/agent-doc/actions/runs/34408090473). The v0.35.355 upload workflow is queued (https://github.com/btakita/agent-doc/actions/runs/34417546068). Unblocks: obtain a quota increase or explicitly approve old-release cleanup, then rerun the PyPI workflow and verify uploaded artifacts.
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.
 - [/] [#harnessswitchverify] [operator-verify] #harnessswitchstorm remains unverified. The 2026-08-25 fpe.md attempt was invalidated by a stale live JetBrains plugin generation: ops.log showed controller_crdt_replica_refusal_storm (25 refusals), editor_absent/disk authority, agent_restart_respec_inert to Claude, then old_harness=claude -> new_harness=codex only after save. Unblocks after make install, restart the JetBrains IDE host, repeat the unsaved claude <-> codex switch, and prove exactly one spawn plus agent_restart_deferred reason=non_authoritative_document_view.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

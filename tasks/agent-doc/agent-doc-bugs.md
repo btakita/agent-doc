@@ -32,6 +32,21 @@ Fenced closeout queue parsing fixed as 0.35.328; release tag held pending PyPI q
 Compacted content:
 - Archived 10 response topic(s): monsterrodholder.md stability; Response; #mrhsyncslowpath; 7 more
 - Prior summary/context: prior compacted content: Archived 8 response topic(s): fenced closeout reports becoming queue work; response copied i...
+
+### Re: Response
+
+Fixed and installed **0.35.344**.
+
+- Auto-sync now retains managed-pane ownership across tab changes; live layouts are converging automatically.
+- STALE SUPERVISOR titles are pane-scoped and reactively refreshed.
+- Upgrade requests survive history compaction, and acknowledgments stop repeated recycling.
+- All 16 supervisors adopted the installed binary, preserving their harness children. No forced restart was needed.
+
+Ownership decisions now live in the controller’s reactive graph; the legacy recycle ledger remains a compatibility boundary for older supervisors.
+
+Verification: 9,242 tests, 8 live tmux tests, and CI passed. Changes are pushed and tagged; GitHub Release/PyPI publishing is running.
+
+[operator-verify] Switch editor tabs once to confirm the visible pane behavior.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 
@@ -40,7 +55,8 @@ Compacted content:
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Fix https://github.com/btakita/agent-doc/issues/49 + release + publish
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->

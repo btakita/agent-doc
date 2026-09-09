@@ -17,6 +17,8 @@ class CrdtReplicaReadActionTest {
             .substringBefore("fun <T> withAgentAppliedEditorMutation")
         val refreshOne = source.substringAfter("fun forceRefreshOpenDocumentReplica(")
             .substringBefore("fun ensureReplicaForOpenDocument")
+        val recoveryRefresh = source.substringAfter("fun refreshOpenDocumentReplicaForRecoveryAndWait(")
+            .substringBefore("private fun runOnEdtNonBlocking")
 
         assertEdtCapturePrecedesDocumentLookup(refreshAll, "all-open-document refresh")
         assertEdtCapturePrecedesDocumentLookup(refreshOne, "single-document refresh")
@@ -29,6 +31,20 @@ class CrdtReplicaReadActionTest {
             "single-document refresh should leave CRDT work on a pooled thread",
             refreshOne.indexOf("manager.ensureOpenDocumentReplica") >
                 refreshOne.indexOf("executeOnPooledThread"),
+        )
+        assertTrue(
+            "typed recovery must capture IntelliJ model state on the EDT before acknowledging attach",
+            recoveryRefresh.contains("invokeAndWait") &&
+                recoveryRefresh.contains("await = true") &&
+                recoveryRefresh.contains("forceRefresh = true"),
+        )
+        assertTrue(
+            "typed recovery must return the completed attach result",
+            recoveryRefresh.contains("return attached"),
+        )
+        assertTrue(
+            "typed recovery must not wait on an IDEA read permit",
+            !recoveryRefresh.contains("runReadAction"),
         )
 
         val forwarderSwap = source.substringAfter("if (forwarders.replace(filePath, cached, forwarder))")

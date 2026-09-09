@@ -179,9 +179,10 @@ class CrdtReplicaProjectionFrontierTest {
             deliveryBranch.contains("recordDocumentActivity(file, \"socket-crdt-remote\")"),
         )
         assertTrue(
-            "typed missing-membership recovery must rebuild the editor-owned replica",
+            "typed missing-membership recovery must wait for a truthful editor-replica receipt",
             deliveryBranch.contains("shouldReregisterForRemoteEventUtil(reasonToken)") &&
-                deliveryBranch.contains("forceRefreshOpenDocumentReplica("),
+                deliveryBranch.contains("refreshOpenDocumentReplicaForRecoveryAndWait(") &&
+                deliveryBranch.contains("if (reregistered) APPLY_APPLIED else APPLY_FAILED"),
         )
     }
 

@@ -3445,6 +3445,73 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             }
         }
 
+        /**
+         * Re-register one editor-owned replica and return only after the native
+         * controller accepted the replacement member.
+         *
+         * The typed `editor_replica_reregister` IPC uses its reply as a recovery
+         * receipt. The ordinary refresh entrypoint above intentionally remains
+         * asynchronous for controller wakeups and native-generation handoff, but
+         * returning from this method before [ensureOpenDocumentReplica] completed
+         * would let the controller spend its bounded observation window against
+         * work that had only been queued.
+         */
+        fun refreshOpenDocumentReplicaForRecoveryAndWait(
+            project: Project,
+            filePath: String,
+            reason: String,
+        ): Boolean {
+            var captured: Triple<CrdtReplicaManager, String, Document>? = null
+            val captureOnEdt = {
+                if (!project.isDisposed) {
+                    val manager = instances[project]
+                    val file = LocalFileSystem.getInstance().findFileByPath(filePath)
+                    val document = file?.let { FileDocumentManager.getInstance().getDocument(it) }
+                    if (manager != null && file != null && document != null) {
+                        captured = Triple(manager, file.path, document)
+                    }
+                }
+            }
+
+            try {
+                if (javax.swing.SwingUtilities.isEventDispatchThread()) {
+                    captureOnEdt()
+                } else {
+                    ApplicationManager.getApplication().invokeAndWait { captureOnEdt() }
+                }
+            } catch (e: Exception) {
+                instances[project]?.log?.warn(
+                    "[crdt-replica] recovery re-register could not capture editor state for $filePath reason=$reason",
+                    e,
+                )
+                return false
+            }
+
+            val (manager, resolvedFilePath, document) = captured ?: return false
+            val fileName = File(resolvedFilePath).name
+            if (!manager.beginProjectionRecoveryReregister(resolvedFilePath)) {
+                manager.log.info(
+                    "[crdt-replica] coalesced projection-recovery re-register for $fileName reason=$reason receipt=not_attached",
+                )
+                return false
+            }
+            manager.log.info(
+                "[crdt-replica] forcing projection-recovery re-register for $fileName reason=$reason receipt=awaiting_attach",
+            )
+            val attached = manager.ensureOpenDocumentReplica(
+                resolvedFilePath,
+                document,
+                await = true,
+                forceRefresh = true,
+            )
+            if (!attached) {
+                manager.log.warn(
+                    "[crdt-replica] projection-recovery re-register failed for $fileName reason=$reason receipt=not_attached",
+                )
+            }
+            return attached
+        }
+
         private fun runOnEdtNonBlocking(block: () -> Unit) {
             if (javax.swing.SwingUtilities.isEventDispatchThread()) {
                 block()

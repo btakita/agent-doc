@@ -492,12 +492,14 @@ class PatchWatcher(private val project: Project) : Disposable {
                 // #editorreplicareregister: a reliable editor can outlive its relay
                 // membership. Only this typed recovery event republishes the current
                 // editor-owned buffer; routine projection wakeups remain drain-only.
-                if (shouldReregisterForRemoteEventUtil(reasonToken)) {
-                    CrdtReplicaManager.forceRefreshOpenDocumentReplica(
+                val reregistered = if (shouldReregisterForRemoteEventUtil(reasonToken)) {
+                    CrdtReplicaManager.refreshOpenDocumentReplicaForRecoveryAndWait(
                         project,
                         file,
                         "crdt-remote-editor-replica-reregister",
                     )
+                } else {
+                    true
                 }
                 // #crdtpushdrain: every controller-published frontier drains urgently.
                 // The urgent path falls back to the gated drain when it finds no work,
@@ -517,7 +519,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 // controller event needs. Refreshing through recordDocumentActivity here
                 // queued a second pull for every delivery signal.
                 TurnStateBannerRefresher.getInstance(project).requestRefresh(file, "socket-crdt-remote")
-                APPLY_APPLIED
+                if (reregistered) APPLY_APPLIED else APPLY_FAILED
             }
             EditorIntent.RefreshVcs.token -> {
                 recordProjectSurfaceOps("vcs_refresh", "refresh_vcs", "commit_vcs_refresh", "triggered")

@@ -6716,6 +6716,15 @@ fn clear_terminal_missing_replica_rebuild(file: &std::path::Path) {
     MISSING_REPLICA_TERMINAL_REBUILD_ASKED.lock().remove(file);
 }
 
+/// A verified healthy observation supersedes both missing-replica recovery
+/// memos. Keeping either memo after editor authority is current would make a
+/// later loss at the same reliable-sync registration witness permanently
+/// ineligible for the recovery it just proved can succeed.
+fn clear_editor_replica_recovery_latches(file: &std::path::Path) {
+    clear_editor_replica_self_heal_exhausted(file);
+    clear_terminal_missing_replica_rebuild(file);
+}
+
 fn reobserve_missing_editor_replica_with_reregistration(
     file: &std::path::Path,
     source: &str,
@@ -6725,7 +6734,7 @@ fn reobserve_missing_editor_replica_with_reregistration(
     if !observation_is_missing_replica_family(file, &observed) {
         // A healthy observation means the editor is answering again; drop any
         // remembered exhaustion so the next failure gets a full retry.
-        clear_editor_replica_self_heal_exhausted(file);
+        clear_editor_replica_recovery_latches(file);
         return observed;
     }
     if should_pause_editor_replica_self_heal(file, &editor_replica_liveness_witness(file)) {
@@ -6742,12 +6751,13 @@ fn reobserve_missing_editor_replica_with_reregistration(
     let attempts = editor_replica_reobserve_attempts();
     let mut current = observed;
     for attempt in 1..=attempts {
-        let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
+        let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event_counting(
             file,
             agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
             0,
         ) {
-            Ok(()) => "requested".to_string(),
+            Ok(0) => "not_delivered".to_string(),
+            Ok(notified) => format!("delivered:{notified}"),
             Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
         };
         agent_doc_ops_log_io::log_op(
@@ -6789,7 +6799,7 @@ fn reobserve_missing_editor_replica_with_reregistration(
         );
         current = reobserved;
         if !observation_is_missing_replica_family(file, &current) {
-            clear_editor_replica_self_heal_exhausted(file);
+            clear_editor_replica_recovery_latches(file);
             return current;
         }
     }
@@ -7206,7 +7216,7 @@ fn resolve_editor_unavailable_disk_read_fallback(
                     // The plugin answered: the editor tier is restored, so this
                     // resolution never reaches the disk question at all.
                     record_editor_relay_authority(file, source, &text);
-                    clear_terminal_missing_replica_rebuild(file);
+                    clear_editor_replica_recovery_latches(file);
                     let reconciliation = Reconciliation {
                         authority: agent_doc_document_realtime::DocAuthority::EditorBuffer,
                         content: text,
@@ -8432,6 +8442,30 @@ mod tests {
             exhausted_authority_error_recovery(false),
             ExhaustedAuthorityErrorRecovery::ClosedEditor,
         );
+    }
+
+    #[test]
+    fn healthy_editor_observation_clears_both_missing_replica_latches() {
+        let file = std::path::Path::new("/tmp/agent-doc-healthy-observation-rearms.md");
+        let observed = witness(true, &[(4242, "jetbrains-a", 1_000)]);
+        clear_editor_replica_recovery_latches(file);
+
+        record_editor_replica_self_heal_exhausted(file, observed.clone());
+        assert!(claim_terminal_missing_replica_rebuild(file, &observed));
+        assert!(should_pause_editor_replica_self_heal(file, &observed));
+        assert!(!claim_terminal_missing_replica_rebuild(file, &observed));
+
+        clear_editor_replica_recovery_latches(file);
+        assert!(
+            !should_pause_editor_replica_self_heal(file, &observed),
+            "verified current editor authority must re-arm upstream self-heal"
+        );
+        assert!(
+            claim_terminal_missing_replica_rebuild(file, &observed),
+            "verified current editor authority must re-arm terminal recovery even when the editor registration is unchanged"
+        );
+
+        clear_editor_replica_recovery_latches(file);
     }
 
     /// The self-heal memo suppresses the retry loop only while the realtime

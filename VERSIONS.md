@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.348
+
+- **Fix: attached-editor replica recovery waits for a truthful receipt.** The
+  JetBrains typed re-registration path now acknowledges only after the bounded
+  native replica attach completes; failed or coalesced refreshes return failure
+  instead of reporting queued work as applied. JetBrains package 0.2.376
+  includes the fix.
+- **Fix: successful replica recovery fully re-arms later recovery.** A verified
+  current editor observation clears both missing-replica exhaustion latches,
+  and recovery diagnostics distinguish actual editor delivery from a request
+  that reached no endpoint. Disk authority remains refused while an editor is
+  attached.
+
 ## 0.35.347
 
 - **Fix: VS Code native reload can rebind ABI structs.** Anonymous Koffi types

@@ -129,6 +129,16 @@ Both original regressions failed before the fixes. Coverage now includes stale s
 `make install-full` completed. The installed CLI and native ABI report 0.35.354, both editor packages are installed, and the workspace and affected project controllers completed stable handoffs with running inodes matching the installed executable. Workspace commit `be7e99292` records the plan, installed-skill versions, and source pointer.
 
 Main and release-tag pushes follow this document closeout. The latest completed CI passed. PyPI's existing project-storage quota failure remains in `#pypi345quota`, updated for this release.
+
+### Re: Release and publication status — gpt-6
+
+> **Queue prompt:** release + publish if you have not already
+
+**v0.35.354 is already released, installed locally, and pushed.** The [GitHub release](https://github.com/btakita/agent-doc/releases/tag/v0.35.354) is published with all six platform packages; its Release workflow succeeded. The tag points to source commit `53b90b4ae6c9a9c4cb79af30ea663c7457b4f951`.
+
+**PyPI publication remains blocked.** [The v0.35.354 upload](https://github.com/btakita/agent-doc/actions/runs/34408090473) failed with HTTP 400: the project reached its 10 GB storage limit. Updated the existing `#pypi345quota` review item with this confirmed failure. Publication needs a quota increase or explicitly approved old-release cleanup, followed by rerunning that workflow.
+
+[CI](https://github.com/btakita/agent-doc/actions/runs/34408090242) is still running. Previous local verification passed 9,275 tests. This cycle only verified publication status; it required no new source changes or version bump.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 
@@ -147,7 +157,7 @@ Main and release-tag pushes follow this document closeout. The latest completed 
 
 <!-- agent:review -->
 - [/] [#compactdevreplica] [operator-verify] Reconnect the editor replica for src/haiven-dev/tasks/dev.md and verify its retained compact continuation commits. Installed 0.35.349 fixes local event ingress and native-save continuation; live read and supported recovery still report editor_attached_model_missing. Reopen the document or restart the editor, then observe the existing continuation; do not repeat Compact Exchange or force disk.
-- [/] [#pypi345quota] [operator-verify] Publish agent-doc v0.35.354 to PyPI after quota space is available. The v0.35.353 upload failed with HTTP 400 because the project reached its 10 GB storage limit; v0.35.354 publication follows the release tag. Unblocks: obtain a quota increase or explicitly approve old-release cleanup, then rerun the latest PyPI workflow and verify uploaded artifacts.
+- [/] [#pypi345quota] [operator-verify] Publish agent-doc v0.35.354 to PyPI after quota space is available. The v0.35.354 upload failed with HTTP 400 because the project reached its 10 GB storage limit (https://github.com/btakita/agent-doc/actions/runs/34408090473). GitHub release v0.35.354 is published with all six platform packages. Unblocks: obtain a quota increase or explicitly approve old-release cleanup, then rerun the PyPI workflow and verify uploaded artifacts.
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.
 - [/] [#harnessswitchverify] [operator-verify] #harnessswitchstorm remains unverified. The 2026-08-25 fpe.md attempt was invalidated by a stale live JetBrains plugin generation: ops.log showed controller_crdt_replica_refusal_storm (25 refusals), editor_absent/disk authority, agent_restart_respec_inert to Claude, then old_harness=claude -> new_harness=codex only after save. Unblocks after make install, restart the JetBrains IDE host, repeat the unsaved claude <-> codex switch, and prove exactly one spawn plus agent_restart_deferred reason=non_authoritative_document_view.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

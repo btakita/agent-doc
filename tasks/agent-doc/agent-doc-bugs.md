@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a086bb-92a9-7152-bd30-9b04effbc938
+  codex: 01a087a3-88f5-7f43-920f-a00d31983bb5
 agent: codex
 claude_model: fable
 agent_doc_format: template
@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -101,10 +101,12 @@ Architecture and verification notes: [prompt preservation plan](plan-unstarted-e
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 do [#fixcommandfailed]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
+- [ ] 🚧 [#fixcommandfailed] Fix "agent-doc command failed (exit 1): Error: session_clear codex command `/clear` for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md was not proven submitted in pane %48 after supervisor_ipc_command_repair_acceptance (result=submission_unobserved, command_visible=false); treating Clear Session Context as not submitted. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=verify_pane_state_then_retry unblocker=clear_submission_unobserved. No submission evidence was seen in either direction, so whether the clear ran is unknown. Check the codex pane before retrying — run Clear Session Context again if the context is still there" and `dispatch-only codex reopen refused to inject into pane %159 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md because the project supervisor is mid-recycle (reason=auto_install_reexec); a trigger typed across the hot-reload boundary would be dropped before submit. Retry once the supervisor settles onto the fresh binary ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_supervisor_recycle_settle`
 <!-- /agent:backlog -->
 
 ## Review

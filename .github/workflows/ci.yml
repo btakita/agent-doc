@@ -45,6 +45,18 @@ jobs:
       - name: Install tmux for integration tests
         run: sudo apt-get update && sudo apt-get install -y tmux
 
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install VS Code plugin dependencies
+        run: npm ci --prefix editors/vscode
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy

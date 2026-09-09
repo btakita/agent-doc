@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-version audit-docs test sim-medium cross-editor-simworld tmux-ci clippy check precommit timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
+.PHONY: build build-release release release-version audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check precommit timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -115,6 +115,12 @@ version-sync:
 dev-harness-test:
 	@python3 scripts/agent-doc-dev self-test
 	@cd editors/jetbrains && ./gradlew --no-daemon --console=plain -q test
+	@cd editors/vscode && npm test
+
+# Every release records coverage, tests both supported plugins, and executes
+# their shipped native forwarders together through a real controller.
+editor-parity: dev-harness-test cross-editor-simworld
+	@python3 scripts/check_editor_parity.py
 
 # Bump JB plugin patch version and build both zips
 bump-plugin:
@@ -167,7 +173,7 @@ lean:
 # the release process runs `make check`, so leaving the installed-surface audit
 # out of it let 0.35.224 ship with harness runbooks several versions behind the
 # binary while every version marker matched.
-check: clippy test sim-medium version-sync audit-docs dev-harness-test lean tla
+check: clippy test sim-medium version-sync audit-docs editor-parity lean tla
 
 # Audit generated instruction surfaces (skill, runbooks, OKF) against the binary.
 audit-docs:

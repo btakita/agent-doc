@@ -1,4 +1,5 @@
 # Shared editor capability matrix.
+# Release coverage and the mandatory verification gate: PARITY.md and release-parity.tsv.
 #
 # `supported` peers participate in the feature conformance test.
 # `conditional` peers participate and must advertise the feature, but runtime

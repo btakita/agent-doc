@@ -1,0 +1,7 @@
+# version	change	jetbrains	vscode	zed	evidence
+0.35.340	Idle revision gating	shared-core	shared-core	staged	make check
+0.35.341	Strict replay terminal proof	shared-core	shared-core	staged	make check
+0.35.342	Stale replica replacement refusal	core plus pending-local-edit guard	shared controller refusal	staged	make check; make cross-editor-simworld
+0.35.343	Supervisor titles and outgoing-pane ownership	shared-core	shared-core	staged	make check
+0.35.344	Recycle request epochs and settlement	shared-core	shared-core	staged	make check
+0.35.345	Queue response evidence and native library bootstrap	stdout-only CLI bootstrap; plugin 0.2.375	direct native path discovery; no merged CLI stream	staged	make check (both unit suites, capability audit, native peers)

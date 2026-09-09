@@ -32,6 +32,8 @@ use agent_doc_tmux_commands::{
 static TMUX_BIN_RESOLUTION: OnceLock<agent_doc_project_config_io::TmuxBinResolution> =
     OnceLock::new();
 
+pub const AGENT_DOC_TMUX_SOCKET_ENV: &str = "AGENT_DOC_TMUX_SOCKET";
+
 /// Build the process-wide tmux handle from project config, global config, or PATH.
 ///
 /// The resolution is stable for the process lifetime, matching the process CWD
@@ -43,6 +45,11 @@ pub fn configured_tmux() -> tmux_router::Tmux {
         .as_deref()
         .map(tmux_router::Tmux::default_server_with_binary)
         .unwrap_or_else(tmux_router::Tmux::default_server)
+        .with_server_socket(
+            std::env::var(AGENT_DOC_TMUX_SOCKET_ENV)
+                .ok()
+                .filter(|socket| !socket.trim().is_empty()),
+        )
 }
 
 pub fn configured_tmux_bin_resolution() -> &'static agent_doc_project_config_io::TmuxBinResolution {

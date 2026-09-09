@@ -23,21 +23,42 @@ pub fn reconcile_tmux_server_identity_in(
     project_root: &Path,
     tmux: &Tmux,
 ) -> Result<TmuxServerReconcileOutcome> {
-    let current = observe_tmux_server_identity(tmux)?;
+    let Some(current) = observe_tmux_server_identity(tmux)? else {
+        // Absence is not a replacement receipt. Preserve the prior identity so
+        // the first observation after bootstrap can still invalidate old rows.
+        return Ok(TmuxServerReconcileOutcome::default());
+    };
     reconcile_observed_identity_in(project_root, current)
 }
 
-fn observe_tmux_server_identity(tmux: &Tmux) -> Result<TmuxServerIdentity> {
+fn observe_tmux_server_identity(tmux: &Tmux) -> Result<Option<TmuxServerIdentity>> {
+    // Actorless bootstrap observation: no managed process graph exists yet.
+    // Keep process status instead of depending on raw_cmd's version-specific
+    // treatment of nonzero exits and empty stdout.
     let output = tmux
-        .raw_cmd(&["display-message", "-p", "#{pid}\t#{start_time}"])
+        .cmd()
+        .args(["display-message", "-p", "#{pid}\t#{start_time}"])
+        .output()
         .context("query tmux server identity")?;
-    parse_tmux_server_identity(&output)
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.trim().is_empty() && (output.status.success() || !tmux.running()) {
+        return Ok(None);
+    }
+    if !output.status.success() {
+        anyhow::bail!(
+            "query tmux server identity failed ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    parse_tmux_server_identity(&stdout).map(Some)
 }
 
 fn parse_tmux_server_identity(output: &str) -> Result<TmuxServerIdentity> {
     let mut fields = output.trim().split('\t');
     let pid = fields
         .next()
+        .filter(|field| !field.is_empty())
         .context("tmux server identity omitted pid")?
         .parse::<u32>()
         .context("parse tmux server pid")?;
@@ -131,6 +152,90 @@ mod tests {
                 start_time: 1_787_525_374,
             }
         );
+    }
+
+    #[test]
+    fn absent_server_preserves_prior_identity_and_registry() {
+        let project = tempfile::tempdir().unwrap();
+        let prior = TmuxServerIdentity {
+            pid: 100,
+            start_time: 1_000,
+        };
+        store_identity(project.path(), prior).unwrap();
+        let mut registry = Registry::new();
+        registry.insert("old.md".into(), entry("old", "%0"));
+        crate::save_in(project.path(), &registry).unwrap();
+        let tmux = Tmux::default_server_with_binary("tmux").with_server_socket(Some(format!(
+            "agent-doc-absent-{}",
+            project.path().file_name().unwrap().to_string_lossy()
+        )));
+
+        assert_eq!(
+            reconcile_tmux_server_identity_in(project.path(), &tmux).unwrap(),
+            TmuxServerReconcileOutcome::default()
+        );
+        assert_eq!(load_identity(project.path()).unwrap(), Some(prior));
+        assert_eq!(crate::load_in(project.path()).unwrap().len(), 1);
+
+        let replacement = TmuxServerIdentity {
+            pid: 200,
+            start_time: 2_000,
+        };
+        let outcome = reconcile_observed_identity_in(project.path(), replacement).unwrap();
+        assert!(outcome.server_replaced);
+        assert_eq!(outcome.stale_rows_removed, 1);
+    }
+
+    #[test]
+    fn missing_executable_is_not_server_absence() {
+        let project = tempfile::tempdir().unwrap();
+        let tmux = Tmux::default_server_with_binary(project.path().join("missing-tmux"));
+        assert!(
+            observe_tmux_server_identity(&tmux)
+                .unwrap_err()
+                .to_string()
+                .contains("query tmux server identity")
+        );
+    }
+
+    #[test]
+    fn malformed_identity_remains_an_error() {
+        for input in ["", "garbage", "12\tbad", "12\t34\textra"] {
+            assert!(parse_tmux_server_identity(input).is_err(), "{input:?}");
+        }
+        assert!(
+            parse_tmux_server_identity("")
+                .unwrap_err()
+                .to_string()
+                .contains("omitted pid")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn observation_distinguishes_empty_output_from_live_query_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let project = tempfile::tempdir().unwrap();
+        let binary = project.path().join("tmux");
+        let tmux = Tmux::default_server_with_binary(&binary);
+        for (script, absent) in [
+            ("#!/bin/sh\nexit 0\n", true),
+            ("#!/bin/sh\nexit 1\n", true),
+            (
+                "#!/bin/sh\ncase \"$1\" in has-session) exit 0;; *) echo denied >&2; exit 1;; esac\n",
+                false,
+            ),
+            ("#!/bin/sh\nprintf 'not-an-identity\\n'\n", false),
+        ] {
+            std::fs::write(&binary, script).unwrap();
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let observation = observe_tmux_server_identity(&tmux);
+            if absent {
+                assert_eq!(observation.unwrap(), None);
+            } else {
+                assert!(observation.is_err());
+            }
+        }
     }
 
     #[test]

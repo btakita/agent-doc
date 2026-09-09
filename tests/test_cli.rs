@@ -31356,6 +31356,90 @@ fn test_cli_start_outside_tmux_bootstraps_a_detached_session() {
 }
 
 #[test]
+fn test_cli_claim_occupied_pane_persists_generated_identity_before_provisioning() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tmux = IsolatedTmuxServer::new("claim-identity");
+    let original = tmp.path().join("original.md");
+    fs::write(
+        &original,
+        "---\nagent_doc_session: original-session\n---\n# Original\n",
+    )
+    .unwrap();
+    init_git_repo(tmp.path(), &original);
+    let output = ProcessCommand::new("tmux")
+        .args([
+            "-L",
+            &tmux.socket,
+            "-f",
+            "/dev/null",
+            "new-session",
+            "-d",
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "-s",
+            "claim-test",
+            "sleep 120",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let pane = String::from_utf8(output.stdout).unwrap().trim().to_owned();
+    let mut first = agent_doc_cmd();
+    first
+        .current_dir(tmp.path())
+        .args(["claim"])
+        .arg(&original)
+        .args(["--pane", &pane]);
+    tmux.configure(&mut first);
+    first.assert().success();
+
+    let incoming = tmp.path().join("incoming.md");
+    fs::write(
+        &incoming,
+        "---\nagent: claude\nclaude_args: --version\n---\n# Incoming\n",
+    )
+    .unwrap();
+    let mut claim = agent_doc_cmd();
+    claim
+        .current_dir(tmp.path())
+        .arg("claim")
+        .arg(&incoming)
+        .args(["--pane", &pane]);
+    tmux.configure(&mut claim);
+    let output = claim.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(stderr.contains("provisioning a new pane"), "{stderr}");
+    let content = fs::read_to_string(&incoming).unwrap();
+    let recorded = agent_doc_frontmatter::frontmatter::session_id_from_content(&content).unwrap();
+    assert!(
+        stderr.contains(&format!("Generated session UUID: {recorded}")),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains(&format!("(session {})", &recorded[..8])),
+        "{stderr}"
+    );
+    let panes = ProcessCommand::new("tmux")
+        .args([
+            "-L",
+            &tmux.socket,
+            "list-panes",
+            "-a",
+            "-F",
+            "#{pane_current_path}",
+        ])
+        .output()
+        .unwrap();
+    assert!(panes.status.success(), "{panes:?}");
+    assert!(
+        String::from_utf8_lossy(&panes.stdout).contains(tmp.path().to_str().unwrap()),
+        "provisioning must stay on the explicitly selected test server: {panes:?}"
+    );
+}
+
+#[test]
 fn test_cli_route_generates_session_for_bare_file() {
     let tmp = tempfile::TempDir::new().unwrap();
     // Opt the bare file in via the `auto_session_for_all_md` escape hatch so the

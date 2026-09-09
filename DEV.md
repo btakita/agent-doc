@@ -20,6 +20,16 @@ the `lazily-spec/proto` sibling when the local `lazily-kt` composite build is
 present. `settings.gradle.kts` now fails with that exact missing path instead of
 an opaque Gradle variant error.
 
+### Linux binary compatibility
+
+Official GNU/Linux release archives use the compatibility `cross` image rather
+than the release runner's system glibc. A binary built locally with `make install`
+or `cargo build` instead inherits that build host's glibc requirements; copying
+it from a newer distribution to Ubuntu 20.04 (glibc 2.31) can fail with
+`GLIBC_2.xx not found`. Use the official GNU archive, the x86_64 musl archive for
+the standalone CLI, or build from source on the destination host. The native
+editor library needs a GNU build compatible with the IDE backend's host.
+
 ## Post-release: cargo install is critical
 
 After publishing, always run `cargo install --path .` — the `~/.cargo/bin/agent-doc`

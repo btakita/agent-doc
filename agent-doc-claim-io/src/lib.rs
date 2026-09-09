@@ -388,6 +388,17 @@ pub fn run(
     // Pane id, tmux handle, and the cross-session guard were resolved above,
     // before the auto-scaffold (`#claim-validate-before-scaffold`).
 
+    // Pane validated — now safe to modify files
+    if updated_content != content {
+        effects
+            .atomic_write(file, &updated_content)
+            .with_context(|| format!("failed to write {}", file.display()))?;
+        eprintln!("Generated session UUID: {}", session_id);
+        content = updated_content;
+    }
+
+    // Persist before every provisioning branch: the new supervisor reads the
+    // document, so an in-memory-only UUID would be replaced during startup.
     // Check if pane is already claimed by a different session.
     // Per the Binding invariant (SPEC §8.5): "document drives pane resolution —
     // find existing OR provision new, NEVER commandeer another document's pane."
@@ -469,15 +480,6 @@ pub fn run(
             configured_session.as_deref(),
         )?;
         return Ok(());
-    }
-
-    // Pane validated — now safe to modify files
-    if updated_content != content {
-        effects
-            .atomic_write(file, &updated_content)
-            .with_context(|| format!("failed to write {}", file.display()))?;
-        eprintln!("Generated session UUID: {}", session_id);
-        content = updated_content;
     }
 
     // Default to template+crdt if neither format nor write_mode nor legacy mode is set

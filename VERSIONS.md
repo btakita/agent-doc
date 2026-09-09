@@ -2,6 +2,21 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.350
+
+- **Fix: cold tmux identity observation accepts an absent server (#51).** Empty
+  bootstrap replies leave the prior registry identity intact; the first valid
+  replacement still clears stale pane bindings. Malformed replies and live-query
+  failures retain diagnostics.
+- **Fix: claim persists generated UUIDs before every provisioning branch (#49).**
+  Occupied-pane and cross-root fallbacks can no longer start a supervisor with a
+  different identity from the one announced by claim.
+- **Fix: explicit tmux socket selection covers claim and route descendants.**
+  The shared tmux constructor now owns the socket override, preventing isolated
+  operations from creating panes on the default server.
+- **Docs: explain Linux source-build versus release glibc compatibility (#49).**
+  The native stdout/stderr fix remains included from 0.35.345 / JetBrains 0.2.375.
+
 ## 0.35.349
 
 - **Fix: compact replies no longer wait on a full project-state replay.**

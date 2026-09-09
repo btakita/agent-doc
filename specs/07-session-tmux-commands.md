@@ -21,6 +21,14 @@ boundary or inherits the shorter ordinary-RPC deadline.
 
 `agent-doc start <FILE> [--force]`
 
+- Server identity observation represents an absent server or empty bootstrap
+  reply explicitly and leaves the prior identity/registry untouched. The first
+  valid identity after creation performs the existing initialize/keep/replace
+  transition, including clearing rows from a replaced server. Nonempty malformed
+  replies, launch failures, and failed queries against a live server remain errors.
+- `AGENT_DOC_TMUX_SOCKET` scopes the shared configured tmux handle for the whole
+  invocation, including claim, route, and supervisor descendants. A selected
+  socket must never fall back to the operator's default server during provisioning.
 - Starts the configured harness in the current tmux pane and registers the pane as the session owner.
 - Route-owned tmux autostart panes must not automatically restart the child harness after a clean exit. If the newly started child exits before or after surfacing a prompt, `start --route-owned` must surface the local restart/quit prompt instead of immediately spawning another child process.
 - Route-owned reap decisions after a committed cycle may use the supervisor actor's stable `ready` state as prompt proof even when the terminal tail still contains transient renderer text. Explicit blocking prompt states, including queued drafts, permission prompts, hook-review prompts, history search, and clean-exit restart prompts, still preserve the pane.
@@ -109,6 +117,10 @@ boundary or inherits the shorter ordinary-RPC deadline.
 
 `agent-doc claim <FILE> [--position left|right|top|bottom] [--window W] [--pane P] [--new-pane]`
 
+- After pane/session admission, claim persists any generated document UUID before
+  every provisioning branch, including occupied-pane and cross-root fallbacks.
+  Its generated-ID diagnostic, route registration, and the new supervisor's
+  frontmatter must describe the same identity.
 - Claims a document for a tmux pane that is already running the harness.
 - `--new-pane` is a provisioning mode, not a force/reuse mode. It bypasses current-pane resolution and cross-session validation, provisions exactly one pane in the project's configured tmux session (or the normal auto-detected session when unconfigured), and binds the new document there. It conflicts with `--position`, `--window`, `--pane`, `--force`, and `--isolate`, so it cannot silently replace or migrate the operator's current pane/window.
 - The command must enforce the one-live-pane-per-document binding invariant. If the requested pane already belongs to another alive document session, `claim` provisions a new pane instead of commandeering the old one.

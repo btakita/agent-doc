@@ -29,7 +29,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 /// Optional tmux socket override used by headless integrations and isolated tests.
-pub const AGENT_DOC_TMUX_SOCKET_ENV: &str = "AGENT_DOC_TMUX_SOCKET";
+pub use agent_doc_tmux_io::AGENT_DOC_TMUX_SOCKET_ENV;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TmuxEnsureOutcome {
@@ -316,11 +316,7 @@ fn prepare_start_document_for_tmux_bootstrap(file: &Path) -> Result<()> {
 }
 
 fn tmux_for_environment() -> tmux_router::Tmux {
-    agent_doc_tmux_io::configured_tmux().with_server_socket(
-        std::env::var(AGENT_DOC_TMUX_SOCKET_ENV)
-            .ok()
-            .filter(|socket| !socket.trim().is_empty()),
-    )
+    agent_doc_tmux_io::configured_tmux()
 }
 
 fn terminal_host_report(tmux: &tmux_router::Tmux) -> TerminalHostReport {

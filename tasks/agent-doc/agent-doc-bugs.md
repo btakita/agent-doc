@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a0846d-6e6b-7011-86b6-d4fe0e2ca3db
+  codex: 01a086bb-92a9-7152-bd30-9b04effbc938
 agent: codex
 claude_model: fable
 agent_doc_format: template
@@ -12,7 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -63,9 +63,11 @@ The original `backend.md` compact recovered independently in commit `fb5d356`, r
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 do [#fixhttpsgithub]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
+- [ ] 🚧 [#fixhttpsgithub] Fix GH https://github.com/btakita/agent-doc/issues/49 + https://github.com/btakita/agent-doc/issues/51. release + publish
 <!-- /agent:backlog -->
 
 ## Review

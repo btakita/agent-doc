@@ -19,7 +19,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-0.35.345 installed, committed, pushed, and tagged. Queue response-evidence guard and issue #50 fixed. GitHub Release/CI running; PyPI publication gated on the 10 GB project quota.
+0.35.345 runtime and JetBrains 0.2.375 installed. Fixes committed/pushed/tagged; mandatory plugin parity gates and release ledger added. PyPI quota blocker tracked as #pypi345quota; IntelliJ restart remains operator verification.
 <!-- /agent:status -->
 
 ## Exchange
@@ -91,6 +91,32 @@ The recent supervisor, layout, recycle, and queue changes share their Rust polic
 Committed and pushed as **5dc7659a6**. The expanded full `make check` passed: **9,245 Rust tests**, **507 JetBrains tests**, **179 VS Code tests**, and the real native-peer/controller test. The installed **0.35.345** runtime and JetBrains **0.2.375** package contain the runtime fixes; this follow-up strengthens verification and tracking.
 
 Correction to the prior publication note: closeout reaped `#fixhttpsgithub`, so the unfinished PyPI upload is now preserved under the dedicated gated **#pypi345quota** item. The **10 GB project quota** remains the external blocker. The existing **#restartintellijidea** item retains the live plugin activation check.
+
+### Re: six tmux panes for a two-pane editor split — gpt-6
+
+Fixed and verified the live layout: two editor columns now have two equally sized tmux panes. The four extra sessions were moved into the managed stash, preserving their running agents.
+
+The repair path could pull the stashed panes back into the visible window because tmux automatic renaming made the stash look like a duplicate managed window. Layout repair now pins automatic-rename and allow-rename off for its managed visible/stash windows before consolidation. Unrelated windows retain their settings. Repeated repair coverage proves the two-visible/four-stashed arrangement remains stable. The extracted repair tests now run in `make tmux-ci`.
+
+The pane fix was committed and pushed as **ca7d1de27**, tagged **v0.35.346**, and is included in installed **0.35.347**. Architecture contract: `src/agent-doc/tasks/agent-doc/plan-managed-window-name-stability.md`. The existing layout owner still reconciles editor intent; no additional polling or competing layout owner was introduced.
+
+### Re: recycle dispatch and Restart Agent session recording — gpt-6
+
+Your session-recording suspicion was correct. An external `/clear` prompt could record the agent-doc document UUID into the hook ledger, where the newest row was later mistaken for the Codex thread ID. Hook records now retain identity provenance: genuine harness identity can supply resume arguments, while external document prompts remain available for prompt tracking without replacing the resume ID. Legacy external-clear rows are excluded too.
+
+The affected contracts document now records Codex thread **01a083de-04c8-7aa2-b658-f396653fd33a**. Its saved Codex transcript exists, and the supervisor's resume log uses that same ID. **77b2c07f-79ac-4e62-b9cb-b20a8902de14** remains the document session UUID; it is no longer selected as the Codex resume ID. Regression tests cover newer external clears, legacy records, turnless genuine hooks, parked bindings, and documents without a genuine harness identity.
+
+The recycle refusal had two causes: the client timed out before the supervisor's settlement deadline, and compilation marked the supervisor as recycling before re-exec began. The settlement RPC now permits the full server deadline plus transport margin, and the guard starts at the actual re-exec boundary. Waiting reads the existing retained recycle projection. The hot-reload input guard remains active while replacement is actually underway. A delayed local-socket regression proves the reply can arrive beyond the ordinary RPC deadline.
+
+Mandatory editor parity testing also exposed a VS Code native reload failure: Koffi retained named struct registrations across unload. **VS Code 0.2.70**, now installed, uses anonymous ABI descriptors. The real native-peer test exercises two disconnected reloads followed by reconnect and offline-edit reconciliation.
+
+Architecture contract: `src/agent-doc/tasks/agent-doc/plan-recycle-dispatch-and-thread-identity.md`; updated behavior is specified in `src/agent-doc/specs/07-session-tmux-commands.md`. The existing ProcessScope, Source, Computed, and Effect owners retain lifecycle and projection authority. Hook persistence and the one-shot settlement RPC remain external adapters; neither creates a second state owner or retry loop. The contract records identity, recycle, and reconnect transitions and their verification evidence.
+
+Committed and pushed as **5b62eafc0**, tagged **v0.35.347**. Runtime/native **0.35.347** and VS Code **0.2.70** are installed; JetBrains remains **0.2.375**. The workspace pointer and generated skill versions were committed separately as **a4616c6ec**.
+
+Final `make check` passed: **9,249 Rust tests**, both editor unit suites, real native-peer/controller coverage with repeated reloads, and release/formal checks. Expanded `make tmux-ci` passed, including all 13 extracted layout-repair tests. Live checks confirm the two-pane layout and correct saved thread identity. CI **34302782998** was in progress and Release **34302783725** was queued when inspected after push; local verification is complete.
+
+The existing PyPI quota follow-up **#pypi345quota** now names v0.35.347. Publication still requires quota space after the earlier HTTP 400 at the 10 GB project limit. No additional backlog follow-up is needed because that item owns the remaining publication step. The existing JetBrains host-activation check remains in **#restartintellijidea**.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 

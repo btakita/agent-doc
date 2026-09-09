@@ -51,3 +51,31 @@ consecutive recovery attempts. Latest CI before this change was green.
 The initial broad in-process Cargo test run was stopped after its commit tests
 passed and preflight tests stalled; the full standard nextest run above passed
 all tests in isolated processes with the repository's timeout policy.
+
+## Reused-heading edge found during final review
+
+A negative regression (`older follow-up question` after `Re: older`) proved that
+post-commit cleanup could delete a fresh question even without a capture.
+Expand the policy owner/edit surface to document/write_normalization: cleanup
+requires exact committed queue-prompt proof, never a similar response heading.
+Remove its fuzzy heading matcher rather than add another exception. An exact
+queue echo with a missing committed proof may reconcile; retained proofs plus
+a new prompt are ambiguous and must stay visible. Batch wording without exact
+proof likewise stays visible. Commit-io must exclude already committed captures
+from both prompt matching and adoption authorization.
+
+These are pure decisions over the same immutable transaction cut; no new
+lifecycle, cached readiness, polling, or reactive graph is introduced. Extend
+the git matrix and pure cleanup tests, then rerun the complete verification.
+The 0.35.351 installation was stopped before replacing the installed 0.35.350
+binary; the follow-up release includes this additional preservation fix.
+
+The reused-heading regression failed before the normalization fix and passed
+afterward. All 9 focused checks passed. The expanded full run passed 9,263 tests
+(256 skipped); `make tmux-ci` passed its 8 general and 13 layout-repair tests.
+CI initially failed before tests on a Google apt-index hash mismatch; its
+requested retry passed package installation and continued normally.
+
+Final `make check` completed successfully, including documentation, both editor
+test suites, native cross-editor simulation, Lean and TLA. Final source commit:
+`c7b3023ed` (0.35.352), following the initial `0453a3282` preservation fix.

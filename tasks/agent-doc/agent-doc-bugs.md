@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a087a3-88f5-7f43-920f-a00d31983bb5
+  codex: 01a087fd-0ff3-70a2-8bd5-58f14d433db9
 agent: codex
 claude_model: fable
 agent_doc_format: template
@@ -19,7 +19,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-0.35.353: clear, recycle, and three-pane fixes installed and verified; release push follows closeout.
+0.35.354 installed: queue revisions survive stale completion and update live steering; verification complete.
 <!-- /agent:status -->
 
 ## Exchange
@@ -110,6 +110,25 @@ The recycle readiness check now observes a keyed Computed derived from the exist
 `make check tmux-ci` passed: **9,269 workspace tests and 21 isolated tmux tests**, plus editor parity, native peer integration, and formal checks. Regressions cover sibling recycle isolation, delayed blank repaint, missing-session focus, and stashed-pane focus. `make install-full` completed; installed executable and native library matched the release artifacts byte-for-byte, and both editor packages installed. Both affected project controllers completed handoff and match the installed binary. The live window remained at two panes across further document switches.
 
 The source tree is clean. Workspace commit `28f9b4784` records the plan, generated skill versions, and source pointer. Main and release-tag pushes follow this document closeout. The previous CI run passed; the existing PyPI project-storage quota failure remains tracked in `#pypi345quota`, updated for this release. No additional implementation follow-up is needed.
+
+### Re: Live queue edits during an active turn — gpt-6
+
+> **Queue prompt:**
+> do [#runfpeupdate]
+
+Implemented and installed **0.35.354**, source commit `53b90b4ae`.
+
+- A newer queue instruction survives a stale selection marker or completion strike. Both the primary cell merge and fallback component merge preserve the edited revision. Completing an ID also checks the queue revision, so an old completion cannot consume its replacement.
+- Queue-only replacements now enter the existing steering aggregate with their complete text, including multiline instructions. Reordering, selection/priority markers, ordinary completion, and independent additions retain their existing behavior. Independent additions remain queued work.
+- The editor's live turn projection updates from canonical replica events. The harness receives steering through its existing response boundary; this change does not introduce immediate mid-generation prompt injection.
+
+The invariant is that completion belongs to the instruction revision the turn observed. Merge reconciliation owns text precedence, the shared queue guard owns done-ID eligibility, and realtime baseline comparison owns the steering aggregate. These pure decisions use immutable transaction inputs within the existing document-scoped event/projection graph. Existing replica events and cycle-fenced receipts drive subscribers; no new polling loop or independently refreshed cache was introduced. Architecture and evidence: [plan-live-queue-steering.md](plan-live-queue-steering.md).
+
+Both original regressions failed before the fixes. Coverage now includes stale strikes, multiline corrections, same-ID completion, independent and duplicate additions, marker-only changes, reordering, retraction, and concurrent exchange changes. **9,275 workspace tests passed**, with 256 skipped; the affected package suites passed 691 tests. Editor tests, native cross-editor simulation, simulator, version/instruction audits, and formal checks passed. The final `make check` run stopped at a missing release-parity ledger row; after adding that row, the parity audit and remaining Lean/TLA gates passed.
+
+`make install-full` completed. The installed CLI and native ABI report 0.35.354, both editor packages are installed, and the workspace and affected project controllers completed stable handoffs with running inodes matching the installed executable. Workspace commit `be7e99292` records the plan, installed-skill versions, and source pointer.
+
+Main and release-tag pushes follow this document closeout. The latest completed CI passed. PyPI's existing project-storage quota failure remains in `#pypi345quota`, updated for this release.
 <!-- agent:boundary:d997bd6b -->
 <!-- /agent:exchange -->
 
@@ -128,7 +147,7 @@ The source tree is clean. Workspace commit `28f9b4784` records the plan, generat
 
 <!-- agent:review -->
 - [/] [#compactdevreplica] [operator-verify] Reconnect the editor replica for src/haiven-dev/tasks/dev.md and verify its retained compact continuation commits. Installed 0.35.349 fixes local event ingress and native-save continuation; live read and supported recovery still report editor_attached_model_missing. Reopen the document or restart the editor, then observe the existing continuation; do not repeat Compact Exchange or force disk.
-- [/] [#pypi345quota] [operator-verify] Publish agent-doc v0.35.353 to PyPI after quota space is available. The v0.35.352 upload failed with HTTP 400 because the project reached its 10 GB storage limit; v0.35.353 publication follows the release tag. Unblocks: obtain a quota increase or explicitly approve old-release cleanup, then rerun the latest PyPI workflow and verify uploaded artifacts.
+- [/] [#pypi345quota] [operator-verify] Publish agent-doc v0.35.354 to PyPI after quota space is available. The v0.35.353 upload failed with HTTP 400 because the project reached its 10 GB storage limit; v0.35.354 publication follows the release tag. Unblocks: obtain a quota increase or explicitly approve old-release cleanup, then rerun the latest PyPI workflow and verify uploaded artifacts.
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.
 - [/] [#harnessswitchverify] [operator-verify] #harnessswitchstorm remains unverified. The 2026-08-25 fpe.md attempt was invalidated by a stale live JetBrains plugin generation: ops.log showed controller_crdt_replica_refusal_storm (25 refusals), editor_absent/disk authority, agent_restart_respec_inert to Claude, then old_harness=claude -> new_harness=codex only after save. Unblocks after make install, restart the JetBrains IDE host, repeat the unsaved claude <-> codex switch, and prove exactly one spawn plus agent_restart_deferred reason=non_authoritative_document_view.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40

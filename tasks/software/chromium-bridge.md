@@ -251,6 +251,52 @@ Verified this task is already implemented: release commit `2ae58cba8` is an ance
 The live check did uncover a newer operational stall in `contracts.md`: its cycle had reached `write_applied`, but the editor was still registered while the controller replica was missing. Fail-closed disk refusal was correct. `agent-doc admin reload-lib` re-registered the current 0.35.322 editor library, and one `agent-doc repair` then found the response already present, retired the retained intent, and committed cycle `cycle-1788399957470` (`commit_already_current`).
 
 No repository files were changed in this follow-up, so no test suite was rerun. Verification was the released-fix ancestry check, current binary version check, successful replica reload, repair completion, and committed live-cycle status. The exchange is large (211 lines), but the queue is active, so I did not interrupt it for compaction.
+
+### Re: Response
+
+Runtime and document recovery are fixed.
+
+- Live runtime: `agent-doc 0.35.349`, with native library `0.35.349` successfully reloaded.
+- Live JetBrains plugin: `0.2.376`.
+- The `0.35.349` runtime contains the recovery fix from commit `5c5d6ffcc`.
+- `backend.md` now passes `session-check`: committed, `queue_continuation_required=false`, `no_drainable_work`.
+- `chromium-bridge.md` is also committed with no drainable work.
+- The source worktree is clean.
+
+### Root cause and fix
+
+When an attached editor replica disappeared, JetBrains reported that re-registration had succeeded before the asynchronous CRDT attachment had actually completed. Rust exhausted its bounded recovery window and correctly refused to fall back to disk while the editor was attached, producing the `missing_replica recovery exhausted` error.
+
+The fix:
+
+- Makes recovery re-registration synchronous and returns success only after replica attachment completes.
+- Returns a failed receipt if registration is missing, coalesced, rejected, or times out.
+- Clears both missing-replica recovery latches after a verified healthy/current observation, allowing later losses under the same editor witness to recover.
+- Records whether the recovery signal was actually delivered to an editor endpoint.
+
+The invariant remains: **while an editor is attached, disk never silently becomes authoritative**. Rust owns the authority/retry policy; the editor plugin performs the typed re-registration and supplies the completion receipt.
+
+Primary changes:
+
+- [CrdtReplicaManager.kt](/home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt)
+- [PatchWatcher.kt](/home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt)
+- [Rust realtime recovery](/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-document-realtime-io/src/lib.rs)
+
+Tested transitions include missing replica → synchronous registration → current, failed/coalesced registration → fail closed without disk fallback, and healthy observation → recovery latches cleared.
+
+### Verification and release
+
+- Focused Rust recovery tests passed.
+- Focused JetBrains tests passed.
+- Cross-editor simulation passed.
+- Local `make check` passed.
+- GitHub CI passed on September 9, 2026.
+- Release commit: `5c5d6ffccfb4c59e34d976c135ee49348f6ce7e3`
+- Release/tag: `v0.35.348`
+- GitHub Release has all six expected artifacts, including the installable Windows package:
+  `agent-doc-x86_64-pc-windows-msvc.zip`
+
+The only release-channel issue is PyPI: all four wheels built successfully, but PyPI rejected publication because the `agent-doc` project has reached its 10 GB storage limit. The GitHub Windows package is published and usable. I did not delete historical PyPI releases because that would be destructive and requires explicit approval.
 <!-- agent:boundary:28f7ea75 -->
 <!-- /agent:exchange -->
 ###

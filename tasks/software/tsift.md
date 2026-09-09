@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
-  codex: 01a063bf-83bc-7831-8716-42e142e537d6
+  codex: 01a08387-676c-7d10-9667-16c9ddf4765a
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -42,12 +42,19 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 6 response topic(s): tsift 0.1.96 released; Response; do [#fixcompactexchange]; 3 more
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): tsift issue #23 and v0.1.95
+
+### Re: Session resumed — gpt-6
+
+Recorded the updated Codex resume ID. The queue remains stopped; issue #25 is pending.
+
+Workspace verification: `make check` failed in `corky-core` library tests (`make` exit 2; log: `.tsift/artifacts/tart-2ff5828b2d.test.log`). No source changes were made. The latest GitHub Actions run passed; no workflow named `CI` exists in this workspace. The stale agent-doc install warning remains advisory for its owning development cycle.
 <!-- agent:boundary:b8ec92e9:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Fix https://github.com/btakita/tsift/issues/25 + release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

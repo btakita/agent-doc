@@ -25192,7 +25192,6 @@ mod tests {
     #[test]
     fn tmux_layout_observation_prefers_effect_assignment_over_partial_actor_store() {
         let project_root = Path::new("/repo");
-        let tmux = agent_doc_tmux_io::configured_tmux();
         let actor_store = BTreeMap::new();
         let effect_file_panes = vec![
             ("/repo/tasks/primary.md".to_string(), "%1".to_string()),
@@ -25202,10 +25201,16 @@ mod tests {
             ),
         ];
 
+        // This precedence lives entirely in the pure observation resolver, so it
+        // is asserted there. Routing it through the IO wrapper made the case
+        // depend on the developer's own tmux server: on a machine that really
+        // has a pane `%2`, `configured_tmux()` resolved a live process owner,
+        // which correctly outranks every projection and reddened the suite with
+        // a real local document path.
         assert_eq!(
-            layout_sync_state_actual_document_for_pane(
+            layout_sync_state_actual_document_from_observations(
                 project_root,
-                &tmux,
+                None,
                 &actor_store,
                 &effect_file_panes,
                 "%2",

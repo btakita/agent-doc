@@ -471,6 +471,15 @@ mod tests {
                 .is_empty()
             );
         }
+        // `baseline` and `content` are distinct on purpose: selection is read
+        // from the current document. A head that was live in the baseline but
+        // removed from the current queue is not selected and cannot be quoted.
+        let retired = doc("- do [#nextitem]\n", "");
+        assert!(
+            selected_free_text_heads_missing_response_evidence(Some(&content), &retired, generic)
+                .unwrap()
+                .is_empty()
+        );
         for queue in [
             format!("- {head}\n"),
             format!("- ~~🚧 {head}~~\n"),

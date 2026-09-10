@@ -2048,7 +2048,23 @@ fn capture_validated_stream_closeout_before_authority_resolution(
             &parsed.unmatched,
             true,
         )?;
-        enforce_selected_queue_response_contract(baseline, pre_capture_content, response, flags)?;
+        // The free-text queue gate asks which heads the operator currently has
+        // selected, so its witness must be the operator-visible queue, not the
+        // cycle baseline. The baseline is the previous committed turn: a head the
+        // operator removed this turn, or one an earlier cycle already answered,
+        // is unsatisfiable by this turn's response and would wedge closeout while
+        // demanding a quote for a prompt that no longer exists. Live authority is
+        // deliberately not resolved here — that would move the editor delivery
+        // barrier ahead of the mutation capture this function exists to
+        // guarantee — so the witness is the durable on-disk document, which is
+        // the same surface preflight diffed, with the baseline as fallback.
+        let queue_gate_witness = agent_doc_fs::read_optional_text(file).ok().flatten();
+        enforce_selected_queue_response_contract(
+            baseline,
+            queue_gate_witness.as_deref().unwrap_or(pre_capture_content),
+            response,
+            flags,
+        )?;
     }
 
     capture_closeout_mutation_plan_before_authority_resolution(file, response, flags)?;
@@ -3052,6 +3068,85 @@ mod tests {
                 .is_none()
         );
         assert_eq!(fs::read_to_string(&doc).unwrap(), selected);
+    }
+
+    /// A free-text queue head that the operator removed this turn lives on in the
+    /// cycle baseline, and no response this turn can ever quote it. Gating the
+    /// mutation-bearing stream on the baseline queue therefore wedged closeout
+    /// with "include its exact `> **Queue prompt:**` quote" for a prompt that is
+    /// no longer in the document. The witness is the operator-visible queue.
+    #[test]
+    fn strict_stream_closeout_gates_free_text_queue_on_current_document_not_baseline() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("removed-free-text-head.md");
+        let header = concat!(
+            "---\n",
+            "agent_doc_session: removed-free-text-head\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### User Prompt\n\n",
+            "Drain the queue.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let baseline = format!(
+            "{header}<!-- agent:queue go -->\n- 🚧 Fix the reported queue completion defect\n<!-- /agent:queue -->\n"
+        );
+        // The operator removed the in-progress head and queued a `do [#id]`
+        // directive in its place, exactly as an answered head is retired.
+        let current =
+            format!("{header}<!-- agent:queue go -->\n- do [#nextitem]\n<!-- /agent:queue -->\n");
+        fs::write(&doc, &current).unwrap();
+
+        let plan = agent_doc_write_command_io::CapturedCloseoutMutationPlan {
+            is_template: true,
+            is_stream: true,
+            pending_done: vec!["nextitem".to_string()],
+            ..Default::default()
+        };
+        let flags = WriteFlags {
+            allow_replace_pending: false,
+            has_pending_add: false,
+            has_pending_done: true,
+            has_pending_mutation: true,
+            has_metadata_only_mutation: true,
+            pending_done_ids: vec!["nextitem".to_string()],
+            queue_completion_ids: Vec::new(),
+            pending_kept_open_ids: Vec::new(),
+            strict_closeout: true,
+            force_disk: false,
+            no_pending_capture: false,
+            mutation_plan_json: Some(serde_json::to_string(&plan).unwrap()),
+            empty_response_recovery: None,
+            rerun_command_base: None,
+        };
+
+        capture_validated_stream_closeout_before_authority_resolution(
+            &doc,
+            Some(&baseline),
+            false,
+            "<!-- patch:exchange -->\n### Re: #nextitem — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
+            &flags,
+        )
+        .expect("a head the operator removed this turn must not gate closeout");
+
+        // The same response is still refused while the head is live on disk, so
+        // the guard is relocated rather than weakened.
+        fs::write(&doc, &baseline).unwrap();
+        let err = capture_validated_stream_closeout_before_authority_resolution(
+            &doc,
+            Some(&baseline),
+            false,
+            "<!-- patch:exchange -->\n### Re: #nextitem — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
+            &flags,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("selected free-text queue prompt lacks response evidence")
+        );
     }
 
     #[test]

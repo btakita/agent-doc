@@ -290,6 +290,18 @@ Yes, state remains in the existing Lazily document, turn, and supervisor graph. 
 Your authorized Grok CLI worked in disposable JSON and terminal probes. The authenticated MCP probe exhausted the free usage quota before end-to-end closeout, so that live verification remains in review until quota returns or your planned subscription is available. Heavy is not required by the integration. Two early unstructured response probes failed document capture proof; the correctly structured local native-backend fixture committed successfully.
 
 Your IDEA restart activated plugin 0.2.378 in PID 1035669. The old activation prerequisite is satisfied; the separate live unsaved-edit checks remain explicit. Next, as requested, I am continuing with the extra tmux pane seen with two editor panes. Plan and release proof: `tasks/agent-doc/plan-grok-build-support.md`.
+
+### Re: two-editor pane layout — gpt-6
+
+Completed after the Grok integration, as requested. v0.35.360 fixes the startup race that could leave three tmux panes for two editor columns: layout-owned startups now stage offscreen until the current layout places them. Superseded and replaced sessions stay alive, and intermediate startup does not take focus. Standalone route placement remains supported.
+
+Yes, the existing Lazily layout graph owns desired state, binding applicability, placement, and focus. This change removes competing visible-pane mutation from the startup adapter; it adds no separate state owner or polling loop.
+
+The production regression reproduced three panes before the fix and passed afterward. Full `make check tmux-ci` passed: 9,302 workspace tests, 28 explicit tmux tests, editor integration, and formal checks. Tests include concurrent startup, reordered columns, paused queues, focus preservation, and surviving replaced sessions.
+
+CLI/native v0.35.360 is installed; source commit `642da69db` and tag `v0.35.360` are pushed. The controller refreshed successfully and the live window still contains exactly two panes, with `fpe.md` focused. This shared-code fix needs no new IDEA plugin version. CI and release/PyPI publishing were in progress at the post-push observation; remote publication is not yet confirmed.
+
+Plan and evidence: `tasks/agent-doc/plan-sync-layout-cardinality-focus-handoff.md`. Grok support was already completed in v0.35.359; authenticated Grok MCP closeout verification remains gated on available quota under #grokmcpverify.
 <!-- agent:boundary:d53e8ec0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -301,12 +313,11 @@ Your IDEA restart activated plugin 0.2.378 in PID 1035669. The old activation pr
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~Fix fpe.md issue that stopped retrieving the next queue item. Also Run Agent Doc on this file is wedged.~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#harnessswitchverify]
-- Please add support for grok build
+- ~~Please add support for grok build~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#twocolpanefix] Fix the extra tmux pane with two editor panes, after the Grok integration. Reproduce the current layout transition, preserve active sessions/focus, and enforce the editor-visible pane count. Plan: tasks/agent-doc/plan-sync-layout-cardinality-focus-handoff.md.
 <!-- /agent:backlog -->
 
 ## Review

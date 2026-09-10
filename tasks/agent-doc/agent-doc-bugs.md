@@ -13,7 +13,7 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: go
 ---
 
 ## Status
@@ -204,6 +204,16 @@ Yes—state uses the existing Lazily `Source → Computed → Effect` graph.
 Fixed and installed v0.35.356. Live controller recycling preserved pane focus. All 9,280 tests and tmux checks passed.
 
 Three review tasks are queued. Code and document commits are pushed; release workflows are pending.
+
+### Re: #restartintellijidea — gpt-6
+
+> **Queue prompt:** do [#restartintellijidea]
+
+Verified and completed. IntelliJ PID `1653132` is registered with **agent-doc plugin 0.2.376**, matching the installed package, and advertises native generation hot-reload plus operator-text authority capabilities. Its log records successful load and hot-reload of **libagent_doc 0.35.356** at 20:02:01 on September 9. The mapped generation file matches the installed library byte-for-byte (SHA-256 `0510e296ecf6b19b8f2d3301f614a80b3b7e92cfbb4a8b75d22305bfffbc9765`).
+
+The newer-release bootstrap check passed against the installed executable. Temporarily seeded cached version `999.0.0`; a read-only control command emitted the newer-version notice, while `agent-doc lib-path` returned exactly one existing library path and empty stderr. The previous cache bytes were restored afterward. This proves the notice cannot contaminate the native bootstrap path, alongside the live IDE load evidence.
+
+The historical 0.2.375/0.35.345 activation prerequisite is satisfied; **no IntelliJ restart is needed**. No code or installation change was necessary. The unchanged source is `7fca2ff8f`; its full `make check tmux-ci` previously passed, and its latest GitHub CI run now reports success. The remaining queue continues with `#harnessswitchverify`, then `#compactdevreplica`.
 <!-- agent:boundary:bff5c51e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -213,14 +223,13 @@ Three review tasks are queued. Code and document commits are pushed; release wor
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#actionable-review~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#restartintellijidea]
+- ~~#actionable-review~~
+- ~~do [#restartintellijidea]~~
 - do [#harnessswitchverify]
 - do [#compactdevreplica]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#restartintellijidea] Verify the current IntelliJ agent-doc plugin registration and native-library load path when a newer agent-doc release exists. Compare the running plugin/native versions with the installed artifacts; the old 0.2.375/0.35.345 references are historical. Use existing runtime evidence first. If activation still requires an IDE restart, record that exact operator prerequisite; close only with live native-load evidence.
 - [ ] [#harnessswitchverify] Recheck #harnessswitchstorm with the current live JetBrains plugin generation. After proving editor authority and matching runtime registration, validate an unsaved claude <-> codex switch: exactly one spawn and agent_restart_deferred reason=non_authoritative_document_view, without refusal storms or requiring a save to recognize the edit. Preserve operator text and use a disposable session for the repro. If a host restart is still required, record the current registration and precise blocker. The 2026-08-25 fpe.md run is invalid historical evidence.
 - [ ] [#compactdevreplica] Recheck the retained Compact Exchange continuation for src/haiven-dev/tasks/dev.md using current replica state and commit history. If it already settled, record the exact commit and resolve this item. Otherwise use supported replica recovery and verify the existing continuation commits while preserving operator text. Do not repeat Compact Exchange or force disk. If editor_attached_model_missing persists, record the exact reopen/restart prerequisite. Context: tasks/agent-doc/plan-compact-save-layout-dispatch.md.
 <!-- /agent:backlog -->

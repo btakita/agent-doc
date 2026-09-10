@@ -180,6 +180,29 @@ conversion for the reverse mirror is step 4 above: serve the poll from the
 controller's reactive actor store instead of SQLite. A pure-subscription
 replacement remains out of reach until a tmux focus-change hook exists.
 
+### 0.35.362 reverse-focus restoration
+
+The JetBrains reverse-focus adapter was later disabled at project startup while
+hardening unrelated editor recovery, leaving the controller projection and its
+500 ms tmux observation path unreachable. Version 0.35.362 restores the single
+`TmuxPaneFocusSync` lifecycle instance and makes its boundary decision explicit:
+
+- a focused editor component preserves editor-owned selection;
+- focus transferred to an embedded tmux terminal may mirror a visible document,
+  including a document from another project root in the same editor surface;
+- a hidden foreign-root target remains suppressed; and
+- editor-origin intent remains generation/lease fenced until tmux acknowledges it.
+
+The Project Controller remains the tmux focus-state owner. The plugin contributes
+only the bounded observation adapter and applies a selected file with
+`focusEditor=false`; no second layout owner, durable cache, or new polling path was
+introduced. JetBrains lifecycle and pure transition regressions cover the restored
+installation, embedded-terminal cross-root case, focused-editor preservation, and
+hidden-foreign-root suppression. Full `make check tmux-ci` passed 9,304 workspace
+tests plus editor parity, cross-editor native integration, formal models, and the
+isolated tmux suite. Source commit: `bc7215e9f`; release tag: `v0.35.362`;
+JetBrains plugin: `0.2.379`.
+
 ## Follow-ups (out of plan scope)
 
 - **`#replicarefusalstorm` fallback: a "take over wedged endpoint" operation (`#replicaendpointtakeover`).** When `reload-lib` genuinely cannot reach a live editor endpoint (e.g. the endpoint's native listener is wedged beyond the reload-compat path), the controller refuses `replica_register` as `detached_authority` forever — the editor can't re-attach through the very RPC that would attach it. Add a controller operation that, for a proven-live editor PID, accepts a `replica_register` as the attach trigger (flipping the doc to `MultiReplica`) instead of refusing it for not being attached, with the existing `#replica-structure-guard` + `#qdelauth` backstops catching dangerous stale content. This is the fallback for the case the 0.35.157 reload-receipt fix (`IPC_RELOAD_LIBRARY_RECEIPT_TIMEOUT_SECS`) does not cover (a listener that won't accept the reload at all). Lower priority than the latency work.

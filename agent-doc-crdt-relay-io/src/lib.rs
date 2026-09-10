@@ -5357,6 +5357,17 @@ mod tests {
             "retiring the old forwarder must preserve the replacement PID Source"
         );
         assert_eq!(crdt_authority_for_file(&doc), CrdtAuthority::MultiReplica);
+        let document_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        assert!(
+            allocated_routed_relay_document_hashes().contains(&document_hash),
+            "the late retired close must not remove the replacement from allocated_model_docs"
+        );
+        assert!(
+            agent_doc_document_realtime::editor_open_docs::editor_open_docs()
+                .open_agent_docs()
+                .contains(&file_str),
+            "the late retired close must not remove the replacement from registry_open_docs"
+        );
 
         assert!(deregister_editor_replica_for_file(&doc, &refresh_identity, pid).unwrap());
         assert!(

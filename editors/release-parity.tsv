@@ -16,3 +16,4 @@
 0.35.354	Live queue revision preservation and steering	shared-core; existing turn projection stream	shared-core; existing turn projection stream	staged	make check; stale-strike, done-ID revision, multiline steering and native-peer regressions
 0.35.355	Layout provisioning independent of focus and queue dispatch	shared-core	shared-core	staged	make check; make tmux-ci; paused queue provisioning and cross-project route policy regressions
 0.35.356	Startup layout recall does not authorize shared-window placement	shared-core	shared-core	staged	make check; make tmux-ci; saved-layout startup, actor hydration, restart, and late-sink activation regressions
+0.35.357	Late replica teardown fencing and successful-registration recovery rearm	plugin-lifetime native-manager generation plus shared recovery receipt; plugin 0.2.377	shared recovery receipt	staged	make check; make tmux-ci; retired-generation membership and recovery-rearm regressions

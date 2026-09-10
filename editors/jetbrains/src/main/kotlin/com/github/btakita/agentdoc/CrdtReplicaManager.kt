@@ -510,7 +510,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val templateGuardRecoveryFailureCounts = ConcurrentHashMap<String, Int>()
     private val deferredWriteReplayRetryPaths = ConcurrentHashMap.newKeySet<String>()
     private val deferredWriteReplayFailureCounts = ConcurrentHashMap<String, Int>()
-    private val refreshConnectionEpoch = AtomicLong(0)
     // `#ctrlkillreregister` Tier 3: transport loss is reported per document, but a
     // dead controller strands every document at once. One pull answers for all of
     // them, so the second and third file to notice must not each start their own.
@@ -933,7 +932,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         val replacement =
                             CrdtReplicaForwarder(
                                 filePath = newPath,
-                                identity = "${EditorIdentity.id}:$newPath:path-transition-${refreshConnectionEpoch.incrementAndGet()}",
+                                identity = EditorIdentity.nextReplicaConnectionIdentity(newPath),
                                 node = NativeReplicaNode(),
                                 transport = CpSocketReplicaTransport(root),
                                 ownershipContext = ownershipContext,
@@ -2599,12 +2598,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 (!allowPendingLocalAtSwap && hasPendingLocal(filePath)))
         ) return cached
         val root = resolveProjectRoot(filePath) ?: return null
-        val baseIdentity = "${EditorIdentity.id}:$filePath"
-        val identity = if (replaceCached && cached != null) {
-            "$baseIdentity:refresh-${refreshConnectionEpoch.incrementAndGet()}"
-        } else {
-            baseIdentity
-        }
+        // Allocate from the plugin-lifetime epoch even for an initial attach.
+        // CrdtReplicaManager is recreated during native reload, so an instance-local
+        // counter (or the bare editor/path identity) can collide with a retiring
+        // manager whose deregistration is still in flight.
+        val identity = EditorIdentity.nextReplicaConnectionIdentity(filePath)
         val retainedResumeState =
             if (bootstrapFromControllerCanonical) {
                 null

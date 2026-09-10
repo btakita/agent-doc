@@ -17,11 +17,24 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.SwingUtilities
 
 object EditorIdentity {
     val id: String = "jetbrains-${ProcessHandle.current().pid()}-${UUID.randomUUID()}"
+    private val replicaConnectionEpoch = AtomicLong(0)
+
+    /**
+     * Allocate a distinct transport identity for every native replica incarnation.
+     *
+     * The editor id is stable across an in-process native reload, while an old
+     * manager can finish deregistering after its replacement has registered. A
+     * generation suffix lets the relay recognize that late close as belonging to
+     * the retired member instead of removing the replacement's identical client id.
+     */
+    internal fun nextReplicaConnectionIdentity(filePath: String): String =
+        "$id:$filePath:refresh-${replicaConnectionEpoch.incrementAndGet()}"
 }
 
 internal data class PendingEditorOp(

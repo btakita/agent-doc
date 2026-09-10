@@ -9625,6 +9625,7 @@ fn controller_crdt_replica_data(
                 )?;
             match registration {
                 Some(registration) => {
+                    observe_editor_replica_rebuild_healthy(canonical);
                     if durable_projection_retained {
                         agent_doc_crdt_relay_io::ensure_canonical_projection_receipt_for_file(
                             canonical, identity,
@@ -13870,6 +13871,25 @@ fn claim_editor_replica_rebuild_edges(
     let claimed = targets.difference(&published).cloned().collect::<Vec<_>>();
     published.extend(claimed.iter().cloned());
     claimed
+}
+
+fn observe_editor_replica_rebuild_healthy_with(
+    plane: &EditorReplicaRebuildPlane,
+    file: &Path,
+) -> bool {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let canonical = canonical.to_string_lossy();
+    let mut published = plane.published.lock();
+    let previous_len = published.len();
+    published.retain(|target| target.path != canonical);
+    published.len() != previous_len
+}
+
+/// A successful replica registration is the typed health receipt for a prior
+/// rebuild edge. Rearm that path immediately so a later, genuinely distinct hub
+/// loss at the same reliable-sync registration can request recovery again.
+fn observe_editor_replica_rebuild_healthy(file: &Path) {
+    observe_editor_replica_rebuild_healthy_with(editor_replica_rebuild_plane(), file);
 }
 
 fn dispatch_editor_replica_rebuild_targets_with(
@@ -30978,6 +30998,37 @@ mod tests {
             },
         );
         assert_eq!(calls.get(), 2, "a genuinely new edge remains retryable");
+    }
+
+    #[test]
+    fn successful_replica_membership_rearms_the_same_rebuild_target() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("tasks/fpe.md");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "# FPE\n").unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let plane = EditorReplicaRebuildPlane::default();
+        let target = EditorReplicaRebuildTarget {
+            path: canonical.to_string_lossy().into_owned(),
+            pid: 42,
+            editor_id: "jetbrains-42".to_string(),
+            strategy: EditorReplicaRepairStrategy::ControllerPush,
+        };
+        let targets = BTreeSet::from([target]);
+
+        assert_eq!(
+            claim_editor_replica_rebuild_edges(&plane, &targets).len(),
+            1
+        );
+        assert!(claim_editor_replica_rebuild_edges(&plane, &targets).is_empty());
+        assert!(observe_editor_replica_rebuild_healthy_with(
+            &plane, &canonical
+        ));
+        assert_eq!(
+            claim_editor_replica_rebuild_edges(&plane, &targets).len(),
+            1,
+            "a later loss at the same editor registration must be a new edge",
+        );
     }
 
     #[test]

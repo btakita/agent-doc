@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.357
+
+- Prevent a delayed JetBrains replica-manager teardown from deregistering its
+  successor. Every native-manager incarnation now receives a plugin-lifetime
+  connection generation, preserving the current hub, `allocated_model_docs`,
+  and `registry_open_docs` when an older deregistration arrives late.
+- Rearm missing-membership recovery when replica registration succeeds. The
+  typed registration receipt clears the single-flight rebuild edge so a later
+  loss under the same reliable-sync registration can request repair again
+  without falling back to refused disk authority.
+
 ## 0.35.356
 
 - Prevent controller startup and recycle from replaying a project's saved layout into a shared tmux window and stealing pane focus. Saved columns remain available for explicit recall; current editor or command intent authorizes placement.

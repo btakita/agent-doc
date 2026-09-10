@@ -236,6 +236,16 @@ The replica is now readable through `agent-doc read`, and the current authority/
 A broader doctor check still warns about the old response capture whose body was archived by compaction. That warning does not negate the compact's committed proof. I left the document's later uncommitted resume/preset edits intact and did not reset its baseline to absorb them.
 
 This completes the two verified review tasks. `#harnessswitchverify` remains in review for the real unsaved-editor check; its current plugin/native prerequisites are verified.
+
+### Re: Response
+
+Committed and pushed the document updates.
+
+- IntelliJ/native loading verified; no restart needed.
+- Retained compact confirmed in commit `8e62982`.
+- Harness switching remains in review pending a real unsaved-editor test.
+
+Session check passed; no actionable queue items remain.
 <!-- agent:boundary:bff5c51e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

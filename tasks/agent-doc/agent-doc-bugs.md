@@ -224,6 +224,18 @@ Verified the current prerequisite: IntelliJ PID `1653132` runs plugin **0.2.376*
 The live unsaved-switch proof remains open. Current logs contain no qualifying switch with the required one-spawn/deferred-restart evidence. The shared policy tests passed in the unchanged 0.35.356 full suite, but they do not replace that live check. Requested a disposable document path and a real unsaved editor edit to observe; ordinary CLI persistence would not exercise the same condition.
 
 Moved this item back to review with that precise remaining prerequisite. The [agent-doc skill](../../.codex/skills/agent-doc/SKILL.md) permits gating for a “required live editor/pane verification”; that is the remaining work here. No additional backlog follow-up is needed because implementation and automated checks are complete and the retained review item owns the live verification. Continuing to `#compactdevreplica`.
+
+### Re: #compactdevreplica — gpt-6
+
+> **Queue prompt:** do [#compactdevreplica]
+
+The retained compact already committed as **`8e62982`** in `src/haiven-dev` on September 9 at 02:02 EDT. That commit contains the compact summary and the exact archive reference ending `20260909-045203.md`; the 63,494-byte archive still exists, and the current live editor exchange carries the same reference.
+
+The replica is now readable through `agent-doc read`, and the current authority/disk comparison reports no divergence. The old `editor_attached_model_missing` blocker no longer prevents this check. Marked `#compactdevreplica` done; no repeated Compact Exchange, forced disk write, or editor restart was needed.
+
+A broader doctor check still warns about the old response capture whose body was archived by compaction. That warning does not negate the compact's committed proof. I left the document's later uncommitted resume/preset edits intact and did not reset its baseline to absorb them.
+
+This completes the two verified review tasks. `#harnessswitchverify` remains in review for the real unsaved-editor check; its current plugin/native prerequisites are verified.
 <!-- agent:boundary:bff5c51e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -236,11 +248,10 @@ Moved this item back to review with that precise remaining prerequisite. The [ag
 - ~~#actionable-review~~
 - ~~do [#restartintellijidea]~~
 - do [#harnessswitchverify]
-- do [#compactdevreplica]
+- ~~do [#compactdevreplica]~~
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#compactdevreplica] Recheck the retained Compact Exchange continuation for src/haiven-dev/tasks/dev.md using current replica state and commit history. If it already settled, record the exact commit and resolve this item. Otherwise use supported replica recovery and verify the existing continuation commits while preserving operator text. Do not repeat Compact Exchange or force disk. If editor_attached_model_missing persists, record the exact reopen/restart prerequisite. Context: tasks/agent-doc/plan-compact-save-layout-dispatch.md.
 <!-- /agent:backlog -->
 
 ## Review

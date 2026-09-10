@@ -13,14 +13,14 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: start
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
 
-0.35.358 installed; editor recovery and refused-admission guards shipped. Retained closeout recovered; plugin 0.2.378 activation remains a live verification follow-up.
+Grok v0.35.359 installed and pushed; full local verification passed. Authenticated Grok MCP closeout awaits renewed quota. Next: fix extra tmux pane with two editor panes.
 <!-- /agent:status -->
 
 ## Exchange
@@ -276,6 +276,20 @@ The invariant is preservation of operator edits and exact admission authority. T
 IntelliJ still reports plugin 0.2.376, so activation of installed 0.2.378 and its live stale-splice regression check remain in review. This is **not a blocker to continuing this document**. The [agent-doc skill](../../.codex/skills/agent-doc/SKILL.md) permits gating a “required live editor/pane verification”; that is the exact remaining prerequisite, with implementation, installation, publication trigger, and automated checks complete.
 
 Architecture and evidence: [plan-captured-editor-splice-recovery.md](plan-captured-editor-splice-recovery.md).
+
+### Re: Grok Build integration — gpt-6
+
+> **Queue prompt:** Please add support for grok build
+
+Grok Build support is implemented, installed, and pushed as v0.35.359 (`714382522`). Set `agent: grok` in a document; `grok-build` is an alias. The installer added the shared Grok skill and project MCP configuration. Headless runs parse Grok's native final JSON and store document-bound identity in `resume.grok`, preserving other harness histories and excluding reasoning traces. Managed sessions recognize Grok's idle composer, protect drafts, and use its verified two-key quit sequence.
+
+Yes, state remains in the existing Lazily document, turn, and supervisor graph. Grok adds protocol and pane observations, not a separate state owner. Its passive hooks cannot supply admission or queue steering, so the skill uses connected admit/finalize and follows the binary's same-turn queue continuation.
+
+`make check tmux-ci` passed: 9,302 tests plus 21 isolated tmux cases, editor parity and formal checks. Release builds and `make install-full` passed; the installed Grok skill check and controller recycle succeeded. CI, Release and PyPI were in progress at the single post-push observation.
+
+Your authorized Grok CLI worked in disposable JSON and terminal probes. The authenticated MCP probe exhausted the free usage quota before end-to-end closeout, so that live verification remains in review until quota returns or your planned subscription is available. Heavy is not required by the integration. Two early unstructured response probes failed document capture proof; the correctly structured local native-backend fixture committed successfully.
+
+Your IDEA restart activated plugin 0.2.378 in PID 1035669. The old activation prerequisite is satisfied; the separate live unsaved-edit checks remain explicit. Next, as requested, I am continuing with the extra tmux pane seen with two editor panes. Plan and release proof: `tasks/agent-doc/plan-grok-build-support.md`.
 <!-- agent:boundary:d53e8ec0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -285,20 +299,22 @@ Architecture and evidence: [plan-captured-editor-splice-recovery.md](plan-captur
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Fix fpe.md issue that stopped retrieving the next queue item. Also Run Agent Doc on this file is wedged.
+- ~~Fix fpe.md issue that stopped retrieving the next queue item. Also Run Agent Doc on this file is wedged.~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#harnessswitchverify]
 - Please add support for grok build
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
+- [ ] [#twocolpanefix] Fix the extra tmux pane with two editor panes, after the Grok integration. Reproduce the current layout transition, preserve active sessions/focus, and enforce the editor-visible pane count. Plan: tasks/agent-doc/plan-sync-layout-cardinality-focus-handoff.md.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#activateinstalledjetbrai] [operator-verify] Activate the installed JetBrains plugin 0.2.378 and verify captured local edits recover across an independently advanced canonical response. IntelliJ PID 1653132 still reports plugin 0.2.376; CLI/native 0.35.358 and plugin package 0.2.378 are installed and all automated tests passed. Unblocks: activate the updated plugin through IntelliJ and provide a disposable live document for the edit/response interleaving check. The original retained capture already committed as 1b35dcb028; this does not block continued document work. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
-- [/] [#harnessswitchverify] [operator-verify] Current prerequisites verified: IntelliJ PID 1653132 runs plugin 0.2.376 and native 0.35.356 with operator_text_authority_v1. Remaining proof: in a disposable live IntelliJ session, make an unsaved codex -> claude -> codex frontmatter switch while observing supervisor receipts; prove one spawn per authoritative switch, deferred restart for non-authoritative evidence, and no refusal/respawn storm. No host restart is currently indicated. Unblocks: provide the disposable document path and perform the real unsaved editor edit; CLI persisted writes cannot substitute for this proof.
+- [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation once the free usage quota renews or the planned subscription is active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed; the live MCP probe stopped at the usage limit before committed closeout. Installed v0.35.359; Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.
+- [/] [#activateinstalledjetbrai] [operator-verify] IDEA restart activated plugin 0.2.378 in PID 1035669; CLI/native 0.35.359 is installed. Remaining proof: captured local edits recover across an independently advanced canonical response in a disposable live editor document. The original retained capture committed as 1b35dcb028, and all automated regressions passed. Unblocks: perform the live edit/response interleaving check. No further plugin activation is required. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
+- [/] [#harnessswitchverify] [operator-verify] Current prerequisites verified: IntelliJ PID 1035669 runs plugin 0.2.378; CLI/native 0.35.359 is installed. Remaining proof: in a disposable live IntelliJ session, make an unsaved codex -> claude -> codex frontmatter switch while observing supervisor receipts; prove one spawn per authoritative switch, deferred restart for non-authoritative evidence, and no refusal/respawn storm. Unblocks: provide the disposable document path and perform the real unsaved editor edit; persisted CLI writes cannot substitute for this proof.
 - [/] [#cargo355token] [operator-verify] Rotate the Cargo registry token exposed in diagnostic tool output during the pane-removal investigation. Tracing was stopped and generated trace files removed; no credential value is stored in this document or source.
 - [/] [#pypi345quota] Publish agent-doc v0.35.358 to PyPI once quota space is available. The previously observed upload failure was the 10 GB project-storage limit; v0.35.358's tag-triggered workflow was in progress at last observation and its uploaded artifacts are not yet verified. Unblocks: obtain a quota increase or explicitly approve old-release cleanup if this release also encounters the quota, then rerun PyPI and verify artifacts.
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.

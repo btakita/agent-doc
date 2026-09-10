@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a08888-494a-78d1-b610-891160adb001
+  codex: 01a08ca6-2d17-7822-948a-aaff42a157ac
 agent: codex
 claude_model: fable
 agent_doc_format: template
@@ -314,6 +314,20 @@ Before/after regressions proved the failure and correction. Full `make check tmu
 `#harnessswitchverify` remains open in review. IntelliJ PID 1035669 is running the activated 0.2.378 plugin, but the required unsaved codex → claude → codex switch in a disposable live editor document has not been observed. Completing it requires that editor transition and the corresponding supervisor receipts; saved CLI edits cannot substitute for this proof.
 
 Plan and verification evidence: `tasks/agent-doc/plan-stop-gated-queue-head.md`.
+
+### Re: Tmux pane auto-sync — gpt-6
+
+Fixed, installed, and published as agent-doc **v0.35.362** (source commit `bc7215e9f`) with JetBrains plugin **0.2.379**.
+
+The reverse tmux-to-editor adapter existed but was no longer installed by the JetBrains project lifecycle, so controller focus observations could never reach editor selection. Startup now installs exactly one adapter. Its transition policy distinguishes actual editor-component focus from the containing IDE frame: an actively focused editor stays authoritative, while clicking tmux in the embedded terminal can select the corresponding visible editor document even when that document belongs to another project root. Hidden foreign-root targets remain suppressed, editor-origin focus retains its acknowledgment lease, and reverse selection still uses `focusEditor=false`.
+
+The Project Controller remains the tmux state owner. JetBrains supplies one bounded observation adapter and applies the derived selection; no second layout owner, durable cache, or additional polling path was introduced. The existing 500 ms probe remains necessary because tmux exposes no push event for arbitrary pane-focus changes.
+
+**Verification:** the focused JetBrains regression suite passed. Full `make check tmux-ci` then passed **9,304 workspace tests** (259 skipped), 179 VS Code tests, cross-editor native integration, editor parity, formal models, and the isolated tmux suite. The first rerun was interrupted only by a full `/tmp`; removing the regenerable 4.4 GB agent-doc Gradle cache restored capacity and the clean rerun passed.
+
+The optimized CLI/native release and both editor packages are installed. Source `main` and tag `v0.35.362` are pushed; CI, Release, and PyPI workflows were queued/in progress at the required post-push observation. IntelliJ PID 1035669 is still running plugin 0.2.378, so one IDE restart is required to activate installed 0.2.379 and perform the live pane-click proof; that exact check is retained in review.
+
+Architecture and evidence: [plan-tmux-auto-sync-reactive.md](plan-tmux-auto-sync-reactive.md).
 <!-- agent:boundary:d53e8ec0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -332,8 +346,9 @@ Plan and verification evidence: `tasks/agent-doc/plan-stop-gated-queue-head.md`.
 ## Review
 
 <!-- agent:review -->
+- [/] [#tmuxfocussyncverify] [operator-verify] Restart IntelliJ to activate installed JetBrains plugin 0.2.379, then keep agent-doc-bugs.md and the cross-root infra.md visible, click each embedded tmux pane, and verify editor selection follows without stealing focus from an actively focused editor component. Automated lifecycle and transition regressions plus make check tmux-ci passed; source v0.35.362 is published. Plan: tasks/agent-doc/plan-tmux-auto-sync-reactive.md.
 - [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation once the free usage quota renews or the planned subscription is active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed; the live MCP probe stopped at the usage limit before committed closeout. Installed v0.35.359; Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.
-- [/] [#activateinstalledjetbrai] [operator-verify] IDEA restart activated plugin 0.2.378 in PID 1035669; CLI/native 0.35.359 is installed. Remaining proof: captured local edits recover across an independently advanced canonical response in a disposable live editor document. The original retained capture committed as 1b35dcb028, and all automated regressions passed. Unblocks: perform the live edit/response interleaving check. No further plugin activation is required. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
+- [/] [#activateinstalledjetbrai] [operator-verify] Installed JetBrains plugin 0.2.379 is staged while running IDEA PID 1035669 remains on 0.2.378; one restart activates both the reverse tmux-focus fix and the current package generation. Remaining splice proof: captured local edits recover across an independently advanced canonical response in a disposable live editor document. The original retained capture committed as 1b35dcb028, and all automated regressions passed. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 - [/] [#harnessswitchverify] [operator-verify] Current prerequisites verified: IntelliJ PID 1035669 runs plugin 0.2.378; CLI/native 0.35.361 is installed. Remaining proof: in a disposable live IntelliJ session, make an unsaved codex -> claude -> codex frontmatter switch while observing supervisor receipts; prove one spawn per authoritative switch, deferred restart for non-authoritative evidence, and no refusal/respawn storm. Unblocks: provide the disposable document path and perform the real unsaved editor edit; persisted CLI writes cannot substitute for this proof. The unrelated Stop-hook gate-selection defect is fixed in v0.35.361; plan: tasks/agent-doc/plan-stop-gated-queue-head.md.
 - [/] [#cargo355token] [operator-verify] Rotate the Cargo registry token exposed in diagnostic tool output during the pane-removal investigation. Tracing was stopped and generated trace files removed; no credential value is stored in this document or source.
 - [/] [#pypi345quota] Publish agent-doc v0.35.358 to PyPI once quota space is available. The previously observed upload failure was the 10 GB project-storage limit; v0.35.358's tag-triggered workflow was in progress at last observation and its uploaded artifacts are not yet verified. Unblocks: obtain a quota increase or explicitly approve old-release cleanup if this release also encounters the quota, then rerun PyPI and verify artifacts.

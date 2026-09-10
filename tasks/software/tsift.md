@@ -65,12 +65,59 @@ Verification passed: `make check` with 1,835 Rust tests, Clippy, OpenCode plugin
 [Release v0.1.97](https://github.com/btakita/tsift/releases/tag/v0.1.97) includes Linux, macOS, and Windows binaries and checksums. [Publication](https://github.com/btakita/tsift/actions/runs/34296745682) passed: crates.io uploaded all 26 crates (`published=26 skipped=0`), verified individually at v0.1.97 and not yanked; npm confirms `opencode-tsift@0.1.97`.
 
 The clean release worktree is `/tmp/tsift-issue-25`. The original checkout retains its preexisting uncommitted changes.
+
+
+### Re: tsift compared with Graft — gpt-6
+
+> **Queue prompt:**
+>
+> do [#comparetsiftgraft]
+
+
+**Graft does not supersede tsift as a whole.** It is a credible alternative for repository orientation and retrieving relevant code for an agent. Its strongest contribution to tsift would be a simpler retrieval interface. tsift covers additional workflows—structural edits, durable evidence and memory, and compact session/test/log handling—that the inspected Graft implementation does not replace.
+
+I reviewed Graft **0.17.0**, commit `3a85a2f`, against released tsift **0.1.97**, commit `4e8af21`, on September 10, 2026. This is a source comparison, not a measured performance comparison. The assessment uses the clean tsift release worktree, preserving the original checkout's existing changes.
+
+| Area | Graft | Implication for tsift |
+|---|---|---|
+| Code retrieval | A question-oriented `ask` interface combines intent routing, lexical evidence, graph ranking, and source excerpts. | Make existing primitives easier to consume together; this is more specific than simply adding graph search. |
+| Generated meaning | Optional deep indexing adds summaries and concepts. Per-symbol “crux” excerpts select decisive lines from actual source. | Add progressive expansion from summary to decisive excerpt to full symbol. |
+| Graph precision | Tree-sitter extraction plus optional LSP call-edge enrichment. | An opportunity to improve selected call-resolution cases without building a type checker. |
+| Change impact | Changed-line seeds, incoming dependency traversal, grouped modules, and evidence paths. | Extend the presentation and integration of tsift's existing `impact` command. |
+| Agent integration | Six focused MCP tools cover finding code, file APIs, calls, exhaustive matches, maps, and freshness. | A small MCP interface could reduce the effort of choosing among tsift commands. |
+| Broader workflows | Primarily repository context and navigation. | tsift's structural edits, graph evidence/memory, and digest envelopes remain separate reasons to use it. |
+
+The retrieval and integration observations come from [Graft's ask implementation](https://github.com/trailhq/Graft/blob/3a85a2f40e283ac0c9b617d9a4bead18d73c3c70/src/ask/ask.ts) and [MCP tools](https://github.com/trailhq/Graft/blob/3a85a2f40e283ac0c9b617d9a4bead18d73c3c70/src/mcp/tools.ts). tsift's broader scope is documented in its [edit contract](https://github.com/btakita/tsift/blob/4e8af219a469b1f7c12378c546eff1bafaafcc5d/specs/ast-edits.md), [graph/evidence contract](https://github.com/btakita/tsift/blob/4e8af219a469b1f7c12378c546eff1bafaafcc5d/specs/graph.md), and [output envelopes](https://github.com/btakita/tsift/blob/4e8af219a469b1f7c12378c546eff1bafaafcc5d/specs/output-formats.md).
+
+Several details matter when evaluating Graft's claims:
+
+- **Its basic graph is deterministic.** LLM enrichment is optional; describing Graft as merely generated Markdown would miss its structural retrieval engine. Its file-based storage still includes a JSON graph and cached query sidecars. “No database” does not mean no maintained index. [Refresh implementation](https://github.com/trailhq/Graft/blob/3a85a2f40e283ac0c9b617d9a4bead18d73c3c70/src/graph/refresh.ts)
+- **Freshness has separate layers.** Queries attempt structural refresh without calling a model. Lock contention or refresh errors can leave queries using the existing graph. Changed symbols retain summaries marked stale until enrichment runs. tsift navigation can also explicitly warn that a snapshot lags an active writer; neither tool should be described as universally fresh. Preserve tsift's operation-specific watermark/version checks and expose structural and summary freshness separately. [Graft summary invalidation](https://github.com/trailhq/Graft/blob/3a85a2f40e283ac0c9b617d9a4bead18d73c3c70/src/graph/enrich.ts)
+- **LSP support is useful but bounded.** The inspected implementation picks one eligible installed server, enriches existing in-repository nodes, and falls back when unavailable. This is not proof of complete resolution across a mixed-language monorepo. [LSP enrichment](https://github.com/trailhq/Graft/blob/3a85a2f40e283ac0c9b617d9a4bead18d73c3c70/src/graph/lsp/enrich.ts), [server selection](https://github.com/trailhq/Graft/blob/3a85a2f40e283ac0c9b617d9a4bead18d73c3c70/src/graph/lsp/registry.ts)
+- **The published benchmarks do not compare with tsift.** Graft reports improvements against a cold agent baseline, including a 50-instance SWE-bench evaluation. Those results support testing Graft's approach; they do not establish replacement, equal language coverage, or better large-workspace performance. [Published benchmark description](https://github.com/trailhq/Graft/blob/3a85a2f40e283ac0c9b617d9a4bead18d73c3c70/README.md#benchmark)
+
+My recommended order is:
+
+1. **Measure the actual gap — `#graftbenchmark`.** Use identical repositories, tasks, model, and context limits for baseline, tsift, and Graft. Separate cold setup, warm queries, dirty-tree updates, and optional model enrichment. Measure task correctness and missed related files alongside total tokens and latency.
+2. **Build a question-oriented interface — `#grafttaskcontext`.** Route a task to existing search, graph, and source operations, returning a bounded source-backed context pack. Add thin MCP adapters and a compact repository map. Graft's file diversity and weak-scope filtering are worth testing; tsift already has graph ranking, so reuse that foundation. [Ranking and scope fusion](https://github.com/trailhq/Graft/blob/3a85a2f40e283ac0c9b617d9a4bead18d73c3c70/src/ask/fuse.ts)
+3. **Add verified crux excerpts — `#graftcrux`.** Let optional enrichment select the branch, guard, formula, or state transition that explains a symbol. Slice the actual source, validate the span, and bind it to the body hash. Graft already implements per-symbol crux extraction; its proposed inline Markdown treatment should not be confused with shipped behavior. [Crux extraction](https://github.com/trailhq/Graft/blob/3a85a2f40e283ac0c9b617d9a4bead18d73c3c70/src/ai/crux.ts)
+4. **Improve impact context — `#graftimpactcontext`.** Group affected production modules, show the path from each changed symbol, and separate test evidence. This extends [tsift's existing impact analysis](https://github.com/btakita/tsift/blob/4e8af219a469b1f7c12378c546eff1bafaafcc5d/packages/tsift-search/src/impact.rs), drawing on [Graft's blast analysis](https://github.com/trailhq/Graft/blob/3a85a2f40e283ac0c9b617d9a4bead18d73c3c70/src/blast/blast.ts).
+5. **Prototype optional LSP edges — `#graftlspedges`.** Start with measured Rust/TypeScript resolution failures. Keep extraction usable without a server and retain edge provenance and coverage diagnostics. This fits a narrower scope than the full LSP-level type inference excluded by [tsift's current integration guidance](https://github.com/btakita/tsift/blob/4e8af219a469b1f7c12378c546eff1bafaafcc5d/specs/release-integration.md).
+
+I would keep tsift's existing storage and evidence model while evaluating these additions. The recommendation is selective adoption, subject to a direct comparison. All five follow-ups are recorded as provisional `[recommended]` items; this comparison does not claim they are implemented.
+
+Verification: tsift's full `make check` passed in the release worktree, and the [latest CI run](https://github.com/btakita/tsift/actions/runs/34296745413) passed. Graft was inspected from source; I did not run its model-backed benchmarks. Completed `#comparetsiftgraft`; top recommended backlog item: `#graftbenchmark`.
 <!-- agent:boundary:b8ec92e9:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- do [#graftbenchmark]
+- do [#grafttaskcontext]
+- do [#graftcrux]
+- do [#graftimpactcontext]
+- do [#graftlspedges]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -79,6 +126,11 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#graftbenchmark] [recommended] Benchmark tsift and Graft against the same baseline, repositories, tasks, model, and context budget; measure correctness, multi-file recall, total tokens, setup/model cost, and cold/warm/dirty-tree latency before prioritizing adoption.
+- [ ] [#grafttaskcontext] [recommended] Add a question-oriented task-context interface and thin MCP adapters over existing tsift search, graph, source, and freshness primitives; evaluate file diversity, weak-match abstention, compact repo maps, and total context budgets.
+- [ ] [#graftcrux] [recommended] Add optional source-verified crux excerpts to tsift summaries and symbol context, anchored to symbol spans and body hashes with explicit stale-state handling.
+- [ ] [#graftimpactcontext] [recommended] Extend existing tsift impact output with grouped production modules, changed-symbol evidence paths, and separate test signals; expose bounded context to post-edit integrations.
+- [ ] [#graftlspedges] [recommended] Prototype optional LSP call-edge enrichment using installed servers, preserving extractor fallback, provenance, confidence, coverage diagnostics, and tsift freshness contracts; validate Rust and TypeScript resolution precision.
 <!-- /agent:backlog -->
 
 ## Review

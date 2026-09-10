@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: afcc61d9-14a3-4322-99e1-7734891e9959
+  claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
   codex: 01a08ca6-2d17-7822-948a-aaff42a157ac
 agent: claude
 claude_model: opus
@@ -13,7 +13,7 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -53,6 +53,46 @@ Audited all 8 gated `agent:review` items against live state rather than their pr
 **No agent-drainable work came out of this.** All three promoted items are operator-executed, so they carry `[operator-verify]` and go-mode will correctly defer them rather than churn the drain. The value here is that three one-line actions are now visible in the actionable list instead of buried in eight paragraphs of gated prose.
 
 No code, test, or build surfaces changed this cycle — the mutations are confined to this document's tracked-work components, so no suite run applies. The standing `stale_plugin` warning (live 0.2.378 vs shipped 0.2.379) is exactly what `#restartideaplugin` now tracks.
+
+### Re: #restartideaplugin restarted, do #pypiquotafix, do #cargotokenrevoke — opus-5
+
+Three queue heads, oldest-first — plus an agent-doc defect that this turn tripped over and fixed, because the first `finalize` refused the cycle.
+
+**`#restartideaplugin` — done.** Verified rather than taken on faith: PID 1035669 is gone, IDEA is now PID 13006 started `Thu Sep 10 18:41:13`, and the staged `agent-doc-jetbrains-0.2.379.jar` was written at `15:38:33`, so the running IDE loaded it. This turn's preflight carried **no `stale_plugin` warning** — that check is the binary's own live-vs-shipped comparison and it had been firing every cycle until now. The plugin floor for `#tmuxfocussyncverify`, `#activateinstalledjetbrai`, and `#harnessswitchverify` is satisfied; those three still need the human-interaction half of their proofs.
+
+**`#pypiquotafix` — took path (a), the non-destructive one. Filed https://github.com/pypi/support/issues/12214** ("Project Limit Request: agent-doc - 25 GiB"). I did **not** touch path (b): deleting 34 releases is irreversible and burns those version numbers permanently, so that stays your call.
+
+Re-measured live before filing, and one number is worse than the backlog text:
+
+| | |
+|---|---|
+| Total | **9.990 GiB** across 165 releases (10.726 GB) |
+| Average release | 62.0 MiB (4 wheels); largest 68.1 MiB (`0.35.327`) |
+| Latest | `0.35.343` — **1 of 4 wheels**, macOS x86_64 only |
+| First upload | 2026-07-17 |
+| **Releases in the last 30 days** | **82** |
+
+That last row is the actual problem. 82 × 62 MiB is **~5 GiB/month**, so a granted 25 GiB buys roughly three months and then we are back here. The limit increase is a stopgap, not the fix — I said so plainly in the issue and committed to reducing cadence, so that is now a public commitment attached to the request. I did not change the publish policy myself: `pypi.yml` fires on every `v*` tag and that is yours to set, so it is queued as `#pypicadence` at the top of the backlog with three concrete options. I verified before asserting it publicly that `[profile.release]` really does carry `lto = "fat"`, `codegen-units = 1`, `strip = true`, so there is no wheel-shrinking path left to claim.
+
+**`#cargotokenrevoke` — blocked one click short.** `https://crates.io/settings/tokens` is open in the bridged browser (tab 13, the spare New Tab — your other 19 tabs are untouched) and returns **"This page requires authentication"**: that Chromium profile has no crates.io session and there is no saved `chromium-bridge state` snapshot. crates.io token management is session-cookie-gated, so the exposed token cannot revoke itself through the API either. Logging in is a GitHub OAuth handshake and I am not driving that on your account. **Click "Log in with GitHub" in tab 13** — OAuth lands you straight back on `/settings/tokens` — then re-queue the item and I will enumerate and revoke in-session. Blast radius is still nil: no `cargo publish` step and no `CARGO_REGISTRY_TOKEN` in any of the five workflows.
+
+### The defect this turn hit — fixed, not filed
+
+The first `finalize` of this response was refused:
+
+> `[finalize] pre-write gate: selected free-text queue prompt lacks response evidence: #actionable-review.`
+
+`#actionable-review` was **last** turn's queue head. It was answered and committed last cycle, and you removed it from the queue in this turn's edit — preflight's own `node_events` record the removal. No response written this turn could ever quote it, so the cycle was wedged asking for a quote of a prompt that no longer exists.
+
+Root cause, `agent-doc-write-runtime-io/src/run_entry.rs`: the guard is `selected_free_text_heads_missing_response_evidence(baseline, content, response)` and it deliberately takes baseline and current content as **separate** arguments — selection is read from `content`. Four of the five call sites pass `(baseline, &current_content)`. The fifth, on the mutation-bearing strict-stream path, passes `pre_capture_content`, which is `baseline.or(pre_capture_current_content)` — so whenever a preflight baseline exists, the gate reads the **previous committed turn's queue** and treats its heads as this turn's selection. That path is the one that runs whenever the turn carries tracked-work mutations, which is nearly every drain cycle.
+
+The obvious repair — resolve live authority there — is wrong: that call site sits deliberately *before* authority resolution, because moving the editor delivery barrier ahead of the mutation capture is exactly the response-loss this function exists to prevent. The witness is instead the durable on-disk document, which is the same surface preflight diffed against the snapshot, with the baseline as fallback.
+
+Regression coverage, and I proved the test detects the bug rather than trusting it: reverting just the one-line witness swap makes `strict_stream_closeout_gates_free_text_queue_on_current_document_not_baseline` fail with the exact production error text, and restoring it passes. The test also asserts the converse — the same response is still refused while the head is live on disk — so the guard is relocated, not weakened. A second test in `queue_closeout_guard.rs` pins the two-argument contract that every existing test had been collapsing by passing the same string twice.
+
+**Second red, also fixed:** `make check` was already failing on `main` before my change, independent of it — `tmux_layout_observation_prefers_effect_assignment_over_partial_actor_store` asserted `/repo/nested/tasks/secondary.md` and got `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md`. The precedence it tests lives entirely in the pure resolver `layout_sync_state_actual_document_from_observations`, but the test routed through the IO wrapper with `configured_tmux()`. On a machine that really has a pane `%2`, that resolved a live process owner — which correctly outranks every projection — so the test read this machine's own tmux. Pointed at the pure resolver with `process_owner: None`; the live-owner-wins case was already covered by the adjacent test, so no coverage was lost. It passes on CI only because CI has no such pane.
+
+**Verification:** `make check` → **9305 passed, 0 failed** (the first run had stopped after the tmux failure with 7081 tests unrun). Built and installed. Latest CI run `34521712512` is green. Committed `7ccf1c822` in `src/agent-doc` and pushed; parent gitlink `1b6ff49e4`.
 <!-- agent:boundary:d53e8ec0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -61,8 +101,10 @@ No code, test, or build surfaces changed this cycle — the mutations are confin
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 #actionable-review
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+- [#restartideaplugin]: restarted
+- do [#pypiquotafix]
+- do [#cargotokenrevoke]
 <!-- /agent:queue -->
 
 

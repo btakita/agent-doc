@@ -381,11 +381,18 @@ pub fn handle_codex_user_prompt_submit() -> anyhow::Result<()> {
         }
         return Ok(());
     }
-    run_preflight_for_prompt(
+    if invoked_document(&input.prompt).is_some() {
+        // A process timeout must retain refusal, never reuse an older admission.
+        agent_doc_codex_hook_io::record_preflight_admission(&input, false)?;
+    }
+    let admission = run_preflight_for_prompt(
         &input.prompt,
         Path::new(&input.cwd),
         Some(CODEX_IN_PANE_ADMISSION_DIRECTIVE),
     );
+    if admission == HookAdmission::Admitted {
+        agent_doc_codex_hook_io::record_preflight_admission(&input, true)?;
+    }
     Ok(())
 }
 

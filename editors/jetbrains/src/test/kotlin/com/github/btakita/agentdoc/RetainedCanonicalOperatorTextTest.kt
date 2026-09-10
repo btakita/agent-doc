@@ -17,6 +17,21 @@ import org.junit.Test
  * not the compaction archive.
  */
 class RetainedCanonicalOperatorTextTest {
+
+    @Test
+    fun `pending captured edits defer a fresh bootstrap even without retained delivery`() {
+        assertEquals(
+            RetainedRegistrationProjectionAction.DeferCanonicalProjection,
+            retainedRegistrationProjectionActionForAttachUtil(
+                deferCanonicalProjectionForPendingLocal = true,
+                canonicalProjectionRetained = false,
+                canonicalCoversRetainedFrontier = null,
+                publishedShadow = "old response and queue",
+                bufferText = "old response and edited queue",
+                canonicalText = "new response and queue",
+            ),
+        )
+    }
     @Test
     fun `first captured local delta defers retained canonical projection`() {
         assertEquals(

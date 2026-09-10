@@ -1209,6 +1209,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return LocalEditorForwardResult.Retry
         }
         shadows[filePath] = editorText
+        if (forwarders[filePath]?.replicaText() != editorText) {
+            retainedCanonicalProjectionPaths.add(filePath)
+            requestRemoteDrain(filePath, "rebased-local-splices-projection")
+        }
         if (!projectSettledVisibleState(filePath, forwarders[filePath]!!, editorText)) {
             requestRemoteDrain(filePath, "local-visible-projection-retry")
         }
@@ -1230,6 +1234,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         edits: List<PreparedLocalEditorEdit>,
     ): Boolean {
         if (forwarders[filePath] !== staleForwarder) return false
+        val root = resolveProjectRoot(filePath) ?: return false
+        val canonical = CpSocketReplicaTransport(root).currentCanonicalText(filePath) ?: return false
+        val rebased = NativePatching.rebaseCapturedSplices(capturedBaseText, canonical, edits) ?: return false
         val replacement =
             forwarderFor(
                 filePath = filePath,
@@ -1238,17 +1245,17 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 expectedEditorTextAtSwap = visibleEditorText,
                 allowPendingLocalAtSwap = true,
                 bootstrapFromControllerCanonical = true,
-                expectedCanonicalTextAtSwap = capturedBaseText,
+                expectedCanonicalTextAtSwap = canonical,
                 deferCanonicalProjectionForPendingLocal = true,
             )
         if (replacement == null || replacement === staleForwarder) return false
         if (
             editorBufferText(filePath) != visibleEditorText ||
-            replacement.replicaText() != capturedBaseText
+            replacement.replicaText() != canonical
         ) {
             return false
         }
-        return replacement.forwardLocalEdits(edits)
+        return replacement.forwardLocalEdits(rebased)
     }
 
     fun requestRemoteDrain(filePath: String? = null, reason: String = "event") {
@@ -1434,7 +1441,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             val updates = (delivery as ReplicaPullDelivery.Deltas).updates
             updateCount = updates.size
             usefulWork = updateCount
-            if (updates.isEmpty()) return usefulWork
+            if (updates.isEmpty()) {
+                if (retainedCanonicalProjectionPaths.contains(filePath)) {
+                    val canonical = forwarder.replicaText()
+                    if (canonical != null && canonical != expectedText) {
+                        queueRemoteTextApply(filePath, expectedText, canonical, forwarder, emptyList())
+                    }
+                }
+                return usefulWork
+            }
 
         if (!editorReplicaBaselineMatches(filePath, forwarder, expectedText, updates)) {
             return usefulWork
@@ -3704,7 +3719,7 @@ internal fun retainedRegistrationProjectionActionForAttachUtil(
     bufferText: String?,
     canonicalText: String?,
 ): RetainedRegistrationProjectionAction =
-    if (deferCanonicalProjectionForPendingLocal && canonicalProjectionRetained) {
+    if (deferCanonicalProjectionForPendingLocal) {
         RetainedRegistrationProjectionAction.DeferCanonicalProjection
     } else if (canonicalProjectionRetained) {
         retainedRegistrationProjectionActionUtil(

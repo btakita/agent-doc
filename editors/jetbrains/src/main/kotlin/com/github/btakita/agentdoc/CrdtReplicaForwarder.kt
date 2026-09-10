@@ -643,6 +643,24 @@ class CpSocketReplicaTransport(
 
     override fun lastRegisterError(): String? = lastRegisterError
 
+    /** Event-triggered observation; registration CAS fences this captured cut. */
+    fun currentCanonicalText(filePath: String): String? {
+        val request = JsonObject().apply {
+            addProperty("command", "crdt_current_text")
+            addProperty("file", filePath)
+            addProperty("diagnostic_payload", JsonObject().apply {
+                addProperty("source", "captured-local-splice-recovery")
+                addProperty("flush_barrier", false)
+                addProperty("recover_projection", false)
+            }.toString())
+        }
+        val response = send(request) ?: return null
+        if (!response.ok) return null
+        val data = response.data ?: return null
+        if (data.get("status")?.asString != "current") return null
+        return data.get("text")?.asString
+    }
+
     override fun register(filePath: String, identity: String): ReplicaRegisterAck? =
         register(filePath, identity, null)
 

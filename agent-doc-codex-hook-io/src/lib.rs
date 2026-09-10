@@ -93,6 +93,10 @@ pub struct SessionState {
     /// start another cycle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_prompt_cycle: Option<PromptCycleObservation>,
+    /// Receipt for this exact harness prompt, not authority over document work.
+    /// None preserves legacy/non-trigger behavior; false fences refused admission.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preflight_admitted: Option<bool>,
     pub updated_at: u64,
 }
 
@@ -168,6 +172,7 @@ pub fn parked_session_state(state: &SessionState, updated_at: u64) -> SessionSta
         last_auto_queue_head: None,
         last_context_clear_at: state.last_context_clear_at,
         last_prompt_cycle: None,
+        preflight_admitted: None,
         updated_at,
     }
 }
@@ -255,6 +260,7 @@ pub fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
         last_auto_queue_head: None,
         last_context_clear_at,
         last_prompt_cycle,
+        preflight_admitted: None,
         updated_at: now,
     };
     for root in roots {
@@ -285,6 +291,22 @@ pub fn load_state_any(
         }
     }
     Ok(None)
+}
+
+/// Persist the admission receipt in the existing exact-thread hook envelope.
+/// A newer prompt supersedes this receipt; it must never inherit a stale refusal.
+pub fn record_preflight_admission(input: &UserPromptSubmitInput, admitted: bool) -> Result<()> {
+    let cwd = Path::new(&input.cwd);
+    let roots = project_roots_for(cwd);
+    let Some((loaded_root, mut state)) = load_state_any(&roots, &input.session_id)? else {
+        return Ok(());
+    };
+    if state.last_prompt != input.prompt || state.last_turn_id != input.turn_id {
+        return Ok(());
+    }
+    state.preflight_admitted = Some(admitted);
+    let roots = tracking_roots(cwd, Some(Path::new(&state.doc_path)));
+    save_state_across_roots(&roots, &loaded_root, &state)
 }
 
 pub fn clear_state_across_roots(
@@ -494,6 +516,7 @@ pub fn record_external_prompt_for_file(file: &Path, session_id: &str, prompt: &s
         last_auto_queue_head: None,
         last_context_clear_at: prompt_requests_clear(prompt).then(now_secs),
         last_prompt_cycle: prompt_cycle_observation(&canonical)?,
+        preflight_admitted: None,
         updated_at: now_secs(),
     };
     for root in project_roots_for(&canonical) {
@@ -972,6 +995,7 @@ agent-doc {}\n",
                 last_auto_queue_head: None,
                 last_context_clear_at: None,
                 last_prompt_cycle: None,
+                preflight_admitted: None,
                 updated_at: 10,
             },
         )
@@ -987,6 +1011,7 @@ agent-doc {}\n",
                 last_auto_queue_head: None,
                 last_context_clear_at: Some(20),
                 last_prompt_cycle: None,
+                preflight_admitted: None,
                 updated_at: 20,
             },
         )
@@ -1021,6 +1046,7 @@ agent-doc {}\n",
                 last_auto_queue_head: None,
                 last_context_clear_at: Some(20),
                 last_prompt_cycle: None,
+                preflight_admitted: None,
                 updated_at: 20,
             },
         )

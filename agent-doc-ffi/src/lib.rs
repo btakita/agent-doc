@@ -522,6 +522,35 @@ macro_rules! ffi_guard {
     };
 }
 
+/// Plan captured editor splices against a newer canonical cut. Returns JSON
+/// splices or an explicit error; never falls back to a whole-buffer overwrite.
+///
+/// # Safety
+/// All arguments must point to valid NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_rebase_captured_splices(
+    base: *const c_char,
+    canonical: *const c_char,
+    edits_json: *const c_char,
+) -> FfiPatchResult {
+    if base.is_null() || canonical.is_null() || edits_json.is_null() {
+        return ffi_patch_err("null captured splice argument");
+    }
+    ffi_guard!(
+        ffi_patch_err("captured splice planner panicked"),
+        ffi_patch_from_result((|| {
+            let base = unsafe { CStr::from_ptr(base) }.to_str()?;
+            let canonical = unsafe { CStr::from_ptr(canonical) }.to_str()?;
+            let edits_json = unsafe { CStr::from_ptr(edits_json) }.to_str()?;
+            let edits: Vec<agent_doc_merge::captured_splice::CapturedSplice> =
+                serde_json::from_str(edits_json)?;
+            Ok(serde_json::to_string(
+                &agent_doc_merge::captured_splice::rebase(base, canonical, &edits)?,
+            )?)
+        })())
+    )
+}
+
 /// Open (or reset) the cdylib-hosted CRDT replica `replica_id`, optionally
 /// bootstrapping it from a previously encoded state (`init_state` / `init_len`;
 /// pass null / 0 for a fresh empty replica). `replica_id` is also the yrs client

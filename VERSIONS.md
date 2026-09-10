@@ -2,6 +2,20 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.358
+
+- Fence Codex Stop handling after a refused preflight admission. The hook leaves
+  the prior capture and queue intact instead of turning the refusal explanation
+  into a new response or repeatedly demanding an inadmissible continuation.
+
+- Recover captured JetBrains edits when canonical text has independently advanced.
+  Shared native policy translates only proven, non-overlapping splice ranges;
+  registration checks the observed canonical hash before replacing membership.
+  Overlapping edits remain retained instead of overwriting either side.
+- Feed a rebased replica's outstanding visible projection into the existing
+  editor apply and native-save path even when its remote delivery queue is empty,
+  allowing retained closeout and subsequent queue admission to converge.
+
 ## 0.35.357
 
 - Prevent a delayed JetBrains replica-manager teardown from deregistering its

@@ -332,6 +332,12 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
     };
 
     let file = PathBuf::from(&state.doc_path);
+    if state.preflight_admitted == Some(false) {
+        // Admission already told this turn to stop. Neither an older document
+        // cycle nor its active queue can authorize capturing that explanation.
+        agent_doc_ops_log_io::log_op(&file, "codex_stop_refused_admission_preserved");
+        return Ok(StopResponse::Continue { continue_: true });
+    }
     let cleanup_roots = tracking_roots(&cwd, Some(&file));
     if !file.exists() {
         clear_state_across_roots(&cleanup_roots, &loaded_root, &input.session_id)?;
@@ -1566,6 +1572,51 @@ fn now_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refused_admission_does_not_capture_explanation_or_drain_previous_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_auto_queue_doc(&dir, &["fix queue retrieval"]);
+        init_git_repo(dir.path(), &doc);
+        let input = agent_doc_codex_hook_io::UserPromptSubmitInput {
+            session_id: "codex-session".into(),
+            turn_id: "refused-turn".into(),
+            cwd: dir.path().display().to_string(),
+            prompt: format!("agent-doc {}", doc.display()),
+        };
+        agent_doc_codex_hook_io::apply_user_prompt_submit(&input).unwrap();
+        agent_doc_codex_hook_io::record_preflight_admission(&input, false).unwrap();
+        let before = fs::read_to_string(&doc).unwrap();
+        let result = apply_stop(&StopInput {
+            session_id: input.session_id.clone(),
+            turn_id: input.turn_id.clone(),
+            cwd: input.cwd.clone(),
+            last_assistant_message: "Preflight refused; pending content is retained.".into(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+        assert!(matches!(result, StopResponse::Continue { continue_: true }));
+        assert_eq!(fs::read_to_string(&doc).unwrap(), before);
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+
+        // A new ordinary prompt clears the refusal; a late old-hook receipt
+        // cannot fence it, even when the document binding is unchanged.
+        let newer = agent_doc_codex_hook_io::UserPromptSubmitInput {
+            turn_id: "new-turn".into(),
+            prompt: "Fix the admission defect".into(),
+            ..input
+        };
+        agent_doc_codex_hook_io::apply_user_prompt_submit(&newer).unwrap();
+        let old = agent_doc_codex_hook_io::UserPromptSubmitInput {
+            turn_id: "refused-turn".into(),
+            ..newer
+        };
+        agent_doc_codex_hook_io::record_preflight_admission(&old, false).unwrap();
+        let (_, state) = load_bound_session_for_stop(dir.path(), "codex-session")
+            .unwrap()
+            .unwrap();
+        assert_eq!(state.preflight_admitted, None);
+    }
     use std::fs;
     use std::process::Command as ProcessCommand;
 
@@ -3611,6 +3662,7 @@ Reviewed the gated items.\n\
                 last_auto_queue_head: None,
                 last_context_clear_at: Some(compaction_ts),
                 last_prompt_cycle: None,
+                preflight_admitted: None,
                 updated_at: compaction_ts,
             },
         )
@@ -3733,6 +3785,7 @@ Reviewed the gated items.\n\
                 last_auto_queue_head: Some("do #fix1".to_string()),
                 last_context_clear_at: None,
                 last_prompt_cycle: None,
+                preflight_admitted: None,
                 updated_at: 20,
             },
         )
@@ -3784,6 +3837,7 @@ Reviewed the gated items.\n\
                 last_auto_queue_head: Some("do #fix1".to_string()),
                 last_context_clear_at: None,
                 last_prompt_cycle: None,
+                preflight_admitted: None,
                 updated_at: 20,
             },
         )
@@ -3831,6 +3885,7 @@ Reviewed the gated items.\n\
                 last_auto_queue_head: Some("do #fix1".to_string()),
                 last_context_clear_at: None,
                 last_prompt_cycle: None,
+                preflight_admitted: None,
                 updated_at: 20,
             },
         )

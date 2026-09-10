@@ -34,6 +34,17 @@ that consumes verified realtime handoffs and owns commits, see
 
 ## Core Invariant
 
+Captured editor splice recovery observes current canonical text and translates
+only ranges proven unchanged by independent canonical edits. Shared native
+policy validates the complete ordered splice stream against its captured base;
+overlapping changes remain retained. An already-present complete batch is a
+no-op. Registration fences the observed canonical hash before replacing the
+old membership, and the editor's visible cut remains fenced during the swap.
+After durable publication, an outstanding canonical projection drives the
+existing editor-apply/native-save effect even when no peer update remains in
+the delivery queue. Recovery never requires canonical text to regress to an
+obsolete captured baseline and never adopts an entire stale editor buffer.
+
 The operator-visible document state is authoritative for every
 operator-authored change. An operator change is any text, whitespace, component
 body, frontmatter edit, queue/backlog edit, prompt, comment, partial word, or

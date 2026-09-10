@@ -5,6 +5,7 @@
 //! editor state, mutate snapshots, or commit changes. Turn lifecycle and realtime
 //! scheduling crates own those responsibilities.
 
+pub mod captured_splice;
 pub mod ownership;
 
 pub mod crdt;

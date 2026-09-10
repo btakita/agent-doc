@@ -332,6 +332,12 @@ interface AgentDocLib : Library {
         yaml_fields: String,
     ): FfiPatchResult.ByValue
 
+    fun agent_doc_rebase_captured_splices(
+        base: String,
+        canonical: String,
+        editsJson: String,
+    ): FfiPatchResult.ByValue
+
     /**
      * Converge the `agent:queue` opening-tag `auto` attribute. `want_auto` is a C int (nonzero =
      * ensure `auto`, zero = strip `auto`); a content patch cannot change an opening-tag attribute,
@@ -2127,6 +2133,32 @@ object NativePatching {
      * Merge frontmatter fields using the native library. Returns the updated document, or null if
      * FFI is unavailable/errors.
      */
+    internal fun rebaseCapturedSplices(
+        base: String,
+        canonical: String,
+        edits: List<PreparedLocalEditorEdit>,
+    ): List<PreparedLocalEditorEdit>? {
+        val lib = AgentDocLib.get() ?: return null
+        val gson = com.google.gson.Gson()
+        val result = try {
+            lib.agent_doc_rebase_captured_splices(base, canonical, gson.toJson(edits))
+        } catch (error: UnsatisfiedLinkError) {
+            LOG.warn("[native] captured splice recovery requires the updated native library; edits retained", error)
+            return null
+        }
+        try {
+            if (result.error != null) {
+                LOG.warn("[native] captured splice rebase retained: ${result.error!!.getString(0)}")
+                return null
+            }
+            val json = result.text?.getString(0) ?: return null
+            return gson.fromJson(json, Array<PreparedLocalEditorEdit>::class.java).toList()
+        } finally {
+            lib.agent_doc_free_string(result.error)
+            lib.agent_doc_free_string(result.text)
+        }
+    }
+
     fun mergeFrontmatter(doc: String, yamlFields: String): String? {
         val lib = AgentDocLib.get() ?: return null
         val result = lib.agent_doc_merge_frontmatter(doc, yamlFields)

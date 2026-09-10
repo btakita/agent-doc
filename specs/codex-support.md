@@ -4,6 +4,13 @@ Plan for supporting both Claude Code and Codex (OpenAI) as agent-doc harnesses.
 
 ## Current State
 
+The UserPromptSubmit hook records admission in its existing exact-thread prompt
+envelope. A refused or interrupted admission prevents Stop from capturing the
+refusal explanation, recovering a prior cycle, or continuing its queue. A new
+prompt replaces that receipt; late receipts from an older turn cannot fence the
+new prompt. The receipt describes harness admission only and never changes the
+document's retained capture, queue, or canonical authority.
+
 ### Already Multi-Harness
 
 | Layer | Status | Notes |

@@ -275,7 +275,7 @@ class TypingTrackerEdtBudgetTest {
         assertTrue(
             "a stale native baseline must retain the captured delta and rebootstrap its exact controller base",
             forwardBody.contains("retainedCanonicalProjectionPaths.add(filePath)") &&
-                forwardBody.contains("expectedCanonicalTextAtSwap = capturedBaseText") &&
+                forwardBody.contains("expectedCanonicalTextAtSwap = canonical") &&
                 forwardBody.contains("requestRemoteDrain(filePath, \"captured-local-delta-retry\")"),
         )
         assertFalse(
@@ -555,7 +555,7 @@ class TypingTrackerEdtBudgetTest {
                 localDeltaBody.contains("forwarder.forwardLocalEdits(edits)") &&
                 localDeltaBody.contains("localReplicaBaselineDecisionUtil(replicaText, beforeText)") &&
                 localDeltaBody.contains("retainedCanonicalProjectionPaths.add(filePath)") &&
-                localDeltaBody.contains("expectedCanonicalTextAtSwap = capturedBaseText") &&
+                localDeltaBody.contains("expectedCanonicalTextAtSwap = canonical") &&
                 localDeltaBody.contains("requestRemoteDrain(filePath, \"captured-local-delta-retry\")") &&
                 localDeltaBody.contains("recovery=canonical-rebootstrap-captured-local-delta"),
         )

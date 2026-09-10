@@ -610,13 +610,13 @@ class CrdtReplicaProjectionFrontierTest {
             manager
                 .substringAfter("private fun forwardLocalEditsFromShadow(")
                 .substringBefore("fun requestRemoteDrain(")
-        assertTrue(localEffect.contains("expectedCanonicalTextAtSwap = capturedBaseText"))
+        assertTrue(localEffect.contains("expectedCanonicalTextAtSwap = canonical"))
         assertTrue(localEffect.contains("expectedEditorTextAtSwap = visibleEditorText"))
         assertTrue(localEffect.contains("bootstrapFromControllerCanonical = true"))
         assertTrue(localEffect.contains("shadows[filePath] = beforeText"))
         assertTrue(
-            localEffect.indexOf("replacement.replicaText() != capturedBaseText") <
-                localEffect.indexOf("replacement.forwardLocalEdits(edits)"),
+            localEffect.indexOf("replacement.replicaText() != canonical") <
+                localEffect.indexOf("replacement.forwardLocalEdits(rebased)"),
         )
         assertFalse(
             "a concurrent canonical advance after durable acceptance must not retain the same splice",

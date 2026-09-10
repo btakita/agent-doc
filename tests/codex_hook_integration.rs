@@ -389,12 +389,6 @@ fn codex_hook_cli_blocks_transcript_shaped_last_assistant_message() {
     let (tmp, doc) = setup_template_doc();
     init_git_repo(tmp.path(), &doc);
 
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["preflight", doc.to_str().unwrap()])
-        .assert()
-        .success();
-
     let submit_payload = json!({
         "session_id": "codex-session",
         "turn_id": "turn-1",
@@ -407,7 +401,10 @@ fn codex_hook_cli_blocks_transcript_shaped_last_assistant_message() {
         .args(["hook", "codex-user-prompt-submit"])
         .write_stdin(submit_payload.to_string())
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains(
+            "preflight already ran in the binary",
+        ));
 
     let transcript_payload = concat!(
         "<!-- agent:exchange patch=append -->\n",
@@ -460,4 +457,43 @@ fn codex_hook_cli_blocks_transcript_shaped_last_assistant_message() {
     let blocked_payload = fs::read_to_string(blocked[0].path()).unwrap();
     assert!(blocked_payload.contains("agent:exchange"));
     assert!(blocked_payload.contains("Hook closeout body."));
+}
+
+#[test]
+fn codex_hook_cli_refused_admission_preserves_previous_cycle() {
+    let (tmp, doc) = setup_template_doc();
+    init_git_repo(tmp.path(), &doc);
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    let submit = json!({
+        "session_id": "refused-session", "turn_id": "refused-turn",
+        "cwd": tmp.path().display().to_string(),
+        "prompt": format!("agent-doc {}", doc.display()),
+    });
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["hook", "codex-user-prompt-submit"])
+        .write_stdin(submit.to_string())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("cycle contract UNAVAILABLE"));
+    let before = fs::read_to_string(&doc).unwrap();
+    let stop = json!({
+        "session_id": "refused-session", "turn_id": "refused-turn",
+        "cwd": tmp.path().display().to_string(),
+        "last_assistant_message": "Preflight refused; content remains retained.",
+        "stop_hook_active": true,
+    });
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["hook", "codex-stop"])
+        .write_stdin(stop.to_string())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"continue\":true"));
+    assert_eq!(fs::read_to_string(&doc).unwrap(), before);
+    assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
 }

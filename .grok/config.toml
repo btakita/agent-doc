@@ -1,0 +1,4 @@
+[mcp_servers.agent-doc]
+args = ["mcp"]
+command = "agent-doc"
+enabled = true

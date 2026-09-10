@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: afcc61d9-14a3-4322-99e1-7734891e9959
-  codex: 01a0885a-185a-76c1-940b-1274f09972ad
+  codex: 01a08888-494a-78d1-b610-891160adb001
 agent: codex
 claude_model: fable
 agent_doc_format: template
@@ -10,9 +10,10 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
+  '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -165,7 +166,37 @@ Architecture: the existing ProcessScope layout graph owns structural intent, eff
 Validation: **9,279 workspace tests passed**, native editor checks, `tmux-ci`, eight cleanup regressions, paused-queue and remote-snapshot regressions, and five restart-specific tests. Installed CLI/library match the final build. Source main and `v0.35.355` are pushed; CI is running, Release and PyPI workflows are queued. The existing PyPI 10 GB quota blocker remains tracked in `#pypi345quota`.
 
 During diagnosis, a Cargo registry token appeared in tool output. Tracing was stopped and the generated trace files were removed; rotate that token. No credential value was added to source or this document.
-<!-- agent:boundary:d997bd6b -->
+
+### Re: #actionable-review — gpt-6
+
+> **Queue prompt:** #actionable-review
+
+Moved three review items into backlog and queue, retaining their IDs and ordering the native-loading check first:
+
+1. `#restartintellijidea`: verify current running plugin/native versions and library loading with a newer release present; replace historical version assumptions with current evidence.
+2. `#harnessswitchverify`: validate unsaved harness switching with authoritative editor state, exactly one spawn, and the expected deferred-restart receipt.
+3. `#compactdevreplica`: inspect current replica and commit evidence, then verify the existing retained compact continuation.
+
+Each task starts with evidence the agent can collect. If a live IDE action is still required, it must identify the exact remaining prerequisite. Token rotation, PyPI quota, Coder access, and the multi-user dependency remain gated; no completion is asserted for them.
+
+### Re: Repeated tmux focus stealing and Lazily state — gpt-6
+
+> also fix monsterrodholders.md keeps on stealing tmux pane focus
+>
+> Are you using lazily for the state?
+
+Fixed and installed **v0.35.356**, source commit `7fca2ff8f`.
+
+The project controller replayed its saved singleton layout each time it started. That structural action displaced the newer two-pane layout even with its queue paused and `focus_not_requested`. Saved columns now remain recall data; only current editor or command intent can authorize placement after startup or recycle.
+
+**Yes, state uses the existing Lazily ProcessScope.** Live intent enters the desired Source; actor bindings, applicability, and receipt matching are Computeds; the retained Effect applies tmux changes and publishes generation-fenced receipt Sources. Removed the startup storage-to-intent conversion. No new cache, polling loop, or separate state owner was introduced. Live intent received before worker binding still runs when the sink-ready Source changes; identical foreground requests still receive fresh generations.
+
+The regression failed before the fix and passes afterward, covering saved-layout startup, actor hydration, live publication, history retention, restart, and late sink activation. **`make check tmux-ci` passed: 9,280 workspace tests, 258 skipped, plus editor/native integration, parity, simulator, formal checks, and 21 isolated tmux tests.** The controller package separately passed 410 tests under nextest.
+
+`make install-full` completed, including CLI, native library, and both editor packages. Both affected controllers completed stable handoffs to 0.35.356 with running inodes matching the installed executable. Live verification recycled the background project while panes `%177` and `%6` were visible: both panes and active `%6` remained unchanged, and that controller emitted no new layout effect. Its old singleton `%189` layout was not replayed.
+
+Architecture and evidence: [plan-startup-layout-authority.md](plan-startup-layout-authority.md). Workspace plan/install commit: `11acb735c`. Source and release-tag pushes follow this document closeout. The latest observed CI remains in progress. PyPI's existing quota blocker remains tracked in `#pypi345quota`, now targeting this release.
+<!-- agent:boundary:bff5c51e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -174,21 +205,25 @@ During diagnosis, a Cargo registry token appeared in tool output. Tracing was st
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 #actionable-review
+- do [#restartintellijidea]
+- do [#harnessswitchverify]
+- do [#compactdevreplica]
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
+- [ ] [#restartintellijidea] Verify the current IntelliJ agent-doc plugin registration and native-library load path when a newer agent-doc release exists. Compare the running plugin/native versions with the installed artifacts; the old 0.2.375/0.35.345 references are historical. Use existing runtime evidence first. If activation still requires an IDE restart, record that exact operator prerequisite; close only with live native-load evidence.
+- [ ] [#harnessswitchverify] Recheck #harnessswitchstorm with the current live JetBrains plugin generation. After proving editor authority and matching runtime registration, validate an unsaved claude <-> codex switch: exactly one spawn and agent_restart_deferred reason=non_authoritative_document_view, without refusal storms or requiring a save to recognize the edit. Preserve operator text and use a disposable session for the repro. If a host restart is still required, record the current registration and precise blocker. The 2026-08-25 fpe.md run is invalid historical evidence.
+- [ ] [#compactdevreplica] Recheck the retained Compact Exchange continuation for src/haiven-dev/tasks/dev.md using current replica state and commit history. If it already settled, record the exact commit and resolve this item. Otherwise use supported replica recovery and verify the existing continuation commits while preserving operator text. Do not repeat Compact Exchange or force disk. If editor_attached_model_missing persists, record the exact reopen/restart prerequisite. Context: tasks/agent-doc/plan-compact-save-layout-dispatch.md.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
 - [/] [#cargo355token] [operator-verify] Rotate the Cargo registry token exposed in diagnostic tool output during the pane-removal investigation. Tracing was stopped and generated trace files removed; no credential value is stored in this document or source.
-- [/] [#compactdevreplica] [operator-verify] Reconnect the editor replica for src/haiven-dev/tasks/dev.md and verify its retained compact continuation commits. Installed 0.35.349 fixes local event ingress and native-save continuation; live read and supported recovery still report editor_attached_model_missing. Reopen the document or restart the editor, then observe the existing continuation; do not repeat Compact Exchange or force disk.
-- [/] [#pypi345quota] [operator-verify] Publish agent-doc v0.35.355 to PyPI after quota space is available. The prior v0.35.354 upload failed at the 10 GB project-storage limit (https://github.com/btakita/agent-doc/actions/runs/34408090473). The v0.35.355 upload workflow is queued (https://github.com/btakita/agent-doc/actions/runs/34417546068). Unblocks: obtain a quota increase or explicitly approve old-release cleanup, then rerun the PyPI workflow and verify uploaded artifacts.
+- [/] [#pypi345quota] Publish agent-doc v0.35.356 to PyPI after quota space is available. The v0.35.354 upload failed at the 10 GB project-storage limit (https://github.com/btakita/agent-doc/actions/runs/34408090473). This release will trigger publication after its tag push; uploaded artifacts are not yet verified. Unblocks: obtain a quota increase or explicitly approve old-release cleanup, then rerun the PyPI workflow and verify the release artifacts.
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.
-- [/] [#harnessswitchverify] [operator-verify] #harnessswitchstorm remains unverified. The 2026-08-25 fpe.md attempt was invalidated by a stale live JetBrains plugin generation: ops.log showed controller_crdt_replica_refusal_storm (25 refusals), editor_absent/disk authority, agent_restart_respec_inert to Claude, then old_harness=claude -> new_harness=codex only after save. Unblocks after make install, restart the JetBrains IDE host, repeat the unsaved claude <-> codex switch, and prove exactly one spawn plus agent_restart_deferred reason=non_authoritative_document_view.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [/] [#restartintellijidea] [operator-verify] Restart IntelliJ IDEA to activate installed agent-doc JetBrains 0.2.375, then verify native library loading still works when a newer agent-doc release exists. The CLI/native library is installed as 0.35.345; plugin tests and signed build passed.
 <!-- /agent:review -->
 
 <!-- agent:icebox -->

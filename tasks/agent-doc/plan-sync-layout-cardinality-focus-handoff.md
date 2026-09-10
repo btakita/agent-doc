@@ -82,3 +82,96 @@ This plan ties those together around pane cardinality and plugin completion sema
 - `Sync Tmux Layout` cannot expand a two-editor-pane projection into 3-4 visible tmux panes.
 - Automatic sync focuses `monsterrodholders.md` when its pane is already visible or retries when preserve-layout prevented focus.
 - Logs make the outcome unambiguous: desired columns, visible pane count, preserved panes, and active focus pane are all recorded.
+
+## Current implementation contract (2026-09-10)
+
+Invariant: provisioning owned by a layout operation cannot change the visible
+pane set or selection before the current layout graph places the returned pane.
+Two visible editor columns therefore stay at two panes while an obsolete or
+concurrent startup completes.
+
+Policy owner: the existing ControllerPaneLayoutGraph owns placement and its
+generation. Route startup is the process-creation effect adapter and must stage
+layout-owned creations; standalone route startup keeps its existing explicit
+visible-placement behavior.
+
+Transition table:
+- LayoutProvision or deferred-to-layout start with a visible target window:
+  create a detached staging pane, register/start it, preserve visible geometry
+  and selection, and return the normal pane binding receipt.
+- Existing document owner: reuse it; no duplicate creation.
+- Current layout includes the new owner: the existing reconciliation Effect
+  attaches it and stashes the replaced owner, preserving both processes.
+- Layout superseded before startup completes: the new owner remains off-screen;
+  completion cannot append a third pane to the settled two-pane layout.
+- Standalone explicit route: retain its visible anchor/placement policy.
+- No target window yet: retain the existing first-window bootstrap contract.
+- Creation failure: return the error without promoting or deleting another pane.
+
+Evidence inputs: the 2026-09-09T23:11:43Z log proves reconciliation stashed %181,
+but a concurrent startup created %182 before VERIFY, leaving [%177,%6,%182]
+for desired [%177,%6]. The current IDEA has two columns and the controller
+reports a converged [%177,%6] cut. The historical startup replay fix removes one
+trigger; the process-creation boundary still directly splits the visible window
+for layout provisioning and allows this race.
+
+Reactive topology: existing desired-layout Source → applicability Computed →
+structural Effect → remote/local startup pane-binding receipt Source → current
+layout placement Effect. Creation supplies the binding, not visibility authority.
+Existing generation fences decide whether that binding remains desired.
+
+Imperative extraction audit: remove visible-window mutation and focus selection
+from layout-owned startup; both are already owned by the layout Effect. Launch
+mode/argv and the bounded tmux create command are actorless effect-boundary cuts,
+not long-lived derived caches. Reuse the existing mutation observation invalidation
+and cross-controller receipt publication. No polling, new graph, or SQLite arbiter.
+
+Allowed edit surfaces: route startup adapter, deterministic transition/isolated
+tmux regression tests, tmux-ci coverage selection if needed, routing specs and
+release metadata. Do not modify the already-dirty tmux-router checkout.
+
+Verification: reproduce three visible panes using the production creation helper;
+prove staging leaves two panes and selection unchanged, a current replacement
+can be joined with two visible panes, and the superseded staged owner stays
+alive. Cover standalone placement and empty-window bootstrap compatibility.
+Run full make check and tmux-ci, release/install, and read live geometry.
+
+Out of scope: killing or interrupting user agents, changing operator focus to
+manufacture a repro, changing queue permissions, and another window-policy owner.
+
+## Completion proof (2026-09-10, v0.35.360)
+
+Implemented the contract in `agent-doc-route-io/src/startup.rs`: anchored
+layout-owned starts create a detached staging window and return the usual binding;
+standalone routing retains its visible split. The existing Lazily layout graph
+owns attachment and selection. No new state owner, polling loop, or SQLite
+coordination was introduced; the dirty sibling tmux-router checkout was untouched.
+
+The production-helper regression failed before the fix with three visible panes
+instead of two, then passed after staging. Isolated tmux coverage proves late and
+concurrent starts, physical column order, preserved selection, paused queues,
+replacement placement, and surviving superseded/replaced sessions. The tmux CI
+target now includes these regressions.
+
+Verification: `make check tmux-ci` passed, including 9,302 workspace tests (259
+skipped), 28 explicit tmux tests, editor parity, native cross-editor simulation,
+Lean and TLA checks. Privacy audit and diff checks passed. Logs are under
+`/home/brian/.cache/agent-doc-test-tmp/layout-{check,install,release-build}.log`;
+the before/after repro logs are `layout-regression-{before,after}.log`.
+
+Source commit `642da69db` and tag `v0.35.360` are pushed. `make install-full`
+installed CLI/native 0.35.360 and matching existing editor packages. A normal
+project controller recycle succeeded without force or child interruption;
+controller PID 3297648 reports 0.35.360 and stable handoff. Live window @74 still
+contains exactly [%177,%6], with %6 active. The pre-recycle reactive receipt also
+proved exact desired/actual documents and pane order; no editor event had yet
+published a new status frame immediately after recycle, so the post-install
+claim is the directly observed tmux geometry, not an invented convergence receipt.
+
+One post-push observation found CI, Release, and PyPI in progress:
+- https://github.com/btakita/agent-doc/actions/runs/34439180076
+- https://github.com/btakita/agent-doc/actions/runs/34439181625
+- https://github.com/btakita/agent-doc/actions/runs/34439181602
+
+The implementation and local installation are complete; remote publication is
+not claimed complete while those jobs run.

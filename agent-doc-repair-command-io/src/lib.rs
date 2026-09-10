@@ -1,5 +1,5 @@
 use agent_doc_turn::repair::RepairOutcome;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::Path;
 
 /// Durable identity of a binary-owned finalize operation. The response capture
@@ -162,7 +162,7 @@ pub fn resume_captured_finalize(
         projected_phase,
         Some(agent_doc_turn::CyclePhase::WriteApplied | agent_doc_turn::CyclePhase::Committed)
     ) {
-        return resume_materialized_captured_finalize(file);
+        return resume_materialized_captured_finalize(file, expected);
     }
 
     let result = resume_captured_finalize_intent(file, expected);
@@ -193,8 +193,138 @@ pub fn resume_captured_finalize(
     }
 }
 
-fn resume_materialized_captured_finalize(file: &Path) -> CapturedFinalizeResumeOutcome {
+/// Load the durable capture that matches `expected`, retained projection first.
+fn captured_closeout_for(
+    file: &Path,
+    expected: &CapturedFinalizeResumeKey,
+) -> Result<Option<agent_doc_cycle_state_io::ProjectedCapturedResponse>> {
+    let matches_expected = |capture: &agent_doc_cycle_state_io::ProjectedCapturedResponse| {
+        capture.cycle_id == expected.cycle_id
+            && capture.capture_id == expected.capture_id
+            && capture.response_sha256 == expected.response_sha256
+    };
+    if let Some(capture) = agent_doc_cycle_state_io::load_projected_retained_captured_response(file)?
+        .filter(matches_expected)
+    {
+        return Ok(Some(capture));
+    }
+    Ok(
+        agent_doc_cycle_state_io::load_projected_captured_response(file, &expected.capture_id)?
+            .filter(|capture| {
+                capture.cycle_id == expected.cycle_id
+                    && capture.response_sha256 == expected.response_sha256
+            }),
+    )
+}
+
+/// `#deferredmutdrop`: replay this closeout's tracked-work half when only its
+/// response half materialized.
+///
+/// A capture reaches `write_applied` as soon as the response cell is durable.
+/// The tracked-work half runs AFTER that write and can be retained by the same
+/// no-live-editor barrier that retained the response — and the retained document
+/// write carries only the response target. Continuing straight to commit from
+/// there publishes a half-applied cycle: observed live 2026-09-10 on
+/// `cycle-1789080212116`, where `respond --done ... --backlog-gate ...
+/// --backlog-add ...` committed its response as `3e61bbb726` while backlog,
+/// queue, and review stayed byte-identical to their pre-cycle state, and manual
+/// `write --pending-only --commit` + `commit` was the only recovery.
+///
+/// The capture already carries the validated mutation plan
+/// (`capture_closeout_mutation_plan_before_authority_resolution` attaches it to
+/// the same capture precisely so recovery cannot commit only the response), so
+/// replay it as a tracked-work-only write with NO commit: the materialized
+/// continuation below still commits both halves as one transaction.
+///
+/// The replay is gated on this cycle's own recorded mutations still being
+/// unlanded — the same predicate `commit` and `session-check` use — so a
+/// closeout whose mutations DID apply is left alone and a resume that runs
+/// repeatedly cannot double-apply. An error here is deliberately propagated:
+/// a mutation half that cannot land must fail closed rather than let the
+/// continuation report a committed cycle.
+fn apply_unlanded_captured_mutation_plan(
+    file: &Path,
+    expected: &CapturedFinalizeResumeKey,
+) -> Result<bool> {
+    let Some(capture) = captured_closeout_for(file, expected)? else {
+        return Ok(false);
+    };
+    let Some(plan_json) = capture.mutation_plan_json.as_deref() else {
+        return Ok(false);
+    };
+    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+        return Ok(false);
+    };
+    if state.cycle_id != expected.cycle_id {
+        return Ok(false);
+    }
+    let current_content =
+        agent_doc_document_realtime_io::try_resolve_current_doc_from_file_with_source(
+            file,
+            "captured_finalize_resume_tracked_work_witness",
+        )
+        .map(|resolved| resolved.content)?;
+    if !agent_doc_turn::write_ownership::recorded_tracked_work_is_unlanded(
+        agent_doc_turn::write_ownership::RecordedTrackedWork {
+            done_ids: &state.pending_done_ids,
+            added_ids: &state.pending_added_ids,
+            requested_done_ids: &state.requested_done_ids,
+            requested_added_ids: &state.requested_added_ids,
+        },
+        &current_content,
+    ) {
+        return Ok(false);
+    }
+    let plan: agent_doc_write_command_io::CapturedCloseoutMutationPlan =
+        serde_json::from_str(plan_json)
+            .map_err(|err| anyhow::anyhow!("decode captured closeout mutation plan: {err}"))?;
+    let mut options =
+        agent_doc_write_command_io::CommandOptions::recovery_from_captured_closeout_mutation_plan(
+            file, plan,
+        );
+    // A tracked-work-only write rejects the response-shaped transports.
+    options.is_template = false;
+    options.is_stream = false;
+    options.is_ipc = false;
+    options.pending_only = true;
+    options.origin = Some("captured_finalize_resume_tracked_work".to_string());
+    if !options.has_pending_mutation() {
+        return Ok(false);
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "captured_finalize_resume_tracked_work_replay file={} cycle_id={} capture_id={} plan_hash={} recovery=pending_only_no_commit",
+            file.display(),
+            expected.cycle_id,
+            expected.capture_id,
+            agent_doc_hash::content_hash(plan_json),
+        ),
+    );
+    agent_doc_write_runtime_io::run_command_with_response(
+        options,
+        agent_doc_write_command_io::CommitMode::None,
+        String::new(),
+    )
+    .with_context(|| {
+        format!(
+            "the response half of the captured closeout for {} is materialized but its tracked-work half could not be replayed; refusing to commit a half-applied cycle",
+            file.display()
+        )
+    })?;
+    Ok(true)
+}
+
+fn resume_materialized_captured_finalize(
+    file: &Path,
+    expected: &CapturedFinalizeResumeKey,
+) -> CapturedFinalizeResumeOutcome {
     use agent_doc_session_check_io::SessionCheckEffects;
+
+    // `#deferredmutdrop`: continue the SAME closeout, not just its response half.
+    if let Err(err) = apply_unlanded_captured_mutation_plan(file, expected) {
+        return classify_captured_finalize_resume_error(&format!("{err:#}"));
+    }
 
     match agent_doc_closeout_runtime_io::session_check_effects().resume_captured_finalize(file) {
         Ok(agent_doc_session_check_io::CapturedFinalizeResumeOutcome::Committed) => {

@@ -1,14 +1,28 @@
 name: PyPI
 
-# Tag pushes are the trigger of record. The Release workflow creates the GitHub
-# Release with the default GITHUB_TOKEN, and GitHub deliberately does not raise
-# workflow-triggering events for token-authored actions — so `release: published`
-# silently stopped firing once release creation moved into CI, and 0.35.97
-# through 0.35.118 never reached PyPI. `release: published` is kept for releases
-# published by hand, and `skip-existing` makes the overlap harmless.
+# `#pypicadence` + GH #52: cadence is the trigger of record, not "every tag".
+#
+# Until 0.35.363 this workflow fired on EVERY `v*` tag. Measured 2026-09-09:
+# 82 releases in 30 days at ~62 MiB of wheels each is ~5 GiB/month against a
+# 10 GiB project quota, so uploads started failing with
+# `400 Project size too large` and PyPI silently fell 20 versions behind the
+# newest tag (0.35.342 vs v0.35.362) — `pip install --upgrade agent-doc` became
+# a DOWNGRADE for anyone on a recent build. A quota increase alone only buys
+# ~3 months (pypi/support#12214 requests one and commits to this reduction).
+#
+# So: milestone tags (`vX.Y.0`) publish automatically, every other tag still
+# gets a GitHub Release from `release.yml`, and any single version can be
+# published on demand with `gh workflow run PyPI --ref <tag>`.
+#
+# `release: published` is kept for releases published by hand. Tag pushes stayed
+# the trigger of record because GitHub deliberately does not raise
+# workflow-triggering events for token-authored actions, so `release: published`
+# silently stopped firing once release creation moved into CI and 0.35.97
+# through 0.35.118 never reached PyPI. `skip-existing` makes the overlap
+# harmless.
 on:
   push:
-    tags: ["v*"]
+    tags: ["v[0-9]+.[0-9]+.0"]
   release:
     types: [published]
   workflow_dispatch:
@@ -25,12 +39,16 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            lib: libagent_doc.so
           - target: x86_64-apple-darwin
             os: macos-14
+            lib: libagent_doc.dylib
           - target: aarch64-apple-darwin
             os: macos-latest
+            lib: libagent_doc.dylib
           - target: x86_64-pc-windows-msvc
             os: windows-latest
+            lib: agent_doc.dll
 
     runs-on: ${{ matrix.os }}
 
@@ -47,6 +65,31 @@ jobs:
         with:
           python-version: "3.12"
 
+      # GH #52: `bindings = "bin"` ships the executable alone, and `lib-path`
+      # resolves the cdylib as a SIBLING of the executable — so a
+      # `pip install agent-doc` had no library to find and every editor plugin
+      # ran in the degraded file-based-IPC mode. maturin's wheel `data`
+      # directory installs `scripts/` into the same `bin/` as the binary, which
+      # is exactly the layout the resolver needs. The key is written here rather
+      # than committed so a source checkout still builds without a data
+      # directory it cannot populate.
+      - name: Declare the wheel data directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p wheel-data/scripts
+          printf '\ndata = "wheel-data"\n' >> pyproject.toml
+          tail -5 pyproject.toml
+
+      - name: Build FFI library for the wheel
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add ${{ matrix.target }}
+          cargo build --release --target ${{ matrix.target }} --lib
+          cp "target/${{ matrix.target }}/release/${{ matrix.lib }}" wheel-data/scripts/
+
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
@@ -54,6 +97,31 @@ jobs:
           args: --release --out dist
           manylinux: auto
           docker-options: -v ${{ github.workspace }}/..:${{ github.workspace }}/..
+          before-script-linux: |
+            set -euo pipefail
+            cargo build --release --target ${{ matrix.target }} --lib
+            cp "target/${{ matrix.target }}/release/${{ matrix.lib }}" wheel-data/scripts/
+
+      # An asset that cannot deliver FFI is the defect this job exists to
+      # prevent, so prove the library is in the wheel before it is uploaded.
+      - name: Verify the wheel ships the FFI library
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - "${{ matrix.lib }}" <<'PY'
+          import glob, sys, zipfile
+
+          lib = sys.argv[1]
+          wheels = glob.glob("dist/*.whl")
+          if not wheels:
+              sys.exit("no wheel was built")
+          for wheel in wheels:
+              names = zipfile.ZipFile(wheel).namelist()
+              if not any(name.endswith(f".data/scripts/{lib}") for name in names):
+                  print("\n".join(names))
+                  sys.exit(f"{wheel} does not ship {lib} beside the binary (GH #52)")
+              print(f"{wheel}: {lib} present")
+          PY
 
       - uses: actions/upload-artifact@v4
         with:
@@ -76,3 +144,29 @@ jobs:
         with:
           packages-dir: dist
           skip-existing: true
+
+  # GH #52 part 2: PyPI drifted 20 versions behind the newest tag without
+  # surfacing anywhere, because a failed upload only reddens a job nobody was
+  # watching. Assert the version this run was supposed to publish is actually
+  # resolvable on PyPI, so a quota block or a skipped upload fails loudly at the
+  # moment it happens instead of being discovered by a user whose
+  # `pip install --upgrade` silently downgraded them.
+  verify:
+    needs: [publish]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify the tagged version is live on PyPI
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF#refs/tags/v}"
+          for attempt in 1 2 3 4 5 6; do
+            if curl -sfL "https://pypi.org/pypi/agent-doc/${version}/json" >/dev/null; then
+              echo "agent-doc ${version} is live on PyPI"
+              exit 0
+            fi
+            echo "attempt ${attempt}: agent-doc ${version} not visible yet; waiting"
+            sleep 20
+          done
+          echo "::error::agent-doc ${version} is not on PyPI after a successful publish job — check the project size quota (pypi/support#12214) and the upload logs"
+          exit 1

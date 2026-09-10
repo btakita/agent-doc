@@ -14041,6 +14041,75 @@ fn test_release_install_paths_fail_closed_for_issue_47() {
     );
 }
 
+/// GH #52: release artifacts must be able to deliver FFI.
+///
+/// `agent-doc-x86_64-unknown-linux-gnu.tar.gz` unpacked to exactly one file —
+/// the binary — for every one of the six targets, and `lib-path` resolves the
+/// cdylib as a SIBLING of the executable. So `libagent_doc.so` shipped in no
+/// release asset at all, `make install` from a source checkout was the only way
+/// to obtain it, and every package-installed user ran the editor plugins in the
+/// degraded file-based-IPC mode that `AGENTS.md` treats as the fallback path.
+///
+/// A workflow cannot be exercised from a test, so pin the packaging invariants
+/// the same way `test_release_install_paths_fail_closed_for_issue_47` pins the
+/// cross image: the archive step must name the platform library, and the job
+/// must refuse rather than publish an asset without it.
+#[test]
+fn test_release_artifacts_ship_the_ffi_library_for_issue_52() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let release = fs::read_to_string(manifest_dir.join(".github/workflows/release.yml")).unwrap();
+    for required in [
+        "libagent_doc.dylib",
+        "libagent_doc.so",
+        "agent_doc.dll",
+        "tar czf agent-doc-${{ matrix.target }}.tar.gz -C \"$release_dir\" agent-doc \"$lib\"",
+    ] {
+        assert!(
+            release.contains(required),
+            "release archives must carry the platform cdylib beside the binary: {required}"
+        );
+    }
+    assert!(
+        release.contains("cannot deliver FFI without it"),
+        "a release build whose cdylib is missing must fail closed rather than publish a binary-only asset"
+    );
+
+    let pypi = fs::read_to_string(manifest_dir.join(".github/workflows/pypi.yml")).unwrap();
+    assert!(
+        pypi.contains("data = \"wheel-data\""),
+        "the wheel must declare a data directory so the cdylib installs into the same bin/ as the binary"
+    );
+    assert!(
+        pypi.contains("does not ship {lib} beside the binary (GH #52)"),
+        "the wheel build must prove the cdylib is present before the upload"
+    );
+
+    // `#pypicadence`: per-tag publishing burned ~5 GiB/month against a 10 GiB
+    // project quota, so uploads started failing with `400 Project size too
+    // large` and PyPI silently fell 20 versions behind the newest tag.
+    assert!(
+        pypi.contains("tags: [\"v[0-9]+.[0-9]+.0\"]"),
+        "PyPI publishing must be gated to milestone tags, not every tag"
+    );
+    assert!(
+        pypi.contains("workflow_dispatch"),
+        "any single tag must remain publishable on demand"
+    );
+    assert!(
+        pypi.contains("is not on PyPI after a successful publish job"),
+        "a publish that does not land on PyPI must fail loudly instead of drifting silently"
+    );
+
+    let release_tags = release
+        .split_once("tags:")
+        .expect("release workflow tag trigger")
+        .1;
+    assert!(
+        release_tags.trim_start().starts_with("[\"v*\"]"),
+        "every tag must still produce a GitHub Release even though PyPI is cadence-gated"
+    );
+}
+
 #[test]
 fn test_global_config_has_no_orchestration_facade() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));

@@ -1424,6 +1424,125 @@ mod tests {
         ));
     }
 
+    /// `#deferredmutdrop` — a deferred retained write used to resume with the
+    /// response and DROP its tracked-work mutation plan.
+    ///
+    /// Observed live 2026-09-10 on `cycle-1789080212116` with no live editor
+    /// registration: `respond --done ... --backlog-gate ... --backlog-add ...`
+    /// failed with `recovery=await_editor_replica_no_disk_write`, the retained
+    /// response converged and committed as `3e61bbb726`, and not one of the five
+    /// tracked-work mutations applied — backlog, queue, and review were
+    /// byte-identical to their pre-cycle state. Recovery took a separate
+    /// `write --pending-only --commit` plus `commit` from the owning pane.
+    ///
+    /// The response half reaches `write_applied` first, so the resume takes the
+    /// materialized-continuation branch; that branch continued straight to
+    /// commit and published a half-applied cycle.
+    #[test]
+    fn binary_owned_resume_replays_the_tracked_work_half_of_a_write_applied_capture() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\n",
+            "session: test\n",
+            "agent_doc_format: append\n",
+            "agent_doc_write: merge\n",
+            "---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#fix1] original next action\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "<!-- /agent:review -->\n\n",
+            "## User\n\n",
+            "Hello\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let response = "Response whose tracked-work half never applied.";
+        let plan = agent_doc_write_command_io::CapturedCloseoutMutationPlan {
+            pending_add: vec!["[#new1] follow-up from the dropped half".to_string()],
+            pending_gate: vec!["fix1".to_string()],
+            ..Default::default()
+        };
+        let plan_json = serde_json::to_string(&plan).unwrap();
+        agent_doc_capture_io::capture_response_with_current_content_and_intent_and_plan(
+            &doc,
+            response,
+            content,
+            Some(response),
+            Some(&plan_json),
+        )
+        .unwrap();
+        // `#mutprovenancepreresponse`: the intent is recorded before the
+        // response write, which is what proves the divergence belongs to this
+        // closeout rather than to a fresh operator edit.
+        agent_doc_cycle_state_io::record_requested_tracked_work(
+            &doc,
+            &[],
+            &["new1".to_string()],
+        )
+        .unwrap();
+
+        // Only the response half materialized: `#fix1` is still an open backlog
+        // item and `#new1` does not exist anywhere in the document.
+        let response_only = concat!(
+            "---\n",
+            "session: test\n",
+            "agent_doc_format: append\n",
+            "agent_doc_write: merge\n",
+            "---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#fix1] original next action\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "<!-- /agent:review -->\n\n",
+            "## User\n\n",
+            "Hello\n\n",
+            "## Assistant\n\n",
+            "Response whose tracked-work half never applied.\n",
+        );
+        std::fs::write(&doc, response_only).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "test_response_cell_write_applied",
+            Some(response_only),
+            Some(response_only),
+        )
+        .unwrap();
+        agent_doc_repair_io::pending::clear_pending(&doc).unwrap();
+
+        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .expect("write-applied capture should expose a durable resume key");
+        let outcome = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
+        assert!(
+            matches!(
+                outcome,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+            ),
+            "{outcome:?}"
+        );
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(result.matches(response).count(), 1);
+        assert!(
+            result.contains("[#new1]"),
+            "the captured --backlog-add must not be dropped by the resume: {result}"
+        );
+        assert!(
+            !result.contains("- [ ] [#fix1]"),
+            "the captured --backlog-gate must not be dropped by the resume: {result}"
+        );
+    }
+
     #[test]
     fn session_check_reports_captured_mutation_plan_without_replaying_it() {
         let dir = setup_project();

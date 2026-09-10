@@ -449,10 +449,100 @@ fn auto_recycle_after_install() {
     }
 }
 
+/// Whether this executable lives inside a Cargo build tree.
+///
+/// `target/release/agent-doc` and `target/<triple>/release/agent-doc` are the
+/// two shapes `cargo build` produces; anything else is an installed copy.
+pub(crate) fn executable_is_in_cargo_target_dir(exe: &Path) -> bool {
+    let Some(profile_dir) = exe.parent() else {
+        return false;
+    };
+    let profile = profile_dir.file_name().and_then(|name| name.to_str());
+    if !matches!(profile, Some("debug" | "release")) {
+        return false;
+    }
+    // `target/<profile>` or `target/<triple>/<profile>`.
+    let mut ancestor = profile_dir.parent();
+    for _ in 0..2 {
+        let Some(dir) = ancestor else {
+            return false;
+        };
+        if dir.file_name().and_then(|name| name.to_str()) == Some("target") {
+            return true;
+        }
+        ancestor = dir.parent();
+    }
+    false
+}
+
+/// The remedy printed when the FFI library is not a sibling of the binary.
+///
+/// GH #52: the remedy used to be `build with: cargo build --release`
+/// unconditionally. `lib-path` resolves the cdylib as a sibling of the
+/// executable, and until 0.35.363 no release asset shipped one at all — so the
+/// audience that actually saw this line was someone who downloaded a tarball or
+/// `pip install`ed agent-doc, who has neither a Rust toolchain nor a source
+/// tree. Branch on how the binary was installed and name a remedy that audience
+/// can run.
+pub(crate) fn missing_library_remedy(exe: &Path, lib_name: &str) -> Vec<String> {
+    if executable_is_in_cargo_target_dir(exe) {
+        return vec![
+            "build with: cargo build --release".to_string(),
+            "or install binary + library together with: make install".to_string(),
+        ];
+    }
+    vec![
+        format!(
+            "this agent-doc was installed as a package, so there is no source tree to build from; \
+             re-install from a release asset that ships {lib_name} beside the binary \
+             (https://github.com/btakita/agent-doc/releases/latest — assets from v0.35.363 onward include it)"
+        ),
+        format!(
+            "or point agent-doc at a copy you already have: agent-doc lib-install --source <dir containing {lib_name}>"
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn cargo_build_tree_keeps_the_source_checkout_remedy() {
+        for exe in [
+            Path::new("/src/agent-doc/target/release/agent-doc"),
+            Path::new("/src/agent-doc/target/debug/agent-doc"),
+            Path::new("/src/agent-doc/target/x86_64-unknown-linux-gnu/release/agent-doc"),
+        ] {
+            assert!(executable_is_in_cargo_target_dir(exe), "{}", exe.display());
+            let remedy = missing_library_remedy(exe, "libagent_doc.so").join("\n");
+            assert!(remedy.contains("cargo build --release"), "{remedy}");
+        }
+    }
+
+    /// GH #52: `cargo build --release` is unusable advice for someone who
+    /// installed from a release tarball or PyPI — no toolchain, no source tree.
+    #[test]
+    fn package_install_gets_a_remedy_it_can_actually_run() {
+        for exe in [
+            Path::new("/home/coder/.local/bin/agent-doc"),
+            Path::new("/tmp/pkgonly/agent-doc"),
+            Path::new("/venv/bin/agent-doc"),
+            // A `target` directory that is not a Cargo profile dir is still a
+            // package install.
+            Path::new("/opt/target/agent-doc"),
+        ] {
+            assert!(!executable_is_in_cargo_target_dir(exe), "{}", exe.display());
+            let remedy = missing_library_remedy(exe, "libagent_doc.so").join("\n");
+            assert!(
+                !remedy.contains("cargo build"),
+                "package installs must not be told to run cargo: {remedy}"
+            );
+            assert!(remedy.contains("lib-install"), "{remedy}");
+            assert!(remedy.contains("releases/latest"), "{remedy}");
+        }
+    }
 
     #[test]
     fn binary_install_atomically_replaces_existing_executable() {

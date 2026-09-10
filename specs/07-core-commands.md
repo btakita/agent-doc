@@ -242,7 +242,25 @@ read only stdout for this protocol and inherit stderr separately, including
 when an older binary emits an upgrade notice. Rejected candidates report the
 exit code, stdout candidate, and existence check.
 
+Release artifacts ship the platform cdylib beside the binary
+(`libagent_doc.so` / `.dylib` / `agent_doc.dll` in each release archive, and in
+the wheel's `.data/scripts/` so `pip install` lands it in the same `bin/`).
+`lib-path` resolves the library as a sibling of the executable, so a package
+install that omitted it could only run the editor plugins in the degraded
+file-based-IPC mode (GH #52). The missing-library remedy branches on how the
+binary was installed: a Cargo build tree is told to `cargo build --release`, and
+a package install is pointed at a release asset or `agent-doc lib-install
+--source <dir>` rather than at a toolchain it does not have.
+
 `agent-doc upgrade` checks GitHub Releases for a newer version and upgrades through the prebuilt GitHub binary / `pip` cascade. The agent-doc Rust workspace is private and is not a crates.io upgrade source.
+
+PyPI publishing is cadence-gated (`#pypicadence`): milestone tags (`vX.Y.0`)
+publish automatically and any other tag publishes on demand with
+`gh workflow run PyPI --ref <tag>`. Every tag still produces a GitHub Release.
+Per-tag PyPI publishing exhausted the 10 GiB project quota at ~5 GiB/month, which
+made uploads fail with `400 Project size too large` and left PyPI 20 versions
+behind the newest tag without surfacing; the PyPI workflow now asserts the tagged
+version is resolvable on PyPI after publishing so that drift fails loudly.
 
 The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.json`.
 

@@ -5341,7 +5341,9 @@ fn try_main() -> anyhow::Result<()> {
                 println!("{}", lib_path.display());
             } else {
                 eprintln!("[lib-path] library not found at {}", lib_path.display());
-                eprintln!("[lib-path] build with: cargo build --release");
+                for line in lib_install::missing_library_remedy(&exe, lib_name) {
+                    eprintln!("[lib-path] {line}");
+                }
                 std::process::exit(1);
             }
             Ok(())

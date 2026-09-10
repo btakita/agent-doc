@@ -2,6 +2,33 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.363
+
+- Ship the FFI library in release artifacts (GH #52). Release archives now carry
+  `libagent_doc.so` / `.dylib` / `agent_doc.dll` beside the binary for every
+  target, and the wheel installs it into the same `bin/`, so a package install
+  no longer runs the editor plugins in file-based-IPC-only mode. A build whose
+  cdylib is missing fails closed. `lib-path`'s missing-library remedy branches
+  on how the binary was installed: a source checkout is still told to
+  `cargo build --release`, and a package install is pointed at a release asset
+  or `agent-doc lib-install --source <dir>` instead of a toolchain it does not
+  have.
+- Gate PyPI publishing to milestone tags (`#pypicadence`, GH #52). Per-tag
+  publishing ran ~5 GiB/month against a 10 GiB project quota, so uploads began
+  failing with `400 Project size too large` and PyPI drifted 20 versions behind
+  the newest tag without surfacing. Milestone tags (`vX.Y.0`) publish
+  automatically, any tag publishes on demand with
+  `gh workflow run PyPI --ref <tag>`, every tag still produces a GitHub Release,
+  and the workflow now asserts the tagged version is resolvable on PyPI after
+  publishing.
+- Replay the tracked-work half of a captured closeout whose response half
+  already materialized (`#deferredmutdrop`). A deferred retained write resumed
+  with the response and dropped its backlog/queue/review mutation plan, so a
+  cycle could commit a response claiming an item was done beside a backlog that
+  still showed it open; the resume now replays the captured plan before the
+  commit continuation, and refuses to report a committed cycle when that half
+  cannot land.
+
 ## 0.35.362
 
 - Restore JetBrains tmux-to-editor pane focus synchronization at project startup.

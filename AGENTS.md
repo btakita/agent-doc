@@ -341,15 +341,24 @@ editors/
 5. **No operator gate on agent-doable steps (`#deploy-just-do-it`):** proceed straight through steps 6-9 without asking. The only operator-gated step is a live human eyeball of the changed behavior in a real editor/pane — record it as a non-blocking `[operator-verify]` follow-up; it never blocks the build/install/push/publish/recycle.
 6. Branch → PR → squash merge to main (or commit + push to main directly in this dogfooding repo)
 7. Tag: `git tag v<version> && git push origin v<version>`
-8. The tag push drives both publishes in CI: `.github/workflows/release.yml`
-   builds the six target binaries and runs `gh release create` (GitHub
-   Release), and `.github/workflows/pypi.yml` builds and uploads the wheels
-   (PyPI). Every agent-doc Cargo package has `publish = false`, so there is no
-   crates.io step.
-9. Verify both runs went green (`gh run list --limit 5`) and that
-   `gh release view v<version>` lists six assets. If PyPI needs a rerun, use
-   `gh workflow run PyPI --ref v<version>`; the local fallback is
-   `make publish-pypi`.
+8. The tag push drives the GitHub Release: `.github/workflows/release.yml`
+   builds the six target binaries, packages each one **with its platform cdylib
+   beside it** (`libagent_doc.so` / `.dylib` / `agent_doc.dll` — GH #52: without
+   it `lib-path` cannot resolve the library and every package install runs the
+   editor plugins in degraded file-based-IPC mode), and runs
+   `gh release create`. Every agent-doc Cargo package has `publish = false`, so
+   there is no crates.io step.
+
+   **PyPI is cadence-gated (`#pypicadence`), not per-tag.**
+   `.github/workflows/pypi.yml` fires automatically only on milestone tags
+   (`vX.Y.0`). Per-tag publishing ran ~5 GiB/month against a 10 GiB project
+   quota, so uploads started failing with `400 Project size too large` and PyPI
+   fell 20 versions behind the newest tag without surfacing. To publish an
+   ordinary tag, run `gh workflow run PyPI --ref v<version>` deliberately.
+9. Verify the release run went green (`gh run list --limit 5`) and that
+   `gh release view v<version>` lists six assets. When a PyPI publish was
+   requested, its `verify` job asserts the version is resolvable on PyPI; the
+   local fallback is `make publish-pypi`.
 
 ## Agent Backend Contract
 

@@ -64,14 +64,43 @@ jobs:
         if: "!matrix.use_cross"
         run: cargo build --release --target ${{ matrix.target }}
 
+      # GH #52: the tarball used to hold the binary ALONE. `lib-path` resolves
+      # the cdylib as a SIBLING of the executable, so every package install
+      # failed to load FFI and silently ran the editor plugins in the degraded
+      # file-based-IPC mode. `libagent_doc.so` shipped in no release asset for
+      # any target — `make install` from a source checkout was the only way to
+      # obtain it. Fail closed if the cdylib is missing: an asset without it is
+      # the defect, not a smaller download.
       - name: Package (Unix)
         if: runner.os != 'Windows'
-        run: tar czf agent-doc-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release agent-doc
+        run: |
+          set -euo pipefail
+          release_dir="target/${{ matrix.target }}/release"
+          case "${{ matrix.target }}" in
+            *-apple-darwin) lib="libagent_doc.dylib" ;;
+            *) lib="libagent_doc.so" ;;
+          esac
+          if [ ! -f "$release_dir/$lib" ]; then
+            echo "::error::$release_dir/$lib is missing; the release tarball cannot deliver FFI without it"
+            ls -la "$release_dir"
+            exit 1
+          fi
+          tar czf agent-doc-${{ matrix.target }}.tar.gz -C "$release_dir" agent-doc "$lib"
+          tar tzf agent-doc-${{ matrix.target }}.tar.gz
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path target/${{ matrix.target }}/release/agent-doc.exe -DestinationPath agent-doc-${{ matrix.target }}.zip
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseDir = "target/${{ matrix.target }}/release"
+          $lib = Join-Path $releaseDir 'agent_doc.dll'
+          if (-not (Test-Path $lib)) {
+            Write-Output "::error::$lib is missing; the release archive cannot deliver FFI without it"
+            Get-ChildItem $releaseDir
+            exit 1
+          }
+          Compress-Archive -Path (Join-Path $releaseDir 'agent-doc.exe'), $lib -DestinationPath agent-doc-${{ matrix.target }}.zip
 
       - name: Upload artifact (Unix)
         if: runner.os != 'Windows'

@@ -2,6 +2,13 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.362
+
+- Restore JetBrains tmux-to-editor pane focus synchronization at project startup.
+  Editor-component focus remains authoritative over background recovery, while
+  embedded-terminal pane selection may follow a visible document across project
+  roots. Hidden foreign-root targets remain suppressed. JetBrains plugin 0.2.379.
+
 ## 0.35.361
 
 - Make Codex Stop recovery share queue eligibility with continuation. A gated

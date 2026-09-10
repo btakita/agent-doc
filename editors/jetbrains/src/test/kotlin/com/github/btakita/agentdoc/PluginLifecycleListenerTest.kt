@@ -29,7 +29,7 @@ class PluginLifecycleListenerTest {
             )
         )
         assertFalse(source.contains("openFile("))
-        assertFalse(source.contains("TmuxPaneFocusSync.install(project)"))
+        assertTrue(source.contains("TmuxPaneFocusSync.install(project)"))
 
         val focusSyncSource = Files.readString(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TmuxPaneFocusSync.kt")

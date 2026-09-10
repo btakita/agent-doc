@@ -6,29 +6,27 @@ import org.junit.Test
 
 class TmuxPaneFocusSyncTest {
     @Test
-    fun `active editor selection outranks background tmux document changes`() {
+    fun `focused editor component outranks background tmux document changes`() {
         assertEquals(
-            true,
-            TmuxPaneFocusSync.shouldPreserveActiveEditorSelection(
-                projectWindowActive = true,
+            TmuxFocusMirrorDecision.PreserveFocusedEditor,
+            TmuxPaneFocusSync.decideTmuxFocusMirror(
+                editorContentFocused = true,
                 editorDocumentPath = "/repo/tasks/haiven-websocket-hub-takehome-v2.md",
                 tmuxDocumentPath = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+                tmuxDocumentVisible = false,
+                tmuxFocusedDocRoot = "/repo",
+                editorFocusedDocRoot = "/repo",
             ),
         )
         assertEquals(
-            false,
-            TmuxPaneFocusSync.shouldPreserveActiveEditorSelection(
-                projectWindowActive = false,
+            TmuxFocusMirrorDecision.Mirror,
+            TmuxPaneFocusSync.decideTmuxFocusMirror(
+                editorContentFocused = false,
                 editorDocumentPath = "/repo/tasks/haiven-websocket-hub-takehome-v2.md",
                 tmuxDocumentPath = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            ),
-        )
-        assertEquals(
-            false,
-            TmuxPaneFocusSync.shouldPreserveActiveEditorSelection(
-                projectWindowActive = true,
-                editorDocumentPath = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-                tmuxDocumentPath = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+                tmuxDocumentVisible = false,
+                tmuxFocusedDocRoot = "/repo",
+                editorFocusedDocRoot = "/repo",
             ),
         )
     }
@@ -143,12 +141,29 @@ class TmuxPaneFocusSyncTest {
     }
 
     @Test
-    fun `tmux focus mirror is suppressed across project roots`() {
-        // Operator focused on a submodule doc while the superproject's agent-doc
-        // window is active must NOT have the editor yanked across roots.
+    fun `embedded terminal mirrors a visible document across project roots`() {
         assertEquals(
-            false,
-            TmuxPaneFocusSync.shouldMirrorTmuxFocusToEditor(
+            TmuxFocusMirrorDecision.Mirror,
+            TmuxPaneFocusSync.decideTmuxFocusMirror(
+                editorContentFocused = false,
+                editorDocumentPath = "/repo/tasks/agent-doc/agent-doc-bugs.md",
+                tmuxDocumentPath = "/repo/src/sample-app/tasks/infra.md",
+                tmuxDocumentVisible = true,
+                tmuxFocusedDocRoot = "/repo/src/sample-app",
+                editorFocusedDocRoot = "/repo",
+            ),
+        )
+    }
+
+    @Test
+    fun `hidden foreign root tmux document cannot steal editor selection`() {
+        assertEquals(
+            TmuxFocusMirrorDecision.SuppressHiddenForeignRoot,
+            TmuxPaneFocusSync.decideTmuxFocusMirror(
+                editorContentFocused = false,
+                editorDocumentPath = "/repo/src/sample-app/tasks/infra.md",
+                tmuxDocumentPath = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+                tmuxDocumentVisible = false,
                 tmuxFocusedDocRoot = "/repo",
                 editorFocusedDocRoot = "/repo/src/sample-app",
             ),
@@ -158,8 +173,12 @@ class TmuxPaneFocusSyncTest {
     @Test
     fun `tmux focus mirror fires within one project root`() {
         assertEquals(
-            true,
-            TmuxPaneFocusSync.shouldMirrorTmuxFocusToEditor(
+            TmuxFocusMirrorDecision.Mirror,
+            TmuxPaneFocusSync.decideTmuxFocusMirror(
+                editorContentFocused = false,
+                editorDocumentPath = "/repo/tasks/current.md",
+                tmuxDocumentPath = "/repo/tasks/other.md",
+                tmuxDocumentVisible = false,
                 tmuxFocusedDocRoot = "/repo",
                 editorFocusedDocRoot = "/repo",
             ),
@@ -171,15 +190,23 @@ class TmuxPaneFocusSyncTest {
         // No focused markdown editor (or an unresolvable path) leaves single-project
         // following unchanged.
         assertEquals(
-            true,
-            TmuxPaneFocusSync.shouldMirrorTmuxFocusToEditor(
+            TmuxFocusMirrorDecision.Mirror,
+            TmuxPaneFocusSync.decideTmuxFocusMirror(
+                editorContentFocused = false,
+                editorDocumentPath = null,
+                tmuxDocumentPath = "/repo/tasks/other.md",
+                tmuxDocumentVisible = false,
                 tmuxFocusedDocRoot = "/repo",
                 editorFocusedDocRoot = null,
             ),
         )
         assertEquals(
-            true,
-            TmuxPaneFocusSync.shouldMirrorTmuxFocusToEditor(
+            TmuxFocusMirrorDecision.Mirror,
+            TmuxPaneFocusSync.decideTmuxFocusMirror(
+                editorContentFocused = false,
+                editorDocumentPath = "/repo/tasks/current.md",
+                tmuxDocumentPath = "/repo/tasks/other.md",
+                tmuxDocumentVisible = false,
                 tmuxFocusedDocRoot = null,
                 editorFocusedDocRoot = "/repo",
             ),

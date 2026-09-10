@@ -8,7 +8,6 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.LocalFileSystem
-import com.intellij.openapi.wm.WindowManager
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -24,6 +23,12 @@ internal enum class EditorFocusIntentDecision {
     SuppressStaleTmux,
     Acknowledge,
     Expired,
+}
+
+internal enum class TmuxFocusMirrorDecision {
+    Mirror,
+    PreserveFocusedEditor,
+    SuppressHiddenForeignRoot,
 }
 
 /**
@@ -97,36 +102,26 @@ class TmuxPaneFocusSync private constructor(
             ?.takeIf { it.name.endsWith(".md") }?.path
             ?: manager.selectedFiles.firstOrNull { it.name.endsWith(".md") }?.path
 
-        // The command plane can move tmux focus while recovering a different
-        // document. Tmux state is not operator intent while the project window
-        // remains active: keep the selected editor authoritative and retry the
-        // mirror only after the operator actually leaves the IDE for tmux.
-        val projectWindowActive = WindowManager.getInstance().getFrame(project)?.isActive == true
-        if (shouldPreserveActiveEditorSelection(
-                projectWindowActive = projectWindowActive,
+        val editorContentFocused = manager.selectedTextEditor?.contentComponent?.isFocusOwner == true
+        val tmuxDocumentVisible = manager.selectedFiles.any { it.path == documentPath }
+        when (
+            decideTmuxFocusMirror(
+                editorContentFocused = editorContentFocused,
                 editorDocumentPath = editorFocusedMdPath,
                 tmuxDocumentPath = documentPath,
-            )
-        ) {
-            return
-        }
-
-        // #tmuxmirrorcrossroot: never yank the editor selection across project
-        // roots. When the operator is actively focused on a markdown doc owned by a
-        // different agent-doc project than the tmux-focused session (observed: a
-        // submodule's sampleorders.md while the superproject's agent-doc window
-        // has agent-doc-bugs2.md active), mirroring the foreign window's focus would
-        // steal their selection. Record the tmux focus so a later same-root change
-        // still mirrors, but do not move the editor now.
-        if (!shouldMirrorTmuxFocusToEditor(
+                tmuxDocumentVisible = tmuxDocumentVisible,
                 tmuxFocusedDocRoot =
                     TerminalUtil.resolveProjectPath(project.basePath, documentPath).first,
                 editorFocusedDocRoot = editorFocusedMdPath
                     ?.let { TerminalUtil.resolveProjectPath(project.basePath, it).first },
             )
         ) {
-            lastDocumentPath = documentPath
-            return
+            TmuxFocusMirrorDecision.Mirror -> Unit
+            TmuxFocusMirrorDecision.PreserveFocusedEditor -> return
+            TmuxFocusMirrorDecision.SuppressHiddenForeignRoot -> {
+                lastDocumentPath = documentPath
+                return
+            }
         }
 
         lastDocumentPath = documentPath
@@ -213,13 +208,41 @@ class TmuxPaneFocusSync private constructor(
             lastDocumentPath: String?,
         ): Boolean = documentPath != null && documentPath != lastDocumentPath
 
-        internal fun shouldPreserveActiveEditorSelection(
-            projectWindowActive: Boolean,
+        /**
+         * Decide the single reverse-focus transition at the editor boundary.
+         *
+         * An actually focused editor component remains authoritative over command-plane
+         * focus changes. The IDE frame itself is not sufficient evidence: clicking an
+         * embedded tmux terminal leaves that frame active while transferring focus away
+         * from the editor. A visible document is part of this editor surface, so selecting
+         * its tmux pane may mirror across project roots; a hidden foreign-root document is
+         * still suppressed to prevent background recovery from stealing the selection.
+         */
+        internal fun decideTmuxFocusMirror(
+            editorContentFocused: Boolean,
             editorDocumentPath: String?,
             tmuxDocumentPath: String,
-        ): Boolean = projectWindowActive &&
-            !editorDocumentPath.isNullOrBlank() &&
-            editorDocumentPath != tmuxDocumentPath
+            tmuxDocumentVisible: Boolean,
+            tmuxFocusedDocRoot: String?,
+            editorFocusedDocRoot: String?,
+        ): TmuxFocusMirrorDecision {
+            if (
+                editorContentFocused &&
+                !editorDocumentPath.isNullOrBlank() &&
+                editorDocumentPath != tmuxDocumentPath
+            ) {
+                return TmuxFocusMirrorDecision.PreserveFocusedEditor
+            }
+            if (tmuxDocumentVisible) return TmuxFocusMirrorDecision.Mirror
+            if (
+                tmuxFocusedDocRoot != null &&
+                editorFocusedDocRoot != null &&
+                tmuxFocusedDocRoot != editorFocusedDocRoot
+            ) {
+                return TmuxFocusMirrorDecision.SuppressHiddenForeignRoot
+            }
+            return TmuxFocusMirrorDecision.Mirror
+        }
 
         internal fun decideEditorFocusIntent(
             tmuxDocumentPath: String,
@@ -235,23 +258,6 @@ class TmuxPaneFocusSync private constructor(
             } else {
                 EditorFocusIntentDecision.Expired
             }
-        }
-
-        /**
-         * #tmuxmirrorcrossroot: whether a tmux-focused agent-doc document may move
-         * the IDE editor selection given the operator's currently-focused markdown
-         * document. Suppress the mirror only when both project roots are known and
-         * differ — that is the cross-project steal (a submodule doc in the editor vs
-         * the superproject's active agent-doc pane). When either root is unknown
-         * (no focused markdown editor, or an unresolvable path) the mirror still
-         * fires so single-project tmux→editor following is unchanged.
-         */
-        internal fun shouldMirrorTmuxFocusToEditor(
-            tmuxFocusedDocRoot: String?,
-            editorFocusedDocRoot: String?,
-        ): Boolean {
-            if (tmuxFocusedDocRoot == null || editorFocusedDocRoot == null) return true
-            return tmuxFocusedDocRoot == editorFocusedDocRoot
         }
 
         internal fun isAgentDocWindowActive(projectRoot: String): Boolean? =

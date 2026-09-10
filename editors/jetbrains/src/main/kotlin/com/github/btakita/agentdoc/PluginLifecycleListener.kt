@@ -76,11 +76,10 @@ class PluginLifecycleListener : ProjectManagerListener {
         // selectionChanged does not fire for focus movement between existing
         // splits, so this reuses editorTabSync's reconcile from focus events.
         EditorFocusSyncListener.install(project, editorTabSync)
-        // Editor selection is operator-owned. Project Controller/tmux activity can
-        // follow an explicit editor focus change through EditorTabSyncListener, but
-        // background agent, recovery, restart, or pane-focus events must never open
-        // or select a different IDE document. The reverse focus mirror therefore
-        // remains uninstalled.
+        // Mirror Project Controller-owned tmux focus back into editor selection.
+        // TmuxPaneFocusSync keeps an actually focused editor authoritative, permits
+        // embedded-terminal focus changes, and suppresses hidden cross-root targets.
+        TmuxPaneFocusSync.install(project)
         project.messageBus
             .connect(project)
             .subscribe(

@@ -13,7 +13,7 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: start
 ---
 
 ## Status
@@ -196,6 +196,14 @@ The regression failed before the fix and passes afterward, covering saved-layout
 `make install-full` completed, including CLI, native library, and both editor packages. Both affected controllers completed stable handoffs to 0.35.356 with running inodes matching the installed executable. Live verification recycled the background project while panes `%177` and `%6` were visible: both panes and active `%6` remained unchanged, and that controller emitted no new layout effect. Its old singleton `%189` layout was not replayed.
 
 Architecture and evidence: [plan-startup-layout-authority.md](plan-startup-layout-authority.md). Workspace plan/install commit: `11acb735c`. Source and release-tag pushes follow this document closeout. The latest observed CI remains in progress. PyPI's existing quota blocker remains tracked in `#pypi345quota`, now targeting this release.
+
+### Re: Response
+
+Yes—state uses the existing Lazily `Source → Computed → Effect` graph.
+
+Fixed and installed v0.35.356. Live controller recycling preserved pane focus. All 9,280 tests and tmux checks passed.
+
+Three review tasks are queued. Code and document commits are pushed; release workflows are pending.
 <!-- agent:boundary:bff5c51e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -205,7 +213,7 @@ Architecture and evidence: [plan-startup-layout-authority.md](plan-startup-layou
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 #actionable-review
+- ~~#actionable-review~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#restartintellijidea]
 - do [#harnessswitchverify]
 - do [#compactdevreplica]

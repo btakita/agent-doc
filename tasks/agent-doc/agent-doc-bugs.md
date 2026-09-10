@@ -20,7 +20,7 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-0.35.354 installed: queue revisions survive stale completion and update live steering; verification complete.
+0.35.358 installed; editor recovery and refused-admission guards shipped. Retained closeout recovered; plugin 0.2.378 activation remains a live verification follow-up.
 <!-- /agent:status -->
 
 ## Exchange
@@ -256,6 +256,26 @@ The Stop hook conflicts with preflight’s explicit refusal. No valid cycle exis
 The session check confirms the editor’s native save is still pending. Content is retained, and the controller owns the next closeout attempt.
 
 No cycle was admitted. I stopped without resubmitting, forcing disk writes, or disturbing the editor state.
+
+### Re: Queue retrieval and wedged Run Agent Doc — gpt-6
+
+> **Queue prompt:** Fix fpe.md issue that stopped retrieving the next queue item. Also Run Agent Doc on this file is wedged.
+
+Implemented, installed, and pushed **0.35.358**, source commit `b198f06d2`, with JetBrains plugin **0.2.378**.
+
+The editor recovery path repeatedly tried to register against an obsolete captured baseline. Shared Rust policy now validates the captured splice stream, translates only unchanged ranges over independent canonical edits, and recognizes an already-published batch without duplicating it. Overlapping changes remain retained. Registration checks the newly observed canonical hash before replacing membership. Pending local edits defer bootstrap display; an outstanding canonical projection still drives editor apply/native save when no peer delivery remains.
+
+The Codex Stop hook also ignored failed preflight admission and demanded continuation or tried to capture the refusal explanation. The existing exact-thread prompt envelope now carries an admission receipt. Stop respects refusal before touching document work; a new prompt clears the receipt, and late receipts cannot fence a newer turn.
+
+The invariant is preservation of operator edits and exact admission authority. The native merge planner owns bounded splice policy; the controller owns registration CAS; the existing document replica and retained editor-apply Lazily graph own projection and save effects. No new polling loop, document state owner, or SQLite arbitration was added. The pure splice planner and persisted hook event receipt are bounded adapter operations; existing Sources, derived readiness, Effects, and generation-fenced receipts retain lifecycle coordination.
+
+**Verification:** `make check tmux-ci` passed: **9,291 tests passed, 258 skipped**, plus editor/native parity, formal checks, and isolated tmux tests. The installed native ABI smoke passed. Tests cover Unicode and sequential edits, independent changes, already-applied batches, overlap refusal, registration guards, admitted closeout, refused admission, and newer-prompt reset. `make install-full` completed. Source, release tag, and workspace notes are pushed; CI/Release/PyPI workflows were still in progress at the last check.
+
+**The original retained closeout has recovered.** The controller committed it automatically as `1b35dcb028` at 03:26:48 UTC and reported `captured_finalize_resume_committed`. A fresh connected admission subsequently succeeded. No reset, forced disk write, repeated finalization, or controller recycle was used. `fpe.md` was already actively executing work in pane `%6` when inspected, so I preserved that running work.
+
+IntelliJ still reports plugin 0.2.376, so activation of installed 0.2.378 and its live stale-splice regression check remain in review. This is **not a blocker to continuing this document**. The [agent-doc skill](../../.codex/skills/agent-doc/SKILL.md) permits gating a “required live editor/pane verification”; that is the exact remaining prerequisite, with implementation, installation, publication trigger, and automated checks complete.
+
+Architecture and evidence: [plan-captured-editor-splice-recovery.md](plan-captured-editor-splice-recovery.md).
 <!-- agent:boundary:d53e8ec0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -269,7 +289,7 @@ No cycle was admitted. I stopped without resubmitting, forcing disk writes, or d
 - do [#harnessswitchverify]
 - Please add support for grok build
 <!-- /agent:queue -->
-9
+
 
 <!-- agent:backlog -->
 <!-- /agent:backlog -->
@@ -277,9 +297,10 @@ No cycle was admitted. I stopped without resubmitting, forcing disk writes, or d
 ## Review
 
 <!-- agent:review -->
+- [/] [#activateinstalledjetbrai] [operator-verify] Activate the installed JetBrains plugin 0.2.378 and verify captured local edits recover across an independently advanced canonical response. IntelliJ PID 1653132 still reports plugin 0.2.376; CLI/native 0.35.358 and plugin package 0.2.378 are installed and all automated tests passed. Unblocks: activate the updated plugin through IntelliJ and provide a disposable live document for the edit/response interleaving check. The original retained capture already committed as 1b35dcb028; this does not block continued document work. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.
 - [/] [#harnessswitchverify] [operator-verify] Current prerequisites verified: IntelliJ PID 1653132 runs plugin 0.2.376 and native 0.35.356 with operator_text_authority_v1. Remaining proof: in a disposable live IntelliJ session, make an unsaved codex -> claude -> codex frontmatter switch while observing supervisor receipts; prove one spawn per authoritative switch, deferred restart for non-authoritative evidence, and no refusal/respawn storm. No host restart is currently indicated. Unblocks: provide the disposable document path and perform the real unsaved editor edit; CLI persisted writes cannot substitute for this proof.
 - [/] [#cargo355token] [operator-verify] Rotate the Cargo registry token exposed in diagnostic tool output during the pane-removal investigation. Tracing was stopped and generated trace files removed; no credential value is stored in this document or source.
-- [/] [#pypi345quota] Publish agent-doc v0.35.356 to PyPI after quota space is available. The v0.35.354 upload failed at the 10 GB project-storage limit (https://github.com/btakita/agent-doc/actions/runs/34408090473). This release will trigger publication after its tag push; uploaded artifacts are not yet verified. Unblocks: obtain a quota increase or explicitly approve old-release cleanup, then rerun the PyPI workflow and verify the release artifacts.
+- [/] [#pypi345quota] Publish agent-doc v0.35.358 to PyPI once quota space is available. The previously observed upload failure was the 10 GB project-storage limit; v0.35.358's tag-triggered workflow was in progress at last observation and its uploaded artifacts are not yet verified. Unblocks: obtain a quota increase or explicitly approve old-release cleanup if this release also encounters the quota, then rerun PyPI and verify artifacts.
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.
 - [/] [#ha3h] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml → receive.auto_create_components = ["pending"] (or = false). Flip notify/write default from auto-create to consult-recipient-config. Single-author workspaces set list once; multi-user recipients gate what senders materialize. Blocked until multi-user workspace support exists; issue #40 explicitly says not to ship this before that prerequisite. Tracked: https://github.com/btakita/agent-doc/issues/40
 <!-- /agent:review -->

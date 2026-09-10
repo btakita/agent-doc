@@ -225,6 +225,10 @@ layout or select its intermediate window; existing sessions remain alive.
 
 ### Integration Layer
 
+Codex Stop recovery uses the shared queue eligibility policy. A deferred review
+item cannot reopen a committed response merely because its queue line remains;
+eligible manual prompts still require document writeback.
+
 | Term | Definition |
 |------|-----------|
 | **Route** | Resolve which tmux pane handles a file. Creates panes if needed (provisioning). |

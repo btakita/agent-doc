@@ -2,6 +2,13 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.361
+
+- Make Codex Stop recovery share queue eligibility with continuation. A gated
+  review mirror no longer reopens a committed document or captures another
+  response; eligible manual work, operator verdicts and stop fences retain
+  their intended behavior.
+
 ## 0.35.360
 
 - Stage layout-owned pane creation off-screen and defer selection to the current

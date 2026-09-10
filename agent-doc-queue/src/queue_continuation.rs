@@ -475,14 +475,50 @@ pub fn live_continuation_head(content: &str) -> Option<String> {
 pub fn drainable_head_prompt_for_scope(content: &str, scope: DrainScope) -> Option<QueuePrompt> {
     let (queue_facts, activation) =
         active_queue_for_supervisor_start(content, matches!(scope, DrainScope::Supervisor))?;
+    eligible_head_prompt_from_entries(
+        content,
+        &activation.entries_after,
+        queue_facts.preset_supplies_directive,
+        scope,
+    )
+}
+
+/// Pending manual work shares drain eligibility without granting auto activation.
+/// Stop recovery uses this projection so deferred review mirrors cannot create
+/// response debt after closeout. Explicit stop/time fences still park the work.
+pub fn pending_head_prompt_text(content: &str, scope: DrainScope) -> Option<String> {
+    if crate::queue_heads::queue_is_explicitly_stopped(content) {
+        return None;
+    }
+    let (queue_facts, entries) = queue_component_entries(content)?;
+    if document_queue::has_stop_fence_at_head(&entries)
+        || document_queue::time_gate_at_head(&entries).is_some()
+    {
+        return None;
+    }
+    let head = eligible_head_prompt_from_entries(
+        content,
+        &entries,
+        queue_facts.preset_supplies_directive,
+        scope,
+    )?;
+    Some(strip_in_progress_marker(&head.text))
+}
+
+fn eligible_head_prompt_from_entries(
+    content: &str,
+    entries: &[QueueEntry],
+    preset_supplies_directive: bool,
+    scope: DrainScope,
+) -> Option<QueuePrompt> {
     let open_backlog = open_backlog_ids_from_content(content);
     let deferred_ids = deferred_backlog_ids_split(content, scope);
     first_drainable_head(
-        &activation.entries_after,
+        entries,
         open_backlog.as_ref(),
         &deferred_ids,
         &after_deps_from_content(content),
-        queue_facts.preset_supplies_directive,
+        preset_supplies_directive,
         scope,
     )
     .cloned()

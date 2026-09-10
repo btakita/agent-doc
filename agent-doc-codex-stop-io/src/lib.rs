@@ -42,7 +42,6 @@ use agent_doc_codex_hook_io::{
 use agent_doc_codex_hook_io::{
     UserPromptSubmitInput, apply_user_prompt_submit, load_state, save_state,
 };
-use agent_doc_document::queue_projection::strip_in_progress_marker;
 use agent_doc_queue_io::queue_consume;
 use agent_doc_turn::codex_stop_continuation::{
     render_prompt_continuation_instruction, render_slash_command_continuation_instruction,
@@ -742,19 +741,10 @@ fn active_session_prompt_or_queue_head(file: &Path) -> Result<Option<String>> {
 }
 
 fn first_active_queue_prompt_in_content(content: &str) -> Option<String> {
-    if agent_doc_queue::queue_heads::queue_is_explicitly_stopped(content) {
-        return None;
-    }
-    let components = agent_doc_element::element::parse(content).ok()?;
-    let queue = components
-        .iter()
-        .find(|component| component.name == "queue")?;
-    let entries = agent_doc_queue::document_queue::parse(queue.content(content)).ok()?;
-    let prompt = agent_doc_queue::document_queue::prompts(&entries)
-        .into_iter()
-        .map(|prompt| strip_in_progress_marker(&prompt.text))
-        .map(|prompt| prompt.trim().to_string())
-        .find(|prompt| !prompt.is_empty())?;
+    let prompt = agent_doc_queue::queue_continuation::pending_head_prompt_text(
+        content,
+        agent_doc_queue::queue_continuation::DrainScope::InSessionLoop,
+    )?;
     if agent_doc_codex_hook_io::is_context_clear_prompt(&prompt)
         || agent_doc_queue::queue_command::slash_command_text(&prompt).is_some()
     {
@@ -3048,6 +3038,80 @@ Reviewed the gated items.\n\
 
         assert_eq!(response, StopResponse::Continue { continue_: true });
         assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+    }
+
+    #[test]
+    fn stop_passes_through_committed_cycle_with_gated_review_head() {
+        let dir = setup_project();
+        let doc = write_manual_queue_doc(&dir, &["do [#liveverify]"]);
+        let original = format!(
+            "{}\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\
+             <!-- agent:review -->\n\
+             - [/] [#liveverify] [operator-verify] Verify unsaved editor switching.\n\
+             <!-- /agent:review -->\n",
+            fs::read_to_string(&doc).unwrap()
+        );
+        fs::write(&doc, &original).unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit",
+            Some(&original),
+            Some(&original),
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "turn-gated-review");
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-gated-review".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "Implementation is installed; live verification remains gated."
+                .to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert_eq!(response, StopResponse::Continue { continue_: true });
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+    }
+
+    #[test]
+    fn pending_queue_writeback_skips_gated_heads_but_preserves_real_work() {
+        let document = |queue: &str| {
+            format!(
+                "<!-- agent:queue -->\n{queue}\n<!-- /agent:queue -->\n\
+                 <!-- agent:backlog -->\n- [ ] [#ready] Implement ready work.\n\
+                 <!-- /agent:backlog -->\n\
+                 <!-- agent:review -->\n\
+                 - [/] [#verify] [operator-verify] Observe a real editor edit.\n\
+                 <!-- /agent:review -->\n"
+            )
+        };
+        for (queue, expected) in [
+            ("- do [#verify]", None),
+            ("- do [#verify]\n- do [#ready]", Some("do [#ready]")),
+            ("- Fix the remaining issue", Some("Fix the remaining issue")),
+            (
+                "- complete [#verify]: verified. looks good",
+                Some("complete [#verify]: verified. looks good"),
+            ),
+            ("--- stop\n- do [#ready]", None),
+        ] {
+            assert_eq!(
+                first_active_queue_prompt_in_content(&document(queue)).as_deref(),
+                expected,
+                "queue: {queue}"
+            );
+        }
     }
 
     #[test]

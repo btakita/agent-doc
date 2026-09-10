@@ -88,9 +88,11 @@ After a cycle is committed, a visible queue line is not by itself proof that the
 same turn still owes document work. Frontmatter `queue: stop` explicitly parks
 that head, so the Stop hook must agree with `session-check`'s
 `no_drainable_work` outcome, clear the tracked hook state, and return
-`continue=true`. A manual queue head without an explicit stop remains a
-writeback guard for chat-only responses, and active go/auto queue continuation
-is unchanged.
+`continue=true`. The pending-work guard also shares the queue policy's eligibility
+predicate: deferred review mirrors, unmet dependencies, and head fences cannot
+create fresh response debt. An eligible manual queue prompt remains a writeback
+guard without granting auto activation; a deferred head does not hide eligible
+work behind it. Inline operator verdicts follow the same shared policy.
 
 When the repo-local Codex config registers the `agent-doc` MCP server, Stop-hook queue-continuation blocks must prefer the MCP tool path for the active turn: `agent_doc_admit`, `agent_doc_plan` / `agent_doc_read` as needed, `agent_doc_finalize` for the strict write/commit closeout, and `agent_doc_session_check` for the final gate. If MCP tools are unavailable in the current Codex run, the same block must retain the in-pane CLI fallback (`agent-doc finalize <FILE>` or `agent-doc write --commit <FILE>`) and must still forbid running `agent-doc <FILE>` from the owner pane. Claude, OpenCode, and direct CLI flows remain unchanged.
 

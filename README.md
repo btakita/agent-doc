@@ -219,6 +219,10 @@ agent-doc extends the [existence kernel vocabulary](https://github.com/btakita/e
 | **Provisioning** | Creating a new tmux pane and starting the configured agent harness for a document. Performed by `route::auto_start`. The normal path for new documents — sync triggers provisioning when it finds a session UUID with no registered pane. |
 | **Initialization** | Assigning a session UUID, creating a snapshot, and committing to git. Performed by `ensure_initialized()`. Called from claim, preflight, and sync's resolve_file. |
 
+Layout-owned provisioning stages new panes off-screen until the current layout
+places them. A late startup cannot add a third visible pane to a two-editor
+layout or select its intermediate window; existing sessions remain alive.
+
 ### Integration Layer
 
 | Term | Definition |

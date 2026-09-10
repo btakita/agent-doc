@@ -3992,12 +3992,10 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn provision_pane_first_col_splits_left() {
-        // Verify that provision_pane with a file in the first column
-        // computes split_before=true via is_first_column and places the new
-        // pane at the leftmost position in the agent-doc window.
+    fn provision_pane_first_col_stays_detached_until_layout() {
         let dir = tempfile::tempdir().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let _bin_guard = crate::tests::EnvGuard::set("AGENT_DOC_ROUTE_BIN", "/bin/echo");
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let tasks = dir.path().join("tasks");
         std::fs::create_dir_all(&tasks).unwrap();
@@ -4043,21 +4041,13 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             result.err()
         );
 
-        // The new pane should be leftmost (split_before=true picks first pane, splits -dbh)
+        let new_pane = result.unwrap();
         let after = iso
             .list_window_panes(&format!("{}:agent-doc", session))
             .unwrap();
-        assert_eq!(after.len(), 3, "should have 3 panes after auto_start");
-        // The new pane is NOT one of the original two — find it
-        let new_pane: Vec<_> = after
-            .iter()
-            .filter(|p| *p != &pane_left && *p != &pane_right)
-            .collect();
-        assert_eq!(new_pane.len(), 1, "should have exactly 1 new pane");
-        assert_eq!(
-            &after[0], new_pane[0],
-            "first-column file should produce leftmost pane (split_before=true)"
-        );
+        assert_eq!(after, [pane_left, pane_right]);
+        assert!(iso.pane_alive(&new_pane));
+        assert_ne!(iso.pane_window(&new_pane).unwrap(), window);
     }
 
     #[test]
@@ -4118,6 +4108,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     fn layout_owned_provisioning_does_not_focus_intermediate_pane() {
         let dir = tempfile::tempdir().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let _bin_guard = crate::tests::EnvGuard::set("AGENT_DOC_ROUTE_BIN", "/bin/echo");
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let tasks = dir.path().join("tasks");
         std::fs::create_dir_all(&tasks).unwrap();
@@ -4156,12 +4147,10 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn provision_pane_second_col_splits_right() {
-        // Verify that provision_pane with a file in the second column
-        // computes split_before=false via is_first_column and places the new
-        // pane at the rightmost position in the agent-doc window.
+    fn provision_pane_second_col_stays_detached_until_layout() {
         let dir = tempfile::tempdir().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let _bin_guard = crate::tests::EnvGuard::set("AGENT_DOC_ROUTE_BIN", "/bin/echo");
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let tasks = dir.path().join("tasks");
         std::fs::create_dir_all(&tasks).unwrap();
@@ -4207,22 +4196,13 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             result.err()
         );
 
-        // The new pane should be rightmost (split_before=false picks last pane, splits -dh)
+        let new_pane = result.unwrap();
         let after = iso
             .list_window_panes(&format!("{}:agent-doc", session))
             .unwrap();
-        assert_eq!(after.len(), 3, "should have 3 panes after auto_start");
-        // Find the new pane (not one of the original two)
-        let new_pane: Vec<_> = after
-            .iter()
-            .filter(|p| *p != &pane_left && *p != &pane_right)
-            .collect();
-        assert_eq!(new_pane.len(), 1, "should have exactly 1 new pane");
-        assert_eq!(
-            after.last().unwrap(),
-            new_pane[0],
-            "second-column file should produce rightmost pane (split_before=false)"
-        );
+        assert_eq!(after, [pane_left, pane_right]);
+        assert!(iso.pane_alive(&new_pane));
+        assert_ne!(iso.pane_window(&new_pane).unwrap(), window);
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
@@ -4298,12 +4278,10 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn provision_pane_right_col_picks_rightmost_after_rearrange() {
-        // Regression: provision_pane must use screen position, not creation order.
-        // After rearranging panes so creation order != screen order,
-        // split_before=false should split from the rightmost pane by screen position.
+    fn provision_pane_preserves_rearranged_visible_columns() {
         let dir = tempfile::tempdir().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let _bin_guard = crate::tests::EnvGuard::set("AGENT_DOC_ROUTE_BIN", "/bin/echo");
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let tasks = dir.path().join("tasks");
         std::fs::create_dir_all(&tasks).unwrap();
@@ -4327,7 +4305,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let _ = iso.raw_cmd(&["break-pane", "-d", "-t", &pane_b]);
         let _ = iso.raw_cmd(&["join-pane", "-bh", "-d", "-s", &pane_b, "-t", &pane_a]);
 
-        // Provision a right-column file — should split from pane_a (rightmost by screen).
+        // Provisioning must leave the existing physical order unchanged.
         let col_args = vec!["tasks/file_a.md".to_string(), "tasks/file_b.md".to_string()];
         let file_b_rel = Path::new("tasks/file_b.md");
         let result = agent_doc_route_io::startup::provision_pane(
@@ -4348,19 +4326,10 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let after = iso
             .list_panes_ordered(&format!("{}:agent-doc", session))
             .unwrap();
-        assert_eq!(after.len(), 3, "should have 3 panes");
-
-        // The new pane should be rightmost (split after pane_a which is rightmost).
-        let new_pane: Vec<_> = after
-            .iter()
-            .filter(|p| *p != &pane_a && *p != &pane_b)
-            .collect();
-        assert_eq!(new_pane.len(), 1, "should have exactly 1 new pane");
-        assert_eq!(
-            after.last().unwrap(),
-            new_pane[0],
-            "right-column file should produce rightmost pane even after rearrangement"
-        );
+        assert_eq!(after, [pane_b, pane_a]);
+        let new_pane = result.unwrap();
+        assert!(iso.pane_alive(&new_pane));
+        assert_ne!(iso.pane_window(&new_pane).unwrap(), window);
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
@@ -4369,10 +4338,17 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 
         let dir = tempfile::tempdir().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let _bin_guard = crate::tests::EnvGuard::set("AGENT_DOC_ROUTE_BIN", "/bin/echo");
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
 
         let session = "test";
         let iso = Arc::new(IsolatedTmux::new("route-test-concurrent-provision"));
+        let left = iso.new_session(session, dir.path()).unwrap();
+        let right = iso.split_window(&left, dir.path(), "-dh").unwrap();
+        let visible_window = iso.pane_window(&left).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", &visible_window, "agent-doc"])
+            .unwrap();
+        iso.select_pane(&right).unwrap();
         let doc_a = dir.path().join("a.md");
         let doc_b = dir.path().join("b.md");
         std::fs::write(&doc_a, "# A\n").unwrap();
@@ -4417,16 +4393,17 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
 
         let window_a = iso.pane_window(&pane_a).unwrap();
         let window_b = iso.pane_window(&pane_b).unwrap();
-        assert_eq!(
+        assert_ne!(
             window_a, window_b,
-            "concurrent provisioning in one tmux session should converge into a single window"
+            "each pending owner has independent staging until layout placement"
         );
 
-        let panes = iso.list_window_panes(&window_a).unwrap();
-        assert!(
-            panes.contains(&pane_a) && panes.contains(&pane_b),
-            "both provisioned panes should remain visible in the shared window"
-        );
+        let visible = iso.list_panes_ordered("test:agent-doc").unwrap();
+        assert_eq!(visible, [left, right.clone()]);
+        assert_ne!(window_a, visible_window);
+        assert_ne!(window_b, visible_window);
+        assert_eq!(iso.active_pane(session).unwrap(), right);
+        assert!(iso.pane_alive(&pane_a) && iso.pane_alive(&pane_b));
 
         let registry = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
         assert!(

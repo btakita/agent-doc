@@ -133,7 +133,7 @@ Claude artifact UI must be distinguished by stable shape rather than session-own
 
 **Duplicate-pane guard:** When a document's registry entry is stale but there are still live panes whose process trees or supervisor PID still prove that document, route first computes the full candidate set. It only auto-picks when the winner is unambiguous: a single provable owner overall, or a single owner in the active tmux window while every other candidate is already stashed. Otherwise route fails closed with an ambiguity report and direct inspect/claim/kill commands.
 
-**No hidden fallback-pane guard:** When route needs a fresh pane, it may split beside a visible authoritative anchor or create a brand-new window only when no `agent-doc` window exists yet. If `split-window` fails beside the chosen anchor, or if the target session already has an `agent-doc` window but no safe registered anchor pane, route must fail closed and show tmux inspect/kill commands instead of creating a hidden stash fallback pane.
+**No hidden fallback-pane guard:** Standalone route may split beside a visible authoritative anchor or create the first window when no `agent-doc` window exists. A failed split or missing safe anchor remains fail-closed; it never creates a fallback pane. Layout-owned provisioning deliberately creates a detached staging pane before returning its binding to the current layout Effect. It must not split or select the visible window: a superseded startup completing after a two-column reconcile cannot append a third pane. Staging is the requested creation mode, not recovery from a failed visible split.
 
 **Failed fresh-start cleanup guard:** If route creates a new pane, registers it, and later fails closed because a fresh-start admission projection was not observed, cleanup must preserve that pane when it is still the live registered owner for the document. The operator should see the admission-projection failure, not a killed pane.
 
@@ -276,7 +276,7 @@ When the user navigates to a document in the editor:
 5. **Provisioning** — `route::provision_pane()` creates a new tmux pane:
 - Serializes concurrent provisioning with per-document and per-session startup flocks before choosing the split target
 - Re-checks the registry after the lock is acquired so a concurrent route that already registered this document is reused instead of double-started
-- Splits alongside an existing pane in the agent-doc window
+- Stages layout-owned starts in a detached window until the current layout places the returned binding; standalone routes split alongside a proven visible anchor
 - For nested-project documents sharing that window, accepts a pane from another project as a split-only anchor only when every visible pane's process tree proves a different agent-doc document owner; unknown or same-document ownership stays fail-closed
 - Registers the session→pane **Binding** in the controller state transaction
    - Starts Claude asynchronously in the new pane

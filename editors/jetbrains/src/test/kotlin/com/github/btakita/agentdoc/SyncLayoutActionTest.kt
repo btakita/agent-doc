@@ -473,7 +473,7 @@ class SyncLayoutActionTest {
     @Test
     fun `build columns groups windows by x into separate columns`() {
         // Two editor windows at distinct x positions → a 2-column (2-editor-pane)
-        // layout, which sync mirrors as 2 editor panes + 1 agent-doc pane.
+        // layout, which sync mirrors as exactly 2 document panes.
         val columns = LayoutDetector.buildColumnsFromSnapshots(
             listOf(
                 LayoutDetector.LayoutWindowSnapshot(x = 0, y = 0, file = "left.md"),

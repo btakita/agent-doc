@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.360
+
+- Stage layout-owned pane creation off-screen and defer selection to the current
+  layout effect. A startup completing after a two-column reconciliation cannot
+  append a third visible pane; superseded and replaced sessions remain alive.
+- Preserve standalone route placement and first-window bootstrap behavior.
+  Extend tmux CI with delayed-startup, concurrent provisioning, reordered
+  columns, focus preservation and paused-queue coverage.
+
 ## 0.35.359
 
 - Add Grok Build as a native headless backend and managed interactive harness.

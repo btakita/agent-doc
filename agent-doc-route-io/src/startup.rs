@@ -1,7 +1,7 @@
 //! Route startup and provisioning I/O.
 //!
 //! A shared `agent-doc` tmux window may span nested project roots. Fresh
-//! provisioning may use a pane from another root as a split-only anchor only
+//! standalone routing may use a pane from another root as a split-only anchor only
 //! when every visible pane proves ownership of a different agent-doc document;
 //! unknown ownership and same-document ownership remain fail-closed.
 //! Layout provisioning preserves paused queue control and uses an idle owner;
@@ -470,12 +470,43 @@ fn provision_only_visible_anchor(window_panes: &[String], split_before: bool) ->
     }
 }
 
+fn create_anchored_startup_pane(
+    tmux: &Tmux,
+    session_name: &str,
+    cwd: &Path,
+    anchor: &str,
+    split_flag: &str,
+    layout_owned: bool,
+) -> Result<String> {
+    if !layout_owned {
+        return tmux.split_window(anchor, cwd, split_flag);
+    }
+    // A remote startup can complete after the requesting layout was superseded.
+    // Only the current layout effect may place this binding in the visible
+    // window. `new_window` selects its window, so use an explicitly detached
+    // creation here and publish the same mutation observation as other creates.
+    tmux_router::tmux::invalidate_pane_snapshot();
+    tmux.raw_cmd(&[
+        "new-window",
+        "-d",
+        "-t",
+        &format!("{session_name}:"),
+        "-n",
+        "stash",
+        "-c",
+        &cwd.to_string_lossy(),
+        "-P",
+        "-F",
+        "#{pane_id}",
+    ])
+}
+
 /// Auto-start a new agent session in a specific tmux session.
 ///
 /// Strategy:
 /// 1. Find an existing registered agent-doc pane in the target session
-/// 2. If found: `split-window` directly in that pane's window (avoids creating
-///    a throwaway window then failing to join due to minimum pane size)
+/// 2. If found: stage layout-owned starts in a detached window; standalone
+///    routes split directly beside their proven anchor.
 /// 3. If not found: create a new window via `auto_start` (session may not exist yet)
 ///
 /// When `skip_wait` is true, skips `wait_for_agent_ready` and `send_command`.
@@ -535,8 +566,8 @@ pub fn auto_start_in_session_with_lock_mode(
     effects: RouteStartupEffects,
 ) -> Result<Option<String>> {
     // Serialize auto-starts for both the document and the target tmux session.
-    // This prevents duplicate starts for the same file and split-target races
-    // when two different documents provision concurrently into the same window.
+    // This prevents duplicate starts and serializes binding publication when
+    // different documents provision concurrently in the same tmux session.
     let startup_locks = match acquire_startup_locks(file, session_name, startup_lock_mode)? {
         StartupLockAcquire::Acquired(locks) => locks,
         StartupLockAcquire::Busy => {
@@ -662,11 +693,10 @@ pub fn auto_start_in_session_with_lock_mode(
     // Resolve the agent-doc binary path (same binary that's currently running)
     let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
 
-    // Try to split directly in an existing pane.
-    // Provision-only focus/sync may anchor only inside the target agent-doc
-    // window. A durable registration in `stash` is ownership evidence, not a
-    // geometry anchor: splitting beside it creates an invisible extra pane and
-    // makes the following active-window focus guard reject the successful start.
+    // Resolve the existing target window. Standalone routes need a proven split
+    // anchor. Layout-owned creation uses the visible target as evidence that
+    // placement belongs to the layout, then stages outside it. A durable stash
+    // registration proves ownership, not authority to change visible geometry.
     let window_panes = tmux
         .list_panes_ordered(&format!("{}:agent-doc", session_name))
         .unwrap_or_default();
@@ -738,13 +768,28 @@ pub fn auto_start_in_session_with_lock_mode(
         }
     };
     let split_flag = if split_before { "-dbh" } else { "-dh" };
+    let layout_owned_start = skip_wait || crate::invocation::defer_startup_focus_to_layout();
     let new_pane = if let Some(ref target) = existing_pane {
-        match tmux.split_window(target, &cwd, split_flag) {
+        match create_anchored_startup_pane(
+            tmux,
+            session_name,
+            &cwd,
+            target,
+            split_flag,
+            layout_owned_start,
+        ) {
             Ok(pane) => {
-                eprintln!(
-                    "[route] split-window {} alongside registered pane {} in session '{}' → new pane {}",
-                    split_flag, target, session_name, pane
-                );
+                if layout_owned_start {
+                    eprintln!(
+                        "[route] staged pane {} in session '{}' for current layout placement",
+                        pane, session_name
+                    );
+                } else {
+                    eprintln!(
+                        "[route] split-window {} alongside registered pane {} in session '{}' → new pane {}",
+                        split_flag, target, session_name, pane
+                    );
+                }
                 pane
             }
             Err(e) => {
@@ -754,7 +799,7 @@ pub fn auto_start_in_session_with_lock_mode(
                         session_name,
                         file_path,
                         anchor_pane: Some(target),
-                        cause: &format!("split-window failed alongside pane {} ({})", target, e),
+                        cause: &format!("pane creation failed for anchor {} ({})", target, e),
                     })
                 );
             }
@@ -834,7 +879,7 @@ pub fn auto_start_in_session_with_lock_mode(
     // transaction does not: the pane can still be in a temporary stash/new
     // window here, and selecting it steals the operator's window before
     // tmux-router places the canonical layout.
-    if crate::invocation::defer_startup_focus_to_layout() {
+    if layout_owned_start {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -1299,6 +1344,71 @@ fn resubmit_stranded_fresh_start_trigger(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "isolated tmux integration test; run make tmux-ci"]
+    fn layout_startup_completion_cannot_append_a_third_visible_pane() {
+        let dir = tempfile::tempdir().unwrap();
+        let tmux = tmux_router::IsolatedTmux::new("layout-startup-staging");
+        let left = tmux.new_session("test", dir.path()).unwrap();
+        let right = tmux.split_window(&left, dir.path(), "-dh").unwrap();
+        let window = tmux.pane_window(&left).unwrap();
+        tmux.raw_cmd(&["rename-window", "-t", &window, "agent-doc"])
+            .unwrap();
+        tmux.select_pane(&right).unwrap();
+        let before = tmux
+            .raw_cmd(&[
+                "display-message",
+                "-p",
+                "-t",
+                "test:",
+                "#{window_id}:#{pane_id}",
+            ])
+            .unwrap();
+
+        // The visible two-column reconciliation has already finished when an
+        // older/remote layout startup returns. Creation cannot change its cut.
+        let stale =
+            create_anchored_startup_pane(&tmux, "test", dir.path(), &left, "-dh", true).unwrap();
+        assert_eq!(
+            tmux.list_panes_ordered(&window).unwrap(),
+            [left.clone(), right.clone()],
+            "late provisioning must not append a third visible pane"
+        );
+        assert_eq!(
+            tmux.raw_cmd(&[
+                "display-message",
+                "-p",
+                "-t",
+                "test:",
+                "#{window_id}:#{pane_id}"
+            ])
+            .unwrap(),
+            before
+        );
+        assert!(tmux.pane_alive(&stale));
+        assert_ne!(tmux.pane_window(&stale).unwrap(), window);
+
+        // A current replacement is placed only by the layout effect. The old
+        // startup remains alive off-screen and cannot resurrect itself here.
+        let current =
+            create_anchored_startup_pane(&tmux, "test", dir.path(), &left, "-dh", true).unwrap();
+        tmux.stash_pane(&left, "test").unwrap();
+        tmux.join_pane(&current, &right, "-dbh").unwrap();
+        assert_eq!(
+            tmux.list_panes_ordered(&window).unwrap(),
+            [current.clone(), right.clone()]
+        );
+        assert!(tmux.pane_alive(&stale));
+        assert!(tmux.pane_alive(&left));
+        assert_ne!(tmux.pane_window(&stale).unwrap(), window);
+        let standalone =
+            create_anchored_startup_pane(&tmux, "test", dir.path(), &right, "-dh", false).unwrap();
+        assert_eq!(
+            tmux.list_panes_ordered(&window).unwrap(),
+            [current, right, standalone]
+        );
+    }
 
     #[test]
     fn layout_focus_defer_guard_is_scoped_and_nested() {

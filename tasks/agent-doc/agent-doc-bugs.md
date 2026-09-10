@@ -214,6 +214,16 @@ Verified and completed. IntelliJ PID `1653132` is registered with **agent-doc pl
 The newer-release bootstrap check passed against the installed executable. Temporarily seeded cached version `999.0.0`; a read-only control command emitted the newer-version notice, while `agent-doc lib-path` returned exactly one existing library path and empty stderr. The previous cache bytes were restored afterward. This proves the notice cannot contaminate the native bootstrap path, alongside the live IDE load evidence.
 
 The historical 0.2.375/0.35.345 activation prerequisite is satisfied; **no IntelliJ restart is needed**. No code or installation change was necessary. The unchanged source is `7fca2ff8f`; its full `make check tmux-ci` previously passed, and its latest GitHub CI run now reports success. The remaining queue continues with `#harnessswitchverify`, then `#compactdevreplica`.
+
+### Re: #harnessswitchverify — gpt-6
+
+> **Queue prompt:** do [#harnessswitchverify]
+
+Verified the current prerequisite: IntelliJ PID `1653132` runs plugin **0.2.376** and native **0.35.356**, with operator-text authority and native hot-reload capabilities. The old plugin-generation blocker is stale; no IDE restart is currently indicated.
+
+The live unsaved-switch proof remains open. Current logs contain no qualifying switch with the required one-spawn/deferred-restart evidence. The shared policy tests passed in the unchanged 0.35.356 full suite, but they do not replace that live check. Requested a disposable document path and a real unsaved editor edit to observe; ordinary CLI persistence would not exercise the same condition.
+
+Moved this item back to review with that precise remaining prerequisite. The [agent-doc skill](../../.codex/skills/agent-doc/SKILL.md) permits gating for a “required live editor/pane verification”; that is the remaining work here. No additional backlog follow-up is needed because implementation and automated checks are complete and the retained review item owns the live verification. Continuing to `#compactdevreplica`.
 <!-- agent:boundary:bff5c51e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -230,13 +240,13 @@ The historical 0.2.375/0.35.345 activation prerequisite is satisfied; **no Intel
 <!-- /agent:queue -->
 
 <!-- agent:backlog -->
-- [ ] [#harnessswitchverify] Recheck #harnessswitchstorm with the current live JetBrains plugin generation. After proving editor authority and matching runtime registration, validate an unsaved claude <-> codex switch: exactly one spawn and agent_restart_deferred reason=non_authoritative_document_view, without refusal storms or requiring a save to recognize the edit. Preserve operator text and use a disposable session for the repro. If a host restart is still required, record the current registration and precise blocker. The 2026-08-25 fpe.md run is invalid historical evidence.
 - [ ] [#compactdevreplica] Recheck the retained Compact Exchange continuation for src/haiven-dev/tasks/dev.md using current replica state and commit history. If it already settled, record the exact commit and resolve this item. Otherwise use supported replica recovery and verify the existing continuation commits while preserving operator text. Do not repeat Compact Exchange or force disk. If editor_attached_model_missing persists, record the exact reopen/restart prerequisite. Context: tasks/agent-doc/plan-compact-save-layout-dispatch.md.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#harnessswitchverify] [operator-verify] Current prerequisites verified: IntelliJ PID 1653132 runs plugin 0.2.376 and native 0.35.356 with operator_text_authority_v1. Remaining proof: in a disposable live IntelliJ session, make an unsaved codex -> claude -> codex frontmatter switch while observing supervisor receipts; prove one spawn per authoritative switch, deferred restart for non-authoritative evidence, and no refusal/respawn storm. No host restart is currently indicated. Unblocks: provide the disposable document path and perform the real unsaved editor edit; CLI persisted writes cannot substitute for this proof.
 - [/] [#cargo355token] [operator-verify] Rotate the Cargo registry token exposed in diagnostic tool output during the pane-removal investigation. Tracing was stopped and generated trace files removed; no credential value is stored in this document or source.
 - [/] [#pypi345quota] Publish agent-doc v0.35.356 to PyPI after quota space is available. The v0.35.354 upload failed at the 10 GB project-storage limit (https://github.com/btakita/agent-doc/actions/runs/34408090473). This release will trigger publication after its tag push; uploaded artifacts are not yet verified. Unblocks: obtain a quota increase or explicitly approve old-release cleanup, then rerun the PyPI workflow and verify the release artifacts.
 - [/] [#coder7] [operator-verify] Phase 7 — run the five-case live Coder workspace validation matrix after a reachable Coder workspace and authenticated access are available, with JetBrains Gateway remote backend, VS Code Remote-SSH, simultaneous dual-IDE attachment, workspace stop/start, and a no-tmux image variant. Plan: tasks/agent-doc/plan-coder-ide-hosted-tmux.md. Unblocks: provide the workspace URL or SSH target plus authentication and enable the current agent-doc plugin/extension in both remote IDE hosts.

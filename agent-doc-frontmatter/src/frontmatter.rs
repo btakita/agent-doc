@@ -370,7 +370,7 @@ pub enum FreeTextExecutionMode {
 
 /// Per-harness conversation pointers stored under the `resume:` frontmatter key.
 ///
-/// Keeping the three supported harnesses as explicit fields makes the persisted
+/// Keeping supported harnesses as explicit fields makes the persisted
 /// contract closed and deterministic: a Claude id can never be selected by a
 /// Codex or OpenCode launch merely because it is the only id in the document.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -381,17 +381,23 @@ pub struct HarnessResumeMap {
     pub codex: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opencode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grok: Option<String>,
 }
 
 impl HarnessResumeMap {
     fn is_empty(&self) -> bool {
-        self.claude.is_none() && self.codex.is_none() && self.opencode.is_none()
+        self.claude.is_none()
+            && self.codex.is_none()
+            && self.opencode.is_none()
+            && self.grok.is_none()
     }
 
     fn get(&self, harness: &str) -> Option<&str> {
         match canonical_resume_harness(harness) {
             "codex" => self.codex.as_deref(),
             "opencode" => self.opencode.as_deref(),
+            "grok" => self.grok.as_deref(),
             _ => self.claude.as_deref(),
         }
     }
@@ -400,6 +406,7 @@ impl HarnessResumeMap {
         match canonical_resume_harness(harness) {
             "codex" => self.codex = id,
             "opencode" => self.opencode = id,
+            "grok" => self.grok = id,
             _ => self.claude = id,
         }
     }
@@ -409,6 +416,7 @@ impl HarnessResumeMap {
             self.claude.as_deref(),
             self.codex.as_deref(),
             self.opencode.as_deref(),
+            self.grok.as_deref(),
         ]
         .into_iter()
         .flatten()
@@ -431,6 +439,7 @@ fn canonical_resume_harness(raw: &str) -> &'static str {
     match raw.trim() {
         "codex" => "codex",
         "opencode" | "open-code" | "open_code" => "opencode",
+        "grok" | "grok-build" => "grok",
         _ => "claude",
     }
 }
@@ -2114,6 +2123,22 @@ mod tests {
         assert_eq!(fm.resume_for_harness("claude"), Some("claude-thread"));
         assert_eq!(fm.resume_for_harness("codex"), Some("codex-thread"));
         assert_eq!(fm.resume_for_harness("open-code"), Some("opencode-thread"));
+    }
+
+    #[test]
+    fn grok_resume_preserves_other_harnesses_and_migrates_legacy() {
+        let source = "---\nagent: grok-build\nresume: old-grok\n---\n\nbody\n";
+        let updated = set_resume_id_for_harness(source, "claude", "claude-thread").unwrap();
+        let updated = set_resume_id_for_harness(&updated, "grok-build", "grok-thread").unwrap();
+        let (mut fm, _) = parse(&updated).unwrap();
+        assert_eq!(fm.resume_for_harness("grok"), Some("grok-thread"));
+        assert_eq!(fm.resume_for_harness("claude"), Some("claude-thread"));
+        assert_eq!(fm.active_resume_harness(), "grok");
+        assert!(fm.claims_resume_id("grok-thread"));
+        fm.clear_resume_for_harness("grok-build");
+        assert_eq!(fm.resume_for_harness("grok"), None);
+        assert!(!fm.claims_resume_id("grok-thread"));
+        assert_eq!(fm.resume_for_harness("claude"), Some("claude-thread"));
     }
 
     #[test]

@@ -409,6 +409,64 @@ fn run_template_mode_writes_inside_exchange_and_commits() {
 }
 
 #[test]
+fn grok_native_json_run_commits_response_and_its_own_resume_slot() {
+    let tmp = TempDir::new().unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(
+        &doc,
+        template_doc().replacen("---\n", "---\nagent: grok\n", 1),
+    )
+    .unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let script = tmp.path().join("grok-fixture.sh");
+    let payload = serde_json::json!({
+        "text": "<!-- patch:exchange -->\n### Re: topic — grok-4.6\nGrok response body\n<!-- /patch:exchange -->\n",
+        "stopReason": "end_turn",
+        "sessionId": "grok-thread",
+        "thought": "private fixture reasoning"
+    });
+    fs::write(
+        &script,
+        format!("#!/bin/sh\ncat <<'JSON'\n{payload}\nJSON\n"),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let config_root = write_config(tmp.path(), &script);
+    let config_path = config_root.join("agent-doc/config.toml");
+    let config = fs::read_to_string(&config_path)
+        .unwrap()
+        .replace("mock", "grok");
+    fs::write(config_path, config).unwrap();
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["run", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    let head = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["show", "HEAD:session.md"])
+        .output()
+        .unwrap();
+    assert!(head.status.success());
+    let head_blob = String::from_utf8_lossy(&head.stdout);
+    assert!(
+        head_blob.contains("### Re: topic — grok-4.6"),
+        "{head_blob}"
+    );
+    assert!(
+        head_blob.contains("resume:\n  grok: grok-thread"),
+        "{head_blob}"
+    );
+    assert!(!head_blob.contains("private fixture reasoning"));
+    assert_eq!(read_cycle_phase(&doc), "committed");
+}
+
+#[test]
 fn bare_path_alias_uses_same_template_safe_path() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");

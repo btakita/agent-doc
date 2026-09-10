@@ -25,6 +25,7 @@
 
 pub mod claude;
 pub mod codex;
+pub mod grok;
 pub mod junie;
 pub mod opencode;
 
@@ -71,6 +72,9 @@ pub fn run_agent_timeout() -> Duration {
 /// terminate and reap the backend together with any preflight/background
 /// descendants it started.
 pub fn configure_agent_child_process_group(command: &mut Command) {
+    // The child harness publishes its own identity. Carrying a parent Grok ID
+    // into another harness would misattribute its tools/admission to Grok.
+    command.env_remove("GROK_SESSION_ID");
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -230,6 +234,7 @@ pub fn resolve(
     match name {
         "claude" => Ok(Box::new(claude::Claude::new(cmd, args).with_env(env))),
         "codex" => Ok(Box::new(codex::Codex::new(cmd, args).with_env(env))),
+        "grok" | "grok-build" => Ok(Box::new(grok::Grok::new(cmd, args).with_env(env))),
         "opencode" => Ok(Box::new(opencode::OpenCode::new(cmd, args).with_env(env))),
         "junie" => Ok(Box::new(junie::Junie::new(cmd, args))),
         other => {
@@ -251,6 +256,7 @@ pub fn resolve_for_file(
 ) -> Result<Box<dyn Agent>> {
     let (cmd, args) = build_backend_command(name, config, Some(file));
     match name {
+        "grok" | "grok-build" => Ok(Box::new(grok::Grok::new(cmd, args).with_env(env))),
         "claude" => Ok(Box::new(claude::Claude::new(cmd, args).with_env(env))),
         "codex" => Ok(Box::new(
             codex::Codex::new(cmd, args)
@@ -284,7 +290,7 @@ pub fn resolve_streaming_for_file(
                 .with_env(env)
                 .with_required_ssh_targets(fm.required_ssh_targets.clone()),
         ))),
-        "opencode" => Ok(None),
+        "opencode" | "grok" | "grok-build" => Ok(None),
         "junie" => Ok(None),
         other => {
             if config.is_some() {

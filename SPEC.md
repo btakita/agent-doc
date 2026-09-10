@@ -1,5 +1,11 @@
 # agent-doc Functional Specification
 
+- Grok Build uses a native final-JSON backend and the existing managed
+  supervisor lifecycle, with exact document-bound resume IDs and structural
+  composer readiness. Passive hooks are not admission/continuation authority;
+  the shared Grok skill uses connected admit/finalize. See
+  [the backend contract](specs/05-agent-backend.md#grok-build-adapter).
+
 - Cross-version supervisor recycle requests use a retained recycle-epoch high
   water mark, independent of compacted event counts. Settlement names the exact
   observed request epoch; a late settlement cannot consume a newer request.

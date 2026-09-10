@@ -1249,7 +1249,7 @@ fn run_stderr_redirect_needed() -> bool {
 }
 
 pub fn run_stderr_redirect_harness(harness: &str) -> bool {
-    matches!(harness, "claude" | "codex" | "opencode")
+    matches!(harness, "claude" | "codex" | "opencode" | "grok")
 }
 
 pub struct RunHeartbeat {

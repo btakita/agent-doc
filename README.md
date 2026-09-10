@@ -2,6 +2,10 @@
 
 Interactive document sessions with AI agents.
 
+Grok Build is supported through `agent: grok`, including managed interactive
+sessions and headless runs. Install its shared skill and MCP connection with
+`agent-doc skill install --harness grok`. See [Grok Build setup](docs/guide/agent-backends.md#grok-build).
+
 Edit a markdown file, press a hotkey, and the tool diffs your changes, sends them to an AI agent, and writes the response back into the document. The document is the UI.
 
 > **Alpha Software** — actively developed; APIs and frontmatter format may change between versions.

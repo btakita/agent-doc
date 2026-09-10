@@ -387,6 +387,8 @@ pub fn build_harness_launch_spec_with_resume(
     let env_spec = agent_doc_supervisor_io::env::EnvSpec::from_frontmatter(fm);
     let mut resolved_env = env_spec.resolve()?;
     strip_reexec_handoff_env(&mut resolved_env);
+    // A new or switched child supplies its own session identity.
+    resolved_env.remove("GROK_SESSION_ID");
     if harness.supports_enable_tool_search && fm.enable_tool_search.unwrap_or(false) {
         resolved_env.insert("ENABLE_TOOL_SEARCH".into(), "true".into());
     }
@@ -654,6 +656,32 @@ mod tests {
         }
 
         fn start_console_status(&mut self, _message: &str) {}
+    }
+
+    #[test]
+    fn grok_launch_uses_exact_document_resume_and_its_model_namespace() {
+        let (fm, _) = frontmatter::parse("---\nagent: grok\nmodel: grok-4.6\nenv:\n  GROK_SESSION_ID: parent-session\nresume:\n  grok: 11111111-2222-4333-8444-555555555555\n  claude: unrelated\n---\n").unwrap();
+        let dir = TempDir::new().unwrap();
+        let spec = build_harness_launch_spec_with_resume(
+            &fm,
+            &agent_doc_config::Config::default(),
+            &dir.path().join("notes.md"),
+            &mut RecordingLaunchLog::default(),
+            Some(&agent_doc_harness::ResumeRequest::Latest),
+        )
+        .unwrap();
+        assert_eq!(spec.harness.binary, "grok");
+        assert!(!spec.resolved_env.contains_key("GROK_SESSION_ID"));
+        assert_eq!(
+            spec.base_args,
+            [
+                "--model",
+                "grok-4.6",
+                "--resume",
+                "11111111-2222-4333-8444-555555555555"
+            ]
+        );
+        assert!(!spec.capability_proof_required);
     }
 
     #[test]

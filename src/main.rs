@@ -2251,7 +2251,7 @@ enum Commands {
         force: bool,
         /// Explicit harness authority for recovery when document/actor metadata
         /// is missing or damaged.
-        #[arg(long, value_parser = ["claude", "codex", "opencode"])]
+        #[arg(long, value_parser = ["claude", "codex", "opencode", "grok", "grok-build"])]
         harness: Option<String>,
         /// Resume the harness conversation instead of starting a fresh one.
         /// This is the DEFAULT: with no `--resume`/`--fresh` flag at all, a start
@@ -4077,7 +4077,7 @@ enum SkillCommands {
         /// After install, output reload instructions: compact (default) or restart
         #[arg(long)]
         reload: Option<String>,
-        /// Target harness: claude, opencode, codex, cursor, generic (auto-detected if omitted)
+        /// Target harness: claude, opencode, codex, grok, cursor, generic (auto-detected if omitted)
         #[arg(long)]
         harness: Option<String>,
         /// Install for all supported harnesses
@@ -4679,48 +4679,52 @@ fn try_main() -> anyhow::Result<()> {
         Commands::Fix { file, session } => {
             agent_doc_sync_io::resync::run_fix(file.as_deref(), session.as_deref())
         }
-        Commands::Skill { command } => {
-            match command {
-                SkillCommands::Install {
-                    reload,
-                    harness,
-                    all,
-                    root,
-                } => {
-                    if all {
-                        skill::install_all_at(root.as_deref())?;
-                    } else if let Some(ref h) = harness {
-                        let env = agent_kit::detect::Environment::from_name(h)
+        Commands::Skill { command } => match command {
+            SkillCommands::Install {
+                reload,
+                harness,
+                all,
+                root,
+            } => {
+                if all {
+                    skill::install_all_at(root.as_deref())?;
+                } else if harness
+                    .as_deref()
+                    .is_some_and(|h| matches!(h, "grok" | "grok-build"))
+                    || (harness.is_none() && std::env::var_os("GROK_SESSION_ID").is_some())
+                {
+                    skill::grok::install(root.as_deref())?;
+                } else if let Some(ref h) = harness {
+                    let env = agent_kit::detect::Environment::from_name(h)
                         .ok_or_else(|| anyhow::anyhow!(
-                            "unknown harness '{}'. Valid: claude, opencode, codex, cursor, generic", h
+                            "unknown harness '{}'. Valid: claude, opencode, codex, grok, cursor, generic", h
                         ))?;
-                        skill::install_for_at(env, root.as_deref())?;
-                    } else if let Some(root) = root.as_deref() {
-                        skill::install_at(Some(root))?;
-                    } else {
-                        let updated = skill::install_and_check_updated()?;
-                        if updated && let Some(ref mode) = reload {
-                            match mode.as_str() {
-                                "restart" => {
-                                    println!("SKILL_RELOAD=restart");
-                                    println!(
-                                        "Skill updated. Please restart this session with --resume to reload the skill."
-                                    );
-                                }
-                                _ => {
-                                    println!("SKILL_RELOAD=compact");
-                                    println!(
-                                        "Skill updated. Please run /compact to reload the updated skill instructions."
-                                    );
-                                }
+                    skill::install_for_at(env, root.as_deref())?;
+                } else if let Some(root) = root.as_deref() {
+                    skill::install_at(Some(root))?;
+                } else {
+                    let updated = skill::install_and_check_updated()?;
+                    if updated && let Some(ref mode) = reload {
+                        match mode.as_str() {
+                            "restart" => {
+                                println!("SKILL_RELOAD=restart");
+                                println!(
+                                    "Skill updated. Please restart this session with --resume to reload the skill."
+                                );
+                            }
+                            _ => {
+                                println!("SKILL_RELOAD=compact");
+                                println!(
+                                    "Skill updated. Please run /compact to reload the updated skill instructions."
+                                );
                             }
                         }
                     }
-                    Ok(())
                 }
-                SkillCommands::Check => skill::check(),
+                Ok(())
             }
-        }
+            SkillCommands::Check => skill::check(),
+        },
         Commands::Plugin { action } => match action {
             PluginAction::Install {
                 editor,

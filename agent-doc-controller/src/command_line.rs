@@ -22,7 +22,7 @@ fn token_is_agent_doc_binary(token: &str) -> bool {
 fn token_is_harness_binary(token: &str) -> bool {
     matches!(
         token_basename(token),
-        "claude" | "codex" | "opencode" | "bun" | "node"
+        "claude" | "codex" | "opencode" | "grok" | "grok-build" | "bun" | "node"
     )
 }
 

@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.359
+
+- Add Grok Build as a native headless backend and managed interactive harness.
+  Final JSON validation excludes thoughts and refuses incomplete output; private
+  prompt files avoid argument limits and document text in process listings.
+- Preserve document-bound Grok session identity on resume. Recognize its boxed
+  composer and live cancel/stop indicators through existing supervisor state,
+  preserving drafts and refusing unknown UI rather than guessing readiness.
+- Install the shared Grok skill, runbooks and project MCP server with
+  `agent-doc skill install --harness grok`. The skill uses connected
+  admission/finalize and same-turn queue continuation, without a parallel
+  lifecycle or a Heavy-plan requirement.
+
 ## 0.35.358
 
 - Fence Codex Stop handling after a refused preflight admission. The hook leaves

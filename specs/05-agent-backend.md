@@ -2,6 +2,21 @@
 
 # Agent Backend
 
+## Grok Build adapter
+
+`grok` / `grok-build` select Grok Build, never the Claude fallback. The native
+headless adapter sends a private prompt file and requires final JSON containing
+nonempty `text`, `sessionId`, and `stopReason: end_turn`; incomplete or failed
+turns are errors. Thoughts are ignored. First invocation starts fresh; resume
+uses the document-bound ID. Native streaming is not advertised.
+
+Interactive launch and resume use `HarnessConfig::grok` and the existing
+supervisor scopes. Grok's boxed composer is ready only when empty, structurally
+complete, and free of active cancel/stop evidence or unrecognized footer UI.
+The Grok skill is rendered from the shared workflow; its passive hooks require
+connected MCP admission/finalize and in-turn queue continuation. The installer
+preserves existing project MCP server configuration.
+
 ## Trait
 
 `fn send(prompt, session_id, fork, model) -> (text, session_id)`

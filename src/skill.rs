@@ -36,6 +36,9 @@ use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+#[path = "skill_grok.rs"]
+pub mod grok;
+
 /// The shared SKILL.md source bundled at build time.
 const SKILL_TEMPLATE: &str = include_str!("../SKILL.md");
 
@@ -533,6 +536,7 @@ fn retire_managed_always_on_agents(root: Option<&Path>) -> Result<()> {
 pub(crate) fn audit_managed_instruction_surfaces(root: Option<&Path>) -> Result<()> {
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
     let base = resolved.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    grok::audit(&base)?;
 
     for path in [base.join("AGENTS.md"), base.join(".codex/AGENTS.md")] {
         if !path.exists() {
@@ -1836,6 +1840,7 @@ pub fn install_for_at(env: agent_kit::detect::Environment, root: Option<&Path>) 
 pub fn install_all_at(root: Option<&Path>) -> Result<()> {
     let install_user_codex_hooks = root.is_none();
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
+    grok::install(resolved.as_deref())?;
     for (env, _) in agent_kit::detect::Environment::all_skill_rel_paths("agent-doc") {
         install_skill_for_env(env, resolved.as_deref())?;
     }
@@ -1854,6 +1859,9 @@ pub fn install_all_at(root: Option<&Path>) -> Result<()> {
 /// When `root` is None, resolves to git superproject root (or CWD fallback).
 pub fn check_at(root: Option<&Path>) -> Result<()> {
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
+    if std::env::var_os("GROK_SESSION_ID").is_some() {
+        return grok::check(resolved.as_deref());
+    }
     let up_to_date = check_skill_for_env(detect_install_env(), resolved.as_deref())?;
     if !up_to_date {
         std::process::exit(1);

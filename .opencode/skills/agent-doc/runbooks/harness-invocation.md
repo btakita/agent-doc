@@ -1,5 +1,27 @@
 # Harness Invocation Patterns
 
+## Grok Build
+
+Install with `agent-doc skill install --harness grok`. The skill and bundled
+runbooks live in `.grok/skills/agent-doc/`; the project MCP server is registered
+in `.grok/config.toml`, preserving an existing entry. Enable/trust it in Grok
+when required by the host. Select `agent: grok` (`grok-build` is an alias).
+
+Submit `agent-doc <FILE>` as a normal prompt. Grok's passive hooks cannot supply
+the Claude/Codex admission marker or block Stop. For Grok, call connected
+`agent_doc_admit` before reading/planning/answering and `agent_doc_finalize`
+for the terminal write/commit and queue continuation. This admission rule
+supersedes hook-marker instructions below. Never recursively invoke the owner
+pane or shell preflight. Continue actionable queue heads in the same turn after
+committed closeout; do not run another session-check after a terminal connected
+finalize.
+
+Routing reuses the supervisor lifecycle and document-bound resume UUID.
+Readiness requires a complete empty Grok composer with no live cancel/stop
+indicator; unknown screens and drafts remain protected. Fullscreen UI was
+verified with Grok Build 1.0.24. `/clear` starts a fresh conversation; Ctrl+Q
+twice exits. Goal dispatch and native token streaming are not advertised.
+
 This runbook covers the harness-specific differences in how agent-doc is invoked.
 The core workflow (preflight, respond, persist the response) is identical across all harnesses; see `commit.md` for the shared commit-boundary contract.
 

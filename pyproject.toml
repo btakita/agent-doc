@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "agent-doc"
-version = "0.35.358"
+version = "0.35.359"
 description = "Interactive document sessions with AI agents"
 readme = "README.md"
 license = "MIT"

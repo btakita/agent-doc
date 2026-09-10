@@ -29,6 +29,7 @@ use agent_doc_turn_executor_tmux::prompt::{
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
+mod grok;
 pub mod managed_capability;
 pub mod prompt_source;
 pub mod timeout;
@@ -436,6 +437,7 @@ pub fn operator_quit_key_plan_for_state(harness: &str, busy: bool) -> Vec<&'stat
 
 pub fn operator_quit_key_plan(harness: &str) -> Vec<&'static str> {
     match harness {
+        "grok" => vec!["C-q", "C-q"],
         // OpenCode needs the doubled Escape its interrupt plan uses before the
         // composer is genuinely empty.
         "opencode" => vec!["Escape", "Escape", "C-d"],
@@ -447,6 +449,7 @@ pub fn normalize_harness_name(raw: &str) -> String {
     match raw.trim() {
         "" => "default".to_string(),
         "claude" => "claude-code".to_string(),
+        "grok-build" => "grok".to_string(),
         other => other.to_string(),
     }
 }
@@ -459,6 +462,24 @@ pub fn document_harness_from_content(content: &str) -> Option<String> {
 }
 
 impl HarnessConfig {
+    pub fn grok() -> Self {
+        Self {
+            binary: "grok".into(),
+            restart_behavior: RestartBehavior::Append(vec![]),
+            resume_behavior: ResumeBehavior::AppendFlag("--resume".into()),
+            session_id_assignment: SessionIdAssignment::Flag("--session-id".into()),
+            session_transcript_layout: SessionTranscriptLayout::Unsupported,
+            clean_exit_behavior: CleanExitBehavior::PromptUser,
+            prompt_patterns: vec!["│ ❯".into()],
+            trigger_command_template: "agent-doc {file}".into(),
+            env_remove: vec!["GROK_SESSION_ID".into()],
+            supports_no_mcp: false,
+            supports_enable_tool_search: false,
+            tmux_session_fallback: "grok".into(),
+            process_names: vec!["agent-doc".into(), "grok".into(), "grok-build".into()],
+        }
+    }
+
     pub fn claude() -> Self {
         Self {
             binary: "claude".into(),
@@ -537,6 +558,7 @@ impl HarnessConfig {
 
     pub fn from_agent_name(name: &str) -> Self {
         match name {
+            "grok" | "grok-build" => Self::grok(),
             "codex" => Self::codex(),
             "opencode" | "open-code" | "open_code" => Self::opencode(),
             _ => Self::claude(),
@@ -548,6 +570,7 @@ impl HarnessConfig {
     /// should fall back to the document's configured harness.
     pub fn from_pane_command(cmd: &str) -> Option<Self> {
         match cmd {
+            "grok" | "grok-build" => Some(Self::grok()),
             "codex" => Some(Self::codex()),
             "opencode" => Some(Self::opencode()),
             "claude" => Some(Self::claude()),
@@ -557,7 +580,10 @@ impl HarnessConfig {
     }
 
     pub fn is_tui_harness(&self) -> bool {
-        matches!(self.binary.as_str(), "claude" | "codex" | "opencode")
+        matches!(
+            self.binary.as_str(),
+            "claude" | "codex" | "opencode" | "grok"
+        )
     }
 
     pub fn supports_goal_command(&self, opencode_goal_extension_available: bool) -> bool {
@@ -699,6 +725,10 @@ impl HarnessConfig {
         let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(line);
         let trimmed = stripped.trim();
         match self.binary.as_str() {
+            "grok" => trimmed
+                .strip_prefix("│ ❯")
+                .and_then(|s| s.strip_suffix('│'))
+                .is_some_and(|s| s.trim().is_empty()),
             "claude" => {
                 matches!(trimmed, "❯" | "⏵")
                     || is_claude_idle_placeholder_prompt(trimmed)
@@ -1004,6 +1034,10 @@ impl HarnessConfig {
             return Some("help/usage screen detected".to_string());
         }
 
+        if self.binary == "grok" {
+            return grok::blocker(output);
+        }
+
         if self.binary == "opencode" {
             // #opencode-post-turn-false-active: check only the recent bottom
             // lines for a genuine busy cue instead of scanning the whole
@@ -1214,6 +1248,17 @@ impl HarnessConfig {
 
     /// Return the most recent non-empty, non-footer line from a captured transcript.
     pub fn last_prompt_candidate(&self, output: &str) -> Option<String> {
+        if self.binary == "grok" {
+            return match project_pane_composer(output, self) {
+                PaneComposerProjection::ReadyEmpty { evidence } => {
+                    Some(evidence.compatibility_candidate())
+                }
+                PaneComposerProjection::OperatorDraft { preview } => {
+                    Some(format!("│ ❯ {preview} │"))
+                }
+                PaneComposerProjection::Busy | PaneComposerProjection::Absent => None,
+            };
+        }
         if self.binary == "codex"
             && let Some(placeholder) = codex_idle_placeholder_candidate(output)
         {
@@ -1322,6 +1367,13 @@ pub enum PaneComposerProjection {
 
 /// Project the current ANSI pane snapshot into its composer state.
 pub fn project_pane_composer(content: &str, harness: &HarnessConfig) -> PaneComposerProjection {
+    if harness.binary == "grok" {
+        return if harness.has_busy_cue(content) {
+            PaneComposerProjection::Busy
+        } else {
+            grok::project(content)
+        };
+    }
     let latest_prompt_candidate = harness.last_prompt_candidate(content);
     let latest_prompt_is_dim_placeholder =
         latest_prompt_candidate.as_deref().is_some_and(|candidate| {

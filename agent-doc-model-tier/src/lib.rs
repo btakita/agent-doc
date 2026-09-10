@@ -192,11 +192,21 @@ fn builtin_for(harness: &str) -> TierMap {
     match harness {
         "claude-code" => builtin_claude_code(),
         "codex" => builtin_codex(),
+        // Grok has its own model namespace; never pass Claude tier aliases.
+        // Users can map tiers to their custom models in [model.tiers.grok].
+        "grok" => TierMap {
+            low: Some("grok-4.6".into()),
+            med: Some("grok-4.6".into()),
+            high: Some("grok-4.6".into()),
+        },
         _ => builtin_default(),
     }
 }
 
 pub fn detect_harness() -> String {
+    if std::env::var_os("GROK_SESSION_ID").is_some() {
+        return "grok".into();
+    }
     if ["CLAUDE_CODE_SESSION", "CLAUDE_CODE", "CLAUDECODE"]
         .iter()
         .any(|key| std::env::var_os(key).is_some())
@@ -226,6 +236,7 @@ pub fn harness_key_for_agent_name(agent_name: &str) -> String {
         "claude" | "claude-code" | "claudecode" | "claude-code-cli" => "claude-code".to_string(),
         "codex" | "codex-cli" | "openai-codex" => "codex".to_string(),
         "opencode" | "open-code" | "opencode-ai" => "opencode".to_string(),
+        "grok" | "grok-build" => "grok".to_string(),
         "" => "default".to_string(),
         other => other.to_string(),
     }
@@ -240,6 +251,7 @@ pub fn canonical_harness_name(value: &str) -> Option<String> {
         }
         "codex" | "codex-cli" | "openai-codex" => Some("codex".to_string()),
         "opencode" | "open-code" | "opencode-ai" => Some("opencode".to_string()),
+        "grok" | "grok-build" => Some("grok".to_string()),
         other => Some(other.to_string()),
     }
 }
@@ -695,6 +707,21 @@ pub fn parse_model_arg(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn grok_tiers_never_resolve_claude_aliases() {
+        for tier in [super::Tier::Low, super::Tier::Med, super::Tier::High] {
+            assert_eq!(
+                super::resolve_tier_to_model(tier, "grok", &super::ModelConfig::default())
+                    .as_deref(),
+                Some("grok-4.6")
+            );
+        }
+        assert_eq!(super::harness_key_for_agent_name("grok-build"), "grok");
+        assert_eq!(
+            super::canonical_harness_name("grok-build").as_deref(),
+            Some("grok")
+        );
+    }
     use super::*;
     use parking_lot::Mutex;
 
@@ -736,6 +763,7 @@ mod tests {
     }
 
     const HARNESS_ENV_KEYS: &[&str] = &[
+        "GROK_SESSION_ID",
         "CLAUDE_CODE_SESSION",
         "CLAUDE_CODE",
         "CLAUDECODE",
@@ -898,6 +926,11 @@ mod tests {
         // SAFETY: this test holds the shared env lock.
         unsafe { std::env::set_var("CODEX_THREAD_ID", "thread-123") };
         assert_eq!(detect_harness(), "codex");
+        // Grok tools publish their current ID even if the launching shell had
+        // a Codex identity. Restore the environment under the same test lock.
+        unsafe { std::env::set_var("GROK_SESSION_ID", "grok-thread") };
+        assert_eq!(detect_harness(), "grok");
+        unsafe { std::env::remove_var("GROK_SESSION_ID") };
         // SAFETY: this test holds the shared env lock.
         unsafe { std::env::remove_var("CODEX_THREAD_ID") };
 

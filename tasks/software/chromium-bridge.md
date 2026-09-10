@@ -297,6 +297,31 @@ Tested transitions include missing replica → synchronous registration → curr
   `agent-doc-x86_64-pc-windows-msvc.zip`
 
 The only release-channel issue is PyPI: all four wheels built successfully, but PyPI rejected publication because the `agent-doc` project has reached its 10 GB storage limit. The GitHub Windows package is published and usable. I did not delete historical PyPI releases because that would be destructive and requires explicit approval.
+
+### Re: Response
+
+Fixed, released, and verified.
+
+- `fpe.md` is healthy again: present in `allocated_model_docs`, `registry_open_docs`, plane-open, and plane-live, owned by editor PID `1653132`.
+- `session-check` passes with cycle committed and the next queue item (`#fpesbxidentitydb`) drainable.
+- Root cause: a delayed JetBrains manager deregistration reused the successor’s replica identity, evicting the active relay hub and subsequently closing its registry-open projection.
+- Replica identities now use plugin-lifetime generations in [TypingTracker.kt](/home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt:36) and [CrdtReplicaManager.kt](/home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt:2605). Late teardown is therefore recognized as stale.
+- Successful registration now explicitly rearms missing-membership recovery in [rpc.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-controller-io/src/project_controller/rpc.rs:13876), preventing the same liveness generation from remaining permanently suppressed.
+- Relay and recovery regressions cover both transitions in [lib.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-crdt-relay-io/src/lib.rs:5326) and [rpc.rs](/home/brian/work/btakita/agent-loop/src/agent-doc/agent-doc-controller-io/src/project_controller/rpc.rs:31004).
+
+Verification passed:
+
+- Focused Rust and JetBrains tests
+- Full `make check`
+- `make tmux-ci`
+- Optimized release build and installation
+- Post-recycle native reload and live membership check
+
+Published commit `822a60bbc` and tag `v0.35.357`. CI, Release, PyPI, and Pages workflows were running when inspected; Book had passed.
+
+JetBrains plugin `0.2.377` is installed, but the running IDE still reports `0.2.376`; restart IntelliJ when convenient to activate the Kotlin-side generation fence. The current `fpe.md` runtime remains healthy meanwhile.
+
+The pending `chromium-bridge.md` cycle was also checked: it is committed with no drainable work, so its agent-doc boundary is no longer outstanding.
 <!-- agent:boundary:28f7ea75 -->
 <!-- /agent:exchange -->
 ###

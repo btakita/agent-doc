@@ -13,7 +13,7 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -322,10 +322,7 @@ Plan and verification evidence: `tasks/agent-doc/plan-stop-gated-queue-head.md`.
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Fix fpe.md issue that stopped retrieving the next queue item. Also Run Agent Doc on this file is wedged.~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#harnessswitchverify]
-- ~~Please add support for grok build~~ — auto-struck: answered this cycle (#ftstrike)
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

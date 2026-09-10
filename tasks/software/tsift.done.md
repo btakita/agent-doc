@@ -535,3 +535,4 @@
 - 2026-08-31 [#fixopenissues] Fix the open issues in tsift + release + publish 0.1.96
 - 2026-09-02 [#fixcompactexchange] Fix Compact Exchange on contracts.md agent-doc issue(s): `[compact] pending: the compacted target is retained for editor delivery and is not yet committed. Do not retry Compact Exchange while this target is pending; if delivery remains pending, restart the editor so its agent-doc plugin reconnects
 - 2026-09-10 [#comparetsiftgraft] Compare tsift with graft https://github.com/trailhq/Graft. Does graft supercede tsift? Are there features of graft that tsift can impelement?
+- 2026-09-10 [#graftbenchmark] [recommended] Benchmark tsift and Graft against the same baseline, repositories, tasks, model, and context budget; measure correctness, multi-file recall, total tokens, setup/model cost, and cold/warm/dirty-tree latency before prioritizing adoption.

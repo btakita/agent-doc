@@ -107,13 +107,81 @@ My recommended order is:
 I would keep tsift's existing storage and evidence model while evaluating these additions. The recommendation is selective adoption, subject to a direct comparison. All five follow-ups are recorded as provisional `[recommended]` items; this comparison does not claim they are implemented.
 
 Verification: tsift's full `make check` passed in the release worktree, and the [latest CI run](https://github.com/btakita/tsift/actions/runs/34296745413) passed. Graft was inspected from source; I did not run its model-backed benchmarks. Completed `#comparetsiftgraft`; top recommended backlog item: `#graftbenchmark`.
+
+
+### Re: Graft benchmark — gpt-5
+
+> **Queue prompt:**
+>
+> do [#graftbenchmark]
+
+
+The benchmark supports adopting Graft's retrieval design, but it does not support replacing tsift.
+
+I ran a zero-model retrieval benchmark using [Graft 0.18.0](https://github.com/trailhq/Graft/releases/tag/v0.18.0) at `de8456e` and [tsift 0.1.97](https://github.com/btakita/tsift/releases/tag/v0.1.97) at `4e8af21`. Graft 0.18.0 was released after the earlier source comparison, so this run uses the newer tagged release.
+
+#### Method
+
+The frozen corpus contains 12 hand-authored code-navigation questions: six about Graft and six about tsift. Each question has a source-verified set of one to three implementation files. Both tools received identical query text and returned at most eight results.
+
+- Graft arm: deterministic `graft ask --source`, without deep summaries or LSP enrichment.
+- tsift arm: `tsift search --strategy lexical --json`.
+- Model and model cost: none; both arms made zero model calls and incurred $0 model cost.
+- Correctness: target-file recall, complete target-set success, and mean reciprocal rank.
+- Shared context budget: 12,000 output characters, approximately 3,000 tokens. A result counted as visible only when its path appeared before that cutoff.
+- Timing: five warm repetitions per task; three full rebuilds and three one-file refreshes per repository.
+- Isolation: each tool indexed a separate clean clone of each repository. Installation time was excluded.
+
+#### Results
+
+| Metric, 12 tasks | tsift | Graft |
+|---|---:|---:|
+| Target-file Recall@8, unbounded | 55.6% | **75.0%** |
+| Target-file Recall@8, within budget | 47.2% | **63.9%** |
+| Complete target sets, unbounded | 4/12 | **7/12** |
+| Complete target sets, within budget | 3/12 | **5/12** |
+| Mean reciprocal rank | 0.389 | **0.747** |
+| Median warm query | **21.7 ms** | 196.0 ms |
+| Mean raw response | **8.87 KB** | 14.12 KB |
+| Responses over 12 KB | **3/12** | 10/12 |
+| Approximate raw tokens per task | **2,218** | 3,529 |
+
+The aggregate result is influenced by a strong home-repository advantage:
+
+| Repository | tsift budgeted recall | Graft budgeted recall | Complete sets |
+|---|---:|---:|---:|
+| Graft | 52.8% | **77.8%** | tsift 1/6, Graft 3/6 |
+| tsift | 41.7% | **50.0%** | 2/6 each |
+
+On the foreign tsift repository, Graft's budgeted recall advantage was 8.3 percentage points, while both tools completed the same number of target sets. That is encouraging for Graft's question-oriented ranking, but too small a sample to claim general superiority. The corpus also scores implementation files: tsift sometimes ranked architectural specs ahead of source, which is useful for explanation but counted as a miss here. Graft indexed a narrower code-only surface in the tsift repository.
+
+Latency shows the opposite tradeoff. With automatic freshness checks enabled and no changes, median queries were 16.6/25.6 ms for tsift on the Graft/tsift repositories and 164.9/208.4 ms for Graft. After one source file changed, three-run medians were 42.7/40.8 ms for tsift and 448.0/528.7 ms for Graft.
+
+Full rebuilds split by repository:
+
+| Repository | tsift rebuild | Graft rebuild |
+|---|---:|---:|
+| Graft | **2.03 s** | 3.33 s |
+| tsift | 2.21 s | **1.30 s** |
+
+Cache size also varied. On Graft, tsift used 7.95 MB and Graft 10.63 MB. On tsift, tsift used 73.62 MB and Graft 23.84 MB. These sizes are not feature-equivalent: tsift stores broader document, AST, graph, and freshness data, while Graft's structural pass covered 127 code files in the tsift repository.
+
+#### Decision
+
+Graft's strongest measured advantage is ranking the first relevant implementation file and collecting related files. tsift's strongest measured advantages are query latency, refresh latency, and compact responses. The useful path is to add a Graft-style task-context facade over tsift's existing index and graph rather than migrate to Graft's storage or replace tsift.
+
+I refined `#grafttaskcontext` with benchmark-based acceptance criteria: retain explicit source-versus-document modes, exceed 50% budgeted Recall@8 on the foreign-repository slice, stay within 12,000 characters, and target a warm median below 50 ms. The frozen corpus should be expanded before treating those thresholds as a release gate.
+
+Limitations: this benchmark measures retrieval, not patch correctness; uses 12 author-selected questions; uses a character cutoff rather than a provider tokenizer; excludes model-enriched summaries, LSP edges, installation time, and end-to-end agent behavior. Graft's richer inline source explains part of its larger response. A model-backed SWE-bench comparison would answer a different and substantially more expensive question.
+
+Verification: all benchmark commands completed successfully. The root `make check` passed. The latest root [Agent Doc CI run](https://github.com/btakita/agent-loop/actions/runs/34522009943) predates this benchmark; its tmux job passed, while its check job failed in the agent-doc dev-harness on missing Node typings/local Lazily packages. No product source changed in this cycle. Completed `#graftbenchmark`; the next queued recommendation is `#grafttaskcontext`.
 <!-- agent:boundary:b8ec92e9:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- do [#graftbenchmark]
+- ~~do [#graftbenchmark]~~
 - do [#grafttaskcontext]
 - do [#graftcrux]
 - do [#graftimpactcontext]
@@ -126,8 +194,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#graftbenchmark] [recommended] Benchmark tsift and Graft against the same baseline, repositories, tasks, model, and context budget; measure correctness, multi-file recall, total tokens, setup/model cost, and cold/warm/dirty-tree latency before prioritizing adoption.
-- [ ] [#grafttaskcontext] [recommended] Add a question-oriented task-context interface and thin MCP adapters over existing tsift search, graph, source, and freshness primitives; evaluate file diversity, weak-match abstention, compact repo maps, and total context budgets.
+- [ ] [#grafttaskcontext] [recommended] Prototype a question-oriented task-context interface and thin MCP adapters over existing tsift search, graph, source, and freshness primitives. Validate on the frozen Graft comparison corpus: improve foreign-repo budgeted Recall@8 beyond 50%, preserve explicit source-versus-doc modes, keep output within 12,000 characters, target warm median latency below 50 ms, and retain weak-match abstention and freshness evidence.
 - [ ] [#graftcrux] [recommended] Add optional source-verified crux excerpts to tsift summaries and symbol context, anchored to symbol spans and body hashes with explicit stale-state handling.
 - [ ] [#graftimpactcontext] [recommended] Extend existing tsift impact output with grouped production modules, changed-symbol evidence paths, and separate test signals; expose bounded context to post-edit integrations.
 - [ ] [#graftlspedges] [recommended] Prototype optional LSP call-edge enrichment using installed servers, preserving extractor fallback, provenance, confidence, coverage diagnostics, and tsift freshness contracts; validate Rust and TypeScript resolution precision.

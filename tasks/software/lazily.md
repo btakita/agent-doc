@@ -139,6 +139,36 @@ That is `KeyedFold.clear()` exactly, which is how it showed up. `_EagerPuller._d
 **Verification:** 18 new `KeyedFold` tests plus 2 kernel regression tests; `make check` green (913 tests, ty, ruff, `run_readme`, conformance coverage, interop peer, assertion-ordering, ci-reach). Docs in README, SPEC, CHANGELOG (`Added` + `Fixed`). Committed `lazily-py 6d54f3b`, superproject `484dcae3e1`, both pushed.
 
 `#lzpypromegress`'s CI run (34616209898) came back green.
+
+### Re: #lzpyworkflowdeterminism — make divergence loud — opus-5
+
+> **Queue prompt:** do [#lzpyworkflowdeterminism]
+
+`lazily.workflow`. A reactive graph is already a pure function of its sources, which is most of what durable replay wants — until something in it reads the wall clock. Then replay diverges *silently* and surfaces much later as a workflow that will not complete. The module's whole job is to move that failure to the line that caused it.
+
+**No dependency on `temporalio`.** The engine is injected as a clock accessor plus a two-method scheduler, so the same code runs against temporal.io, a test double, or any other durable engine. Adding the dependency would have bought nothing and pinned lazily to one engine's release cadence.
+
+```python
+wf = workflow_context(ctx, workflow.now, scheduler=TemporalScheduler())
+timer = wf.register(TimerCore(fire_at=wf.clock.tick() + 5_000))
+
+with deterministic_scope():
+    while not timer.fired():
+        await wf.schedule_next()   # a durable engine timer, not a sleep
+        wf.advance()               # one clock reading drives every source
+```
+
+**The clock raises instead of clamping.** `ManualClock.advance` clamps a backwards move — correct for a game loop, wrong here. A replayed clock cannot regress, so a backwards reading means something is feeding it wall time, and clamping would hide precisely the bug this module exists to surface. That asymmetry is the one design decision I'd flag for review.
+
+**One reading per `advance()`.** The context owns the registered `TimelineSource` set and ticks all of them from a single clock read, so two sources can never disagree about "now" — the shape that makes a replay diverge from the original run. `next_wakeup()` deliberately distinguishes `0` (a source is already due; a real instruction to the engine) from `None` (nothing pending). `activity()` is the only sanctioned side effect: a reactive effect reruns on replay, and its I/O would rerun with it.
+
+**The guard, stated at its real strength.** `deterministic_scope()` rebinds `time.time`/`time_ns`/`monotonic`/`monotonic_ns`/`perf_counter`/`perf_counter_ns`, the module-level `random` functions, `os.urandom`, and `uuid.uuid1`/`uuid4` to raise `NonDeterminismError`, restoring every one on exit — including on an exception, and nesting safely. It is **not a sandbox**, and I did not let the docs imply otherwise: it cannot intercept `datetime.datetime.now()` (a method on a C type whose attributes cannot be rebound), a reference bound before the scope opened, or anything a C extension does internally. Module re-import isolation is the correct layer for those — which is what temporal.io's own workflow sandbox does. Both limits are **asserted**, not just described: `test_a_reference_bound_before_the_scope_escapes_the_guard` exists so the claim cannot quietly become false.
+
+**On the naming collision.** `lazily.temporal` now opens with a warning block stating plainly that it is not temporal.io — it is the time-operator family, "temporal" in the tense/logical-clock sense, and older than the engine — and pointing at `lazily.workflow`. I did **not** rename it: it is public API in nine bindings, and a breaking change across all of them buys exactly what that paragraph buys. A test asserts the note is present, so it is API rather than a comment someone can delete.
+
+**Verification:** 42 new tests; `make check` green (955 tests, ty, ruff, `run_readme`, conformance coverage, interop peer, assertion-ordering, ci-reach). Docs in README, SPEC, CHANGELOG. Committed `lazily-py 5dd631c`, superproject `d942241a31`, both pushed.
+
+`#lzpykeyedfold`'s CI run (34617355723) came back green, which also confirms the eager-`Computed` kernel fix passes CI, not just the local rebuild. Run 34618133123 for this commit is queued. Exchange is large (118 lines, 7 cycles in 30 min) — noting it rather than pausing the queue to compact.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -148,7 +178,7 @@ That is `KeyedFold.clear()` exactly, which is how it showed up. `_EagerPuller._d
 - ~~do [#lzpystructcell]: should we use pyproject extras or another project? This adapter should be generic to handle other competing libraries such as pydantic and dataclasses.~~
 - ~~do [#lzpypromegress]~~
 - ~~do [#lzpykeyedfold]~~
-- do [#lzpyworkflowdeterminism]
+- ~~do [#lzpyworkflowdeterminism]~~
 - do [#lzpyreplayproof]
 - do [#lzpyprojectedchart]
 <!-- /agent:queue -->
@@ -156,7 +186,6 @@ That is `KeyedFold.clear()` exactly, which is how it showed up. `_EagerPuller._d
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzpyworkflowdeterminism] [recommended] [lazily-py] temporal.io workflow-safe context: bind `TimelineSource` to `workflow.now()`, route scheduled effects through Temporal timers/activity starts, and raise on any non-deterministic read instead of corrupting replay. Also rename or loudly document `lazily.temporal` (time operators) to avoid the temporal.io collision. Blocks any workflow-side adoption. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
 - [ ] [#lzpyreplayproof] [recommended] [lazily-py] replay-equivalence harness: rebuild the graph from an ordered event log and assert cell values match a recorded fingerprint, failing loudly on divergence -- the durable-execution analogue of tsift's BLAKE3 body-hash revalidation for crux excerpts. `reliable_sync` and `latest_durable_projection` have the machinery but no stated contract. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
 - [ ] [#lzpyprojectedchart] [recommended] [lazily-py] statechart mode that projects an external authority: feed it observed states, have it validate each transition was legal, and expose a derived 'wedged' cell (in a state past its deadline with no advance). FPE's workflow_run.status is owned by Postgres/Temporal, not the graph. Would express the #fpelasterrorlww wedge declaratively. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
 <!-- /agent:backlog -->

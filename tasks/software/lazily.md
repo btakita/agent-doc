@@ -1,6 +1,7 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
-resume: d6379dbb-42f5-4658-8da6-e0251c5eaa18
+resume:
+  claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -8,7 +9,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -1302,17 +1303,65 @@ Two things fell out that were worth fixing in the same pass:
 lazily-spec's `AGENTS.md` was dirty from another session — committed with `--only` on `coverage.json` and `docs/coverage.md`, and it is still unstaged there.
 
 Queue is drained. Exchange is at ~1290 lines / 39 sections, well past the clear threshold; `compact` before the next substantial run.
+
+### Re: Does lazily have integration with the temporal service? — opus-5
+
+Ambiguous phrase, so both readings:
+
+**1. Temporal.io (the durable workflow orchestration service) — no.**
+
+Zero references anywhere in the 15 `src/lazily-*` repos: no `temporal.io`, `temporalio`, `temporal-sdk`, or `sdk-temporal` hits in any source, doc, or manifest; no SDK dependency in `Cargo.toml`, `pyproject.toml`, `package.json`, or `go.mod`. No adapter, no worker shim, and nothing in `lazily-spec` that plans one.
+
+**2. lazily's own `temporal` family (`#lztime`) — yes, it's a shipped first-class family.**
+
+Spec: [`src/lazily-spec/docs/temporal-sources.md`](src/lazily-spec/docs/temporal-sources.md). Four sources over a monotone logical clock (`tick(now: u64) -> bool` fire edge, `next_fire() -> Option<u64>`):
+
+| Source | State | Contract |
+|---|---|---|
+| `TimerCell` | `fire_at`, `fired` | single-shot, idempotent fire, edge-only invalidation |
+| `IntervalCell` | `period`, `next`, `count` | every `period` ticks; a jump counts every boundary crossed; monotone `count` |
+| `CronCell` | `cycle`, `offsets`, `cursor`, `count` | fires when `m mod cycle ∈ offsets`, match count computed arithmetically (O(offsets), no range scan) |
+| `DeadlineCell<T>` | `Live(T)` → `Expired(T)` | monotone expiry preserving the payload |
+
+Conformance fixtures: `conformance/temporal/{timer_single_shot,interval_periodic,cron_pattern,deadline_expiry}.json`.
+
+Implemented in **9 bindings** plus the formal model:
+
+| Repo | Implementation | Conformance runner |
+|---|---|---|
+| lazily-rs | `src/time.rs` | `tests/temporal_conformance.rs` |
+| lazily-py | `src/lazily/temporal.py` | `tests/test_temporal_conformance.py` |
+| lazily-js | `src/temporal.js` (+ `./temporal` subpath export) | `test/temporal-conformance.test.js` |
+| lazily-go | `temporal.go` | `temporal_conformance_test.go` |
+| lazily-kt | `src/main/kotlin/io/github/lazily/Time.kt` | `TemporalConformanceTest.kt` |
+| lazily-cs | `src/Lazily/Temporal.cs` | `TemporalRateWindowConformanceTests.cs` |
+| lazily-cpp | `include/lazily/temporal.hpp` | `tests/test_temporal_conformance.cpp` |
+| lazily-dart | `lib/src/temporal.dart` | `test/temporal_conformance_test.dart` |
+| lazily-zig | `src/lazily/temporal.zig` (re-exported from `root.zig`) | in-repo test |
+| lazily-formal | `LazilyFormal/Temporal.lean` | `timer_stays_fired`, `interval_count_monotone`, `cron_count_monotone`, `deadline_expired_monotone`, `deadline_preserves_value` |
+
+**lazily-gd has none** — expected, it's the in-progress 10th binding. `lazily-react`/`lazily-html`/`lazily-interop` are shells, not bindings.
+
+**3. If you meant the `service` family (`#lzservice`) specifically** — that's a separate Phase 7 family ([`docs/service.md`](src/lazily-spec/docs/service.md): `HealthCell`, readiness, discovery, `service_registry`), composing membership + leases + resilience probes. It does not compose the temporal sources either; see below.
+
+### One thing worth flagging
+
+`docs/temporal-sources.md` claims `DeadlineCell` is "used to build every deadline-driven primitive downstream: lease expiry (`#lzcoord`), ephemeral expiry (`#lzpresence`), RPC timeouts (`#lzresilience`)." In lazily-rs that's true as a *discipline*, not as *composition*: `coordination.rs`, `presence.rs`, `resilience.rs` and `windowing.rs` each expose their own `tick(now: u64)` and hand-roll `now >= expiry`, and none of them import `DeadlineCore` or `TimerCore`. The only module that actually composes a temporal core is `stdlib.rs` — `Timer`, the wall-clock adapter that maps `Instant`s before/after a deadline to logical ticks `0`/`1` over a real `TimerCore`, spawning no thread.
+
+So the integration between `#lztime` and the rest of the families is a shared clock contract (every family is driven by the same monotone `tick(now)` from the host runtime), not shared code. That's defensible, but the doc reads as if it were structural. Queued as a backlog item to decide which way to reconcile it — I did not change either side unilaterally, since "soften the doc" and "compose the core across 9 bindings" are very different amounts of work.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- 🚧 do [#lazilyintegrationtempora]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] 🚧 [#lazilyintegrationtempora] Does lazily have integration with the temporal service?
 <!-- /agent:backlog -->
 
 ## Review

@@ -407,6 +407,17 @@ fn exchange_steering_all_between(baseline: &str, current: &str) -> RealtimeSteer
             .map(|change| {
                 let preview = prompt_bearing_preview(&change.text);
                 let verbatim = change.text.trim().to_string();
+                // `#responsereplaysteering`: a verbatim replay of committed
+                // response body is binary-owned content, not operator steering.
+                // Without this the phantom directive can never be answered and
+                // every later `session-check` INTERRUPTs, so the turn never
+                // closes.
+                if agent_doc_diff::prompt_target_replays_committed_response_body(
+                    baseline,
+                    &change.text,
+                ) {
+                    return RealtimeSteering::None;
+                }
                 match change.kind {
                     agent_doc_diff::PromptBearingChangeKind::PromptTarget => {
                         RealtimeSteering::PromptTarget { preview, verbatim }
@@ -814,6 +825,61 @@ mod tests {
             Some("❯ First steering directive")
         );
         assert_eq!(projection.verbatim.as_deref(), Some(aggregate.as_str()));
+    }
+
+    #[test]
+    fn replayed_committed_response_cell_is_not_realtime_steering() {
+        // `#responsereplaysteering`: a retained-capture replay spliced a committed
+        // `### Re:` cell back into the live buffer a second time. Its paragraphs are
+        // agent-authored bytes that the write pipeline resolves away, but the
+        // steering detector used to read them as new operator prompts — and since
+        // answering one only appends another response, the phantom directives never
+        // cleared and every later `session-check` INTERRUPTed. The turn could never
+        // close.
+        let response_cell = concat!(
+            "### Re: PR 20 — review addressed — fable\n",
+            "\n",
+            "Done. haiven-docs PR #20 head is now `283c17b`.\n",
+            "\n",
+            "Worked in a scratch worktree (`src/.haiven-docs-pr20`, removed after push).\n",
+        );
+        let baseline = doc(&format!("❯ Address all reviews in PR 20.\n\n{response_cell}"));
+        let current = doc(&format!(
+            "❯ Address all reviews in PR 20.\n\n{response_cell}\n{response_cell}"
+        ));
+
+        let set = BaselineComparison::new(&baseline, &current).realtime_steering_all();
+        assert!(
+            !set.is_present(),
+            "a replayed committed response cell is not operator steering: {:?}",
+            set.directives()
+        );
+    }
+
+    #[test]
+    fn replayed_response_cell_does_not_hide_a_concurrent_operator_prompt() {
+        // The replay suppression is per-directive: a genuine prompt added in the
+        // same edit still reaches the agent.
+        let response_cell = concat!(
+            "### Re: PR 20 — review addressed — fable\n",
+            "\n",
+            "Done. haiven-docs PR #20 head is now `283c17b`.\n",
+        );
+        let baseline = doc(&format!("❯ Address all reviews in PR 20.\n\n{response_cell}"));
+        let current = doc(&format!(
+            "❯ Address all reviews in PR 20.\n\n{response_cell}\n{response_cell}\n\
+             ❯ Since we will be migrating away from Cognito, use the backend-signed shape.\n"
+        ));
+
+        let set = BaselineComparison::new(&baseline, &current).realtime_steering_all();
+        assert_eq!(set.len(), 1, "{:?}", set.directives());
+        assert!(
+            set.verbatim_aggregate()
+                .unwrap()
+                .contains("backend-signed shape"),
+            "the genuine concurrent directive must survive: {:?}",
+            set.directives()
+        );
     }
 
     #[test]

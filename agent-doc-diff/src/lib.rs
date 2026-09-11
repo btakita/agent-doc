@@ -939,6 +939,97 @@ pub fn prompt_target_is_immediately_before_existing_response(
     false
 }
 
+/// Trimmed exchange lines of `content`, each paired with whether it sits inside a
+/// committed agent response body (after a `### Re:` / `## Assistant` heading and
+/// before the next heading, operator prompt line, or managed marker).
+fn exchange_lines_with_response_body_flags(content: &str) -> Vec<(String, bool)> {
+    let body = agent_doc_frontmatter::frontmatter::parse(content)
+        .map(|(_, body)| body.to_string())
+        .unwrap_or_else(|_| content.to_string());
+    let Ok(components) = element::parse(&body) else {
+        return Vec::new();
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return Vec::new();
+    };
+    let mut in_response_body = false;
+    let mut lines = Vec::new();
+    for line in exchange.content(&body).lines() {
+        let trimmed = line.trim();
+        if is_exchange_response_heading(trimmed) {
+            in_response_body = true;
+            lines.push((trimmed.to_string(), false));
+            continue;
+        }
+        // A heading, an operator prompt line, or managed marker chrome closes the
+        // response body. `❯ `-prefixed and `> **User prompt:**` /
+        // `> **Queue prompt:**` lines are operator-owned even when a response cell
+        // renders them, so they never count as replayable response content.
+        let closes_body = trimmed.starts_with('#')
+            || trimmed.starts_with('❯')
+            || trimmed.starts_with("<!--")
+            || {
+                let semantic = prompt_line_semantic_text(trimmed);
+                semantic.starts_with("**User prompt:**") || semantic.starts_with("**Queue prompt:**")
+            };
+        if closes_body {
+            in_response_body = false;
+        }
+        lines.push((trimmed.to_string(), in_response_body && !trimmed.is_empty()));
+    }
+    lines
+}
+
+/// `#responsereplaysteering`: added exchange text that is a verbatim replay of
+/// content already committed in the baseline, overlapping a committed agent
+/// response body, is binary-owned response content — never fresh operator
+/// steering.
+///
+/// A retained-capture / CRDT replay can splice a committed `### Re:` cell, or a
+/// contiguous run of its body, back into the live buffer a second time. The write
+/// pipeline resolves those bytes away as a duplicate, so they never reach a
+/// commit; but the steering detector reads the raw buffer, classifies the
+/// replayed paragraphs as new `PromptTarget`s, and INTERRUPTs every subsequent
+/// `session-check`. The turn can then never close: answering a phantom prompt
+/// only appends another response, and the replayed bytes stay in the buffer.
+///
+/// The discriminator is provenance, not shape. The whole block must match a
+/// contiguous run of the baseline exchange — so every one of its lines is already
+/// committed and none of it is new operator input — and that run must overlap a
+/// response body, which is where an operator prompt is never committed. A
+/// re-surfaced operator prompt block has no response-body overlap and still
+/// classifies as steering.
+pub fn prompt_target_replays_committed_response_body(
+    baseline_doc: &str,
+    change_text: &str,
+) -> bool {
+    let candidate: Vec<String> = change_text
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect();
+    if candidate.is_empty() {
+        return false;
+    }
+    let baseline: Vec<(String, bool)> = exchange_lines_with_response_body_flags(baseline_doc)
+        .into_iter()
+        .filter(|(line, _)| !line.is_empty())
+        .collect();
+    if baseline.len() < candidate.len() {
+        return false;
+    }
+    baseline.windows(candidate.len()).any(|window| {
+        window
+            .iter()
+            .zip(candidate.iter())
+            .all(|((line, _), wanted)| line == wanted)
+            && window.iter().any(|(_, in_response_body)| *in_response_body)
+    })
+}
+
 pub fn first_unstarted_prompt_bearing_change_from_diff(
     diff_text: &str,
     current_doc: &str,
@@ -4127,6 +4218,96 @@ Done.\n\
                 .iter()
                 .any(|change| change.kind == PromptBearingChangeKind::PromptTarget),
             "prompt-prefixed recovery evidence must not become prompt targets: {changes:?}"
+        );
+    }
+
+    /// `#responsereplaysteering` baseline: a committed exchange holding one
+    /// operator prompt and one agent response cell.
+    fn replay_baseline() -> String {
+        concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ Address all reviews in PR 20.\n",
+            "\n",
+            "### Re: PR 20 — review addressed — fable\n",
+            "\n",
+            "Done. haiven-docs PR #20 head is now `283c17b`; summary posted as a PR comment.\n",
+            "\n",
+            "- **Shape chosen:** the plan now proposes the Backend-signed game credential.\n",
+            "- **Ripple:** ADR 0011 README, `auth-handoff`, `delegated-grant`, repo README.\n",
+            "\n",
+            "Worked in a scratch worktree (`src/.haiven-docs-pr20`, removed after push).\n",
+            "> **Queue prompt:** Address all reviews in PR 20.\n",
+            "<!-- agent:boundary:26fa831f:docs -->\n",
+            "<!-- /agent:exchange -->\n",
+        )
+        .to_string()
+    }
+
+    #[test]
+    fn replayed_committed_response_body_is_not_operator_steering() {
+        let baseline = replay_baseline();
+
+        assert!(
+            prompt_target_replays_committed_response_body(
+                &baseline,
+                "Done. haiven-docs PR #20 head is now `283c17b`; summary posted as a PR comment.",
+            ),
+            "a replayed response paragraph is committed agent content, not a new prompt"
+        );
+        assert!(
+            prompt_target_replays_committed_response_body(
+                &baseline,
+                concat!(
+                    "- **Shape chosen:** the plan now proposes the Backend-signed game credential.\n",
+                    "- **Ripple:** ADR 0011 README, `auth-handoff`, `delegated-grant`, repo README.\n",
+                ),
+            ),
+            "a replayed multi-line run of response body is committed agent content"
+        );
+        // The run may end on the response cell's trailing quoted queue prompt, as
+        // long as it still overlaps response body.
+        assert!(
+            prompt_target_replays_committed_response_body(
+                &baseline,
+                concat!(
+                    "Worked in a scratch worktree (`src/.haiven-docs-pr20`, removed after push).\n",
+                    "> **Queue prompt:** Address all reviews in PR 20.\n",
+                ),
+            ),
+            "a replayed response tail plus its quoted queue prompt is still a replay"
+        );
+    }
+
+    #[test]
+    fn genuine_operator_steering_is_not_treated_as_a_response_replay() {
+        let baseline = replay_baseline();
+
+        assert!(
+            !prompt_target_replays_committed_response_body(
+                &baseline,
+                "Since we will be migrating away from Cognito, use the backend-signed shape.",
+            ),
+            "a new operator directive is not committed response body"
+        );
+        // A re-surfaced committed OPERATOR prompt has no response-body overlap and
+        // must keep classifying as steering.
+        assert!(
+            !prompt_target_replays_committed_response_body(
+                &baseline,
+                "> **Queue prompt:** Address all reviews in PR 20.",
+            ),
+            "a quoted operator prompt alone is not a response-body replay"
+        );
+        // Re-ordered response lines are not a contiguous committed run.
+        assert!(
+            !prompt_target_replays_committed_response_body(
+                &baseline,
+                concat!(
+                    "- **Ripple:** ADR 0011 README, `auth-handoff`, `delegated-grant`, repo README.\n",
+                    "Done. haiven-docs PR #20 head is now `283c17b`; summary posted as a PR comment.\n",
+                ),
+            ),
+            "a non-contiguous recombination is not a verbatim replay"
         );
     }
 

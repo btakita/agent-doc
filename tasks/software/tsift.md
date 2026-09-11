@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -252,15 +252,50 @@ Changed paths:
 Verification passed: the final full `make check` run (`tart-5c1f5def2b`); Clippy for `tsift-search` and `tsift-cli` with warnings denied; five focused impact tests; the impact CLI parser test; `git diff --check`; and the public-repository private-name scan. An end-to-end Rust fixture returned a grouped `src` module, a source-located `core → api` evidence path, separate changed-test and import signals, and correct totals/truncation under `--limit 2`. The latest upstream GitHub Actions release run passed; this branch remains local and is three commits ahead of `origin/main`.
 
 Confidence is high. No escalation or follow-up work was required for this item.
-<!-- agent:boundary:a6b6ae94:tsift -->
+
+### Re: Response
+
+> **Queue prompt:**
+>
+> do [#graftlspedges]
+
+
+Implemented `[#graftlspedges]` and committed it as `b68021b` (`feat: add optional LSP call-edge enrichment`).
+
+The new opt-in `tsift index --lsp` path keeps extractor call sites as the fallback, starts only installed providers, resolves definitions over LSP stdio, validates each returned location against a symbol in the same index, and records `callee_file`, `callee_line`, `provenance`, and `confidence`. Rust uses `rust-analyzer`; TypeScript, TSX, JavaScript, and JSX use `typescript-language-server --stdio` when installed. Missing servers, missing definitions, timeouts, transient server errors, and rejected destinations are reported as coverage diagnostics without failing ordinary indexing.
+
+The stored coverage report includes the index file-state watermark. `lsp::enrichment_status` recomputes it so a later incremental index update marks the prior report stale, while the normal transactional caller-file replacement restores changed edges to extractor provenance. Read-only graph queries remain compatible with databases created before the added columns. Graph JSON now exposes the destination and resolution metadata, relativizes both source and destination paths, and converts every stored edge line to the existing one-based user-facing convention. Index JSON without `--lsp` retains its prior shape.
+
+Changed paths:
+
+- `packages/tsift-index/src/lsp.rs`
+- `packages/tsift-index/src/index.rs`
+- `packages/tsift-index/src/lib.rs`
+- `packages/tsift-cli/src/cli.rs`
+- `packages/tsift-cli/src/commands/index_search.rs`
+- `packages/tsift-cli/src/commands/graph.rs`
+- `packages/tsift-cli/src/lib.rs`
+- `specs/search-navigation.md`
+
+Verification:
+
+- `cargo test -p tsift-index` passed, including duplicate-name Rust resolution, TypeScript alias resolution, outside-root rejection, UTF-16 call positions, and index-watermark invalidation.
+- `cargo clippy -p tsift-index -p tsift-cli --all-targets -- -D warnings` passed.
+- `make check` passed (`tart-3488d71870`).
+- A live `rust-analyzer` smoke project with duplicate `run` functions resolved `right::run()` to `src/right.rs:1`; `tsift graph` returned `provenance: lsp:rust-analyzer` and `confidence: 0.97`.
+- The same smoke reported the unavailable TypeScript provider explicitly, and the TypeScript precision path is covered with an indexed alias-target test because `typescript-language-server` is not installed locally.
+- `git diff --check` and the public-name hygiene scan passed.
+- Latest GitHub Actions run: `Release` for `v0.1.97`, completed successfully.
+
+Confidence: high. The Rust transport was exercised end to end against an installed server; TypeScript uses the same protocol and validation code but was validated with fixtures rather than a live server on this host.
+
+Escalation: none.
+<!-- agent:boundary:3ab8db0e:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#graftcrux]~~
-- ~~do [#graftimpactcontext]~~
-- do [#graftlspedges]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -269,7 +304,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#graftlspedges] [recommended] Prototype optional LSP call-edge enrichment using installed servers, preserving extractor fallback, provenance, confidence, coverage diagnostics, and tsift freshness contracts; validate Rust and TypeScript resolution precision.
 <!-- /agent:backlog -->
 
 ## Review

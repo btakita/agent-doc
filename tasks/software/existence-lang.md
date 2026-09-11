@@ -6,7 +6,7 @@ agent: claude
 claude_model: fable
 agent_doc_format: template
 agent_doc_write: crdt
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -345,27 +345,44 @@ Gated on one interactive step. Both routes to letting the job open its own pull 
 **The current state is not broken.** PR #2 is open on `audit/safe-fixes`, the job force-pushed it again at 21:19 UTC on today's dispatch, and the fallback compare link lands in the issue whenever `gh pr create` is refused. Only after #2 is merged does the gap matter, and then only until the next weekly run's compare link is opened by hand.
 
 **One command from you, then re-queue.** Run this in the session prompt so the token gains the scope: `! gh auth refresh -h github.com -s admin:org`, then queue `do #auditprtoken` again and the cycle will apply the org PUT and the repo PUT already spelled out in the item, dispatch the workflow, and confirm the job opens a PR on a branch with no open one. If you would rather not widen the token, mint a classic PAT with `repo` scope and run `gh secret set AUDIT_TOKEN -R existence-lang/ontology`; the workflow already prefers that secret. Either way the item's text stays as written, so it is gated rather than edited. Exchange is at fifteen responses; queue active, no compaction.
+
+### Re: do #xlrequote — fable
+
+> **Queue prompt:**
+>
+> do [#xlrequote]
+
+Done. The decision is **pin, do not requote**: the ontology keeps quoting the 2014–15 wording it was built on, the live link stays for readers, and a second anchor on the same line pins the Wayback snapshot the passage was taken from, so the audit verifies the quote against a page that cannot drift. 150 of the 206 missing quotes are pinned on `main`, four newly written nodes are requoted, all six dead links are resolved, and the weekly job repeats the whole procedure on its own from now on.
+
+**Why pin rather than refresh.** I checked the drift by hand before deciding: Wiktionary's 2015-02 snapshot of `scope` carries "The breadth, depth or reach of a subject; a domain." exactly as the node quotes it, and today's page says "…; the extent of applicability or relevance". Refreshing 206 passages would silently change what the ontology cites, one editorial call per source; pinning is mechanical, verifiable every week, and keeps the original citation honest. SPEC rule 8 now records the convention.
+
+**The tool does the pinning** ([`2745b14`](https://github.com/existence-lang/existence/commit/2745b14), released as [v0.7.0](https://github.com/existence-lang/existence/releases/tag/v0.7.0)). `existence sources` reads `<a href=live>…</a> <a href="https://web.archive.org/web/<ts>/<live>">(archived 2015-02-21)</a>` as one source with a pin, not two sources. `audit --sources` checks a passage the live page has lost against the pinned copy and records it `archived`; only a passage absent from both is an error. With no pin it asks the Wayback CDX index for the page's snapshots, tries the ones nearest `--archive-around` (default 2015-01-01, when the philosophy repo's history begins) first, fetches at most six, and pins the first that carries **every** passage the ontology quotes from that page; `--fix` writes the anchor. A reset connection is now retried once instead of writing off the whole host, which is what made a first pass pin nothing. Tests cover the parser fold, the lock, the search order (the nearest snapshot lacking the sentence is skipped), the written line, and the read-back on a second run; `make check` is green at 98 tests and the Release run published the assets and crate.
+
+**The run over the real ontology** ([`95b4a8e`](https://github.com/existence-lang/ontology/commit/95b4a8e)) took 54 minutes at one request per second and changed 106 files: 150 quotes pinned (141 pages), the three `cosmicscale` links moved to the 2015 archive, `stevenpoole.net` and the NYT piece to theirs, `Physical_information` to its 2021 copy, the AAAI SARA-13 paper to the archived abstract page (its PDF was never captured), and the Stebbins paper to its new home at `journals.colorado.edu`. Ontology CI and the Pages build are green on the new `v0.7.0` pin and [scope.html](https://existence-lang.github.io/ontology/scope.html) shows both `(archived 2015-…)` links.
+
+**Requoted, not pinned.** `noumena`, `phenomena`, `pneuma`, and `project` were written this year and their "quotes" turned out to be paraphrases: `etymonline` never said "that which is perceived by the mind" for *noumenon*. They now quote today's pages verbatim, and a scratch pass reports them clean.
+
+**What is left: 45 quotes, now `#xlrequote2`.** No single snapshot carries every passage those nodes quote from one page, usually because the quotes came from different years (`system` quotes six Wiktionary senses, one of them newer than the rest). Each needs a person: split the blockquote so each passage has its own anchor and let `--fix` pin them separately, or requote. The weekly run lists them as `quote_missing` with no fix and re-searches them, about five minutes of its runtime. The generated `audit/` directory stayed out of `main`; the safe-fixes PR owns the lock, as before.
+
+That empties the queue: three items drained this session; `#semantickey` and `#auditprtoken` are gated on credentials only you can mint. Exchange is at sixteen responses.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- ~~do [#semantickey]~~
-- 🚧 do [#auditprtoken]
-- do [#xlrequote]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#xlrequote] Decide what to do with the source drift the first real `existence audit --sources` run found in `src/existence-lang/ontology`: 206 quoted passages are no longer on their pages (87 wiktionary, 108 wikipedia, 6 etymonline; the nodes quote 2014-15 wording that has since been rewritten) and 19 have changed but still match. Per source, either refresh the blockquote from the live page or pin the historical Wayback snapshot next to the anchor so the quote stays verifiable. Also 6 dead links: `--fix` can swap cosmicscale.appspot.com (fractal, physical-system, scope), the NYT attention-schema piece, and wikipedia `Physical_information` (entity, information) for snapshots; stevenpoole.net, the AAAI SARA13 PDF, and the colorado.edu PDF have none and need a replacement source. Content decisions, not code; `audit --sources` reports them again each weekly run once Phase 6 commits the lock
+- [ ] [#xlrequote2] Decide the 45 quotes no single Wayback snapshot carries (the strict pin rule wants every passage a node quotes from one page in one copy): 27 on Wiktionary (abstraction, conscious, context, create, creativity, evolution ×2, existence, explicit, focus, fractal, history, human ×2, intelligence, love, model, physical, science, spirit, story, system ×3, tool, type, violence) and 18 on Wikipedia (Abstract_object ×3, Algorithm, Emotion, Evolution_(disambiguation), Formal_system, Information ×2, Intelligence, Natural_law, Nature, Platonic_realism, Sexual_reproduction, Spirituality, Story, Technology, Type–token_distinction). Per source: split the blockquote so each passage sits under its own anchor and let `existence audit --sources --fix` pin each, or requote from today’s page. `audit --sources` lists them as `quote_missing` with no fix each week; see `tasks/software/existence-lang.md` for the pinning decision
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] 🚧 [#auditprtoken] Let the weekly Ontology audit workflow open its own `audit: safe fixes` pull request: the `existence-lang` organization forbids GitHub Actions from creating PRs, and lifting it needs an `admin:org` scope this session does not have (`gh auth refresh -h github.com -s admin:org`, then `gh api -X PUT orgs/existence-lang/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true` and the same PUT on `repos/existence-lang/ontology`), or add an `AUDIT_TOKEN` repo secret (classic PAT, `repo` scope) which `.github/workflows/audit.yml` already prefers. Until then the job pushes the branch and links the compare page in the issue; PR #2 was opened by hand and the job keeps it current
+- [/] [#auditprtoken] Let the weekly Ontology audit workflow open its own `audit: safe fixes` pull request: the `existence-lang` organization forbids GitHub Actions from creating PRs, and lifting it needs an `admin:org` scope this session does not have (`gh auth refresh -h github.com -s admin:org`, then `gh api -X PUT orgs/existence-lang/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true` and the same PUT on `repos/existence-lang/ontology`), or add an `AUDIT_TOKEN` repo secret (classic PAT, `repo` scope) which `.github/workflows/audit.yml` already prefers. Until then the job pushes the branch and links the compare page in the issue; PR #2 was opened by hand and the job keeps it current
 - [/] [#semantickey] Mint a Console API key (console.anthropic.com/settings/keys, `sk-ant-api03-...`) and store it with `passage edit btak/ANTHROPIC_API_KEY`: the entry today holds a Claude OAuth access token (`sk-ant-oat01-...`), which the Messages API rejects with HTTP 401, and `btak/OPENAI_API_KEY` is rejected too, so the semantic audit has only been proven against the local stand-in server. Then run `ANTHROPIC_API_KEY="$(passage show btak/ANTHROPIC_API_KEY)" existence --ontology src/existence-lang/ontology audit --semantic --limit 5` once to confirm the live Messages API shape, and `gh secret set ANTHROPIC_API_KEY -R existence-lang/ontology` to switch on the weekly semantic pass that `audit.yml` already gates on that secret (about 117 Opus 5 calls the first week, then only changed neighbourhoods)
 <!-- /agent:review -->
 
@@ -399,4 +416,5 @@ Gated on one interactive step. Both routes to letting the job open its own pull 
 - 2026-09-11 [#xlaudit7] Phase 7 of `tasks/software/plan-ontology-audit.md`: `existence audit --semantic --provider anthropic|openai` LLM contradiction pass over each node's lay definition and its linked neighbours, report only, verdicts cached by content hash so a rerun with no changes makes zero model calls. Never on the PR path
 - 2026-09-11 [#cutexistenceusers] [recommended] Cut existence 0.6.0 (`make release` in `src/existence-lang/existence`) so `install.sh` / `cargo install existence` users get `toc`; `existence --version` on `cargo install --path .` still reads 0.5.0. Bump `Cargo.toml` first, then flip the README "Commands (v0.3.0)" heading, which is already stale
 - 2026-09-11 [#fixmanifestdrift] Fix the manifest drift `existence audit --structure` reports in `src/existence-lang/ontology` (it is what the new CI job fails on): `qualitative` + `quantitative` are declared in ring 1 with no node file (create them or drop them from the ring), `contextual-systems` has an empty Ontology section (needs a lay definition), `noumena` / `phenomena` / `pneuma` are in no ring (ring 2 fits), and `universal-set.md` links `./exists`, which has no node (`exist` does). The 11 fixable suffix-less links were already rewritten by `#xlaudit2`. Then publish `terms.md` from the Pages workflow (`existence toc -o terms.md`) so the site has a glossary page
+- 2026-09-11 [#xlrequote] Decide what to do with the source drift the first real `existence audit --sources` run found in `src/existence-lang/ontology`: 206 quoted passages are no longer on their pages (87 wiktionary, 108 wikipedia, 6 etymonline; the nodes quote 2014-15 wording that has since been rewritten) and 19 have changed but still match. Per source, either refresh the blockquote from the live page or pin the historical Wayback snapshot next to the anchor so the quote stays verifiable. Also 6 dead links: `--fix` can swap cosmicscale.appspot.com (fractal, physical-system, scope), the NYT attention-schema piece, and wikipedia `Physical_information` (entity, information) for snapshots; stevenpoole.net, the AAAI SARA13 PDF, and the colorado.edu PDF have none and need a replacement source. Content decisions, not code; `audit --sources` reports them again each weekly run once Phase 6 commits the lock
 <!-- /agent:done -->

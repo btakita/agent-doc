@@ -563,10 +563,10 @@ Your two new tmux reports (auto-focus on selecting the opposite pane in IDEA) ar
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 As I was typing in this file's agent:exchange when the turn started, my changes in agent:exchange were reverted by agent-doc.
-- do [#retainedresumewakeflake]
+- ~~As I was typing in this file's agent:exchange when the turn started, my changes in agent:exchange were reverted by agent-doc.~~
+- ⏭️ do [#retainedresumewakeflake]
 - do [#cargotokenrevoke]
-- The JB "Focus Agent Terminal" does not navigate to anything.
+- 🚧 The JB "Focus Agent Terminal" does not navigate to anything.
 <!-- /agent:queue -->
 
 

@@ -65,6 +65,38 @@ Two judgment calls worth flagging:
 **Verification:** 21 new tests in `tests/test_struct_cell.py`; `make check` green end to end (ty, ruff format/check, `run_readme`, 854 tests, conformance coverage 142/153, interop peer, assertion-ordering, ci-reach). Docs in README (`## Struct bridge`), SPEC (`### Struct bridge`), CHANGELOG Unreleased. Committed `lazily-py c9f9a37`, superproject `3c5270a16c`, both pushed. `lazily-hub/lazily-py` CI run 34614969844 is still queued at write time — local `make check` is the evidence this turn stands on.
 
 The FPE gate this item existed to answer is **open**: the eight `*State` structs are a swap, not a rewrite — `struct_source` seeds from an existing instance, `apply()` accepts the struct `status()` already builds, and `msgspec.structs.asdict` stays the one C call on that path. That adoption belongs in `src/haiven-dev/tasks/fpe.md`, not here.
+
+### Re: #lzpypromegress — metrics as graph reads, not mirrors — opus-5
+
+> **Queue prompt:** do [#lzpypromegress]
+
+Two modules. `lazily.metrics` is the family; `lazily.prometheus_egress` is the adapter. The split follows `ingress` / `ingress_core`, and it matters here because the family has **no dependency at all** — `render_text()` emits the Prometheus text exposition format directly.
+
+**The design decision that deletes the 43 mirror lines.** A `MetricFamily` child at a label set is either *writable* (`CounterCell` / `GaugeCell` over a `Source`) or *derived*:
+
+```python
+up = metrics.gauge("service_up", "1 when the component is connected.", ("component",))
+up.derive(("intake",), lambda c: 1.0 if connected(c).value else 0.0)
+```
+
+`derive` binds a `Computed` that reads the graph. There is no push step, so there is no interval during which the exported number and the state it describes disagree — which is the actual defect in a mirror, not the line count. FPE's `update_runtime_metrics` is 43 `self._X.labels(...).set(...)` lines that run only when someone remembers to call them; a derived child runs when the scrape happens.
+
+`lazily.prometheus_egress.register_metrics(registry, prom)` registers the whole registry as a `prometheus_client` **custom collector** — a pull, for the same reason. Its output is asserted byte-equal to `render_text()`, so the dependency-free path and the exporter path cannot drift.
+
+**Four semantics worth stating, each with a test:**
+
+- **Counter monotonicity in both directions of use.** `inc` rejects a negative delta; `set` — the form that mirrors an externally-owned absolute total, which is what `_set_component_counter` does — rejects a total below the current one. A scraper can never read a spurious counter reset out of this family.
+- **Lazy derive by default.** The expression runs on `collect`, not on every upstream change, so a graph that churns between scrapes costs nothing. The honest trade-off: a lazy child holds no settled value, so a reactive consumer of `observe()` *is* invalidated by an upstream change that leaves the number alone. `eager=True` buys the `Computed` guard at the cost of computing on every upstream change. Both behaviours are asserted, not described — `test_lazy_derived_child_has_no_settled_value_to_guard_with` exists specifically so the doc claim cannot rot.
+- **One kind per label set.** A writable and a derived child disagree about who owns the value, so asking for either where the other lives raises rather than silently shadowing.
+- **Collection is untracked.** A scrape is not a graph node; subscribing the exporter to every metric would make scraping invalidate the graph it reads. `observe(compute)` is the explicit opt-in.
+
+Name validation is enforced up front (Prometheus metric/label grammar, reserved `__` prefix, duplicate labels), and the text renderer handles `+Inf` / `-Inf` / `NaN` plus documentation and label-value escaping.
+
+**On the coverage matrix.** The backlog item cites Python **Egress** as `~`. That cell is generated from `lazily-spec`'s `coverage.json`, and this is a Python-local surface — no new node kind, no invalidation rule, no canonical fixture. It does not flip the cell, and deliberately so: a new canonical fixture reddens all nine bindings, which is not a price worth paying for an exporter adapter.
+
+**Verification:** 39 new tests in `tests/test_metrics.py`; `make check` green (ty, ruff, `run_readme`, 893 tests, conformance coverage, interop peer, assertion-ordering, ci-reach). New `lazily[prometheus]` extra, pulled into `lazily[dev]` so CI exercises the adapter rather than skipping it. Docs in README, SPEC, CHANGELOG. Committed `lazily-py c0f04dd`, superproject `aa0a66a423`, both pushed.
+
+Also: the previous item's CI run (34614969844) finished **green**, so `#lzpystructcell` is confirmed beyond the local `make check` it was reported on. Run 34616209898 for this commit is queued.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -72,7 +104,7 @@ The FPE gate this item existed to answer is **open**: the eight `*State` structs
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzpystructcell]: should we use pyproject extras or another project? This adapter should be generic to handle other competing libraries such as pydantic and dataclasses.~~
-- do [#lzpypromegress]
+- ~~do [#lzpypromegress]~~
 - do [#lzpykeyedfold]
 - do [#lzpyworkflowdeterminism]
 - do [#lzpyreplayproof]
@@ -82,7 +114,6 @@ The FPE gate this item existed to answer is **open**: the eight `*State` structs
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzpypromegress] [recommended] [lazily-py] counter/gauge cell family plus a `prometheus_client` egress adapter that registers off the reactive graph. Coverage matrix marks Python Egress as partial; this would delete the 43 hand-written mirror lines in src/haiven-dev/src/fpe/core/telemetry.py `update_runtime_metrics`. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
 - [ ] [#lzpykeyedfold] [recommended] [lazily-py] named `KeyedFold` cell: N independent writers each own a key and clear only their own, with the summary as a guarded `Computed` over the live set. `service.HealthCell` does this for booleans only; `merge.MergeCell` has the algebra but no documented keyed-fold surface. Generalizes the FPE `last_errors` fix (#fpelasterrorlww, fpe PR #92). Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
 - [ ] [#lzpyworkflowdeterminism] [recommended] [lazily-py] temporal.io workflow-safe context: bind `TimelineSource` to `workflow.now()`, route scheduled effects through Temporal timers/activity starts, and raise on any non-deterministic read instead of corrupting replay. Also rename or loudly document `lazily.temporal` (time operators) to avoid the temporal.io collision. Blocks any workflow-side adoption. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
 - [ ] [#lzpyreplayproof] [recommended] [lazily-py] replay-equivalence harness: rebuild the graph from an ordered event log and assert cell values match a recorded fingerprint, failing loudly on divergence -- the durable-execution analogue of tsift's BLAKE3 body-hash revalidation for crux excerpts. `reliable_sync` and `latest_durable_projection` have the machinery but no stated contract. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md

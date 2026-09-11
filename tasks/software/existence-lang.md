@@ -331,28 +331,42 @@ Proven against the real passage value with no request made (the test points the 
 **Verified with a dispatch.** Run [34648241901](https://github.com/existence-lang/ontology/actions/runs/34648241901) went green in 6m37s on the new file: the two cache steps reported `skipped` because no secret is set, the audit ran, and PR #2 and the issue were refreshed. The unchanged path is unchanged.
 
 **What is left for you**, now the text of `#semantickey` (gated): mint a Console key into the same passage path, run the five-node command once, and `gh secret set ANTHROPIC_API_KEY -R existence-lang/ontology` when you want the weekly pass on. Exchange is at fourteen responses; queue active, no compaction.
+
+### Re: do #auditprtoken — fable
+
+> **Queue prompt:**
+>
+> do [#auditprtoken]
+
+Gated on one interactive step. Both routes to letting the job open its own pull request end at a credential this session cannot mint, and I tried the one thing that might have worked without it.
+
+**What I tried.** The repository-level setting is the smaller change, so I sent `PUT repos/existence-lang/ontology/actions/permissions/workflow` with `can_approve_pull_request_reviews=true` on the `repo` scope this session has. GitHub answered `409 The organization does not allow GitHub Actions to create or approve pull requests`: the org policy overrides the repo one, and reading or writing the org policy answers `403` with the hint to run `gh auth refresh -h github.com -s admin:org`. You are an `admin` of `existence-lang`, so the scope is yours to add; the refresh is a browser device-code flow, which is why no cycle can run it for you. The token route needs a personal access token, which GitHub has no API to create. The three PATs in passage belong to other projects (`lucas/github`, two under `haiven/`), so I did not borrow one.
+
+**The current state is not broken.** PR #2 is open on `audit/safe-fixes`, the job force-pushed it again at 21:19 UTC on today's dispatch, and the fallback compare link lands in the issue whenever `gh pr create` is refused. Only after #2 is merged does the gap matter, and then only until the next weekly run's compare link is opened by hand.
+
+**One command from you, then re-queue.** Run this in the session prompt so the token gains the scope: `! gh auth refresh -h github.com -s admin:org`, then queue `do #auditprtoken` again and the cycle will apply the org PUT and the repo PUT already spelled out in the item, dispatch the workflow, and confirm the job opens a PR on a branch with no open one. If you would rather not widen the token, mint a classic PAT with `repo` scope and run `gh secret set AUDIT_TOKEN -R existence-lang/ontology`; the workflow already prefers that secret. Either way the item's text stays as written, so it is gated rather than edited. Exchange is at fifteen responses; queue active, no compaction.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- 🚧 do [#semantickey]
-- do [#auditprtoken]
+- ~~do [#semantickey]~~
+- 🚧 do [#auditprtoken]
 - do [#xlrequote]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#auditprtoken] Let the weekly Ontology audit workflow open its own `audit: safe fixes` pull request: the `existence-lang` organization forbids GitHub Actions from creating PRs, and lifting it needs an `admin:org` scope this session does not have (`gh auth refresh -h github.com -s admin:org`, then `gh api -X PUT orgs/existence-lang/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true` and the same PUT on `repos/existence-lang/ontology`), or add an `AUDIT_TOKEN` repo secret (classic PAT, `repo` scope) which `.github/workflows/audit.yml` already prefers. Until then the job pushes the branch and links the compare page in the issue; PR #2 was opened by hand and the job keeps it current
 - [ ] [#xlrequote] Decide what to do with the source drift the first real `existence audit --sources` run found in `src/existence-lang/ontology`: 206 quoted passages are no longer on their pages (87 wiktionary, 108 wikipedia, 6 etymonline; the nodes quote 2014-15 wording that has since been rewritten) and 19 have changed but still match. Per source, either refresh the blockquote from the live page or pin the historical Wayback snapshot next to the anchor so the quote stays verifiable. Also 6 dead links: `--fix` can swap cosmicscale.appspot.com (fractal, physical-system, scope), the NYT attention-schema piece, and wikipedia `Physical_information` (entity, information) for snapshots; stevenpoole.net, the AAAI SARA13 PDF, and the colorado.edu PDF have none and need a replacement source. Content decisions, not code; `audit --sources` reports them again each weekly run once Phase 6 commits the lock
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] 🚧 [#semantickey] Mint a Console API key (console.anthropic.com/settings/keys, `sk-ant-api03-...`) and store it with `passage edit btak/ANTHROPIC_API_KEY`: the entry today holds a Claude OAuth access token (`sk-ant-oat01-...`), which the Messages API rejects with HTTP 401, and `btak/OPENAI_API_KEY` is rejected too, so the semantic audit has only been proven against the local stand-in server. Then run `ANTHROPIC_API_KEY="$(passage show btak/ANTHROPIC_API_KEY)" existence --ontology src/existence-lang/ontology audit --semantic --limit 5` once to confirm the live Messages API shape, and `gh secret set ANTHROPIC_API_KEY -R existence-lang/ontology` to switch on the weekly semantic pass that `audit.yml` already gates on that secret (about 117 Opus 5 calls the first week, then only changed neighbourhoods)
+- [/] 🚧 [#auditprtoken] Let the weekly Ontology audit workflow open its own `audit: safe fixes` pull request: the `existence-lang` organization forbids GitHub Actions from creating PRs, and lifting it needs an `admin:org` scope this session does not have (`gh auth refresh -h github.com -s admin:org`, then `gh api -X PUT orgs/existence-lang/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true` and the same PUT on `repos/existence-lang/ontology`), or add an `AUDIT_TOKEN` repo secret (classic PAT, `repo` scope) which `.github/workflows/audit.yml` already prefers. Until then the job pushes the branch and links the compare page in the issue; PR #2 was opened by hand and the job keeps it current
+- [/] [#semantickey] Mint a Console API key (console.anthropic.com/settings/keys, `sk-ant-api03-...`) and store it with `passage edit btak/ANTHROPIC_API_KEY`: the entry today holds a Claude OAuth access token (`sk-ant-oat01-...`), which the Messages API rejects with HTTP 401, and `btak/OPENAI_API_KEY` is rejected too, so the semantic audit has only been proven against the local stand-in server. Then run `ANTHROPIC_API_KEY="$(passage show btak/ANTHROPIC_API_KEY)" existence --ontology src/existence-lang/ontology audit --semantic --limit 5` once to confirm the live Messages API shape, and `gh secret set ANTHROPIC_API_KEY -R existence-lang/ontology` to switch on the weekly semantic pass that `audit.yml` already gates on that secret (about 117 Opus 5 calls the first week, then only changed neighbourhoods)
 <!-- /agent:review -->
 
 ## Icebox

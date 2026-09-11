@@ -208,7 +208,28 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         notification.isImportant = true
         notification.addAction(
             NotificationAction.createSimple("Focus Agent Terminal") {
-                IdeTerminalHost.focusExisting(project)
+                // `#jbfocusnoop`: this used to call a Unit-returning focus that
+                // `return`ed on every miss, so a click with no live agent-doc tab
+                // navigated nowhere and told the operator nothing. Report the miss.
+                when (IdeTerminalHost.focusExisting(project)) {
+                    TerminalFocusOutcome.AGENT_TAB -> Unit
+                    TerminalFocusOutcome.TOOL_WINDOW_ONLY ->
+                        LOG.info(
+                            "[turn-state] Focus Agent Terminal: no \"agent-doc\" tab in the " +
+                                "terminal tool window; activated the tool window instead",
+                        )
+                    TerminalFocusOutcome.NOTHING ->
+                        NotificationGroupManager.getInstance()
+                            .getNotificationGroup("Agent Doc")
+                            .createNotification(
+                                "No terminal to focus",
+                                "This IDE has no Terminal tool window, so there is no " +
+                                    "agent-doc terminal to open. Answer the prompt in the " +
+                                    "tmux pane running the session.",
+                                NotificationType.WARNING,
+                            )
+                            .notify(project)
+                }
             },
         )
         notification.notify(project)

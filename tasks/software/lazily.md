@@ -9,7 +9,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -1354,18 +1354,48 @@ Implemented in **9 bindings** plus the formal model:
 `docs/temporal-sources.md` claims `DeadlineCell` is "used to build every deadline-driven primitive downstream: lease expiry (`#lzcoord`), ephemeral expiry (`#lzpresence`), RPC timeouts (`#lzresilience`)." In lazily-rs that's true as a *discipline*, not as *composition*: `coordination.rs`, `presence.rs`, `resilience.rs` and `windowing.rs` each expose their own `tick(now: u64)` and hand-roll `now >= expiry`, and none of them import `DeadlineCore` or `TimerCore`. The only module that actually composes a temporal core is `stdlib.rs` — `Timer`, the wall-clock adapter that maps `Instant`s before/after a deadline to logical ticks `0`/`1` over a real `TimerCore`, spawning no thread.
 
 So the integration between `#lztime` and the rest of the families is a shared clock contract (every family is driven by the same monotone `tick(now)` from the host runtime), not shared code. That's defensible, but the doc reads as if it were structural. Queued as a backlog item to decide which way to reconcile it — I did not change either side unilaterally, since "soften the doc" and "compose the core across 9 bindings" are very different amounts of work.
+
+### Re: do [#reconcilecompositionclai] — opus-5
+
+Reconciled toward the **doc**, not the code — and the investigation turned the item from "pick the cheaper option" into "the code is right and the doc was wrong."
+
+**Why composition is not just expensive, it's incorrect.** `DeadlineCore` wraps a `TimerCore`: constructed with `new(deadline)`, no `rearm`/`reset`, and `TimerCore::fired` is monotone. Its two load-bearing invariants are proven in `LazilyFormal/Temporal.lean` — `deadline_expired_monotone` and `deadline_preserves_value`. Every downstream "deadline-driven" core violates one or both:
+
+| Core | Re-arm path | Violates |
+|---|---|---|
+| `LeaseCore` (`#lzcoord`) | `acquire` / `renew` set `expiry = now + ttl`; a lease goes held → expired → held (new grant bumps `fence`) | `deadline_expired_monotone` |
+| `EphemeralCore` (`#lzpresence`) | `set(value, now, ttl)` resets `expiry`; expiry sets `value = None` | both — it *drops* the value |
+| `TimeoutCore` (`#lzresilience`) | `arm(now, timeout)` resets `deadline` **and** clears `timed_out` | `deadline_expired_monotone` |
+
+Composing `DeadlineCore` into any of those would require adding a reset to `DeadlineCore`, which would invalidate the Lean proofs that make `DeadlineCell` worth having. So "actually compose the core across 9 bindings" was never the right branch.
+
+I checked this isn't a rs-only accident: `lazily-py/src/lazily/coordination.py`, `lazily-go/coordination.go` and `lazily-js/src/coordination.js` likewise import/reference neither the temporal nor the membership module. The pattern is uniform across bindings, which is further evidence the doc was the outlier.
+
+**What landed**
+
+- `lazily-spec` [`754b1a7`](https://github.com/lazily-hub/lazily-spec/commit/754b1a7) — `docs/temporal-sources.md`: replaced "Used to build every deadline-driven primitive downstream" with a `DeadlineCell` one-shot/not-re-armable bullet plus a new **"Relationship to the downstream deadline-driven primitives"** section stating what is actually shared (monotone `tick(now: u64)` from the host runtime, deadlines as tick values, edges firing once per crossing), the re-armability and value-drop reasons composition is refused, a "reach for X when Y" rule, and the one real composition (`stdlib::Timer`). Same commit fixes `docs/coordination.md`, which carried the mirror overclaim ("Reads `MembershipCell` (`#lzmemb`) and the temporal sources (`#lztime`)") — it reads neither.
+- `lazily-rs` [`e0a72d1`](https://github.com/lazily-hub/lazily-rs/commit/e0a72d1) — `AGENTS.md`: "Foundation for leases/expiry/windows/presence" → the discipline-not-composition wording, so the agent-facing surface stops seeding the same wrong assumption.
+
+Both pushed to their own remotes. `lazily-spec` `make check` is green (exit 0) across all 13 gates — assertion-block schema, schemas, Lean formal, coverage + coverage-claims, 135 vendored fixtures byte-identical, async-v2 names for 8 bindings, 175 scenario identities, prose keys, assertion ordering, fixture discriminability (619 exact-value routes, 56 mutants killed), corpus publication. CI on both repos is queued from these pushes, not yet started — reporting on local evidence rather than waiting.
+
+I staged the `lazily-rs` change as a hand-built blob (`HEAD` + my single line) rather than `--only`, because another session has an in-flight `tsift init` rewrite of the Code Navigation block in that same file; `lazily-spec` had an unrelated `AGENTS.md` edit and a `runbooks/code-navigation.md` deletion pending, both left untouched.
+
+No follow-up filed. `lazily-gd` still has no temporal family, but that's the expected state of the in-progress 10th binding, not a gap this item opened.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- 🚧 do [#reconcilecompositionclai]
+- do [#lazilytemporalpackage]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#reconcilecompositionclai] Reconcile the `#lztime` composition claim: `src/lazily-spec/docs/temporal-sources.md` says `DeadlineCell` is "used to build every deadline-driven primitive downstream" (`#lzcoord` lease expiry, `#lzpresence` ephemeral expiry, `#lzresilience` RPC timeouts), but in lazily-rs `coordination.rs`, `presence.rs`, `resilience.rs` and `windowing.rs` each reimplement expiry over the same `tick(now: u64)` contract and never import `DeadlineCore`/`TimerCore` — only `stdlib.rs` composes `TimerCore`. Decide: soften the doc to "shares the logical-clock discipline", or actually compose the core, then apply the decision across all 9 bindings.
+- [ ] [#lazilytemporalpackage] Can we make a lazily-py-temporal package? What operations would lazily-py-temporal need to fully integrate with temporal? Is it worthwhile or should the consumer implement their own temporal integration?
+- [ ] 🚧 [#reconcilecompositionclai] Reconcile the `#lztime` composition claim: `src/lazily-spec/docs/temporal-sources.md` says `DeadlineCell` is "used to build every deadline-driven primitive downstream" (`#lzcoord` lease expiry, `#lzpresence` ephemeral expiry, `#lzresilience` RPC timeouts), but in lazily-rs `coordination.rs`, `presence.rs`, `resilience.rs` and `windowing.rs` each reimplement expiry over the same `tick(now: u64)` contract and never import `DeadlineCore`/`TimerCore` — only `stdlib.rs` composes `TimerCore`. Decide: soften the doc to "shares the logical-clock discipline", or actually compose the core, then apply the decision across all 9 bindings.
 <!-- /agent:backlog -->
 
 ## Review

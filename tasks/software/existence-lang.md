@@ -268,6 +268,24 @@ existence audit --semantic [--provider anthropic|openai] [--model ID] [--limit N
 **The live proof fell short by one credential.** The mock-server tests cover the request shape for both providers, but I also tried three real nodes against `api.anthropic.com` with the key in passage: the server answered `401 API key is invalid`, which shows the endpoint, headers, and error handling are wired but the stored key is stale. The exit was 2 as designed. `#semantickey` at the top of the backlog is the operator step: rotate the key, run a five-node pass once, and decide whether the weekly workflow should carry the secret.
 
 The `existence` worktree's other-session `AGENTS.md`/`CLAUDE.md` edits stayed out of the commit. Exchange is at eleven responses; queue active, no compaction.
+
+### Re: do #cutexistenceusers — fable
+
+> **Queue prompt:**
+>
+> do [#cutexistenceusers]
+
+Done. existence 0.6.0 is out on every channel the installers use:
+
+- **GitHub release** [v0.6.0](https://github.com/existence-lang/existence/releases/tag/v0.6.0) with all seven prebuilt assets (x86_64 and aarch64 for Linux gnu and musl, both macOS, Windows), which is what `install.sh` and `install.ps1` download.
+- **crates.io** serves `existence 0.6.0`, so `cargo install existence` gets it.
+- The local binary reports 0.6.0 after `make release`, which ran `make check` (95 tests green), tagged, pushed `main` and the tag, and installed.
+
+The release commit bumps `Cargo.toml`/`Cargo.lock` and flips the README command-table heading from the stale "Commands (v0.3.0)" to v0.6.0. What ships since 0.5.0 is the whole of this session's `existence` work: `toc`, `sources`, and `audit` with its five classes.
+
+**One self-inflicted red run, fixed.** I published to crates.io by hand from a clean worktree of the tag (the working tree holds another session's edits, which `cargo publish` refuses and `--allow-dirty` would have packaged). The Release workflow turned out to have its own crates.io publish job, which then failed with "crate existence@0.6.0 already exists". The release and assets were unaffected. I made that job idempotent in [`f96b7e4`](https://github.com/existence-lang/existence/commit/f96b7e4): it now skips when the version is already on crates.io. Recorded in memory so the next release just waits for the workflow.
+
+**Downstream pins.** The ontology's three workflows (`pages.yml`, `ci.yml`, `audit.yml`) now install `existence` by the `v0.6.0` tag instead of a commit, in [`df99bfa`](https://github.com/existence-lang/ontology/commit/df99bfa). Exchange is at twelve responses; queue active, no compaction.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
@@ -282,7 +300,7 @@ The `existence` worktree's other-session `AGENTS.md`/`CLAUDE.md` edits stayed ou
 - ~~do [#xlaudit5]~~
 - ~~do [#xlaudit6]~~
 - ~~do [#xlaudit7]~~
-- do [#cutexistenceusers]
+- ~~do [#cutexistenceusers]~~
 - do [#fixmanifestdrift]
 <!-- /agent:queue -->
 
@@ -292,7 +310,6 @@ The `existence` worktree's other-session `AGENTS.md`/`CLAUDE.md` edits stayed ou
 - [ ] [#semantickey] The `btak/ANTHROPIC_API_KEY` entry in passage is rejected by api.anthropic.com (HTTP 401 "API key is invalid"), so `existence audit --semantic` could only be proven against the local stand-in server. Rotate the key (a new one from the Console into the same passage path), then run `ANTHROPIC_API_KEY="$(passage show btak/ANTHROPIC_API_KEY)" existence --ontology src/existence-lang/ontology audit --semantic --limit 5` once to confirm the live Messages API shape, and decide whether the weekly workflow should carry an `ANTHROPIC_API_KEY` secret and add `--semantic` (about 117 Opus 5 calls on the first run, then only changed neighbourhoods)
 - [ ] [#auditprtoken] Let the weekly Ontology audit workflow open its own `audit: safe fixes` pull request: the `existence-lang` organization forbids GitHub Actions from creating PRs, and lifting it needs an `admin:org` scope this session does not have (`gh auth refresh -h github.com -s admin:org`, then `gh api -X PUT orgs/existence-lang/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true` and the same PUT on `repos/existence-lang/ontology`), or add an `AUDIT_TOKEN` repo secret (classic PAT, `repo` scope) which `.github/workflows/audit.yml` already prefers. Until then the job pushes the branch and links the compare page in the issue; PR #2 was opened by hand and the job keeps it current
 - [ ] [#xlrequote] Decide what to do with the source drift the first real `existence audit --sources` run found in `src/existence-lang/ontology`: 206 quoted passages are no longer on their pages (87 wiktionary, 108 wikipedia, 6 etymonline; the nodes quote 2014-15 wording that has since been rewritten) and 19 have changed but still match. Per source, either refresh the blockquote from the live page or pin the historical Wayback snapshot next to the anchor so the quote stays verifiable. Also 6 dead links: `--fix` can swap cosmicscale.appspot.com (fractal, physical-system, scope), the NYT attention-schema piece, and wikipedia `Physical_information` (entity, information) for snapshots; stevenpoole.net, the AAAI SARA13 PDF, and the colorado.edu PDF have none and need a replacement source. Content decisions, not code; `audit --sources` reports them again each weekly run once Phase 6 commits the lock
-- [ ] [#cutexistenceusers] [recommended] Cut existence 0.6.0 (`make release` in `src/existence-lang/existence`) so `install.sh` / `cargo install existence` users get `toc`; `existence --version` on `cargo install --path .` still reads 0.5.0. Bump `Cargo.toml` first, then flip the README "Commands (v0.3.0)" heading, which is already stale
 - [ ] [#fixmanifestdrift] Fix the manifest drift `existence audit --structure` reports in `src/existence-lang/ontology` (it is what the new CI job fails on): `qualitative` + `quantitative` are declared in ring 1 with no node file (create them or drop them from the ring), `contextual-systems` has an empty Ontology section (needs a lay definition), `noumena` / `phenomena` / `pneuma` are in no ring (ring 2 fits), and `universal-set.md` links `./exists`, which has no node (`exist` does). The 11 fixable suffix-less links were already rewritten by `#xlaudit2`. Then publish `terms.md` from the Pages workflow (`existence toc -o terms.md`) so the site has a glossary page
 <!-- /agent:backlog -->
 
@@ -324,4 +341,5 @@ The `existence` worktree's other-session `AGENTS.md`/`CLAUDE.md` edits stayed ou
 - 2026-09-11 [#xlaudit5] Phase 5 of `tasks/software/plan-ontology-audit.md`: `[[mirrors]]` in existence.toml (`kind = nodes|toc`) + `existence audit --mirrors`; `--fix` regenerates toc mirrors (`terms.md`); register the `~/.claude/CLAUDE.md` philosophy table and the sibling `philosophy/` repo so the genus-port drift is reported per term. The nodes comparator must strip link titles (`"broader"`) before diffing: 5 of the 11 terms `#reconcileotherlay` was handed differed only by that, and it should compare the first Ontology paragraph, not the whole section, so a missing Axiology section is not reported as lay-definition drift
 - 2026-09-11 [#xlaudit6] Phase 6 of `tasks/software/plan-ontology-audit.md`: weekly `schedule` workflow in `src/existence-lang/ontology` running `existence audit --all --format json`, upserting one `Ontology audit` issue (edit by title, diff vs last report) and one idempotent `audit: safe fixes` PR carrying only safe resolutions + refreshed lock + regenerated mirrors. Done after one real scheduled run
 - 2026-09-11 [#xlaudit7] Phase 7 of `tasks/software/plan-ontology-audit.md`: `existence audit --semantic --provider anthropic|openai` LLM contradiction pass over each node's lay definition and its linked neighbours, report only, verdicts cached by content hash so a rerun with no changes makes zero model calls. Never on the PR path
+- 2026-09-11 [#cutexistenceusers] [recommended] Cut existence 0.6.0 (`make release` in `src/existence-lang/existence`) so `install.sh` / `cargo install existence` users get `toc`; `existence --version` on `cargo install --path .` still reads 0.5.0. Bump `Cargo.toml` first, then flip the README "Commands (v0.3.0)" heading, which is already stale
 <!-- /agent:done -->

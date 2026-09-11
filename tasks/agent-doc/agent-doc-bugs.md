@@ -13,7 +13,7 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: start
 ---
 
 ## Status
@@ -584,6 +584,19 @@ I also took the two liveness conditions **out of the focus path entirely**. A ta
 **One thing I did not fix**, because it is a different bug wearing the same clothes: the notification is per-document (`Agent input required for $fileName`) but `focusExisting(project)` ignores the file entirely and focuses a single project-wide tab. In your multi-document tmux layout the correct target is the pane that owns *that* document. The plugin already has the machinery (`TmuxPaneFocusSync`), but routing it there is the same pane→window resolution work as `#stashfocuswindow`, and doing it twice in two places is how these three tmux reports became three reports. Filed as `#jbfocusdocroute`, adjacent to it.
 
 Exchange is at 529 lines / 22 sections; noted, still draining.
+
+### Re: queue drained — stopping the loop — opus-5
+
+Nothing agent-drainable is left. Preflight reports `queue_drainable_head_count = 0` and `queue_continuation_required = false`; the two remaining heads are both non-drainable in-session:
+
+- `⏭️ do [#retainedresumewakeflake]` — skip-marked.
+- `do [#cargotokenrevoke]` — `[operator-verify]`, blocked on one click: log in with GitHub at `https://crates.io/settings/tokens` in bridged Chromium tab 13, then re-queue it and the revoke happens in-session.
+
+This cycle is a closeout only — the diff was bookkeeping (the `queue: go` → `queue: start` flip and the `#ftstrike` auto-strike of the JB head), not a new request. I am writing it because preflight had already opened the cycle, not to add a section: the document is at 559 lines across 23 sections with three no-op closeouts in the last half hour, and a fourth would be exactly the `#qchurn` the skill warns about.
+
+**Landed across this drain:** `#fixdocsturn` (`0f959e11f`), the reconcile safety post-condition plus its ops.log signal (`73795693b`), and the JB Focus Agent Terminal no-op (`50bc06de5`, plugin 0.2.381, staged into IntelliJ — it needs an IDE restart to activate, which also clears the standing `stale_plugin` warning).
+
+**Top of the backlog, with evidence rather than hypotheses:** `#queuelineclobber` (P0, your text being destroyed — the isolation merge is ruled out across seven probed shapes, next lead is the rebootstrap path), `#presetnullblank` (P1, reproduced deterministically), `#stashfocuswindow` + `#jbfocusdocroute` (P1/P2, one pane→window binding bug behind all the tmux focus reports), `#compactackflake` (P2, pre-existing CI red).
 <!-- agent:boundary:1406b99d:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -592,11 +605,16 @@ Exchange is at 529 lines / 22 sections; noted, still draining.
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~As I was typing in this file's agent:exchange when the turn started, my changes in agent:exchange were reverted by agent-doc.~~
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
 - ⏭️ do [#retainedresumewakeflake]
+- ⏭️ do [#cargotokenrevoke]
+- do [#queuelineclobber]
+- do [#presetnullblank]
+- do [#stashfocuswindow]
+- do [#jbfocusdocroute]
+- do [#compactackflake]
+- do [#retainedresumewakeflake]
 - do [#cargotokenrevoke]
-- 🚧 The JB "Focus Agent Terminal" does not navigate to anything.
 <!-- /agent:queue -->
 
 

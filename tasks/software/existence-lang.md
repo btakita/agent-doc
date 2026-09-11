@@ -6,7 +6,7 @@ agent: claude
 claude_model: fable
 agent_doc_format: template
 agent_doc_write: crdt
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -82,20 +82,44 @@ Plan written to `tasks/software/plan-ontology-audit.md` (committed as `11416fd54
 **Cadence.** The structural subset runs on every ontology PR and fails the check. Weekly, a scheduled workflow runs `existence audit --all --format json`, upserts a single `Ontology audit` issue (edit by title, diff against last week's report) and keeps one idempotent `audit: safe fixes` PR with only mechanical resolutions plus the refreshed lock and regenerated mirrors. Report JSON is the interface; exit 0 clean, 1 findings, 2 could not run. Fetches are rate-limited and an unreachable host skips the source pass rather than failing it.
 
 **Phases**, one backlog item each (Phase 1 through 7): sources extraction + lock schema → `audit --structure` + PR CI → `--contradictions` → `--sources` with Wayback pinning → `[[mirrors]]` → weekly workflow with issue/PR upsert → `--semantic`. Phases 1 to 3 are offline and land the report format; 4 needs the lock from 1; 5 and 6 need 2; 7 last. Each phase closes with tests, `make check`, `cargo install --path .`, and a README section.
+
+### Re: do #xlgenusport — fable
+
+> **Queue prompt:**
+>
+> do [#xlgenusport]
+
+
+Done. Pushed to `btakita/philosophy` as `a6a1497`, and the live `~/.claude/CLAUDE.md` table is updated.
+
+**What was actually drifted.** Of the two genus decisions from the canonical-chain work, only one had a stale copy in `philosophy/src`:
+
+- `src/entity.md` still opened with "Any [information] in [Existence]". Now "Anything in [Existence] that can be distinguished from anything else.", matching `existence-lang/ontology@0d2e495`. Untyped link, since the philosophy repo does not use the `"broader"` title convention.
+- `src/abstraction.md` already names entity as the thing modeled ("a symbol that represents a real entity; member of a schema"), so the abstraction/concept loop was never present there. The stale "a concept modeling something else" wording lived in `philosophy/install.sh`, the script that generates the `<!-- philosophy:start -->` block in `~/.claude/CLAUDE.md`.
+
+**The table has three copies, and the generator was the stale one.** The live CLAUDE.md section had moved ahead of `install.sh` (newer Abstraction row, plus a "Universal applicability" paragraph the generator lacked), so re-running the installer would have regressed it. I changed the Entity row in both, then synced the generator's kernel block to the live section byte for byte; `diff` of the two blocks is now empty and `bash -n` passes. `~/.claude` is not a git repo, so the generator is the versioned source for that table.
+
+**Should `philosophy/` track `existence-lang/ontology`? Not as a submodule, yes as a declared mirror.** The numbers argue against a mechanical merge right now:
+
+- 110 nodes are shared; 49 exist only in `philosophy/` (language-planning and the like); 7 only in the ontology (`abstract-system`, `agreement`, `conceptual-existence`, `contextual-systems`, `humans`, `physical-existence`, `signals`).
+- Of the shared 110, 66 are byte-identical and 44 differ, mostly sections (the ontology added Axiology sections; philosophy lacks them on `entity` and `abstraction`).
+- 12 shared nodes had a different lay definition before this cycle; entity is fixed, 11 remain: abstraction, concept, context, domain, information, noumena, phenomena, pneuma, scope, state, tool.
+
+Direction: `existence-lang/ontology` is canonical for the shared nodes (linted, ring-declared, published); `philosophy/` is the personal superset that pulls decisions from it. Phase 5 of the audit plan declares `philosophy/src` as a `kind = "nodes"` mirror so the per-term lay-definition diff is reported weekly instead of rediscovered by hand, and `install.sh` should eventually generate its table from `existence toc --ring 0` rather than a hand-kept heredoc. A backlog item carries the 11-term reconcile, which is content work (each is a decision about which side is right, not a copy).
+
+The philosophy worktree also holds another session's uncommitted `.gitignore` / `AGENTS.md` edits; I committed only `install.sh` and `src/entity.md`.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- ~~do [#fixhttpsgithub]~~
-- ~~do [#planwayregularly]: The audit should also identify + report + safely resolve (where possible): contradictions + source/ontology drift.~~
-- do [#xlgenusport]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#reconcileotherlay] Reconcile the other 11 lay definitions that differ between `philosophy/src` and `src/existence-lang/ontology/src` (abstraction, concept, context, domain, information, noumena, phenomena, pneuma, scope, state, tool) — decide direction per term (ontology is canonical for the 110 shared nodes; philosophy keeps its 49 extras), port the sentence, and keep the CLAUDE.md table row in `philosophy/install.sh` in step. Until Phase 5 of `tasks/software/plan-ontology-audit.md` declares philosophy as a `kind = nodes` mirror, this list is the drift record
 - [ ] [#xlaudit1] Phase 1 of `tasks/software/plan-ontology-audit.md`: `existence sources [term] --json` derives (url, citing term, quoted passages) from the anchor+blockquote markdown SPEC rules 7/8 already mandate, plus the `audit/sources.lock.json` schema and writer (no network yet). Done when a fixture node round-trips and the real ontology lists all 313 anchors
 - [ ] [#xlaudit2] Phase 2 of `tasks/software/plan-ontology-audit.md`: `existence audit --structure` wraps lint + `toc --check` + links missing the `.md` suffix (`evolution.md` → `./environment`) + near-duplicate slugs (`signal`/`signals`, `human`/`humans`); JSON report with exit codes 0/1/2; `--fix` appends `.md` only. Then a CI job on ontology PRs
 - [ ] [#xlaudit3] Phase 3 of `tasks/software/plan-ontology-audit.md`: `existence audit --contradictions`: typed-link cycles in the broader graph after inverses, 2-cycles in lay-definition links (the `entity`/`information` shape the canonical-chain work fixed by hand), unlinked mentions of known terms in lay definitions. Report only, both sentences side by side
@@ -105,7 +129,6 @@ Plan written to `tasks/software/plan-ontology-audit.md` (committed as `11416fd54
 - [ ] [#xlaudit7] Phase 7 of `tasks/software/plan-ontology-audit.md`: `existence audit --semantic --provider anthropic|openai` LLM contradiction pass over each node's lay definition and its linked neighbours, report only, verdicts cached by content hash so a rerun with no changes makes zero model calls. Never on the PR path
 - [ ] [#cutexistenceusers] [recommended] Cut existence 0.6.0 (`make release` in `src/existence-lang/existence`) so `install.sh` / `cargo install existence` users get `toc`; `existence --version` on `cargo install --path .` still reads 0.5.0. Bump `Cargo.toml` first, then flip the README "Commands (v0.3.0)" heading, which is already stale
 - [ ] [#fixmanifestdrift] Fix the manifest drift `existence toc --check` found in `src/existence-lang/ontology`: `qualitative` + `quantitative` are declared in ring 1 with no node file (create them or drop them from the ring), `contextual-systems` has an empty Ontology section (needs a lay definition), `noumena` / `phenomena` / `pneuma` are in no ring (ring 2 fits), and `evolution.md` links `./environment` without `.md` so neither lint nor the rebaser sees it. Then add `existence toc --check` next to `lint` in the ontology CI and publish `terms.md` from the Pages workflow (`existence toc -o terms.md`) so the site has a glossary page
-- [ ] [#xlgenusport] [recommended] Port the two genus decisions from `#xlchaingaps` to the sibling `philosophy/` repo (what `~/.claude/philosophy` resolves to; its `src/entity.md` still reads "Any information in Existence" and `src/abstraction.md` still says "a concept that models") and to the `<!-- philosophy:start -->` table in `~/.claude/CLAUDE.md` (Entity row). Content, two files plus one table row; decide whether `philosophy/` should track `existence-lang/ontology` instead of drifting
 <!-- /agent:backlog -->
 
 ## Icebox
@@ -127,4 +150,5 @@ Plan written to `tasks/software/plan-ontology-audit.md` (committed as `11416fd54
 - 2026-08-28 [#xlchaingaps] [recommended] Three edges of the canonical chain (Existence → Entity → System → Domain → Scope → Context → Resolution → Focus) cannot be typed by retitling because the Ontology section has no such link: `system.md` never links `entity`, `resolution.md` links `scope`/`perspective` but not `context`, `focus.md` never links `resolution`. Also two mutual definitions block typing in either direction: `entity.md` ("any information in Existence") vs `information.md` ("An Entity"), and `abstraction.md` ("a concept that models") vs `concept.md` ("an abstraction that does not represent a physical entity"). Decide which side is the genus and reword one sentence per pair; add the three missing chain sentences; then retitle. Content, not code
 - 2026-09-11 [#fixhttpsgithub] Fix https://github.com/existence-lang/existence/issues/1
 - 2026-09-11 [#planwayregularly] Plan a way to regularly audit ontology items. Should we track the sources of each ontology item and recheck during the audit?
+- 2026-09-11 [#xlgenusport] [recommended] Port the two genus decisions from `#xlchaingaps` to the sibling `philosophy/` repo (what `~/.claude/philosophy` resolves to; its `src/entity.md` still reads "Any information in Existence" and `src/abstraction.md` still says "a concept that models") and to the `<!-- philosophy:start -->` table in `~/.claude/CLAUDE.md` (Entity row). Content, two files plus one table row; decide whether `philosophy/` should track `existence-lang/ontology` instead of drifting
 <!-- /agent:done -->

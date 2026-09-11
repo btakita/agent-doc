@@ -728,6 +728,113 @@ fn retry_controller_transport_drop<T>(
     }
 }
 
+/// (`#handoffrefusalretry`) How long a client waits out a controller handoff
+/// before surfacing a not-authoritative refusal, and how often it re-asks.
+///
+/// A handoff promotes (or the replacement self-reaps) in well under a second in
+/// the normal case; the budget covers a recycle storm where several generations
+/// churn back to back.
+const CONTROLLER_HANDOFF_SETTLE_BUDGET: Duration = Duration::from_secs(10);
+const CONTROLLER_HANDOFF_SETTLE_INTERVAL: Duration = Duration::from_millis(200);
+
+/// (`#handoffrefusalretry`) Did the controller refuse because it is not yet
+/// authoritative — rather than fail?
+///
+/// Every `controller not authoritative` refusal bails at the top of its handler,
+/// before touching pane state, the CRDT, or the dispatch record, so the request
+/// provably did nothing. And the state it refused from is transient by
+/// construction: a `Preparing` generation either promotes to `Stable` or is
+/// reaped by the handoff watchdog. The refusal is therefore a "not yet", and
+/// re-issuing it against the promoted generation is the whole recovery.
+fn controller_handoff_refusal_is_retryable(err: &anyhow::Error) -> bool {
+    format!("{err:#}").contains("controller not authoritative")
+}
+
+/// Pure retry policy: the delay before attempt `attempt` (1-based) of a request
+/// that has now been refused `attempt` times, or `None` once the budget is spent.
+fn controller_handoff_retry_delay(
+    attempt: usize,
+    elapsed: Duration,
+    budget: Duration,
+    interval: Duration,
+) -> Option<Duration> {
+    if attempt == 0 || elapsed >= budget {
+        return None;
+    }
+    Some(interval.min(budget.saturating_sub(elapsed)))
+}
+
+/// (`#handoffrefusalretry`) Re-issue a request that a mid-handoff controller
+/// refused, until one generation answers it or the settle budget is spent.
+///
+/// Reported live 2026-09-11 against `src/haiven-dev/tasks/docs.md`: a `make
+/// install` recycled every live controller, churning that project through
+/// controller generations 1176 → 1178 inside 24 seconds, and a "Run Agent Doc"
+/// layout observation that landed in the window surfaced the raw
+/// `pane layout observation refused: controller not authoritative
+/// (handoff_state=Preparing)` to the operator — a failure message for a
+/// condition that cleared on its own a moment later. Each attempt reconnects, so
+/// the retry reaches the newly promoted generation rather than re-asking the
+/// process that already said no.
+fn retry_controller_handoff_refusal<T>(
+    retry_log_path: &Path,
+    command: &str,
+    budget: Duration,
+    interval: Duration,
+    mut sleep: impl FnMut(Duration),
+    mut request_once: impl FnMut() -> Result<T>,
+) -> Result<T> {
+    let started = Instant::now();
+    let mut refusals = 0usize;
+    loop {
+        match request_once() {
+            Err(err) if controller_handoff_refusal_is_retryable(&err) => {
+                refusals += 1;
+                let Some(delay) =
+                    controller_handoff_retry_delay(refusals, started.elapsed(), budget, interval)
+                else {
+                    agent_doc_ops_log_io::log_op(
+                        retry_log_path,
+                        &format!(
+                            "controller_rpc_handoff_retry_exhausted command={} refusals={} budget_ms={} detail={}",
+                            command,
+                            refusals,
+                            budget.as_millis(),
+                            compact_controller_error(&err)
+                        ),
+                    );
+                    return Err(err);
+                };
+                if refusals == 1 {
+                    agent_doc_ops_log_io::log_op(
+                        retry_log_path,
+                        &format!(
+                            "controller_rpc_handoff_retry command={} reason=controller_not_authoritative detail={}",
+                            command,
+                            compact_controller_error(&err)
+                        ),
+                    );
+                }
+                sleep(delay);
+            }
+            other => {
+                if refusals > 0 && other.is_ok() {
+                    agent_doc_ops_log_io::log_op(
+                        retry_log_path,
+                        &format!(
+                            "controller_rpc_handoff_retry_settled command={} refusals={} waited_ms={}",
+                            command,
+                            refusals,
+                            started.elapsed().as_millis()
+                        ),
+                    );
+                }
+                return other;
+            }
+        }
+    }
+}
+
 pub(crate) fn request_controller<T: DeserializeOwned>(
     project_root: &Path,
     request: ControllerRequest,
@@ -1194,16 +1301,18 @@ fn request_controller_with_timeout<T: DeserializeOwned>(
     request: ControllerRequest,
     timeout: Duration,
 ) -> Result<T> {
-    // A reloadable editor library is a passive client, never a controller
-    // lifecycle owner. In particular it must not run `status`/bootstrap
-    // recovery, because those paths open the controller's SQLite store and can
-    // retain WAL mappings across a native-library reload.
-    let stream = if EMBEDDED_NATIVE_HOST.load(Ordering::SeqCst) {
-        connect(project_root)?
-    } else {
-        connect_or_launch(project_root, LaunchMode::Lazy)?
-    };
-    request_controller_on_stream_with_timeout(project_root, request, timeout, stream)
+    request_across_controller_handoff(project_root, &request, || {
+        // A reloadable editor library is a passive client, never a controller
+        // lifecycle owner. In particular it must not run `status`/bootstrap
+        // recovery, because those paths open the controller's SQLite store and can
+        // retain WAL mappings across a native-library reload.
+        let stream = if EMBEDDED_NATIVE_HOST.load(Ordering::SeqCst) {
+            connect(project_root)?
+        } else {
+            connect_or_launch(project_root, LaunchMode::Lazy)?
+        };
+        request_controller_on_stream_with_timeout(project_root, request.clone(), timeout, stream)
+    })
 }
 
 fn request_existing_controller_with_timeout<T: DeserializeOwned>(
@@ -1211,8 +1320,29 @@ fn request_existing_controller_with_timeout<T: DeserializeOwned>(
     request: ControllerRequest,
     timeout: Duration,
 ) -> Result<T> {
-    let stream = connect(project_root)?;
-    request_controller_on_stream_with_timeout(project_root, request, timeout, stream)
+    request_across_controller_handoff(project_root, &request, || {
+        let stream = connect(project_root)?;
+        request_controller_on_stream_with_timeout(project_root, request.clone(), timeout, stream)
+    })
+}
+
+/// (`#handoffrefusalretry`) Run one client RPC under the handoff settle policy.
+///
+/// Each attempt reconnects from scratch, so a retry lands on whichever
+/// generation now owns the public socket.
+fn request_across_controller_handoff<T>(
+    project_root: &Path,
+    request: &ControllerRequest,
+    attempt: impl FnMut() -> Result<T>,
+) -> Result<T> {
+    retry_controller_handoff_refusal(
+        request.file.as_deref().unwrap_or(project_root),
+        &request.command,
+        CONTROLLER_HANDOFF_SETTLE_BUDGET,
+        CONTROLLER_HANDOFF_SETTLE_INTERVAL,
+        std::thread::sleep,
+        attempt,
+    )
 }
 
 fn request_controller_on_stream_with_timeout<T: DeserializeOwned>(
@@ -23197,6 +23327,114 @@ pub fn run_restart(root: Option<&Path>, force: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
+
+    use super::*;
+
+    fn handoff_refusal() -> anyhow::Error {
+        anyhow::anyhow!(
+            "pane layout observation refused: controller not authoritative (handoff_state=Preparing)"
+        )
+    }
+
+    #[test]
+    fn a_mid_handoff_refusal_is_retried_until_a_generation_answers() {
+        // `#handoffrefusalretry`, reported live 2026-09-11 on
+        // `src/haiven-dev/tasks/docs.md`: a `make install` churned the project
+        // through controller generations 1176 -> 1178 in 24s, and a Run Agent Doc
+        // layout observation that landed in that window surfaced the raw refusal
+        // to the operator. The refusal is a "not yet" — the handler bails before
+        // touching any state — so the client waits the handoff out.
+        let dir = tempfile::tempdir().unwrap();
+        let mut attempts = 0usize;
+        let mut slept: Vec<Duration> = Vec::new();
+        let result: Result<&str> = retry_controller_handoff_refusal(
+            dir.path(),
+            "sync_tmux_layout",
+            Duration::from_secs(10),
+            Duration::from_millis(1),
+            |delay| slept.push(delay),
+            || {
+                attempts += 1;
+                if attempts < 3 {
+                    Err(handoff_refusal())
+                } else {
+                    Ok("published")
+                }
+            },
+        );
+
+        assert_eq!(result.unwrap(), "published");
+        assert_eq!(attempts, 3, "each retry re-issues the request");
+        assert_eq!(slept.len(), 2, "one wait per refusal, none after the answer");
+    }
+
+    #[test]
+    fn a_handoff_that_outlives_the_settle_budget_still_surfaces_the_refusal() {
+        // The retry is bounded: a controller that never promotes must not turn a
+        // refusal into a hang.
+        let dir = tempfile::tempdir().unwrap();
+        let mut attempts = 0usize;
+        let result: Result<&str> = retry_controller_handoff_refusal(
+            dir.path(),
+            "sync_tmux_layout",
+            Duration::ZERO,
+            Duration::from_millis(1),
+            |_| panic!("a spent budget must not sleep"),
+            || {
+                attempts += 1;
+                Err(handoff_refusal())
+            },
+        );
+
+        assert!(
+            format!("{:#}", result.unwrap_err()).contains("controller not authoritative"),
+            "the operator still sees the real refusal"
+        );
+        assert_eq!(attempts, 1);
+    }
+
+    #[test]
+    fn a_failure_that_is_not_a_handoff_refusal_is_never_retried() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut attempts = 0usize;
+        let result: Result<&str> = retry_controller_handoff_refusal(
+            dir.path(),
+            "sync_tmux_layout",
+            Duration::from_secs(10),
+            Duration::from_millis(1),
+            |_| panic!("a real failure must not sleep"),
+            || {
+                attempts += 1;
+                Err(anyhow::anyhow!("sync_tmux_layout refused: desired pane layout is empty"))
+            },
+        );
+
+        assert!(result.is_err());
+        assert_eq!(attempts, 1);
+    }
+
+    #[test]
+    fn the_last_handoff_wait_never_overruns_the_settle_budget() {
+        assert_eq!(
+            controller_handoff_retry_delay(
+                1,
+                Duration::from_millis(950),
+                Duration::from_secs(1),
+                Duration::from_millis(200)
+            ),
+            Some(Duration::from_millis(50)),
+            "the final wait is clamped to what is left of the budget"
+        );
+        assert_eq!(
+            controller_handoff_retry_delay(
+                1,
+                Duration::from_secs(1),
+                Duration::from_secs(1),
+                Duration::from_millis(200)
+            ),
+            None
+        );
+    }
 
     #[test]
     fn repeated_compact_reports_one_continuation_aware_pending_diagnostic() {

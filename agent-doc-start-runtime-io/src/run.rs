@@ -386,7 +386,7 @@ fn document_without_matching_resume_id(current: &str, id: &str) -> Result<Option
         return Ok(None);
     }
     fm.clear_resume_for_harness(harness);
-    Ok(Some(frontmatter::write(&fm, body)?))
+    Ok(Some(frontmatter::write_preserving(current, &fm, body)?))
 }
 
 fn stale_resume_clear_target(file: &Path, current: &str, id: &str) -> Result<Option<String>> {

@@ -155,7 +155,7 @@ pub fn run(
     // Clear agent conversation ID (resume) — keep session (routing key)
     let (mut fm, body) = frontmatter::parse(&content)?;
     fm.resume = None;
-    let updated = frontmatter::write(&fm, body)?;
+    let updated = frontmatter::write_preserving(&content, &fm, body)?;
     if force_disk {
         agent_doc_document_realtime_io::atomic_write_force_disk_through_authority(file, &updated)?;
         agent_doc_ops_log_io::log_op(

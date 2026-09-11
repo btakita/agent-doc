@@ -13,6 +13,11 @@
 //!   and fails closed when a configured SSH-dependent document cannot resolve any targets.
 //! - `write(fm, body)` serialises `Frontmatter` to YAML and prepends it to `body`, producing a
 //!   complete document string.
+//! - `write_preserving(original, fm, body)` is the managed-write path (`#presetnullblank`): it
+//!   emits the ORIGINAL BYTES of every top-level key whose value did not change — preserving the
+//!   operator's quoting, comments, and a key typed without a value yet — re-rendering only the
+//!   keys that actually changed. It falls back to `write` whenever the original cannot be
+//!   accounted for byte-for-byte. Every parse → mutate one field → write wrapper below uses it.
 //! - `set_session_id` / `set_resume_id` are convenience wrappers: parse → mutate one field →
 //!   write. They create frontmatter when none exists.
 //! - `ensure_session` is idempotent: if `session` is already set the document is returned
@@ -1422,7 +1427,7 @@ pub fn ensure_session_with_ssh_resolver(
     }
     let session_id = Uuid::new_v4().to_string();
     fm.session = Some(session_id.clone());
-    let updated = write(&fm, body)?;
+    let updated = write_preserving(content, &fm, body)?;
     Ok((updated, session_id))
 }
 
@@ -1437,32 +1442,241 @@ pub fn ensure_session_with_ssh_resolver(
 /// resolve both forms (`normalize_queue_control` folds `queue:` back onto
 /// `queue_active` on parse), and a doc with no queue state writes neither.
 pub fn write(fm: &Frontmatter, body: &str) -> Result<String> {
-    let fm = if fm.queue_active.is_some() {
-        let mut canonical = fm.clone();
-        if canonical.queue.is_none() {
-            canonical.queue = Some(
-                if fm.queue_active == Some(true) {
-                    "start"
-                } else {
-                    "stop"
-                }
-                .to_string(),
-            );
-        }
-        canonical.queue_active = None;
-        std::borrow::Cow::Owned(canonical)
-    } else {
-        std::borrow::Cow::Borrowed(fm)
-    };
+    let fm = canonical_for_write(fm);
     let yaml = serde_yaml::to_string(fm.as_ref())?;
     Ok(format!("---\n{}---\n{}", yaml, body))
+}
+
+/// Fold the deprecated `queue_active` flag onto the canonical `queue` control
+/// before serialisation. Shared by [`write`] and [`write_preserving`] so both
+/// write paths emit the same canonical key set.
+fn canonical_for_write(fm: &Frontmatter) -> std::borrow::Cow<'_, Frontmatter> {
+    if fm.queue_active.is_none() {
+        return std::borrow::Cow::Borrowed(fm);
+    }
+    let mut canonical = fm.clone();
+    if canonical.queue.is_none() {
+        canonical.queue = Some(
+            if fm.queue_active == Some(true) {
+                "start"
+            } else {
+                "stop"
+            }
+            .to_string(),
+        );
+    }
+    canonical.queue_active = None;
+    std::borrow::Cow::Owned(canonical)
+}
+
+/// `#presetnullblank`: write frontmatter back into a document while preserving
+/// the ORIGINAL BYTES of every top-level key whose value did not change.
+///
+/// [`write`] re-serialises the whole `Frontmatter` struct, so a cycle that only
+/// touched (say) `agent_doc_pipeline` still rewrote every other line: quoting was
+/// normalised (`agent: 'claude'` → `agent: claude`) and a key the operator had
+/// typed without a value yet (`'#k':`) came back as `'#k': null`. Same YAML
+/// document, different bytes — agent-doc was editing lines the operator is
+/// mid-keystroke on, which is how a half-typed preset gets clobbered.
+///
+/// This path diffs the parsed old mapping against the newly serialised one
+/// key-by-key:
+/// - value unchanged → the original block's bytes are emitted verbatim (quoting,
+///   a bare `key:` with no value, comments, and indentation all survive);
+/// - value changed → only that key's block is re-rendered, in place;
+/// - key gone from the new mapping → its block is dropped (same as [`write`],
+///   which is how deprecated keys like `queue_active` are retired);
+/// - key new → rendered and appended before the closing fence.
+///
+/// It is deliberately conservative: anything it cannot account for byte-for-byte
+/// (no frontmatter region, unparseable YAML, duplicate top-level keys, a block
+/// whose own bytes do not round-trip to the parsed value) falls back to [`write`].
+/// Note the trap recorded with the bug: dropping null-valued keys at parse time
+/// is NOT the fix — `write()` would then delete the operator's half-typed line,
+/// which is the same data loss wearing a different hat.
+pub fn write_preserving(original: &str, fm: &Frontmatter, body: &str) -> Result<String> {
+    match preserved_frontmatter_yaml(original, fm) {
+        Some(yaml) => Ok(format!("---\n{}---\n{}", yaml, body)),
+        None => write(fm, body),
+    }
+}
+
+/// One top-level region of a raw frontmatter block: a `key:` line plus every
+/// continuation line under it (indented children, comments, blank lines), or a
+/// keyless preamble of comments/blank lines before the first key.
+struct FrontmatterBlock {
+    key: Option<String>,
+    text: String,
+}
+
+/// Render the preserved YAML region (without `---` fences), or `None` when the
+/// original cannot be preserved byte-precisely and the caller should fall back
+/// to full re-serialisation.
+fn preserved_frontmatter_yaml(original: &str, fm: &Frontmatter) -> Option<String> {
+    let old_yaml = raw_frontmatter_yaml(original)?;
+    let old_map = match serde_yaml::from_str::<serde_yaml::Value>(old_yaml).ok()? {
+        serde_yaml::Value::Mapping(m) => m,
+        serde_yaml::Value::Null => serde_yaml::Mapping::new(),
+        _ => return None,
+    };
+    let canonical = canonical_for_write(fm);
+    let new_map = match serde_yaml::to_value(canonical.as_ref()).ok()? {
+        serde_yaml::Value::Mapping(m) => m,
+        _ => return None,
+    };
+    let blocks = split_top_level_key_blocks(old_yaml, &old_map)?;
+
+    let mut out: Vec<String> = Vec::with_capacity(blocks.len() + new_map.len());
+    let mut emitted: Vec<String> = Vec::with_capacity(blocks.len());
+    for block in blocks {
+        let Some(key) = block.key.clone() else {
+            out.push(block.text);
+            continue;
+        };
+        let key_value = serde_yaml::Value::String(key.clone());
+        match new_map.get(&key_value) {
+            // Unchanged — keep the operator's bytes exactly as typed.
+            Some(new_v) if old_map.get(&key_value) == Some(new_v) => out.push(block.text),
+            // Changed — re-render just this key, in place.
+            Some(new_v) => out.push(render_frontmatter_key(&key, new_v)?),
+            // Retired — drop the block (matches `write`'s key set).
+            None => {}
+        }
+        emitted.push(key);
+    }
+    for (key, value) in &new_map {
+        let key_str = key.as_str()?;
+        if emitted.iter().any(|k| k == key_str) {
+            continue;
+        }
+        out.push(render_frontmatter_key(key_str, value)?);
+    }
+    if out.is_empty() {
+        return Some(String::new());
+    }
+    Some(format!("{}\n", out.join("\n")))
+}
+
+/// Serialise a single `key: value` pair as YAML lines (no trailing newline).
+fn render_frontmatter_key(key: &str, value: &serde_yaml::Value) -> Option<String> {
+    let mut single = serde_yaml::Mapping::new();
+    single.insert(serde_yaml::Value::String(key.to_string()), value.clone());
+    let rendered = serde_yaml::to_string(&serde_yaml::Value::Mapping(single)).ok()?;
+    Some(rendered.trim_end_matches('\n').to_string())
+}
+
+/// Split a raw frontmatter YAML region into per-top-level-key byte blocks.
+///
+/// Returns `None` — meaning "cannot preserve, re-serialise instead" — when a
+/// top-level key repeats, when a block's own bytes do not round-trip to the value
+/// the whole region parsed to (a multi-line flow collection starting at column 0,
+/// say), or when the keyless preamble carries data rather than comments.
+fn split_top_level_key_blocks(
+    yaml: &str,
+    old_map: &serde_yaml::Mapping,
+) -> Option<Vec<FrontmatterBlock>> {
+    let mut blocks: Vec<FrontmatterBlock> = Vec::new();
+    let mut current: Option<FrontmatterBlock> = None;
+    for line in yaml.split('\n') {
+        match top_level_key(line) {
+            Some(key) => {
+                if let Some(block) = current.take() {
+                    blocks.push(block);
+                }
+                current = Some(FrontmatterBlock {
+                    key: Some(key),
+                    text: line.to_string(),
+                });
+            }
+            None => match current.as_mut() {
+                Some(block) => {
+                    block.text.push('\n');
+                    block.text.push_str(line);
+                }
+                None => {
+                    current = Some(FrontmatterBlock {
+                        key: None,
+                        text: line.to_string(),
+                    });
+                }
+            },
+        }
+    }
+    if let Some(block) = current.take() {
+        blocks.push(block);
+    }
+
+    let last = blocks.len().saturating_sub(1);
+    let mut seen: Vec<&str> = Vec::with_capacity(blocks.len());
+    for (index, block) in blocks.iter().enumerate() {
+        // Every block but the last is followed by a newline inside the region.
+        // Block scalars clip differently with and without it, so parse the block
+        // exactly as the region presents it.
+        let source = if index == last {
+            block.text.clone()
+        } else {
+            format!("{}\n", block.text)
+        };
+        let Some(key) = block.key.as_deref() else {
+            // Preamble must be comments/blank only — never data.
+            if !block.text.trim().is_empty()
+                && !matches!(
+                    serde_yaml::from_str::<serde_yaml::Value>(&source).ok()?,
+                    serde_yaml::Value::Null
+                )
+            {
+                return None;
+            }
+            continue;
+        };
+        if seen.contains(&key) {
+            return None;
+        }
+        seen.push(key);
+        let parsed = match serde_yaml::from_str::<serde_yaml::Value>(&source).ok()? {
+            serde_yaml::Value::Mapping(m) => m,
+            _ => return None,
+        };
+        if parsed.len() != 1 {
+            return None;
+        }
+        let (parsed_key, parsed_value) = parsed.into_iter().next()?;
+        if parsed_key.as_str() != Some(key) {
+            return None;
+        }
+        if old_map.get(&parsed_key) != Some(&parsed_value) {
+            return None;
+        }
+    }
+    Some(blocks)
+}
+
+/// Identify a line that opens a top-level frontmatter key, returning its name.
+///
+/// Column-0, non-comment, non-sequence lines are offered to the YAML parser
+/// rather than pattern-matched, so quoted keys (`'#k':`), keys with `:` in the
+/// value, and block-scalar headers are all classified correctly.
+fn top_level_key(line: &str) -> Option<String> {
+    let first = line.as_bytes().first()?;
+    if matches!(first, b' ' | b'\t' | b'#' | b'-') {
+        return None;
+    }
+    let parsed = match serde_yaml::from_str::<serde_yaml::Value>(line).ok()? {
+        serde_yaml::Value::Mapping(m) => m,
+        _ => return None,
+    };
+    if parsed.len() != 1 {
+        return None;
+    }
+    let (key, _) = parsed.into_iter().next()?;
+    key.as_str().map(|s| s.to_string())
 }
 
 /// Update the session ID in a document string. Creates frontmatter if missing.
 pub fn set_session_id(content: &str, session_id: &str) -> Result<String> {
     let (mut fm, body) = parse(content)?;
     fm.session = Some(session_id.to_string());
-    write(&fm, body)
+    write_preserving(content, &fm, body)
 }
 
 /// Update the resume (agent conversation) ID in a document string.
@@ -1470,14 +1684,14 @@ pub fn set_resume_id(content: &str, resume_id: &str) -> Result<String> {
     let (mut fm, body) = parse(content)?;
     let harness = fm.active_resume_harness();
     fm.set_resume_for_harness(harness, resume_id);
-    write(&fm, body)
+    write_preserving(content, &fm, body)
 }
 
 /// Update one harness's resume id while preserving the other harness entries.
 pub fn set_resume_id_for_harness(content: &str, harness: &str, resume_id: &str) -> Result<String> {
     let (mut fm, body) = parse(content)?;
     fm.set_resume_for_harness(harness, resume_id);
-    write(&fm, body)
+    write_preserving(content, &fm, body)
 }
 
 /// Update the live finalize-pipeline tracker in a document's frontmatter,
@@ -1506,7 +1720,7 @@ pub fn set_pipeline_state(
     if let Some(v) = queue_task_id {
         fm.pipeline.queue_task_id = Some(v.to_string());
     }
-    write(&fm, body)
+    write_preserving(content, &fm, body)
 }
 
 /// Drop the live finalize-pipeline tracker from a document's frontmatter,
@@ -1517,7 +1731,7 @@ pub fn set_pipeline_state(
 pub fn clear_pipeline_state(content: &str) -> Result<String> {
     let (mut fm, body) = parse(content)?;
     fm.pipeline = AgentDocPipeline::default();
-    write(&fm, body)
+    write_preserving(content, &fm, body)
 }
 
 /// `#queue-active-deprecated-line-stuck`: byte-precise removal of the deprecated
@@ -1670,7 +1884,7 @@ pub fn set_format_and_write(
     fm.format = Some(format);
     fm.write_mode = Some(write_mode);
     fm.mode = None;
-    write(&fm, body)
+    write_preserving(content, &fm, body)
 }
 
 /// Merge YAML key/value pairs into a document's frontmatter.
@@ -1807,7 +2021,7 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
         }
     }
 
-    write(&fm, body)
+    write_preserving(content, &fm, body)
 }
 
 /// Persist the canonical `queue:` activation control (`#queue-state-unify`
@@ -1819,7 +2033,7 @@ pub fn merge_queue_state(content: &str, active: bool) -> Result<String> {
     let (mut fm, body) = parse(content)?;
     fm.queue = Some(if active { "start" } else { "stop" }.to_string());
     fm.queue_active = None;
-    write(&fm, body)
+    write_preserving(content, &fm, body)
 }
 
 /// Persist an explicit canonical `queue:` control value, clearing the deprecated
@@ -1835,7 +2049,7 @@ pub fn merge_queue_control(content: &str, control: &str) -> Result<String> {
     let (mut fm, body) = parse(content)?;
     fm.queue = Some(normalized.to_string());
     fm.queue_active = None;
-    write(&fm, body)
+    write_preserving(content, &fm, body)
 }
 
 /// Update the tmux_session name in a document string.
@@ -1846,7 +2060,7 @@ pub fn merge_queue_control(content: &str, control: &str) -> Result<String> {
 pub fn set_tmux_session(content: &str, session_name: &str) -> Result<String> {
     let (mut fm, body) = parse(content)?;
     fm.tmux_session = Some(session_name.to_string());
-    write(&fm, body)
+    write_preserving(content, &fm, body)
 }
 
 /// Ensure the document has a session ID. If no frontmatter exists, creates one
@@ -3362,6 +3576,121 @@ mod tests {
     }
 
     #[test]
+    fn a_managed_write_leaves_untouched_frontmatter_bytes_alone() {
+        // `#presetnullblank`, remaining half: a cycle that only advances the
+        // pipeline tracker must not rewrite lines the operator is mid-keystroke
+        // on. `write()` re-serialized the whole struct, so it stripped the
+        // operator's quoting and turned the bare `'#k':` they had just typed into
+        // `'#k': null` — same YAML document, different bytes, still racing the
+        // value being typed.
+        let content = concat!(
+            "---\n",
+            "# session notes\n",
+            "agent_doc_session: abc-123\n",
+            "agent: 'claude'\n",
+            "prompt_presets:\n",
+            "  '#rebase-conflicts':\n",
+            "  '#release': |\n",
+            "    Run cargo test.\n",
+            "queue: start\n",
+            "---\n",
+            "Body\n"
+        );
+        let updated =
+            set_pipeline_state(content, Some("cycle-1"), Some("preflight"), None, None).unwrap();
+
+        assert!(
+            updated.contains("agent: 'claude'"),
+            "operator quoting preserved: {updated}"
+        );
+        assert!(
+            updated.contains("  '#rebase-conflicts':\n"),
+            "half-typed preset key preserved verbatim: {updated}"
+        );
+        assert!(
+            !updated.contains("null"),
+            "no agent-authored null materialized: {updated}"
+        );
+        assert!(
+            updated.contains("# session notes"),
+            "frontmatter comment preserved: {updated}"
+        );
+        assert!(updated.contains("run_id: cycle-1"), "{updated}");
+
+        // The pipeline block is the ONLY difference: clearing it returns the
+        // document to its original bytes.
+        assert_eq!(clear_pipeline_state(&updated).unwrap(), content);
+    }
+
+    #[test]
+    fn a_changed_key_is_rerendered_in_place_and_a_new_key_is_appended() {
+        let content = "---\nagent_doc_session: 'old-id'\nagent: claude\n---\nBody\n";
+        let updated = set_session_id(content, "new-id").unwrap();
+        assert_eq!(
+            updated,
+            "---\nagent_doc_session: new-id\nagent: claude\n---\nBody\n",
+            "the changed key is re-rendered in place; the rest is untouched"
+        );
+
+        let with_tmux = set_tmux_session(&updated, "sess").unwrap();
+        assert_eq!(
+            with_tmux,
+            "---\nagent_doc_session: new-id\nagent: claude\ntmux_session: sess\n---\nBody\n",
+            "a key the document did not have is appended before the closing fence"
+        );
+    }
+
+    #[test]
+    fn a_retired_key_is_still_dropped_by_the_preserving_write() {
+        // `queue_active` is deliberately folded onto the canonical `queue` control
+        // on write. Byte preservation must not resurrect it.
+        let content = "---\nqueue_active: true\nagent: claude\n---\nBody\n";
+        let updated = merge_queue_state(content, true).unwrap();
+        assert!(!updated.contains("queue_active"), "{updated}");
+        assert!(updated.contains("queue: start"), "{updated}");
+        assert!(updated.contains("agent: claude"), "{updated}");
+    }
+
+    #[test]
+    fn an_unpreservable_frontmatter_falls_back_to_full_reserialization() {
+        // A multi-line flow collection starting at column 0 cannot be attributed to
+        // a single key block byte-for-byte, so the write path falls back to
+        // `write()` rather than guess which bytes belong to whom.
+        let content = "---\nrequired_ssh_targets: [\n  alpha,\n  beta,\n]\nagent: claude\n---\nBody\n";
+        let updated = set_session_id(content, "id-1").unwrap();
+        let (parsed, body) = parse(&updated).unwrap();
+        assert_eq!(body, "Body\n");
+        assert_eq!(parsed.session.as_deref(), Some("id-1"));
+        assert_eq!(parsed.required_ssh_targets, vec!["alpha", "beta"]);
+        assert_eq!(parsed.agent.as_deref(), Some("claude"));
+
+        // And a document with no frontmatter at all still gets one created.
+        let created = set_session_id("Body only\n", "id-2").unwrap();
+        assert!(created.starts_with("---\nagent_doc_session: id-2\n"), "{created}");
+        assert!(created.ends_with("Body only\n"), "{created}");
+    }
+
+    #[test]
+    fn repeated_managed_writes_never_drift_the_operators_frontmatter() {
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: abc-123\n",
+            "agent: 'claude'\n",
+            "prompt_presets:\n",
+            "  '#half-typed':\n",
+            "---\n",
+            "Body\n"
+        );
+        let mut current = content.to_string();
+        for i in 0..5 {
+            current = set_pipeline_state(&current, Some(&format!("cycle-{i}")), None, None, None)
+                .unwrap();
+            current = clear_pipeline_state(&current).unwrap();
+        }
+        assert_eq!(current, content, "five managed cycles left the bytes alone");
+    }
+
+    #[test]
     fn an_explicitly_empty_preset_is_kept_distinct_from_an_unset_one() {
         // The operator CAN deliberately write an empty preset. That is a value they
         // typed, so it must survive as one and must not be confused with a key that
@@ -4007,3 +4336,4 @@ mod tests {
         assert_eq!(aliased.dogfood_mode, Some(false));
     }
 }
+

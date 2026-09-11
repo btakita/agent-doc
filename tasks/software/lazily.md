@@ -12,7 +12,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -339,12 +339,16 @@ Exchange is at 278 lines / 11 sections with the queue active — noting it rathe
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- 🚧 do[#lzblockfloorpin]
+- do[#lzorderinganchors]
+- do[#lzktareapartition]
+- do[#lzscenariofloormissing]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzblockfloorpin] [lazily-spec] Assertion-block floors are the same drifting constant #lzcorpusfloorguard just retired for steps, and they are still hand-maintained: lazily-cs MIN_BLOCKS=743, lazily-js MIN_BLOCKS=638, lazily-py MIN_DECLARED_BLOCKS=620, lazily-zig MIN_BLOCKS=31. cs's own comment is the proof - 'Re-pinned from 740 for lazily-spec 4010d99 (#lzreplayframing), which grew canonical_encoding_equality.json from 11 steps to 14'. corpus-counts.json pins every top-level ARRAY length but not assertion-block SITES, so deleting these floors today would leave that dimension unguarded. Extend the corpus-side pin to block sites (they are corpus-derived and countable from conformance/ the same way), then let each binding derive its count instead of typing it. Repo: src/lazily-spec, then the four bindings.
+- [ ] 🚧 [#lzblockfloorpin] [lazily-spec] Assertion-block floors are the same drifting constant #lzcorpusfloorguard just retired for steps, and they are still hand-maintained: lazily-cs MIN_BLOCKS=743, lazily-js MIN_BLOCKS=638, lazily-py MIN_DECLARED_BLOCKS=620, lazily-zig MIN_BLOCKS=31. cs's own comment is the proof - 'Re-pinned from 740 for lazily-spec 4010d99 (#lzreplayframing), which grew canonical_encoding_equality.json from 11 steps to 14'. corpus-counts.json pins every top-level ARRAY length but not assertion-block SITES, so deleting these floors today would leave that dimension unguarded. Extend the corpus-side pin to block sites (they are corpus-derived and countable from conformance/ the same way), then let each binding derive its count instead of typing it. Repo: src/lazily-spec, then the four bindings.
 - [ ] [#lzorderinganchors] [lazily-spec] scripts/check-assertion-ordering.py ORDERED_CHECKS anchors its ordering contract on the EXACT floor literals the bindings are now removing - regexes like 'assert accepted == 6', 'assert replayed == 12', 'assert.equal(accepted, 10)' for py/js/cs. lazily-py could not delete three of its floors this cycle and shipped them as DEAD ANCHORS, kept only to satisfy this guard, with the live constant-free assertion sitting above them. That is debt the guard created. Re-anchor on something stable that is not a value - a named helper call, or a marker the runner declares - so removing a constant does not break an unrelated ordering contract. Note the anchor must also be UNIQUE in the file (py tripped 'anchors are not unique' by quoting the literal in an explanatory comment). Repo: src/lazily-spec, then src/lazily-py to drop the dead anchors.
 - [ ] [#lzktareapartition] [lazily-kt] check-conformance-coverage.sh declares REQUIRED_AREAS (27 areas) with no EXCUSED_AREAS complement, so the area list scopes the AUDIT and not the set the suite OPENS: kt opens 148 fixtures / replays 157 scenarios where deriving from the areas alone gives 147 / 151. lazily-spec's check-corpus-floors.mjs therefore declines to derive any floor for kt (it would otherwise have called an honest MIN_FIXTURES=148 unsatisfiable). lazily-cpp pairs the two arrays and its own guard enforces the exact complement, and there the derivation is exact. Add the EXCUSED_AREAS complement (or the equivalent partition assertion) so kt's floors become auditable from the corpus side. Repo: src/lazily-kt
 - [ ] [#lzscenariofloormissing] [lazily-py, lazily-kt, lazily-gd] No MIN_SCENARIOS floor is declared at all - lazily-spec's check-corpus-floors.mjs reports this rather than failing, because lazily-kt deliberately retired MIN_FIXTURES for an area-partition assertion and that is a stronger invariant. But a binding with NEITHER is relying on nothing: py replays 151 scenarios and kt 157 with no positive-evidence floor under either, so a run that silently stopped replaying scenarios would report green. Derive each floor from the gate's own output, add it, and prove it exact by failing at n+1. lazily-gd is staged and may legitimately have nothing to floor yet - check before adding. Repos: src/lazily-py, src/lazily-kt, src/lazily-gd

@@ -12,7 +12,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -308,12 +308,13 @@ Exchange is at 244 lines / 10 sections with the queue active — noting it rathe
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- 🚧 do [#lzcorpusfloorguard]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcorpusfloorguard] [lazily-spec] Every binding's replay runner carried a slack minimum-steps floor (8 of 9 pinned >= 11 against a 14-step fixture); only lazily-cs failed loudly. A published corpus step is invisible to a binding whose floor still describes the old fixture, so a spec-side addition can report green in nine repos while three rows never execute. Same class as the MIN_FIXTURES/MIN_SCENARIOS drift closed this cycle in lazily-cpp (149->151), lazily-py (141->145, blocks 578->620), lazily-js (635->638) and lazily-cs (740->743). Add a lazily-spec guard that reads each binding's declared per-fixture step/fixture/scenario floors from its ledger and fails when any floor sits below what the published corpus carries - the corpus knows its own counts, the bindings do not re-derive them reliably. Repo: src/lazily-spec
+- [ ] 🚧 [#lzcorpusfloorguard] [lazily-spec] Every binding's replay runner carried a slack minimum-steps floor (8 of 9 pinned >= 11 against a 14-step fixture); only lazily-cs failed loudly. A published corpus step is invisible to a binding whose floor still describes the old fixture, so a spec-side addition can report green in nine repos while three rows never execute. Same class as the MIN_FIXTURES/MIN_SCENARIOS drift closed this cycle in lazily-cpp (149->151), lazily-py (141->145, blocks 578->620), lazily-js (635->638) and lazily-cs (740->743). Add a lazily-spec guard that reads each binding's declared per-fixture step/fixture/scenario floors from its ledger and fails when any floor sits below what the published corpus carries - the corpus knows its own counts, the bindings do not re-derive them reliably. Repo: src/lazily-spec
 <!-- /agent:backlog -->
 
 ## Review

@@ -20,7 +20,7 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-Grok v0.35.359 installed and pushed; full local verification passed. Authenticated Grok MCP closeout awaits renewed quota. Next: fix extra tmux pane with two editor panes.
+Editor-route layout supersede, controller bind-before-serve, the JB accept-leg bound, and the queued-clear mislabel are fixed and pushed (5577cfeeb, b0e9530a6, 232c6c103); make check 9316 passed. #fixrunlazily is gated on one IDEA restart to load plugin 0.2.380. Open: #tmuxautosyncwedge, #cargotokenrevoke.
 <!-- /agent:status -->
 
 ## Exchange
@@ -295,7 +295,72 @@ pane_layout_projection generation=17 attempt=1 phase=retry_pending observation=s
 Every observed value matches every expected value — documents, panes, focus pane — and the projection still sits in `retry_pending` because the *focus receipt* was superseded. Today's counts say the same thing: 39 `pane_layout_projection_cancelled` against 31 `pane_layout_projection`, so more layout generations are being cancelled than projected. `pane_layout_effect_worker` responds to a focus supersede with `attempt = 0; continue`, which re-reads the newest generation at the loop top and is therefore not the infinite loop it looks like — I checked that before filing, so nobody re-checks it. The open question is why a projection whose observation is byte-identical to its desired state cannot reach `Converged`. Filed as `#tmuxautosyncwedge` with the live pane state it needs.
 
 **Verification.** `make check` → **9314 passed, 0 failed**. One run before that reported a single failure — `stop_codex_continuation_suppresses_clear_when_token_count_crosses_threshold`, `file is not a database: Error code 26` on a freshly created temp `state.db` under 174 parallel test binaries. It passes in isolation and in its own package's full suite (50/50), and did not recur; I am recording it rather than calling it clean. `make install` plus `cargo build --release` so the repo-root-relative `.bin/agent-doc` symlink target is not stale — both binaries and `libagent_doc.so` carry the fix. Committed `5577cfeeb`, pushed. CI run `34612322320` is queued, not yet started; local evidence is what this closeout rests on.
-<!-- agent:boundary:d53e8ec0:agent-doc-bugs -->
+
+### Re: #fixrunlazily, tmux auto-sync, Clear Session Context — opus-5
+
+Draining `#fixrunlazily`, plus the `session_clear` failure you added mid-turn. Three commits: `b0e9530a6` and `232c6c103` this cycle, on top of `5577cfeeb`.
+
+### Re: #fixrunlazily — narrowed to a real window, closed from both ends, gated on one restart — opus-5
+
+Last cycle I killed two hypotheses by measurement. This cycle the window itself turned out to be the answer, and I fixed it from both sides.
+
+**The window.** `serve_project_controller` binds its socket at `ListenerOptions::create_sync()` and starts its accept loop ~50 lines later. A client that connects into that gap gets a **successful** connect, writes its request, and then waits — nothing is accepting, and no error is ever returned. At the editor that is indistinguishable from a wedged controller, and it is exactly the reported message.
+
+There is already a comment in `restore_reliable_sync_liveness` naming this failure mode, which is why its *recovery effects* are spawned. But its **durable fold** is still synchronous and still inside the window: a SQLite read plus a JSON decode of a journal with no bound on its size — 59,671 rows / 6.5 MB on this project, against a 150 MB `state.db` that a **departing** controller may still be writing through WAL, which is precisely the handoff case here. The fold now runs before the bind. The effects still run after the listener is accepting, because they contact editor routes that call straight back in; the structural guard now asserts both halves rather than just the second.
+
+**What is left of the window now measures itself**: `controller_listener_serve_ready ... bind_to_accept_ms=`. If a stall reappears, that line says so in one field instead of costing another forensic session.
+
+**The client end is the half that actually changes the operator's experience.** The 60000ms is `SOCKET_REQUEST_TIMEOUT_MS`, and the leg that burned it is `sendAcceptedCommandSubmitToSocket` — the command-plane **accept** leg, which is a pure enqueue: the controller validates the payload, publishes `Accepted`, hands the work to a worker thread, and replies. I measured a live controller at **25–50ms** for exactly that round trip. It had no business sharing a ceiling with legs that legitimately block on server-side work — turn admission awaits 30s on purpose, which is why `SOCKET_REQUEST_TIMEOUT_MS` itself may not be lowered and there is a test pinning it above 30s.
+
+So the accept leg gets its own 10s bound, and on an unacknowledged accept it takes the **same** `ensure_controller_running` recovery as a failed connect — a controller that cannot serve the request is operationally the same either way. A dead minute becomes a fast retry through a path that already existed. JetBrains plugin `0.2.380`.
+
+**Gated, not done.** The plugin half cannot be verified from here: IDEA is still running `0.2.378` with `0.2.379` staged and never loaded, so `0.2.380` needs the same restart `#restartideaplugin` already asks for. One restart, then `Run Agent Doc` on `lazily.md`.
+
+### Re: tmux pane auto-sync is wedged — filed, one dead end already ruled out — opus-5
+
+Filed as `#tmuxautosyncwedge` last cycle with the signature that makes it worth keeping — a projection whose observation is byte-identical to its desired state and still sits in `retry_pending`:
+
+```
+pane_layout_projection generation=17 attempt=1 phase=retry_pending observation=synced effect=applied
+  focus=focus_superseded_by_newer_layout_state
+  expected=[tsift.md, infra.md]  actual=[tsift.md, infra.md]
+  expected_panes=[%10, %14]      panes=[%10, %14]
+  expected_focus_pane=Some("%10") active_pane=Some("%10")
+```
+
+Today: 39 `pane_layout_projection_cancelled` against 31 `pane_layout_projection` — more generations cancelled than projected. I checked the obvious suspect before filing so nobody re-checks it: `pane_layout_effect_worker` answers a focus supersede with `attempt = 0; continue`, and the loop top re-reads `pending_revision()` and `pane_layout_desired()`, so it is **not** an infinite loop on a stale generation. The open question is why a projection whose observation already matches cannot reach `Converged`, and it needs the live pane state.
+
+### Re: Clear Session Context "whether the clear ran is unknown" — fixed — opus-5
+
+> **Queue prompt:**
+>
+> 📌 do [#fixrunlazily]
+
+
+The message asks you to go look at the pane. The binary had already looked.
+
+`src/haiven-dev/tasks/sdk.md`, pane `%1`, 15:01:07 and again at 15:01:09. I captured the pane:
+
+```
+  ❯ /agent-doc …/src/haiven-dev/tasks/sdk.md
+────────────────────────────────────────────
+❯ Press up to edit queued messages
+────────────────────────────────────────────
+  Opus 5 (1M context) ctx:17% … · ← 2 agents
+```
+
+That composer line is Claude Code's **busy** state — input is being queued, not executed. Two subagents running. The `/clear` went into the queue, the command-repair resend 2s later went into the same queue, and the probe's own log already said so: `conversation_retained retained_lines=1641`. Retrying, which is what the message asks for, queues a third one.
+
+The cause is a conflation that is correct in one direction and wrong in the other. `❯ Press up to edit queued messages` is treated as a dispatch-ready prompt, and for **dispatch** that is right — the trigger was accepted and the harness will run it when the turn ends. For a command whose contract is an **immediate state transition** it is wrong: acceptance into a queue is not execution.
+
+`is_queued_input_placeholder_line` splits that case out. It deliberately excludes `❯ describe a task for a new session`, the other empty-composer placeholder, because that one means the pane is **idle** — the two share a function today and mean opposite things about busyness. An unobserved clear is checked against it before the cleared-state probe.
+
+**The acceptance rule is unchanged.** A queued clear is still not accepted and still fails closed — the same contract `#clearsubmitlabel` set when it split the earlier mislabel. What changes is the label and the unblocker: `wait_for_turn_or_interrupt_then_retry`, instead of sending you to inspect a pane the binary had already read.
+
+**Verification.** `make check` → **9316 passed, 0 failed**. JetBrains `CpSocketDeadlineTest`: 5 run, 0 skipped, 0 failures (I read the JUnit XML rather than trusting the Gradle exit code — a skipped task reads as a pass through the log filter). All three fixes are mutation-checked: removing the accept-leg wiring reddens 2 of the 5 plugin tests, and neutering the queued-composer detector reddens its own test. `make install` plus `cargo build --release` so the repo-root-relative `.bin/agent-doc` symlink target is current; both binaries carry the changes.
+
+One process note. `src/session_actor_cmd.rs` carries another session's uncommitted `#panewindowbindingrebind` work. I committed my two hunks by hashing a hand-built blob of `HEAD` plus my edits and committing the index directly, rather than `--only` on a shared file — their 23 uncommitted lines are still in the working tree untouched. Exchange is at 270 lines / 13 response sections, noted and still draining.
+<!-- agent:boundary:1406b99d:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -305,7 +370,7 @@ Every observed value matches every expected value — documents, panes, focus pa
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#donequeuestrike]~~
-- 📌 do [#fixrunlazily]
+- ~~📌 do [#fixrunlazily]~~
 - ~~do [#mutplanwitness]~~
 - do [#cargotokenrevoke]
 <!-- /agent:queue -->
@@ -313,13 +378,13 @@ Every observed value matches every expected value — documents, panes, focus pa
 
 <!-- agent:backlog priority -->
 - [ ] [#tmuxautosyncwedge] tmux pane auto-sync is wedged: a pane-layout generation whose observation is byte-identical to its desired state never reaches Converged. Signature (2026-09-11 13:13:54): `pane_layout_projection generation=17 attempt=1 phase=retry_pending observation=synced effect=applied focus=focus_superseded_by_newer_layout_state expected=[tsift.md, infra.md] actual=[tsift.md, infra.md] expected_panes=[%10, %14] panes=[%10, %14] expected_focus_pane=Some("%10") active_pane=Some("%10")` — documents, panes and focus pane ALL match, and the projection still sits in retry_pending because the focus receipt was superseded. Today: 39 pane_layout_projection_cancelled vs 31 pane_layout_projection, so more generations are cancelled than projected. Already checked, do not re-check: pane_layout_effect_worker responds to a focus supersede with `attempt = 0; continue`, and the loop top re-reads `state.lock().pending_revision()` plus `runtime.pane_layout_desired()`, so it is NOT an infinite loop on a stale generation. Open question: why apply_pane_layout_focus_effect keeps returning focus_superseded_by_newer_layout_state (agent-doc-controller-io/src/project_controller/rpc.rs:19386, `state.is_superseded(generation)`) while the observed layout already matches, and why that blocks Converged when focus_required_for_pane_layout_generation could treat an already-active focus pane as satisfied. Needs the live pane state to verify; related to but distinct from the editor-route supersede fix in 5577cfeeb.
-- [ ] [#fixrunlazily] Run Agent Doc on lazily.md fails with `command-plane editor_route request failed via .agent-doc/controller.sock: Project Controller did not respond within 60000ms; the controller may be wedged`. NARROWED 2026-09-11, two hypotheses measured and DISPROVED — do not re-walk them. (1) The failure is the ACCEPT leg, not the work leg: the prefix `command-plane editor_route request failed` plus 60000ms is SOCKET_REQUEST_TIMEOUT_MS in sendAcceptedCommandSubmitToSocket; awaitCommandSubmitTerminal uses waitForReadySeconds*1000+grace instead. So the controller failed to ACKNOWLEDGE a command submit for 60s, and handle_editor_command_submit_async_rpc only enqueues. (2) NOT serialized accepts: rpc.rs:11185 listener.accept() spawns a thread per client. (3) NOT a slow pre-serve window: the socket binds at ListenerOptions::create_sync() (rpc.rs:11134) and the accept loop starts at 11184, so synchronous work between them leaves clients connected and hanging — the ss -lxp backlog signature — but the candidate, restore_reliable_sync_liveness, measures 0.08s for all 59,671 reliable_sync_liveness_journal rows / 6.5MB / 60,582 ops on this project, and its recovery effects are already spawned async. Live evidence at the failure window: ffi_ensure_controller_running_failed Connection refused (os error 111) x7 at 14:00:58-59, controller adopted 14:01:44, and a separate client still timing out at 14:02:23 (timed out after 5.0s waiting for project controller response) — unresponsive at least 40s after adoption. NEXT LEAD: what holds a lock across handle_request_locked (rpc.rs:12526) at runtime.bootstrap_snapshot() (12560) during a controller first seconds. Repro lever: kill the controller, then click Run Agent Doc while a replacement is launching.
 - [ ] [#cargotokenrevoke] [operator-verify] Revoke and re-issue the crates.io API token exposed in diagnostic tool output during the pane-removal investigation, then store the replacement via passage. BLOCKED ON ONE CLICK: https://crates.io/settings/tokens is open in bridged Chromium tab 13 and returns 'This page requires authentication' — that profile has no crates.io session and no chromium-bridge state snapshot exists. crates.io token management is session-cookie-gated, so the exposed token cannot revoke itself via API. Unblocks: click 'Log in with GitHub' in tab 13 (OAuth returns to /settings/tokens), then re-queue this item and the agent enumerates and revokes in-session. Blast radius nil: agent-doc has no cargo publish step and no CARGO_REGISTRY_TOKEN in any of its five workflows (book, ci, mdbook, pypi, release).
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] 🚧 [#fixrunlazily] Run Agent Doc on lazily.md fails with `command-plane editor_route request failed via .agent-doc/controller.sock: Project Controller did not respond within 60000ms; the controller may be wedged`. NARROWED 2026-09-11, two hypotheses measured and DISPROVED — do not re-walk them. (1) The failure is the ACCEPT leg, not the work leg: the prefix `command-plane editor_route request failed` plus 60000ms is SOCKET_REQUEST_TIMEOUT_MS in sendAcceptedCommandSubmitToSocket; awaitCommandSubmitTerminal uses waitForReadySeconds*1000+grace instead. So the controller failed to ACKNOWLEDGE a command submit for 60s, and handle_editor_command_submit_async_rpc only enqueues. (2) NOT serialized accepts: rpc.rs:11185 listener.accept() spawns a thread per client. (3) NOT a slow pre-serve window: the socket binds at ListenerOptions::create_sync() (rpc.rs:11134) and the accept loop starts at 11184, so synchronous work between them leaves clients connected and hanging — the ss -lxp backlog signature — but the candidate, restore_reliable_sync_liveness, measures 0.08s for all 59,671 reliable_sync_liveness_journal rows / 6.5MB / 60,582 ops on this project, and its recovery effects are already spawned async. Live evidence at the failure window: ffi_ensure_controller_running_failed Connection refused (os error 111) x7 at 14:00:58-59, controller adopted 14:01:44, and a separate client still timing out at 14:02:23 (timed out after 5.0s waiting for project controller response) — unresponsive at least 40s after adoption. NEXT LEAD: what holds a lock across handle_request_locked (rpc.rs:12526) at runtime.bootstrap_snapshot() (12560) during a controller first seconds. Repro lever: kill the controller, then click Run Agent Doc while a replacement is launching.
 - [/] [#pypiquotafix] [operator-verify] PyPI 10 GiB project-size block: non-destructive path (a) EXECUTED 2026-09-10 — filed https://github.com/pypi/support/issues/12214 requesting 25 GiB. Awaiting PyPI maintainer response; every agent-doc publish since 0.35.343 fails with 400 Project size too large, and 0.35.343 itself landed only 1 of 4 wheels (macosx_10_12_x86_64). Measured at filing: 9.990 GiB across 165 releases, avg 62.0 MiB. Unblocks: (1) PyPI grants or counters the increase, or (2) you authorize destructive path (b) — delete the 34 oldest releases 0.35.0 through 0.35.112 (all pre-2026-08-02) to free 1.75 GiB, permanent and those version numbers can never be reused. The publish cadence fix landed in 0.35.363 (#pypicadence): milestone tags publish automatically, other tags publish on demand, and a verify job now asserts the tagged version is resolvable on PyPI. ALSO GATED ON THIS: the GH #52 wheel-FFI path is written and proven at the maturin layout level (data = wheel-data puts libagent_doc.* in .data/scripts/ so pip lands it beside the binary, with a pre-upload assertion) but has never run in CI, because no publish has been possible since the quota block. On the first successful publish after this unblocks, confirm the wheel ships the library and then close GH #52.
 - [/] [#tmuxfocussyncverify] [operator-verify] Restart IntelliJ to activate installed JetBrains plugin 0.2.379, then keep agent-doc-bugs.md and the cross-root infra.md visible, click each embedded tmux pane, and verify editor selection follows without stealing focus from an actively focused editor component. Automated lifecycle and transition regressions plus make check tmux-ci passed; source v0.35.362 is published. Plan: tasks/agent-doc/plan-tmux-auto-sync-reactive.md.
 - [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation once the free usage quota renews or the planned subscription is active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed; the live MCP probe stopped at the usage limit before committed closeout. Installed v0.35.359; Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.

@@ -489,6 +489,53 @@ mod tests {
     }
 
     #[test]
+    /// `#supervisoridlewatchmissing`: two crates answer "which document does
+    /// this supervisor serve?" and they drifted. `agent-doc-controller` depends
+    /// on `agent-doc-supervisor`, so the predicate cannot be shared downward
+    /// into one function without moving `agent_doc_start_arg_index` and its
+    /// shell-sentinel helpers too. This is the next best guarantee: both
+    /// parsers must agree on every command-line shape agent-doc itself
+    /// launches, so a value-taking flag added to `start` cannot silently break
+    /// one of them again.
+    #[test]
+    fn both_supervisor_document_parsers_agree_on_every_launched_shape() {
+        let corpus = [
+            "/home/u/.cargo/bin/agent-doc start --route-owned tasks/plan.md",
+            "/home/u/.cargo/bin/agent-doc start --route-owned \
+             --route-owned-reap-policy keep-alive tasks/plan.md",
+            // The 2026-09-11 live shapes: a value-taking flag between the last
+            // boolean flag and the document.
+            "/home/u/.cargo/bin/agent-doc start --route-owned \
+             --route-owned-reap-policy keep-alive \
+             --route-owned-start-purpose layout-provision tasks/agent-doc/agent-doc-bugs.md",
+            "/home/u/.cargo/bin/agent-doc start --route-owned \
+             --route-owned-reap-policy keep-alive \
+             --route-owned-start-purpose layout-provision --resume -- tasks/backend.md",
+            // `start_reexec_command` puts the document FIRST, before the flags.
+            "/home/u/.cargo/bin/agent-doc start tasks/plan.md --force --harness codex \
+             --route-owned --route-owned-reap-policy auto",
+            "/home/u/.cargo/bin/agent-doc start tasks/plan.md --fresh --route-owned \
+             --route-owned-reap-policy keep-alive",
+        ];
+
+        for command_line in corpus {
+            let args: Vec<String> = command_line
+                .split_whitespace()
+                .map(str::to_string)
+                .collect();
+            assert_eq!(
+                start_route_owned_document_from_args(&args),
+                agent_doc_supervisor::selfkill::start_route_owned_doc_from_args(&args),
+                "parsers disagree on `{command_line}`",
+            );
+            assert!(
+                start_route_owned_document_from_args(&args).is_some(),
+                "the corpus must be shapes that DO resolve: `{command_line}`",
+            );
+        }
+    }
+
+    #[test]
     fn start_supervisor_document_from_args_includes_operator_started_supervisors() {
         assert_eq!(
             start_supervisor_document_from_args(&[

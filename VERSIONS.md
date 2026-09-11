@@ -2,6 +2,32 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.366
+
+- Make supervisor discovery see the supervisors that exist
+  (`#supervisoridlewatchmissing`).
+  `agent_doc_supervisor::selfkill::start_route_owned_doc_from_args` walked
+  positionally from `start`, skipping `-`-prefixed tokens and exactly one
+  hand-listed `--flag VALUE` pair (`--route-owned-reap-policy`). Every later
+  value-taking flag therefore returned that flag's VALUE as the document, and
+  `--route-owned-start-purpose layout-provision` is how agent-doc launches its
+  own layout-provision supervisors — so the parser answered `layout-provision`
+  for essentially every live supervisor, canonicalization failed, and
+  `supervisor_pid_for_doc` reported NO supervisor for documents that had one.
+  Observed 2026-09-11 with twelve live supervisors and zero found. Downstream
+  that reads as "no idle watch": the controller falls back to
+  `controller_orphan_drain_dispatch ... reason=no_supervisor_idle_watch`, and
+  the captured-finalize resume — whose only drivers are that idle watch and the
+  Codex `Stop` hook — has no driver at all, which is the upstream cause of the
+  `#capturedresumeunowned` wedge fixed in 0.35.364. The parser now keys on the
+  `.md` token after `start`, matching
+  `agent_doc_controller::command_line::start_supervisor_document_from_args`,
+  which already read these same command lines correctly. `agent-doc-controller`
+  depends on `agent-doc-supervisor`, so the two cannot collapse into one
+  function without moving the shell-sentinel helpers; a mutation-checked
+  cross-crate agreement test over every shape agent-doc launches keeps them from
+  drifting again.
+
 ## 0.35.365
 
 - Make a captured-closeout resume idempotent against its own already-applied

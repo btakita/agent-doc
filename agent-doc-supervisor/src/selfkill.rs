@@ -34,6 +34,28 @@ pub fn supervisor_force_kill_decision(
 /// Returns `None` for any other process. Skips the value of
 /// `--route-owned-reap-policy` so it cannot be mistaken for the positional
 /// document.
+/// The document a live `agent-doc start --route-owned` supervisor serves.
+///
+/// `#supervisoridlewatchmissing`: this used to walk positionally from `start`,
+/// skipping `-`-prefixed tokens and one hand-listed `--flag VALUE` pair
+/// (`--route-owned-reap-policy`). Every later value-taking flag then made it
+/// return that flag's VALUE as the document. `--route-owned-start-purpose
+/// layout-provision` is how agent-doc launches its own layout-provision
+/// supervisors, so the parser answered `layout-provision` for essentially every
+/// live supervisor, `supervisor_doc_canonical` failed to canonicalize it, and
+/// `supervisor_pid_for_doc` reported NO supervisor for documents that had one.
+/// Downstream that reads as "no idle watch": the controller falls back to
+/// `controller_orphan_drain_dispatch ... reason=no_supervisor_idle_watch`, and
+/// the captured-finalize resume — whose only drivers are that idle watch and
+/// the Codex `Stop` hook — has no driver at all. Observed 2026-09-11 with
+/// twelve live supervisors running and `supervisor_pid_for_doc` finding none.
+///
+/// Keying on the `.md` token instead makes it flag-order- and flag-set-
+/// independent, and matches
+/// `agent_doc_controller::command_line::start_supervisor_document_from_args`,
+/// which already parsed these same command lines correctly. That crate depends
+/// on this one, so the shared predicate cannot live there; an agreement test in
+/// `agent-doc-controller` keeps the two from drifting again.
 pub fn start_route_owned_doc_from_args(args: &[String]) -> Option<PathBuf> {
     if !args.iter().any(|arg| arg.ends_with("agent-doc")) {
         return None;
@@ -41,31 +63,14 @@ pub fn start_route_owned_doc_from_args(args: &[String]) -> Option<PathBuf> {
     if !args.iter().any(|arg| arg == "start") || !args.iter().any(|arg| arg == "--route-owned") {
         return None;
     }
-    let mut seen_start = false;
-    let mut skip_next = false;
-    for arg in args {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-        if !seen_start {
-            if arg == "start" {
-                seen_start = true;
-            }
-            continue;
-        }
-        if arg == "--route-owned-reap-policy" {
-            // Long form `--flag VALUE`; `--flag=VALUE` carries its own `=` and is
-            // already filtered by the `--` prefix check below.
-            skip_next = true;
-            continue;
-        }
-        if arg.starts_with('-') {
-            continue;
-        }
-        return Some(PathBuf::from(arg));
-    }
-    None
+    let start_idx = args.iter().position(|arg| arg == "start")?;
+    args[start_idx + 1..]
+        .iter()
+        .find(|arg| {
+            arg.trim_matches(|c| c == '"' || c == '\'')
+                .ends_with(".md")
+        })
+        .map(PathBuf::from)
 }
 
 #[cfg(test)]
@@ -152,6 +157,44 @@ mod tests {
             start_route_owned_doc_from_args(&args),
             Some(PathBuf::from("doc.md"))
         );
+    }
+
+    /// `#supervisoridlewatchmissing`: the exact command lines of the live
+    /// supervisors observed 2026-09-11, all twelve of which the positional
+    /// parser answered `layout-provision` for.
+    #[test]
+    fn a_value_taking_flag_after_start_is_never_mistaken_for_the_document() {
+        let layout_provision = "/home/u/.cargo/bin/agent-doc start --route-owned \
+             --route-owned-reap-policy keep-alive \
+             --route-owned-start-purpose layout-provision tasks/agent-doc/agent-doc-bugs.md";
+        assert_eq!(
+            start_route_owned_doc_from_args(&split(layout_provision)),
+            Some(PathBuf::from("tasks/agent-doc/agent-doc-bugs.md")),
+        );
+
+        let resumed = "/home/u/.cargo/bin/agent-doc start --route-owned \
+             --route-owned-reap-policy keep-alive \
+             --route-owned-start-purpose layout-provision --resume -- tasks/backend.md";
+        assert_eq!(
+            start_route_owned_doc_from_args(&split(resumed)),
+            Some(PathBuf::from("tasks/backend.md")),
+        );
+
+        // A flag whose value the parser has never heard of must not matter:
+        // that open-endedness is the whole point of keying on the document.
+        let unknown_flag = "agent-doc start --route-owned --harness codex \
+             --some-future-flag some-future-value tasks/plan.md";
+        assert_eq!(
+            start_route_owned_doc_from_args(&split(unknown_flag)),
+            Some(PathBuf::from("tasks/plan.md")),
+        );
+    }
+
+    fn split(command_line: &str) -> Vec<String> {
+        command_line
+            .split_whitespace()
+            .map(str::to_string)
+            .collect()
     }
 
     #[test]

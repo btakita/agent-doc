@@ -13,7 +13,7 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -93,6 +93,104 @@ Regression coverage, and I proved the test detects the bug rather than trusting 
 **Second red, also fixed:** `make check` was already failing on `main` before my change, independent of it — `tmux_layout_observation_prefers_effect_assignment_over_partial_actor_store` asserted `/repo/nested/tasks/secondary.md` and got `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md`. The precedence it tests lives entirely in the pure resolver `layout_sync_state_actual_document_from_observations`, but the test routed through the IO wrapper with `configured_tmux()`. On a machine that really has a pane `%2`, that resolved a live process owner — which correctly outranks every projection — so the test read this machine's own tmux. Pointed at the pure resolver with `process_owner: None`; the live-owner-wins case was already covered by the adjacent test, so no coverage was lost. It passes on CI only because CI has no such pane.
 
 **Verification:** `make check` → **9305 passed, 0 failed** (the first run had stopped after the tmux failure with 7081 tests unrun). Built and installed. Latest CI run `34521712512` is green. Committed `7ccf1c822` in `src/agent-doc` and pushed; parent gitlink `1b6ff49e4`.
+
+### Re: #deferredmutdrop, #pypicadence, GH #52 + release + publish — opus-5
+
+Three heads, oldest-first. All three landed; **v0.35.363 is released and its assets are verified**, and one of them found a second defect that only a tagged CI run could surface.
+
+### Re: #deferredmutdrop — fixed, and the report's own root-cause hypothesis was wrong — opus-5
+
+The backlog text asked whether the retained canonical content is computed before the mutation plan is folded in, or whether the resume replays only the response capture. **Neither.** The capture is fine: `closeout_mutation_plan_captured_before_authority_resolution` fired at 23:04:53 with `plan_hash=49ecccc2`, so the plan was attached to the same capture exactly as `capture_validated_stream_closeout_before_authority_resolution`'s doc comment promises.
+
+The ops log names the real path. `resume_captured_finalize` has two branches, and only one of them knows about mutations:
+
+```
+23:04:53  captured_finalize_resume_started      → captured_finalize_resume_waiting_for_state
+23:04:55  captured_finalize_resume_started      → captured_finalize_resume_waiting_for_state
+23:04:57  captured_finalize_resume_started
+23:04:59  commit_success  len=17002
+23:05:00  captured_finalize_resume_committed  repair_outcome=ContinuedWriteAppliedCapture
+```
+
+`ContinuedWriteAppliedCapture` is the `WriteApplied | Committed` branch — `resume_materialized_captured_finalize`. Its `#writeappliedcontinuation` guard is correct about the *response*: once that phase is durable, replaying the command would recapture after pending intent was cleared. But a capture reaches `write_applied` the moment the response cell is durable, and the tracked-work half runs **after** that write, where the same no-live-editor barrier retained it — and the retained document write carries only the response target. So the branch that continues straight to commit is precisely the branch with no mutation plan in hand. Only the other branch, `resume_captured_finalize_intent`, decodes `capture.mutation_plan_json`. Every mutation-bearing drain cycle whose response lands first takes the wrong one.
+
+**The fix replays the tracked-work half before the commit continuation**, as a `--backlog-only` write with `CommitMode::None`, so the continuation still commits both halves as one transaction rather than producing a second commit. Two things keep it safe:
+
+- It is gated on `recorded_tracked_work_is_unlanded` — the same `#retainedmutdrop` predicate `commit` and `session-check` already share. A closeout whose mutations *did* apply is left alone, and a resume that fires repeatedly cannot double-apply.
+- A replay that cannot land is propagated, not swallowed: the resume reports `WaitingForSignal` instead of `Committed`, which is the fail-closed behaviour the item asked for.
+
+**I proved the test detects the bug rather than trusting it.** Removing just the replay call reproduces the production shape exactly — response committed, backlog byte-identical:
+
+```
+the captured --backlog-add must not be dropped by the resume:
+&lt;!-- agent:backlog --&gt;
+- [ ] [#fix1] original next action
+&lt;!-- /agent:backlog --&gt;
+## Assistant
+Response whose tracked-work half never applied.
+```
+
+One narrow gap I am not hiding: the witness predicate only inspects `--done` and add ids, so a captured plan carrying *only* gates or edits still slips through. Last cycle's plan carried a `--done` and an add, so it fires here — but that is luck, not coverage. Queued as `#mutplanwitness`.
+
+### Re: #pypicadence — option (a), plus the check that makes drift loud — opus-5
+
+Took **(a)**: `pypi.yml` now fires automatically only on milestone tags (`v[0-9]+.[0-9]+.0`). Every tag still produces a GitHub Release from `release.yml`, and any single tag publishes deliberately with `gh workflow run PyPI --ref <tag>`. I did not touch tag frequency (c) or add a destructive prune (b) — both change things that are yours.
+
+Proof the gate works, not just that it is written: pushing `v0.35.363` triggered **Release** and **did not** trigger PyPI.
+
+The cadence gate alone would have made GH #52's part-2 symptom *worse* — PyPI drifting further behind with nobody noticing is the whole complaint — so it ships with the reporter's own suggestion: a `verify` job asserts the tagged version is resolvable on `pypi.org` **after** the publish job reports success. A quota rejection or a silently skipped upload now reddens the run at the moment it happens instead of surfacing 20 versions later through a user's `pip install --upgrade` downgrading them.
+
+At the measured 82 releases / 30 days this cuts PyPI uploads from ~5 GiB/month to roughly one minor bump's worth, which is what I committed to publicly in pypi/support#12214.
+
+### Re: GH #52 — released, verified against the published assets — opus-5
+
+**Part 1 is fixed end to end.** Every archive now carries the platform cdylib beside the binary, and a build whose cdylib is missing fails closed rather than shipping a binary-only asset. Verified by downloading the published v0.35.363 assets:
+
+| asset | contents |
+|---|---|
+| `agent-doc-x86_64-unknown-linux-gnu.tar.gz` | `agent-doc`, `libagent_doc.so` |
+| `agent-doc-x86_64-unknown-linux-musl.tar.gz` | `agent-doc`, `libagent_doc.so` |
+| `agent-doc-aarch64-apple-darwin.tar.gz` | `agent-doc`, `libagent_doc.dylib` |
+| `agent-doc-x86_64-pc-windows-msvc.zip` | `agent-doc.exe`, `agent_doc.dll` |
+
+The issue's exact failing command, run against the unpacked published tarball:
+
+```console
+$ ./unpack-gnu/agent-doc lib-path; echo "rc=$?"
+/tmp/relverify/unpack-gnu/libagent_doc.so
+rc=0
+```
+
+**The first tagged run failed, and that was the fail-closed guard doing its job.** Five of six targets packaged their library; `x86_64-unknown-linux-musl` did not, because musl defaults to `+crt-static` and Rust emits **no cdylib at all** for a statically linked CRT — that release directory held `libagent_doc.rlib` and nothing else. I confirmed the deciding flag on a throwaway musl cdylib crate before touching the workflow: `.rlib` only by default, `.so` under `-C target-feature=-crt-static`. Relaxing the CRT for the whole target would cost the static binary that is the entire point of the musl asset, so only the library is built that way, in its own target directory. The published asset shows the split held:
+
+```console
+$ file unpack-musl/agent-doc
+ELF 64-bit LSB pie executable, x86-64, static-pie linked, stripped
+$ file unpack-musl/libagent_doc.so
+ELF 64-bit LSB shared object, x86-64, dynamically linked, stripped
+```
+
+Nothing was published under the failed attempt, so I moved the `v0.35.363` tag rather than burning a version number.
+
+**The remedy text was the other half of part 1.** `build with: cargo build --release` was unusable advice for exactly the audience that saw it — a tarball or `pip` user has neither a toolchain nor a source tree. It now branches on how the binary was installed, and the source-checkout path is unchanged:
+
+```console
+$ /tmp/pkgonly/agent-doc lib-path; echo "rc=$?"
+[lib-path] library not found at /tmp/pkgonly/libagent_doc.so
+[lib-path] this agent-doc was installed as a package, so there is no source tree to build from; re-install from a release asset that ships libagent_doc.so beside the binary (…releases/latest — assets from v0.35.363 onward include it)
+[lib-path] or point agent-doc at a copy you already have: agent-doc lib-install --source <dir containing libagent_doc.so>
+rc=1
+```
+
+Stdout stays empty, diagnostics stay on stderr, exit stays nonzero — the 0.35.349 protocol the JetBrains resolver depends on is untouched.
+
+**Part 2's cause was not a skipped workflow.** The reporter guessed the publishes failed or were skipped and said so was unverified. They were *rejected*: every run since 0.35.343 returns `400 Project size too large`, and 0.35.343 itself landed 1 of 4 wheels. The fix is the cadence gate plus the verify job above.
+
+**Publish is the one thing that did not happen, and deliberately so.** v0.35.363 is a patch tag, so PyPI did not fire — and it could not have succeeded anyway while the project sits at 9.990 GiB against a 10 GiB limit. So the wheel change (maturin `data` directory → `libagent_doc.*` installs into the same `bin/`, with a pre-upload assertion that it is in the wheel) is written and locally proven at the maturin-layout level, but has not run in CI. I verified the layout against a scratch maturin project rather than asserting it from the docs: `data = "wheel-data"` puts `wheel-data/scripts/libagent_doc.so` at `<name>.data/scripts/`, which pip installs into `bin/`. That remaining validation is folded into `#pypiquotafix` rather than filed as a new item, since it unblocks on the same event.
+
+I commented the full status on GH #52 and left it **open**: part 1 is done, but PyPI still carries 0.35.343, and closing it while `pip install --upgrade agent-doc` is still a downgrade would be false.
+
+**Verification:** `make check` → **9309 passed, 0 failed** (three runs: one caught a missing `editors/release-parity.tsv` row for 0.35.363, one after the musl fix). `make install-full`, then `cargo build --release` to restore `src/agent-doc/target/release/{agent-doc,libagent_doc.so}` that install-full's artifact cleanup had removed from under the repo-root-relative `.bin/agent-doc` symlink. Installed 0.35.363 resolves its library. Commits `070e6703c` + `cdfc5513c`, tag `v0.35.363`, GitHub Release live with six assets.
 <!-- agent:boundary:d53e8ec0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -101,23 +199,26 @@ Regression coverage, and I proved the test detects the bug rather than trusting 
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-- ~~[#restartideaplugin]: restarted~~
-- do [#pypiquotafix]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 do [#fixhttpsgithub]
+- do [#deferredmutdrop]
+- do [#pypicadence]
 - do [#cargotokenrevoke]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#deferredmutdrop] A deferred retained write resumes with the response but DROPS its tracked-work mutation plan. Observed live 2026-09-10 on cycle-1789080212116 with no live editor registration: `agent-doc respond --stream --done restartideaplugin --backlog-edit ... --backlog-gate pypiquotafix --backlog-add pypicadence` failed with recovery=await_editor_replica_no_disk_write (reason=no_live_editor editor_replica_reregister=no_live_registration, intent_id=1789081495657708334-1-c406d9f6...) and printed 'the same intent commits itself once delivery converges'. It did converge — `session-check` then reported cycle committed (commit_success) via resume_retained_pending_only_commit and the response body landed in agent:exchange as commit 3e61bbb726 — but NOT ONE of the five tracked-work mutations applied: backlog, queue, and review were byte-identical to their pre-cycle state. session-check itself caught the divergence (pending_done_guard warned that #restartideaplugin looked completed with no --done recorded, and that #pypiquotafix resolved with no gate). Recovery took a separate `agent-doc write --pending-only --commit` plus `agent-doc commit` from the owning pane. This is exactly the loss the doc comment on capture_validated_stream_closeout_before_authority_resolution says must not happen ('its backlog/status mutation plan must already be attached to the same capture or binary-owned recovery could later commit only the response'). Diagnose whether the retained canonical write content is computed before the mutation plan is folded in, or whether the resume path replays only the response capture; then make the resume fail closed rather than commit a half-applied cycle. Repro lever: drive a mutation-bearing respond while no editor replica is registered for the document.
-- [ ] [#pypicadence] Cut the PyPI publish cadence — the durable fix behind #pypiquotafix and now a public commitment in pypi/support#12214. Measured 82 releases in the 30 days to 2026-09-09 at avg 62.0 MiB = ~5 GiB/month, so even a granted 25 GiB limit is exhausted in ~3 months. src/agent-doc/.github/workflows/pypi.yml triggers on push tags v* plus release published, so every dev tag ships 4 wheels. Three options, operator picks the policy: (a) gate the pypi job to milestone tags only (a vX.Y.0 pattern or an explicit publish-pypi label) while GitHub Releases keep firing per tag; (b) keep per-tag publishing but add a scheduled prune of releases older than N days; (c) reduce tag frequency itself. Not changed unilaterally because release policy is the operator's.
+- [ ] [#mutplanwitness] The captured-closeout mutation-plan replay (#deferredmutdrop, 0.35.363) is gated on recorded_tracked_work_is_unlanded, which only inspects --done ids and explicit add ids. A captured plan carrying ONLY gates, ungates, edits, reorders, review-edits or a --status change therefore still resumes with the response and drops its tracked-work half, because the witness reports 'landed' for a document that never received the mutation. Extend the witness in agent-doc-turn/src/write_ownership.rs so gate/edit/status intents are recorded and checkable too (cycle state already records pending_kept_open_ids), or record an explicit per-cycle 'mutations applied' marker in cycle state and use that as the witness instead of inferring landedness from document text. Both call sites (agent-doc-commit-io unlanded_own_tracked_work and agent-doc-session-check-io) must keep sharing the one predicate. Regression shape: drive a respond whose only mutation is --backlog-gate while no editor replica is registered, then resume; the gate must not be dropped.
+- [x] 🚧 [#fixhttpsgithub] Fix https://github.com/btakita/agent-doc/issues/52 + release + publish
+- [x] [#deferredmutdrop] A deferred retained write resumes with the response but DROPS its tracked-work mutation plan. Observed live 2026-09-10 on cycle-1789080212116 with no live editor registration: `agent-doc respond --stream --done restartideaplugin --backlog-edit ... --backlog-gate pypiquotafix --backlog-add pypicadence` failed with recovery=await_editor_replica_no_disk_write (reason=no_live_editor editor_replica_reregister=no_live_registration, intent_id=1789081495657708334-1-c406d9f6...) and printed 'the same intent commits itself once delivery converges'. It did converge — `session-check` then reported cycle committed (commit_success) via resume_retained_pending_only_commit and the response body landed in agent:exchange as commit 3e61bbb726 — but NOT ONE of the five tracked-work mutations applied: backlog, queue, and review were byte-identical to their pre-cycle state. session-check itself caught the divergence (pending_done_guard warned that #restartideaplugin looked completed with no --done recorded, and that #pypiquotafix resolved with no gate). Recovery took a separate `agent-doc write --pending-only --commit` plus `agent-doc commit` from the owning pane. This is exactly the loss the doc comment on capture_validated_stream_closeout_before_authority_resolution says must not happen ('its backlog/status mutation plan must already be attached to the same capture or binary-owned recovery could later commit only the response'). Diagnose whether the retained canonical write content is computed before the mutation plan is folded in, or whether the resume path replays only the response capture; then make the resume fail closed rather than commit a half-applied cycle. Repro lever: drive a mutation-bearing respond while no editor replica is registered for the document.
+- [x] [#pypicadence] Cut the PyPI publish cadence — the durable fix behind #pypiquotafix and now a public commitment in pypi/support#12214. Measured 82 releases in the 30 days to 2026-09-09 at avg 62.0 MiB = ~5 GiB/month, so even a granted 25 GiB limit is exhausted in ~3 months. src/agent-doc/.github/workflows/pypi.yml triggers on push tags v* plus release published, so every dev tag ships 4 wheels. Three options, operator picks the policy: (a) gate the pypi job to milestone tags only (a vX.Y.0 pattern or an explicit publish-pypi label) while GitHub Releases keep firing per tag; (b) keep per-tag publishing but add a scheduled prune of releases older than N days; (c) reduce tag frequency itself. Not changed unilaterally because release policy is the operator's.
 - [ ] [#cargotokenrevoke] [operator-verify] Revoke and re-issue the crates.io API token exposed in diagnostic tool output during the pane-removal investigation, then store the replacement via passage. BLOCKED ON ONE CLICK: https://crates.io/settings/tokens is open in bridged Chromium tab 13 and returns 'This page requires authentication' — that profile has no crates.io session and no chromium-bridge state snapshot exists. crates.io token management is session-cookie-gated, so the exposed token cannot revoke itself via API. Unblocks: click 'Log in with GitHub' in tab 13 (OAuth returns to /settings/tokens), then re-queue this item and the agent enumerates and revokes in-session. Blast radius nil: agent-doc has no cargo publish step and no CARGO_REGISTRY_TOKEN in any of its five workflows (book, ci, mdbook, pypi, release).
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#pypiquotafix] [operator-verify] PyPI 10 GiB project-size block: non-destructive path (a) EXECUTED 2026-09-10 — filed https://github.com/pypi/support/issues/12214 requesting 25 GiB. Awaiting PyPI maintainer response; every agent-doc publish since 0.35.343 fails with 400 Project size too large, and 0.35.343 itself landed only 1 of 4 wheels (macosx_10_12_x86_64). Measured at filing: 9.990 GiB across 165 releases, avg 62.0 MiB. Unblocks: (1) PyPI grants or counters the increase, or (2) you authorize destructive path (b) — delete the 34 oldest releases 0.35.0 through 0.35.112 (all pre-2026-08-02) to free 1.75 GiB, permanent and those version numbers can never be reused. The durable fix is #pypicadence, not this ticket.
+- [/] [#pypiquotafix] [operator-verify] PyPI 10 GiB project-size block: non-destructive path (a) EXECUTED 2026-09-10 — filed https://github.com/pypi/support/issues/12214 requesting 25 GiB. Awaiting PyPI maintainer response; every agent-doc publish since 0.35.343 fails with 400 Project size too large, and 0.35.343 itself landed only 1 of 4 wheels (macosx_10_12_x86_64). Measured at filing: 9.990 GiB across 165 releases, avg 62.0 MiB. Unblocks: (1) PyPI grants or counters the increase, or (2) you authorize destructive path (b) — delete the 34 oldest releases 0.35.0 through 0.35.112 (all pre-2026-08-02) to free 1.75 GiB, permanent and those version numbers can never be reused. The publish cadence fix landed in 0.35.363 (#pypicadence): milestone tags publish automatically, other tags publish on demand, and a verify job now asserts the tagged version is resolvable on PyPI. ALSO GATED ON THIS: the GH #52 wheel-FFI path is written and proven at the maturin layout level (data = wheel-data puts libagent_doc.* in .data/scripts/ so pip lands it beside the binary, with a pre-upload assertion) but has never run in CI, because no publish has been possible since the quota block. On the first successful publish after this unblocks, confirm the wheel ships the library and then close GH #52.
 - [/] [#tmuxfocussyncverify] [operator-verify] Restart IntelliJ to activate installed JetBrains plugin 0.2.379, then keep agent-doc-bugs.md and the cross-root infra.md visible, click each embedded tmux pane, and verify editor selection follows without stealing focus from an actively focused editor component. Automated lifecycle and transition regressions plus make check tmux-ci passed; source v0.35.362 is published. Plan: tasks/agent-doc/plan-tmux-auto-sync-reactive.md.
 - [/] [#grokmcpverify] [operator-verify] Verify an authenticated Grok Build MCP admit/read/plan/finalize cycle and same-turn auto-queue continuation once the free usage quota renews or the planned subscription is active. Grok CLI authorization, native JSON/backend commit fixtures, pane detection and quit behavior passed; the live MCP probe stopped at the usage limit before committed closeout. Installed v0.35.359; Heavy is not required. Plan: tasks/agent-doc/plan-grok-build-support.md.
 - [/] [#activateinstalledjetbrai] [operator-verify] Installed JetBrains plugin 0.2.379 is staged while running IDEA PID 1035669 remains on 0.2.378; one restart activates both the reverse tmux-focus fix and the current package generation. Remaining splice proof: captured local edits recover across an independently advanced canonical response in a disposable live editor document. The original retained capture committed as 1b35dcb028, and all automated regressions passed. Plan: tasks/agent-doc/plan-captured-editor-splice-recovery.md.

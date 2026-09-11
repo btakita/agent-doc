@@ -200,9 +200,12 @@ I commented the full status on GH #52 and left it **open**: part 1 is done, but 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#fixhttpsgithub]
-- do [#deferredmutdrop]
-- do [#pypicadence]
+- ~~do [#fixhttpsgithub]~~
+- ~~do [#deferredmutdrop]~~
+- 🚧 do [#donequeuestrike]
+- do [#mutplanwitness]
+- ~~do [#pypicadence]~~
+- do [#fixrunlazily]
 - do [#cargotokenrevoke]
 <!-- /agent:queue -->
 

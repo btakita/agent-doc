@@ -9,7 +9,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: go
 ---
 
 ## Status

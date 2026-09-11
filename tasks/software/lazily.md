@@ -9,6 +9,9 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
+prompt_presets:
+  '#actionable': Add actionable tasks into backlog + queue
+  '#actionable-review': Add actionable review items into backlog + queue
 queue: stop
 ---
 
@@ -265,6 +268,40 @@ Nobody's green was taken on faith. kt read the JUnit XML timestamps to confirm `
 For `lazily-spec` I flipped the `replay-equivalence-proof` marks to shipped for all nine implementing bindings — GDScript stays absent, there being no binding yet — and regenerated `docs/coverage.md`. `make check` exit 0, all thirteen guards. I then probed that the claims guard is live for this row by marking GDScript shipped: it fails, naming all three fixtures and GDScript's own `KNOWN_UNCOVERED` entries. So the nine marks are backed by each binding's ledger, not by my assertion. As predicted by every agent independently, no binding README changed — optional rows are excluded from the family roll-up. CI run 34633130674 is queued at hand-off.
 
 Two things I did not do. `#lzreplayframing` is above. `#lzcppscenfloor` is the smaller one: five bindings re-pinned their scenario floors during phase 2 and `lazily-cpp` left its slack at 149 against a reported 151, for scope discipline — pre-existing drift, but by that script's own rule a slack floor has stopped guarding. Both are actionable backlog items, not review gates. Exchange is at 215 lines / 9 sections with the queue active; noting it rather than stalling to compact.
+
+### Re: do [#lzreplayframing] — opus-5
+
+> **Queue prompt:**
+>
+> #actionable-review
+
+
+> **Queue prompt:**
+>
+> do [#lzreplayframing]
+>
+> do [#lzcppscenfloor]
+
+
+Ten repos, ten green. `lazily-spec` `4010d99` published first so every binding's CI clone would replay the same corpus, then nine subagents — one per binding, never two in a repo — landed `lazily-rs` `0832acd`, `lazily-py` `829b372`, `lazily-js` `6798b78`, `lazily-kt` `75f1bd4`, `lazily-go` `2a13cab`, `lazily-zig` `a1a93f5`, `lazily-cpp` `3710cf3`, `lazily-cs` `c4f51ba`, `lazily-dart` `ddf069b`. Every one green locally with an explicitly captured exit code and green on its own CI run. `#lzcppscenfloor` closed in the same push as `lazily-cpp` `637f85c`. Then `lazily-spec` `a4548e6` for the correction the rollout itself earned, which is the interesting half.
+
+The fixture now carries three member-framing rows instead of one. The old `["a","bc"]` vs `["ab","c"]` stays, asserting the equality class. `["a","sbc"]` vs `["as","bc"]` plus the mapping analogue `{"a":"sb"}` vs `{"as":"b"}` were lifted from `lazily-kt`'s own suite. And a new one nobody had: `[["a"],"b"]` vs `[["a","b"]]`, which collides under an unframed concatenation in *every* layout, because a nested container's boundary has no tag to hide behind.
+
+**Not one binding's encoder was defective.** All nine were genuinely length-framed. The entire defect was in what the tests proved, which is the more expensive kind, because nine repos were each carrying a green assertion they believed covered this.
+
+**The layout is unanimous, and that is not what the spec says.** Obligation 3 says a binding **MAY** choose its own byte layout, and reasons carefully about why demanding a shared hash would buy a dependency in five bindings for nothing. Nine bindings independently chose the identical frame: `<tag><decimal length>:<body>`. Not similar — the same netstring, down to the colon. The freedom is real and nobody used it. That means the corpus's layout-dependent rows do fire everywhere today, and it also means the "reference layout" hedge in the fixture was hedging against a thing that did not happen.
+
+**What did happen is that a two-part length prefix fails in more than two ways.** `lazily-go` found it first: its frame is `s<digits>:`, so under a mutation that drops only the digits the content a member must spell is `s:`, not `s` — and the corpus pairs stay green. `lazily-js`, `lazily-dart`, `lazily-py`, `lazily-rs`, `lazily-cs` and `lazily-cpp` each ran that second mutation independently and each found the nested row was the only thing that killed it. Then `lazily-cpp` ran a third: remove the count from the **leaf** frame only, leave containers framed. All fourteen corpus steps pass. Nothing in the corpus reaches it, and nothing can — the corpus has to choose its colliding content in advance, and that content has to spell `s:`, a string the corpus has no standing to know. `a4548e6` writes those three shapes into a table and turns the binding-local pair from advice into **MUST**: construct the colliding pair for each *level* of frame you emit, leaf and container, spelling the whole surviving prefix rather than just the tag, and prove each by running its own mutation on a cold build.
+
+**Every binding's runner had a slack step floor, and the new rows would have passed without running.** Eight of nine pinned `steps.len() >= 11` against a fixture that now carries 14; `lazily-cs` hard-coded `Assert.Equal(11, ...)` and was the only one that failed loudly instead of silently accepting three steps it never replayed. That is the second finding and it generalizes past this row: publishing a corpus step is invisible to a binding whose floor still describes the old fixture. `lazily-zig` said it plainly — the three new rows would have landed inside the old slack and reported green.
+
+Pre-existing floor drift surfaced and closed on the way through, none of it caused by this work: `lazily-cpp` `MIN_SCENARIOS` 149 → 151 (that is `#lzcppscenfloor`, traced to lazily-spec `1c388a5` moving `MIN_FIXTURES` and not `MIN_SCENARIOS`), `lazily-py` `MIN_FIXTURES` 141 → 145 and `MIN_DECLARED_BLOCKS` 578 → 620, `lazily-js` `MIN_BLOCKS` 635 → 638, `lazily-cs` `MIN_BLOCKS` 740 → 743. Every re-pinned floor was proved exact by failing at n+1, and every one was pinned against the *published* corpus, not a working tree.
+
+Four repos were carrying comments that asserted the false version of this property in prose — `lazily-py`'s `test_length_prefixes_keep_concatenations_distinct` claimed "without length framing both encode to the same member bytes", `lazily-zig`'s `frame()` doc said the same, `lazily-rs`'s `AGENTS.md` recorded "Dropping only the LENGTH stays green here" as a known-and-accepted fact. All three corrected in their own commits. `lazily-kt`'s comment was right; it was the one that found this.
+
+On method: nobody's green was taken on faith. `lazily-kt` read JUnit XML timestamps to prove the test task advanced rather than reporting `UP-TO-DATE`; `lazily-go` cleared the test cache and grepped for `(cached)`; `lazily-zig` built into a freshly created cache dir it verified did not exist, and re-ran all three pinned toolchains raw after the known `rtk proxy` exit-code trap (the six `failed command:` lines are real, pre-existing, and are the build runner annotating steps that wrote to stderr on a `1097/1097 passed` summary); `lazily-cpp` asserted `test ! -d build` before each configure; `lazily-py` confirmed `replay.py` is not one of the five mypyc modules before trusting a source-level mutation. Every restore came from a scratch copy, never `git checkout --`, and the shared corpus at `../lazily-spec/conformance` was never written by any of the nine.
+
+Exchange is at 244 lines / 10 sections with the queue active — noting it rather than stalling to compact.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -276,8 +313,7 @@ Two things I did not do. `#lzreplayframing` is above. `#lzcppscenfloor` is the s
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzreplayframing] [lazily-spec] conformance/replay/canonical_encoding_equality.json does NOT pin length framing, and two bindings proved it independently (lazily-kt and lazily-rs both ran the mutation; lazily-js and lazily-cs hit the same survivor and wrongly judged it benign). With a type tag before every member, ["a","bc"] and ["ab","c"] already differ as bytes, so an encoder that drops the length prefix passes the fixture while violating obligation 3. Add the colliding pair ["a","sbc"] vs ["as","bc"] plus the mapping analogue (lazily-kt already carries both locally in its own suite - lift them). NOTE: a new canonical fixture reddens all nine bindings at once, so scope this cycle to lazily-spec + all 9 binding repos and budget accordingly; publish lazily-spec first so the corpus-published guard lets the bindings verify.
-- [ ] [#lzcppscenfloor] [lazily-cpp] MIN_SCENARIOS is slack at 149 while the run reports 151 - pre-existing corpus drift, not caused by the replay work. The script's own rule is that a slack floor has stopped guarding. lazily-js, lazily-cs, lazily-go, lazily-zig and lazily-rs all re-pinned their scenario floors during phase 2; lazily-cpp was the one left behind for scope discipline. Pin it to the number a completed CI run prints, then make check + push. Repo: src/lazily-cpp
+- [ ] [#lzcorpusfloorguard] [lazily-spec] Every binding's replay runner carried a slack minimum-steps floor (8 of 9 pinned >= 11 against a 14-step fixture); only lazily-cs failed loudly. A published corpus step is invisible to a binding whose floor still describes the old fixture, so a spec-side addition can report green in nine repos while three rows never execute. Same class as the MIN_FIXTURES/MIN_SCENARIOS drift closed this cycle in lazily-cpp (149->151), lazily-py (141->145, blocks 578->620), lazily-js (635->638) and lazily-cs (740->743). Add a lazily-spec guard that reads each binding's declared per-fixture step/fixture/scenario floors from its ledger and fails when any floor sits below what the published corpus carries - the corpus knows its own counts, the bindings do not re-derive them reliably. Repo: src/lazily-spec
 <!-- /agent:backlog -->
 
 ## Review

@@ -453,12 +453,43 @@ fn log_symptom_dedupe(file: &Path, surface: &str, id: &str, key: &backlog::Sympt
     );
 }
 
+/// Log and report that an explicit-id add is already satisfied by the document.
+///
+/// `#captureresumereplaynotidempotent`: a captured-closeout resume replays the
+/// tracked-work mutations it recorded, so it can reach an add its own earlier
+/// run already inserted. Same id + same text is the same item, so the add is a
+/// no-op instead of the `#preset-item-id-collision-enforce` refusal that used
+/// to turn a fully-applied document into `refusing to commit a half-applied
+/// cycle`. A different text under the same id is still a real collision.
+fn explicit_add_already_satisfied(
+    file: &Path,
+    full_content: &str,
+    surface: &str,
+    item: &str,
+) -> bool {
+    let Some(component) = backlog::explicit_add_already_satisfied(full_content, item) else {
+        return false;
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "backlog_add_already_satisfied file={} surface={surface} component={component} item={}",
+            file.display(),
+            item.replace('\n', " "),
+        ),
+    );
+    true
+}
+
 /// Add a new item to the pending component (assigns a stable hash id + `[ ]`
 /// or `[/]`) at the beginning of the list. Supports canonical `id=<custom> `
 /// syntax and compatibility `[#custom] ` input to preserve a custom id. Prints
 /// the assigned hash id to stdout.
 pub fn add(file: &Path, item: &str, gated: bool) -> Result<()> {
     let (full_content, comp) = find_pending_component(file)?;
+    if explicit_add_already_satisfied(file, &full_content, "backlog", item) {
+        return Ok(());
+    }
     backlog::ensure_new_item_explicit_id_available(&full_content, item)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
@@ -496,6 +527,15 @@ fn add_many_to_list(
         return Ok(Vec::new());
     }
     let (full_content, comp) = find_tracked_list_component(file, list)?;
+    let items: Vec<String> = items
+        .iter()
+        .filter(|item| !explicit_add_already_satisfied(file, &full_content, list.label(), item))
+        .cloned()
+        .collect();
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+    let items = items.as_slice();
     for item in items {
         backlog::ensure_new_item_explicit_id_available(&full_content, item)?;
     }
@@ -534,6 +574,11 @@ fn add_at_to_list(
     list: backlog::TrackedWorkList,
 ) -> Result<String> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
+    if explicit_add_already_satisfied(file, &full_content, list.label(), item)
+        && let Some(id) = backlog::explicit_custom_id(item)
+    {
+        return Ok(backlog::normalize_pending_id(&id));
+    }
     backlog::ensure_new_item_explicit_id_available(&full_content, item)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);

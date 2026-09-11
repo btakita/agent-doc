@@ -2,6 +2,21 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.365
+
+- Make a captured-closeout resume idempotent against its own already-applied
+  tracked work (`#captureresumereplaynotidempotent`). A capture records its
+  backlog mutations so `agent-doc repair --resume-capture` can replay them, but
+  the replay reached the `#preset-item-id-collision-enforce` guard with the item
+  its own earlier run had already inserted. The guard cannot tell that from a
+  real collision, so the resume reported `refusing to commit a half-applied
+  cycle` for a document that was in fact fully applied — defeating the recovery
+  0.35.364 had just introduced, on exactly the documents that need it. An
+  explicit-id add whose id is already active with the same text is now a
+  logged no-op (`backlog_add_already_satisfied`); the same id carrying
+  different text is still the two-meanings collision the guard exists for, and
+  a reaped id still reads as a real request for new work.
+
 ## 0.35.364
 
 - Fix tmux pane auto-sync parking a converged layout in `retry_pending`

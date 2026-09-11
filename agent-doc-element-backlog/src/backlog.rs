@@ -1250,6 +1250,60 @@ pub fn explicit_new_item_id_collision(
     })
 }
 
+/// Collapse an add's body text to the form two spellings of the same item share.
+///
+/// Only whitespace: the replay compares a recorded add against the item that
+/// add already produced, and the only thing between them is line wrapping.
+fn replayed_add_text_identity(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Is this explicit-id add already satisfied — same id, same text, still active?
+///
+/// `#captureresumereplaynotidempotent`: a captured closeout records its
+/// tracked-work mutations so a resume can replay them, but the replay reaches
+/// [`ensure_new_item_explicit_id_available`] with the item its own earlier run
+/// already inserted. The guard cannot tell that from a real collision, so it
+/// fails closed and the resume reports `refusing to commit a half-applied
+/// cycle` for a document that is in fact fully applied. Observed 2026-09-11:
+/// the response, the queue strike, the `--done` reap and the `--backlog-add`
+/// had all landed; only the commit was outstanding, and the recovery the
+/// `#capturedresumeunowned` remedy names could not run.
+///
+/// Deliberately narrow. Identical id **and** identical text is not an ambiguity
+/// — it is the same item — so replaying it is a no-op. The same id carrying
+/// DIFFERENT text is exactly the two-meanings case the guard exists for and
+/// still fails. A `Done` item does not satisfy an add either: re-adding a
+/// reaped id is a real request for new work.
+///
+/// Returns the component the satisfying item lives in, for the ops record.
+pub fn explicit_add_already_satisfied(full_content: &str, item: &str) -> Option<String> {
+    let (custom_id, text) = parse_custom_id_prefix(item).ok()?;
+    let id = normalize_pending_id(&custom_id?);
+    if id.is_empty() {
+        return None;
+    }
+    let want = replayed_add_text_identity(&text);
+    if want.is_empty() {
+        return None;
+    }
+    let components = element::parse(full_content).ok()?;
+    components.into_iter().find_map(|component| {
+        if !element::is_tracked_work_component(&component.name) {
+            return None;
+        }
+        let (_, items, _) = parse_items(component.content(full_content));
+        items
+            .into_iter()
+            .any(|existing| {
+                existing.id == id
+                    && existing.state != PendingState::Done
+                    && replayed_add_text_identity(&existing.text) == want
+            })
+            .then(|| component.name.clone())
+    })
+}
+
 /// Enforce that an explicit new tracked-work id has exactly one active meaning
 /// in the document after insertion.
 pub fn ensure_new_item_explicit_id_available(full_content: &str, item: &str) -> Result<()> {
@@ -7525,6 +7579,63 @@ mod tests {
             explicit_new_item_id_collision(content, "mention #alpha without explicit prefix"),
             None
         );
+    }
+
+    /// `#captureresumereplaynotidempotent`: replaying a recorded add must be a
+    /// no-op, and must stay narrow enough that a real collision still fails.
+    #[test]
+    fn an_explicit_add_is_satisfied_only_by_the_same_id_and_the_same_text() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#newwork] follow up on the wedge\n",
+            "- [x] [#reaped] finished long ago\n",
+            "<!-- /agent:backlog -->\n"
+        );
+
+        // Same id, same text, still active — the add already happened.
+        assert_eq!(
+            explicit_add_already_satisfied(content, "[#newwork] follow up on the wedge"),
+            Some("backlog".to_string()),
+        );
+        // Whitespace is the only difference a replay can introduce.
+        assert_eq!(
+            explicit_add_already_satisfied(content, "id=newwork follow up\n  on the wedge"),
+            Some("backlog".to_string()),
+        );
+
+        // Same id, DIFFERENT text: two meanings, which is what the guard is for.
+        assert_eq!(
+            explicit_add_already_satisfied(content, "[#newwork] something else entirely"),
+            None,
+        );
+        // A reaped id is a real request for new work, not a satisfied add.
+        assert_eq!(
+            explicit_add_already_satisfied(content, "[#reaped] finished long ago"),
+            None,
+        );
+        // No explicit id at all: the derived-id path owns this, not the guard.
+        assert_eq!(
+            explicit_add_already_satisfied(content, "follow up on the wedge"),
+            None,
+        );
+        // An unrelated id is simply absent.
+        assert_eq!(
+            explicit_add_already_satisfied(content, "[#other] follow up on the wedge"),
+            None,
+        );
+    }
+
+    /// The narrow no-op must not weaken the collision guard it sits in front of.
+    #[test]
+    fn a_same_id_different_text_add_still_fails_the_collision_guard() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#newwork] follow up on the wedge\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let err = ensure_new_item_explicit_id_available(content, "[#newwork] a different meaning")
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("#preset-item-id-collision-enforce"));
     }
 
     #[test]

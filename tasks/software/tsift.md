@@ -226,14 +226,40 @@ Changed paths:
 Verification passed: full `make check`; all 50 `tsift-summarize` tests; focused crux tests; Clippy for `tsift-summarize` and `tsift-cli` with warnings denied; CLI parsing; `git diff --check`; and the public-repository private-name scan. An end-to-end smoke test with a mocked existing Anthropic response proved extraction, `summarize` and `symbol-read` presentation, stale suppression after a body edit, refresh after re-enrichment, and a zero-file second `--crux` pass with model credentials removed. The latest upstream GitHub Actions run passed; this local branch has not been pushed, so CI does not yet contain `006ba2f`.
 
 Confidence is high. No escalation or follow-up work was required for this item.
-<!-- agent:boundary:b8ec92e9:tsift -->
+
+### Re: Structured impact context
+
+> **Queue prompt:**
+>
+> do [#graftimpactcontext]
+
+Implemented `#graftimpactcontext` in `/home/brian/work/btakita/agent-loop/.worktrees/tsift-graft` and committed it as `eca6e17 feat: add structured impact context`.
+
+`tsift impact` now groups production files by workspace unit, including `packages/<name>`, `crates/<name>`, `apps/<name>`, and leading source directories. It walks incoming call edges up to four nodes and emits deterministic evidence paths from each changed symbol to affected production callers. Evidence nodes carry the symbol, file, and indexed caller line. Directly changed production symbols also receive a one-node path.
+
+The report now returns typed test signals for changed test-bearing files, call-graph reachability, imports, and routes. These signals are separate from the existing affected-test targets and runnable commands, so integrations no longer need to parse human reason strings. Changed files are excluded from the import scan to avoid self-reference noise, while production files that contain inline tests participate in both the production grouping and test evidence.
+
+`--limit` bounds affected tests, production modules, structured test signals, and one shared evidence-path budget. The JSON contract exposes totals, per-module evidence totals, and `context_truncated`; its new arrays are always present and deserialize safely from older cached reports through serde defaults. Semantic-edit verification embeds the bounded production-module, evidence-path, and test-signal data. Conflict-matrix preparation already serializes the full impact report and therefore receives the same structured context.
+
+Changed paths:
+
+- `packages/tsift-search/src/impact.rs`
+- `packages/tsift-cli/src/cli.rs`
+- `packages/tsift-cli/src/lib.rs`
+- `packages/tsift-cli/src/semantic_edit.rs`
+- `specs/search-navigation.md`
+
+Verification passed: the final full `make check` run (`tart-5c1f5def2b`); Clippy for `tsift-search` and `tsift-cli` with warnings denied; five focused impact tests; the impact CLI parser test; `git diff --check`; and the public-repository private-name scan. An end-to-end Rust fixture returned a grouped `src` module, a source-located `core → api` evidence path, separate changed-test and import signals, and correct totals/truncation under `--limit 2`. The latest upstream GitHub Actions release run passed; this branch remains local and is three commits ahead of `origin/main`.
+
+Confidence is high. No escalation or follow-up work was required for this item.
+<!-- agent:boundary:a6b6ae94:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#graftcrux]~~
-- do [#graftimpactcontext]
+- ~~do [#graftimpactcontext]~~
 - do [#graftlspedges]
 <!-- /agent:queue -->
 <!--
@@ -243,7 +269,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#graftimpactcontext] [recommended] Extend existing tsift impact output with grouped production modules, changed-symbol evidence paths, and separate test signals; expose bounded context to post-edit integrations.
 - [ ] [#graftlspedges] [recommended] Prototype optional LSP call-edge enrichment using installed servers, preserving extractor fallback, provenance, confidence, coverage diagnostics, and tsift freshness contracts; validate Rust and TypeScript resolution precision.
 <!-- /agent:backlog -->
 

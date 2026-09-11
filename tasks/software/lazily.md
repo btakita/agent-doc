@@ -1386,6 +1386,50 @@ Both pushed to their own remotes. `lazily-spec` `make check` is green (exit 0) a
 I staged the `lazily-rs` change as a hand-built blob (`HEAD` + my single line) rather than `--only`, because another session has an in-flight `tsift init` rewrite of the Code Navigation block in that same file; `lazily-spec` had an unrelated `AGENTS.md` edit and a `runbooks/code-navigation.md` deletion pending, both left untouched.
 
 No follow-up filed. `lazily-gd` still has no temporal family, but that's the expected state of the in-progress 10th binding, not a gap this item opened.
+
+### Re: Can we make a lazily-py-temporal package? — opus-5
+
+Yes, it's buildable, and it's small. But I'd recommend **not** shipping it as a package — for a reason that only showed up when I went looking at the invalidation code, and which matters more than the packaging question.
+
+#### The finding that decides this
+
+Temporal workflow code must be deterministic under replay; its sandbox explicitly bans `set` iteration for that reason. lazily-py's reactive layer does exactly that:
+
+- `Cell._parents` is `set[Slot[Any, Any, Any]]`, tracked **by object identity** (`src/lazily/cell.py:60`).
+- `touch()` does `for parent in pare: _reset_work.append((parent, ctx))` (`cell.py:163-168`), and `_drain_resets` pops that work list LIFO (`slot.py:214-231`).
+
+Set iteration order for arbitrary objects follows `id()`, i.e. memory addresses, which differ between processes. So the **order `Effect`s fire within one invalidation wave is not stable across a worker restart**. Values still converge — the graph is confluent, each node recomputes from its own deps — but the *sequence of side effects* does not.
+
+That is precisely the thing Temporal replay checks. If an `Effect` issues Temporal commands (starts a timer, schedules an activity, signals), a replay on a different worker can emit them in a different order and fail with a non-determinism error. Worst-case bug shape: it works in dev, works in test, and only breaks on failover.
+
+**The split this implies is clean, and it's a split lazily already has.** The pure cores — `TimerCore`, `IntervalCore`, `CronCore`, `DeadlineCore`, `LeaseCore`, `EphemeralCore`, `TimeoutCore`, `CircuitBreakerCore`, `RetryPolicyCore`, `BulkheadCore`, window/rateshape cores, `StateTable` — are plain state machines over integers with no I/O, no randomness, no threads, no global mutation. They are replay-safe by construction and pass the sandbox as-is. The reactive glue is what isn't. That is the *same* core/cell split the spec already mandates for backend portability — it turns out to also be the deterministic-replay boundary.
+
+#### What a `lazily-py-temporal` would actually need
+
+Four things, in descending order of real value:
+
+1. **A core-only façade.** Re-export just the pure cores so the unsafe surface is unreachable from workflow code. Note this is not achievable by import hygiene alone: `lazily/temporal.py` and `lazily/resilience.py` define cores *and* cells in one module and import `.cell` at module scope, so you can't import a core without pulling the reactive layer in. The façade has to be an explicit curated namespace.
+2. **Sandbox passthrough config.** lazily-py ships mypyc-compiled extensions (`cell.cpython-314-*.so`, `signal`, `effect`, `batch`). Temporal's sandbox re-imports modules per workflow run, and compiled extensions must be passed through — `SandboxRestrictions.default.with_passthrough_modules("lazily")`, or `with workflow.unsafe.imports_passed_through(): import lazily`. Shipping this as a ready-made `SandboxedWorkflowRunner` saves every user the same discovery.
+3. **A clock bridge.** `workflow.now()` returns a replay-stable `datetime`; lazily wants a monotone `u64` tick. Needs a fixed epoch and a declared resolution. Sound, but ~10 lines.
+4. **A drive loop.** `next_fire() -> Option[u64]` → `await workflow.sleep(delta)` → `tick(now)` on wake. Also ~10 lines.
+
+Serialization needs nothing special: Temporal reconstructs workflow state by replaying history, not by snapshotting objects. You'd only want a converter if core state crosses a `@workflow.query`/`@workflow.signal` payload boundary, and the `BytesPayload` cores plus the existing `lazily.msgpack_codec` already cover that.
+
+Activities need nothing at all — they run outside the sandbox, so the full reactive layer is fine there.
+
+#### Is it worthwhile?
+
+**No, not as a package.** Three reasons:
+
+- **The overlap is worst exactly where the integration would live.** Temporal's whole value proposition is durable timers, retries, and timeouts. That is `#lztime`, `TimeoutCore`, `RetryPolicyCore`, `CircuitBreakerCore`. Inside a workflow you should use `workflow.sleep`, retry policies, and `start_to_close_timeout` — the Temporal versions survive process death, which is the entire point and which lazily's cannot do. Bridging lazily's timers into Temporal means running the weaker of two overlapping mechanisms.
+- **The genuinely valuable part is ~100 lines and one page of prose,** most of it a constant and two loops. That does not justify a new release target in a family that already carries per-release cost across 10 bindings.
+- **The consumer's own integration is trivial** *once they know the core/reactive boundary*. The knowledge is the deliverable, not the code.
+
+So: consumers should implement their own, and what we owe them is the boundary written down.
+
+**What I'd do instead** — and this is the part I think is actually worth building — is document the **deterministic-replay-safe subset** of lazily as a general property. It isn't Temporal-specific: the same guarantee is what event sourcing, lockstep netcode, and deterministic simulation all need, and all of them will hit the same `set`-ordering edge. One spec page that says "these cores are replay-safe, the reactive layer guarantees convergence but not side-effect order" serves every one of those hosts and costs far less than a binding. Filed as a backlog item.
+
+One caveat on scope: I verified the container types and the invalidation walk by reading `cell.py`/`slot.py`, and the sandbox rules from the Temporal Python SDK README. I did **not** build a workflow and force a replay divergence, so "this will fail on failover" is a read of the mechanism, not an observed failure. If the replay-safety page gets written, a cross-process ordering test is the thing that would settle it.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 

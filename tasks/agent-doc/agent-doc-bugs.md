@@ -767,7 +767,119 @@ So the guard did its job: it refused to call an unobservable clear "submitted" a
 **Verification:** full suite green — 9348 tests, 0 failures (up 9 from the 9339 baseline: 5 frontmatter + 4 handoff). Built, installed, and both commits pushed (`e13404d9c` in the submodule, `f5b35c7e2` in the superproject). CI run 34644974999 was still queued when I checked, so this rests on local evidence. One housekeeping note: `src/session_actor_cmd.rs` carries another session's uncommitted doctor-message change in this shared tree — I left it alone and committed only my four files.
 
 Exchange is at ~700 lines across 28 sections; not stopping for it.
-<!-- agent:boundary:1406b99d:agent-doc-bugs -->
+
+### Re: #exchangetypingrevert — the CP write was the loss site, not the reconcile — opus-5
+
+The item was right that `crdt_replica_update_corruption_rejected` is a detector. The thing that produced the divergent member replica is **agent-doc's own controller write**, one second earlier.
+
+The ops.log window around `17:22:09` reads in order:
+
+```
+17:22:08  queue_maintenance_rebased  expected_len=60856 current_len=60867 rebased_len=60967
+17:22:09  crdt_cp_write  source=queue_maintenance  content_len=60967  update_bytes=3370  targets=1
+17:22:09  crdt_document_op_delta_ingested  delta_len=98        ← the operator, still typing
+17:22:09  crdt_replica_update_corruption_rejected  reason=cross_component_raw_union
+```
+
+`3370` update bytes for a net `+100` character change is the tell. `RelayHub::apply_canonical_replace` turned that whole-document write into CRDT ops through `minimal_char_span_edit`, which peels **one** shared prefix and **one** shared suffix — so every difference collapses into a *single* delete+insert span running from the first differing character to the last. `queue_maintenance` strikes a queue line **and** rewrites the status line: two disjoint regions, with `exchange` sitting between them. That one span therefore tombstoned the entire untouched `exchange` component and both of its markers, and reinserted them as brand-new characters.
+
+That is the whole mechanism. An insertion the operator makes concurrently inside that range is anchored among those tombstones, so the raw union materializes it on the far side of a component marker; `relay_update_capture` notices the cross-component union and `rebuild_component_isolated_epoch` rebootstraps the canonical *and every member replica*. The operator watches their own paragraph revert. `merge_by_component` and `rebuild_component_isolated_epoch` were correctly ruled out — they are what runs after the damage, and neither could have caused it.
+
+**The fix is one span per changed region.** `minimal_char_span_edits` peels the identical head and tail linearly, runs line-level Myers only over what is left, trims each hunk by its own shared prefix/suffix, and returns the spans highest-offset-first so each one still addresses the pre-edit text. A component the write left byte-identical keeps its original character identities, so a concurrent insertion inside it merges natively and there is no cross-component union to reconcile at all. The head/tail peel also keeps Myers off the 60KB whole-document case, where it would otherwise be O(N·D) over the entire file.
+
+**What I proved, and what I did not.** The mechanism is proven — two tests go red without the fix. What I could not recover from the log is the exact span of that one 17:22:09 write. `update_bytes=3370` for a `+100` net change implies a span of roughly 3000 characters, which fits `queue`+`backlog` (adjacent in this document) and does **not** reach up into `exchange`. I wrote a fixture at that exact geometry and it passes *both* before and after the fix, so I deleted it rather than ship a test that cannot fail — that is a false green, not evidence.
+
+So the honest chain is: the CP write is the only cross-component writer in the window; the single-span edit provably manufactures cross-component tombstones; and once `component_isolation_reconciled` fires for any reason, `rebuild_component_isolated_epoch` rebootstraps the canonical **and every member replica** — which is the only thing in the system that resets an operator's editor wholesale, and therefore the only thing that can look like "my typing reverted." My fix removes a large class of spurious triggers. It does not remove the rebootstrap itself, and the reconcile still decides to fire by comparing against a merge over a **synthetic** base that the code's own comment says "cannot be trusted." That residue is queued as `#reconcilesyntheticbase`, at the top of the backlog.
+
+**I proved the tests detect the defect rather than trusting them.** Collapsing the hunk merge back to a single span (`if true ||` on the adjacency condition) reddens both regression tests with the production shape, and restoring it greens them:
+
+| test | what it pins |
+|---|---|
+| `a_two_region_cp_write_must_not_tombstone_the_untouched_component_between_them` | behavioural — the operator's text survives **and** no isolation reconcile fires |
+| `a_two_region_write_leaves_the_component_between_them_untouched` | the mechanism, CRDT-free: no returned span may contain another component's bytes |
+| `split_spans_reproduce_the_target_text_exactly` | the split stays a faithful replacement (no trailing newline, pure insert, pure delete, multi-byte) |
+
+The third stays green under the mutation on purpose — it is a faithfulness invariant, not the defect.
+
+**One existing test changed, and I want to be explicit about it.** `notes_delete_cannot_splice_a_concurrent_exchange_response` asserted `packet.component_isolation_reconciled` and `pending_rebootstrap_members() == [2, 3]`. Both now fail — because in that scenario the CP write leaves `notes` byte-identical, so with per-region spans `notes` is never tombstoned, the concurrent delete merges natively, and there is nothing cross-component left to repair. Its content assertions are untouched and still pass: the canonical is byte-identical to the same `expected`, and the response still never reaches `notes`. I inverted the two mechanism assertions rather than deleting them, because the reconcile repairs by rebootstrapping the canonical *and every member replica* — which is precisely the visible revert this whole item is about. Never needing it is the stronger outcome, so the test now asserts it did not run.
+
+**On the `stale_plugin` cross-check the item asked for:** not implicated. The divergence is produced hub-side, inside the binary, by a span this binary computes; the plugin's `agent_doc_replica_diff` update at `delta_len=98` is an ordinary well-formed 9-character insertion. The 0.2.379-vs-0.2.381 warning is still standing and still wants an IDE restart, but it is a different problem.
+
+### Re: Run Agent Doc on sdk.md wedged — two causes, both fixed — opus-5
+
+The pane itself was not deadlocked, but the first cycle really did die, and its scrollback names the cause outright:
+
+```
+❯ /agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk.md
+  ⎿  UserPromptSubmit hook timed out after 30s — output discarded.
+● I'll start by checking the cycle contract from the preflight hook.
+✻ Worked for 2s · done
+```
+
+A 2-second no-op turn, no contract, no reason. `session-check` confirmed `cycle-1789161041234` stuck at `preflight_started`. Because that turn never closed, the queue stayed active and the supervisor idle watch re-dispatched — four `/agent-doc` triggers were stacked in the composer by the time you flagged it.
+
+**The runtime cause.** `src/haiven-dev/.claude/settings.json` wires the preflight hook with **no `timeout`**, so Claude Code applies its 30s default and *discards the output* on expiry. The superproject's settings beside it carry `timeout: 120`. Preflight is nowhere near 30s-safe on these documents — my own `session-check` on `sdk.md` just measured `resolve_current_document_content: 2878ms across 8 calls`, and preflight does far more than eight. I repaired that file; it was the only stale one in the tree.
+
+**The agent-doc cause — and it is the one that matters, because the repair above only ever happens when someone notices.** `PREFLIGHT_HOOK_TIMEOUT_SECS = 120` is written exclusively by `merge_claude_turn_status_hooks`, which runs on an explicit install *in that directory*. A submodule initialized by an older binary therefore keeps Claude's 30s default forever, and nothing in the product ever looks. Worse, under a 30s deadline the binary's own 90s `HOOK_ADMISSION_BUDGET_SECS` is not a budget at all: the harness kills the hook and discards its output long before the binary reaches the line that would have named its overrun. The entire `#hookcontractlost` design — "the binary always gets to name its own overrun before the harness kills it silently" — was inert in exactly the checkouts that needed it.
+
+Two changes, one per session:
+
+- **This session:** `admission_budget_under_harness_deadline` clamps the budget under the deadline the settings actually wire, with headroom to print and a floor so a pathological value cannot refuse turns a healthy controller would admit. Under a 30s deadline the budget becomes 25s, so a slow preflight now produces the `UNAVAILABLE` marker *with a reason* instead of silence.
+- **The next session:** `repair_claude_preflight_hook_timeout` writes the full timeout back onto a preflight entry the file already wires. Deliberately narrower than the merge — it adds no hook the file does not have and touches no other key, so it cannot resurrect something you removed on purpose.
+
+Verified end to end through the real hook binary against a scratch project, not just the unit tests:
+
+```
+before: [None]
+[agent-doc] repaired …/.claude/settings.json preflight hook timeout 30s -> 120s;
+           the 30s deadline still applies until Claude Code reloads settings
+after:  [120]
+other hooks preserved: 1
+```
+
+Four regression tests cover the clamp (untimed, correctly-installed, unknown-layer, pathological), the repair, and the must-not-touch case.
+
+The trigger stacking is downstream of the no-op turn — a turn that never closes leaves the queue active, so the idle watch keeps re-dispatching. That resolves itself now that the contract arrives. The general shape (a failing turn stacking N triggers with no composer-level dedup) is queued as `#idledispatchstack`.
+
+### Re: Clear Session Context on backend.md — yes, we were double sending — opus-5
+
+> **Queue prompt:**
+>
+> do [#exchangetypingrevert]
+
+
+Confirmed from the log, not inferred. One operator Clear produced two submits:
+
+```
+21:31:56  session_clear_sent            delivery=supervisor_ipc
+21:31:57  session_clear_submit_observation  phase=supervisor_ipc_acceptance
+                                           result=submission_unobserved capture_len=1157 capture_hash=95c262b69155
+21:31:57  tmux_input_event  source=session_clear.supervisor_ipc_resubmit
+                            transform=clear_resubmit_full_command key=text bytes=6   ← "/clear" again
+21:31:57  tmux_input_event  ... key=Enter
+21:31:58  session_clear_submit_observation  phase=supervisor_ipc_command_repair_acceptance
+                                           result=submission_unobserved capture_len=1183 capture_hash=81857010df9f
+21:31:58  session_clear_submit_blocked
+```
+
+The two capture hashes differ and the capture grew 26 bytes, so **the resend visibly landed** — the pane had been accepting input the whole time. You got two clears and a `blocked` verdict. Pane `%12` is sitting at `ctx:11%` as I write this, which settles it: the clear worked, and the report that it had not was wrong.
+
+**Why it resent.** `context_clear_submit_retry_action` fired `ResendCommand` on `status == Unobserved && !command_visible`, with the comment "`/clear`-style commands are idempotent, so repair the lost delivery with the full command." But `Unobserved` does not mean the delivery was lost — it means *the observation window closed with no evidence either way*. That is precisely the collapse this codebase's own `#idlerevisionreactive` rule forbids ("a cheap probe that gates expensive work must keep 'I did not look', 'I looked and got no answer', and 'here is the answer' as distinct outcomes"), and it inverts behaviour at the worst moment: the state where we cannot tell is exactly the state where a second submit is most likely to be a duplicate. And `/clear` is idempotent in *effect*, not in *delivery* — a second one still consumes a submit.
+
+**The evidence was already being computed and thrown away.** The poll loop derives `content_changed_since_delivery` per frame to recognise acceptance, then discarded it on timeout, so the retry decision could only see that acceptance was unproven and had to guess why. It now rides on `ContextClearSubmitObservation`, and the full-command resend requires the pane to have **never moved** since delivery — the one state a lost delivery actually produces. Mutation-checked: removing the guard reddens `a_pane_that_visibly_moved_since_delivery_is_never_resent_the_full_command`.
+
+I deliberately left the `SubmitKey` retry alone. A command sitting *visibly* in a split-submit composer is proven un-submitted, so pressing the harness submit key duplicates nothing; `a_visible_stuck_draft_still_earns_a_submit_key_even_after_the_pane_moved` pins that.
+
+**What this does not fix, and I would rather say so than let it look closed:** the false `submission_unobserved` verdict itself. `retained_lines=2041` in that log is a red herring — it counts non-empty lines in the whole tmux *scrollback*, which survives a `/clear` and is only logged, never used as the gate. The real verdict comes from `context_clear_history_proves_cleared_state`, which needs a settled dispatch-ready prompt it could not find. That stays tracked as `#clearunobservedrecycle` and `#clearsubmitpanesettle`. What is fixed is that failing to prove it no longer costs you a second `/clear`.
+
+**Verification.** Full suite green: **9359 tests run, 9359 passed, 0 failed**, `make check` exit 0 including the editor-parity release gate. All three fixes are mutation-checked — I reverted each guard in turn and confirmed the matching test reddens with the production shape, then restored it.
+
+Two things worth naming rather than burying. Earlier in the turn two `orchestrate::dag` tests failed with `controller_binary_stale (running controller binary 0.35.367 differs from caller 0.35.366)` — version skew from bumping mid-run against live controllers, not a regression; all 15 pass on the aligned build. And `src/session_actor_cmd.rs` is also being edited by another session right now, so rather than sweep their in-progress doctor-message change into my commit I staged a hand-built blob of `HEAD` plus only my four hunks. Their work is untouched in the tree.
+
+Released as **0.35.367**: committed `ff337b269`, pushed, tagged `v0.35.367`, built, installed (`agent-doc 0.35.367` confirmed live), supervisor recycled. The haiven-dev hook-timeout repair is its own commit (`a933132`) in that submodule. The Release run is in flight; per `#ci-no-closeout-wait` I am reporting it rather than waiting on it.
+
+One thing you should see: the superproject's **Agent Doc workflow has failed to start on its last five runs** — `"The job was not started because recent account payments have failed or your spending limit needs to be increased"`. That is a billing block, not a code regression, but nothing in that workflow has actually executed. agent-doc's own CI is unaffected and green.
+<!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -776,8 +888,7 @@ Exchange is at ~700 lines across 28 sections; not stopping for it.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- ~~do [#presetnullblank]~~
-- do [#exchangetypingrevert]
+- ~~do [#exchangetypingrevert]~~
 - do [#queuegorevokedonfreetext]
 - do [#layoutbindstale]
 - do [#jbfocusdocroute]
@@ -788,9 +899,11 @@ Exchange is at ~700 lines across 28 sections; not stopping for it.
 
 
 <!-- agent:backlog priority -->
+- [ ] [#reconcilesyntheticbase] [P1] `#exchangetypingrevert` removed a large class of spurious cross-component unions, but not the thing that turns one into data loss. `relay_update_capture` decides to reconcile by testing `isolated != after_text`, where `isolated` comes from `merge_by_component` over a **synthetic** `CrdtDoc::from_text(intent_before)` base — the code's own comment says that arbiter 'is reasoning over fabricated op identities' and 'cannot be trusted'. When it disagrees and `lost.is_empty()`, the repair is `rebuild_component_isolated_epoch`, which rebootstraps the canonical AND every member replica: any editor-side typing not yet in `intent_after` is gone with no recovery path. That is the only mechanism in the system that can reset an operator's buffer wholesale, so it is the real loss site for 'my typing reverted'. Two directions: (a) make the trigger require positive evidence of cross-component damage (a member character materialized past a component marker) rather than mere merge disagreement; (b) make the repair narrow — reproject only the offending component to the offending member — so a heuristic disagreement can never cost every replica. `lost` is also line-granular and trims whitespace, so a whitespace-only or duplicate-line insertion slips the safety net entirely.
+- [ ] [#idledispatchstack] [P2] A turn that fails to close leaves the queue active and the supervisor idle watch re-dispatches with no dedup against a trigger already sitting in the target composer. Observed 2026-09-11 on `src/haiven-dev/tasks/sdk.md`: after the `#hookcontractlost` no-op turn, FOUR `/agent-doc .../sdk.md` messages were stacked in pane %1 (`queue_dispatch_invoked` at 21:07:26 and 21:10:23, `command_kind=dispatch_only_reopen actor_state=ready`). Fixing the contract removed this instance's trigger, but the shape is general — any turn that dies without closeout re-arms the watch. `pane_composer_has_pending_trigger` (`agent-doc-controller/src/dispatch.rs:1488`) already classifies exactly 'this trigger is queued unsubmitted in that composer' for the `#jbtsiftnosub2` fresh-pane path; reuse it as an idle-watch precondition so the watch defers instead of stacking.
+- [ ] [#cpwritecomponentscoped] [P3] [recommended] Every CP write hands `RelayHub::apply_canonical_replace` a whole-document image and lets a text diff rediscover which components changed — `apply_document_rewrite` (`agent-doc-element-backlog-io/src/backlog_cmd.rs:354`) reads the entire document, applies a pure rewrite, and passes the whole result to `persist_pending_write`. `#exchangetypingrevert` made the derived spans per-region so an untouched component is no longer tombstoned, but the CP already KNOWS which components it mutated. Passing that scope down instead would make the write structurally incapable of touching another component, rather than relying on a diff to notice after the fact.
 - [ ] [#clearunobservedrecycle] [P2] `/clear` reported `submission_unobserved` on two haiven-dev panes (%16 docs.md, %15 dev.md) at 2026-09-11T20:24:15Z / 20:25:01Z, both `command_visible=false`, `elapsed_ms≈908`, `capture_len=2146`/`1138`. Evidence: `src/haiven-dev/.agent-doc/logs/ops.log` shows the same window churning controller generations 1176→1178 (`controller_active_non_stable_deferred ... handoff_state=Preparing`), so the panes were mid-restart and held no dispatch-ready prompt line — which is why `context_clear_history_proves_cleared_state` (#clearsubmitunobserved) could not resolve the idempotent case and the guard fell through to blocked. The guard itself is correct (fail-closed, exact unblocker). What is missing is the preceding step: the clear was attempted against a controller that had already refused as non-authoritative. Check whether the client-side #handoffrefusalretry landed in e13404d9c now defers the clear until the generation promotes; if it does not cover the supervisor_ipc_command_repair_acceptance path, extend it there. Repro: run `make install` against live route-owned supervisors, then issue Clear Session Context within ~30s.
 - [ ] [#clearsubmitpanesettle] [P3] [recommended] `context_clear_history_proves_cleared_state` requires a dispatch-ready prompt line, so a pane that is restarting reads identically to a pane that swallowed the clear. Consider a distinct `PaneRestarting` status (harness banner present, no prompt yet) whose unblocker is "wait for the harness to finish starting" rather than "verify pane state then retry" — the operator currently cannot tell those two apart from the message.
-- [ ] [#exchangetypingrevert] [P1] The OTHER half of the 2026-09-11 17:22:09 agent-doc-bugs.md sighting: operator exchange typing reverted while they typed. #queuelineclobber (fixed in 5983df246) explains the vanished free-text queue item and its promoted backlog mirror, but NOT this — exchange is a different component and this one does carry a real `crdt_replica_update_corruption_rejected ... reason=cross_component_raw_union recovery=canonical_restored_and_member_reprojected` event. Start from the fact that the isolation reconcile is a DETECTOR here, not necessarily the loss site: `crdt_replica_update_corruption_rejected` fires when `packet.component_isolation_reconciled` is true, which means a raw union already materialized member characters on the far side of a component marker. Ask what produced the divergent member replica, not what the reconcile did with it. Cross-check the standing stale_plugin warning (live JB plugin 0.2.379 vs 0.2.381 shipped). Do NOT re-walk merge_by_component (seven shapes probed, all preserve) or rebuild_component_isolated_epoch (ruled out on infra.md by ops.log timing).
 - [ ] [#queuegorevokedonfreetext] [P2] After #queuelineclobber, an operator who writes a free-text `re [#id]: <question>` queue line and flips `queue: go` keeps their text but still gets the activation revoked (`[preflight] queue: stripped activation token (drained)` then `queue: set queue: stop`) — that path is separate from the now-gated need_clear_drained_body. Defensible as-is (a `re` line is not a drainable head, and the inactive_queue_residue warning routes it to the next cycle's prompt), so this is a design question, not a proven defect: decide whether an operator activation should survive a body that holds only non-drainable operator text, or whether the revoke plus the residue warning is the intended answer. Decide before changing it — go-mode churn (#qchurn) is the failure mode on the other side.
 - [ ] [#layoutbindstale] [P2] `derive_layout_actor_bindings` (src/agent-doc/agent-doc-controller-io/src/project_controller.rs:746-784) builds `desired_windows` from the RECORDED `record.window_id`, then binds every other actor whose recorded window is in that set as a co-window sibling of the layout. The record is provably untrustworthy: `agent-doc session doctor src/haiven-dev/tasks/infra.md` reports actor+registry `window=@0` for pane %14 while tmux has %14 in @3 (@0=agent-doc visible, @3=stash). So a stashed pane can be joined into a layout it is not part of, and after a `session doctor --repair` (which rebinds the record to the LIVE window) every stashed pane would share the stash window id and be bound together. Decide whether this join should consume a window id at all, or key on the desired document set alone. NOTE from #stashfocuswindow: resolving live is NOT automatically the right answer — for a selection effect the live window is the stash, which is precisely what must not be used. Status: a reading of the join, not an observed symptom; needs a repro before changing it.
 - [ ] [#jbfocusdocroute] [P2] The JB "Focus Agent Terminal" notification is per-document ("Agent input required for $fileName", TurnStateBannerRefresher.notifyInputRequired) but IdeTerminalHost.focusExisting(project) ignores the file and focuses a single project-wide terminal tab named "agent-doc". In a multi-document tmux layout the correct target is the pane that OWNS that document. The plugin already has the machinery (TmuxPaneFocusSync.recordEditorFocusIntent takes a documentPath, though it only records a lease — the actual routing goes through the command plane via EditorFocusSyncListener). Do this together with #stashfocuswindow: both are pane->window/document resolution, and solving it in two places separately is how three tmux focus reports became three separate reports. The silent-no-op half of this is already fixed in plugin 0.2.381 (commit 50bc06de5); what remains is routing to the right pane rather than merely always navigating somewhere.

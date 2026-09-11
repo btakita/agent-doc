@@ -14073,6 +14073,15 @@ fn test_release_artifacts_ship_the_ffi_library_for_issue_52() {
         release.contains("cannot deliver FFI without it"),
         "a release build whose cdylib is missing must fail closed rather than publish a binary-only asset"
     );
+    // musl defaults to `+crt-static`, for which Rust emits no cdylib at all —
+    // the release directory holds `libagent_doc.rlib` and nothing else. The
+    // static binary is the point of the musl asset, so only the library build
+    // relaxes the CRT, and it does so in its own target directory.
+    assert!(
+        release.contains("RUSTFLAGS: \"-C target-feature=-crt-static\"")
+            && release.contains("--lib --target-dir target-ffi"),
+        "the musl library must be built with a dynamic CRT, separately from the static binary"
+    );
 
     let pypi = fs::read_to_string(manifest_dir.join(".github/workflows/pypi.yml")).unwrap();
     assert!(

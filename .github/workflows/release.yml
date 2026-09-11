@@ -64,6 +64,25 @@ jobs:
         if: "!matrix.use_cross"
         run: cargo build --release --target ${{ matrix.target }}
 
+      # `x86_64-unknown-linux-musl` defaults to `+crt-static`, and Rust emits NO
+      # cdylib for a statically linked CRT — the musl release directory holds
+      # `libagent_doc.rlib` and no `.so` at all. Observed on the first v0.35.363
+      # run, where this job's packaging guard fail-closed while the other five
+      # targets packaged their library fine. The shipped musl binary must stay
+      # statically linked (that is the point of the musl asset), so build the
+      # library separately with the CRT dynamically linked, into its own target
+      # directory so the static binary's artifacts are untouched.
+      - name: Build FFI library (musl)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          set -euo pipefail
+          cross build --release --target ${{ matrix.target }} --lib --target-dir target-ffi
+          cp "target-ffi/${{ matrix.target }}/release/libagent_doc.so" \
+            "target/${{ matrix.target }}/release/libagent_doc.so"
+        env:
+          CROSS_CONTAINER_ENGINE: docker
+          RUSTFLAGS: "-C target-feature=-crt-static"
+
       # GH #52: the tarball used to hold the binary ALONE. `lib-path` resolves
       # the cdylib as a SIBLING of the executable, so every package install
       # failed to load FFI and silently ran the editor plugins in the degraded

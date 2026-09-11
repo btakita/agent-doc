@@ -8,11 +8,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   `libagent_doc.so` / `.dylib` / `agent_doc.dll` beside the binary for every
   target, and the wheel installs it into the same `bin/`, so a package install
   no longer runs the editor plugins in file-based-IPC-only mode. A build whose
-  cdylib is missing fails closed. `lib-path`'s missing-library remedy branches
-  on how the binary was installed: a source checkout is still told to
-  `cargo build --release`, and a package install is pointed at a release asset
-  or `agent-doc lib-install --source <dir>` instead of a toolchain it does not
-  have.
+  cdylib is missing fails closed — the musl library is built separately with a
+  dynamic CRT, because `+crt-static` (the musl default) makes Rust emit no
+  cdylib at all while the shipped musl binary must stay static. `lib-path`'s
+  missing-library remedy branches on how the binary was installed: a source
+  checkout is still told to `cargo build --release`, and a package install is
+  pointed at a release asset or `agent-doc lib-install --source <dir>` instead
+  of a toolchain it does not have.
 - Gate PyPI publishing to milestone tags (`#pypicadence`, GH #52). Per-tag
   publishing ran ~5 GiB/month against a 10 GiB project quota, so uploads began
   failing with `400 Project size too large` and PyPI drifted 20 versions behind

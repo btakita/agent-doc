@@ -232,7 +232,7 @@ Confidence is high. No escalation or follow-up work was required for this item.
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#graftcrux]
+- ~~do [#graftcrux]~~
 - do [#graftimpactcontext]
 - do [#graftlspedges]
 <!-- /agent:queue -->
@@ -243,7 +243,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#graftcrux] [recommended] Add optional source-verified crux excerpts to tsift summaries and symbol context, anchored to symbol spans and body hashes with explicit stale-state handling.
 - [ ] [#graftimpactcontext] [recommended] Extend existing tsift impact output with grouped production modules, changed-symbol evidence paths, and separate test signals; expose bounded context to post-edit integrations.
 - [ ] [#graftlspedges] [recommended] Prototype optional LSP call-edge enrichment using installed servers, preserving extractor fallback, provenance, confidence, coverage diagnostics, and tsift freshness contracts; validate Rust and TypeScript resolution precision.
 <!-- /agent:backlog -->

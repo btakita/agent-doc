@@ -36,7 +36,7 @@
 //! [`RelayHub::recover_from_projection`], [`RelayHub::reconcile_disk_projection`],
 //! and [`DISK_IS_RECOVERY_PROJECTION_ONLY`].
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt::Write;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -160,6 +160,12 @@ pub struct BroadcastPacket {
     /// hub atomically rebuilt from the isolated result and queued every live
     /// editor for replace-capable re-bootstrap instead of exposing this delta.
     pub component_isolation_reconciled: bool,
+    /// `#queuelineclobber`: the component-scoped reconcile was REFUSED because its
+    /// result would have dropped text this member had just inserted. The raw union
+    /// was published instead. Callers log this — a refusal means the isolation
+    /// merge and the member disagree about operator-authored bytes, which is a
+    /// defect to investigate, not a steady state.
+    pub component_isolation_refused_lossy: bool,
 }
 
 /// One supervisor-to-editor delivery awaiting a matching visible-state projection.
@@ -502,7 +508,48 @@ impl DeliveryConvergenceSubscription {
     }
 }
 
-impl RelayHub {
+/// `#queuelineclobber`: non-blank lines the member just inserted that `isolated`
+/// would not carry through.
+///
+/// A line present in the member's post-edit buffer more often than in their own
+/// pre-edit buffer is text they just typed. No other replica has observed it yet,
+/// so no concurrent side can legitimately have deleted it — if the reconciled text
+/// does not contain it, the reconcile is losing operator-authored bytes.
+///
+/// Counts are multisets so a duplicated insertion is not masked by one surviving
+/// copy, and comparison is on trimmed non-blank lines so pure re-indentation or
+/// blank-line normalization inside the isolation merge is not reported as loss.
+/// Lines the canonical already held independently only make the check more
+/// permissive, which keeps it conservative against false alarms.
+fn member_insertions_lost_by(
+    intent_before: &str,
+    intent_after: &str,
+    isolated: &str,
+) -> Vec<String> {
+    fn line_counts(text: &str) -> BTreeMap<&str, usize> {
+        let mut counts = BTreeMap::new();
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                *counts.entry(trimmed).or_default() += 1;
+            }
+        }
+        counts
+    }
+    let before = line_counts(intent_before);
+    let after = line_counts(intent_after);
+    let result = line_counts(isolated);
+    let mut lost = Vec::new();
+    for (line, after_count) in after {
+        let inserted = after_count.saturating_sub(before.get(line).copied().unwrap_or(0));
+        if inserted > 0 && result.get(line).copied().unwrap_or(0) < inserted {
+            lost.push(line.to_string());
+        }
+    }
+    lost
+}
+
+    impl RelayHub {
     fn mint_lineage() -> String {
         uuid::Uuid::new_v4().to_string()
     }
@@ -1097,12 +1144,13 @@ impl RelayHub {
             update,
             targets,
             component_isolation_reconciled: false,
+            component_isolation_refused_lossy: false,
         };
         self.enqueue_delivery(&packet);
         Ok(packet)
     }
 
-    /// Apply a raw encoded lazily `TextCrdt` delta from member `client_id` to that
+/// Apply a raw encoded lazily `TextCrdt` delta from member `client_id` to that
     /// member's hub-side mirror, integrate the new op(s) into the canonical
     /// replica, and capture the fan-out packet of those op(s) for every OTHER
     /// live member **without delivering it** (the caller controls delivery — the
@@ -1160,19 +1208,52 @@ impl RelayHub {
         // retain native CRDT peer-union behavior. The semantic firewall is only
         // active once the canonical document actually contains component cells.
         let component_scoped = !project_document(&before_text).is_empty();
+        let mut component_isolation_refused_lossy = false;
         if component_scoped
             && (intent_before_text != &before_text || intent_after_text != &after_text)
         {
             let base_state = CrdtDoc::from_text(intent_before_text).encode_state();
             let isolated = merge_by_component(Some(&base_state), &before_text, intent_after_text)?;
             if isolated != after_text {
-                self.rebuild_component_isolated_epoch(&before_text, &isolated)?;
-                return Ok(BroadcastPacket {
-                    origin: client_id,
-                    update: Vec::new(),
-                    targets: Vec::new(),
-                    component_isolation_reconciled: true,
-                });
+                // `#queuelineclobber`: the reconcile must never drop text this
+                // member just inserted. `rebuild_component_isolated_epoch`
+                // rebootstraps the canonical AND every member replica from
+                // `isolated`, so anything missing from it is gone everywhere with
+                // no recovery path — the operator watches their own queue line or
+                // exchange paragraph disappear as they type.
+                //
+                // The merge base here is a SYNTHETIC `CrdtDoc::from_text`, so the
+                // causality-aware arbiter inside `merge_by_component` is reasoning
+                // over fabricated op identities. It cannot be trusted to decide
+                // that a member insertion was legitimately deleted — and nothing
+                // else can have deleted it, because no other replica has seen it
+                // yet. When the result would lose one, publish the raw union
+                // instead: it still carries the member's own op, and a character
+                // landing on the wrong side of a component marker is visible and
+                // repairable, where a silent deletion is neither. The structural
+                // safety net is unaffected — `agent-doc-crdt-relay-io` still
+                // restores the canonical if the union introduces a parse failure.
+                let lost = member_insertions_lost_by(
+                    intent_before_text,
+                    intent_after_text,
+                    &isolated,
+                );
+                if lost.is_empty() {
+                    self.rebuild_component_isolated_epoch(&before_text, &isolated)?;
+                    return Ok(BroadcastPacket {
+                        origin: client_id,
+                        update: Vec::new(),
+                        targets: Vec::new(),
+                        component_isolation_reconciled: true,
+                        component_isolation_refused_lossy: false,
+                    });
+                }
+                component_isolation_refused_lossy = true;
+                eprintln!(
+                    "[crdt] component_isolation_reconcile_refused reason=member_insertion_would_be_lost client_id={client_id} lost_lines={} first={:?}",
+                    lost.len(),
+                    lost.first().map(|line| line.chars().take(120).collect::<String>()),
+                );
             }
         }
         self.sync_live_document_projection(&before_text, &after_text);
@@ -1188,6 +1269,7 @@ impl RelayHub {
             update: delta,
             targets,
             component_isolation_reconciled: false,
+            component_isolation_refused_lossy,
         };
         self.enqueue_delivery(&packet);
         Ok(packet)
@@ -1240,6 +1322,7 @@ impl RelayHub {
             update: out,
             targets,
             component_isolation_reconciled: false,
+            component_isolation_refused_lossy: false,
         };
         self.enqueue_delivery(&packet);
         Ok(packet)
@@ -1349,6 +1432,7 @@ impl RelayHub {
             update,
             targets,
             component_isolation_reconciled: false,
+            component_isolation_refused_lossy: false,
         };
         self.enqueue_delivery(&packet);
         for target in &packet.targets {
@@ -2286,6 +2370,111 @@ mod tests {
             hub.member_text(3).unwrap(),
             "hello-ipc",
             "the raw-update fan-out reached the other live replica's mirror"
+        );
+    }
+
+    #[test]
+    fn member_insertions_lost_by_flags_only_text_the_member_just_added() {
+        // Direct cover for the `#queuelineclobber` safety post-condition. A line
+        // the member added since their own pre-edit buffer has been observed by
+        // nobody else, so nothing can legitimately have deleted it — if the
+        // reconciled text lacks it, the reconcile is dropping operator bytes.
+        let before = "- head\n- shared\n";
+        let after = "- head\n- shared\n- do [#operatortyped]\n";
+
+        assert_eq!(
+            member_insertions_lost_by(before, after, "- head\n- shared\n"),
+            vec!["- do [#operatortyped]".to_string()],
+            "a dropped member insertion must be reported"
+        );
+        assert!(
+            member_insertions_lost_by(before, after, after).is_empty(),
+            "a preserved insertion is not a loss"
+        );
+        assert!(
+            member_insertions_lost_by(before, after, "  - do [#operatortyped]  \n").is_empty(),
+            "re-indentation inside the isolation merge is not a loss"
+        );
+        assert!(
+            member_insertions_lost_by(before, before, "").is_empty(),
+            "a member that inserted nothing can lose nothing"
+        );
+        // Multiset, so one surviving copy cannot mask a duplicated insertion: two
+        // copies were inserted, only one survived.
+        assert_eq!(
+            member_insertions_lost_by("- x\n", "- x\n- x\n- x\n", "- x\n"),
+            vec!["- x".to_string()],
+        );
+        assert!(
+            member_insertions_lost_by("- x\n", "- x\n- x\n- x\n", "- x\n- x\n- x\n").is_empty(),
+            "both inserted copies surviving is not a loss"
+        );
+        // A line the CANONICAL already held independently only makes the check
+        // more permissive — it must never be reported as a member loss.
+        assert!(
+            member_insertions_lost_by("", "- shared\n", "- shared\n- shared\n").is_empty(),
+        );
+    }
+
+    #[test]
+    fn operator_queue_insertion_converges_with_a_concurrent_agent_queue_rewrite() {
+        // Characterization test for the shape reported on 2026-09-11 (queue items
+        // and exchange typing vanishing while the operator typed): the operator
+        // appends a queue line on a one-generation-stale projection while the agent
+        // concurrently REPLACES a different line in that same component, which is
+        // what puts the merge on the guarded, deletion-bearing path.
+        //
+        // This documents that the component-isolation merge converges CORRECTLY
+        // here. Seven such shapes were probed against `merge_by_component` —
+        // append-vs-replace, in-place-edit-vs-replace, exchange-typing-vs-append,
+        // append-vs-delete, in-place-edit-vs-body-rewrite, and both
+        // canonical-only-line-vs-stale-editor variants — and every one preserved
+        // the operator text. So this test is NOT a proof of the
+        // `member_insertions_lost_by` guard (that guard has no reproduction yet;
+        // it is a fail-safe). It is the record that the isolation merge was ruled
+        // out, so the next investigation starts at the rebootstrap / canonical
+        // projection delivered to the editor instead of re-walking this merge.
+        let base = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "- Fix docs.md turn not closing properly.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let agent_write = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt.\n\n### Re: prompt — opus-5\n\nComplete response.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#fixdocsturn]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let mut hub = RelayHub::from_text(1, base);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        let editor_frontier = editor.state_vector();
+
+        hub.apply_canonical_replace(base, agent_write).unwrap();
+
+        let operator_line = "- do [#retainedresumewakeflake]\n";
+        let insert_at = base.find("<!-- /agent:queue -->").unwrap();
+        editor.apply_local_edit(base[..insert_at].chars().count() as u32, 0, operator_line);
+        let update = editor.diff(&editor_frontier).unwrap();
+
+        hub.relay_update(2, &update).unwrap();
+
+        let canonical = hub.canonical_text();
+        assert!(
+            canonical.contains("- do [#retainedresumewakeflake]"),
+            "the operator's just-typed queue line must survive the reconcile; \
+             canonical was:\n{canonical}"
+        );
+        assert!(
+            canonical.contains("Complete response."),
+            "and the concurrent agent response must survive too; canonical was:\n{canonical}"
         );
     }
 

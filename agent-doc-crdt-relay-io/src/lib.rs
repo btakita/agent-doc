@@ -2250,8 +2250,13 @@ pub fn relay_replica_update_for_file(
     // Reattach the live member but quarantine that unproven update. The normal
     // controller-to-editor canonical projection repairs the consumer; the stale
     // editor baseline is never adopted as whole-document authority.
-    let (packet, reattached, canonical_projection_pending, corruption_restored) =
-        with_hub_seeded_from_file(file, |hub| -> Result<_> {
+    let (
+        packet,
+        reattached,
+        canonical_projection_pending,
+        corruption_restored,
+        isolation_refused_lossy,
+    ) = with_hub_seeded_from_file(file, |hub| -> Result<_> {
             let registered = hub.is_registered(client_id);
             let decision = decide_cold_start_replica_update(
                 registered,
@@ -2285,6 +2290,14 @@ pub fn relay_replica_update_for_file(
                 canonical_projection_pending = true;
                 corruption_restored = Some("cross_component_raw_union".to_string());
             }
+            // `#queuelineclobber`: the reconcile refused to publish a result that
+            // would have dropped text this member just typed, so the raw union was
+            // published instead. Surface it: a refusal means the isolation merge
+            // and the member disagree about operator-authored bytes, and until
+            // that merge is fixed this is the only record that it happened.
+            let isolation_refused_lossy = packet
+                .as_ref()
+                .is_some_and(|packet| packet.component_isolation_refused_lossy);
             if packet.is_some() {
                 let after_text = hub.canonical_text();
                 // Narrow to component *parse* failures (unclosed / mismatched /
@@ -2321,8 +2334,19 @@ pub fn relay_replica_update_for_file(
                 reattached,
                 canonical_projection_pending,
                 corruption_restored,
+                isolation_refused_lossy,
             ))
         })??;
+    if isolation_refused_lossy {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_component_isolation_reconcile_refused file={} authority=multi_replica client_id={} reason=member_insertion_would_be_lost recovery=raw_union_published_operator_text_preserved",
+                file.display(),
+                client_id,
+            ),
+        );
+    }
     if let Some(reason) = corruption_restored {
         agent_doc_ops_log_io::log_op(
             file,

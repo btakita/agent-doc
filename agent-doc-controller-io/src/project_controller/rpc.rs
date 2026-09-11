@@ -11166,7 +11166,15 @@ pub(crate) fn serve_with_options(
     let durable_project_root = bootstrap.project_root.clone();
     let runtime = ControllerRuntime::new_arc(bootstrap)?;
     install_local_document_projection_reader(&runtime);
+    // `#ctrlbindbeforeserve`: fold the durable reliable-sync journal BEFORE the
+    // socket becomes connectable. A bound socket with no accept loop behind it
+    // is a silent black hole: the client connects, writes, and waits out its own
+    // timeout with no way to tell this from a wedged controller. Everything
+    // between the bind below and the first `accept()` must therefore be bounded
+    // and cheap; this fold is neither.
+    let reliable_sync_recovery = hydrate_reliable_sync_liveness(&durable_project_root)?;
     let name = sock.clone().to_fs_name::<GenericFilePath>()?;
+    let listener_bound_at = Instant::now();
     let listener = ListenerOptions::new()
         .name(name)
         .create_sync()
@@ -11194,11 +11202,26 @@ pub(crate) fn serve_with_options(
     //
     // Sender frames may already have been pruned after their ACK; the receiver
     // journal is therefore the recycle authority, not a lease scan.
-    restore_reliable_sync_liveness(&durable_project_root, handoff_state)?;
+    if let Some(dead_open_pids) = reliable_sync_recovery {
+        spawn_reliable_sync_recovery_effects(&durable_project_root, handoff_state, dead_open_pids);
+    }
     // #s4b: install the OS process-exit watcher on the process-global
     // editor-attachment registry so `authority_for_file` reads reactive state
     // and editor crashes publish a bounded-latency liveness transition.
     crate::process_exit_watcher::install_process_exit_watcher(durable_project_root);
+
+    // `#ctrlbindbeforeserve`: name the window a client can connect into without
+    // being served. It should be sub-millisecond; if a stall ever reappears, this
+    // line says so directly instead of costing another forensic session.
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!(
+            "controller_listener_serve_ready socket={} handoff_state={:?} bind_to_accept_ms={}",
+            sock.display(),
+            handoff_state,
+            listener_bound_at.elapsed().as_millis(),
+        ),
+    );
 
     let should_stop = Arc::new(AtomicBool::new(false));
     let active_clients = Arc::new(AtomicUsize::new(0));
@@ -13707,10 +13730,25 @@ fn restored_reliable_sync_projects() -> &'static parking_lot::Mutex<BTreeSet<Pat
 /// Rebuild the in-memory liveness plane from facts the receiver committed before
 /// acknowledging them. This is intentionally idempotent: CRDT joins and cursor
 /// maxima make duplicate hydration harmless.
-fn restore_reliable_sync_liveness(
+/// Fold the durable reliable-sync liveness journal into the in-memory plane.
+///
+/// `#ctrlbindbeforeserve`: this runs BEFORE the controller binds its socket. It
+/// is a SQLite read plus a JSON decode of a journal with no bound on its size
+/// (59,671 rows / 6.5 MB on `agent-loop` at 2026-09-11), against a `state.db`
+/// that a departing controller may still be writing through WAL during a
+/// handoff. Anything unbounded between `create_sync()` and the first `accept()`
+/// leaves a client CONNECTED and silent — it already wrote its request — until
+/// the client's own timeout fires. That is indistinguishable at the editor from
+/// a wedged controller, and it is what `Project Controller did not respond
+/// within 60000ms` reports.
+///
+/// Returns `None` when this project was already restored in this process, and
+/// otherwise the editor pids whose deaths still need projecting — which the
+/// caller hands to [`spawn_reliable_sync_recovery_effects`] only once the
+/// listener is accepting.
+fn hydrate_reliable_sync_liveness(
     project_root: &Path,
-    handoff_state: ControllerHandoffState,
-) -> Result<()> {
+) -> Result<Option<Vec<agent_doc_reliable_sync_io::liveness::Pid>>> {
     let project_key = project_root
         .canonicalize()
         .unwrap_or_else(|_| project_root.to_path_buf());
@@ -13718,7 +13756,7 @@ fn restore_reliable_sync_liveness(
         .lock()
         .contains(&project_key)
     {
-        return Ok(());
+        return Ok(None);
     }
 
     let snapshot = agent_doc_sqlite::reliable_sync_inbox::load(
@@ -13759,13 +13797,24 @@ fn restore_reliable_sync_liveness(
             .collect::<Vec<_>>()
     };
     restored_reliable_sync_projects().lock().insert(project_key);
-    // The durable fold above is the readiness boundary. Recovery effects below
-    // can contact every retained editor route, and one stale IPC endpoint may
-    // consume a timeout. Running them before the accept loop made a newly-bound
-    // socket look alive while its backlog was never serviced; concurrent route
-    // supervisors then cold-launched duplicate controllers. Project these
-    // effects asynchronously so `status`/handoff RPCs are immediately
-    // serviceable while the already-hydrated liveness plane drives recovery.
+    Ok(Some(dead_open_pids))
+}
+
+/// Project the recovery effects the durable fold discovered.
+///
+/// The fold is the readiness boundary. These effects can contact every retained
+/// editor route, and one stale IPC endpoint may consume a timeout. Running them
+/// before the accept loop made a newly-bound socket look alive while its backlog
+/// was never serviced; concurrent route supervisors then cold-launched duplicate
+/// controllers. They are spawned, and only after the listener is accepting, so
+/// `status`/handoff RPCs are immediately serviceable while the already-hydrated
+/// liveness plane drives recovery — and so an editor answering the missing-replica
+/// projection reaches a controller that can receive it.
+fn spawn_reliable_sync_recovery_effects(
+    project_root: &Path,
+    handoff_state: ControllerHandoffState,
+    dead_open_pids: Vec<agent_doc_reliable_sync_io::liveness::Pid>,
+) {
     let recovery_root = project_root.to_path_buf();
     std::thread::spawn(move || {
         // A process can die while the controller is down, so its exit watcher
@@ -13783,7 +13832,6 @@ fn restore_reliable_sync_liveness(
             );
         }
     });
-    Ok(())
 }
 
 fn project_editor_replica_rebuilds(project_root: &Path) {
@@ -30997,25 +31045,48 @@ mod tests {
             .find("set_nonblocking(ListenerNonblockingMode::Accept)")
             .expect("controller listener readiness");
         let liveness_restored = serve
-            .find("restore_reliable_sync_liveness(&durable_project_root, handoff_state)?")
-            .expect("reliable-sync liveness restoration");
+            .find("spawn_reliable_sync_recovery_effects(&durable_project_root, handoff_state, dead_open_pids)")
+            .expect("reliable-sync recovery effect projection");
+        // `#ctrlbindbeforeserve`: the durable fold is a SQLite read plus a JSON
+        // decode of an unbounded journal, so it must finish BEFORE the socket is
+        // connectable. Anything unbounded between the bind and the first accept
+        // leaves a client connected and silent until its own timeout fires —
+        // reported at the editor as `Project Controller did not respond within
+        // 60000ms`, indistinguishable from a wedged controller.
+        let liveness_hydrated = serve
+            .find("hydrate_reliable_sync_liveness(&durable_project_root)?")
+            .expect("reliable-sync liveness hydration");
+        let serve_ready_logged = serve
+            .find("controller_listener_serve_ready")
+            .expect("bind-to-accept observability");
 
+        assert!(
+            liveness_hydrated < listener_bound,
+            "the durable reliable-sync fold is unbounded work; it must complete before the \
+             socket becomes connectable, or a client that connects into the gap waits out \
+             its own timeout against a socket nothing is accepting on"
+        );
         assert!(
             listener_bound < listener_nonblocking && listener_nonblocking < liveness_restored,
             "restored liveness immediately projects missing-replica targets; the controller \
              listener must already be ready so the returning editor projection becomes a \
              retained-delivery Source edge"
         );
+        assert!(
+            liveness_restored < serve_ready_logged,
+            "the bind-to-accept window must be measured at the accept loop, after every \
+             startup step it is supposed to bound"
+        );
 
         let restore = &source[source
-            .find("fn restore_reliable_sync_liveness(")
-            .expect("reliable-sync restoration")..];
+            .find("fn hydrate_reliable_sync_liveness(")
+            .expect("reliable-sync hydration")..];
         let durable_fold = restore
             .find("restored_reliable_sync_projects().lock().insert(project_key)")
             .expect("durable liveness fold readiness boundary");
         let async_effects = restore
-            .find("std::thread::spawn(move ||")
-            .expect("post-hydration recovery effect thread");
+            .find("fn spawn_reliable_sync_recovery_effects(")
+            .expect("post-hydration recovery effect entry point");
         let editor_signal = restore
             .find("if handoff_state == ControllerHandoffState::Stable")
             .expect("stable-public-generation gate");

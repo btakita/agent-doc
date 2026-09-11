@@ -1123,6 +1123,22 @@ internal fun resolveCommandSubmitTerminalData(data: JsonObject, commandId: Strin
     /// near the client's 15s deadline hint would abort routes that are still
     /// running correctly — the exact failure recorded in #jbroutasync.
 private const val SOCKET_REQUEST_TIMEOUT_MS = 60_000L
+
+/// `#ctrlacceptleg`: the command-plane ACCEPT leg is a pure enqueue — the
+/// controller validates the payload, publishes `Accepted`, hands the work to a
+/// worker thread, and replies. It has no legitimate server-side wait, so it must
+/// not share the hang-guard ceiling with legs that do (turn admission awaits 30s
+/// on purpose, which is why `SOCKET_REQUEST_TIMEOUT_MS` may not be lowered).
+///
+/// A controller binds its socket before its accept loop runs, so a client that
+/// connects into that window is CONNECTED and silent: it already wrote its
+/// request and simply waits out its own budget. On 2026-09-11 that surfaced to
+/// the operator as `Run Agent Doc` failing with `Project Controller did not
+/// respond within 60000ms; the controller may be wedged` — a full minute spent
+/// on a leg whose measured round trip against a live controller is 25-50ms, with
+/// no way to tell a starting controller from a wedged one. Bounding it here turns
+/// that into a fast retry through the `#rebootselfheal` path that already exists.
+private const val COMMAND_SUBMIT_ACCEPT_TIMEOUT_MS = 10_000L
 private const val COMMAND_COMPLETION_GRACE_MS = 5_000L
 private const val MIN_COMMAND_AWAIT_TIMEOUT_MS = 1L
 private const val TURN_AUTHORITY_STREAM_TIMEOUT_MS = 120_000L
@@ -1226,11 +1242,22 @@ private const val TURN_AUTHORITY_RECONNECT_MAX_MS = 5_000L
     /// So the reboot self-heal belongs only on lanes a human actually asked for
     /// (Sync Tmux Layout, Run Agent Doc, focus handoff), where starting a
     /// controller is the expected cost of the action.
-    private fun sendOperatorRequestDataToSocket(socket: File, request: JsonObject): JsonObject {
+    private fun sendOperatorRequestDataToSocket(
+        socket: File,
+        request: JsonObject,
+        timeoutMs: Long = SOCKET_REQUEST_TIMEOUT_MS,
+        selfHealOnTimeout: Boolean = false,
+    ): JsonObject {
         return try {
-            sendRequestDataToSocketWithTimeout(socket, request, SOCKET_REQUEST_TIMEOUT_MS)
+            sendRequestDataToSocketWithTimeout(socket, request, timeoutMs)
         } catch (e: Exception) {
-            if (!provesNoControllerListening(e)) throw e
+            val noListener = provesNoControllerListening(e)
+            // `#ctrlacceptleg`: on a leg with no legitimate server-side wait, a
+            // timeout means the same thing operationally as no listener — a
+            // controller that cannot serve this request — so it takes the same
+            // recovery instead of surfacing a dead minute to the operator.
+            val boundButNotServing = selfHealOnTimeout && provesControllerDidNotAcknowledge(e)
+            if (!noListener && !boundButNotServing) throw e
             // The shared library owns the recovery: adopt a live controller,
             // unlink a stale socket file, launch. This call must stay a single
             // delegation — a plugin that grows its own socket recovery is how the
@@ -1238,8 +1265,14 @@ private const val TURN_AUTHORITY_RECONNECT_MAX_MS = 5_000L
             val projectRoot = socket.parentFile?.parentFile?.path
                 ?: throw e
             log.warn(
-                "[cp] no controller listening on ${socket.path}; " +
-                    "ensuring one is running (#rebootselfheal)"
+                if (noListener) {
+                    "[cp] no controller listening on ${socket.path}; " +
+                        "ensuring one is running (#rebootselfheal)"
+                } else {
+                    "[cp] controller accepted a connection on ${socket.path} but did not " +
+                        "acknowledge within ${timeoutMs}ms; ensuring a serving controller " +
+                        "(#ctrlacceptleg)"
+                }
             )
             val lib = AgentDocLib.get() ?: throw e
             val ensured = try {
@@ -1249,8 +1282,20 @@ private const val TURN_AUTHORITY_RECONNECT_MAX_MS = 5_000L
                 throw e
             }
             if (ensured != 1) throw e
-            sendRequestDataToSocketWithTimeout(socket, request, SOCKET_REQUEST_TIMEOUT_MS)
+            sendRequestDataToSocketWithTimeout(socket, request, timeoutMs)
         }
+    }
+
+    /// `#ctrlacceptleg`: the request reached a listening socket and nothing came
+    /// back before the deadline — distinct from `provesNoControllerListening`,
+    /// where the connect itself failed.
+    internal fun provesControllerDidNotAcknowledge(e: Throwable): Boolean {
+        var cause: Throwable? = e
+        while (cause != null) {
+            if (cause.message?.contains("did not respond within") == true) return true
+            cause = cause.cause
+        }
+        return false
     }
 
     private fun sendRequestDataToSocketWithTimeout(
@@ -1316,7 +1361,14 @@ private fun sendAcceptedCommandSubmitToSocket(
         commandId: String,
         commandName: String,
     ): CpEditorRouteResult {
-    val data = sendOperatorRequestDataToSocket(socket, request)
+    // `#ctrlacceptleg`: bounded separately from the terminal leg below, which
+    // keeps the full ceiling because it genuinely waits on server-side work.
+    val data = sendOperatorRequestDataToSocket(
+        socket,
+        request,
+        timeoutMs = COMMAND_SUBMIT_ACCEPT_TIMEOUT_MS,
+        selfHealOnTimeout = true,
+    )
     return resolveCommandSubmitAcceptedData(data, commandId, commandName)
 }
 

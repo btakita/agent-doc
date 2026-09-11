@@ -466,6 +466,66 @@ Before the fix every one of those was `None`.
 CI: run 34623772732 (0.35.365) has been in progress for ~40 minutes without completing, so `#retainedresumewakeflake` is still unconfirmed; 34626410869 (0.35.366) is queued behind it. Reported, not waited on.
 
 Exchange is at 430 lines / 20 response sections, noted. Only `#cargotokenrevoke` remains in the queue and it is operator-gated on the crates.io login click, so the drain ends here.
+Fix docs.md turn not closing properly...the response is uncommitted.
+```
+● No cycle ran this turn. Preflight refused admission because the previous cycle's document write is still reconciling,
+  and session-check confirms the same controller-owned divergence as before.
+
+  State
+
+  - The response to "Address all reviews in PR 20" is committed in git (commit b1063aa on tasks/docs.md) and the PR
+    work itself is done and pushed (haiven-docs 283c17b).
+  - The editor buffer for docs.md still holds a different exchange and queue than disk, so the controller has requested
+    a native editor save and owns the next closeout. Disk now also contains the response, but session-check still
+    reports divergence on the exchange and queue components.
+  - Per the standing rule for this state I did not patch, restore, or resubmit anything.
+
+  What clears it
+
+  Save the docs.md buffer in the editor, then re-invoke /agent-doc tasks/docs.md. If session-check still reports
+  divergence after the save, that is a controller defect to report rather than something to work around by editing the
+  file.
+
+  The two open items from the last cycle still stand: your unsubmitted pending review on PR 20 blocks inline replies
+  from your account, and Sanat's questions on the issuance shape, its owner, and the handoff date are yours to answer.
+```
+
+### Re: docs.md turn not closing, plus three more operator-text-loss reports — opus-5
+
+**`#fixdocsturn` is fixed, tested, installed and pushed** (0.35.366, commit `0f959e11f`). The other three reports you added mid-turn are diagnosed with reproductions but not fixed — details and my reasoning below.
+
+#### Why the docs.md turn could never close
+
+`session-check` on `src/haiven-dev/tasks/docs.md` reported **6 concurrent operator steering directives**. Four of them were not yours. Steering 1/6–4/6 were verbatim paragraphs of the committed `### Re: #plcite` response cell — a retained-capture replay had spliced that whole cell back into the live buffer a second time (plus three reversed copies of the PR-20 bullet list).
+
+The write pipeline was doing the right thing: it resolved those bytes away as a duplicate, so they never reached a commit. But the steering detector reads the raw buffer, and classified the replayed paragraphs as new `PromptTarget`s. That is a trap with no exit — answering a phantom prompt only appends another response, the replayed bytes stay, and the next `session-check` INTERRUPTs again. Hence "the response is uncommitted": the cycle committed, and the document still looked unanswered forever.
+
+The fix classifies by **provenance, not shape**. A block is a replay only if the whole thing matches a *contiguous run* of the baseline exchange — so every line is already committed and none of it is new operator input — **and** that run overlaps a response body, which is where an operator prompt is never committed. A re-surfaced operator prompt block has no response-body overlap and still counts as steering.
+
+Proof, against the real wedged pair (`b1063aa` plus the observed duplicate cell):
+
+| | directives |
+|---|---|
+| before | **4** `prompt_target` — byte-identical to live steering 1/6…4/6 |
+| after | **0** |
+
+Two unit tests plus two steering-level tests, mutation-checked (removing the filter reddens `replayed_committed_response_cell_is_not_realtime_steering`). `make check` green locally; 446 passed on the two touched crates.
+
+#### The three reports you added mid-turn
+
+I did **not** fix these, and I want to be straight about why rather than quietly hand you four half-fixes.
+
+**Your queue items and exchange typing being destroyed is the most serious thing here**, and it is now reproducing across two documents. I found the exact event on this document — `cross_component_raw_union` at 17:22:09, three seconds before this turn admitted, with `recovery=canonical_restored_and_member_reprojected` — and on `infra.md` I found something sharper: your queue line survives as `- do [#fpeidentitysecondclient]`**`U`**. That stray `U` does not exist anywhere in the text that was removed, so it arrived from a *different component*. That is character-granularity cross-component damage, not a lost line. I walked the path to `crdt_relay.rs:1168` and found two things worth your attention: the three-way merge base is a **synthetic** `CrdtDoc::from_text`, so all op identity is discarded before the merge runs, and the canonical-with-delta-applied text is computed and then thrown away. Fixing that properly needs a SimWorld case with a one-generation-stale editor projection, and the recovery currently drops your bytes **without logging what it dropped** — so step one is instrumentation, not a patch. It is at the top of the backlog as `#queuelineclobber` with everything I found, so the next cycle starts from evidence rather than from scratch.
+
+**The `prompt_presets` blanking I did reproduce deterministically.** When you type the key and have not typed the value yet, the parser reads the YAML null as an empty string and the next write emits an explicit empty value — something you never wrote, which then races the value you are still typing. I stopped short of landing the clean fix because it needs `prompt_presets` to round-trip null the way the `env` field already does, and that is ~200 references across 23 files — a refactor I was not willing to start at the end of a long turn in a tree another session is writing to. There is also a trap worth recording: "just drop the null key at parse" would make `write()` **delete your half-typed line**, which is the same harm wearing a different hat. Filed as `#presetnullblank` with the reproduction and both findings, including the separate discovery that agent-doc re-serialized your frontmatter (stripping your quotes) without changing a single value.
+
+**The stash-window focus is confirmed live.** `session doctor` on `infra.md` says pane `%14` is recorded against window `@0` but actually lives in `@3` — and `@0` is the stash. I ruled out `select_pane` (tmux resolves the pane's real window) and found that the focus-*mirror* direction is already guarded live-vs-record with a sensitivity proof, so the remaining suspect is a path issuing `select-window` against the **recorded** window. The durable fix is to resolve pane→window at use time and stop persisting an id tmux already owns; `doctor --repair` is a band-aid and should not be the answer. Filed as `#stashfocuswindow`.
+
+#### One more thing you should know
+
+CI run **34626410869 is red** on `compact_exchange_returns_retained_success_when_editor_ack_stays_delayed`. It predates my commit and is not reachable from it, and local `make check` on the same tree is green — but it is the same delayed-editor-ack shape as `#retainedresumewakeflake`, whose diagnosis probably applies directly. Filed as `#compactackflake`.
+
+I also could not `--done` the `#fixdocsturn` backlog item: it had already been destroyed by `#queuelineclobber` before I could close it.
 <!-- agent:boundary:1406b99d:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -475,13 +535,18 @@ Exchange is at 430 lines / 20 response sections, noted. Only `#cargotokenrevoke`
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#captureresumereplaynotidempotent]~~
-- ~~do [#supervisoridlewatchmissing]~~
+- As I was typing in this file's agent:exchange when the turn started, my changes in agent:exchange were reverted by agent-doc.
+- do [#retainedresumewakeflake]
 - do [#cargotokenrevoke]
+- The JB "Focus Agent Terminal" does not navigate to anything.
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#queuelineclobber] [P0] agent-doc destroys operator-authored text in a live document mid-turn. THREE independent sightings today, two documents. (1) agent-doc-bugs.md 17:22:09, ~3s before this turn admitted: ops.log `crdt_replica_update_corruption_rejected file=tasks/agent-doc/agent-doc-bugs.md authority=multi_replica client_id=5284999437058107 reason=cross_component_raw_union recovery=canonical_restored_and_member_reprojected` — the operator was typing in agent:exchange and their text was reverted; their free-text queue item AND its promoted backlog item (#fixdocsturn) both vanished. (2) src/haiven-dev/tasks/infra.md: HEAD c0fae3b queue held `- re [#fpeidentitysecondclient]: Since we moved over to a Secret Bearer Token between the fpe + backend, is this still applicable?`; the worktree now holds `- do [#fpeidentitysecondclient]U` — the operator question text is gone and a stray U is welded onto the end of their line. There is no U anywhere in the text that was removed, so that character came from a DIFFERENT component: character-granularity cross-component union damage, exactly the failure relay_update_capture names in its own comment. Code path, already walked, do not re-walk: agent-doc-crdt-relay-io/src/lib.rs:2281-2287 sets corruption_restored=cross_component_raw_union from packet.component_isolation_reconciled, which is set at agent-doc-document-realtime/src/crdt_relay.rs:1168-1176 when merge_by_component(base=CrdtDoc::from_text(intent_before), ours=canonical_before, theirs=intent_after) disagrees with the raw union; it then calls rebuild_component_isolated_epoch and returns an EMPTY packet with NO targets. Note two things about that call: the base is a SYNTHETIC CrdtDoc built from text, so all op identity is discarded before the three-way merge, and after_text (the canonical with the editor delta actually applied) is computed and then thrown away. START HERE: instrument rebuild_component_isolated_epoch to log before/after lengths and a per-component line delta, because today the recovery drops operator bytes with no record of what it dropped. Then build a SimWorld case: operator edits queue while agent rewrites queue in the same tick, editor projection one generation stale.
+- [ ] [#presetnullblank] [P1] agent-doc materializes a frontmatter value the operator never typed, which then clobbers the value they are typing. Reported on src/haiven-dev/tasks/docs.md: operator wrote a prompt_presets entry #rebase-conflicts and agent-doc reverted its value "rebase + fix merge conflicts" to the empty string. REPRODUCED DETERMINISTICALLY (probe over agent_doc_frontmatter::frontmatter parse/write): a preset key typed with no value yet parses to ("#rebase-conflicts", "") and writes back as an explicit empty-string value. So a mid-typing YAML null becomes an agent-authored empty string in the operator document, and that agent write then competes with — and can win over — the real value. Parse site: agent-doc-frontmatter/src/frontmatter.rs:1656-1662. SECOND, RELATED FINDING from the same document: HEAD 3f777fe holds the preset value single-quoted and the worktree holds it UNQUOTED — agent-doc re-serialized the operator YAML without changing any value, so write() is rewriting frontmatter it does not own. The clean fix for the null case needs prompt_presets to round-trip null (the env field at frontmatter.rs:766 already uses IndexMap<String, Option<String>> for exactly this) — measured blast radius is ~200 references across 23 files, so it is a real refactor, not a one-liner. Do NOT fix it by dropping null keys at parse: write() would then delete the half-typed line out from under the operator, which is the same harm. Prefer instead making the write path byte-preserving for frontmatter it did not change — frontmatter.rs:1435-1529 already documents that pattern (every other byte is preserved verbatim) and some write path is bypassing it.
+- [ ] [#stashfocuswindow] [P1] Navigating to src/haiven-dev/tasks/infra.md focuses the tmux STASH window. CONFIRMED LIVE, do not re-diagnose: `agent-doc session doctor src/haiven-dev/tasks/infra.md` reports both "actor window @0 for pane %14 is stale — the pane now lives in @3" and the same for the registry entry. So the recorded binding points at @0 (stash) while the pane really lives in @3. Already ruled out: select_pane is NOT the culprit — tmux resolves %14 to its real window, proven by agent-doc-route-io/tests/route/startup.rs:3167 select_pane_switches_window. Also already present and passing: the focus-MIRROR direction is guarded live-vs-record by src/sim_world.rs:198 a_stashed_column_never_receives_mirrored_focus, with a record-only sensitivity proof at :240. So the remaining suspect is a path that issues select-window against the RECORDED window instead of resolving the pane live. The durable fix is to resolve pane->window at use time and stop persisting a window id that tmux already owns; `agent-doc session doctor --repair` is the manual band-aid and must not be the answer. Needs a live pane repro — see memory reference_agent_doc_live_pane_repro_harness_gotchas for the three traps.
+- [ ] [#compactackflake] [P2] CI run 34626410869 (0.35.366, workflow CI) is RED on agent-doc-document-realtime-io tests::compact_exchange_returns_retained_success_when_editor_ack_stays_delayed, panicking at agent-doc-document-realtime-io/src/lib.rs:9472 (3183 passed / 1 failed / 259 skipped, 1025s). It predates the #fixdocsturn commit 0f959e11f and is not reachable from it (that change touches agent-doc-diff + baseline_comparison only), and local `make check` on the same tree is green. Same delayed-editor-ack shape as #retainedresumewakeflake, and that item already carries the diagnosis to apply here: the test synchronises on a subscribe RETURNING rather than on the condition holding, so a contended runner returns from subscribe for something other than the awaited event. Check whether :9472 waits on a subscribe/timeout proxy and convert it to a bounded poll of the actual condition.
 - [ ] [#retainedresumewakeflake] CI run 34621201563 (0.35.364) went red on agent-doc-controller-io `project_controller::tests::retained_resume_reacts_when_the_intent_arrives_after_delivery` — `assertion left == right failed; left: None, right: Some("retained_settled_delivery_reactive")` at project_controller.rs:15843. Already checked, do not re-walk: it does NOT reproduce locally (~900 executions, including `taskset -c 0` with --test-threads=8 and a 2-core taskset), and neither 0.35.364 change is reachable from it — pane_layout_projection_converged is in the pane-layout worker this test never drives, and capture_resume_unowned is in agent-doc-capture-io, which agent-doc-controller-io's lib test binary does not link. That CI run took 805s vs 166s locally, so the runner was heavily contended. Lead: the test's synchronization is a proxy, not a wait. It asserts `!subscribe_state_plane(CAPTURED_FINALIZE_WAKE_STATE_CHANNEL, None, 0, 2s).timed_out` and then reads runtime.captured_finalize_wakes immediately. record_captured_finalize_wake (rpc.rs:18944) inserts into that map BEFORE publishing the frame, so an absent key proves the subscribe returned for something other than this wake — check what state_plane_effective_after_version(None, 0, gen) plus the generationless-cursor reset makes `subscribe` return when the channel has no frames yet. Fix: wait on the condition (poll captured_finalize_wakes for the expected reason under a bounded deadline) rather than on subscribe-return, and apply it to all three sites using this pattern (15694, 15843, 15898). Keep both assertions — that settlement publishes the receipt AND that it records the reason.
 - [ ] [#cargotokenrevoke] [operator-verify] Revoke and re-issue the crates.io API token exposed in diagnostic tool output during the pane-removal investigation, then store the replacement via passage. BLOCKED ON ONE CLICK: https://crates.io/settings/tokens is open in bridged Chromium tab 13 and returns 'This page requires authentication' — that profile has no crates.io session and no chromium-bridge state snapshot exists. crates.io token management is session-cookie-gated, so the exposed token cannot revoke itself via API. Unblocks: click 'Log in with GitHub' in tab 13 (OAuth returns to /settings/tokens), then re-queue this item and the agent enumerates and revokes in-session. Blast radius nil: agent-doc has no cargo publish step and no CARGO_REGISTRY_TOKEN in any of its five workflows (book, ci, mdbook, pypi, release).
 <!-- /agent:backlog -->

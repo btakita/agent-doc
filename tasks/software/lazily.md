@@ -190,6 +190,22 @@ Shipped `lazily.replay` — the provability half of the gate `lazily.workflow` o
 `deterministic=True` runs each replay inside `deterministic_scope()`, so a wall-clock read raises at the line that reached it rather than surfacing as a divergence one checkpoint later; the suite asserts both modes. Hashing is BLAKE2b-256 from `hashlib`, not BLAKE3 — lazily-py has no runtime dependencies and BLAKE3 is not in the stdlib. Digests are not wire-compatible with tsift's and are not meant to be.
 
 CI run 34619335884 was still queued at hand-off; 34618133123 (the previous commit) came back green. Local evidence stands on its own. Filed the cross-binding port as a recommended follow-up at the queue tail rather than preempting `#lzpyprojectedchart`.
+
+### Re: do [#lzpyprojectedchart] — opus-5
+
+Shipped `lazily.projected_chart` — `2c6fda2`, pushed. `make check` green (1011 tests, ruff/ty/conformance-coverage/interop-peer/assertion-ordering/ci-reach clean).
+
+**The design decision the item turns on: the projection never refuses the authority.** `lazily.statechart` owns its transitions — you send it an event and it decides. That is the wrong shape when `workflow_run.status` lives in Postgres and is advanced by Temporal. So this chart decides nothing; you feed it observed states and it answers the two questions the authority cannot. Every non-stale observation is **adopted**, including a step the declared lifecycle forbids and a state the chart has never heard of, and the violation is recorded as an `IllegalTransition` counted on a reactive cell. Refusing the row would make this side silently disagree with the database it is projecting — worse than not modelling it. Adopting it quietly would say nothing. It adopts and says so. An undeclared state cannot wedge, because no deadline is knowable for it: the violation is the signal, not a fabricated deadline.
+
+**The wedge is where the FPE bug lives, so it is where the semantics are strictest.** `wedged` is a derived cell over `now - entered_at > deadline`, strictly — at the deadline is not past it — so an effect or health cell on it runs exactly on the edge and not once per poll. The part that matters: **a repeated observation does not reset the deadline.** Re-observing the current state advances the authority timestamp but *not* `entered_at`, because a poller re-reading the same `started` row is evidence the run is wedged, not evidence it just advanced. Resetting there makes the wedge unreachable, which is precisely the failure `#fpelasterrorlww` was patching by hand. Terminal and deadline-less states never wedge — a finished run is not late.
+
+**Two clocks, kept apart on purpose.** `at` is the authority's timestamp for the row and staleness is last-writer-wins on it, so out-of-order delivery cannot walk the state backwards — but an `at` older than the observer clock is *not* stale, which is the ordinary case of a row written five seconds before the poll that reads it. Dropping those would lose real transitions. `tick(now)` is the observer clock and raises on a backwards reading rather than clamping (`ManualClock` clamps, which is right for a game loop; a deadline computed off a regressing clock is not a deadline). Both must share a time base, which epoch-ms DB timestamps and a local reading naturally do.
+
+`tick`/`next_fire` match `TimelineSource`, so the wedge registers with a `WorkflowContext` and becomes a durable engine timer instead of a polling loop. And because both clocks are inputs, `ProjectedChartCore` is a pure function of its observation log — the suite proves one under last cycle's `ReplayHarness` with wedge and violations in the fingerprint, so `#lzpyreplayproof` paid for itself one item later.
+
+Scoped as a Python-side addition, not a spec family: `statechart` stays the conformant Harel/SCXML chart that owns its transitions, and the subject here is one external row per chart, so no thread-safe/async flavours and no cross-binding port implied. Filed the FPE adoption (drop the hand-written branch for the derived cell) into `src/haiven-dev/tasks/fpe.md`, where that work actually lives.
+
+`#lzpyreplayproof`'s CI run 34619335884 came back green; 34620191066 for this commit is pending. Advisory `stale_install` and `stale_plugin` warnings noted — neither is owned by this cycle. Exchange is at 169 lines / 7 sections; noting it rather than stalling the queue to compact.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -197,13 +213,14 @@ CI run 34619335884 was still queued at hand-off; 34618133123 (the previous commi
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzpyreplayproof]~~
-- do [#lzpyprojectedchart]
+- 🚧 do [#lzpyprojectedchart]
+- do [#lazilyspecbindings]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzpyprojectedchart] [recommended] [lazily-py] statechart mode that projects an external authority: feed it observed states, have it validate each transition was legal, and expose a derived 'wedged' cell (in a state past its deadline with no advance). FPE's workflow_run.status is owned by Postgres/Temporal, not the graph. Would express the #fpelasterrorlww wedge declaratively. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
+- [ ] 🚧 [#lzpyprojectedchart] [recommended] [lazily-py] statechart mode that projects an external authority: feed it observed states, have it validate each transition was legal, and expose a derived 'wedged' cell (in a state past its deadline with no advance). FPE's workflow_run.status is owned by Postgres/Temporal, not the graph. Would express the #fpelasterrorlww wedge declaratively. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
 - [ ] [#lazilyspecbindings] [recommended] [lazily-spec + 8 bindings] port the replay-equivalence contract from lazily-py's `lazily.replay` to the spec and the remaining bindings: a canonical fixture for the log digest / fingerprint binding, then ReplayHarness-equivalents in rs/kt/js/dart/zig/go/cpp/cs. Budget ~10 repos — a new canonical fixture reddens all nine. Repo: src/lazily-spec first. Source: #lzpyreplayproof
 <!-- /agent:backlog -->
 

@@ -424,6 +424,48 @@ This closes the gap 0.35.364 opened one release earlier — the `CaptureResumeUn
 **CI: the 0.35.364 run (34621201563) went red** on `agent-doc-controller-io project_controller::tests::retained_resume_reacts_when_the_intent_arrives_after_delivery` — `left: None, right: Some("retained_settled_delivery_reactive")`. I do not believe it belongs to that change, and I checked rather than assumed: neither edit is reachable from that test. `pane_layout_projection_converged` lives in the pane-layout worker, which this test never drives, and the `capture_resume_unowned` bit is in `agent-doc-capture-io`, which `agent-doc-controller-io`'s lib test binary does not link. It did not reproduce in ~900 local executions, including pinned to one core at `--test-threads=8`; that CI run took 805s against 166s locally, so the runner was heavily contended. The test's synchronization looks like the real fragility — `subscribe_state_plane(..., None, 0, 2s)` returning is used as a proxy for "this specific wake landed", and `record_captured_finalize_wake` inserts into the map *before* it publishes, so an absent key means the subscribe was satisfied by something that was not this frame. Filed as `#retainedresumewakeflake` with that analysis; the 0.35.365 run (34623772732) was still in progress at closeout and will confirm or refute it.
 
 Exchange is at 400 lines / 19 response sections, noted and still draining.
+
+### Re: #supervisoridlewatchmissing — opus-5
+
+> **Queue prompt:**
+>
+> do [#supervisoridlewatchmissing]
+
+
+Root-caused, fixed, and **verified live**. Shipped in **0.35.366** (`afedc44bb`, tagged and pushed, installed, recycle marked). `make check` → **9326 passed, 0 failed**.
+
+**The supervisors were there the whole time. The parser could not see them.**
+
+```
+$ pgrep -fa "agent-doc start"          # twelve live route-owned supervisors
+13952    agent-doc start --route-owned --route-owned-reap-policy keep-alive \
+                        --route-owned-start-purpose layout-provision tasks/agent-doc/agent-doc-bugs.md
+1827015  ... --route-owned-start-purpose layout-provision --resume -- tasks/backend.md
+```
+
+`start_route_owned_doc_from_args` walked positionally from `start`: skip `-`-prefixed tokens, skip exactly one hand-listed `--flag VALUE` pair (`--route-owned-reap-policy`), return the first bare token. So `--route-owned-start-purpose` — a value-taking flag added after that list was written — fell through the `starts_with('-')` arm, and the very next token was returned as the document. **Every one of those twelve supervisors resolved to `layout-provision`.** `supervisor_doc_canonical` then failed to canonicalize a file that does not exist, and `supervisor_pid_for_doc` answered `None` for documents whose supervisor was running the entire time.
+
+That is the whole chain to the wedge: no supervisor found ⇒ no idle watch ⇒ the controller falls back to `controller_orphan_drain_dispatch ... reason=no_supervisor_idle_watch`, and captured-finalize resume — whose only drivers are that idle watch and the Codex `Stop` hook — genuinely has no driver. It also means 0.35.364's `capture_resume_unowned` bit was reading `true` on documents that *were* owned. The verdict logic was right; its input was being lied to by this parser.
+
+The fix keys on the `.md` token after `start`, which is flag-order- and flag-set-independent. That rule was not invented here — `agent_doc_controller::command_line::start_supervisor_document_from_args` already used it and already read these exact command lines correctly. Two crates answering the same question, one right and one wrong, for however long `--route-owned-start-purpose` has existed.
+
+They cannot collapse into one function: `agent-doc-controller` depends on `agent-doc-supervisor`, so the shared predicate would have to move down along with `agent_doc_start_arg_index` and its shell-sentinel helpers — more than this cycle should take. The guarantee instead is a **cross-crate agreement test** over every command-line shape agent-doc itself launches, including both orderings (`start_reexec_command` puts the document *first*; the controller-side launcher puts it *last*) and an unknown future flag. Both new tests are mutation-checked: restoring the old parser reddens them with `parsers disagree on ...`.
+
+**Live proof after install** — `admin kill-supervisor --dry-run` resolves the pid without signalling:
+
+| document | pid | matches `pgrep` |
+|---|---|---|
+| `src/haiven-dev/tasks/backend.md` | 1827015 | ✅ |
+| `src/haiven-dev/tasks/infra.md` | 1928885 | ✅ |
+| `tasks/software/lazily.md` | 2477504 | ✅ |
+| `tasks/software/tsift.md` | 2475272 | ✅ |
+| `tasks/agent-doc/agent-doc-bugs.md` | 13952 | ✅ (`refused_self_ancestor` — this session's own supervisor, which it could only refuse by first resolving it) |
+
+Before the fix every one of those was `None`.
+
+CI: run 34623772732 (0.35.365) has been in progress for ~40 minutes without completing, so `#retainedresumewakeflake` is still unconfirmed; 34626410869 (0.35.366) is queued behind it. Reported, not waited on.
+
+Exchange is at 430 lines / 20 response sections, noted. Only `#cargotokenrevoke` remains in the queue and it is operator-gated on the crates.io login click, so the drain ends here.
 <!-- agent:boundary:1406b99d:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -434,14 +476,13 @@ Exchange is at 400 lines / 19 response sections, noted and still draining.
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#captureresumereplaynotidempotent]~~
-- do [#supervisoridlewatchmissing]
+- ~~do [#supervisoridlewatchmissing]~~
 - do [#cargotokenrevoke]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
 - [ ] [#retainedresumewakeflake] CI run 34621201563 (0.35.364) went red on agent-doc-controller-io `project_controller::tests::retained_resume_reacts_when_the_intent_arrives_after_delivery` — `assertion left == right failed; left: None, right: Some("retained_settled_delivery_reactive")` at project_controller.rs:15843. Already checked, do not re-walk: it does NOT reproduce locally (~900 executions, including `taskset -c 0` with --test-threads=8 and a 2-core taskset), and neither 0.35.364 change is reachable from it — pane_layout_projection_converged is in the pane-layout worker this test never drives, and capture_resume_unowned is in agent-doc-capture-io, which agent-doc-controller-io's lib test binary does not link. That CI run took 805s vs 166s locally, so the runner was heavily contended. Lead: the test's synchronization is a proxy, not a wait. It asserts `!subscribe_state_plane(CAPTURED_FINALIZE_WAKE_STATE_CHANNEL, None, 0, 2s).timed_out` and then reads runtime.captured_finalize_wakes immediately. record_captured_finalize_wake (rpc.rs:18944) inserts into that map BEFORE publishing the frame, so an absent key proves the subscribe returned for something other than this wake — check what state_plane_effective_after_version(None, 0, gen) plus the generationless-cursor reset makes `subscribe` return when the channel has no frames yet. Fix: wait on the condition (poll captured_finalize_wakes for the expected reason under a bounded deadline) rather than on subscribe-return, and apply it to all three sites using this pattern (15694, 15843, 15898). Keep both assertions — that settlement publishes the receipt AND that it records the reason.
-- [ ] [#supervisoridlewatchmissing] A live agent-doc session's controller reports no supervisor idle watch, which is the upstream cause of the #capturedresumeunowned wedge fixed in 0.35.364. Evidence 2026-09-11 in src/haiven-dev/.agent-doc/logs/ops.log: `controller_orphan_drain_dispatch file=tasks/backend.md pane=%12 ... reason=no_supervisor_idle_watch` and `adstatechart_snapshot advisory=1 transport.socket editor_sync.synced closeout.written supervisor.sup_stale`, both while live_editors=1 and delivery_converged=true. The controller compensates by re-dispatching the prompt to the pane (a different recovery from resuming the capture), and that dispatch was then suppressed as `reason=supervisor_recovered`. Find why no `agent-doc start --route-owned` supervisor owns these documents while their panes are live: agent_doc_supervisor_io::process::supervisor_pid_for_doc is the predicate both the orphan drain and the new capture_resume_unowned bit read, so either the supervisor exited without the session noticing or its cmdline no longer matches start_route_owned_doc_from_args. Without an idle watch, captured-finalize resume and unattended queue drain both have no driver.
 - [ ] [#cargotokenrevoke] [operator-verify] Revoke and re-issue the crates.io API token exposed in diagnostic tool output during the pane-removal investigation, then store the replacement via passage. BLOCKED ON ONE CLICK: https://crates.io/settings/tokens is open in bridged Chromium tab 13 and returns 'This page requires authentication' — that profile has no crates.io session and no chromium-bridge state snapshot exists. crates.io token management is session-cookie-gated, so the exposed token cannot revoke itself via API. Unblocks: click 'Log in with GitHub' in tab 13 (OAuth returns to /settings/tokens), then re-queue this item and the agent enumerates and revokes in-session. Blast radius nil: agent-doc has no cargo publish step and no CARGO_REGISTRY_TOKEN in any of its five workflows (book, ci, mdbook, pypi, release).
 <!-- /agent:backlog -->
 

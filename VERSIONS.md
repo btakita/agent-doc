@@ -2,6 +2,105 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.367
+
+- **A CP write no longer tombstones the components it did not touch
+  (`#exchangetypingrevert`).** Live sighting 2026-09-11 17:22:09 on
+  `agent-doc-bugs.md`: the operator's exchange typing reverted under them while
+  they typed, with `crdt_replica_update_corruption_rejected ...
+  reason=cross_component_raw_union
+  recovery=canonical_restored_and_member_reprojected` in the ops log. The
+  isolation reconcile was the detector, not the loss site. `queue_maintenance`
+  had published a whole-document `crdt_cp_write` (`content_len=60967`,
+  `update_bytes=3370`) one second earlier, and
+  `RelayHub::apply_canonical_replace` turned it into CRDT ops through
+  `minimal_char_span_edit` — a **single** delete+insert span peeled from one
+  shared prefix and one shared suffix. A write that strikes a queue line *and*
+  rewrites the status line has two disjoint changed regions, so that one span
+  covered everything between them: the whole untouched `exchange` component and
+  both of its markers were tombstoned and reinserted as new characters. An
+  operator insertion made concurrently inside that range is anchored among those
+  tombstones, so the raw union materializes it on the far side of a component
+  marker, `relay_update_capture` detects the cross-component union, and
+  `rebuild_component_isolated_epoch` rebootstraps the canonical and every member
+  replica — which is what the operator sees as their typing reverting.
+  `minimal_char_span_edits` replaces it with one span per changed region
+  (line-level Myers over the region left after linear head/tail peeling, each
+  hunk then trimmed by its own shared prefix/suffix), returned highest-offset
+  first so each span still addresses the pre-edit text. A component the write
+  left byte-identical keeps its original character identities and a concurrent
+  insertion inside it merges natively, with no cross-component union to
+  reconcile at all. Coverage:
+  `a_two_region_cp_write_must_not_tombstone_the_untouched_component_between_them`
+  (behavioural — asserts both the surviving text and the absent reconcile),
+  `a_two_region_write_leaves_the_component_between_them_untouched` (the
+  mechanism, CRDT-free), and `split_spans_reproduce_the_target_text_exactly`
+  (the replacement stays faithful across no-trailing-newline, pure-insert,
+  pure-delete, and multi-byte cases). Both regression tests were proven to
+  detect the defect by collapsing the hunk merge back to a single span.
+  `notes_delete_cannot_splice_a_concurrent_exchange_response` changed with the
+  fix: its content assertions are untouched and still pass byte-identically, but
+  the scenario no longer needs the reconcile at all (the CP write leaves `notes`
+  byte-identical, so per-region spans never tombstone it), so the two mechanism
+  assertions are inverted — the splice is now prevented at the write instead of
+  repaired by a canonical-and-every-member rebootstrap after it.
+
+- **A stale `.claude/settings.json` can no longer silently swallow the cycle
+  contract (`#hookcontractlost`, submodule half).** Live 2026-09-11: a
+  `/agent-doc .../src/haiven-dev/tasks/sdk.md` session reported
+  `UserPromptSubmit hook timed out after 30s — output discarded`, produced a
+  2-second no-op turn with no contract and no reason, and left the queue active
+  so the supervisor idle watch re-dispatched the trigger until four copies were
+  stacked in the composer. `PREFLIGHT_HOOK_TIMEOUT_SECS` (120s) is only written
+  by `merge_claude_turn_status_hooks`, which runs on an explicit install *in
+  that directory* — so the submodule's settings, written by an older binary,
+  kept Claude Code's 30s default indefinitely while the superproject beside it
+  carried 120s. Under a 30s deadline the binary's own 90s
+  `HOOK_ADMISSION_BUDGET_SECS` is not a budget: the harness kills the hook and
+  discards its output before the binary reaches the line that would have named
+  the overrun, so the agent sees the unwired-hook shape. Two changes, one for
+  each session. `admission_budget_under_harness_deadline` clamps the budget
+  under the deadline the settings actually wire (with headroom to print, and a
+  floor so a pathological value cannot refuse admissible turns), so the binary
+  always speaks first on the CURRENT session;
+  `repair_claude_preflight_hook_timeout` writes the full timeout back onto a
+  preflight entry the file already wires — adding no hook it does not have and
+  touching no other key — so the NEXT session gets the whole budget. Coverage:
+  `an_untimed_installed_hook_clamps_the_budget_under_claudes_own_deadline`,
+  `a_correctly_installed_hook_keeps_the_configured_budget`,
+  `a_session_repairs_the_stale_hook_timeout_it_ran_under`, and
+  `a_settings_file_that_does_not_wire_preflight_is_left_alone`, plus an
+  end-to-end run of the real hook binary against a scratch project.
+
+- **Clear Session Context no longer sends `/clear` twice (`#cleardoublesend`).**
+  Operator-reported 2026-09-11 on `src/haiven-dev/tasks/backend.md`: the clear
+  failed with `result=submission_unobserved ... treating Clear Session Context as
+  not submitted`, and the ops log shows why it had already run twice — a
+  `session_clear_sent` over supervisor IPC at `21:31:56`, then a
+  `clear_resubmit_full_command` retyping `/clear` + `Enter` at `21:31:57`. The
+  pane capture grew `1157 -> 1183` bytes across that resend, so the pane had been
+  accepting input the whole time; the operator got two clears *and* a `blocked`
+  verdict. `context_clear_submit_retry_action` resent the full command whenever
+  the observation was `Unobserved` with the command not visible — but
+  `Unobserved` means "the window closed with no evidence either way", which is
+  not the claim "the delivery was lost". That is the same collapse
+  `#idlerevisionreactive` already forbids elsewhere in this codebase, and it
+  inverts behavior at the worst moment: the state where we cannot tell is exactly
+  the state where a second submit is most likely to be a duplicate. The evidence
+  needed was already being computed and thrown away — the poll loop derives
+  `content_changed_since_delivery` per frame to recognize acceptance, but
+  discarded it on timeout. It is now carried on
+  `ContextClearSubmitObservation`, and the full-command resend requires the pane
+  to have **never moved** since delivery, which is the one state a lost delivery
+  produces. The `SubmitKey` retry is deliberately untouched: a command sitting
+  visibly in a split-submit composer is proven un-submitted, so pressing the
+  harness submit key duplicates nothing. Coverage:
+  `a_pane_that_visibly_moved_since_delivery_is_never_resent_the_full_command`
+  (mutation-checked — removing the guard reddens it) and
+  `a_visible_stuck_draft_still_earns_a_submit_key_even_after_the_pane_moved`.
+  This does not by itself fix the false `submission_unobserved` verdict, which
+  stays tracked as `#clearunobservedrecycle` / `#clearsubmitpanesettle`.
+
 ## 0.35.366
 
 - Make supervisor discovery see the supervisors that exist

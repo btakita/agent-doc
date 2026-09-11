@@ -2333,6 +2333,10 @@ fn poll_context_clear_submit_acceptance(
     let mut last_capture: Option<(bool, usize, String)> = None;
     let mut poll_state = ContextClearSubmitPollState::default();
     let mut capture_failed = false;
+    // `#cleardoublesend`: the per-frame answer is already computed below to
+    // recognize acceptance; remember it for the whole window so a timeout can
+    // still say whether input ever reached the pane.
+    let mut content_ever_changed_since_delivery = false;
     let mut observation_budget = CLEAR_DIRECT_SUBMIT_RENDER_TIMEOUT;
     while start.elapsed() < observation_budget {
         match agent_doc_tmux_io::capture_pane(tmux, pane) {
@@ -2346,6 +2350,7 @@ fn poll_context_clear_submit_acceptance(
                 let content_changed_since_delivery = pre_delivery_capture_hash
                     .map(|pre_hash| pre_hash != capture_hash)
                     .unwrap_or(false);
+                content_ever_changed_since_delivery |= content_changed_since_delivery;
                 last_capture = Some((command_visible, capture_len, capture_hash));
                 observation_budget =
                     agent_doc_turn_executor_tmux::context_clear::context_clear_observation_budget(
@@ -2367,6 +2372,7 @@ fn poll_context_clear_submit_acceptance(
                         status: ContextClearSubmitStatus::Accepted,
                         elapsed: start.elapsed(),
                         command_visible: false,
+                        content_changed_since_delivery: content_ever_changed_since_delivery,
                     };
                     log_context_clear_submit_observation(
                         file,
@@ -2422,6 +2428,7 @@ fn poll_context_clear_submit_acceptance(
         status,
         elapsed,
         command_visible,
+        content_changed_since_delivery: content_ever_changed_since_delivery,
     };
     log_context_clear_submit_observation(
         file,

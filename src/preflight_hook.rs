@@ -82,6 +82,43 @@ fn resolve_hook_admission_budget(raw: Option<&str>) -> std::time::Duration {
     std::time::Duration::from_secs(secs)
 }
 
+/// Seconds reserved for the binary to print its own refusal before the harness
+/// deadline. Emitting the failure marker is a single `println!`, so this only
+/// has to cover process scheduling.
+const HOOK_REPORT_HEADROOM_SECS: u64 = 5;
+
+/// Floor for a clamped budget. Below this the clamp would refuse turns a
+/// healthy controller could still admit, which is worse than the silence.
+const HOOK_MIN_CLAMPED_BUDGET_SECS: u64 = 10;
+
+/// Fit the admission budget under the deadline the harness will actually
+/// enforce (`#hookcontractlost`, submodule half).
+///
+/// [`HOOK_ADMISSION_BUDGET_SECS`] is chosen to sit under the
+/// [`crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS`] this binary installs — but only
+/// the settings file that wired *this* hook decides the real deadline, and a
+/// checkout written by an older binary wires none, which means Claude's 30s
+/// default. A 90s budget under a 30s deadline is not a budget: the harness kills
+/// the hook and discards its output at 30s, so the binary never reaches the line
+/// that would have named the overrun, and the agent sees the unwired-hook shape.
+///
+/// Clamping restores the invariant on the CURRENT session, without waiting for a
+/// settings repair to be picked up by a restart: the binary always gets to speak
+/// first. A missing installed timeout (the hook is wired in another settings
+/// layer) leaves the configured budget alone rather than guessing a deadline.
+fn admission_budget_under_harness_deadline(
+    configured: std::time::Duration,
+    installed_timeout_secs: Option<u64>,
+) -> std::time::Duration {
+    let Some(deadline) = installed_timeout_secs else {
+        return configured;
+    };
+    let ceiling = deadline
+        .saturating_sub(HOOK_REPORT_HEADROOM_SECS)
+        .max(HOOK_MIN_CLAMPED_BUDGET_SECS);
+    configured.min(std::time::Duration::from_secs(ceiling))
+}
+
 fn read_stdin_payload() -> anyhow::Result<String> {
     use std::io::Read;
 
@@ -184,6 +221,16 @@ fn run_preflight_for_prompt(
     // preceding shell command the model can forget. The claim must precede
     // preflight because preflight reconciles the prior clean closeout's pending
     // continuation and classifies a missing lease as a queue stall.
+    // `#hookcontractlost`: learn the deadline the harness will enforce on THIS
+    // hook before spending it, and repair the settings so the next session gets
+    // the full one. A checkout whose `.claude/settings.json` predates the
+    // installed timeout otherwise keeps Claude's 30s default indefinitely — the
+    // merge that writes it only runs on an explicit install in that directory.
+    let budget = admission_budget_under_harness_deadline(
+        hook_admission_budget(),
+        repair_and_report_hook_deadline(cwd),
+    );
+
     if let Err(err) = claim_loop_drain_owner(&invocation, &file) {
         let err = err.context("claim Claude loop drain-owner lease");
         eprintln!("[agent-doc] preflight hook failed: {err:#}");
@@ -191,7 +238,7 @@ fn run_preflight_for_prompt(
         return HookAdmission::Failed;
     }
 
-    match run_preflight_within_budget(&file, hook_admission_budget()) {
+    match run_preflight_within_budget(&file, budget) {
         Ok(contract) => {
             // The marker seals a successfully produced contract. It must not
             // appear on any error path because the skill treats its absence as
@@ -213,6 +260,52 @@ fn run_preflight_for_prompt(
             HookAdmission::Failed
         }
     }
+}
+
+/// Report the preflight deadline the Claude settings for this session wire, and
+/// repair a stale one in passing.
+///
+/// The repaired value only reaches Claude on its next settings load, so the
+/// return value is the deadline still in force for THIS turn — the repair fixes
+/// the next session, the clamp fixes this one. Best-effort by construction: a
+/// hook must never block an ordinary prompt over a settings file, so a failure
+/// is reported to the operator's hook log and treated as an unknown deadline.
+fn repair_and_report_hook_deadline(cwd: &Path) -> Option<u64> {
+    // Claude reads project settings from the directory it was launched in; the
+    // project root is checked too so a session started in a subdirectory still
+    // finds the file that wired the hook.
+    let mut candidates = vec![cwd.join(".claude/settings.json")];
+    if let Some(root) = agent_doc_fs::find_project_root(cwd) {
+        let rooted = root.join(".claude/settings.json");
+        if !candidates.contains(&rooted) {
+            candidates.push(rooted);
+        }
+    }
+    let mut deadline = None;
+    for path in candidates {
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Some(installed) = crate::skill::installed_preflight_hook_timeout_secs(&content) else {
+            continue;
+        };
+        // The nearest settings layer that wires the hook is the one in force.
+        deadline.get_or_insert(installed);
+        match crate::skill::repair_claude_preflight_hook_timeout(&path) {
+            Ok(Some(previous)) => eprintln!(
+                "[agent-doc] repaired {} preflight hook timeout {previous}s -> {}s; \
+                 the {previous}s deadline still applies until Claude Code reloads settings",
+                path.display(),
+                crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS,
+            ),
+            Ok(None) => {}
+            Err(err) => eprintln!(
+                "[agent-doc] could not repair {} preflight hook timeout: {err:#}",
+                path.display()
+            ),
+        }
+    }
+    deadline
 }
 
 fn claim_loop_drain_owner(invocation: &AgentDocInvocation, file: &Path) -> anyhow::Result<()> {
@@ -398,6 +491,155 @@ pub fn handle_codex_user_prompt_submit() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        HOOK_ADMISSION_BUDGET_SECS, admission_budget_under_harness_deadline,
+        repair_and_report_hook_deadline,
+    };
+    use std::time::Duration;
+
+    #[test]
+    fn an_untimed_installed_hook_clamps_the_budget_under_claudes_own_deadline() {
+        // `#hookcontractlost`, submodule half. A checkout wired by a binary that
+        // predates the installed timeout gets Claude's 30s default, and Claude
+        // DISCARDS the hook's output on expiry. A 90s budget under a 30s
+        // deadline means the binary is killed before it can name its overrun, so
+        // the agent sees the same silence as an unwired hook — which is exactly
+        // what stalled a live `src/haiven-dev` session on 2026-09-11.
+        let configured = Duration::from_secs(HOOK_ADMISSION_BUDGET_SECS);
+        let clamped = admission_budget_under_harness_deadline(
+            configured,
+            Some(crate::skill::CLAUDE_DEFAULT_HOOK_TIMEOUT_SECS),
+        );
+        assert!(
+            clamped < Duration::from_secs(crate::skill::CLAUDE_DEFAULT_HOOK_TIMEOUT_SECS),
+            "the budget must leave room to print the refusal before the harness kills the hook, \
+             got {clamped:?}"
+        );
+        assert_eq!(clamped, Duration::from_secs(25));
+    }
+
+    #[test]
+    fn a_correctly_installed_hook_keeps_the_configured_budget() {
+        let configured = Duration::from_secs(HOOK_ADMISSION_BUDGET_SECS);
+        assert_eq!(
+            admission_budget_under_harness_deadline(
+                configured,
+                Some(crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS)
+            ),
+            configured,
+            "the installed 120s timeout already exceeds the budget; clamping must be a no-op"
+        );
+        assert_eq!(
+            admission_budget_under_harness_deadline(configured, None),
+            configured,
+            "a hook wired in another settings layer has no known deadline to clamp against"
+        );
+        // A pathologically small deadline must not refuse turns a healthy
+        // controller could still admit.
+        assert_eq!(
+            admission_budget_under_harness_deadline(configured, Some(2)),
+            Duration::from_secs(10)
+        );
+    }
+
+    #[test]
+    fn a_session_repairs_the_stale_hook_timeout_it_ran_under() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join(".claude/settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        // The exact shape a pre-timeout binary left in `src/haiven-dev`.
+        std::fs::write(
+            &settings,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "hooks": {
+                    "UserPromptSubmit": [{
+                        "hooks": [
+                            { "type": "command", "command": "agent-doc turn-status active" },
+                            { "type": "command", "command": "agent-doc hook preflight-user-prompt-submit" }
+                        ]
+                    }]
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        // The deadline reported is the one still in force for THIS turn, not the
+        // repaired value — Claude has not reloaded settings yet.
+        assert_eq!(
+            repair_and_report_hook_deadline(dir.path()),
+            Some(crate::skill::CLAUDE_DEFAULT_HOOK_TIMEOUT_SECS)
+        );
+
+        let repaired = std::fs::read_to_string(&settings).unwrap();
+        assert_eq!(
+            crate::skill::installed_preflight_hook_timeout_secs(&repaired),
+            Some(crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS),
+            "the next session must get the full timeout"
+        );
+        assert!(
+            repaired.contains("agent-doc turn-status active"),
+            "the repair must not disturb the operator's other hooks"
+        );
+        // Idempotent: a second pass reports the repaired deadline and rewrites nothing.
+        assert_eq!(
+            repair_and_report_hook_deadline(dir.path()),
+            Some(crate::skill::PREFLIGHT_HOOK_TIMEOUT_SECS)
+        );
+    }
+
+    #[test]
+    fn a_deliberately_larger_operator_timeout_is_never_lowered() {
+        // Raise-only. A bigger deadline strengthens the `#hookcontractlost`
+        // invariant, so the repair must leave it alone; only a deadline below
+        // the default can produce the silent output-discard.
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join(".claude/settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        std::fs::write(
+            &settings,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "hooks": { "UserPromptSubmit": [{ "hooks": [{
+                    "type": "command",
+                    "command": "agent-doc hook preflight-user-prompt-submit",
+                    "timeout": 300
+                }]}]}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(repair_and_report_hook_deadline(dir.path()), Some(300));
+        assert_eq!(
+            crate::skill::installed_preflight_hook_timeout_secs(
+                &std::fs::read_to_string(&settings).unwrap()
+            ),
+            Some(300),
+            "a larger operator-chosen deadline must survive the repair"
+        );
+    }
+
+    #[test]
+    fn a_settings_file_that_does_not_wire_preflight_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join(".claude/settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        let original = serde_json::to_string_pretty(&serde_json::json!({
+            "hooks": { "UserPromptSubmit": [{ "hooks": [
+                { "type": "command", "command": "agent-doc turn-status active" }
+            ]}]}
+        }))
+        .unwrap();
+        std::fs::write(&settings, &original).unwrap();
+
+        assert_eq!(repair_and_report_hook_deadline(dir.path()), None);
+        assert_eq!(
+            std::fs::read_to_string(&settings).unwrap(),
+            original,
+            "the hook must never add a hook a settings file does not already wire"
+        );
+    }
+
 
     /// `#hooktriggerunresolved`: a trigger whose document path does not resolve
     /// must FAIL LOUDLY, not read as an unrelated prompt.

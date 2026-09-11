@@ -1407,6 +1407,94 @@ const _: () = assert!(
     "the installed Codex Stop timeout must exceed the binary's Stop budget"
 );
 
+/// Claude Code's deadline for a `UserPromptSubmit` hook entry that carries no
+/// explicit `timeout`. On expiry Claude **discards the hook's output**, so an
+/// untimed preflight entry silently reproduces `#hookcontractlost`.
+pub(crate) const CLAUDE_DEFAULT_HOOK_TIMEOUT_SECS: u64 = 30;
+
+/// The preflight `timeout` a Claude `settings.json` actually wires, in seconds.
+///
+/// `None` means the file does not wire our preflight hook at all (it may be
+/// installed in another settings layer). `Some(30)` is returned for an entry
+/// present without a `timeout`, because that is the deadline Claude enforces —
+/// the distinction that matters downstream is the effective deadline, not
+/// whether the key was written.
+pub(crate) fn installed_preflight_hook_timeout_secs(settings: &str) -> Option<u64> {
+    let root = serde_json::from_str::<serde_json::Value>(settings).ok()?;
+    root.get("hooks")?
+        .get("UserPromptSubmit")?
+        .as_array()?
+        .iter()
+        .filter_map(|entry| entry.get("hooks")?.as_array())
+        .flatten()
+        .find(|hook| {
+            hook.get("command").and_then(|v| v.as_str()) == Some(PREFLIGHT_USER_PROMPT_COMMAND)
+        })
+        .map(|hook| {
+            hook.get("timeout")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(CLAUDE_DEFAULT_HOOK_TIMEOUT_SECS)
+        })
+}
+
+/// Raise a preflight hook entry this settings file already wires up to
+/// [`PREFLIGHT_HOOK_TIMEOUT_SECS`], returning the previous effective deadline
+/// when it changed.
+///
+/// Deliberately narrower than [`merge_claude_turn_status_hooks`]: it adds no
+/// hook the file does not already have and touches no other key. A project that
+/// was initialized before the timeout existed — or any checkout whose
+/// `.claude/settings.json` was written by an older binary — otherwise keeps
+/// Claude's 30s default forever, because the merge only runs on an explicit
+/// install in *that* directory. Live 2026-09-11: a submodule session
+/// (`src/haiven-dev`) lost its cycle contract to
+/// `UserPromptSubmit hook timed out after 30s — output discarded` while the
+/// superproject beside it carried the 120s entry.
+pub(crate) fn repair_claude_preflight_hook_timeout(path: &Path) -> Result<Option<u64>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let Some(installed) = installed_preflight_hook_timeout_secs(&content) else {
+        return Ok(None);
+    };
+    // Raise-only. An operator who deliberately set a LARGER timeout has made the
+    // invariant safer, not weaker, and this repair must not quietly undo that.
+    // Only a deadline below the installed default can produce the silent
+    // output-discard this exists to prevent.
+    if installed >= PREFLIGHT_HOOK_TIMEOUT_SECS {
+        return Ok(None);
+    }
+    let mut root = serde_json::from_str::<serde_json::Value>(&content)
+        .with_context(|| format!("parse {}", path.display()))?;
+    let Some(entries) = root
+        .get_mut("hooks")
+        .and_then(|hooks| hooks.get_mut("UserPromptSubmit"))
+        .and_then(|entries| entries.as_array_mut())
+    else {
+        return Ok(None);
+    };
+    for hook in entries
+        .iter_mut()
+        .filter_map(|entry| entry.get_mut("hooks")?.as_array_mut())
+        .flatten()
+    {
+        if hook.get("command").and_then(|v| v.as_str()) != Some(PREFLIGHT_USER_PROMPT_COMMAND) {
+            continue;
+        }
+        let Some(hook) = hook.as_object_mut() else {
+            continue;
+        };
+        hook.insert(
+            "timeout".to_string(),
+            serde_json::json!(PREFLIGHT_HOOK_TIMEOUT_SECS),
+        );
+    }
+    let rendered = ensure_trailing_newline(&serde_json::to_string_pretty(&root)?);
+    std::fs::write(path, rendered).with_context(|| format!("write {}", path.display()))?;
+    Ok(Some(installed))
+}
+
 const TURN_STATUS_ACTIVE_COMMAND: &str = "agent-doc turn-status active";
 const TURN_STATUS_IDLE_COMMAND: &str = "agent-doc turn-status idle";
 

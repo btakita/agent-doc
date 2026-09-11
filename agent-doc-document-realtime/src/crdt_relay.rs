@@ -36,6 +36,7 @@
 //! [`RelayHub::recover_from_projection`], [`RelayHub::reconcile_disk_projection`],
 //! and [`DISK_IS_RECOVERY_PROJECTION_ONLY`].
 
+use similar::{Algorithm, DiffTag, capture_diff_slices};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt::Write;
 use std::sync::Arc;
@@ -191,45 +192,136 @@ fn content_hash(text: &str) -> String {
     out
 }
 
-/// Minimal single-span codepoint edit turning `current` into `content`.
+/// Split a whole-document CP replacement into the disjoint codepoint spans that
+/// actually changed (`#exchangetypingrevert`), highest offset first.
 ///
-/// Canonical response writes used to delete and reinsert the whole document.
-/// That retained every tombstone and turned a 32 KiB response into a 7 MiB
-/// delta. Shared prefix/suffix peeling preserves CRDT lineage outside the
-/// changed span and bounds the update by the actual response edit.
-fn minimal_char_span_edit(current: &str, content: &str) -> Result<Option<(u32, u32, String)>> {
+/// Peeling one shared prefix and one shared suffix (what this replaced) means
+/// every difference collapses into a SINGLE delete+insert span running from the
+/// first differing character to the last. A `queue_maintenance` write that
+/// strikes a queue line *and* rewrites the status line therefore tombstoned
+/// every character between those two regions — whole untouched components and
+/// both of their markers included — and reinserted them as brand-new
+/// characters. An insertion a member made concurrently inside that range is
+/// anchored among those tombstones, so the raw union materializes it on the far
+/// side of a component marker and `relay_update_capture`'s isolation reconcile
+/// rebootstraps the hub from the reconciled text. That rebootstrap is what the
+/// operator sees as their own exchange typing reverting under them.
+///
+/// Diffing per line first keeps the tombstoned set to the lines the CP actually
+/// rewrote. A component the write left byte-identical keeps its original
+/// character identities, so a concurrent insertion inside it merges natively
+/// with no cross-component union to reconcile at all.
+///
+/// Every returned span addresses the PRE-edit text, so they are ordered by
+/// descending offset: applying them in order never invalidates a later offset.
+fn minimal_char_span_edits(current: &str, content: &str) -> Result<Vec<(u32, u32, String)>> {
     if current == content {
-        return Ok(None);
+        return Ok(Vec::new());
     }
-    let current_chars = current.chars().collect::<Vec<_>>();
-    let content_chars = content.chars().collect::<Vec<_>>();
-    let mut prefix = 0usize;
-    let max_prefix = current_chars.len().min(content_chars.len());
-    while prefix < max_prefix && current_chars[prefix] == content_chars[prefix] {
-        prefix += 1;
+    let current_lines = split_lines_inclusive(current);
+    let content_lines = split_lines_inclusive(content);
+    let mut line_start_chars = Vec::with_capacity(current_lines.len() + 1);
+    let mut running = 0usize;
+    line_start_chars.push(running);
+    for line in &current_lines {
+        running += line.chars().count();
+        line_start_chars.push(running);
     }
-    let mut suffix = 0usize;
-    let max_suffix = (current_chars.len() - prefix).min(content_chars.len() - prefix);
-    while suffix < max_suffix
-        && current_chars[current_chars.len() - 1 - suffix]
-            == content_chars[content_chars.len() - 1 - suffix]
+
+    // Myers is O(N*D); on a 60KB session document a full rewrite would make D
+    // the whole document. Peeling the identical head and tail first is linear
+    // and leaves Myers only the region that actually differs, which is what a CP
+    // write always is. Offsets stay in whole-document space via `head`.
+    let mut head = 0usize;
+    while head < current_lines.len().min(content_lines.len())
+        && current_lines[head] == content_lines[head]
     {
-        suffix += 1;
+        head += 1;
     }
-    let delete_len = current_chars.len() - prefix - suffix;
-    let insert = content_chars[prefix..content_chars.len() - suffix]
-        .iter()
-        .collect::<String>();
-    Ok(Some((
-        prefix
-            .try_into()
-            .map_err(|_| anyhow!("canonical edit offset exceeds CRDT codepoint range"))?,
-        delete_len
-            .try_into()
-            .map_err(|_| anyhow!("canonical edit length exceeds CRDT codepoint range"))?,
-        insert,
-    )))
+    let mut tail = 0usize;
+    while tail < current_lines.len() - head
+        && tail < content_lines.len() - head
+        && current_lines[current_lines.len() - 1 - tail] == content_lines[content_lines.len() - 1 - tail]
+    {
+        tail += 1;
+    }
+    let current_middle = &current_lines[head..current_lines.len() - tail];
+    let content_middle = &content_lines[head..content_lines.len() - tail];
+
+    // Merge adjacent non-equal ops (Myers emits Delete then Insert for a
+    // replacement) so one changed region becomes one span rather than two
+    // spans sharing an offset, whose relative order a sort could not preserve.
+    let mut hunks: Vec<(std::ops::Range<usize>, std::ops::Range<usize>)> = Vec::new();
+    for op in capture_diff_slices(Algorithm::Myers, current_middle, content_middle) {
+        if op.tag() == DiffTag::Equal {
+            continue;
+        }
+        let (old, new) = (
+            op.old_range().start + head..op.old_range().end + head,
+            op.new_range().start + head..op.new_range().end + head,
+        );
+        match hunks.last_mut() {
+            Some((prev_old, prev_new)) if prev_old.end == old.start && prev_new.end == new.start => {
+                prev_old.end = old.end;
+                prev_new.end = new.end;
+            }
+            _ => hunks.push((old, new)),
+        }
+    }
+
+    let mut edits = Vec::with_capacity(hunks.len());
+    for (old, new) in hunks {
+        let deleted: Vec<char> = current_lines[old.clone()].concat().chars().collect();
+        let inserted: Vec<char> = content_lines[new].concat().chars().collect();
+        // Line granularity bounds the blast radius; peeling the hunk's own
+        // shared prefix/suffix keeps a one-character edit a one-character edit.
+        let mut lead = 0usize;
+        while lead < deleted.len() && lead < inserted.len() && deleted[lead] == inserted[lead] {
+            lead += 1;
+        }
+        let mut tail = 0usize;
+        while tail < deleted.len() - lead
+            && tail < inserted.len() - lead
+            && deleted[deleted.len() - 1 - tail] == inserted[inserted.len() - 1 - tail]
+        {
+            tail += 1;
+        }
+        let delete_len = deleted.len() - lead - tail;
+        let insert: String = inserted[lead..inserted.len() - tail].iter().collect();
+        if delete_len == 0 && insert.is_empty() {
+            continue;
+        }
+        edits.push((
+            (line_start_chars[old.start] + lead)
+                .try_into()
+                .map_err(|_| anyhow!("canonical edit offset exceeds CRDT codepoint range"))?,
+            delete_len
+                .try_into()
+                .map_err(|_| anyhow!("canonical edit length exceeds CRDT codepoint range"))?,
+            insert,
+        ));
+    }
+    edits.sort_unstable_by_key(|edit| std::cmp::Reverse(edit.0));
+    Ok(edits)
 }
+
+/// Split on `\n` while keeping each terminator with its line, so concatenating
+/// the result reproduces the input exactly.
+fn split_lines_inclusive(text: &str) -> Vec<&str> {
+    let mut lines = Vec::new();
+    let mut start = 0usize;
+    for (index, ch) in text.char_indices() {
+        if ch == '\n' {
+            lines.push(&text[start..index + 1]);
+            start = index + 1;
+        }
+    }
+    if start < text.len() {
+        lines.push(&text[start..]);
+    }
+    lines
+}
+
 
 /// Delivery/ACK state for one registered editor replica.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1415,7 +1507,10 @@ fn member_insertions_lost_by(
             ));
         }
         let before = self.canonical.state_vector();
-        if let Some((offset, delete_len, insert)) = minimal_char_span_edit(&current, content)? {
+        // `#exchangetypingrevert`: one span per changed region, highest offset
+        // first, so an untouched component between two changed ones is never
+        // tombstoned and a concurrent member insertion inside it survives.
+        for (offset, delete_len, insert) in minimal_char_span_edits(&current, content)? {
             self.canonical.apply_local_edit(offset, delete_len, &insert);
         }
         self.sync_live_document_projection(&current, content);
@@ -2479,6 +2574,170 @@ mod tests {
     }
 
     #[test]
+    fn a_two_region_write_leaves_the_component_between_them_untouched() {
+        // Direct cover for the `#exchangetypingrevert` mechanism, independent of
+        // any CRDT: the spans a two-region CP write produces must not span the
+        // component that sits between those regions. A single prefix/suffix peel
+        // reported ONE span of 63 characters covering all of `exchange` and both
+        // of its markers; those are the characters that get tombstoned, and an
+        // operator insertion among them is what lands cross-component.
+        let current = concat!(
+            "<!-- agent:status -->\n",
+            "old status line\n",
+            "<!-- /agent:status -->\n",
+            "<!-- agent:exchange -->\n",
+            "Paragraph one.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#a]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let content = current
+            .replace("old status line", "new status line")
+            .replace("- do [#a]", "- ~~do [#a]~~");
+
+        let edits = minimal_char_span_edits(current, &content).unwrap();
+        assert_eq!(edits.len(), 2, "one span per changed region, got {edits:?}");
+        for (offset, delete_len, _) in &edits {
+            let span = *offset as usize..(*offset + *delete_len) as usize;
+            let deleted: String = current.chars().take(span.end).skip(span.start).collect();
+            assert!(
+                !deleted.contains("agent:exchange") && !deleted.contains("Paragraph one."),
+                "an untouched component must never be inside a tombstoned span; \
+                 span {span:?} deleted {deleted:?}"
+            );
+        }
+        // Descending offset order is the caller's contract: each span addresses
+        // the pre-edit text, so a lower offset must never be applied first.
+        assert!(
+            edits.windows(2).all(|pair| pair[0].0 > pair[1].0),
+            "spans must be ordered by descending offset, got {edits:?}"
+        );
+    }
+
+    #[test]
+    fn a_whole_document_cp_write_stays_linear_on_a_realistic_session_document() {
+        // The live sighting was a 60KB / ~800-line document. Myers is O(N*D), so
+        // the head/tail peel is what keeps a whole-document image cheap; without
+        // it a full rewrite would hand Myers the entire file.
+        let mut base = String::new();
+        for component in ["status", "exchange", "backlog", "queue"] {
+            base.push_str(&format!("<!-- agent:{component} -->\n"));
+            for line in 0..200 {
+                base.push_str(&format!("{component} line {line} with some realistic prose\n"));
+            }
+            base.push_str(&format!("<!-- /agent:{component} -->\n"));
+        }
+        let two_region = base
+            .replace("status line 0 ", "status line 0 REWRITTEN ")
+            .replace("queue line 199 ", "queue line 199 STRUCK ");
+
+        let started = std::time::Instant::now();
+        let edits = minimal_char_span_edits(&base, &two_region).unwrap();
+        let elapsed = started.elapsed();
+
+        assert_eq!(edits.len(), 2, "got {edits:?}");
+        let touched: usize = edits.iter().map(|(_, delete_len, _)| *delete_len as usize).sum();
+        assert!(
+            touched < 60,
+            "a two-word change in a {}-char document must touch a handful of characters, not {touched}",
+            base.chars().count()
+        );
+        assert!(
+            elapsed < std::time::Duration::from_millis(250),
+            "whole-document span computation took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn split_spans_reproduce_the_target_text_exactly() {
+        // Splitting the edit must stay a faithful replacement, including the
+        // cases line-granularity makes easy to get wrong: no trailing newline,
+        // pure insert, pure delete, and multi-byte characters ahead of the span.
+        for (current, content) in [
+            ("a\nb\nc\n", "a\nB\nc\n"),
+            ("a\nb\nc", "a\nb\nc\nd"),
+            ("a\nb\nc\n", "a\nc\n"),
+            ("a\nb\n", "a\nb\nc\nd\n"),
+            ("", "fresh\n"),
+            ("gone\n", ""),
+            ("— em\nkeep\n— dash\n", "— EM\nkeep\n— DASH\n"),
+            ("one line no newline", "one line no newlines"),
+        ] {
+            let mut chars: Vec<char> = current.chars().collect();
+            for (offset, delete_len, insert) in minimal_char_span_edits(current, content).unwrap() {
+                let at = offset as usize;
+                chars.splice(at..at + delete_len as usize, insert.chars());
+            }
+            assert_eq!(
+                chars.into_iter().collect::<String>(),
+                content,
+                "replaying the spans of {current:?} -> {content:?} must reproduce the target"
+            );
+        }
+    }
+
+    #[test]
+    fn a_two_region_cp_write_must_not_tombstone_the_untouched_component_between_them() {
+        // `#exchangetypingrevert`. `queue_maintenance` rewrites the whole
+        // document: it strikes a queue line AND rewrites status, two disjoint
+        // regions with `exchange` sitting between them. A single-span edit
+        // covers everything from the first differing char to the last — so every character of the
+        // untouched exchange, and both of its component markers, is tombstoned
+        // and re-inserted. An operator insertion made concurrently inside that
+        // span is then anchored among tombstones, and the raw union materializes
+        // it on the far side of a component marker.
+        let base = concat!(
+            "<!-- agent:status -->\n",
+            "old status line\n",
+            "<!-- /agent:status -->\n",
+            "<!-- agent:exchange -->\n",
+            "Paragraph one.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#a]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let cp_write = concat!(
+            "<!-- agent:status -->\n",
+            "new status line\n",
+            "<!-- /agent:status -->\n",
+            "<!-- agent:exchange -->\n",
+            "Paragraph one.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "- ~~do [#a]~~\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let mut hub = RelayHub::from_text(1, base);
+        hub.register(2).unwrap();
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        let editor_frontier = editor.state_vector();
+
+        // The operator types inside `exchange` from the pre-write projection, at
+        // the same moment the CP publishes its two-region write.
+        let caret = base.find("Paragraph one.").unwrap() + "Paragraph one.".len();
+        editor.apply_local_edit(base[..caret].chars().count() as u32, 0, " typed");
+        let update = editor.diff(&editor_frontier).unwrap();
+
+        hub.apply_canonical_replace(base, cp_write).unwrap();
+        let packet = hub.relay_update(2, &update).unwrap();
+
+        let canonical = hub.canonical_text();
+        assert!(
+            canonical.contains("Paragraph one. typed"),
+            "the operator's just-typed exchange text must survive a CP write that \
+             did not touch exchange at all; canonical was:\n{canonical}"
+        );
+        assert!(
+            !packet.component_isolation_reconciled,
+            "a CP write that left exchange byte-identical must not force a \
+             cross-component isolation reconcile; canonical was:\n{canonical}"
+        );
+    }
+
+    #[test]
     fn notes_delete_cannot_splice_a_concurrent_exchange_response() {
         let base = concat!(
             "<!-- agent:exchange -->\n",
@@ -2534,7 +2793,6 @@ mod tests {
 
         let packet = hub.relay_update(2, &update).unwrap();
 
-        assert!(packet.component_isolation_reconciled);
         let canonical = hub.canonical_text();
         assert_eq!(canonical, expected);
         let notes = canonical
@@ -2543,7 +2801,23 @@ mod tests {
             .and_then(|body| body.split("<!-- /agent:notes -->").next())
             .unwrap();
         assert!(!notes.contains("Complete response."));
-        assert_eq!(hub.pending_rebootstrap_members(), vec![2, 3]);
+        // `#exchangetypingrevert` strengthened this guarantee rather than
+        // relaxing it. The CP write above changes `exchange` and `queue` but
+        // leaves `notes` byte-identical, so `minimal_char_span_edits` no longer
+        // tombstones `notes` on its way from one region to the other — the
+        // concurrent delete merges natively and there is nothing cross-component
+        // left to splice. The reconcile is a repair, and it repairs by
+        // rebootstrapping the canonical AND every member replica, which is what
+        // an operator sees as their own text reverting. Never needing it is the
+        // stronger outcome, so this asserts it did not run.
+        assert!(
+            !packet.component_isolation_reconciled,
+            "the splice must be prevented at the write, not repaired after it"
+        );
+        assert!(
+            hub.pending_rebootstrap_members().is_empty(),
+            "no member may be rebootstrapped when nothing was spliced"
+        );
     }
 
     #[test]

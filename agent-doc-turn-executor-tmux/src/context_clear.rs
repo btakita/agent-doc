@@ -172,6 +172,16 @@ pub struct ContextClearSubmitObservation {
     pub status: ContextClearSubmitStatus,
     pub elapsed: Duration,
     pub command_visible: bool,
+    /// Whether the pane capture ever differed from its pre-delivery hash
+    /// (`#cleardoublesend`).
+    ///
+    /// The poll loop already computes this per frame to recognize acceptance,
+    /// but used to discard it on timeout — so the retry decision could only see
+    /// that acceptance was not *proven* and had to guess why. `true` means input
+    /// visibly reached the pane and a resend would be a second submit; `false`
+    /// means the pane never moved, which is the only state a lost delivery can
+    /// produce.
+    pub content_changed_since_delivery: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -323,8 +333,23 @@ pub fn context_clear_submit_retry_action(
     ) {
         return Some(ContextClearSubmitRetryAction::SubmitKey);
     }
+    // `#cleardoublesend`: `Unobserved` is "I looked and got no answer", NOT "the
+    // delivery was lost" — the same collapse `#idlerevisionreactive` forbids,
+    // and it inverts behavior at the worst moment. Resending the full command
+    // text is a SECOND submit, and the observation window is exactly the case
+    // where we cannot tell whether the first one landed.
+    //
+    // Live 2026-09-11 on `src/haiven-dev/tasks/backend.md`, pane `%12`: the
+    // supervisor-IPC clear reported `submission_unobserved`, the repair retyped
+    // `/clear`+Enter, and the pane capture grew `1157 -> 1183` bytes across it —
+    // the resend visibly landed, so the pane had been accepting input all along.
+    // The operator got two clears and a `blocked` verdict.
+    //
+    // A pane whose capture never moved since delivery is the one state a lost
+    // delivery does produce, so that is what earns the resend.
     (facts.observation.status == ContextClearSubmitStatus::Unobserved
-        && !facts.observation.command_visible)
+        && !facts.observation.command_visible
+        && !facts.observation.content_changed_since_delivery)
         .then_some(ContextClearSubmitRetryAction::ResendCommand)
 }
 
@@ -642,6 +667,71 @@ mod tests {
     }
 
     #[test]
+    fn a_pane_that_visibly_moved_since_delivery_is_never_resent_the_full_command() {
+        // `#cleardoublesend`. Live 2026-09-11, `src/haiven-dev/tasks/backend.md`
+        // pane `%12`: the supervisor-IPC clear reported `submission_unobserved`,
+        // the repair retyped `/clear` + Enter, and the pane capture grew
+        // `1157 -> 1183` bytes across that resend — so the pane had been
+        // accepting input the whole time and the operator got TWO clears before
+        // the command still reported `blocked`.
+        //
+        // `Unobserved` means "the window closed with no evidence either way",
+        // which is not the same claim as "the delivery was lost". Only a pane
+        // that never moved can have lost it.
+        let moved = ContextClearSubmitObservation {
+            status: ContextClearSubmitStatus::Unobserved,
+            elapsed: Duration::from_millis(918),
+            command_visible: false,
+            content_changed_since_delivery: true,
+        };
+        let never_moved = ContextClearSubmitObservation {
+            content_changed_since_delivery: false,
+            ..moved
+        };
+        let facts = |observation| ContextClearSubmitRetryFacts {
+            observation,
+            pending_draft_enter_resubmit: false,
+            attempts_sent: 0,
+            max_attempts: 1,
+        };
+
+        assert_eq!(
+            context_clear_submit_retry_action(facts(moved)),
+            None,
+            "input visibly reached the pane, so resending the command text is a second submit"
+        );
+        assert_eq!(
+            context_clear_submit_retry_action(facts(never_moved)),
+            Some(ContextClearSubmitRetryAction::ResendCommand),
+            "a pane that never moved is the one state a lost delivery produces, \
+             and it must still be repaired"
+        );
+    }
+
+    #[test]
+    fn a_visible_stuck_draft_still_earns_a_submit_key_even_after_the_pane_moved() {
+        // The guard above must narrow only the full-command resend. A command
+        // sitting visibly in a split-submit composer is proven un-submitted, so
+        // pressing the harness submit key duplicates nothing and must keep
+        // working regardless of what else repainted.
+        let facts = ContextClearSubmitRetryFacts {
+            observation: ContextClearSubmitObservation {
+                status: ContextClearSubmitStatus::StillVisible,
+                elapsed: Duration::from_millis(900),
+                command_visible: true,
+                content_changed_since_delivery: true,
+            },
+            pending_draft_enter_resubmit: true,
+            attempts_sent: 0,
+            max_attempts: 1,
+        };
+        assert_eq!(
+            context_clear_submit_retry_action(facts),
+            Some(ContextClearSubmitRetryAction::SubmitKey)
+        );
+    }
+
+    #[test]
     fn blank_repaint_waits_for_ready_clear_receipt() {
         let ordinary = Duration::from_millis(900);
         let rendering = Duration::from_secs(10);
@@ -671,6 +761,7 @@ mod tests {
             status: ContextClearSubmitStatus::Unrendered,
             elapsed: Duration::from_secs(10),
             command_visible: false,
+            content_changed_since_delivery: false,
         };
         assert!(!observation.status.is_accepted());
         assert_eq!(
@@ -910,16 +1001,19 @@ mod tests {
             status: ContextClearSubmitStatus::StillVisible,
             elapsed: Duration::from_millis(250),
             command_visible: true,
+            content_changed_since_delivery: false,
         };
         let accepted = ContextClearSubmitObservation {
             status: ContextClearSubmitStatus::Accepted,
             elapsed: Duration::from_millis(20),
             command_visible: false,
+            content_changed_since_delivery: false,
         };
         let stale_or_empty_timeout = ContextClearSubmitObservation {
             status: ContextClearSubmitStatus::Unobserved,
             elapsed: Duration::from_millis(250),
             command_visible: false,
+            content_changed_since_delivery: false,
         };
 
         assert!(context_clear_submit_needs_enter_resubmit(
@@ -967,6 +1061,7 @@ mod tests {
                     status: ContextClearSubmitStatus::CaptureFailed,
                     elapsed: Duration::from_millis(250),
                     command_visible: false,
+                    content_changed_since_delivery: false,
                 },
                 pending_draft_enter_resubmit: true,
                 attempts_sent: 0,
@@ -1067,6 +1162,7 @@ Welcome to Claude Code
             status: ContextClearSubmitStatus::StillVisible,
             elapsed: Duration::from_millis(5123),
             command_visible: true,
+            content_changed_since_delivery: false,
         };
         let issue = context_clear_submit_observation_line(
             "/tmp/doc.md",
@@ -1097,6 +1193,7 @@ Welcome to Claude Code
                     status: ContextClearSubmitStatus::Accepted,
                     elapsed: Duration::from_millis(150),
                     command_visible: false,
+                    content_changed_since_delivery: false,
                 },
             },
         );
@@ -1119,6 +1216,7 @@ Welcome to Claude Code
                     status: ContextClearSubmitStatus::Accepted,
                     elapsed: Duration::from_millis(150),
                     command_visible: false,
+                    content_changed_since_delivery: false,
                 },
             },
         );
@@ -1131,6 +1229,7 @@ Welcome to Claude Code
             status: ContextClearSubmitStatus::StillVisible,
             elapsed: Duration::from_millis(2001),
             command_visible: true,
+            content_changed_since_delivery: false,
         };
         let line = context_clear_submit_blocked_line(
             "/tmp/doc.md",
@@ -1180,11 +1279,13 @@ Welcome to Claude Code
             status: ContextClearSubmitStatus::StillVisible,
             elapsed: Duration::from_millis(2000),
             command_visible: true,
+            content_changed_since_delivery: false,
         };
         let unobserved = ContextClearSubmitObservation {
             status: ContextClearSubmitStatus::Unobserved,
             elapsed: Duration::from_millis(2000),
             command_visible: false,
+            content_changed_since_delivery: false,
         };
 
         // The contradiction itself: an unobserved submit must never claim the

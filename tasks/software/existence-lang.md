@@ -6,7 +6,7 @@ agent: claude
 claude_model: fable
 agent_doc_format: template
 agent_doc_write: crdt
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -23,17 +23,63 @@ queue: stop
 
 Compacted content:
 - Archived 9 response topic(s): Can existence-lang integrate with OWL, RDF, and SPARQL?; do #xlexportskos; do #xlbaseiri; 6 more
+
+### Re: do #fixhttpsgithub — fable
+
+> **Queue prompt:**
+>
+> do [#fixhttpsgithub]
+
+
+Done. [existence-lang/existence#1](https://github.com/existence-lang/existence/issues/1) asked for an `existence toc` command: a term index with lay definitions, grouped by ring. It shipped in [`28478fb`](https://github.com/existence-lang/existence/commit/28478fbf039b1607baeb78518175160dfaefccb7) on `main`, the issue auto-closed, and I left a usage comment on it. CI run [34628503947](https://github.com/existence-lang/existence/actions/runs/34628503947) was still in progress at closeout; local `make check` is green (69 tests, clippy on both feature sets, fmt).
+
+```
+existence toc [--format markdown|json] [--ring N] [--base PATH] [-o FILE] [--check]
+```
+
+What it does, against the proposal in the issue:
+
+- **Grouped by ring, manifest order.** `## Ring N — name` heading with the ring description from `existence.toml`, then one `- [**Title**](path) — lay definition` bullet per term. The lay definition is the first Ontology line (SPEC rule 2), the same extraction `search` uses.
+- **Link rewriting (`--base`).** `[text](./term.md)`, with an optional `#anchor` or `"broader"` title, becomes `[text](<base>/term.md…)`. Without `--base`, `-o FILE` uses the relative path from the file's directory to `src/` (`-o TERMS.md` at the root gives `src/term.md`, `-o docs/terms.md` gives `../src/term.md`, `-o src/README.md` gives `./term.md`); stdout defaults to `src`.
+- **Title vs slug.** Markdown shows the `# Title`; JSON carries `term` (slug), `title`, `path`, `definition` (markdown, rebased) and `definition_text` (plain) per entry, plus `missing` per ring and a top-level `unringed` list.
+- **Manifest check.** Terms in `src/` that no ring declares land under `## Unringed`; ring terms with no node file are marked `*missing*` inline.
+- **`--check`.** Emits nothing, fails on: an Ontology section that does not open with a plain sentence (blockquote, heading, list, table, fence, HTML tag, image, footnote), a ring term with no file, a node in no ring. Prints one `term: message` line per problem to stderr.
+
+Implementation: new `src/commands/toc.rs` (build model → markdown / JSON renderers → `problems()`), `markdown::extract_title` made public, `Toc` variant in `main.rs`, README section and command-table row. 11 unit tests cover ring grouping and manifest drift, link rebasing with anchors and titles, empty base, ring filter, exact markdown and JSON shape, the check findings, the plain-sentence heuristic, the `-o` relative-base default at three depths, and the relative-path helper. The two `AGENTS.md`/`CLAUDE.md` edits already sitting in that worktree are another session's; I committed only the six toc files.
+
+Run against the reference ontology, `--check` already finds real drift, which is the "doubles as a manifest check" point from the issue:
+
+```
+qualitative: declared in ring 1 of existence.toml but src/qualitative.md does not exist
+quantitative: declared in ring 1 of existence.toml but src/quantitative.md does not exist
+contextual-systems: Ontology section is missing or empty (no lay definition)
+noumena: not declared in any ring of existence.toml
+phenomena: not declared in any ring of existence.toml
+pneuma: not declared in any ring of existence.toml
+```
+
+Two follow-ups are in backlog: a 0.6.0 release so installer users get the command (the local `cargo install --path .` binary has it, but still reports 0.5.0), and fixing that ontology drift plus wiring `toc --check` and a published `terms.md` into the ontology repo's CI/Pages workflow.
+> **Queue prompt:**
+>
+> do [#fixhttpsgithub]
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
+- ~~do [#fixhttpsgithub]~~
+- do [#planwayregularly]: The audit should also identify + report + safely resolve (where possible): contradictions + source/ontology drift.
+- do [#xlgenusport]
 <!-- /agent:queue -->
 
 ## Backlog
 
-<!-- agent:backlog -->
+<!-- agent:backlog priority -->
+- [ ] [#cutexistenceusers] [recommended] Cut existence 0.6.0 (`make release` in `src/existence-lang/existence`) so `install.sh` / `cargo install existence` users get `toc`; `existence --version` on `cargo install --path .` still reads 0.5.0. Bump `Cargo.toml` first, then flip the README "Commands (v0.3.0)" heading, which is already stale
+- [ ] [#fixmanifestdrift] Fix the manifest drift `existence toc --check` found in `src/existence-lang/ontology`: `qualitative` + `quantitative` are declared in ring 1 with no node file (create them or drop them from the ring), `contextual-systems` has an empty Ontology section (needs a lay definition), `noumena` / `phenomena` / `pneuma` are in no ring (ring 2 fits), and `evolution.md` links `./environment` without `.md` so neither lint nor the rebaser sees it. Then add `existence toc --check` next to `lint` in the ontology CI and publish `terms.md` from the Pages workflow (`existence toc -o terms.md`) so the site has a glossary page
+- [x] 🚧 [#fixhttpsgithub] Fix https://github.com/existence-lang/existence/issues/1
+- [ ] [#planwayregularly] Plan a way to regularly audit ontology items. Should we track the sources of each ontology item and recheck during the audit?
 - [ ] [#xlgenusport] [recommended] Port the two genus decisions from `#xlchaingaps` to the sibling `philosophy/` repo (what `~/.claude/philosophy` resolves to; its `src/entity.md` still reads "Any information in Existence" and `src/abstraction.md` still says "a concept that models") and to the `<!-- philosophy:start -->` table in `~/.claude/CLAUDE.md` (Entity row). Content, two files plus one table row; decide whether `philosophy/` should track `existence-lang/ontology` instead of drifting
 <!-- /agent:backlog -->
 

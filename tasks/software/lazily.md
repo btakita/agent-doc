@@ -9,7 +9,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -211,21 +211,50 @@ Shipped `lazily.projected_chart` — `2c6fda2`, pushed. `make check` green (1011
 Scoped as a Python-side addition, not a spec family: `statechart` stays the conformant Harel/SCXML chart that owns its transitions, and the subject here is one external row per chart, so no thread-safe/async flavours and no cross-binding port implied. Filed the FPE adoption (drop the hand-written branch for the derived cell) into `src/haiven-dev/tasks/fpe.md`, where that work actually lives.
 
 `#lzpyreplayproof`'s CI run 34619335884 came back green; 34620191066 for this commit is pending. Advisory `stale_install` and `stale_plugin` warnings noted — neither is owned by this cycle. Exchange is at 169 lines / 7 sections; noting it rather than stalling the queue to compact.
+
+### Re: do [#lazilyspecbindings] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lazilyspecbindings]
+
+
+Phase 1 landed across **12 repos**, all committed and pushed. `lazily-spec` `make check` exit 0 (all 13 guards), `lazily-py` `make check` exit 0 (1014 tests), and each of the 9 other bindings' conformance-coverage guard run individually to exit 0.
+
+**The contract** — `lazily-spec/docs/replay-equivalence.md`, scored as an **optional (MAY)** row. That classification is the load-bearing decision: a replay proof is a verification facility, not a runtime feature, and optional rows are excluded from the family roll-up — so adding it cost **one regenerated line** per binding README instead of flipping `Reactive graph` from ✅ to `~` in nine of them. Three obligations, one fixture each:
+
+1. **The fingerprint is bound to its log**, revalidated before any value compare. `fingerprint_log_binding.json` pins why both halves matter: logs `[+1,+2,+3]` and `[+3,+2,+1]` settle to the **same** sum 6 with **different** digests, so a value-only comparison passes and certifies nothing about the log in front of it — while a harness that compared anyway would blame the graph for a stale test artifact. The non-raising `check` form refuses it too.
+2. **Divergence is localized.** `divergence_localization.json` drifts at seq 1 and requires seq 1 plus the cell label, not the final state where the defect is merely still visible. Stride is part of the fingerprint and a cross-stride compare is refused.
+3. **The encoding is canonical or it fails.** `canonical_encoding_equality.json` names **no hex digest** — it asserts equality *classes* as same/different pairs, so each binding's hash and byte layout stay free. That was the right call for a reason phase 2 will feel: BLAKE2b is stdlib in Python and Zig and a third-party dependency in Kotlin, JS, Dart, C++ and C#. Demanding a shared digest would have bought five dependencies for something no two bindings ever exchange. Values are type-tagged because JSON cannot separate int `1` from float `1.0`, and integers carry decimal **strings** so 2^53+1 stays exact.
+
+**lazily-py is now the reference runner, not just an implementation.** Its coverage guard went 142/153 → **145/156 fixtures opened** with the known-uncovered list unchanged at 11, so the ✅ on the new row describes bytes that were really read. On a `record` step the runner cross-checks that the recorded `sum` digest **is** the digest of the subject's final sum — without that the fixture would accept a harness that observed some other value entirely. Also added `ReplayStrideMismatchError`: the stride refusal was a bare `ReplayProofError`, so a driver could only distinguish it by matching on a message.
+
+**Two corpus-convention corrections I had to make rather than work around.** My per-step claim key was named `property`, which is not in the corpus-wide `PROSE_KEYS` set — every binding's consumption guard would have demanded an assertion for a key carrying nothing comparable, and nine bindings would each have decided how to excuse it, which is precisely the divergence the prose-key convention exists to stop. Renamed to `note`, which is already exempt everywhere and therefore needs *no* declaration; a fixture-level `assertions.prose` is in fact refused, because prose is scoped to the block that carries it. And `lazily-cpp` has an area-level ledger above its fixture ledger, so `replay` had to be excused as an *area* there, not just fixture-by-fixture.
+
+The publish order was forced and followed: `lazily-spec` first (its `corpus-published` guard refuses to let a binding verify against a working tree CI's clone will not see), then the bindings.
+
+**Phase 2 is 8 per-binding harnesses**, filed as one actionable id each rather than re-gating a parent — `#lzreplayrs` through `#lzreplaycs`, in that order at the queue head. `#lzreplayrs` carries a design finding from this cycle worth not rediscovering: lazily-rs has no hash crate and keeps every dependency optional, so it should store the **exact canonical bytes** per label rather than take on blake2/sha2 for an optional facility — the spec deliberately leaves both the hash and the byte layout binding-chosen, and exact bytes are the degenerate strongest choice at test sizes. The same applies to C++.
+
+CI: `lazily-spec` and `lazily-py` green; `lazily-rs` and `lazily-cpp` runs were still in progress at hand-off, and the earlier `lazily-cpp` red I checked was a **cancelled** run from 2026-09-03, not a failure. Advisory `stale_install` / `stale_plugin` warnings noted — neither is owned by this cycle. Exchange is at 190 lines / 8 sections; noting it rather than stalling the queue.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzpyreplayproof]~~
-- ~~do [#lzpyprojectedchart]~~
-- do [#lazilyspecbindings]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilyspecbindings] [recommended] [lazily-spec + 8 bindings] port the replay-equivalence contract from lazily-py's `lazily.replay` to the spec and the remaining bindings: a canonical fixture for the log digest / fingerprint binding, then ReplayHarness-equivalents in rs/kt/js/dart/zig/go/cpp/cs. Budget ~10 repos — a new canonical fixture reddens all nine. Repo: src/lazily-spec first. Source: #lzpyreplayproof
+- [ ] [#lzreplayrs] [lazily-rs] ReplayHarness per docs/replay-equivalence.md; open the three conformance/replay/ fixtures and drop them from scripts/check-conformance-coverage.sh KNOWN_UNCOVERED. DESIGN FINDING from phase 1: lazily-rs has no hash crate and every dep is optional, so do NOT add blake2/sha2 for an optional verification facility — the spec leaves hash AND byte layout binding-chosen, so store the exact canonical bytes per label instead (test-sized, zero collision risk, zero dependency). Mirror ReplayStrideMismatchError as a distinct error variant so a driver routes on the type, not a message. Repo: src/lazily-rs
+- [ ] [#lzreplaykt] [lazily-kt] ReplayHarness per docs/replay-equivalence.md; open the three conformance/replay/ fixtures and drop them from KNOWN_UNCOVERED. Kotlin/JVM has MessageDigest SHA-256 in the stdlib, so no Bouncy Castle dependency is needed. Repo: src/lazily-kt
+- [ ] [#lzreplayjs] [lazily-js] ReplayHarness per docs/replay-equivalence.md; open the three conformance/replay/ fixtures and drop them from KNOWN_UNCOVERED. node:crypto covers the digest; keep it out of any browser bundle path or use the exact-bytes form. Repo: src/lazily-js
+- [ ] [#lzreplaydart] [lazily-dart] ReplayHarness per docs/replay-equivalence.md; open the three conformance/replay/ fixtures and drop them from KNOWN_UNCOVERED. Repo: src/lazily-dart
+- [ ] [#lzreplayzig] [lazily-zig] ReplayHarness per docs/replay-equivalence.md; open the three conformance/replay/ fixtures and drop them from KNOWN_UNCOVERED. std.crypto.hash.blake2 is in the stdlib. Verify all three pinned toolchains. Repo: src/lazily-zig
+- [ ] [#lzreplaygo] [lazily-go] ReplayHarness per docs/replay-equivalence.md; open the three conformance/replay/ fixtures and drop them from KNOWN_UNCOVERED. crypto/sha256 is stdlib; golang.org/x/crypto/blake2b would be a new module dependency. Repo: src/lazily-go
+- [ ] [#lzreplaycpp] [lazily-cpp] ReplayHarness per docs/replay-equivalence.md; open the three conformance/replay/ fixtures, drop them from KNOWN_UNCOVERED and move 'replay' from EXCUSED_AREAS to REQUIRED_AREAS. No stdlib hash: use the exact-canonical-bytes form rather than vendoring one. Keep the core wasm-clean. Repo: src/lazily-cpp
+- [ ] [#lzreplaycs] [lazily-cs] ReplayHarness per docs/replay-equivalence.md; open the three conformance/replay/ fixtures and drop them from KNOWN_UNCOVERED. System.Security.Cryptography.SHA256 is in the BCL. Repo: src/lazily-cs
 <!-- /agent:backlog -->
 
 ## Review

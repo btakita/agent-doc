@@ -9,7 +9,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -1389,6 +1389,11 @@ No follow-up filed. `lazily-gd` still has no temporal family, but that's the exp
 
 ### Re: Can we make a lazily-py-temporal package? — opus-5
 
+> **Queue prompt:**
+>
+> do [#lazilytemporalpackage]
+
+
 Yes, it's buildable, and it's small. But I'd recommend **not** shipping it as a package — for a reason that only showed up when I went looking at the invalidation code, and which matters more than the packaging question.
 
 #### The finding that decides this
@@ -1430,20 +1435,38 @@ So: consumers should implement their own, and what we owe them is the boundary w
 **What I'd do instead** — and this is the part I think is actually worth building — is document the **deterministic-replay-safe subset** of lazily as a general property. It isn't Temporal-specific: the same guarantee is what event sourcing, lockstep netcode, and deterministic simulation all need, and all of them will hit the same `set`-ordering edge. One spec page that says "these cores are replay-safe, the reactive layer guarantees convergence but not side-effect order" serves every one of those hosts and costs far less than a binding. Filed as a backlog item.
 
 One caveat on scope: I verified the container types and the invalidation walk by reading `cell.py`/`slot.py`, and the sandbox rules from the Temporal Python SDK README. I did **not** build a workflow and force a replay divergence, so "this will fail on failover" is a read of the mechanism, not an observed failure. If the replay-safety page gets written, a cross-process ordering test is the thing that would settle it.
+
+### Re: do [#documentdeterministicrep] — opus-5
+
+Written and pushed: `lazily-spec` [`3f99c78`](https://github.com/lazily-hub/lazily-spec/commit/3f99c78) adds `docs/replay-safety.md` (`#lzreplay`) and indexes it in `SUMMARY.md` after *Cell Model*.
+
+**One correction to what I told you last cycle.** I framed py's identity-keyed `_parents` set as a latent hazard. Having read what `reactive-graph.md` actually pins, it's narrower and less alarming than that: the spec fixes effect delivery in **dependency order** (glitch-free — a dependent never runs before what it reads) and fixes **cleanup order** as a cross-binding MUST (reverse creation order, "every binding runs cleanups in the same sequence"), then explicitly leaves **sibling** order free — "Order is therefore free for the edge bookkeeping and fixed for the cleanups." So lazily-py is conformant, not defective: clause 3 permits its set-ordered fan-out, and `TeardownScope._owned` is an ordered `list` iterated in `reversed()`, so the cleanup MUST holds. What's unstable is only the order of two effects at the same depth with no dependency between them.
+
+That narrower fact is still exactly what a replay host cares about, because it compares the sequence of emitted commands rather than the settled values. Which is why the page was worth writing instead of a bug being worth filing.
+
+**What the page says**
+
+- The three ordering clauses above, stated as such, with clause 3 identified as the whole subject.
+- Why convergence doesn't need clause 3 (the graph is confluent, so every node settles to the same value regardless of sibling visit order) and why pinning it would over-constrain edge bookkeeping for no gain in any non-replay host.
+- **Per-binding sibling stability, marked as non-contractual** — rs `EdgeVec = SmallVec<[SlotId; 2]>` + `EdgeIndex`, insertion-ordered; js `Set`, insertion-ordered per ECMAScript; py `set[Slot]` keyed by object identity, so order follows `id()` and varies between processes. The portability warning is the point: code written against rs or js can pick up an insertion-order dependence that breaks on py, and under a replay host it breaks as an intermittent failure on a *different process*.
+- The safe subset, enumerated by family tag: `#lztime`, `#lzcoord`, `#lzpresence`, `#lzresilience`, `#lzwindowing`, `#lzrateshape`, state tables/machines/charts — all side-effect-free state machines over an explicit monotone `tick(now: u64)`, reading no clock of their own. Unsafe for command ordering: `Context`, `Cell`/`Source`, `Computed`, `Slot`, `Effect`.
+- That this is not a new boundary — it's the core/cell split the family already mandates for backend portability, which turns out to also be the deterministic-replay boundary.
+- Two practical notes: cores and cells share a module and import the reactive layer at module scope, so the safe subset has to be a curated name list rather than an import boundary; and prefer the host's own durable timers, because Temporal's `workflow.sleep` / retry policies / `start_to_close_timeout` survive process death and the in-memory cores do not. Reach for a lazily core for what the host lacks — cron-pattern match counting, rate shaping, windowing, a statechart — not to re-implement its timers.
+- A closing section on what strengthening the guarantee would cost (insertion-ordered fan-out specified across all bindings, py's `_parents` container changed, a fixture asserting sequence rather than settled values), explicitly **not** proposed, with the note that only a cross-process test could decide it since a single-process test cannot tell a stable order from a lucky one.
+
+`make check` green (exit 0, all 13 gates). Pushed to `lazily-spec` main. Left the other session's pending `AGENTS.md` edit and `runbooks/code-navigation.md` deletion untouched — committed with `--only` scoped to the two doc paths.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#reconcilecompositionclai]~~
-- do [#lazilytemporalpackage]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilytemporalpackage] Can we make a lazily-py-temporal package? What operations would lazily-py-temporal need to fully integrate with temporal? Is it worthwhile or should the consumer implement their own temporal integration?
+- [x] [#documentdeterministicrep] Document the deterministic-replay-safe subset of lazily in `lazily-spec/docs/` (proposed `replay-safety.md`): the pure cores are replay-safe (plain state machines over a monotone `tick(now)`), but the reactive layer is NOT command-order-stable — `Cell._parents` is a `set` keyed by object identity and `touch()` iterates it into the `_reset_work` LIFO, so `Effect` fire order varies across processes. Values converge; side-effect ORDER does not. Applies to every deterministic-replay host (Temporal.io workflows, event sourcing, lockstep netcode, deterministic sim), not just Temporal. State the guarantee, name the safe surface, and add a cross-process ordering test if the guarantee is meant to be stronger than 'converges'.
 <!-- /agent:backlog -->
 
 ## Review

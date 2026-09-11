@@ -12,7 +12,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: go
+queue: start
 ---
 
 ## Status
@@ -359,13 +359,50 @@ Buckets keep `expect` apart from `expect[]` because the bindings genuinely disag
 **One adjacent hole found and closed.** The generated, fail-closed, routed `schemas/assertion-blocks.json` routed 155 of 158 assertion-block pointers. The three it missed were the six `expect_initial`/`expect_after` blocks in `collections/semtree_incremental.json` and the eight-element array-valued `steps[].expect` — and the test that checks the route ledger is exact in both directions could not see them either, because it walks the corpus with the same three-name constant. A blind spot consistent with itself reports OK. 158 routes now, none removed, and verified constraining rather than merely present: `surprise_key` is rejected on both new routes where the unmodified block validates. Two runners were inventorying blocks no schema constrained.
 
 Exchange is at 309 lines / 12 sections — noting it, not stopping for it.
+
+### Re: queue: start — opus-5
+
+Queue restarted, head drained, and `#lzblockfloorpin` closed out on evidence rather than on last cycle's "in flight".
+
+**`#lzblockfloorpin` — all five repos landed, pushed, CI green.** `lazily-spec 9b55539`, `lazily-cs 362f16c`, `lazily-js bf2fb79`, `lazily-py 302736e`, `lazily-zig 40d4e28`, every one at its remote HEAD with a green run on that exact sha. Marked done.
+
+### Re: do[#lzzigblockwalk] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzblockfloorpin]
+>
+> do [#lzzigblockwalk]
+
+
+Widened, and the widening is where the work was. `lazily-zig aecf1a1` (CI ✅), `lazily-spec 4718d90` (CI ✅), superproject `11505ffd4`.
+
+**The walk: 37 sites / 31 distinct digests → 722 / 613.** Rung 0 read the top-level `assertions` key plus the `assertions` key of each element of the top-level `frames`/`scenarios`/`rejects` arrays, and nothing else — 5.2% of what the same 138 opened fixtures carry, with every `expect`/`expected`/`expect_initial`/`expect_after` block in the corpus outside it. The rule is now the whole of `BLOCK_NAMES` at every depth, object-valued only, a block emitted and not descended into, with `name`-preferring list labels: lazily-py's `iter_declared_blocks` rule, mirrored in the guard's derivation so the declaring side and the expectation cannot walk differently.
+
+**204 digests over 239 sites had no binder. 214 now bind, across nine runners.** The largest was `reactive_graph_conformance`'s `evaluateExpect` — a hand-rolled key loop that refused an unknown key and bound nothing, so ~100 step blocks reported exactly nothing. Binding it immediately failed a rung that had never been able to fire here: `#lzsubblockkeyset`, on `read`/`readable`/`dependents_of`/`dependencies_of`/`computes_of`/`scope_owned_count`. A key-set comparison would be *wrong* for those — they are keyed by node id and a fixture names the subset it cares about, not the graph — so they descend into a child tracker and the obligation moves down instead.
+
+**Three findings the widening produced, not a clean sweep.**
+
+`reliable_sync` had re-typed all twelve `expect` blocks as Zig literals with the key name in a trailing comment — `try testing.expectEqualSlices(u64, &.{ 42, 43 }, retained); // retained_after_ack`. A real comparison against a constant, so upstream could move any of those numbers and the file kept agreeing with itself. `crdt_tree` never read its three `crdt-tree/algebra.json` blocks at all; `expectFrontiersEqual`/`expectSameOpIds` are now predicates so the fixture's booleans decide the verdict, and an `expect*` helper that failed on the spot could never have answered for a corpus declaring `texts_equal: false`. And `arena_blob.json`'s `payload_region` was carried by the fixture and read by **nothing** — which is the whole shape of an unbound block.
+
+**25 remain excused, per site.** They are steps of the six `EXPECTED_SKIPS` fixtures where the replay stops on a `merge_cell` op or the `drain_exhausted` key this binding does not implement, so the later blocks are unreachable rather than unbound — the same class lazily-py excuses for the same fixtures. Per site and not per fixture so that when the op lands each entry fails as stale one at a time. The ledger also grew the two directions it lacked: an excuse naming a site this run did not inventory, and one naming a site whose digest a runner *does* bind, each now fail. Both probed.
+
+**Proven blind, not argued blind.** Deleting one nested `expected` block from a scratch copy of the corpus fails the new guard (613 declared vs 612 derived) while the walk it replaces reports 37 sites / 31 digests either way. Unperturbed control green in the same run.
+
+**One adjacent defect, found because it made an honest floor look broken.** lazily-spec's `check-corpus-floors.mjs` found an array by `NAME=(` and then scanned for the next line beginning `)`. For a same-line `NAME=()` that close belongs to the *next* array, so lazily-zig's 25 new `KNOWN_UNBOUND_BLOCKS` entries read as 25 scenario excuses and silently subtracted 25 from the derived count: `MIN_SCENARIOS=151` was reported "UNSATISFIABLE, above the 126 the corpus plus that binding's ledger can produce". Fixed in the parser and proven against a tree where zig still spells it on one line — fixed parser exit 0, old parser exit 1. `lazily-cpp` and `lazily-dart` ship the same shape and were one populated neighbouring array away from the same false failure.
+
+**Verification.** `make check` exit 0 in both repos: zig's fmt on both pinned toolchains, full suite, interop peer, Lean formal model, 613/613 blocks bound, 138/156 fixtures, 151/151 scenarios, assertion ordering, ci-reach; spec's 13 guards. `assertKeyWith` callbacks needed two shapes fixed for lazily-spec's consumption guard — a multi-line signature whose `zig fmt` trailing comma reads as an empty final parameter, and callbacks resolved by name rather than through a generic factory or a local `const`.
+
+Exchange is at 335 lines / 13 sections with the queue active — noting it, not stopping for it.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do[#lzblockfloorpin]
+- ~~do [#lzblockfloorpin]~~
+- ~~do [#lzzigblockwalk]~~
+- do [#lzblockmagnitudeaudit]
 - do[#lzorderinganchors]
 - do[#lzktareapartition]
 - do[#lzscenariofloormissing]
@@ -374,8 +411,7 @@ Exchange is at 309 lines / 12 sections — noting it, not stopping for it.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzblockfloorpin] [lazily-spec] Assertion-block floors are the same drifting constant #lzcorpusfloorguard just retired for steps, and they are still hand-maintained: lazily-cs MIN_BLOCKS=743, lazily-js MIN_BLOCKS=638, lazily-py MIN_DECLARED_BLOCKS=620, lazily-zig MIN_BLOCKS=31. cs's own comment is the proof - 'Re-pinned from 740 for lazily-spec 4010d99 (#lzreplayframing), which grew canonical_encoding_equality.json from 11 steps to 14'. corpus-counts.json pins every top-level ARRAY length but not assertion-block SITES, so deleting these floors today would leave that dimension unguarded. Extend the corpus-side pin to block sites (they are corpus-derived and countable from conformance/ the same way), then let each binding derive its count instead of typing it. Repo: src/lazily-spec, then the four bindings.
-- [ ] [#lzzigblockwalk] [lazily-zig] rung 0's inventory walk is the NARROW pre-#lzunboundblockguard one: recordDeclaredBlocks in src/lazily/conformance_manifest.zig (~line 383) reads the top-level `assertions` key plus the `assertions` key of each element of top-level `frames`/`scenarios`/`rejects`, and nothing else. Simulating that walk against the corpus plus this repo's ledger reproduces MIN_BLOCKS exactly: 37 sites / 31 distinct digests over 138 opened fixtures. Those same 138 fixtures carry 716 assertion-block sites / 607 distinct digests under the three-name objects-only rule, so rung 0 covers 5.2% of them and every `expect`/`expected` block in the corpus is outside it — their keys are not unread, nothing reads them. This is verbatim what lazily-py had before widening from 31 to 578 (#lzunboundblockguard), and py's widening found 25 real unbound blocks. Widen the walk to the whole block-name set at every depth, then bind or excuse every block it surfaces; expect runner work in zig, not a guard edit. Verify against `make corpus-blocks-report` in lazily-spec. Repo: src/lazily-zig
+- [ ] [#lzblocksitepin] [lazily-py, lazily-js, lazily-zig] The derived assertion-block magnitude is compared as DISTINCT DIGESTS, and a probe this cycle showed that is one dimension short: deleting `stdlib/timer.json` scenarios[0].steps[0].expect from a scratch corpus left lazily-zig`s guard GREEN, because that block`s digest (`{"outcome":"pending","deadline":10}`) recurs elsewhere and the distinct count did not move. Only a block with a unique digest is visible. The SITE count is what closes it — lazily-zig already prints 722 sites and compares 613 digests, and lazily-cs is the one binding that asserts sites (743 == 743). Assert BOTH in every binding that derives a magnitude, and prove each exact by failing at n+1. lazily-spec`s corpus-counts.json pins sites per fixture upstream, so the corpus side is covered; this is the binding-side rung. Repos: src/lazily-py, src/lazily-js, src/lazily-zig
 - [ ] [#lzblockmagnitudeaudit] [lazily-rs, lazily-kt, lazily-dart, lazily-go, lazily-cpp, lazily-gd] #lzblockfloorpin covered only the four bindings that DECLARED an assertion-block magnitude; the other six were never checked for whether they declare one at all. rs/kt/dart/go/cpp each carry some form of unbound-block rung (lazily-rs/scripts/check-conformance-coverage.sh + tests/common/mod.rs, lazily-kt/scripts/check-conformance-coverage.sh + ConformanceFixtures.kt, lazily-dart/scripts/check-unbound-blocks.py, lazily-go's per-area *_conformance_test.go, lazily-cpp/tests/test_spec_fixture.hpp) and lazily-gd appears to carry none — but a rung with no positive-evidence magnitude reports OK over an inventory of zero, which is the #lzvacuousrun hole the four floors existed to close. For each: determine whether a magnitude is asserted, and if not derive one the same way (corpus directory listing minus that binding's committed ledger, walked with that binding's OWN rule, asserted EQUAL). lazily-spec's `make corpus-blocks-report` prints sites and distinct digests per binding in the three rows a walk can vary over. Repos: src/lazily-rs, src/lazily-kt, src/lazily-dart, src/lazily-go, src/lazily-cpp, src/lazily-gd
 - [ ] [#lzorderinganchors] [lazily-spec] scripts/check-assertion-ordering.py ORDERED_CHECKS anchors its ordering contract on the EXACT floor literals the bindings are now removing - regexes like 'assert accepted == 6', 'assert replayed == 12', 'assert.equal(accepted, 10)' for py/js/cs. lazily-py could not delete three of its floors this cycle and shipped them as DEAD ANCHORS, kept only to satisfy this guard, with the live constant-free assertion sitting above them. That is debt the guard created. Re-anchor on something stable that is not a value - a named helper call, or a marker the runner declares - so removing a constant does not break an unrelated ordering contract. Note the anchor must also be UNIQUE in the file (py tripped 'anchors are not unique' by quoting the literal in an explanatory comment). Repo: src/lazily-spec, then src/lazily-py to drop the dead anchors.
 - [ ] [#lzktareapartition] [lazily-kt] check-conformance-coverage.sh declares REQUIRED_AREAS (27 areas) with no EXCUSED_AREAS complement, so the area list scopes the AUDIT and not the set the suite OPENS: kt opens 148 fixtures / replays 157 scenarios where deriving from the areas alone gives 147 / 151. lazily-spec's check-corpus-floors.mjs therefore declines to derive any floor for kt (it would otherwise have called an honest MIN_FIXTURES=148 unsatisfiable). lazily-cpp pairs the two arrays and its own guard enforces the exact complement, and there the derivation is exact. Add the EXCUSED_AREAS complement (or the equivalent partition assertion) so kt's floors become auditable from the corpus side. Repo: src/lazily-kt

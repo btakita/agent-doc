@@ -12,7 +12,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -302,19 +302,52 @@ Four repos were carrying comments that asserted the false version of this proper
 On method: nobody's green was taken on faith. `lazily-kt` read JUnit XML timestamps to prove the test task advanced rather than reporting `UP-TO-DATE`; `lazily-go` cleared the test cache and grepped for `(cached)`; `lazily-zig` built into a freshly created cache dir it verified did not exist, and re-ran all three pinned toolchains raw after the known `rtk proxy` exit-code trap (the six `failed command:` lines are real, pre-existing, and are the build runner annotating steps that wrote to stderr on a `1097/1097 passed` summary); `lazily-cpp` asserted `test ! -d build` before each configure; `lazily-py` confirmed `replay.py` is not one of the five mypyc modules before trusting a source-level mutation. Every restore came from a scratch copy, never `git checkout --`, and the shared corpus at `../lazily-spec/conformance` was never written by any of the nine.
 
 Exchange is at 244 lines / 10 sections with the queue active — noting it rather than stalling to compact.
+
+### Re: do [#lzcorpusfloorguard] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzcorpusfloorguard]
+
+
+> **Queue prompt:**
+>
+> queue: go
+
+Go-mode acknowledged; nothing new to execute from the flip.
+
+Ten repos again. `lazily-spec` `76b79cf` landed the guard, then `d411b7c`, `fd25283` and `804c9d0` corrected it — **each of those three fixes came from a binding agent's report, not from me**. Nine binding commits: rs `260f41a`, py `5953ad1`, js `18c8459`, kt `169f380`, go `b8fe008`, zig `66c370a`, cpp `1e6510e`, cs `88d02d0`, dart `93dd418`. Eight are CI-green; `lazily-rs` run 34641609398 is still in progress with nothing red (Signaling, Lean and the benchmark gate already passed, the long Rust job is running) — recorded as pending, closed out on local evidence. Spec CI 34641783183 green.
+
+**The guard, in two directions of one idea: a count another repo derives from must move deliberately.** `corpus-counts.json` pins the corpus's own array lengths, and each binding's declared `MIN_FIXTURES` / `MIN_SCENARIOS` is re-derived from the corpus plus that binding's own `KNOWN_UNCOVERED` ledger and must match *exactly* — slack fails because slack has stopped guarding, and a floor above reality fails too, naming the already-red binding in one line. The derivation reproduces every declared floor on the nose. Then the bindings retired the constant the incident was actually about: a per-fixture step count hard-coded in the runner is replaced by *executed == loaded* plus *an unknown op type is a hard failure*, neither of which has a number to re-pin.
+
+**The same tautology was live in three bindings.** `lazily-kt`'s ingress `replay()`, `lazily-dart`'s ingress `_replay`, and all four of `lazily-rs`'s queue-family `replay` functions returned `steps.len()` — the **loaded** count — and the caller compared that against the loaded count. `expect(steps, corpusStepTotal())` could not fail. A dispatch loop that walked past a step still reported it replayed. Three agents found the identical shape independently in three languages, which makes it a family-level design slip rather than three mistakes.
+
+**The constants were not confined to replay.** The sweep turned up roughly sixty-six hard-coded corpus counts across nine repos — `lazily-cs` twelve, `lazily-py` twelve, `lazily-rs` ten, `lazily-cpp` nine, `lazily-zig` five, `lazily-dart` five, `lazily-kt` five, `lazily-js` four, `lazily-go` four — in statechart, distributed, lossless-tree, ingress, egress, queue-family, stdlib, codec and blob runners. Every agent also drew the line correctly in the other direction and left alone the counts that describe the *runner's own* ledger (a 3×3 flavor matrix, a fixture list declared forty lines up), which are not corpus-coupled and are right to be literal.
+
+**Nobody was silently skipping unknown ops — but two were failing with the wrong message.** All nine dispatches already ended in a throw. `lazily-js` had the fingerprint lookup *above* that throw, so a new op without a `fingerprint` field died as `no fingerprint named 'undefined'` — reads as a corrupt fixture, not as a new op. `lazily-dart` built four locals eagerly before the branches, so an unrecognized op died on a cast. Both now reach the named error. `lazily-zig`'s two replay chains returned their error mute, and now name fixture, step index and op type — emitted inside the loop while the parse arena still owns those bytes, because stashing the label for a post-`deinit` report is the borrowed slice that dangles on exactly that path.
+
+**The guard I shipped was wrong three times, and the fan-out is what found it.** `lazily-js` reported that it *does* declare `MIN_SCENARIOS=157`, in `check-scenario-coverage.mjs` rather than the coverage guard — so my one-file read produced a false "no floor declared" *and* left a real 157-scenario floor entirely unaudited; the whole `scripts/` directory is the ledger now, and two different values for one floor is a hard failure. `lazily-kt`'s run reporting 148 fixtures / 157 scenarios against my derivation's 147 / 151 exposed that `REQUIRED_AREAS` scopes the **audit**, not the set the suite **opens**; `lazily-cpp` pairs it with `EXCUSED_AREAS`, whose own guard enforces an exact complement, and there the derivation lands exactly. Without that complement the guard now declines to state a number rather than state a wrong one — the previous revision would have called kt's honest `MIN_FIXTURES=148` *unsatisfiable* against its own bad arithmetic, and a guard that manufactures a false failure against a correct floor is worse than no guard. And `lazily-dart` pointed out the manifest pinned `steps` and `scenarios` while its stdlib runner counts `mutations`, so a shrinking mutation ledger was caught nowhere; it now pins **all** 151 array lengths across 144 fixtures, and `mutations` 6→5 and `frames` 4→3 both go red where neither was observable before.
+
+Two artefacts of the drift clock are worth keeping. `lazily-cs`'s `MIN_BLOCKS` comment reads *"Re-pinned from 740 for lazily-spec 4010d99 (#lzreplayframing), which grew canonical_encoding_equality.json from 11 steps to 14"* — the constant recording, in its own words, being reset by my commit from the previous cycle. And `lazily-cpp`'s statechart floor was `>= 33` against a 33-step corpus: zero slack, which is exactly what "just re-pinned" looks like, and a mutation still sent 26 of 33 past it.
+
+Method again held. Cold builds proved cold rather than asserted: `lazily-zig` verified its `--cache-dir` absent before creating it and used an isolated `ZIG_GLOBAL_CACHE_DIR`; `lazily-cpp` asserted `test ! -d build` before each configure and ran a **control** — the same cold binary against the same scratch corpus with the new step removed exits 0 — so the failure is attributable to the step and not to the scratch directory; `lazily-go` cleared the test cache and grepped for `(cached)`; `lazily-kt` read JUnit XML timestamps; `lazily-py` confirmed `replay.py` is not one of the five mypyc modules before trusting a source mutation, then ran the decisive probe — turning its `raise` into a `continue` against a fifteen-step scratch corpus, which the old `>= 14` floor would have passed. Every restore came from a scratch copy, never `git checkout --`, and not one of the nine wrote to the shared corpus.
+
+Exchange is at 278 lines / 11 sections with the queue active — noting it rather than stalling to compact.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lzcorpusfloorguard]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzcorpusfloorguard] [lazily-spec] Every binding's replay runner carried a slack minimum-steps floor (8 of 9 pinned >= 11 against a 14-step fixture); only lazily-cs failed loudly. A published corpus step is invisible to a binding whose floor still describes the old fixture, so a spec-side addition can report green in nine repos while three rows never execute. Same class as the MIN_FIXTURES/MIN_SCENARIOS drift closed this cycle in lazily-cpp (149->151), lazily-py (141->145, blocks 578->620), lazily-js (635->638) and lazily-cs (740->743). Add a lazily-spec guard that reads each binding's declared per-fixture step/fixture/scenario floors from its ledger and fails when any floor sits below what the published corpus carries - the corpus knows its own counts, the bindings do not re-derive them reliably. Repo: src/lazily-spec
+- [ ] [#lzblockfloorpin] [lazily-spec] Assertion-block floors are the same drifting constant #lzcorpusfloorguard just retired for steps, and they are still hand-maintained: lazily-cs MIN_BLOCKS=743, lazily-js MIN_BLOCKS=638, lazily-py MIN_DECLARED_BLOCKS=620, lazily-zig MIN_BLOCKS=31. cs's own comment is the proof - 'Re-pinned from 740 for lazily-spec 4010d99 (#lzreplayframing), which grew canonical_encoding_equality.json from 11 steps to 14'. corpus-counts.json pins every top-level ARRAY length but not assertion-block SITES, so deleting these floors today would leave that dimension unguarded. Extend the corpus-side pin to block sites (they are corpus-derived and countable from conformance/ the same way), then let each binding derive its count instead of typing it. Repo: src/lazily-spec, then the four bindings.
+- [ ] [#lzorderinganchors] [lazily-spec] scripts/check-assertion-ordering.py ORDERED_CHECKS anchors its ordering contract on the EXACT floor literals the bindings are now removing - regexes like 'assert accepted == 6', 'assert replayed == 12', 'assert.equal(accepted, 10)' for py/js/cs. lazily-py could not delete three of its floors this cycle and shipped them as DEAD ANCHORS, kept only to satisfy this guard, with the live constant-free assertion sitting above them. That is debt the guard created. Re-anchor on something stable that is not a value - a named helper call, or a marker the runner declares - so removing a constant does not break an unrelated ordering contract. Note the anchor must also be UNIQUE in the file (py tripped 'anchors are not unique' by quoting the literal in an explanatory comment). Repo: src/lazily-spec, then src/lazily-py to drop the dead anchors.
+- [ ] [#lzktareapartition] [lazily-kt] check-conformance-coverage.sh declares REQUIRED_AREAS (27 areas) with no EXCUSED_AREAS complement, so the area list scopes the AUDIT and not the set the suite OPENS: kt opens 148 fixtures / replays 157 scenarios where deriving from the areas alone gives 147 / 151. lazily-spec's check-corpus-floors.mjs therefore declines to derive any floor for kt (it would otherwise have called an honest MIN_FIXTURES=148 unsatisfiable). lazily-cpp pairs the two arrays and its own guard enforces the exact complement, and there the derivation is exact. Add the EXCUSED_AREAS complement (or the equivalent partition assertion) so kt's floors become auditable from the corpus side. Repo: src/lazily-kt
+- [ ] [#lzscenariofloormissing] [lazily-py, lazily-kt, lazily-gd] No MIN_SCENARIOS floor is declared at all - lazily-spec's check-corpus-floors.mjs reports this rather than failing, because lazily-kt deliberately retired MIN_FIXTURES for an area-partition assertion and that is a stronger invariant. But a binding with NEITHER is relying on nothing: py replays 151 scenarios and kt 157 with no positive-evidence floor under either, so a run that silently stopped replaying scenarios would report green. Derive each floor from the gate's own output, add it, and prove it exact by failing at n+1. lazily-gd is staged and may legitimately have nothing to floor yet - check before adding. Repos: src/lazily-py, src/lazily-kt, src/lazily-gd
 <!-- /agent:backlog -->
 
 ## Review

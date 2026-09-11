@@ -6,7 +6,7 @@ agent: claude
 claude_model: fable
 agent_doc_format: template
 agent_doc_write: crdt
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -307,21 +307,53 @@ Done. [`7288515`](https://github.com/existence-lang/ontology/commit/7288515) cle
 **Not touched.** The ontology's `CLAUDE.md` still shows the two ring 1 rows as pending, but that file and `AGENTS.md` hold another session's uncommitted edits, so I left them alone; the `PR #2` safe-fixes branch will be rebuilt from this `main` on the next weekly run.
 
 That empties the queue: ten items drained this session. Exchange is at thirteen responses; with the queue now inactive, compaction is an operator choice.
+
+### Re: do #semantickey — fable
+
+> **Queue prompt:**
+>
+> do [#semantickey]
+
+Gated, not done: the one step that needs a credential only you can mint stays open, and everything around it landed.
+
+**The key is the wrong kind, not stale.** `passage show btak/ANTHROPIC_API_KEY` yields a `sk-ant-oat01-…` value, a Claude OAuth access token of the sort `claude login` stores, not a Console API key (`sk-ant-api03-…`). Sent as `x-api-key`, the Messages API answers `401 API key is invalid`, which is exactly what last cycle read as a stale key. OAuth tokens are for Claude Code and claude.ai, not third-party API calls, so I did not try to route around it. `btak/OPENAI_API_KEY` also answers 401 on `GET /v1/models`, so `--provider openai` has no live proof either; the other `OPENAI_API_KEY` entries in passage belong to other projects and I left them alone. The five-node live pass therefore did not run. Recorded in memory so the next session does not re-diagnose it.
+
+**The CLI now says so before sending anything.** [`b2848f1`](https://github.com/existence-lang/existence/commit/b2848f1) on `existence` checks the key shape in the client constructor: an empty key, or an `sk-ant-oat` token handed to the anthropic provider, exits 2 with
+
+```
+ANTHROPIC_API_KEY holds a Claude OAuth access token (sk-ant-oat...), not a Console API key (sk-ant-api...); create one at https://console.anthropic.com/settings/keys
+```
+
+Proven against the real passage value with no request made (the test points the endpoint at a closed port, so a shape error is proof nothing was sent). `make check` is green, 96 tests; CI run [34648241194](https://github.com/existence-lang/existence/actions/runs/34648241194) passed. Installed locally; not a release, the workflow's `v0.6.0` pin does not need it.
+
+**Decision on the weekly workflow: carry the secret, opt-in.** [`8eb1050`](https://github.com/existence-lang/ontology/commit/8eb1050) makes `audit.yml` read an `ANTHROPIC_API_KEY` repository secret. Without it the job is byte-for-byte the old run. With it, `--semantic` joins the `--all --fix` invocation so the findings land in the same `audit/report.json` and issue; if that combined run exits 2 the job warns and re-runs without the class, so a revoked key drops one class rather than the week's report. The verdict cache `audit/semantic.cache.json` rides the safe-fixes PR (already inside `git add audit`) and, since that branch is rebuilt from `main` and PR #2 may sit unmerged, also an Actions cache keyed per run with a prefix restore, so an unchanged ontology costs zero model calls even before a merge. Semantic stays report-only and off the PR's fix path, as Phase 7 required.
+
+**Verified with a dispatch.** Run [34648241901](https://github.com/existence-lang/ontology/actions/runs/34648241901) went green in 6m37s on the new file: the two cache steps reported `skipped` because no secret is set, the audit ran, and PR #2 and the issue were refreshed. The unchanged path is unchanged.
+
+**What is left for you**, now the text of `#semantickey` (gated): mint a Console key into the same passage path, run the five-node command once, and `gh secret set ANTHROPIC_API_KEY -R existence-lang/ontology` when you want the weekly pass on. Exchange is at fourteen responses; queue active, no compaction.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
+- 🚧 do [#semantickey]
+- do [#auditprtoken]
+- do [#xlrequote]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#semantickey] The `btak/ANTHROPIC_API_KEY` entry in passage is rejected by api.anthropic.com (HTTP 401 "API key is invalid"), so `existence audit --semantic` could only be proven against the local stand-in server. Rotate the key (a new one from the Console into the same passage path), then run `ANTHROPIC_API_KEY="$(passage show btak/ANTHROPIC_API_KEY)" existence --ontology src/existence-lang/ontology audit --semantic --limit 5` once to confirm the live Messages API shape, and decide whether the weekly workflow should carry an `ANTHROPIC_API_KEY` secret and add `--semantic` (about 117 Opus 5 calls on the first run, then only changed neighbourhoods)
 - [ ] [#auditprtoken] Let the weekly Ontology audit workflow open its own `audit: safe fixes` pull request: the `existence-lang` organization forbids GitHub Actions from creating PRs, and lifting it needs an `admin:org` scope this session does not have (`gh auth refresh -h github.com -s admin:org`, then `gh api -X PUT orgs/existence-lang/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true` and the same PUT on `repos/existence-lang/ontology`), or add an `AUDIT_TOKEN` repo secret (classic PAT, `repo` scope) which `.github/workflows/audit.yml` already prefers. Until then the job pushes the branch and links the compare page in the issue; PR #2 was opened by hand and the job keeps it current
 - [ ] [#xlrequote] Decide what to do with the source drift the first real `existence audit --sources` run found in `src/existence-lang/ontology`: 206 quoted passages are no longer on their pages (87 wiktionary, 108 wikipedia, 6 etymonline; the nodes quote 2014-15 wording that has since been rewritten) and 19 have changed but still match. Per source, either refresh the blockquote from the live page or pin the historical Wayback snapshot next to the anchor so the quote stays verifiable. Also 6 dead links: `--fix` can swap cosmicscale.appspot.com (fractal, physical-system, scope), the NYT attention-schema piece, and wikipedia `Physical_information` (entity, information) for snapshots; stevenpoole.net, the AAAI SARA13 PDF, and the colorado.edu PDF have none and need a replacement source. Content decisions, not code; `audit --sources` reports them again each weekly run once Phase 6 commits the lock
 <!-- /agent:backlog -->
+
+## Review
+
+<!-- agent:review -->
+- [/] 🚧 [#semantickey] Mint a Console API key (console.anthropic.com/settings/keys, `sk-ant-api03-...`) and store it with `passage edit btak/ANTHROPIC_API_KEY`: the entry today holds a Claude OAuth access token (`sk-ant-oat01-...`), which the Messages API rejects with HTTP 401, and `btak/OPENAI_API_KEY` is rejected too, so the semantic audit has only been proven against the local stand-in server. Then run `ANTHROPIC_API_KEY="$(passage show btak/ANTHROPIC_API_KEY)" existence --ontology src/existence-lang/ontology audit --semantic --limit 5` once to confirm the live Messages API shape, and `gh secret set ANTHROPIC_API_KEY -R existence-lang/ontology` to switch on the weekly semantic pass that `audit.yml` already gates on that secret (about 117 Opus 5 calls the first week, then only changed neighbourhoods)
+<!-- /agent:review -->
 
 ## Icebox
 

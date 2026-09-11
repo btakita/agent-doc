@@ -175,6 +175,27 @@ I refined `#grafttaskcontext` with benchmark-based acceptance criteria: retain e
 Limitations: this benchmark measures retrieval, not patch correctness; uses 12 author-selected questions; uses a character cutoff rather than a provider tokenizer; excludes model-enriched summaries, LSP edges, installation time, and end-to-end agent behavior. Graft's richer inline source explains part of its larger response. A model-backed SWE-bench comparison would answer a different and substantially more expensive question.
 
 Verification: all benchmark commands completed successfully. The root `make check` passed. The latest root [Agent Doc CI run](https://github.com/btakita/agent-loop/actions/runs/34522009943) predates this benchmark; its tmux job passed, while its check job failed in the agent-doc dev-harness on missing Node typings/local Lazily packages. No product source changed in this cycle. Completed `#graftbenchmark`; the next queued recommendation is `#grafttaskcontext`.
+
+### Re: Response
+
+Implemented `#grafttaskcontext` as a working prototype in the clean tsift worktree `/tmp/tsift-issue-25` and committed it as `4456d9c feat: add task context and MCP retrieval facade`.
+
+The new `tsift task-context <question>` command combines indexed FTS file ranking with symbol evidence, deduplicates and reranks by file, emits bounded source excerpts, and supports explicit `source`, `docs`, and `mixed` modes. Its JSON contract includes relevance, weak-match abstention, coverage, freshness, diagnostics, and exact serialized byte accounting. The default path inspects and refreshes the index. `--no-autoindex` preserves the sealed snapshot for the low-latency path and reports freshness as `unknown` rather than claiming an unverified snapshot is fresh.
+
+The new `tsift mcp` stdio server exposes five focused adapters: `tsift_task_context`, `tsift_search`, `tsift_source`, `tsift_graph`, and `tsift_freshness`. It supports JSON-RPC `initialize`, `ping`, `tools/list`, and `tools/call`, bounds tool output, preserves UTF-8 boundaries, and returns `structuredContent` when bounded output remains valid JSON. The task-context MCP adapter also exposes the autoindex choice.
+
+Validation on the frozen 12-task Graft comparison corpus, with top 8, a 12,000-byte cap, six invocations per task, and the first timing discarded:
+
+- Overall Recall@8: **93.1%**; 10/12 tasks returned every gold file.
+- Graft repository slice: **86.1%** Recall@8; 4/6 complete tasks.
+- tsift repository slice: **100%** Recall@8; 6/6 complete tasks.
+- Overall warm median: **10.0 ms**; Graft slice 5.4 ms; tsift slice 28.7 ms.
+- Budget compliance: **12/12** responses under 12,000 bytes; largest response 7,422 bytes.
+- An unrelated nonsense query returned `relevance: none`, `abstained: true`, and zero hits.
+- Separate live checks proved docs mode returned only documentation and source mode excluded documentation.
+- An end-to-end MCP call returned structured task context with the expected `packages/tsift-search/src/impact.rs` first.
+
+Verification passed: full repository `make check`, `cargo clippy -p tsift-cli --all-targets -- -D warnings`, five task-context unit tests, two MCP unit tests, `git diff --check`, and the public-repo private-name scan. The latest upstream tsift GitHub Actions run is the successful `v0.1.97` Release run 34296745682; this local branch has not been pushed, so no CI run contains `4456d9c` yet.
 <!-- agent:boundary:b8ec92e9:tsift -->
 <!-- /agent:exchange -->
 
@@ -182,7 +203,7 @@ Verification: all benchmark commands completed successfully. The root `make chec
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#graftbenchmark]~~
-- do [#grafttaskcontext]
+- 🚧 do [#grafttaskcontext]
 - do [#graftcrux]
 - do [#graftimpactcontext]
 - do [#graftlspedges]
@@ -194,7 +215,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#grafttaskcontext] [recommended] Prototype a question-oriented task-context interface and thin MCP adapters over existing tsift search, graph, source, and freshness primitives. Validate on the frozen Graft comparison corpus: improve foreign-repo budgeted Recall@8 beyond 50%, preserve explicit source-versus-doc modes, keep output within 12,000 characters, target warm median latency below 50 ms, and retain weak-match abstention and freshness evidence.
+- [ ] 🚧 [#grafttaskcontext] [recommended] Prototype a question-oriented task-context interface and thin MCP adapters over existing tsift search, graph, source, and freshness primitives. Validate on the frozen Graft comparison corpus: improve foreign-repo budgeted Recall@8 beyond 50%, preserve explicit source-versus-doc modes, keep output within 12,000 characters, target warm median latency below 50 ms, and retain weak-match abstention and freshness evidence.
 - [ ] [#graftcrux] [recommended] Add optional source-verified crux excerpts to tsift summaries and symbol context, anchored to symbol spans and body hashes with explicit stale-state handling.
 - [ ] [#graftimpactcontext] [recommended] Extend existing tsift impact output with grouped production modules, changed-symbol evidence paths, and separate test signals; expose bounded context to post-edit integrations.
 - [ ] [#graftlspedges] [recommended] Prototype optional LSP call-edge enrichment using installed servers, preserving extractor fallback, provenance, confidence, coverage diagnostics, and tsift freshness contracts; validate Rust and TypeScript resolution precision.

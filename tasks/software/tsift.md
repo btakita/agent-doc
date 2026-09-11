@@ -178,6 +178,11 @@ Verification: all benchmark commands completed successfully. The root `make chec
 
 ### Re: Response
 
+> **Queue prompt:**
+>
+> do [#grafttaskcontext]
+
+
 Implemented `#grafttaskcontext` as a working prototype in the clean tsift worktree `/tmp/tsift-issue-25` and committed it as `4456d9c feat: add task context and MCP retrieval facade`.
 
 The new `tsift task-context <question>` command combines indexed FTS file ranking with symbol evidence, deduplicates and reranks by file, emits bounded source excerpts, and supports explicit `source`, `docs`, and `mixed` modes. Its JSON contract includes relevance, weak-match abstention, coverage, freshness, diagnostics, and exact serialized byte accounting. The default path inspects and refreshes the index. `--no-autoindex` preserves the sealed snapshot for the low-latency path and reports freshness as `unknown` rather than claiming an unverified snapshot is fresh.
@@ -203,7 +208,7 @@ Verification passed: full repository `make check`, `cargo clippy -p tsift-cli --
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#graftbenchmark]~~
-- 🚧 do [#grafttaskcontext]
+- ~~do [#grafttaskcontext]~~
 - do [#graftcrux]
 - do [#graftimpactcontext]
 - do [#graftlspedges]
@@ -215,7 +220,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#grafttaskcontext] [recommended] Prototype a question-oriented task-context interface and thin MCP adapters over existing tsift search, graph, source, and freshness primitives. Validate on the frozen Graft comparison corpus: improve foreign-repo budgeted Recall@8 beyond 50%, preserve explicit source-versus-doc modes, keep output within 12,000 characters, target warm median latency below 50 ms, and retain weak-match abstention and freshness evidence.
 - [ ] [#graftcrux] [recommended] Add optional source-verified crux excerpts to tsift summaries and symbol context, anchored to symbol spans and body hashes with explicit stale-state handling.
 - [ ] [#graftimpactcontext] [recommended] Extend existing tsift impact output with grouped production modules, changed-symbol evidence paths, and separate test signals; expose bounded context to post-edit integrations.
 - [ ] [#graftlspedges] [recommended] Prototype optional LSP call-edge enrichment using installed servers, preserving extractor fallback, provenance, confidence, coverage diagnostics, and tsift freshness contracts; validate Rust and TypeScript resolution precision.

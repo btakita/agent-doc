@@ -773,8 +773,8 @@ pub struct Frontmatter {
     ///     Today is 2026-04-25.
     ///     Keep the work tree clean.
     /// ```
-    #[serde(default, skip_serializing_if = "indexmap::IndexMap::is_empty")]
-    pub prompt_presets: indexmap::IndexMap<String, String>,
+    #[serde(default, skip_serializing_if = "PromptPresets::is_empty")]
+    pub prompt_presets: PromptPresets,
     /// How free-text work admitted from `agent:exchange` or `agent:queue` should be
     /// executed after the binary creates backlog items. Values: `auto`, `goal`,
     /// `queue`. Project/global configs use the same key.
@@ -873,6 +873,97 @@ pub struct Frontmatter {
 /// Exact keys win. As a convenience for command-like preset names, a bare
 /// reference such as `preset review` also resolves to a `#review` key when
 /// only the hashtag form is defined.
+/// Reusable prompt snippets, preserving a key the operator has declared but not
+/// yet given a value (`#presetnullblank`).
+///
+/// YAML `'#key':` with nothing after the colon is *incomplete operator input*, not
+/// an empty preset. Reading it as `""` made the next frontmatter write emit
+/// `'#key': ''` — an agent-authored value the operator never typed, which then
+/// competed with, and could win over, the value they were still typing. Dropping
+/// the key at parse instead is the same harm wearing a different hat: `write()`
+/// would delete the half-typed line out from under them. So the null round-trips
+/// as a null and the operator's line is left exactly as they left it.
+///
+/// [`Deref`](std::ops::Deref)s to the map of presets that actually have a value, so
+/// every consumer keeps seeing exactly those — a key still being typed must never
+/// resolve as a preset with an empty body.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PromptPresets {
+    /// Every declared key in document order; `None` is "declared, no value yet".
+    entries: indexmap::IndexMap<String, Option<String>>,
+    /// The subset carrying a value — the [`Deref`](std::ops::Deref) target, kept in
+    /// step with `entries` so consumers need no knowledge of this type.
+    resolved: indexmap::IndexMap<String, String>,
+}
+
+impl PromptPresets {
+    /// Whether nothing is declared at all. Deliberately keyed off `entries`, not
+    /// `resolved`: a document holding only a half-typed key still has frontmatter
+    /// content to write back, and must not be serialized away.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Keys declared with no value yet.
+    pub fn unset_keys(&self) -> impl Iterator<Item = &str> {
+        self.entries
+            .iter()
+            .filter(|(_, value)| value.is_none())
+            .map(|(key, _)| key.as_str())
+    }
+
+    fn rebuild_resolved(&mut self) {
+        self.resolved = self
+            .entries
+            .iter()
+            .filter_map(|(key, value)| value.clone().map(|value| (key.clone(), value)))
+            .collect();
+    }
+}
+
+impl From<indexmap::IndexMap<String, String>> for PromptPresets {
+    fn from(resolved: indexmap::IndexMap<String, String>) -> Self {
+        let entries = resolved
+            .iter()
+            .map(|(key, value)| (key.clone(), Some(value.clone())))
+            .collect();
+        Self { entries, resolved }
+    }
+}
+
+impl std::ops::Deref for PromptPresets {
+    type Target = indexmap::IndexMap<String, String>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.resolved
+    }
+}
+
+impl serde::Serialize for PromptPresets {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.entries.len()))?;
+        for (key, value) in &self.entries {
+            // `None` serializes as a YAML null, so `'#key':` round-trips to
+            // `'#key':` rather than gaining a value the operator never wrote.
+            map.serialize_entry(key, value)?;
+        }
+        map.end()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PromptPresets {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let entries = indexmap::IndexMap::<String, Option<String>>::deserialize(deserializer)?;
+        let mut presets = Self {
+            entries,
+            resolved: indexmap::IndexMap::new(),
+        };
+        presets.rebuild_resolved();
+        Ok(presets)
+    }
+}
+
 pub fn resolve_prompt_preset_key(
     prompt_presets: &indexmap::IndexMap<String, String>,
     requested: &str,
@@ -1654,9 +1745,12 @@ pub fn merge_fields(content: &str, yaml_fields: &str) -> Result<String> {
                 }
             }
             "prompt_presets" => {
-                if let Ok(presets) =
-                    serde_yaml::from_value::<indexmap::IndexMap<String, String>>(value.clone())
-                {
+                // `#presetnullblank`: parse through `PromptPresets` so a key the
+                // operator has declared but not yet given a value stays a null and
+                // is written back as one. Coercing it to `""` here is what made the
+                // next write emit an agent-authored empty value over the one they
+                // were still typing.
+                if let Ok(presets) = serde_yaml::from_value::<PromptPresets>(value.clone()) {
                     fm.prompt_presets = presets;
                 }
             }
@@ -2909,7 +3003,7 @@ mod tests {
             agent_doc_lint_dialect: None,
             hooks: std::collections::HashMap::new(),
             env: indexmap::IndexMap::new(),
-            prompt_presets: indexmap::IndexMap::new(),
+            prompt_presets: PromptPresets::default(),
             free_text_execution: None,
             dispatch: None,
             agent_doc_env_inherit: None,
@@ -3232,6 +3326,82 @@ mod tests {
         let (parsed, body2) = parse(&written).unwrap();
         assert_eq!(body2, "Body\n");
         assert_eq!(parsed.prompt_presets, fm.prompt_presets);
+    }
+
+    #[test]
+    fn a_preset_key_typed_without_a_value_never_gains_one() {
+        // `#presetnullblank`, reported 2026-09-11: the operator wrote a
+        // `prompt_presets` entry and agent-doc reverted the value they were typing
+        // to the empty string. Reading YAML null as `""` made the next write emit
+        // `'#key': ''` — an agent-authored value competing with the real one.
+        let content = "---\nprompt_presets:\n  '#rebase-conflicts':\n---\nBody\n";
+        let (fm, body) = parse(content).unwrap();
+
+        assert!(
+            fm.prompt_presets.get("#rebase-conflicts").is_none(),
+            "a key still being typed is not a preset with an empty body"
+        );
+        assert_eq!(
+            fm.prompt_presets.unset_keys().collect::<Vec<_>>(),
+            vec!["#rebase-conflicts"],
+            "but the key itself must survive — dropping it would delete the \
+             operator's half-typed line on the next write"
+        );
+
+        let written = write(&fm, body).unwrap();
+        assert!(
+            !written.contains("''"),
+            "no empty value may be materialized: {written}"
+        );
+
+        // And it is stable: re-parsing the written form yields the same state, so
+        // repeated cycles never drift the operator's line.
+        let (reparsed, _) = parse(&written).unwrap();
+        assert_eq!(reparsed.prompt_presets, fm.prompt_presets);
+        assert_eq!(write(&reparsed, body).unwrap(), written);
+    }
+
+    #[test]
+    fn an_explicitly_empty_preset_is_kept_distinct_from_an_unset_one() {
+        // The operator CAN deliberately write an empty preset. That is a value they
+        // typed, so it must survive as one and must not be confused with a key that
+        // has no value yet.
+        let content = "---\nprompt_presets:\n  '#deliberate': ''\n---\nBody\n";
+        let (fm, body) = parse(content).unwrap();
+
+        assert_eq!(fm.prompt_presets.get("#deliberate").map(String::as_str), Some(""));
+        assert!(fm.prompt_presets.unset_keys().next().is_none());
+
+        let written = write(&fm, body).unwrap();
+        assert!(written.contains("''"), "{written}");
+        let (reparsed, _) = parse(&written).unwrap();
+        assert_eq!(reparsed.prompt_presets, fm.prompt_presets);
+    }
+
+    #[test]
+    fn an_unset_preset_key_does_not_hide_the_ones_around_it() {
+        let content = "---\nprompt_presets:\n  '#a': done\n  '#half':\n  '#b': also done\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+
+        assert_eq!(fm.prompt_presets.get("#a").map(String::as_str), Some("done"));
+        assert_eq!(fm.prompt_presets.get("#b").map(String::as_str), Some("also done"));
+        assert_eq!(fm.prompt_presets.len(), 2, "only valued presets resolve");
+        assert_eq!(fm.prompt_presets.unset_keys().collect::<Vec<_>>(), vec!["#half"]);
+        assert!(
+            !fm.prompt_presets.is_empty(),
+            "a document holding only declared keys still has frontmatter to write"
+        );
+    }
+
+    #[test]
+    fn a_frontmatter_holding_only_an_unset_preset_key_is_not_serialized_away() {
+        // `is_empty` keys off declared entries, not resolved ones: otherwise
+        // `skip_serializing_if` would drop the operator's line entirely.
+        let content = "---\nprompt_presets:\n  '#half':\n---\nBody\n";
+        let (fm, body) = parse(content).unwrap();
+
+        let written = write(&fm, body).unwrap();
+        assert!(written.contains("#half"), "operator line deleted: {written}");
     }
 
     #[test]

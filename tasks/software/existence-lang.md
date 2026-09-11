@@ -131,6 +131,29 @@ Done. Pushed `btakita/philosophy@09e1a66` and `existence-lang/ontology@29566ed`;
 **Verification.** Ontology `existence lint` is unchanged at 11 warnings, 0 errors; `toc --check` still reports exactly the six pre-existing manifest problems queued under `#fixmanifestdrift`; `export --format turtle` parses and shows the new broader edges. Philosophy has no `existence.toml`, so `existence --ontology . lint` reports 73 baseline errors across 58 files (missing Axiology sections, broken body links in the noumena/phenomena/pneuma bodies philosophy already had); none are in the lines I changed. `bash -n install.sh` passes. Pages run [34634612675](https://github.com/existence-lang/ontology/actions/runs/34634612675) was in progress at closeout; the previous run was green. Both worktrees still hold another session's `AGENTS.md`/`CLAUDE.md`/`.gitignore` edits; I committed only the four intended files in each.
 
 Not fixed, worth knowing: the CLAUDE.md table's Scope row says "reach of a *perspective*" while both node files say "of an *Entity*; a domain". That is table-vs-node drift, which is the `kind = toc` mirror case for Phase 5 rather than this item.
+
+### Re: do #xlaudit1 — fable
+
+> **Queue prompt:**
+>
+> do [#xlaudit1]
+
+Done. `existence sources` shipped in [`05766af`](https://github.com/existence-lang/existence/commit/05766af) on `main`; CI run [34635458324](https://github.com/existence-lang/existence/actions/runs/34635458324) was queued at closeout. Local `make check` is green (76 tests, up from 69; clippy on both feature sets; fmt) and `cargo install --path .` is done, so the local binary has it.
+
+```
+existence sources [term] [--json]          # list anchors + quoted passages
+existence sources --lock [PATH]            # write audit/sources.lock.json
+```
+
+**Against the real ontology it lists all 313 anchors**, in all 117 terms, resolving to 282 unique URLs and 844 quoted lines. The 989 figure in the plan was a raw `grep '^>'` count; the difference is the `> ### Noun` headings and empty `>` spacer lines, which are not passages. 56 anchors carry no quotes at all: keynote videos, paper links, and mid-paragraph references like the Cosmic Scale link in `scope.md`, which the block rules treat correctly as a source with nothing quoted under it.
+
+**Two source shapes, one extractor.** The nodes use both the standalone form (anchor line, then `>` lines; indented `>     sub-sense` lines and blank lines stay in the block) and the inline form `> <a href>Label</a>: passage`. A block ends at the next anchor, a heading, or any prose line. Labels wrapped onto the next line (the Cosmic Scale anchor) are recovered.
+
+**Lockfile.** `--lock` aggregates by URL into exactly the plan's schema: `cited_by`, `fetched_at`, `status`, `content_sha256`, `quotes` (per citing term), `archive`. With no network this phase, new entries are `fetched_at: null` and `quotes: { term: "unchecked" }`. Rewriting an existing lock keeps the fetch results for URLs still cited and the quote status for terms still citing, and drops URLs and terms nothing cites any more, so Phase 4 can refresh in place. `--lock` with a term argument is rejected, since the lock always covers the whole ontology. I did not commit a lock into the ontology repo; the plan has the audit PR own that file once Phase 4 can populate it.
+
+**Tests** (7, in `src/commands/sources.rs`): both shapes plus block termination and wrapped labels on one fixture node; an orphan blockquote before any anchor is ignored; `build` ordering, term filter, and unknown-term error; aggregation by URL with the exact pretty-printed lock JSON round-tripping through `write_lock`/`read_lock`; merge with an existing lock preserving fetch fields and dropping stale entries; the `--lock`/term conflict and the relative-path default; the exact text and JSON output shapes.
+
+One content fix fell out of running it: `create.md` had the only anchor of the 313 with no label text (`<a href=…></a>`). Labelled it "Create (Wikipedia)" in `existence-lang/ontology@116fc11`. The `existence` worktree still holds another session's `AGENTS.md`/`CLAUDE.md` edits; I committed only the four files of this feature.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
@@ -138,7 +161,7 @@ Not fixed, worth knowing: the CLAUDE.md table's Scope row says "reach of a *pers
 
 <!-- agent:queue priority go -->
 - ~~do [#reconcileotherlay]~~
-- do [#xlaudit1]
+- ~~do [#xlaudit1]~~
 - do [#xlaudit2]
 - do [#xlaudit3]
 - do [#xlaudit4]
@@ -152,7 +175,6 @@ Not fixed, worth knowing: the CLAUDE.md table's Scope row says "reach of a *pers
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#xlaudit1] Phase 1 of `tasks/software/plan-ontology-audit.md`: `existence sources [term] --json` derives (url, citing term, quoted passages) from the anchor+blockquote markdown SPEC rules 7/8 already mandate, plus the `audit/sources.lock.json` schema and writer (no network yet). Done when a fixture node round-trips and the real ontology lists all 313 anchors
 - [ ] [#xlaudit2] Phase 2 of `tasks/software/plan-ontology-audit.md`: `existence audit --structure` wraps lint + `toc --check` + links missing the `.md` suffix (`evolution.md` → `./environment`) + near-duplicate slugs (`signal`/`signals`, `human`/`humans`); JSON report with exit codes 0/1/2; `--fix` appends `.md` only. Then a CI job on ontology PRs
 - [ ] [#xlaudit3] Phase 3 of `tasks/software/plan-ontology-audit.md`: `existence audit --contradictions`: typed-link cycles in the broader graph after inverses, 2-cycles in lay-definition links (the `entity`/`information` shape the canonical-chain work fixed by hand), unlinked mentions of known terms in lay definitions. Report only, both sentences side by side
 - [ ] [#xlaudit4] Phase 4 of `tasks/software/plan-ontology-audit.md`: `existence audit --sources` re-fetches each lock URL (1 req/s, User-Agent, skip-not-fail on unreachable host), compares reachability / quote presence (fuzzy ≥0.9) / page hash, pins a Wayback snapshot; `--fix` swaps a dead link to the snapshot. Test against a local http fixture
@@ -184,4 +206,5 @@ Not fixed, worth knowing: the CLAUDE.md table's Scope row says "reach of a *pers
 - 2026-09-11 [#planwayregularly] Plan a way to regularly audit ontology items. Should we track the sources of each ontology item and recheck during the audit?
 - 2026-09-11 [#xlgenusport] [recommended] Port the two genus decisions from `#xlchaingaps` to the sibling `philosophy/` repo (what `~/.claude/philosophy` resolves to; its `src/entity.md` still reads "Any information in Existence" and `src/abstraction.md` still says "a concept that models") and to the `<!-- philosophy:start -->` table in `~/.claude/CLAUDE.md` (Entity row). Content, two files plus one table row; decide whether `philosophy/` should track `existence-lang/ontology` instead of drifting
 - 2026-09-11 [#reconcileotherlay] Reconcile the other 11 lay definitions that differ between `philosophy/src` and `src/existence-lang/ontology/src` (abstraction, concept, context, domain, information, noumena, phenomena, pneuma, scope, state, tool) — decide direction per term (ontology is canonical for the 110 shared nodes; philosophy keeps its 49 extras), port the sentence, and keep the CLAUDE.md table row in `philosophy/install.sh` in step. Until Phase 5 of `tasks/software/plan-ontology-audit.md` declares philosophy as a `kind = nodes` mirror, this list is the drift record
+- 2026-09-11 [#xlaudit1] Phase 1 of `tasks/software/plan-ontology-audit.md`: `existence sources [term] --json` derives (url, citing term, quoted passages) from the anchor+blockquote markdown SPEC rules 7/8 already mandate, plus the `audit/sources.lock.json` schema and writer (no network yet). Done when a fixture node round-trips and the real ontology lists all 313 anchors
 <!-- /agent:done -->

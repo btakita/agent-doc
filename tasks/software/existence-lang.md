@@ -174,6 +174,22 @@ existence audit [--structure] [--format text|json] [--fix] [-o FILE]
 **CI.** `.github/workflows/ci.yml` in the ontology runs `audit --structure` on every pull request and push to `main`, pins `existence` by commit (cached like the Pages job; switch to a tag once `#cutexistenceusers` releases), prints the text view, and uploads the JSON report as an artifact. Run [34636271438](https://github.com/existence-lang/ontology/actions/runs/34636271438) will fail on the seven remaining errors until `#fixmanifestdrift` lands; that item's text is updated to what is actually left (the `evolution.md` link is done, the `./exists` link is added).
 
 **Tests** (5 new): every check on one fixture ontology; `--fix` rewriting only existing targets and the second-pass residue; suffix rewriting with anchors and titles; the stem pairing with five negatives (`art`/`arts`, `spirit`/`spirituality`, `belief`/`believe`); and the clean report's exact JSON and text plus the class-defaulting and format-error paths. Both worktrees still hold another session's `AGENTS.md`/`CLAUDE.md` edits, which I left out of both commits. Exchange is large (5 responses); the queue is active so I did not compact.
+
+### Re: do #xlaudit3 — fable
+
+> **Queue prompt:**
+>
+> do [#xlaudit3]
+
+Done. `existence audit --contradictions` shipped in [`2eaa91d`](https://github.com/existence-lang/existence/commit/2eaa91d) on `main` (CI queued at closeout; the Phase 2 run [34636238853](https://github.com/existence-lang/existence/actions/runs/34636238853) is green). Local `make check` is green with 83 tests, and the binary is installed.
+
+**Three checks, all report only.**
+
+- **Broader cycles.** The broader graph is built the way `export` builds it: `"broader"` links as edges, `"narrower"` links inverted. Every elementary cycle up to length 6 is listed once, rotated to its smallest node. This one is an `error`, since a cycle makes the SKOS hierarchy unpublishable. The real ontology has **none**, so the Ring 0 typing from `#xltypekernel` is consistent.
+- **Mutual lay definitions.** 2- and 3-cycles in the graph of links that appear in first sentences only, reported with each sentence side by side. The two pairs the canonical-chain work resolved by hand no longer appear. Three do: `aesthetics`/`axiology` ("Aesthetics is related to Axiology" / "Axiology includes Ethics and Aesthetics"), `axiology`/`ethics` (same shape), and `coercion`/`violence` ("To use violence…" / "…physical and/or coercion action…"). The first two are the classic includes/is-part-of loop and read as intentional cross-reference rather than circular definition; the third is a genuine one, since each is defined by the other.
+- **Unlinked mentions.** A known term named in a lay definition that never links it. The first cut flagged 61 nodes; it also flagged `abstraction` for `entity`, which its first sentence links and a later sentence repeats in prose. That is ordinary writing, so the rule became "never linked anywhere in this definition", which leaves 36 nodes, with `entity` (23 before the refinement) and `system` the usual unlinked words. Slugs under four letters are skipped as too ambiguous.
+
+Selecting `--contradictions` alone gives 0 errors and 39 warnings on the ontology; the full audit is now 7 errors (the `#fixmanifestdrift` set) and 56 warnings, and the PR CI job still runs `--structure` only, so this class adds nothing to the PR path. Tests: a fixture with a planted lay-definition 2-cycle, a broader 3-cycle closed through a `narrower` inverse, and an unlinked mention; and the cycle enumerator's uniqueness and rotation on a hand-built graph. The `existence` worktree's other-session `AGENTS.md`/`CLAUDE.md` edits stayed out of the commit. Exchange is at six responses; the queue is active so no compaction.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
@@ -183,7 +199,7 @@ existence audit [--structure] [--format text|json] [--fix] [-o FILE]
 - ~~do [#reconcileotherlay]~~
 - ~~do [#xlaudit1]~~
 - ~~do [#xlaudit2]~~
-- do [#xlaudit3]
+- ~~do [#xlaudit3]~~
 - do [#xlaudit4]
 - do [#xlaudit5]
 - do [#xlaudit6]
@@ -195,7 +211,6 @@ existence audit [--structure] [--format text|json] [--fix] [-o FILE]
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#xlaudit3] Phase 3 of `tasks/software/plan-ontology-audit.md`: `existence audit --contradictions`: typed-link cycles in the broader graph after inverses, 2-cycles in lay-definition links (the `entity`/`information` shape the canonical-chain work fixed by hand), unlinked mentions of known terms in lay definitions. Report only, both sentences side by side
 - [ ] [#xlaudit4] Phase 4 of `tasks/software/plan-ontology-audit.md`: `existence audit --sources` re-fetches each lock URL (1 req/s, User-Agent, skip-not-fail on unreachable host), compares reachability / quote presence (fuzzy ≥0.9) / page hash, pins a Wayback snapshot; `--fix` swaps a dead link to the snapshot. Test against a local http fixture
 - [ ] [#xlaudit5] Phase 5 of `tasks/software/plan-ontology-audit.md`: `[[mirrors]]` in existence.toml (`kind = nodes|toc`) + `existence audit --mirrors`; `--fix` regenerates toc mirrors (`terms.md`); register the `~/.claude/CLAUDE.md` philosophy table and the sibling `philosophy/` repo so the genus-port drift is reported per term. The nodes comparator must strip link titles (`"broader"`) before diffing: 5 of the 11 terms `#reconcileotherlay` was handed differed only by that, and it should compare the first Ontology paragraph, not the whole section, so a missing Axiology section is not reported as lay-definition drift
 - [ ] [#xlaudit6] Phase 6 of `tasks/software/plan-ontology-audit.md`: weekly `schedule` workflow in `src/existence-lang/ontology` running `existence audit --all --format json`, upserting one `Ontology audit` issue (edit by title, diff vs last report) and one idempotent `audit: safe fixes` PR carrying only safe resolutions + refreshed lock + regenerated mirrors. Done after one real scheduled run
@@ -227,4 +242,5 @@ existence audit [--structure] [--format text|json] [--fix] [-o FILE]
 - 2026-09-11 [#reconcileotherlay] Reconcile the other 11 lay definitions that differ between `philosophy/src` and `src/existence-lang/ontology/src` (abstraction, concept, context, domain, information, noumena, phenomena, pneuma, scope, state, tool) — decide direction per term (ontology is canonical for the 110 shared nodes; philosophy keeps its 49 extras), port the sentence, and keep the CLAUDE.md table row in `philosophy/install.sh` in step. Until Phase 5 of `tasks/software/plan-ontology-audit.md` declares philosophy as a `kind = nodes` mirror, this list is the drift record
 - 2026-09-11 [#xlaudit1] Phase 1 of `tasks/software/plan-ontology-audit.md`: `existence sources [term] --json` derives (url, citing term, quoted passages) from the anchor+blockquote markdown SPEC rules 7/8 already mandate, plus the `audit/sources.lock.json` schema and writer (no network yet). Done when a fixture node round-trips and the real ontology lists all 313 anchors
 - 2026-09-11 [#xlaudit2] Phase 2 of `tasks/software/plan-ontology-audit.md`: `existence audit --structure` wraps lint + `toc --check` + links missing the `.md` suffix (`evolution.md` → `./environment`) + near-duplicate slugs (`signal`/`signals`, `human`/`humans`); JSON report with exit codes 0/1/2; `--fix` appends `.md` only. Then a CI job on ontology PRs
+- 2026-09-11 [#xlaudit3] Phase 3 of `tasks/software/plan-ontology-audit.md`: `existence audit --contradictions`: typed-link cycles in the broader graph after inverses, 2-cycles in lay-definition links (the `entity`/`information` shape the canonical-chain work fixed by hand), unlinked mentions of known terms in lay definitions. Report only, both sentences side by side
 <!-- /agent:done -->

@@ -606,15 +606,10 @@ This cycle is a closeout only — the diff was bookkeeping (the `queue: go` → 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
+- ~~As I was typing in this file's agent:exchange when the turn started, my changes in agent:exchange were reverted by agent-doc.~~
 - ⏭️ do [#retainedresumewakeflake]
 - ⏭️ do [#cargotokenrevoke]
-- do [#queuelineclobber]
-- do [#presetnullblank]
-- do [#stashfocuswindow]
-- do [#jbfocusdocroute]
-- do [#compactackflake]
-- do [#retainedresumewakeflake]
-- do [#cargotokenrevoke]
+- ~~The JB "Focus Agent Terminal" does not navigate to anything.~~
 <!-- /agent:queue -->
 
 

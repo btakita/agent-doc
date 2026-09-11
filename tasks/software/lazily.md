@@ -29,13 +29,49 @@ completed
 Compacted content:
 - Archived 43 response topic(s): #lzzigcanonrunner; #lzzigforkhlcpeer; #adjshashprivatefield; 40 more
 - Prior summary/context: prior compacted content: Archived 28 response topic(s): Phase 1; Phase 2; superproject pointers + verification; 25 more
+
+### Re: #lzpystructcell — pyproject extras, not another project — opus-5
+
+> **Queue prompt:** do [#lzpystructcell]: should we use pyproject extras or another project? This adapter should be generic to handle other competing libraries such as pydantic and dataclasses.
+
+**Extras, in `lazily-py`.** A separate distribution would ship *zero dependencies* for the two backends that matter most (stdlib `dataclasses` and `NamedTuple`), pin a `lazily` version just to reach `Source`/`Computed`/`batch`, and add a tenth release lane to a family that already releases nine bindings per canonical-fixture change. The bridge is ~all kernel internals; what it needs from msgspec/pydantic/attrs is field introspection and a constructor call.
+
+The dependency argument for a separate project dissolves once the probes are structural. `matches()` never imports its library to decide a type is *not* one of its structs — it walks `__mro__` comparing `__module__`/`__qualname__` (msgspec, pydantic), or reads the marker attribute the library stamps on the class (`__attrs_attrs__`). If the library were not already imported, no live class could carry that base. So `import lazily` still loads no third-party module, and `dependencies` in `pyproject.toml` is unchanged. A subprocess test enforces exactly that:
+
+```python
+subprocess.run([sys.executable, "-c",
+    "import sys, lazily; assert not [m for m in ('msgspec','pydantic','attr','attrs') if m in sys.modules]"], check=True)
+```
+
+New extras — install ergonomics and the CI backend matrix, nothing more: `lazily[msgspec]`, `lazily[pydantic]`, `lazily[attrs]`, `lazily[structs]` (all three). `lazily[dev]` pulls `lazily[structs]`, so `uv sync --frozen` in CI exercises all five backends rather than skipping three of them.
+
+### Re: what shipped — opus-5
+
+`lazily.struct_cell` — `struct_source(ctx, instance)` or `struct_source(ctx, Type, **fields)` → `StructSource[T]`: one `Source` per bridged field plus one guarded `Computed[T]` that re-materializes the struct.
+
+- **Per-field edges.** `c.read(status["queue_depth"])` depends on that field alone. A sibling write forms no edge to it. Verified: a `queue_depth` reader stays at 1 recompute across a `last_error` write.
+- **Guard, both levels.** An equal field write is inert at the cell; an equal re-materialization is inert downstream. `status.update(depth=3, last_error="boom")` on identical values recomputes nothing.
+- **One wave.** `update()` / `apply()` write through `batch`, so an N-field change invalidates each dependent once, not N times.
+- **`apply(instance)`** diffs a whole fresh instance into the cells — the ingress for code that already returns a copy from `status()`. Only the fields that moved invalidate.
+- **Bridged fields** are the `init` fields in declaration order. Non-`init`/derived fields are excluded: the constructor recomputes them, so they are not independent state.
+
+Backends, in resolution order: msgspec `Struct` → pydantic v2 `BaseModel` → `attrs` → `dataclasses` → `NamedTuple`. `register_struct_backend(b)` prepends, and re-registering a built-in's `name` **replaces** it instead of leaving the default behind it in the chain.
+
+Two judgment calls worth flagging:
+
+- **pydantic re-materializes through `model_construct`** (no validation). The values came out of an already-validated instance or an explicit per-field write; re-validating on every settled wave would make a whole-struct read cost a full validation per field change — the exact cost this bridge exists to delete. It is also alias-proof, which the validating constructor is not unless the model sets `populate_by_name`. `PydanticBackend(validate=True)` is the opt-in, passed via `struct_source(..., backend=...)`.
+- **`DataclassBackend` reads fields with `getattr`, not `dataclasses.asdict`** — `asdict` recurses and deep-copies, and a bridged field must hold the object the struct holds, not a copy of it.
+
+**Verification:** 21 new tests in `tests/test_struct_cell.py`; `make check` green end to end (ty, ruff format/check, `run_readme`, 854 tests, conformance coverage 142/153, interop peer, assertion-ordering, ci-reach). Docs in README (`## Struct bridge`), SPEC (`### Struct bridge`), CHANGELOG Unreleased. Committed `lazily-py c9f9a37`, superproject `3c5270a16c`, both pushed. `lazily-hub/lazily-py` CI run 34614969844 is still queued at write time — local `make check` is the evidence this turn stands on.
+
+The FPE gate this item existed to answer is **open**: the eight `*State` structs are a swap, not a rewrite — `struct_source` seeds from an existing instance, `apply()` accepts the struct `status()` already builds, and `msgspec.structs.asdict` stays the one C call on that path. That adoption belongs in `src/haiven-dev/tasks/fpe.md`, not here.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- do [#lzpystructcell]: should we use pyproject extras or another project? This adapter should be generic to handle other competing libraries such as pydantic and dataclasses.
+- ~~do [#lzpystructcell]: should we use pyproject extras or another project? This adapter should be generic to handle other competing libraries such as pydantic and dataclasses.~~
 - do [#lzpypromegress]
 - do [#lzpykeyedfold]
 - do [#lzpyworkflowdeterminism]
@@ -46,7 +82,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzpystructcell] [recommended] [lazily-py] msgspec-native struct bridge: `struct_source(SomeStruct)` returning per-field `Source` cells plus a guarded `Computed` that re-materializes the struct, so `status()` stays one `msgspec.structs.asdict` while readers invalidate per field. Gates whether FPE's eight `*State` structs can adopt lazily as a swap rather than a rewrite. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
 - [ ] [#lzpypromegress] [recommended] [lazily-py] counter/gauge cell family plus a `prometheus_client` egress adapter that registers off the reactive graph. Coverage matrix marks Python Egress as partial; this would delete the 43 hand-written mirror lines in src/haiven-dev/src/fpe/core/telemetry.py `update_runtime_metrics`. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
 - [ ] [#lzpykeyedfold] [recommended] [lazily-py] named `KeyedFold` cell: N independent writers each own a key and clear only their own, with the summary as a guarded `Computed` over the live set. `service.HealthCell` does this for booleans only; `merge.MergeCell` has the algebra but no documented keyed-fold surface. Generalizes the FPE `last_errors` fix (#fpelasterrorlww, fpe PR #92). Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
 - [ ] [#lzpyworkflowdeterminism] [recommended] [lazily-py] temporal.io workflow-safe context: bind `TimelineSource` to `workflow.now()`, route scheduled effects through Temporal timers/activity starts, and raise on any non-deterministic read instead of corrupting replay. Also rename or loudly document `lazily.temporal` (time operators) to avoid the temporal.io collision. Blocks any workflow-side adoption. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md

@@ -210,6 +210,26 @@ existence audit --sources [--lock PATH] [--rate-ms 1000] [--wayback URL] [--fix]
 **The first real run, on a scratch copy of the ontology** (282 URLs, 2 requests per second, about four minutes): 272 answered 200, 6 are dead, 4 hosts were unreachable (`juneroca.com`, `ncatlab.org:8080`, `theunboundedspirit.com`, `www.cs.nott.ac.uk`). Of the 256 quote checks, **206 are missing, 19 moved, 31 present**. I did not believe that number, so I checked two by hand: Wiktionary's `entity` now reads "organizations" for the node's "organisations" (the quote scores 0.99 and lands as `moved`) but its second sense, "An existent something that has the properties of being real…", is gone; `scope`'s "The breadth, depth or reach of a subject; a domain." is gone too. The nodes quote Wiktionary and Wikipedia as they read in 2014–15, and those pages have been rewritten since. So the matcher is right and the source record is stale for about four fifths of the quotes. That is a content decision per source (refresh the quote, or pin the historical snapshot beside the anchor), now `#xlrequote` at the top of the backlog together with the six dead links, three of which have no Wayback snapshot. Nothing was written into the real ontology; the lock lives in the scratch copy until Phase 6 commits it from the weekly job.
 
 The `existence` worktree's other-session `AGENTS.md`/`CLAUDE.md` edits stayed out of the commit. Exchange is at eight responses; queue active, no compaction.
+
+### Re: do #xlaudit5 — fable
+
+> **Queue prompt:**
+>
+> do [#xlaudit5]
+
+Done. `existence audit --mirrors` shipped in [`b229575`](https://github.com/existence-lang/existence/commit/b229575) (CI in progress at closeout; the Phase 4 run is green), and the ontology declares its three mirrors and gains a generated `terms.md` in [`1a3fed8`](https://github.com/existence-lang/ontology/commit/1a3fed8). Local `make check` is green with 91 tests, and the binary is installed.
+
+**Three mirror kinds**, declared as `[[mirrors]]` in `existence.toml` with `path`, `kind`, and `optional`:
+
+- `nodes`: a node-per-file copy. Per-term diff of lay definitions, reported with both sentences. The comparison flattens markdown to prose, so a `"broader"` link title, a link-target spelling, or a missing Axiology section is not drift. That last rule came from the real run: the first cut compared link targets and flagged four terms whose prose is identical but where philosophy still links `./environment` without the `.md` the ontology gained in `#xlaudit2`.
+- `toc`: a generated index. Regenerated through `existence toc` with the link base the output path implies and compared byte for byte; a file that does not exist yet is stale rather than missing, and `--fix` writes it.
+- `table`: `| **Term** | summary |` rows. A row whose term has no node, or whose summary shares less than a quarter of its words with the node's lay definition, is listed with both texts. Report only.
+
+`optional = true` skips a mirror whose path is absent on this machine, so the public ontology repo can name the sibling `philosophy/` checkout and `~/.claude/CLAUDE.md` without the weekly job in CI complaining. A required mirror that is absent is an error.
+
+**On the real ontology.** The philosophy node mirror is **clean**: the eleven-term reconcile from `#reconcileotherlay` holds, and pneuma's unlinked `life` no longer counts because it is a link, not wording. `terms.md` was reported stale, `--fix` generated it (142 lines, three rings plus the unringed section), and a second pass is quiet. The CLAUDE.md table gives 9 warnings out of 14 rows (`existence`, `context`, `resolution`, `system`, `domain`, `focus`, `perspective`, `evolution`, `story`): those rows are hand-written condensations rather than copies, so the overlap score is advisory, but it does show which summaries have wandered furthest from the nodes (`focus` and `perspective` share no words at all). The five rows that pass include the Entity and Abstraction rows this session rewrote, which is the genus-port case the plan wanted caught.
+
+**Tests** (4): every kind on one fixture ontology with identical-after-flattening, drifted, and no-Ontology-section nodes, a stale index, close/drifted/nodeless table rows, and optional and required missing mirrors; `--fix` creating the index and a later node edit making it stale again; the comparison key; and `~/`, relative, and absolute path resolution. Both worktrees' other-session `AGENTS.md`/`CLAUDE.md` edits stayed out of the commits. Exchange is at nine responses; queue active, no compaction.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
@@ -221,7 +241,7 @@ The `existence` worktree's other-session `AGENTS.md`/`CLAUDE.md` edits stayed ou
 - ~~do [#xlaudit2]~~
 - ~~do [#xlaudit3]~~
 - ~~do [#xlaudit4]~~
-- do [#xlaudit5]
+- ~~do [#xlaudit5]~~
 - do [#xlaudit6]
 - do [#xlaudit7]
 - do [#cutexistenceusers]
@@ -232,7 +252,6 @@ The `existence` worktree's other-session `AGENTS.md`/`CLAUDE.md` edits stayed ou
 
 <!-- agent:backlog priority -->
 - [ ] [#xlrequote] Decide what to do with the source drift the first real `existence audit --sources` run found in `src/existence-lang/ontology`: 206 quoted passages are no longer on their pages (87 wiktionary, 108 wikipedia, 6 etymonline; the nodes quote 2014-15 wording that has since been rewritten) and 19 have changed but still match. Per source, either refresh the blockquote from the live page or pin the historical Wayback snapshot next to the anchor so the quote stays verifiable. Also 6 dead links: `--fix` can swap cosmicscale.appspot.com (fractal, physical-system, scope), the NYT attention-schema piece, and wikipedia `Physical_information` (entity, information) for snapshots; stevenpoole.net, the AAAI SARA13 PDF, and the colorado.edu PDF have none and need a replacement source. Content decisions, not code; `audit --sources` reports them again each weekly run once Phase 6 commits the lock
-- [ ] [#xlaudit5] Phase 5 of `tasks/software/plan-ontology-audit.md`: `[[mirrors]]` in existence.toml (`kind = nodes|toc`) + `existence audit --mirrors`; `--fix` regenerates toc mirrors (`terms.md`); register the `~/.claude/CLAUDE.md` philosophy table and the sibling `philosophy/` repo so the genus-port drift is reported per term. The nodes comparator must strip link titles (`"broader"`) before diffing: 5 of the 11 terms `#reconcileotherlay` was handed differed only by that, and it should compare the first Ontology paragraph, not the whole section, so a missing Axiology section is not reported as lay-definition drift
 - [ ] [#xlaudit6] Phase 6 of `tasks/software/plan-ontology-audit.md`: weekly `schedule` workflow in `src/existence-lang/ontology` running `existence audit --all --format json`, upserting one `Ontology audit` issue (edit by title, diff vs last report) and one idempotent `audit: safe fixes` PR carrying only safe resolutions + refreshed lock + regenerated mirrors. Done after one real scheduled run
 - [ ] [#xlaudit7] Phase 7 of `tasks/software/plan-ontology-audit.md`: `existence audit --semantic --provider anthropic|openai` LLM contradiction pass over each node's lay definition and its linked neighbours, report only, verdicts cached by content hash so a rerun with no changes makes zero model calls. Never on the PR path
 - [ ] [#cutexistenceusers] [recommended] Cut existence 0.6.0 (`make release` in `src/existence-lang/existence`) so `install.sh` / `cargo install existence` users get `toc`; `existence --version` on `cargo install --path .` still reads 0.5.0. Bump `Cargo.toml` first, then flip the README "Commands (v0.3.0)" heading, which is already stale
@@ -264,4 +283,5 @@ The `existence` worktree's other-session `AGENTS.md`/`CLAUDE.md` edits stayed ou
 - 2026-09-11 [#xlaudit2] Phase 2 of `tasks/software/plan-ontology-audit.md`: `existence audit --structure` wraps lint + `toc --check` + links missing the `.md` suffix (`evolution.md` → `./environment`) + near-duplicate slugs (`signal`/`signals`, `human`/`humans`); JSON report with exit codes 0/1/2; `--fix` appends `.md` only. Then a CI job on ontology PRs
 - 2026-09-11 [#xlaudit3] Phase 3 of `tasks/software/plan-ontology-audit.md`: `existence audit --contradictions`: typed-link cycles in the broader graph after inverses, 2-cycles in lay-definition links (the `entity`/`information` shape the canonical-chain work fixed by hand), unlinked mentions of known terms in lay definitions. Report only, both sentences side by side
 - 2026-09-11 [#xlaudit4] Phase 4 of `tasks/software/plan-ontology-audit.md`: `existence audit --sources` re-fetches each lock URL (1 req/s, User-Agent, skip-not-fail on unreachable host), compares reachability / quote presence (fuzzy ≥0.9) / page hash, pins a Wayback snapshot; `--fix` swaps a dead link to the snapshot. Test against a local http fixture
+- 2026-09-11 [#xlaudit5] Phase 5 of `tasks/software/plan-ontology-audit.md`: `[[mirrors]]` in existence.toml (`kind = nodes|toc`) + `existence audit --mirrors`; `--fix` regenerates toc mirrors (`terms.md`); register the `~/.claude/CLAUDE.md` philosophy table and the sibling `philosophy/` repo so the genus-port drift is reported per term. The nodes comparator must strip link titles (`"broader"`) before diffing: 5 of the 11 terms `#reconcileotherlay` was handed differed only by that, and it should compare the first Ontology paragraph, not the whole section, so a missing Axiology section is not reported as lay-definition drift
 <!-- /agent:done -->

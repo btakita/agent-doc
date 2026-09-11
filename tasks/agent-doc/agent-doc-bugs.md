@@ -665,6 +665,66 @@ assertion `left == right` failed: an explicit reconcile selection must not activ
 **What I did not close.** Reports 2 and 3 (auto-sync/auto-focus not following when you select the opposite pane in IDEA) are the same event seen from the operator's side — tmux went to the stash instead of following — and the same guard covers them, but confirming that takes your IDE, not a test. Do the navigation once and tell me if tmux still misbehaves. I deliberately did not run it live: `agent-doc focus` on `infra.md` would have resumed that document's session, and I was not going to inject a turn into a live pane to prove a point.
 
 I also did **not** run `session doctor --repair` on the live drift. Rebinding the record to `@3` would tell the layout join that infra.md's window *is* the stash — see the new `#layoutbindstale` below, which is the one place a recorded window id still steers behaviour.
+
+### Re: #queuelineclobber — opus-5
+
+**It is not the CRDT. It is preflight, and preflight says so on stdout.**
+
+```
+[preflight] queue: cleared drained queue body
+[preflight] queue: set queue: stop
+```
+
+Reproduced deterministically from a seeded document in five commands — seed a queue holding one operator line, gate a backlog item, flip `queue: go`, run preflight, and the line is gone. No editor, no live replica, no merge.
+
+**The mechanism.** `run_queue_maintenance` decides a queue is "drained" from two predicates, and neither can see operator text. `need_strip_auto` asks only whether an actionable `do` prompt remains. `queue_entries_are_drained_residue` classifies by entry kind — `Completed | Preset | Dispatch`. An operator's `re [#id]: <question>` line parses as **`Freeform`**, which is deliberately *not* an actionable prompt, so it satisfies "no prompts" while being nothing like residue. The code then blanks the **whole** body:
+
+```rust
+current_content = q.replace_content(&current_content, "");
+```
+
+That is your `infra.md` sighting exactly. `c0fae3b` → `c42c94c`: the queue holding `- re [#fpeidentitysecondclient]: Since we moved over to a Secret Bearer Token…` is replaced, and both your question and the `queue: go` you had just set are gone.
+
+**The item's "next lead" is a dead end, and I can rule it out with evidence rather than more probing.** The clobbering write is `crdt_cp_write … source=pending_write content_len=36073 content_hash=ca7f498d…` at 17:46:44Z — and 36073 is exactly the byte length of the `c42c94c` blob, so that transition *is* the damage. `rebuild_component_isolated_epoch` never ran for it: the only `crdt_replica_update_corruption_rejected reason=cross_component_raw_union` on `infra.md` in the entire ops.log is at 17:26:24Z, twenty minutes earlier and five minutes *before* `c0fae3b`, which still has your line intact. The isolation merge was ruled out by seven probed shapes; the rebootstrap is ruled out by the log.
+
+**Landed** (`5983df246`): the drain clear is gated on `queue_body_clear_is_lossless`. I gated the whole decision rather than only the body write — if the clear would be lossy the queue is not drained, so the auto-strip and the `queue: stop` revocation it drives are wrong for the same reason. Structural separators (blank, `---`, `~~~`) carry no content and still clear, so a genuinely drained queue still deactivates. Your line now surfaces through the existing `inactive_queue_residue` warning, which is what an unanswered queue line should do.
+
+**Mutation-checked end to end, not just in the unit test.** Replacing the gate with `&& true` reddens the new preflight regression *and*, against a rebuilt binary running the live repro, reproduces the deletion:
+
+```
+MUTATED BINARY result:   queue_body= []
+FIXED   BINARY result:   queue_body= ['- re [#bbb]: Since we moved over to a Secret Bearer Token…']
+```
+
+**One half of sighting (a) is still open.** "Free-text queue item and its promoted backlog item vanished" is this bug. "Operator exchange typing reverted" is not — that one does carry a real `cross_component_raw_union` event, and it is a different loss site in a different component. Filed as `#exchangetypingrevert` rather than folded in here, because folding them is what sent the last cycle down the rebootstrap path.
+
+### Re: dispatch refused into pane %15 mid-recycle — opus-5
+
+> **Queue prompt:**
+>
+> do [#queuelineclobber]
+
+
+**The unblocker it handed you cannot happen.** `InFlight` is published by the supervisor just before it `execve`s onto the fresh binary and cleared by the replacement's watch loop, and nothing bounded that window. A supervisor that dies between those two points pins the document `InFlight` permanently — so the route waits its full budget and refuses, forever, pointing at the event that was lost.
+
+Confirmed in `ops.log`, and it is not hypothetical:
+
+```
+18:50:52Z  supervisor_recycle_graph_started  …8ff4e889…  reason=auto_install_reexec  phase=InFlight
+18:50:55Z  supervisor_recycle_graph_settled  …e972f5f6…   (three others settle within 7s)
+19:09:39Z  route_dispatch_only_recycle_inflight_wait      file=…/dev.md pane=%15
+19:09:49Z  route_dispatch_only_recycle_inflight_unsettled waited_ms=10049
+```
+
+dev.md's document hash started and never settled. Nineteen minutes later the route was still waiting 10s for it — my `make install` earlier in this session started that recycle, which is how you caught it.
+
+**Landed** (`70b588e18`): the sibling `Requested` phase has carried a TTL all along (`recycle_request_ttl`, 900s); `InFlight`, the phase that actually gates dispatch, now has the same discipline. Past the settle TTL the transition is treated as lost rather than pending and the gate proceeds, logging `route_dispatch_only_recycle_inflight_abandoned` with the stamp, TTL and epoch. It is checked *before* the wait, so a wedged document no longer pays a 10s stall on every dispatch either.
+
+It still fails closed where it should: inside the TTL, and for an unstamped projection (`marked_secs == 0`), which is unknown rather than stale. 120s default against a real reexec observed at 3–7s, overridable via `AGENT_DOC_RECYCLE_INFLIGHT_TTL_SECS`. Mutation-checked on the observed 19-minute shape.
+
+`make check`: **9339 passed, 0 failed** (three new tests). Installed, so both fixes are live — dev.md's pane should accept a reopen now without waiting on a settle that was never coming.
+
+Exchange is at 640 lines / 26 sections; noted, still draining.
 <!-- agent:boundary:1406b99d:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -674,19 +734,20 @@ I also did **not** run `session doctor --repair` on the live drift. Rebinding th
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- ⏭️ do [#queuelineclobber]
-- ⏭️ do [#presetnullblank]
+- ~~do [#queuelineclobber]~~
+- do [#presetnullblank]
 - ~~do [#stashfocuswindow]~~
 - do [#jbfocusdocroute]
 - do [#compactackflake]
-- ⏭️ do [#retainedresumewakeflake]
-- ⏭️ do [#cargotokenrevoke]
+- do [#retainedresumewakeflake]
+- do [#cargotokenrevoke]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#exchangetypingrevert] [P1] The OTHER half of the 2026-09-11 17:22:09 agent-doc-bugs.md sighting: operator exchange typing reverted while they typed. #queuelineclobber (fixed in 5983df246) explains the vanished free-text queue item and its promoted backlog mirror, but NOT this — exchange is a different component and this one does carry a real `crdt_replica_update_corruption_rejected ... reason=cross_component_raw_union recovery=canonical_restored_and_member_reprojected` event. Start from the fact that the isolation reconcile is a DETECTOR here, not necessarily the loss site: `crdt_replica_update_corruption_rejected` fires when `packet.component_isolation_reconciled` is true, which means a raw union already materialized member characters on the far side of a component marker. Ask what produced the divergent member replica, not what the reconcile did with it. Cross-check the standing stale_plugin warning (live JB plugin 0.2.379 vs 0.2.381 shipped). Do NOT re-walk merge_by_component (seven shapes probed, all preserve) or rebuild_component_isolated_epoch (ruled out on infra.md by ops.log timing).
+- [ ] [#queuegorevokedonfreetext] [P2] After #queuelineclobber, an operator who writes a free-text `re [#id]: <question>` queue line and flips `queue: go` keeps their text but still gets the activation revoked (`[preflight] queue: stripped activation token (drained)` then `queue: set queue: stop`) — that path is separate from the now-gated need_clear_drained_body. Defensible as-is (a `re` line is not a drainable head, and the inactive_queue_residue warning routes it to the next cycle's prompt), so this is a design question, not a proven defect: decide whether an operator activation should survive a body that holds only non-drainable operator text, or whether the revoke plus the residue warning is the intended answer. Decide before changing it — go-mode churn (#qchurn) is the failure mode on the other side.
 - [ ] [#layoutbindstale] [P2] `derive_layout_actor_bindings` (src/agent-doc/agent-doc-controller-io/src/project_controller.rs:746-784) builds `desired_windows` from the RECORDED `record.window_id`, then binds every other actor whose recorded window is in that set as a co-window sibling of the layout. The record is provably untrustworthy: `agent-doc session doctor src/haiven-dev/tasks/infra.md` reports actor+registry `window=@0` for pane %14 while tmux has %14 in @3 (@0=agent-doc visible, @3=stash). So a stashed pane can be joined into a layout it is not part of, and after a `session doctor --repair` (which rebinds the record to the LIVE window) every stashed pane would share the stash window id and be bound together. Decide whether this join should consume a window id at all, or key on the desired document set alone. NOTE from #stashfocuswindow: resolving live is NOT automatically the right answer — for a selection effect the live window is the stash, which is precisely what must not be used. Status: a reading of the join, not an observed symptom; needs a repro before changing it.
-- [ ] [#queuelineclobber] [P0] agent-doc destroys operator-authored text in a live document mid-turn. Sightings 2026-09-11: (a) agent-doc-bugs.md 17:22:09, ops.log `crdt_replica_update_corruption_rejected ... reason=cross_component_raw_union recovery=canonical_restored_and_member_reprojected` — operator exchange typing reverted, their free-text queue item and its promoted backlog item both vanished; (b) src/haiven-dev/tasks/infra.md — HEAD c0fae3b queue line `- re [#fpeidentitysecondclient]: Since we moved over to a Secret Bearer Token...` replaced by `- do [#fpeidentitysecondclient]U`, operator question text gone plus a stray U that exists nowhere in the removed text. RULED OUT 2026-09-11, DO NOT RE-WALK: the component-isolation merge is NOT the loss site. merge_by_component was probed with the exact base/canonical/editor triple the reconcile builds, across seven shapes — append-vs-replace, in-place-edit-vs-replace (the infra.md shape), exchange-typing-vs-append, append-vs-delete, in-place-edit-vs-body-rewrite, and both canonical-only-line-vs-stale-editor variants — and ALL SEVEN preserved the operator text. A regression test written against that hypothesis passed with the fix removed (mutation survived), so it was discarded rather than kept green. NEXT LEAD, start here: rebuild_component_isolated_epoch (agent-doc-document-realtime/src/crdt_relay.rs) does not merely replace the canonical — it resets every member replica and observed_replica from a fresh bootstrap, calls member.pending.clear(), and queues every live member for re-bootstrap, then the editor is told to replace its buffer. Anything a replica holds that has not reached the hub is discarded by construction, which fits "I was typing and my changes were reverted" far better than a merge dropping lines. Cross-check against the standing stale_plugin warning (live JetBrains plugin 0.2.379 vs the 0.2.380 shipped with this binary) — a rebootstrap handler in a stale plugin is a plausible contributor. Landed in 73795693b: a fail-safe post-condition (member_insertions_lost_by) that refuses a reconcile which would drop member insertions and logs `crdt_component_isolation_reconcile_refused` to ops.log. It is instrumentation, NOT a proven fix — it has no reproduction and never fires on any constructed shape.
 - [ ] [#presetnullblank] [P1] REMAINING HALF (the value-clobbering half is FIXED in 1920285e6: a preset key typed without a value no longer gains one; PromptPresets newtype preserves YAML null and Derefs to the resolved map, zero call-site changes). What is left: agent-doc `write()` re-serializes frontmatter it did not change. Evidence from haiven-dev tasks/docs.md — HEAD 3f777fe held the preset value single-quoted, the worktree held it UNQUOTED with no value changed; and an unset key now emits `'#k': null` rather than the bare `'#k':` the operator typed. Same YAML document, different bytes, so agent-doc still edits a line the operator is mid-keystroke on. Durable fix: make the write path byte-preserving for frontmatter it did not change. frontmatter.rs:1435-1529 already documents exactly that pattern ("Every other byte is preserved verbatim") and some write path is bypassing it — find which caller uses parse->write instead of the surgical updaters. NOTE the trap, do not re-walk: dropping null keys at parse is NOT the fix; write() would then delete the operator's half-typed line, which is the same data loss.
 - [ ] [#jbfocusdocroute] [P2] The JB "Focus Agent Terminal" notification is per-document ("Agent input required for $fileName", TurnStateBannerRefresher.notifyInputRequired) but IdeTerminalHost.focusExisting(project) ignores the file and focuses a single project-wide terminal tab named "agent-doc". In a multi-document tmux layout the correct target is the pane that OWNS that document. The plugin already has the machinery (TmuxPaneFocusSync.recordEditorFocusIntent takes a documentPath, though it only records a lease — the actual routing goes through the command plane via EditorFocusSyncListener). Do this together with #stashfocuswindow: both are pane->window/document resolution, and solving it in two places separately is how three tmux focus reports became three separate reports. The silent-no-op half of this is already fixed in plugin 0.2.381 (commit 50bc06de5); what remains is routing to the right pane rather than merely always navigating somewhere.
 - [ ] [#compactackflake] [P2] CI run 34626410869 (0.35.366, workflow CI) is RED on agent-doc-document-realtime-io tests::compact_exchange_returns_retained_success_when_editor_ack_stays_delayed, panicking at agent-doc-document-realtime-io/src/lib.rs:9472 (3183 passed / 1 failed / 259 skipped, 1025s). It predates the #fixdocsturn commit 0f959e11f and is not reachable from it (that change touches agent-doc-diff + baseline_comparison only), and local `make check` on the same tree is green. Same delayed-editor-ack shape as #retainedresumewakeflake, and that item already carries the diagnosis to apply here: the test synchronises on a subscribe RETURNING rather than on the condition holding, so a contended runner returns from subscribe for something other than the awaited event. Check whether :9472 waits on a subscribe/timeout proxy and convert it to a bounded poll of the actual condition.

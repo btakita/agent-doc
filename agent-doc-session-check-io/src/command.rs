@@ -1079,6 +1079,7 @@ fn run_with_options_inner(
             }
             agent_doc_turn::write_ownership::RetainedWriteVerdict::Stranded
             | agent_doc_turn::write_ownership::RetainedWriteVerdict::AwaitingTerminalCommit
+            | agent_doc_turn::write_ownership::RetainedWriteVerdict::CaptureResumeUnowned
             | agent_doc_turn::write_ownership::RetainedWriteVerdict::UnansweredEditPending => {
                 agent_doc_turn::write_ownership::retained_write_remedy(
                     ownership,

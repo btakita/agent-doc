@@ -2,6 +2,38 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.364
+
+- Fix tmux pane auto-sync parking a converged layout in `retry_pending`
+  (`#tmuxautosyncwedge`). Convergence was gated on `focus_receipt.applied` —
+  whether *this* worker pass called `select-pane` — on top of an observation
+  that already proved the focused pane was active. Under editor-navigation
+  churn every pass is superseded before its focus effect, returns
+  `focus_superseded_by_newer_layout_state` with `applied: false`, and the
+  projection stays `retry_pending` while documents, panes and focus pane all
+  match. All 9 occurrences of that signature in one day's ops log carried
+  `observation=synced`. Convergence now reads the observation
+  (`pane_layout_projection_converged`), the reusable-structure branch observes
+  before cancelling instead of short-circuiting on the supersede, and
+  `focus_applied` remains the fallback only when the observation could not
+  speak for focus. The supersede guard still keeps a stale generation from
+  *moving* focus.
+- Stop the retained-write guards promising a deferral nothing can keep
+  (`#capturedresumeunowned`). The captured-finalize resume is edge-triggered and
+  its only drivers are the supervisor idle watch and the Codex `Stop` hook, so a
+  document with neither running sits at `response_captured` forever while
+  `session-check`, `commit`, and `write --commit` all repeat "the same intent
+  commits itself once delivery converges". Observed on a document whose
+  controller was concurrently logging
+  `controller_orphan_drain_dispatch ... reason=no_supervisor_idle_watch` and
+  `delivery_converged=true`. `RetainedWriteOwnership` now carries
+  `capture_resume_unowned`, proven from the same supervisor-liveness predicate
+  the controller's orphan drain already uses, and a durable capture with no
+  driver yields the new `CaptureResumeUnowned` verdict instead of `Deferred`.
+- Add `agent-doc repair --resume-capture <FILE>`, the command that verdict's
+  remedy names: it resumes the exact retained capture once, never captures a new
+  response, and never elects a disk-authority fallback.
+
 ## 0.35.363
 
 - Ship the FFI library in release artifacts (GH #52). Release archives now carry

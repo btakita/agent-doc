@@ -19346,6 +19346,33 @@ fn focus_required_for_pane_layout_generation(
         && !(caller_kind == "automatic" && receipt.reason.starts_with("focus_pane_not_found:"))
 }
 
+/// Convergence is an *observation*, never a receipt for the effect this pass
+/// happened to run.
+///
+/// `#tmuxautosyncwedge`: the observation invocation carries the focus target
+/// exactly when focus is required, and `layout_sync_state_result` then refuses
+/// `synced` unless `expected_focus_pane == active_pane`. A synced report that
+/// observed focus has therefore already proven the focused pane is active. Also
+/// demanding `focus_receipt.applied` re-gates that proof on *which generation*
+/// called `select-pane`, and a project under continuous editor-revision churn
+/// never satisfies it: every pass is superseded before its focus effect,
+/// returns `focus_superseded_by_newer_layout_state` with `applied: false`, and
+/// the projection stays `retry_pending` while documents, panes and focus pane
+/// all match. The supersede guard still keeps a stale generation from *moving*
+/// focus; it just no longer denies what the live layout already shows.
+///
+/// `focus_applied` remains the fallback for the one case where the observation
+/// could not speak for focus — a required focus the observation invocation did
+/// not carry.
+fn pane_layout_projection_converged(
+    report_synced: bool,
+    focus_required: bool,
+    focus_target_observed: bool,
+    focus_applied: bool,
+) -> bool {
+    report_synced && (!focus_required || focus_target_observed || focus_applied)
+}
+
 /// Resolve the window this pane-layout generation is arranging its columns in.
 ///
 /// `#panewindowdrift`: the focus guard needs an explicit *visible window*
@@ -19677,17 +19704,10 @@ fn pane_layout_effect_worker(
                 },
                 |pane| tmux.select_pane(pane),
             );
-            if focus_receipt.reason == "focus_superseded_by_newer_layout_state" {
-                agent_doc_ops_log_io::log_op(
-                    &bootstrap.project_root,
-                    &format!(
-                        "pane_layout_projection_cancelled generation={} phase=before_structural_effect reason={}",
-                        desired.generation, focus_receipt.reason
-                    ),
-                );
-                attempt = 0;
-                continue;
-            }
+            // `#tmuxautosyncwedge`: a supersede must not short-circuit the
+            // observation. Fall through and let the fresh report speak; a
+            // still-unconverged generation drops out of this block into the
+            // shared pre-structural supersede cancel below.
             let focus_required = focus_required_for_pane_layout_generation(
                 &desired.invocation.caller_kind,
                 &focus_receipt,
@@ -19701,9 +19721,13 @@ fn pane_layout_effect_worker(
                 &observation_invocation,
                 &reusable.file_panes,
             );
-            if (!focus_required || focus_receipt.applied)
-                && let Ok(report) = fresh_report
-                && report.synced
+            if let Ok(report) = fresh_report
+                && pane_layout_projection_converged(
+                    report.synced,
+                    focus_required,
+                    observation_invocation.focus.is_some(),
+                    focus_receipt.applied,
+                )
             {
                 let focus_reason = focus_receipt.reason.clone();
                 let logged_expected_documents = report.expected_documents.clone();
@@ -19897,7 +19921,12 @@ fn pane_layout_effect_worker(
                 ),
             ),
         };
-        let synced = report.synced && (!focus_required || focus_receipt.applied);
+        let synced = pane_layout_projection_converged(
+            report.synced,
+            focus_required,
+            observation_invocation.focus.is_some(),
+            focus_receipt.applied,
+        );
         let observation_reason = report.reason.clone();
         let focus_reason = focus_receipt.reason.clone();
         let logged_expected_documents = report.expected_documents.clone();
@@ -21309,6 +21338,35 @@ mod pane_layout_projection_dispatch_tests {
         assert!(pane_layout_invocation_allows_structural_reuse(&invocation(
             "manual", false
         )));
+    }
+
+    #[test]
+    fn an_observed_focus_pane_converges_even_when_the_focus_effect_was_superseded() {
+        // `#tmuxautosyncwedge`: documents, panes and the focus pane all match,
+        // and the focus receipt only says a newer revision arrived before this
+        // pass could call `select-pane`. The live layout is already the desired
+        // layout, so the generation converges instead of parking in
+        // `retry_pending` forever while editor navigation keeps bumping the
+        // input revision.
+        assert!(pane_layout_projection_converged(true, true, true, false));
+        // Same observation, focus effect applied by this pass.
+        assert!(pane_layout_projection_converged(true, true, true, true));
+    }
+
+    #[test]
+    fn an_unsynced_observation_never_converges_on_a_superseded_focus_receipt() {
+        // A stashed / mismatched focus pane makes the report unsynced, and the
+        // supersede reason must not launder that into convergence.
+        assert!(!pane_layout_projection_converged(false, true, true, false));
+        assert!(!pane_layout_projection_converged(false, false, false, true));
+    }
+
+    #[test]
+    fn a_required_focus_the_observation_did_not_carry_still_falls_back_to_the_effect() {
+        assert!(!pane_layout_projection_converged(true, true, false, false));
+        assert!(pane_layout_projection_converged(true, true, false, true));
+        // Focus that was never required is settled by the structural report.
+        assert!(pane_layout_projection_converged(true, false, false, false));
     }
 
     #[test]

@@ -2587,6 +2587,15 @@ enum Commands {
         /// boundary-artifact drift), instead of orphaned-response repair.
         #[arg(long)]
         apply_recovery: bool,
+        /// Resume the retained captured-finalize operation on demand
+        /// (`#capturedresumeunowned`). The captured-finalize resume is
+        /// edge-triggered and its only drivers are the supervisor idle watch
+        /// and the Codex `Stop` hook, so a `response_captured` cycle with
+        /// neither running waits for an edge that can never arrive. This runs
+        /// that exact resume once — the same durable capture, never a new
+        /// response, and never a disk-authority fallback.
+        #[arg(long, conflicts_with = "apply_recovery")]
+        resume_capture: bool,
     },
     /// Admit a live agent request by opening a lightweight response-cycle checkpoint
     Admit {
@@ -4095,6 +4104,71 @@ enum SkillCommands {
 
 /// Initialize structured logging. When `AGENT_DOC_LOG` is set (e.g., "debug"),
 /// logs are written to `.agent-doc/logs/debug.log`. When unset, this is a no-op.
+/// Resume the retained captured-finalize operation for `file` once, on demand.
+///
+/// `#capturedresumeunowned`: the captured-finalize resume is edge-triggered and
+/// its only drivers are the supervisor idle watch and the Codex `Stop` hook.
+/// With neither running, a `response_captured` cycle waits for an edge that can
+/// never arrive while every retained-write guard reports the deferral — the
+/// document has no next move at all. `retained_write_remedy` names this command
+/// for exactly that state, so this must run the SAME durable capture rather
+/// than capturing a new response or electing a disk write.
+fn run_resume_capture(file: &Path) -> anyhow::Result<()> {
+    let Some(key) = agent_doc_repair_command_io::captured_finalize_resume_key(file)? else {
+        eprintln!(
+            "[repair] {} has no retained captured-finalize operation to resume",
+            file.display()
+        );
+        return Ok(());
+    };
+    eprintln!(
+        "[repair] resuming captured finalize for {} (cycle={} capture={})",
+        file.display(),
+        key.cycle_id,
+        key.capture_id,
+    );
+    match agent_doc_repair_command_io::resume_captured_finalize(file, &key) {
+        agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed {
+            repair_outcome,
+        } => {
+            eprintln!(
+                "[repair] captured finalize committed for {} ({repair_outcome})",
+                file.display()
+            );
+            Ok(())
+        }
+        agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded => {
+            eprintln!(
+                "[repair] captured finalize for {} was superseded by a newer capture; nothing to resume",
+                file.display()
+            );
+            Ok(())
+        }
+        // The remaining outcomes retain the same durable capture on purpose.
+        // Reporting them as failure is what keeps a caller from inventing a
+        // recovery that perturbs the capture being awaited.
+        agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::WaitingForSignal { reason } => {
+            anyhow::bail!(
+                "captured finalize for {} is retained and still waiting: {reason}. The same capture remains durable — do NOT re-send the response or force disk",
+                file.display()
+            )
+        }
+        agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetryableEffect { reason } => {
+            anyhow::bail!(
+                "captured finalize for {} failed transiently: {reason}. The same capture remains durable; rerun `agent-doc repair --resume-capture {}` once the controller/editor is reachable",
+                file.display(),
+                file.display()
+            )
+        }
+        agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::NeedsOperator { reason } => {
+            anyhow::bail!(
+                "captured finalize for {} needs operator resolution: {reason}",
+                file.display()
+            )
+        }
+    }
+}
+
 fn init_tracing() {
     let filter = match std::env::var("AGENT_DOC_LOG") {
         Ok(val) => val,
@@ -4922,7 +4996,11 @@ fn try_main() -> anyhow::Result<()> {
         Commands::Repair {
             file,
             apply_recovery,
+            resume_capture,
         } => {
+            if resume_capture {
+                return run_resume_capture(&file);
+            }
             if apply_recovery {
                 use agent_doc_flow_io::closeout::RecoveryApplication;
                 match agent_doc_flow_io::closeout::apply_closeout_recovery(

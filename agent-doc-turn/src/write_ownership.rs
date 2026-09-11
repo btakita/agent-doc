@@ -84,6 +84,24 @@ pub struct RetainedWriteOwnership {
     /// shipped, when a `--backlog-add-after` left exactly this drift and the
     /// message called it an operator edit.
     pub unanswered_edit: bool,
+    /// Nothing is running that can deliver the retained capture's next state
+    /// edge (`#capturedresumeunowned`).
+    ///
+    /// A retained capture is only self-completing because a captured-finalize
+    /// resume worker re-drives it on the next controller document-state edge,
+    /// and the only drivers are the supervisor idle watch and the Codex `Stop`
+    /// hook. With neither present the resume is edge-triggered with no edge
+    /// source: observed 2026-09-11 on `src/haiven-dev/tasks/backend.md`, whose
+    /// cycle sat at `response_captured` across turns while the controller
+    /// logged `controller_orphan_drain_dispatch ... reason=no_supervisor_idle_watch`
+    /// and `delivery_converged=true`. `Deferred`'s promise — "the same intent
+    /// commits itself once delivery converges" — was false, and every guard
+    /// repeated it, so the document had no next move at all.
+    ///
+    /// Only a site that has actually looked for the driver may set this; the
+    /// default is `false`, which keeps the conservative Deferred reading and
+    /// the 2026-07-26 "do NOT invent a recovery" guidance intact.
+    pub capture_resume_unowned: bool,
 }
 
 impl RetainedWriteOwnership {
@@ -96,6 +114,7 @@ impl RetainedWriteOwnership {
         write_applied: false,
         retained_projection: false,
         unanswered_edit: false,
+        capture_resume_unowned: false,
     };
 
     pub const fn new(cycle_open: bool, retained_capture: bool) -> Self {
@@ -105,6 +124,7 @@ impl RetainedWriteOwnership {
             write_applied: false,
             retained_projection: false,
             unanswered_edit: false,
+            capture_resume_unowned: false,
         }
     }
 
@@ -120,6 +140,7 @@ impl RetainedWriteOwnership {
             write_applied,
             retained_projection: false,
             unanswered_edit: false,
+            capture_resume_unowned: false,
         }
     }
 
@@ -138,6 +159,14 @@ impl RetainedWriteOwnership {
         self
     }
 
+    /// Record that nothing is running that can deliver this capture's next
+    /// state edge. Only a site that has actually looked for the resume driver
+    /// may set it; the default keeps the Deferred reading.
+    pub const fn with_capture_resume_unowned(mut self, capture_resume_unowned: bool) -> Self {
+        self.capture_resume_unowned |= capture_resume_unowned;
+        self
+    }
+
     /// Refine ownership with a response capture proven by the current caller.
     ///
     /// Some guards already hold the loaded capture. Keeping that evidence is
@@ -153,7 +182,12 @@ impl RetainedWriteOwnership {
         // captured-finalize worker is waiting on the same editor state edge and
         // a manual `commit` would race it. Only an *uncaptured* write-applied
         // cycle needs the manual terminal-commit recovery.
-        if self.retained_capture || self.retained_projection {
+        if self.retained_capture && self.capture_resume_unowned && !self.retained_projection {
+            // `#capturedresumeunowned`: the capture is durable, but the worker
+            // that would re-drive it is not running. Waiting is the one thing
+            // that cannot work, so this must not read as Deferred.
+            RetainedWriteVerdict::CaptureResumeUnowned
+        } else if self.retained_capture || self.retained_projection {
             RetainedWriteVerdict::Deferred
         } else if self.write_applied {
             RetainedWriteVerdict::AwaitingTerminalCommit
@@ -193,6 +227,14 @@ pub enum RetainedWriteVerdict {
     /// A retained capture instead yields [`Self::Deferred`], because its
     /// captured-finalize worker still owns this boundary.
     AwaitingTerminalCommit,
+    /// A response capture is durable and nothing is running that can deliver
+    /// its next state edge (`#capturedresumeunowned`).
+    ///
+    /// Between [`Self::Deferred`] and [`Self::Stranded`]: the response is NOT
+    /// lost and must not be re-sent — the exact capture is still the thing to
+    /// finish — but no worker will pick it up, so waiting never ends. Resuming
+    /// that same capture on demand is the recovery.
+    CaptureResumeUnowned,
     /// Nothing owns a write because there is no write — the divergence is an
     /// unanswered edit to typed components this turn's write never produced
     /// (`#strandedremedydeadlock`).
@@ -208,6 +250,7 @@ impl RetainedWriteVerdict {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Deferred => "deferred",
+            Self::CaptureResumeUnowned => "capture_resume_unowned",
             Self::Stranded => "stranded",
             Self::AwaitingTerminalCommit => "awaiting_terminal_commit",
             Self::UnansweredEditPending => "unanswered_edit_pending",
@@ -236,7 +279,7 @@ impl RetainedWriteVerdict {
     /// recovery" guidance still governs there.
     pub const fn commit_is_the_named_recovery(self) -> bool {
         match self {
-            Self::Deferred | Self::UnansweredEditPending => false,
+            Self::Deferred | Self::CaptureResumeUnowned | Self::UnansweredEditPending => false,
             Self::Stranded | Self::AwaitingTerminalCommit => true,
         }
     }
@@ -284,6 +327,14 @@ fn retained_write_remedy_inner(ownership: RetainedWriteOwnership, file: &str) ->
              `agent-doc session-check {file}` once to observe the terminal state; do NOT \
              re-send the response, force disk, `admin recycle`, or `admin reload-lib`, all of \
              which disturb the capture being awaited"
+        ),
+        RetainedWriteVerdict::CaptureResumeUnowned => format!(
+            "The response capture is DURABLE but UNOWNED: no supervisor idle watch and no \
+             harness stop hook is running for this document, so the captured-finalize resume \
+             has no state edge source and waiting will never commit it. Do NOT re-send the \
+             response, force disk, or `admin recycle` — the exact capture is still the thing to \
+             finish. Resume that same capture from the pane that OWNS this session: \
+             `agent-doc repair --resume-capture {file}`"
         ),
         RetainedWriteVerdict::Stranded => format!(
             "NO cycle is open and NO response capture is retained, so nothing owns this write \
@@ -827,6 +878,7 @@ mod tests {
             RetainedWriteVerdict::Deferred,
             RetainedWriteVerdict::Stranded,
             RetainedWriteVerdict::AwaitingTerminalCommit,
+            RetainedWriteVerdict::CaptureResumeUnowned,
             RetainedWriteVerdict::UnansweredEditPending,
         ] {
             let ownership = match verdict {
@@ -834,6 +886,9 @@ mod tests {
                 RetainedWriteVerdict::Stranded => RetainedWriteOwnership::UNOWNED,
                 RetainedWriteVerdict::AwaitingTerminalCommit => {
                     RetainedWriteOwnership::new_with_phase(true, false, true)
+                }
+                RetainedWriteVerdict::CaptureResumeUnowned => {
+                    RetainedWriteOwnership::new(true, true).with_capture_resume_unowned(true)
                 }
                 RetainedWriteVerdict::UnansweredEditPending => {
                     RetainedWriteOwnership::UNOWNED.with_unanswered_edit(true)
@@ -852,6 +907,65 @@ mod tests {
         }
     }
 
+    /// `#capturedresumeunowned`: a durable capture with no resume driver is the
+    /// one shape where "wait, it commits itself" is provably false. Observed
+    /// 2026-09-11 on `src/haiven-dev/tasks/backend.md`, whose cycle sat at
+    /// `response_captured` across turns while the controller logged
+    /// `reason=no_supervisor_idle_watch` and `delivery_converged=true`.
+    #[test]
+    fn a_capture_with_no_resume_driver_is_not_deferred() {
+        assert_eq!(
+            RetainedWriteOwnership::new(true, true)
+                .with_capture_resume_unowned(true)
+                .verdict(),
+            RetainedWriteVerdict::CaptureResumeUnowned,
+        );
+        // The same facts with a driver running keep the deferral they earn.
+        assert_eq!(
+            RetainedWriteOwnership::new(true, true).verdict(),
+            RetainedWriteVerdict::Deferred,
+        );
+        // A durable non-response projection continuation still owns the write,
+        // so an absent captured-finalize driver does not strand it.
+        assert_eq!(
+            RetainedWriteOwnership::new(true, true)
+                .with_capture_resume_unowned(true)
+                .with_retained_projection(true)
+                .verdict(),
+            RetainedWriteVerdict::Deferred,
+        );
+        // The flag says nothing when no capture is retained.
+        assert_eq!(
+            RetainedWriteOwnership::UNOWNED
+                .with_capture_resume_unowned(true)
+                .verdict(),
+            RetainedWriteVerdict::Stranded,
+        );
+    }
+
+    /// The remedy must name a command that actually runs, and must still refuse
+    /// the recoveries that perturb the capture being awaited: re-sending the
+    /// response is wrong here even though waiting is also wrong.
+    #[test]
+    fn the_unowned_capture_remedy_names_the_resume_without_licensing_a_re_send() {
+        let remedy = retained_write_remedy(
+            RetainedWriteOwnership::new(true, true).with_capture_resume_unowned(true),
+            "plan.md",
+        );
+
+        assert!(remedy.contains("agent-doc repair --resume-capture plan.md"));
+        assert!(remedy.contains("DURABLE but UNOWNED"));
+        for invented in ["re-send", "force disk", "admin recycle"] {
+            assert!(
+                remedy.contains(invented),
+                "must still rule out `{invented}`: {remedy}"
+            );
+        }
+        assert!(
+            !remedy.contains("commits itself"),
+            "the deferral promise is the false claim being removed: {remedy}"
+        );
+    }
     /// The unowned case must name a recovery rather than forbid one. A session
     /// that obeys the owned wording here waits forever on an edge that cannot
     /// fire, which is exactly what happened three times on 2026-08-03.

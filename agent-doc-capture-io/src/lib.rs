@@ -513,11 +513,33 @@ pub fn retained_write_ownership(
             false
         }
     };
+    // `#capturedresumeunowned`: a retained capture is only self-completing
+    // because a captured-finalize resume worker re-drives it on the next
+    // controller document-state edge. The supervisor idle watch and the Codex
+    // `Stop` hook are the only drivers, so a document with no supervisor has no
+    // edge source and `Deferred`'s "it commits itself" is false. This is the
+    // same predicate the controller's orphan drain already uses when it logs
+    // `reason=no_supervisor_idle_watch`; reading it here keeps all three
+    // retained-write refusals on one answer instead of three.
+    //
+    // Only asked when a capture is actually retained: the process scan is
+    // pointless otherwise, and an unproven driver must never *add* ownership.
+    //
+    // `supervisor_pid_for_doc` skips the calling pid, so a supervisor asking
+    // about its own document would otherwise report itself unowned mid-resume.
+    // Ask about this process explicitly.
+    let capture_resume_unowned = retained_capture
+        && agent_doc_supervisor_io::process::supervisor_pid_for_doc(file).is_none()
+        && !agent_doc_supervisor_io::process::supervisor_pid_matches_doc(
+            std::process::id(),
+            file,
+        );
     agent_doc_turn::write_ownership::RetainedWriteOwnership::new_with_phase(
         cycle_open,
         retained_capture,
         write_applied,
     )
+    .with_capture_resume_unowned(capture_resume_unowned)
 }
 
 pub fn load_active(file: &Path) -> Result<Option<CaptureRecord>> {

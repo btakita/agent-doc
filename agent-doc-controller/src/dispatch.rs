@@ -2169,6 +2169,37 @@ pub fn dispatch_only_starting_pane_draft_message(
     )
 }
 
+/// Longest a supervisor recycle may legitimately stay `InFlight` before the
+/// settle transition is treated as LOST rather than pending.
+///
+/// `#recycleinflightwedge`: `InFlight` is published by the supervisor just before
+/// it `execve`s onto the fresh binary, and cleared by the replacement's watch
+/// loop. Nothing bounded that window. A supervisor that dies between those two
+/// points — or whose replacement never reaches its watch loop — leaves the
+/// document pinned `InFlight` forever, and every dispatch-only reopen is refused
+/// with "retry once the supervisor settles onto the fresh binary": an unblocker
+/// that can never occur, because the event it names is the one that was lost.
+///
+/// Observed live 2026-09-11 on `src/haiven-dev/tasks/dev.md`: four documents went
+/// `InFlight reason=auto_install_reexec` at 18:50:52; three settled within seven
+/// seconds and one never did. Nineteen minutes later the route still waited the
+/// full settle budget and refused. The sibling `Requested` phase has carried a
+/// TTL all along (`recycle_request_ttl`); this is the same discipline for the
+/// phase that actually gates dispatch.
+///
+/// Generous against a real reexec (observed at 3-7s) and still bounded.
+pub const RECYCLE_INFLIGHT_SETTLE_TTL_SECS: u64 = 120;
+pub const RECYCLE_INFLIGHT_SETTLE_TTL_SECS_ENV: &str = "AGENT_DOC_RECYCLE_INFLIGHT_TTL_SECS";
+
+/// True when an `InFlight` recycle marked at `marked_secs` is old enough that its
+/// settle transition was lost rather than merely pending.
+///
+/// A zero/absent `marked_secs` is never abandoned: an unstamped projection is
+/// unknown, not stale, and must keep failing closed.
+pub fn recycle_inflight_is_abandoned(marked_secs: u64, now_secs: u64, ttl_secs: u64) -> bool {
+    marked_secs != 0 && now_secs.saturating_sub(marked_secs) > ttl_secs
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DispatchOnlyRecycleInflightMessageFacts<'a> {
     pub harness_binary: &'a str,
@@ -5190,6 +5221,35 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert!(recycle.contains("reason=auto_install_reexec"));
         assert!(recycle.contains("mid-recycle"));
         assert!(recycle.contains("unblocker=wait_for_supervisor_recycle_settle"));
+    }
+
+    /// `#recycleinflightwedge`, from the live `dev.md` shape: four documents went
+    /// `InFlight reason=auto_install_reexec` at 18:50:52, three settled within
+    /// seven seconds, one never did — and the route still refused at 19:09:39.
+    /// The refusal names an unblocker (wait for the settle) that cannot happen,
+    /// because the settle event is the one that was lost.
+    #[test]
+    fn an_inflight_recycle_past_the_settle_ttl_is_abandoned_not_pending() {
+        let marked = 1_757_616_652; // 18:50:52Z, the observed InFlight stamp.
+        let ttl = RECYCLE_INFLIGHT_SETTLE_TTL_SECS;
+
+        // A real reexec settles in seconds; it must still fail closed.
+        assert!(!recycle_inflight_is_abandoned(marked, marked + 7, ttl));
+        assert!(!recycle_inflight_is_abandoned(marked, marked, ttl));
+        assert!(
+            !recycle_inflight_is_abandoned(marked, marked + ttl, ttl),
+            "the TTL boundary itself is still pending"
+        );
+
+        // The observed wedge: the dispatch came 19 minutes later.
+        assert!(recycle_inflight_is_abandoned(marked, marked + 19 * 60, ttl));
+        assert!(recycle_inflight_is_abandoned(marked, marked + ttl + 1, ttl));
+
+        // An unstamped projection is unknown, not stale.
+        assert!(!recycle_inflight_is_abandoned(0, marked + 19 * 60, ttl));
+
+        // A clock that ran backwards must not read as abandoned either.
+        assert!(!recycle_inflight_is_abandoned(marked, marked - 500, ttl));
     }
 
     #[test]

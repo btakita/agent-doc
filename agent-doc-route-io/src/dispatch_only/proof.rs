@@ -9,6 +9,7 @@ use agent_doc_controller::dispatch::{
     accepted_only_dispatch_start_refusal_message,
     dispatch_only_dispatch_start_proof_required as controller_dispatch_only_dispatch_start_proof_required,
     dispatch_only_recycle_inflight_message, dispatch_only_sent_console_message,
+    recycle_inflight_is_abandoned,
     dispatch_only_sent_log_message, dispatch_proof_failed_event,
     routed_dispatch_start_timeout_for_binary,
 };
@@ -38,6 +39,34 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
 
     let started = std::time::Instant::now();
     let reason = status.reason.unwrap_or_else(|| "unknown".to_string());
+
+    // `#recycleinflightwedge`: a recycle older than the settle TTL lost its
+    // settle transition — the supervisor died between publishing `InFlight` and
+    // its replacement reaching the watch loop. Waiting for it is waiting for an
+    // event that will never arrive, and refusing afterwards hands the operator an
+    // unblocker they cannot perform. Proceed instead, loudly: the hot-reload
+    // boundary this gate protects is long over.
+    if recycle_inflight_is_abandoned(
+        status.marked_secs,
+        now_secs(),
+        recycle_inflight_settle_ttl_secs(),
+    ) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_recycle_inflight_abandoned file={} pane={} harness={} reason={} marked_secs={} ttl_secs={} recycle_epoch={}",
+                file.display(),
+                pane,
+                harness_binary,
+                reason,
+                status.marked_secs,
+                recycle_inflight_settle_ttl_secs(),
+                status.recycle_epoch
+            ),
+        );
+        return Ok(());
+    }
+
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -91,6 +120,22 @@ pub fn wait_for_dispatch_only_recycle_inflight_settle(
         ),
     );
     Ok(())
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Resolve the `InFlight` settle TTL, honoring the
+/// `AGENT_DOC_RECYCLE_INFLIGHT_TTL_SECS` override so a test can shrink it.
+fn recycle_inflight_settle_ttl_secs() -> u64 {
+    std::env::var(agent_doc_controller::dispatch::RECYCLE_INFLIGHT_SETTLE_TTL_SECS_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .unwrap_or(agent_doc_controller::dispatch::RECYCLE_INFLIGHT_SETTLE_TTL_SECS)
 }
 
 pub fn dispatch_only_dispatch_start_proof_required(file: &Path, harness: &HarnessConfig) -> bool {

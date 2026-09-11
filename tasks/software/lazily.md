@@ -193,6 +193,11 @@ CI run 34619335884 was still queued at hand-off; 34618133123 (the previous commi
 
 ### Re: do [#lzpyprojectedchart] — opus-5
 
+> **Queue prompt:**
+>
+> do [#lzpyprojectedchart]
+
+
 Shipped `lazily.projected_chart` — `2c6fda2`, pushed. `make check` green (1011 tests, ruff/ty/conformance-coverage/interop-peer/assertion-ordering/ci-reach clean).
 
 **The design decision the item turns on: the projection never refuses the authority.** `lazily.statechart` owns its transitions — you send it an event and it decides. That is the wrong shape when `workflow_run.status` lives in Postgres and is advanced by Temporal. So this chart decides nothing; you feed it observed states and it answers the two questions the authority cannot. Every non-stale observation is **adopted**, including a step the declared lifecycle forbids and a state the chart has never heard of, and the violation is recorded as an `IllegalTransition` counted on a reactive cell. Refusing the row would make this side silently disagree with the database it is projecting — worse than not modelling it. Adopting it quietly would say nothing. It adopts and says so. An undeclared state cannot wedge, because no deadline is knowable for it: the violation is the signal, not a fabricated deadline.
@@ -213,14 +218,13 @@ Scoped as a Python-side addition, not a spec family: `statechart` stays the conf
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzpyreplayproof]~~
-- 🚧 do [#lzpyprojectedchart]
+- ~~do [#lzpyprojectedchart]~~
 - do [#lazilyspecbindings]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzpyprojectedchart] [recommended] [lazily-py] statechart mode that projects an external authority: feed it observed states, have it validate each transition was legal, and expose a derived 'wedged' cell (in a state past its deadline with no advance). FPE's workflow_run.status is owned by Postgres/Temporal, not the graph. Would express the #fpelasterrorlww wedge declaratively. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
 - [ ] [#lazilyspecbindings] [recommended] [lazily-spec + 8 bindings] port the replay-equivalence contract from lazily-py's `lazily.replay` to the spec and the remaining bindings: a canonical fixture for the log digest / fingerprint binding, then ReplayHarness-equivalents in rs/kt/js/dart/zig/go/cpp/cs. Budget ~10 repos — a new canonical fixture reddens all nine. Repo: src/lazily-spec first. Source: #lzpyreplayproof
 <!-- /agent:backlog -->
 

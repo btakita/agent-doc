@@ -169,25 +169,42 @@ with deterministic_scope():
 **Verification:** 42 new tests; `make check` green (955 tests, ty, ruff, `run_readme`, conformance coverage, interop peer, assertion-ordering, ci-reach). Docs in README, SPEC, CHANGELOG. Committed `lazily-py 5dd631c`, superproject `d942241a31`, both pushed.
 
 `#lzpykeyedfold`'s CI run (34617355723) came back green, which also confirms the eager-`Computed` kernel fix passes CI, not just the local rebuild. Run 34618133123 for this commit is queued. Exchange is large (118 lines, 7 cycles in 30 min) — noting it rather than pausing the queue to compact.
+
+### Re: do [#lzpyreplayproof] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzpyreplayproof]
+
+
+Shipped `lazily.replay` — the provability half of the gate `lazily.workflow` opened last cycle. 1461 lines across module + suite + docs; `make check` green (991 tests, ruff/ty/conformance-coverage/interop-peer/assertion-ordering/ci-reach all clean), committed and pushed as `6c3c111`.
+
+**The tsift rule is the whole design.** A tsift excerpt is trustworthy because it records a body hash and *revalidates against the source bytes* before it is returned, so a stale body deterministically suppresses the cached answer. Here the event log is the source bytes: `ReplayFingerprint` carries the digest of the log that produced it, and `verify`/`check` compare that binding **before** any value. A fingerprint recorded against a different log raises `ReplayLogMismatchError` and is never compared — so it cannot pass by coincidence (two logs, same final total is a test in the suite) and is never misreported as a graph defect. `check()` is the non-raising form for value divergence and still raises here: a stale fingerprint is an unanswerable question, not a report. `stride` is recorded for the same reason.
+
+**Divergence is located, not just detected.** Every event is a checkpoint (`stride=N` samples sparsely; the initial and final states are always captured), so the error names the *first* event where the values parted and the exact cell label. The suite pins that: a graph that takes one value from outside the log at `seq=1` fails at `seq=1`, not at the final state where it is still visible. `prove(log)` needs no recorded fingerprint at all — it records, re-replays, and compares, because a graph that is not a pure function of its log already disagrees with itself. `build` is called once per replay (asserted), so a harness cannot prove a graph against its own leftover state.
+
+**Canonical or it raises.** `canonical_bytes` is type-tagged and length-framed: mapping and set members order by their own encoded bytes so iteration order is not part of a value, but `1` / `"1"` / `1.0` / `True` / `b"1"` / `[1]` / `{1}` are seven distinct digests, `["a","bc"]` ≠ `["ab","c"]`, floats encode by `float.hex()` so `-0.0` ≠ `0.0`, and enums/dataclasses carry their type name (a `StrEnum` member is not its string). An unencodable value raises `ReplayEncodingError` naming the path it was reached through — no `repr` fallback, because an address-bearing `repr` would report a false divergence on every run, which is the exact failure this module exists to prevent.
+
+**The stated contract, on the machinery that already had it.** `replay_log_from_outbox` turns `reliable_sync`'s `DurableOutbox.replay_from` into a fingerprinted log, using outbox epochs as event seqs so an ack-truncated prefix changes the log digest instead of silently shifting every event (pinned: `ack_through(3)` invalidates a fingerprint taken at `ack_through(2)`). `LatestDurableProjectionCore` is proven under the contract over a ten-event upsert/claim/fail/reclaim/ack/reconnect trace, including a wire round-trip of the fingerprint and refusal against an edited log. The contract in one line, now in SPEC.md and the module docstring: *given the same `ReplayLog`, a rebuilt graph observes the same values at every checkpoint — any deviation is a defect, not a tolerance.*
+
+`deterministic=True` runs each replay inside `deterministic_scope()`, so a wall-clock read raises at the line that reached it rather than surfacing as a divergence one checkpoint later; the suite asserts both modes. Hashing is BLAKE2b-256 from `hashlib`, not BLAKE3 — lazily-py has no runtime dependencies and BLAKE3 is not in the stdlib. Digests are not wire-compatible with tsift's and are not meant to be.
+
+CI run 34619335884 was still queued at hand-off; 34618133123 (the previous commit) came back green. Local evidence stands on its own. Filed the cross-binding port as a recommended follow-up at the queue tail rather than preempting `#lzpyprojectedchart`.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzpystructcell]: should we use pyproject extras or another project? This adapter should be generic to handle other competing libraries such as pydantic and dataclasses.~~
-- ~~do [#lzpypromegress]~~
-- ~~do [#lzpykeyedfold]~~
-- ~~do [#lzpyworkflowdeterminism]~~
-- do [#lzpyreplayproof]
+- ~~do [#lzpyreplayproof]~~
 - do [#lzpyprojectedchart]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzpyreplayproof] [recommended] [lazily-py] replay-equivalence harness: rebuild the graph from an ordered event log and assert cell values match a recorded fingerprint, failing loudly on divergence -- the durable-execution analogue of tsift's BLAKE3 body-hash revalidation for crux excerpts. `reliable_sync` and `latest_durable_projection` have the machinery but no stated contract. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
 - [ ] [#lzpyprojectedchart] [recommended] [lazily-py] statechart mode that projects an external authority: feed it observed states, have it validate each transition was legal, and expose a derived 'wedged' cell (in a state past its deadline with no advance). FPE's workflow_run.status is owned by Postgres/Temporal, not the graph. Would express the #fpelasterrorlww wedge declaratively. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
+- [ ] [#lazilyspecbindings] [recommended] [lazily-spec + 8 bindings] port the replay-equivalence contract from lazily-py's `lazily.replay` to the spec and the remaining bindings: a canonical fixture for the log digest / fingerprint binding, then ReplayHarness-equivalents in rs/kt/js/dart/zig/go/cpp/cs. Budget ~10 repos — a new canonical fixture reddens all nine. Repo: src/lazily-spec first. Source: #lzpyreplayproof
 <!-- /agent:backlog -->
 
 ## Review

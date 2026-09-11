@@ -1357,6 +1357,11 @@ So the integration between `#lztime` and the rest of the families is a shared cl
 
 ### Re: do [#reconcilecompositionclai] — opus-5
 
+> **Queue prompt:**
+>
+> do [#reconcilecompositionclai]
+
+
 Reconciled toward the **doc**, not the code — and the investigation turned the item from "pick the cheaper option" into "the code is right and the doc was wrong."
 
 **Why composition is not just expensive, it's incorrect.** `DeadlineCore` wraps a `TimerCore`: constructed with `new(deadline)`, no `rearm`/`reset`, and `TimerCore::fired` is monotone. Its two load-bearing invariants are proven in `LazilyFormal/Temporal.lean` — `deadline_expired_monotone` and `deadline_preserves_value`. Every downstream "deadline-driven" core violates one or both:
@@ -1387,7 +1392,7 @@ No follow-up filed. `lazily-gd` still has no temporal family, but that's the exp
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#reconcilecompositionclai]
+- ~~do [#reconcilecompositionclai]~~
 - do [#lazilytemporalpackage]
 <!-- /agent:queue -->
 
@@ -1395,7 +1400,6 @@ No follow-up filed. `lazily-gd` still has no temporal family, but that's the exp
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lazilytemporalpackage] Can we make a lazily-py-temporal package? What operations would lazily-py-temporal need to fully integrate with temporal? Is it worthwhile or should the consumer implement their own temporal integration?
-- [ ] 🚧 [#reconcilecompositionclai] Reconcile the `#lztime` composition claim: `src/lazily-spec/docs/temporal-sources.md` says `DeadlineCell` is "used to build every deadline-driven primitive downstream" (`#lzcoord` lease expiry, `#lzpresence` ephemeral expiry, `#lzresilience` RPC timeouts), but in lazily-rs `coordination.rs`, `presence.rs`, `resilience.rs` and `windowing.rs` each reimplement expiry over the same `tick(now: u64)` contract and never import `DeadlineCore`/`TimerCore` — only `stdlib.rs` composes `TimerCore`. Decide: soften the doc to "shares the logical-clock discipline", or actually compose the core, then apply the decision across all 9 bindings.
 <!-- /agent:backlog -->
 
 ## Review

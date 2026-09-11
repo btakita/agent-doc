@@ -6,7 +6,7 @@ agent: claude
 claude_model: fable
 agent_doc_format: template
 agent_doc_write: crdt
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -371,12 +371,13 @@ That empties the queue: three items drained this session; `#semantickey` and `#a
 ## Queue
 
 <!-- agent:queue priority go -->
+- 🚧 do [#xlrequote2]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#xlrequote2] Decide the 45 quotes no single Wayback snapshot carries (the strict pin rule wants every passage a node quotes from one page in one copy): 27 on Wiktionary (abstraction, conscious, context, create, creativity, evolution ×2, existence, explicit, focus, fractal, history, human ×2, intelligence, love, model, physical, science, spirit, story, system ×3, tool, type, violence) and 18 on Wikipedia (Abstract_object ×3, Algorithm, Emotion, Evolution_(disambiguation), Formal_system, Information ×2, Intelligence, Natural_law, Nature, Platonic_realism, Sexual_reproduction, Spirituality, Story, Technology, Type–token_distinction). Per source: split the blockquote so each passage sits under its own anchor and let `existence audit --sources --fix` pin each, or requote from today’s page. `audit --sources` lists them as `quote_missing` with no fix each week; see `tasks/software/existence-lang.md` for the pinning decision
+- [ ] 🚧 [#xlrequote2] Decide the 45 quotes no single Wayback snapshot carries (the strict pin rule wants every passage a node quotes from one page in one copy): 27 on Wiktionary (abstraction, conscious, context, create, creativity, evolution ×2, existence, explicit, focus, fractal, history, human ×2, intelligence, love, model, physical, science, spirit, story, system ×3, tool, type, violence) and 18 on Wikipedia (Abstract_object ×3, Algorithm, Emotion, Evolution_(disambiguation), Formal_system, Information ×2, Intelligence, Natural_law, Nature, Platonic_realism, Sexual_reproduction, Spirituality, Story, Technology, Type–token_distinction). Per source: split the blockquote so each passage sits under its own anchor and let `existence audit --sources --fix` pin each, or requote from today’s page. `audit --sources` lists them as `quote_missing` with no fix each week; see `tasks/software/existence-lang.md` for the pinning decision
 <!-- /agent:backlog -->
 
 ## Review

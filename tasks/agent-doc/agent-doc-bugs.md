@@ -21,7 +21,7 @@ queue: start
 <!-- agent:status patch=replace -->
 
 Editor-route layout supersede, controller bind-before-serve, the JB accept-leg bound, and the queued-clear mislabel are fixed and pushed (5577cfeeb, b0e9530a6, 232c6c103); make check 9316 passed. #fixrunlazily is gated on one IDEA restart to load plugin 0.2.380. Open: #tmuxautosyncwedge, #cargotokenrevoke.
-<!-- /agent:status -->
+<!-- /agent:status --> 
 
 ## Exchange
 
@@ -725,6 +725,48 @@ It still fails closed where it should: inside the TTL, and for an unstamped proj
 `make check`: **9339 passed, 0 failed** (three new tests). Installed, so both fixes are live — dev.md's pane should accept a reopen now without waiting on a settle that was never coming.
 
 Exchange is at 640 lines / 26 sections; noted, still draining.
+
+### Re: #presetnullblank — the write path no longer edits lines you are typing on — opus-5
+
+Fixed and pushed (`e13404d9c`). The remaining half was exactly where the backlog note said to look: every `parse → mutate one field → write` wrapper called `write(&fm, body)`, which re-serialises the **whole** `Frontmatter` struct. So a cycle that only advanced `agent_doc_pipeline` still rewrote every other line — stripping your quoting, and emitting `'#k': null` where you had typed a bare `'#k':`.
+
+`write_preserving(original, fm, body)` now owns that path. It diffs the parsed old mapping against the newly serialised one, key by key:
+
+- value unchanged → **the original block's bytes go back verbatim** (your quoting, a bare `key:` with no value, comments, indentation);
+- value changed → only that key's block is re-rendered, in place;
+- key gone from the new mapping → dropped, so `queue_active` and friends still retire;
+- key new → rendered and appended before the closing fence.
+
+It is deliberately conservative: no frontmatter region, unparseable YAML, a duplicate top-level key, or a block whose own bytes do not round-trip to the parsed value all fall back to `write`. One subtlety cost a debugging pass and is now encoded: a `|` block scalar clips differently depending on whether a newline follows it, so each block is parsed exactly as the region presents it — with the separator newline for every block but the last.
+
+Every in-module wrapper (`set_session_id`, `set_resume_id`, `set_resume_id_for_harness`, `set_pipeline_state`, `clear_pipeline_state`, `set_format_and_write`, `merge_fields`, `merge_queue_state`, `merge_queue_control`, `set_tmux_session`, `ensure_session_with_ssh_resolver`) plus `reset.rs` and the start-runtime resume-clear now go through it. `write` stays for genuinely new documents.
+
+Five regression tests, the sharpest being the round-trip one: `set_pipeline_state` then `clear_pipeline_state` on a document carrying a comment, a single-quoted value, a half-typed preset and a block scalar returns the file **byte-identical**, and five such cycles in a row still do. And I kept the trap you recorded — dropping null keys at parse is still not the fix, because `write()` would then delete the half-typed line.
+
+Not yet proven live: the deterministic tests are the evidence I have. The live confirmation point is this document's own frontmatter — it currently holds three single-quoted `prompt_presets` values, and the next preflight runs on the newly installed binary, so those quotes surviving is the real check.
+
+### Re: Run Agent Doc on docs.md — "controller not authoritative (handoff_state=Preparing)" — opus-5
+
+Fixed in the same commit (`#handoffrefusalretry`), and the cause is mine: I ran `make install` mid-session, which recycled every live controller. `src/haiven-dev/.agent-doc/logs/ops.log` shows haiven-dev churning through controller generations **1176 → 1177 → 1178 in 24 seconds** starting 20:24:16Z, each replacement reporting `handoff_state=Preparing`. Your Run Agent Doc landed in that window.
+
+The refusal itself was a "not yet" dressed up as a failure. Every `controller not authoritative` bail happens at the *top* of its handler — before pane state, the CRDT, or the dispatch record is touched — so the request provably did nothing, and a `Preparing` generation either promotes to `Stable` or gets reaped by the watchdog. So the client now waits it out: up to 10s, re-asking every 200ms, **reconnecting on each attempt** so the retry reaches the promoted generation instead of re-asking the process that already said no. It logs `controller_rpc_handoff_retry` on the first refusal and `controller_rpc_handoff_retry_settled` with the wait when a generation finally answers; if the handoff genuinely never promotes, the real refusal still surfaces, bounded. This sits in `request_controller_with_timeout` / `request_existing_controller_with_timeout`, so it covers the layout observation, the CRDT replica refusals, and dispatch alike.
+
+Four tests, including the bound — a controller that never promotes must not turn a refusal into a hang.
+
+### Re: `/clear` was not proven submitted in pane %16 — opus-5
+
+> **Queue prompt:**
+>
+> do [#presetnullblank]
+
+
+Same 24-second window, and I am **not** claiming this one fixed. What the log actually shows, at 20:24:15Z on `%16` and 20:25:01Z on `%15`: `result=submission_unobserved`, `command_visible=false`, `elapsed_ms≈908`, captures of 2146 and 1138 bytes. Those captures are far under the 200-line cleared-state threshold, so `#clearsubmitunobserved`'s idempotent-clear escape should have resolved them — it did not, which means neither capture contained a dispatch-ready prompt line. The panes were mid-restart from the recycle, not busy and not queueing (no `#clearqueuedcomposer` label).
+
+So the guard did its job: it refused to call an unobservable clear "submitted" and gave you the exact unblocker. The defect is upstream — the clear was attempted at all while the controller was churning. The handoff retry above plausibly covers it, but I cannot prove that from this evidence and I am not going to say it is fixed. Filed as `#clearunobservedrecycle` at the top of the backlog with the repro (`make install` against live supervisors, then Clear Session Context within ~30s), plus `#clearsubmitpanesettle` for the smaller thing: a restarting pane and a pane that swallowed the clear currently produce the same message, and you cannot tell them apart.
+
+**Verification:** full suite green — 9348 tests, 0 failures (up 9 from the 9339 baseline: 5 frontmatter + 4 handoff). Built, installed, and both commits pushed (`e13404d9c` in the submodule, `f5b35c7e2` in the superproject). CI run 34644974999 was still queued when I checked, so this rests on local evidence. One housekeeping note: `src/session_actor_cmd.rs` carries another session's uncommitted doctor-message change in this shared tree — I left it alone and committed only my four files.
+
+Exchange is at ~700 lines across 28 sections; not stopping for it.
 <!-- agent:boundary:1406b99d:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -734,9 +776,10 @@ Exchange is at 640 lines / 26 sections; noted, still draining.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- ~~do [#queuelineclobber]~~
-- do [#presetnullblank]
-- ~~do [#stashfocuswindow]~~
+- ~~do [#presetnullblank]~~
+- do [#exchangetypingrevert]
+- do [#queuegorevokedonfreetext]
+- do [#layoutbindstale]
 - do [#jbfocusdocroute]
 - do [#compactackflake]
 - do [#retainedresumewakeflake]
@@ -745,10 +788,11 @@ Exchange is at 640 lines / 26 sections; noted, still draining.
 
 
 <!-- agent:backlog priority -->
+- [ ] [#clearunobservedrecycle] [P2] `/clear` reported `submission_unobserved` on two haiven-dev panes (%16 docs.md, %15 dev.md) at 2026-09-11T20:24:15Z / 20:25:01Z, both `command_visible=false`, `elapsed_ms≈908`, `capture_len=2146`/`1138`. Evidence: `src/haiven-dev/.agent-doc/logs/ops.log` shows the same window churning controller generations 1176→1178 (`controller_active_non_stable_deferred ... handoff_state=Preparing`), so the panes were mid-restart and held no dispatch-ready prompt line — which is why `context_clear_history_proves_cleared_state` (#clearsubmitunobserved) could not resolve the idempotent case and the guard fell through to blocked. The guard itself is correct (fail-closed, exact unblocker). What is missing is the preceding step: the clear was attempted against a controller that had already refused as non-authoritative. Check whether the client-side #handoffrefusalretry landed in e13404d9c now defers the clear until the generation promotes; if it does not cover the supervisor_ipc_command_repair_acceptance path, extend it there. Repro: run `make install` against live route-owned supervisors, then issue Clear Session Context within ~30s.
+- [ ] [#clearsubmitpanesettle] [P3] [recommended] `context_clear_history_proves_cleared_state` requires a dispatch-ready prompt line, so a pane that is restarting reads identically to a pane that swallowed the clear. Consider a distinct `PaneRestarting` status (harness banner present, no prompt yet) whose unblocker is "wait for the harness to finish starting" rather than "verify pane state then retry" — the operator currently cannot tell those two apart from the message.
 - [ ] [#exchangetypingrevert] [P1] The OTHER half of the 2026-09-11 17:22:09 agent-doc-bugs.md sighting: operator exchange typing reverted while they typed. #queuelineclobber (fixed in 5983df246) explains the vanished free-text queue item and its promoted backlog mirror, but NOT this — exchange is a different component and this one does carry a real `crdt_replica_update_corruption_rejected ... reason=cross_component_raw_union recovery=canonical_restored_and_member_reprojected` event. Start from the fact that the isolation reconcile is a DETECTOR here, not necessarily the loss site: `crdt_replica_update_corruption_rejected` fires when `packet.component_isolation_reconciled` is true, which means a raw union already materialized member characters on the far side of a component marker. Ask what produced the divergent member replica, not what the reconcile did with it. Cross-check the standing stale_plugin warning (live JB plugin 0.2.379 vs 0.2.381 shipped). Do NOT re-walk merge_by_component (seven shapes probed, all preserve) or rebuild_component_isolated_epoch (ruled out on infra.md by ops.log timing).
 - [ ] [#queuegorevokedonfreetext] [P2] After #queuelineclobber, an operator who writes a free-text `re [#id]: <question>` queue line and flips `queue: go` keeps their text but still gets the activation revoked (`[preflight] queue: stripped activation token (drained)` then `queue: set queue: stop`) — that path is separate from the now-gated need_clear_drained_body. Defensible as-is (a `re` line is not a drainable head, and the inactive_queue_residue warning routes it to the next cycle's prompt), so this is a design question, not a proven defect: decide whether an operator activation should survive a body that holds only non-drainable operator text, or whether the revoke plus the residue warning is the intended answer. Decide before changing it — go-mode churn (#qchurn) is the failure mode on the other side.
 - [ ] [#layoutbindstale] [P2] `derive_layout_actor_bindings` (src/agent-doc/agent-doc-controller-io/src/project_controller.rs:746-784) builds `desired_windows` from the RECORDED `record.window_id`, then binds every other actor whose recorded window is in that set as a co-window sibling of the layout. The record is provably untrustworthy: `agent-doc session doctor src/haiven-dev/tasks/infra.md` reports actor+registry `window=@0` for pane %14 while tmux has %14 in @3 (@0=agent-doc visible, @3=stash). So a stashed pane can be joined into a layout it is not part of, and after a `session doctor --repair` (which rebinds the record to the LIVE window) every stashed pane would share the stash window id and be bound together. Decide whether this join should consume a window id at all, or key on the desired document set alone. NOTE from #stashfocuswindow: resolving live is NOT automatically the right answer — for a selection effect the live window is the stash, which is precisely what must not be used. Status: a reading of the join, not an observed symptom; needs a repro before changing it.
-- [ ] [#presetnullblank] [P1] REMAINING HALF (the value-clobbering half is FIXED in 1920285e6: a preset key typed without a value no longer gains one; PromptPresets newtype preserves YAML null and Derefs to the resolved map, zero call-site changes). What is left: agent-doc `write()` re-serializes frontmatter it did not change. Evidence from haiven-dev tasks/docs.md — HEAD 3f777fe held the preset value single-quoted, the worktree held it UNQUOTED with no value changed; and an unset key now emits `'#k': null` rather than the bare `'#k':` the operator typed. Same YAML document, different bytes, so agent-doc still edits a line the operator is mid-keystroke on. Durable fix: make the write path byte-preserving for frontmatter it did not change. frontmatter.rs:1435-1529 already documents exactly that pattern ("Every other byte is preserved verbatim") and some write path is bypassing it — find which caller uses parse->write instead of the surgical updaters. NOTE the trap, do not re-walk: dropping null keys at parse is NOT the fix; write() would then delete the operator's half-typed line, which is the same data loss.
 - [ ] [#jbfocusdocroute] [P2] The JB "Focus Agent Terminal" notification is per-document ("Agent input required for $fileName", TurnStateBannerRefresher.notifyInputRequired) but IdeTerminalHost.focusExisting(project) ignores the file and focuses a single project-wide terminal tab named "agent-doc". In a multi-document tmux layout the correct target is the pane that OWNS that document. The plugin already has the machinery (TmuxPaneFocusSync.recordEditorFocusIntent takes a documentPath, though it only records a lease — the actual routing goes through the command plane via EditorFocusSyncListener). Do this together with #stashfocuswindow: both are pane->window/document resolution, and solving it in two places separately is how three tmux focus reports became three separate reports. The silent-no-op half of this is already fixed in plugin 0.2.381 (commit 50bc06de5); what remains is routing to the right pane rather than merely always navigating somewhere.
 - [ ] [#compactackflake] [P2] CI run 34626410869 (0.35.366, workflow CI) is RED on agent-doc-document-realtime-io tests::compact_exchange_returns_retained_success_when_editor_ack_stays_delayed, panicking at agent-doc-document-realtime-io/src/lib.rs:9472 (3183 passed / 1 failed / 259 skipped, 1025s). It predates the #fixdocsturn commit 0f959e11f and is not reachable from it (that change touches agent-doc-diff + baseline_comparison only), and local `make check` on the same tree is green. Same delayed-editor-ack shape as #retainedresumewakeflake, and that item already carries the diagnosis to apply here: the test synchronises on a subscribe RETURNING rather than on the condition holding, so a contended runner returns from subscribe for something other than the awaited event. Check whether :9472 waits on a subscribe/timeout proxy and convert it to a bounded poll of the actual condition.
 - [ ] [#retainedresumewakeflake] CI run 34621201563 (0.35.364) went red on agent-doc-controller-io `project_controller::tests::retained_resume_reacts_when_the_intent_arrives_after_delivery` — `assertion left == right failed; left: None, right: Some("retained_settled_delivery_reactive")` at project_controller.rs:15843. Already checked, do not re-walk: it does NOT reproduce locally (~900 executions, including `taskset -c 0` with --test-threads=8 and a 2-core taskset), and neither 0.35.364 change is reachable from it — pane_layout_projection_converged is in the pane-layout worker this test never drives, and capture_resume_unowned is in agent-doc-capture-io, which agent-doc-controller-io's lib test binary does not link. That CI run took 805s vs 166s locally, so the runner was heavily contended. Lead: the test's synchronization is a proxy, not a wait. It asserts `!subscribe_state_plane(CAPTURED_FINALIZE_WAKE_STATE_CHANNEL, None, 0, 2s).timed_out` and then reads runtime.captured_finalize_wakes immediately. record_captured_finalize_wake (rpc.rs:18944) inserts into that map BEFORE publishing the frame, so an absent key proves the subscribe returned for something other than this wake — check what state_plane_effective_after_version(None, 0, gen) plus the generationless-cursor reset makes `subscribe` return when the channel has no frames yet. Fix: wait on the condition (poll captured_finalize_wakes for the expected reason under a bounded deadline) rather than on subscribe-return, and apply it to all three sites using this pattern (15694, 15843, 15898). Keep both assertions — that settlement publishes the receipt AND that it records the reason.

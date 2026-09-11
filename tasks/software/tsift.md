@@ -201,15 +201,38 @@ Validation on the frozen 12-task Graft comparison corpus, with top 8, a 12,000-b
 - An end-to-end MCP call returned structured task context with the expected `packages/tsift-search/src/impact.rs` first.
 
 Verification passed: full repository `make check`, `cargo clippy -p tsift-cli --all-targets -- -D warnings`, five task-context unit tests, two MCP unit tests, `git diff --check`, and the public-repo private-name scan. The latest upstream tsift GitHub Actions run is the successful `v0.1.97` Release run 34296745682; this local branch has not been pushed, so no CI run contains `4456d9c` yet.
+
+### Re: Verified crux excerpts
+
+> **Queue prompt:**
+>
+> do [#graftcrux]
+
+Implemented `#graftcrux` in the clean tsift worktree `/home/brian/work/btakita/agent-loop/.worktrees/tsift-graft` and committed it as `006ba2f feat: add verified crux excerpts`.
+
+Crux enrichment is opt-in through `tsift summarize --extract <path> --crux` or `[summarize].crux = true`. It reuses the configured summarization backend and extraction request; ordinary indexing, summary lookup, `source-read`, and `symbol-read` never introduce a model call. The extraction response can nominate a symbol and excerpt, but tsift stores it only when the symbol is unique and the excerpt occurs exactly once inside that symbol's indexed body.
+
+Each accepted excerpt records its source byte and line span, its symbol-body bounds, and a BLAKE3 body hash. Summary and symbol-context output revalidates the body hash and exact source bytes before returning a crux, so a body edit suppresses stale data deterministically. Summary replacement and file deletion clear associated crux state. A separate extraction-state record remembers that the current file hash was already considered even when the model produced no valid excerpt, preventing repeated opt-in model calls for unchanged files. Older read-only summary databases without the new tables continue to return summaries without crux data.
+
+Changed paths:
+
+- `packages/tsift-summarize/src/summarize.rs`
+- `packages/tsift-index/src/index.rs`
+- `packages/tsift-cli/src/cli.rs`
+- `packages/tsift-cli/src/commands/summarize.rs`
+- `packages/tsift-cli/src/lib.rs`
+- `specs/search-navigation.md`
+
+Verification passed: full `make check`; all 50 `tsift-summarize` tests; focused crux tests; Clippy for `tsift-summarize` and `tsift-cli` with warnings denied; CLI parsing; `git diff --check`; and the public-repository private-name scan. An end-to-end smoke test with a mocked existing Anthropic response proved extraction, `summarize` and `symbol-read` presentation, stale suppression after a body edit, refresh after re-enrichment, and a zero-file second `--crux` pass with model credentials removed. The latest upstream GitHub Actions run passed; this local branch has not been pushed, so CI does not yet contain `006ba2f`.
+
+Confidence is high. No escalation or follow-up work was required for this item.
 <!-- agent:boundary:b8ec92e9:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#graftbenchmark]~~
-- ~~do [#grafttaskcontext]~~
-- do [#graftcrux]
+- 🚧 do [#graftcrux]
 - do [#graftimpactcontext]
 - do [#graftlspedges]
 <!-- /agent:queue -->
@@ -220,7 +243,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#graftcrux] [recommended] Add optional source-verified crux excerpts to tsift summaries and symbol context, anchored to symbol spans and body hashes with explicit stale-state handling.
+- [ ] 🚧 [#graftcrux] [recommended] Add optional source-verified crux excerpts to tsift summaries and symbol context, anchored to symbol spans and body hashes with explicit stale-state handling.
 - [ ] [#graftimpactcontext] [recommended] Extend existing tsift impact output with grouped production modules, changed-symbol evidence paths, and separate test signals; expose bounded context to post-edit integrations.
 - [ ] [#graftlspedges] [recommended] Prototype optional LSP call-edge enrichment using installed servers, preserving extractor fallback, provenance, confidence, coverage diagnostics, and tsift freshness contracts; validate Rust and TypeScript resolution precision.
 <!-- /agent:backlog -->

@@ -1132,6 +1132,42 @@ pub fn mark_queue_prompts_completed_by_done_ids_in_content(
     Ok((consume_queue_nodes_by_key(content, &keys)?, count))
 }
 
+/// Live (unstruck) `agent:queue` prompts in `content` that name one of
+/// `done_ids`, in queue order.
+///
+/// `#donequeuestrike`: closeout uses this as a fail-closed witness after it
+/// projects the queue strike for completed tracked work. A completed id that is
+/// still a live queue prompt is re-served by the next preflight and by the
+/// go-mode drain, so the strike silently not applying must fail the turn rather
+/// than commit a document whose backlog and queue disagree.
+pub fn live_queue_prompt_done_ids(content: &str, done_ids: &[String]) -> Result<Vec<String>> {
+    if done_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let wanted = done_ids
+        .iter()
+        .map(|id| normalize_done_id(id))
+        .collect::<HashSet<_>>();
+    let components = element::parse(content)?;
+    let Some(queue) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(Vec::new());
+    };
+    let mut live = Vec::new();
+    for entry in document_queue::parse(queue.content(content))? {
+        if let QueueEntry::Prompt(prompt) = entry
+            && let Some(id) = queue_prompt_done_id(&prompt.text)
+            && wanted.contains(&id)
+            && !live.contains(&id)
+        {
+            live.push(id);
+        }
+    }
+    Ok(live)
+}
+
 /// Verify that every matching live queue prompt in `before` is completed in
 /// `after`. IDs that were not queued impose no queue transition requirement.
 pub fn done_ids_have_atomic_queue_completion(

@@ -270,6 +270,12 @@ fn apply_unlanded_captured_mutation_plan(
             added_ids: &state.pending_added_ids,
             requested_done_ids: &state.requested_done_ids,
             requested_added_ids: &state.requested_added_ids,
+            // `#mutplanwitness`: a captured plan carrying only gates,
+            // ungates, edits, reorders, review-edits or a --status change has
+            // no id the text witnesses can see, so without this the resume
+            // reported "landed" and dropped the tracked-work half.
+            requested_mutations: state.requested_tracked_work_mutations,
+            mutations_applied: state.tracked_work_mutations_applied,
         },
         &current_content,
     ) {

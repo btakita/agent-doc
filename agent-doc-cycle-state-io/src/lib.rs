@@ -224,6 +224,25 @@ pub struct CycleState {
     /// `pending_added_ids` record.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub requested_added_ids: Vec<String>,
+    /// `#mutplanwitness`: this cycle requested at least one tracked-work
+    /// mutation, recorded before the response cell was published.
+    ///
+    /// The id-shaped witnesses above only see `--done` and explicitly-named
+    /// adds. A closeout carrying ONLY gates, ungates, edits, reorders,
+    /// review-edits or a `--status` change has no id to inspect, so landedness
+    /// inferred from document text reported "landed" for a document that never
+    /// received the mutation and the captured-closeout resume dropped its
+    /// tracked-work half. This flag plus [`Self::tracked_work_mutations_applied`]
+    /// answers the question directly instead of inferring it.
+    #[serde(default)]
+    pub requested_tracked_work_mutations: bool,
+    /// `#mutplanwitness`: the tracked-work mutation envelope for this cycle was
+    /// published to the document.
+    ///
+    /// Set only after the pending-write transaction returns successfully, so a
+    /// retained or failed mutation write leaves it false.
+    #[serde(default)]
+    pub tracked_work_mutations_applied: bool,
     /// `#backlogqueuepopulation`: tracked-work ids that became actionable this
     /// cycle and therefore may need insert-only mirroring into an explicit
     /// go-mode `agent:queue`. Adds and ungates record here; gates, done
@@ -1244,6 +1263,8 @@ pub fn start_preflight_with_task(
         pending_added_ids: Vec::new(),
         requested_done_ids: Vec::new(),
         requested_added_ids: Vec::new(),
+        requested_tracked_work_mutations: false,
+        tracked_work_mutations_applied: false,
         pending_actionable_ids: Vec::new(),
         pending_anchored_ids: Vec::new(),
         tracked_work_maintenance_required_at_preflight: file_content
@@ -1809,6 +1830,34 @@ pub fn record_requested_tracked_work(
         return Ok(Some(state));
     }
     save(file, &state)?;
+    Ok(Some(state))
+}
+
+/// `#mutplanwitness`: record that this cycle asked for tracked-work mutations,
+/// before the response cell is published.
+pub fn record_requested_tracked_work_mutations(file: &Path) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if !state.requested_tracked_work_mutations {
+        state.requested_tracked_work_mutations = true;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// `#mutplanwitness`: record that the tracked-work mutation envelope reached the
+/// document. Call this only after the pending-write transaction has published.
+pub fn mark_tracked_work_mutations_applied(file: &Path) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    if !state.tracked_work_mutations_applied {
+        state.tracked_work_mutations_applied = true;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
     Ok(Some(state))
 }
 
@@ -3219,6 +3268,8 @@ fn synthetic_state_with_id(
         pending_added_ids: Vec::new(),
         requested_done_ids: Vec::new(),
         requested_added_ids: Vec::new(),
+        requested_tracked_work_mutations: false,
+        tracked_work_mutations_applied: false,
         pending_actionable_ids: Vec::new(),
         pending_anchored_ids: Vec::new(),
         // A synthetic cycle did not observe a preflight document. Preserve

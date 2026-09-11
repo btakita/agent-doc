@@ -334,6 +334,15 @@ pub struct RecordedTrackedWork<'a> {
     pub requested_done_ids: &'a [String],
     /// Explicit add ids this cycle requested (`#mutprovenancepreresponse`).
     pub requested_added_ids: &'a [String],
+    /// `#mutplanwitness`: this cycle requested at least one tracked-work
+    /// mutation of ANY shape — including gates, ungates, edits, reorders,
+    /// review-edits and `--status`, none of which the id witnesses above can
+    /// see.
+    pub requested_mutations: bool,
+    /// `#mutplanwitness`: the tracked-work mutation envelope was published to
+    /// the document. Recorded only after the pending-write transaction
+    /// succeeds, so a retained or failed mutation write leaves it false.
+    pub mutations_applied: bool,
 }
 
 /// Whether a recorded tracked-work mutation is still missing from `disk`.
@@ -364,6 +373,17 @@ pub struct RecordedTrackedWork<'a> {
 /// unanswered-edit refusal stays correct — which is what keeps `commit` from
 /// swallowing the operator's next prompt.
 pub fn recorded_tracked_work_is_unlanded(recorded: RecordedTrackedWork<'_>, disk: &str) -> bool {
+    // `#mutplanwitness`: the id witnesses below can only see `--done` and
+    // explicitly-named adds. A closeout carrying ONLY gates, ungates, edits,
+    // reorders, review-edits or a `--status` change has no id whose document
+    // rendering changes in a way they inspect, so they reported "landed" for a
+    // document that never received the mutation — and the captured-closeout
+    // resume then continued straight to commit with the tracked-work half
+    // dropped. This asks the question directly: the cycle recorded that it
+    // wanted mutations, and never recorded that the envelope published.
+    if recorded.requested_mutations && !recorded.mutations_applied {
+        return true;
+    }
     let normalize = |id: &str| id.trim().trim_start_matches('#').to_string();
     let done_unlanded = |ids: &[String]| {
         ids.iter()
@@ -408,6 +428,13 @@ mod tests {
                 "commit",
                 include_str!("../../agent-doc-commit-io/src/lib.rs"),
             ),
+            // `#mutplanwitness`: the captured-closeout resume decides whether to
+            // replay the tracked-work half from the same predicate. It is a
+            // third deciding site, so it belongs in this guard too.
+            (
+                "captured-finalize-resume",
+                include_str!("../../agent-doc-repair-command-io/src/lib.rs"),
+            ),
         ] {
             assert!(
                 source.contains("recorded_tracked_work_is_unlanded"),
@@ -421,6 +448,67 @@ mod tests {
                  that is the false premise this fix removed"
             );
         }
+    }
+
+    /// `#mutplanwitness`: a closeout whose only mutation is a gate has no id the
+    /// text witnesses can see.
+    ///
+    /// Observed as the residual gap in `#deferredmutdrop` (0.35.363): the
+    /// captured-closeout resume is gated on this predicate, so a plan carrying
+    /// only `--backlog-gate` / `--backlog-ungate` / `--backlog-edit` /
+    /// `--backlog-reorder` / `--review-edit` / `--status` resumed with the
+    /// response and dropped its tracked-work half, because every id witness
+    /// reported "landed" for a document that never received the mutation.
+    #[test]
+    fn a_mutation_only_closeout_with_no_done_or_add_id_is_still_unlanded() {
+        // The gate moved `#gateonly` out of the active backlog, but the document
+        // under inspection is byte-identical to its pre-cycle state — and it
+        // names no id this cycle recorded as done or added.
+        let disk = "- [ ] [#gateonly] still open in the live backlog\n";
+
+        assert!(
+            recorded_tracked_work_is_unlanded(
+                RecordedTrackedWork {
+                    done_ids: &[],
+                    added_ids: &[],
+                    requested_done_ids: &[],
+                    requested_added_ids: &[],
+                    requested_mutations: true,
+                    mutations_applied: false,
+                },
+                disk,
+            ),
+            "a requested tracked-work mutation that never published is this \
+             closeout's unlanded write"
+        );
+
+        // Once the envelope published, the same document is not this cycle's
+        // unlanded write — which is what keeps `commit` refusing to swallow a
+        // genuine operator edit.
+        assert!(!recorded_tracked_work_is_unlanded(
+            RecordedTrackedWork {
+                done_ids: &[],
+                added_ids: &[],
+                requested_done_ids: &[],
+                requested_added_ids: &[],
+                requested_mutations: true,
+                mutations_applied: true,
+            },
+            disk,
+        ));
+
+        // A cycle that requested nothing is unaffected in either direction.
+        assert!(!recorded_tracked_work_is_unlanded(
+            RecordedTrackedWork {
+                done_ids: &[],
+                added_ids: &[],
+                requested_done_ids: &[],
+                requested_added_ids: &[],
+                requested_mutations: false,
+                mutations_applied: false,
+            },
+            disk,
+        ));
     }
 
     /// `#retainedmutdrop`: a `--done` whose item is still open on disk, or an
@@ -440,6 +528,8 @@ mod tests {
                 added_ids: &added,
                 requested_done_ids: &[],
                 requested_added_ids: &[],
+                requested_mutations: false,
+                mutations_applied: false,
             },
             disk,
         ));
@@ -452,6 +542,8 @@ mod tests {
                 added_ids: &[],
                 requested_done_ids: &[],
                 requested_added_ids: &[],
+                requested_mutations: false,
+                mutations_applied: false,
             },
             disk,
         ));
@@ -478,6 +570,8 @@ mod tests {
                 added_ids: &[],
                 requested_done_ids: &requested,
                 requested_added_ids: &[],
+                requested_mutations: false,
+                mutations_applied: false,
             },
             disk,
         ));
@@ -490,6 +584,8 @@ mod tests {
                 added_ids: &[],
                 requested_done_ids: &[],
                 requested_added_ids: &requested_add,
+                requested_mutations: false,
+                mutations_applied: false,
             },
             disk,
         ));
@@ -502,6 +598,8 @@ mod tests {
                 added_ids: &[],
                 requested_done_ids: &requested,
                 requested_added_ids: &[],
+                requested_mutations: false,
+                mutations_applied: false,
             },
             "- [x] [#hooktriggerunresolved] FIXED in 0.35.219\n",
         ));
@@ -545,6 +643,8 @@ mod tests {
                 added_ids: &added,
                 requested_done_ids: &[],
                 requested_added_ids: &[],
+                requested_mutations: false,
+                mutations_applied: false,
             },
             disk,
         ));
@@ -558,6 +658,8 @@ mod tests {
                 added_ids: &added,
                 requested_done_ids: &[],
                 requested_added_ids: &[],
+                requested_mutations: false,
+                mutations_applied: false,
             },
             gated,
         ));

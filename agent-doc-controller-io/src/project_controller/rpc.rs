@@ -8665,12 +8665,48 @@ fn handle_editor_route_rpc(
         layout_invocation.focus.as_deref() == Some(routed_document.as_str()),
         "editor route refused before layout publication: focused document does not match routed document"
     );
-    let layout_receipt = handle_sync_tmux_layout_invocation(
+    let mut layout_receipt = handle_sync_tmux_layout_invocation(
         bootstrap,
         runtime,
         layout_invocation,
         PaneLayoutPublication::FreshIntent,
     )?;
+    // `#routelayoutsupersede`: `Run Agent Doc` is an operator gesture, and it
+    // shares the pane-layout plane with the passive editor-surface observation
+    // lane, which publishes its own desired state on tab activation and geometry
+    // drift. A surface observation landing inside this route's await window bumps
+    // the generation, so the await returns `superseded_by_newer_layout_state` and
+    // the route was REFUSED — the operator's click failed for a race that says
+    // nothing about the layout being wrong. Observed 4 times on 2026-09-11
+    // (14:07:29, 14:13:24, 14:13:31, 14:14:04) on this project.
+    //
+    // Republish this route's intent once against the newer state and await that.
+    // Deliberately bounded to a single retry: a supersede that repeats is real
+    // contention the operator should see, not something to spin on. Every guard
+    // below re-runs against the new receipt, so the retry can only succeed on a
+    // layout that satisfies the same preconditions as a first-pass success.
+    if editor_route_layout_should_republish(&layout_receipt) {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_editor_route_layout_superseded file={} reason={} recovery=republish_once (#routelayoutsupersede)",
+                canonical.display(),
+                layout_receipt.reason,
+            ),
+        );
+        let retry_invocation =
+            editor_route_layout_invocation(&bootstrap.project_root, &layout_args)?;
+        anyhow::ensure!(
+            retry_invocation.focus.as_deref() == Some(routed_document.as_str()),
+            "editor route refused before layout republication: focused document does not match routed document"
+        );
+        layout_receipt = handle_sync_tmux_layout_invocation(
+            bootstrap,
+            runtime,
+            retry_invocation,
+            PaneLayoutPublication::FreshIntent,
+        )?;
+    }
     anyhow::ensure!(
         tmux_layout_command_applied(&layout_receipt),
         "editor route layout did not converge before dispatch: {}",
@@ -21121,6 +21157,24 @@ fn pane_layout_invocation_awaits_projection(
     invocation.caller_kind != "automatic" && !invocation.no_autostart
 }
 
+/// `#routelayoutsupersede`: the await returned a projection for a DIFFERENT
+/// layout generation than the one this caller published — a newer desired state
+/// landed while this one was converging. It says nothing about whether the
+/// layout is wrong, only that this caller's generation is no longer the one
+/// being projected.
+pub(crate) const PANE_LAYOUT_SUPERSEDED_REASON: &str = "superseded_by_newer_layout_state";
+
+/// `#routelayoutsupersede`: whether an editor route should republish its layout
+/// intent once instead of refusing the operator's gesture.
+///
+/// Only a supersede qualifies. Every other non-applied reason describes the
+/// layout itself (`operator_owned_layout`, `projection_effect_not_started`,
+/// `projection_retry_pending`, `desired_layout_state_absent`) and republishing
+/// would not change it — the route must still fail closed on those.
+fn editor_route_layout_should_republish(receipt: &ControllerTmuxLayoutSyncReceipt) -> bool {
+    !tmux_layout_command_applied(receipt) && receipt.reason == PANE_LAYOUT_SUPERSEDED_REASON
+}
+
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 fn pane_layout_await_outcome(
     projection: &PaneLayoutProjection,
@@ -21137,7 +21191,7 @@ fn pane_layout_await_outcome(
         PaneLayoutProjection::RetryPending(current) => (current, false, "projection_retry_pending"),
     };
     if current.generation != requested_generation {
-        (false, "superseded_by_newer_layout_state")
+        (false, PANE_LAYOUT_SUPERSEDED_REASON)
     } else {
         (applied, reason)
     }
@@ -24600,6 +24654,82 @@ mod tests {
             false,
             "superseded_by_newer_layout_state"
         )));
+    }
+
+    /// `#routelayoutsupersede`: an operator `Run Agent Doc` must not be refused
+    /// because the passive editor-surface lane bumped the layout generation
+    /// inside its await window.
+    ///
+    /// Observed 4 times on 2026-09-11 (14:07:29, 14:13:24, 14:13:31, 14:14:04):
+    /// `editor_command_async_completed command=editor_route exit_code=1 ...
+    /// output=editor route layout did not converge before dispatch:
+    /// superseded_by_newer_layout_state`. The layout was not wrong; this route's
+    /// generation had simply stopped being the projected one.
+    #[test]
+    fn an_editor_route_republishes_only_on_a_layout_supersede() {
+        let receipt = |applied, reason: &str| ControllerTmuxLayoutSyncReceipt {
+            applied,
+            reason: reason.to_string(),
+            columns: vec!["tasks/one.md".to_string()],
+            window: Some("agent-doc".to_string()),
+            focus: Some("tasks/one.md".to_string()),
+            no_autostart: true,
+            exact_visible: true,
+            routes_created_panes: false,
+            file_panes: Vec::new(),
+        };
+
+        assert!(editor_route_layout_should_republish(&receipt(
+            false,
+            PANE_LAYOUT_SUPERSEDED_REASON
+        )));
+
+        // A converged or published layout has nothing to republish.
+        assert!(!editor_route_layout_should_republish(&receipt(
+            true,
+            "observed_convergence"
+        )));
+        assert!(!editor_route_layout_should_republish(&receipt(
+            false,
+            "projection_published"
+        )));
+
+        // Every other failure describes the layout itself, so the route must
+        // keep failing closed rather than republishing into the same answer.
+        for reason in [
+            "operator_owned_layout",
+            "projection_effect_not_started",
+            "projection_retry_pending",
+            "desired_layout_state_absent",
+        ] {
+            assert!(
+                !editor_route_layout_should_republish(&receipt(false, reason)),
+                "`{reason}` is a layout verdict, not a generation race"
+            );
+        }
+    }
+
+    /// `#routelayoutsupersede`: the republish is bounded to ONE retry. A route
+    /// that loops on supersede would spin against a lane that publishes on every
+    /// tab activation.
+    #[test]
+    fn the_editor_route_layout_republish_stays_bounded_to_one_retry() {
+        let source = include_str!("rpc.rs");
+        let route = &source[source
+            .find("fn handle_editor_route_rpc(")
+            .expect("editor route handler")..];
+        let route = &route[..route
+            .find("controller_editor_route_layout_converged")
+            .expect("layout convergence log")];
+        assert_eq!(
+            route.matches("editor_route_layout_should_republish").count(),
+            1,
+            "the supersede republish must be a single guarded retry, not a loop"
+        );
+        assert!(
+            !route.contains("while ") && !route.contains("loop {"),
+            "the supersede recovery must not introduce a retry loop in the route"
+        );
     }
 
     #[test]

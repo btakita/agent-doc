@@ -1051,6 +1051,11 @@ fn run_with_options_inner(
                     // has landed still proves the divergence is ours.
                     requested_done_ids: &state.requested_done_ids,
                     requested_added_ids: &state.requested_added_ids,
+                    // `#mutplanwitness`: a gate/edit/reorder/status-only
+                    // closeout has no id witness; ask the cycle whether its
+                    // mutation envelope ever published.
+                    requested_mutations: state.requested_tracked_work_mutations,
+                    mutations_applied: state.tracked_work_mutations_applied,
                 },
                 &disk_content,
             )

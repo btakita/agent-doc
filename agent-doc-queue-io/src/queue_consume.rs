@@ -1350,10 +1350,16 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                     ),
                 }
             } else {
+                // `#donequeuestrike`: name what this does and does NOT mean. The
+                // document strike above is already computed and returned in the
+                // plan; only the baseline sync is skipped. Callers that plan
+                // against virtual transaction content pass `None` deliberately,
+                // and this line previously read as "the strike was skipped",
+                // which sent a live defect hunt down the wrong path.
                 log_snapshot_recovery_warning(
                     file,
                     "queue consume done-id snapshot sync",
-                    "snapshot is missing",
+                    "snapshot is missing; the document queue strike still applies and only the baseline sync is skipped",
                 );
             }
 

@@ -3476,6 +3476,57 @@ fn finalize_consumes_done_id_queue_items_interspersed_with_priority_prompt() {
     );
 }
 
+/// `#donequeuestrike`: a `--done` whose reap is deferred still owns the queue
+/// strike.
+///
+/// Observed live 2026-09-10: a closeout whose response write was retained took
+/// the `reap_done_in_same_write == false` branch, which transitioned the backlog
+/// item to `[x]` and never touched `agent:queue`. Nothing failed — session-check
+/// reported ok/committed — while the operator-visible queue still served three
+/// completed items to the next drain. `write --pending-only` without `--commit`
+/// reaches the same branch deterministically.
+#[test]
+fn pending_only_done_without_commit_strikes_its_queue_head() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let baseline_content = "---\nagent_doc_format: template\nqueue_active: true\n---\n\n<!-- agent:exchange -->\n\u{276f} start\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do [#dqsa]\n- do [#dqsb]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n- [ ] [#dqsa] first tracked item\n- [ ] [#dqsb] second tracked item\n<!-- /agent:backlog -->\n";
+    fs::write(&doc, baseline_content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    checkpoint_baseline(tmp.path(), baseline_content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--pending-only",
+            "--done",
+            "dqsa",
+        ])
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !content.contains("- do [#dqsa]"),
+        "the completed id must not remain a live queue prompt:\n{content}"
+    );
+    assert!(
+        content.contains("- ~~do [#dqsa]~~"),
+        "the completed id's queue head must be struck:\n{content}"
+    );
+    assert!(
+        content.contains("- do [#dqsb]"),
+        "an unrelated queue head must stay live:\n{content}"
+    );
+    assert!(
+        content.contains("[#dqsa]") && !content.contains("- [ ] [#dqsa]"),
+        "the backlog item must be transitioned out of the open state:\n{content}"
+    );
+}
+
 #[test]
 fn finalize_does_not_consume_when_queue_inactive() {
     let tmp = TempDir::new().unwrap();

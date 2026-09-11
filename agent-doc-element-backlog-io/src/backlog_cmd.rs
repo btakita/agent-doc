@@ -788,6 +788,36 @@ pub fn done_and_reap_many(file: &Path, ids: &[String]) -> Result<DoneAndReapOutc
     done_and_reap_many_with_target_projection(file, ids, |content| Ok(content.to_string()))
 }
 
+/// Apply a pure document projection inside the current pending-write
+/// transaction, publishing it through the same staged target as every other
+/// tracked-work mutation.
+///
+/// `#donequeuestrike`: closeout composes the `agent:queue` strike into
+/// `done_and_reap_many_with_target_projection` only when the reap runs in the
+/// same write. When the reap is deferred — a retained response write, or
+/// `--pending-only` without `--commit` — the backlog item is still transitioned
+/// to `[x]`, so the strike has to reach the document through this path or the
+/// completed item stays a live queue prompt for the next drain.
+///
+/// Returns the published target when the projection changed anything.
+pub fn project_tracked_work_document<F>(
+    file: &Path,
+    source: &str,
+    project: F,
+) -> Result<Option<String>>
+where
+    F: FnOnce(&str) -> Result<String>,
+{
+    let full_content = read_command_document(file, source)?;
+    let target =
+        project(&full_content).context("failed to compose tracked-work document projection")?;
+    if target == full_content {
+        return Ok(None);
+    }
+    persist_pending_write(file, &full_content, &target)?;
+    Ok(Some(target))
+}
+
 /// Compose an additional pure document projection into the same write that
 /// archives and reaps completed tracked work.
 ///

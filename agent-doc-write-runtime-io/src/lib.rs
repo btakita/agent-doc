@@ -1584,12 +1584,15 @@ fn apply_pending_and_status_mutations_with_mode(
                             agent_doc_session_check_io::enforce_review_done_guard(file, id)?;
                         }
                         if !options.pending_done.is_empty() {
-                            let planned_reap_outcome = if reap_done_in_same_write {
-                                backlog_cmd::done_and_reap_many_with_target_projection(
-                                    file,
-                                    &options.pending_done,
-                                    |content| {
-                                        let mut plan =
+                            // `#donequeuestrike`: the `agent:queue` strike for a
+                            // completed id belongs to the same tracked-work
+                            // transaction as the done transition — NOT to the reap.
+                            // Both branches below run this projection so a deferred
+                            // reap can never leave `- [x] [#id]` in the backlog beside
+                            // a live `- do [#id]` queue head, which the next preflight
+                            // and the go-mode drain would re-serve as unfinished work.
+                            let project_queue_completion = |content: &str| {
+                                let mut plan =
                                 queue_consume::plan_queue_prompt_consumption_with_snapshot_and_count(
                                     file,
                             content,
@@ -1597,38 +1600,65 @@ fn apply_pending_and_status_mutations_with_mode(
                             &options.pending_done,
                             1,
                         )?;
-                                        let planned = plan
-                                            .as_ref()
-                                            .map(|plan| plan.new_document.as_str())
-                                            .unwrap_or(content);
-                                        let (projected, marked_count) =
+                                let planned = plan
+                                    .as_ref()
+                                    .map(|plan| plan.new_document.as_str())
+                                    .unwrap_or(content);
+                                let (projected, marked_count) =
                                 agent_doc_queue::queue_consume::mark_queue_prompts_completed_by_done_ids_in_content(
                                     planned,
                                     &options.pending_done,
                                 )?;
-                                        let consumed_count = plan
-                                            .as_ref()
-                                            .map(|plan| plan.consumed_texts.len())
-                                            .unwrap_or(0);
-                                        if let Some(plan) = plan.as_mut() {
-                                            plan.new_document = projected.clone();
-                                        }
-                                        if consumed_count + marked_count > 0 {
-                                            composed_queue_completion.replace(Some((
-                                                plan,
-                                                consumed_count + marked_count,
-                                            )));
-                                        }
-                                        Ok(projected)
-                                    },
+                                let consumed_count = plan
+                                    .as_ref()
+                                    .map(|plan| plan.consumed_texts.len())
+                                    .unwrap_or(0);
+                                if let Some(plan) = plan.as_mut() {
+                                    plan.new_document = projected.clone();
+                                }
+                                if consumed_count + marked_count > 0 {
+                                    composed_queue_completion
+                                        .replace(Some((plan, consumed_count + marked_count)));
+                                }
+                                // `#donequeuestrike`: fail the whole tracked-work
+                                // transaction closed rather than publishing a target
+                                // whose backlog says an id is completed while its
+                                // queue head is still live and drainable. Before this
+                                // witness the strike could be skipped with nothing
+                                // reported: session-check passed, and the next drain
+                                // re-served finished work.
+                                let still_live =
+                                agent_doc_queue::queue_consume::live_queue_prompt_done_ids(
+                                    &projected,
+                                    &options.pending_done,
+                                )?;
+                                anyhow::ensure!(
+                                    still_live.is_empty(),
+                                    "queue completion for completed tracked work did not apply: \
+                                     {} still has live agent:queue head(s) for {:?}",
+                                    file.display(),
+                                    still_live
+                                );
+                                Ok(projected)
+                            };
+                            let planned_reap_outcome = if reap_done_in_same_write {
+                                backlog_cmd::done_and_reap_many_with_target_projection(
+                                    file,
+                                    &options.pending_done,
+                                    project_queue_completion,
                                 )?
                             } else {
                                 for id in &options.pending_done {
                                     backlog_cmd::done(file, id)?;
                                 }
+                                let target_content = backlog_cmd::project_tracked_work_document(
+                                    file,
+                                    "backlog_done_queue_completion",
+                                    project_queue_completion,
+                                )?;
                                 backlog_cmd::DoneAndReapOutcome {
                                     removed_ids: Vec::new(),
-                                    target_content: None,
+                                    target_content,
                                 }
                             };
                             reap_outcome.replace(Some(planned_reap_outcome));
@@ -1660,6 +1690,18 @@ fn apply_pending_and_status_mutations_with_mode(
                         return Ok(());
                     }
                     backlog_cmd::with_pending_write_transaction(file, tracked_work_envelope)?;
+                    // `#mutplanwitness`: the envelope published. Anything that
+                    // retains or fails the mutation write propagates above and
+                    // leaves this unset, which is exactly what the resume,
+                    // `commit` and `session-check` witnesses read.
+                    if let Err(err) =
+                        agent_doc_cycle_state_io::mark_tracked_work_mutations_applied(file)
+                    {
+                        eprintln!(
+                            "[write] warning: failed to record applied tracked-work mutations for {}: {err:#}",
+                            file.display()
+                        );
+                    }
 
                     let (same_cycle_added_ids, review_added_ids, anchored_added_ids) =
                         added_ids.into_inner().unwrap_or_default();
@@ -2129,6 +2171,18 @@ fn run_command_inner_within_pass(
             .chain(options.pending_add_back.iter())
             .filter_map(|text| agent_doc_element_backlog::backlog::explicit_custom_id(text))
             .collect();
+        // `#mutplanwitness`: the id lists above only describe `--done` and
+        // explicitly-named adds. Record the plain fact that this cycle asked for
+        // tracked-work mutations too, so a gate/ungate/edit/reorder/status-only
+        // closeout has a witness at all.
+        if let Err(err) =
+            agent_doc_cycle_state_io::record_requested_tracked_work_mutations(file)
+        {
+            eprintln!(
+                "[write] warning: failed to record tracked-work mutation intent for {}: {err:#}",
+                file.display()
+            );
+        }
         if let Err(err) = agent_doc_cycle_state_io::record_requested_tracked_work(
             file,
             &options.pending_done,

@@ -2630,6 +2630,8 @@ mod th {
             capture_id: None,
             response_sha256: None,
             had_pending_mutations: false,
+            requested_tracked_work_mutations: false,
+            tracked_work_mutations_applied: false,
             requires_backlog_capture: false,
             required_backlog_targets: Vec::new(),
             required_explicit_backlog_item_count: 0,

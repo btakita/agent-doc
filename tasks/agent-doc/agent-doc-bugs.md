@@ -191,6 +191,110 @@ Stdout stays empty, diagnostics stay on stderr, exit stays nonzero — the 0.35.
 I commented the full status on GH #52 and left it **open**: part 1 is done, but PyPI still carries 0.35.343, and closing it while `pip install --upgrade agent-doc` is still a downgrade would be false.
 
 **Verification:** `make check` → **9309 passed, 0 failed** (three runs: one caught a missing `editors/release-parity.tsv` row for 0.35.363, one after the musl fix). `make install-full`, then `cargo build --release` to restore `src/agent-doc/target/release/{agent-doc,libagent_doc.so}` that install-full's artifact cleanup had removed from under the repo-root-relative `.bin/agent-doc` symlink. Installed 0.35.363 resolves its library. Commits `070e6703c` + `cdfc5513c`, tag `v0.35.363`, GitHub Release live with six assets.
+
+### Re: #donequeuestrike, #mutplanwitness, Run Agent Doc, layout supersede, auto-sync — opus-5
+
+Five prompts, oldest-first. Three are fixed and shipped in `5577cfeeb`; two are still open with the findings written into their backlog items so the next cycle starts from evidence instead of from scratch.
+
+### Re: #donequeuestrike — fixed, and the report's lead was a red herring — opus-5
+
+The backlog item pointed at `'[queue] snapshot recovery warning during queue consume done-id snapshot sync: snapshot is missing'` as the lead. **That warning is benign.** The projection call site passes `None` for the snapshot deliberately — it plans against virtual transaction content — and the document strike is computed and returned in the plan regardless. Only the baseline sync is skipped. The line now says so, because it cost a diagnosis.
+
+The real cause is one branch, `agent-doc-write-runtime-io/src/lib.rs`:
+
+```rust
+let planned_reap_outcome = if reap_done_in_same_write {
+    backlog_cmd::done_and_reap_many_with_target_projection(file, &options.pending_done, /* queue strike */)?
+} else {
+    for id in &options.pending_done { backlog_cmd::done(file, id)?; }   // no queue strike
+    DoneAndReapOutcome { removed_ids: Vec::new(), target_content: None }
+};
+```
+
+`reap_done_in_same_write` is `write_result.is_ok() && commit_mode != CommitMode::None`. The observed cycle's response write was **retained**, so it took the else branch: the backlog items were transitioned to `[x]` in place and `agent:queue` was never touched. The reap that printed `completed and reaped 3 item(s) atomically` and archived them to `agent-doc-bugs.done.md` was a **later** pass over those `[x]` items, and it does not strike queue heads either. That is why `git diff acca219ab5 eb4fe58186` shows the three heads unchanged — and the committed backlog in that diff shows the smoking gun the report did not quote: `- [x] [#fixhttpsgithub]`, `- [x] [#deferredmutdrop]`, `- [x] [#pypicadence]`, marked done *in place*, not reaped.
+
+`write --pending-only` without `--commit` reaches the same branch deterministically, so the repro needs no editor barrier at all:
+
+```console
+$ agent-doc write doc.md --pending-only --done alpha
+$ grep -n 'alpha' doc.md
+14:- do [#alpha]          # still a live queue head
+19:- [x] [#alpha] ...     # backlog says done
+```
+
+Two changes. The queue-strike projection is now composed into the tracked-work transaction on **both** branches — the same `with_pending_write_transaction` envelope, so it is still one atomic publish. And it no longer fails silently: after projecting, a witness (`live_queue_prompt_done_ids`) enumerates live heads naming a completed id and the whole transaction fails closed if any survive. Previously nothing failed: session-check reported ok/committed while the visible queue kept serving finished work.
+
+**I proved the test detects the bug.** Removing just the new projection call reproduces the production shape exactly:
+
+```
+&lt;!-- agent:queue --&gt;
+- do [#dqsa]
+- do [#dqsb]
+&lt;!-- /agent:queue --&gt;
+&lt;!-- agent:backlog --&gt;
+- [x] [#dqsa] first tracked item
+```
+
+### Re: #mutplanwitness — fixed with the explicit marker, not a wider text guess — opus-5
+
+The item offered two paths: extend the text witnesses to gate/edit/status intents, or record an explicit per-cycle "mutations applied" marker. I took the marker, because the text route cannot be made honest — a `--backlog-edit` witness has to guess whether canonicalization preserved the string it looks for, and guessing wrong here either drops the mutation or swallows an operator prompt.
+
+Cycle state now carries two facts: `requested_tracked_work_mutations`, recorded in the same `#mutprovenancepreresponse` block that already records the intent (so it survives a failure at any position), and `tracked_work_mutations_applied`, set only **after** `with_pending_write_transaction` returns. A retained or failed mutation write leaves the second unset. `recorded_tracked_work_is_unlanded` asks that directly before touching any id witness, so a plan carrying only gates, ungates, edits, reorders, review-edits or a `--status` change is now visible to it.
+
+All three deciding sites consume the same predicate — `commit`, `session-check`, and the captured-finalize resume. That third site was the one `#deferredmutdrop` fixed and the one this gap re-opened; it was missing from the structural guard that exists precisely to stop these sites drifting apart, so it is in the guard now.
+
+Mutation-checked: deleting the two-line early return reddens `a_mutation_only_closeout_with_no_done_or_add_id_is_still_unlanded`, and nothing else caught it.
+
+### Re: editor route layout did not converge before dispatch: superseded_by_newer_layout_state — fixed — opus-5
+
+This one is a plain race and it fired four times today (14:07:29, 14:13:24, 14:13:31, 14:14:04):
+
+```
+editor_command_async_completed command=editor_route exit_code=1 applied=false
+  output=editor route layout did not converge before dispatch: superseded_by_newer_layout_state
+```
+
+`handle_editor_route_rpc` publishes a fresh layout intent, then awaits *that generation*. It shares the pane-layout plane with the passive editor-surface observation lane, which publishes its own desired state on tab activation and geometry drift. A surface observation landing inside the route's await window bumps the generation, `pane_layout_await_outcome` sees `current.generation != requested_generation`, and the operator's click is **refused** — for a race that says nothing about the layout being wrong.
+
+The route now republishes its intent once against the newer state and re-awaits. Bounded to exactly one retry on purpose: a supersede that repeats is real contention the operator should see, not something to spin on against a lane that publishes on every tab activation. Every existing guard re-runs against the new receipt — focus-matches-routed-document before republication, `tmux_layout_command_applied`, and routed-document-in-columns after — so the retry can only succeed on a layout that satisfies the same preconditions as a first-pass success. Only a supersede qualifies; `operator_owned_layout`, `projection_effect_not_started`, `projection_retry_pending` and `desired_layout_state_absent` are verdicts about the layout itself and still fail closed.
+
+Two tests, both mutation-checked: the predicate rejects every non-supersede reason, and a structural guard asserts the recovery stays a single guarded retry and never becomes a loop.
+
+### Re: #fixrunlazily — two hypotheses measured and disproved, not fixed — opus-5
+
+I am not going to claim this one. Here is what the evidence actually says, so the next cycle does not re-walk it.
+
+The failure is the **accept leg**, not the work leg. The message prefix is `command-plane editor_route request failed`, and 60000ms is `SOCKET_REQUEST_TIMEOUT_MS`, used by `sendAcceptedCommandSubmitToSocket`. `awaitCommandSubmitTerminal` uses `waitForReadySeconds * 1000 + grace` instead. So the controller failed to **acknowledge** a command submit for 60 seconds — and that acknowledgement is supposed to be a few hundred microseconds of enqueue work.
+
+Two hypotheses, both killed by measurement rather than reasoning:
+
+- **Serialized accepts.** Disproved by reading the loop: `listener.accept()` spawns a thread per client.
+- **A slow pre-serve window.** The socket is bound at `ListenerOptions::create_sync()` and the accept loop starts ~50 lines later, so anything synchronous in between leaves clients connected and hanging — exactly this shape, and exactly the `ss -lxp` backlog signature. The candidate was `restore_reliable_sync_liveness`, whose durable fold reads `reliable_sync_liveness_journal`. That table holds **59,671 rows / 6.5 MB** on this project, which looked decisive. Measured: **0.08s** total for load plus decode of all 60,582 ops. Not it. (The recovery effects after that fold are already spawned asynchronously, with a comment naming this exact failure mode — someone has been here before.)
+
+What the ops log does show at the failure window: `ffi_ensure_controller_running_failed ... Connection refused (os error 111)` seven times at 14:00:58–59, a controller adopted at 14:01:44, and a *separate* client still timing out at 14:02:23 (`timed out after 5.0s waiting for project controller response`). So the controller was unresponsive for at least 40s after adoption. The next lead is what holds a lock across `handle_request_locked`'s `runtime.bootstrap_snapshot()` during a controller's first seconds — not the journal fold. The item now carries all of this.
+
+### Re: tmux pane auto-sync is wedged — filed with the signature, not fixed — opus-5
+
+> **Queue prompt:**
+>
+> do [#donequeuestrike]
+>
+> do [#mutplanwitness]
+
+
+Related to the layout fix above but not the same defect, and I do not have a verified cause. The signature worth keeping is this line, because it is self-contradictory:
+
+```
+pane_layout_projection generation=17 attempt=1 phase=retry_pending observation=synced effect=applied
+  focus=focus_superseded_by_newer_layout_state
+  expected=[tsift.md, infra.md] actual=[tsift.md, infra.md]
+  expected_panes=[%10, %14] panes=[%10, %14]
+  expected_focus_pane=Some("%10") active_pane=Some("%10")
+```
+
+Every observed value matches every expected value — documents, panes, focus pane — and the projection still sits in `retry_pending` because the *focus receipt* was superseded. Today's counts say the same thing: 39 `pane_layout_projection_cancelled` against 31 `pane_layout_projection`, so more layout generations are being cancelled than projected. `pane_layout_effect_worker` responds to a focus supersede with `attempt = 0; continue`, which re-reads the newest generation at the loop top and is therefore not the infinite loop it looks like — I checked that before filing, so nobody re-checks it. The open question is why a projection whose observation is byte-identical to its desired state cannot reach `Converged`. Filed as `#tmuxautosyncwedge` with the live pane state it needs.
+
+**Verification.** `make check` → **9314 passed, 0 failed**. One run before that reported a single failure — `stop_codex_continuation_suppresses_clear_when_token_count_crosses_threshold`, `file is not a database: Error code 26` on a freshly created temp `state.db` under 174 parallel test binaries. It passes in isolation and in its own package's full suite (50/50), and did not recur; I am recording it rather than calling it clean. `make install` plus `cargo build --release` so the repo-root-relative `.bin/agent-doc` symlink target is not stale — both binaries and `libagent_doc.so` carry the fix. Committed `5577cfeeb`, pushed. CI run `34612322320` is queued, not yet started; local evidence is what this closeout rests on.
 <!-- agent:boundary:d53e8ec0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -200,20 +304,16 @@ I commented the full status on GH #52 and left it **open**: part 1 is done, but 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#fixhttpsgithub]~~
-- ~~do [#deferredmutdrop]~~
-- 🚧 do [#donequeuestrike]
-- do [#mutplanwitness]
-- ~~do [#pypicadence]~~
-- do [#fixrunlazily]
+- ~~do [#donequeuestrike]~~
+- 📌 do [#fixrunlazily]
+- ~~do [#mutplanwitness]~~
 - do [#cargotokenrevoke]
 <!-- /agent:queue -->
 
 
-<!-- agent:backlog -->
-- [ ] [#fixrunlazily] Fix Run Agent Doc on lazily.md: `command-plane editor_route request failed via /home/brian/work/btakita/agent-loop/.agent-doc/controller.sock: Project Controller did not respond within 60000ms (socket=/home/brian/work/btakita/agent-loop/.agent-doc/controller.sock); the controller may be wedged`
-- [ ] 🚧 [#donequeuestrike] A --done reap archives the backlog item but leaves its agent:queue head UNSTRUCK, so a completed item stays a live queue prompt. Observed live 2026-09-10 on cycle-1789082328760: `agent-doc respond --done fixhttpsgithub --done deferredmutdrop --done pypicadence` printed '[pending] completed and reaped 3 item(s) atomically' and all three backlog items were archived into agent-doc-bugs.done.md — but `git diff acca219ab5 eb4fe58186 -- tasks/agent-doc/agent-doc-bugs.md` shows NOT ONE queue line changed; the heads still read '- do [#fixhttpsgithub]', '- do [#deferredmutdrop]', '- do [#pypicadence]'. The lead is the warning the same respond printed FIRST: '[queue] snapshot recovery warning during queue consume done-id snapshot sync: snapshot is missing'. The done-id snapshot sync is how an id-backed head gets struck (`agent-doc queue consume` is explicitly scoped to free-text heads and refuses id-backed ones), so when the snapshot is missing the strike is skipped and NOTHING fails closed: session-check still reports ok/committed and counts queue_deferred_heads=1, meaning the binary's liveness model already treats the three as consumed while the operator-visible text still serves them. That split is the bug — the visible queue is what the next preflight and the go-mode drain read, so a completed item can be re-served. This cycle also ran through the stranded-write path (respond -> await_editor_replica_no_disk_write -> session-check INTERRUPTED 'document still contains completed tracked item(s)' -> repair -> 'the visible edits are STRANDED' -> `agent-doc commit`), so first determine whether the missing snapshot is a consequence of that path or independent. Fix: make the done-id queue strike part of the same atomic tracked-work transaction as the backlog reap (it is already described as atomic), and fail the reap closed rather than silently skipping the strike when the snapshot is unavailable. Regression shape: drive a --done for an id-backed queue head with the document snapshot removed, and assert the queue head is struck or the reap refuses.
-- [ ] [#mutplanwitness] The captured-closeout mutation-plan replay (#deferredmutdrop, 0.35.363) is gated on recorded_tracked_work_is_unlanded, which only inspects --done ids and explicit add ids. A captured plan carrying ONLY gates, ungates, edits, reorders, review-edits or a --status change therefore still resumes with the response and drops its tracked-work half, because the witness reports 'landed' for a document that never received the mutation. Extend the witness in agent-doc-turn/src/write_ownership.rs so gate/edit/status intents are recorded and checkable too (cycle state already records pending_kept_open_ids), or record an explicit per-cycle 'mutations applied' marker in cycle state and use that as the witness instead of inferring landedness from document text. Both call sites (agent-doc-commit-io unlanded_own_tracked_work and agent-doc-session-check-io) must keep sharing the one predicate. Regression shape: drive a respond whose only mutation is --backlog-gate while no editor replica is registered, then resume; the gate must not be dropped.
+<!-- agent:backlog priority -->
+- [ ] [#tmuxautosyncwedge] tmux pane auto-sync is wedged: a pane-layout generation whose observation is byte-identical to its desired state never reaches Converged. Signature (2026-09-11 13:13:54): `pane_layout_projection generation=17 attempt=1 phase=retry_pending observation=synced effect=applied focus=focus_superseded_by_newer_layout_state expected=[tsift.md, infra.md] actual=[tsift.md, infra.md] expected_panes=[%10, %14] panes=[%10, %14] expected_focus_pane=Some("%10") active_pane=Some("%10")` — documents, panes and focus pane ALL match, and the projection still sits in retry_pending because the focus receipt was superseded. Today: 39 pane_layout_projection_cancelled vs 31 pane_layout_projection, so more generations are cancelled than projected. Already checked, do not re-check: pane_layout_effect_worker responds to a focus supersede with `attempt = 0; continue`, and the loop top re-reads `state.lock().pending_revision()` plus `runtime.pane_layout_desired()`, so it is NOT an infinite loop on a stale generation. Open question: why apply_pane_layout_focus_effect keeps returning focus_superseded_by_newer_layout_state (agent-doc-controller-io/src/project_controller/rpc.rs:19386, `state.is_superseded(generation)`) while the observed layout already matches, and why that blocks Converged when focus_required_for_pane_layout_generation could treat an already-active focus pane as satisfied. Needs the live pane state to verify; related to but distinct from the editor-route supersede fix in 5577cfeeb.
+- [ ] [#fixrunlazily] Run Agent Doc on lazily.md fails with `command-plane editor_route request failed via .agent-doc/controller.sock: Project Controller did not respond within 60000ms; the controller may be wedged`. NARROWED 2026-09-11, two hypotheses measured and DISPROVED — do not re-walk them. (1) The failure is the ACCEPT leg, not the work leg: the prefix `command-plane editor_route request failed` plus 60000ms is SOCKET_REQUEST_TIMEOUT_MS in sendAcceptedCommandSubmitToSocket; awaitCommandSubmitTerminal uses waitForReadySeconds*1000+grace instead. So the controller failed to ACKNOWLEDGE a command submit for 60s, and handle_editor_command_submit_async_rpc only enqueues. (2) NOT serialized accepts: rpc.rs:11185 listener.accept() spawns a thread per client. (3) NOT a slow pre-serve window: the socket binds at ListenerOptions::create_sync() (rpc.rs:11134) and the accept loop starts at 11184, so synchronous work between them leaves clients connected and hanging — the ss -lxp backlog signature — but the candidate, restore_reliable_sync_liveness, measures 0.08s for all 59,671 reliable_sync_liveness_journal rows / 6.5MB / 60,582 ops on this project, and its recovery effects are already spawned async. Live evidence at the failure window: ffi_ensure_controller_running_failed Connection refused (os error 111) x7 at 14:00:58-59, controller adopted 14:01:44, and a separate client still timing out at 14:02:23 (timed out after 5.0s waiting for project controller response) — unresponsive at least 40s after adoption. NEXT LEAD: what holds a lock across handle_request_locked (rpc.rs:12526) at runtime.bootstrap_snapshot() (12560) during a controller first seconds. Repro lever: kill the controller, then click Run Agent Doc while a replacement is launching.
 - [ ] [#cargotokenrevoke] [operator-verify] Revoke and re-issue the crates.io API token exposed in diagnostic tool output during the pane-removal investigation, then store the replacement via passage. BLOCKED ON ONE CLICK: https://crates.io/settings/tokens is open in bridged Chromium tab 13 and returns 'This page requires authentication' — that profile has no crates.io session and no chromium-bridge state snapshot exists. crates.io token management is session-cookie-gated, so the exposed token cannot revoke itself via API. Unblocks: click 'Log in with GitHub' in tab 13 (OAuth returns to /settings/tokens), then re-queue this item and the agent enumerates and revokes in-session. Blast radius nil: agent-doc has no cargo publish step and no CARGO_REGISTRY_TOKEN in any of its five workflows (book, ci, mdbook, pypi, release).
 <!-- /agent:backlog -->
 

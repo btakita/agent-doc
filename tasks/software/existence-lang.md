@@ -6,7 +6,7 @@ agent: claude
 claude_model: fable
 agent_doc_format: template
 agent_doc_write: crdt
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -286,22 +286,33 @@ The release commit bumps `Cargo.toml`/`Cargo.lock` and flips the README command-
 **One self-inflicted red run, fixed.** I published to crates.io by hand from a clean worktree of the tag (the working tree holds another session's edits, which `cargo publish` refuses and `--allow-dirty` would have packaged). The Release workflow turned out to have its own crates.io publish job, which then failed with "crate existence@0.6.0 already exists". The release and assets were unaffected. I made that job idempotent in [`f96b7e4`](https://github.com/existence-lang/existence/commit/f96b7e4): it now skips when the version is already on crates.io. Recorded in memory so the next release just waits for the workflow.
 
 **Downstream pins.** The ontology's three workflows (`pages.yml`, `ci.yml`, `audit.yml`) now install `existence` by the `v0.6.0` tag instead of a commit, in [`df99bfa`](https://github.com/existence-lang/ontology/commit/df99bfa). Exchange is at twelve responses; queue active, no compaction.
+
+### Re: do #fixmanifestdrift — fable
+
+> **Queue prompt:**
+>
+> do [#fixmanifestdrift]
+
+Done. [`7288515`](https://github.com/existence-lang/ontology/commit/7288515) clears every structure error the audit had been reporting, and the ontology's CI job went green for the first time since it was added: run [34642083850](https://github.com/existence-lang/ontology/actions/runs/34642083850). `existence audit --structure` exits 0, `toc --check` reports 119 terms and no problems, lint has no errors.
+
+**Resolutions, one per drift:**
+
+- **`qualitative`, `quantitative`** were declared in ring 1 with no node; the ontology's own README and CLAUDE.md carried them as pending. I authored both: quality as a distinction of kind, quantity as a distinction of measure, each linking the other, with software-bridge Pattern Expressions (an enum versus a latency, a bounded-context vocabulary versus a metric) to fit ring 1. Their Cultural Definition passages are quoted from today's Wiktionary and Wikipedia, fetched during this cycle, so the source audit will find them `present` rather than adding to the `#xlrequote` pile. Wiktionary's "Of a measurements and data types" is quoted with its grammar as it stands.
+- **`contextual-systems`** had empty Ontology and Axiology sections and no examples under a title of "Contextualism". It now defines a contextual system (entities take meaning, truth, and behaviour from their containing context) with contextualism as the doctrine that every system is one, an Axiology on scoped definitions and cross-context translation, and examples from bounded contexts, language, protocols, and ethics.
+- **`noumena`, `phenomena`, `pneuma`** joined ring 2, which now describes itself as 88 terms; the manifest says 119 in total.
+- **`universal-set.md`** linked `./exists`; the node is `exist`.
+
+**Glossary on the site.** `terms.md` stays the committed, byte-identical `existence toc` mirror; the Pages build gives its copy front matter so Jekyll renders it, and the result is live at [existence-lang.github.io/ontology/terms.html](https://existence-lang.github.io/ontology/terms.html) with every term link resolving to its page (the new [quantitative](https://existence-lang.github.io/ontology/quantitative.html) page answers 200). The README links the index and its ring tables lost the "pending" rows and gained the three ringed terms.
+
+**Not touched.** The ontology's `CLAUDE.md` still shows the two ring 1 rows as pending, but that file and `AGENTS.md` hold another session's uncommitted edits, so I left them alone; the `PR #2` safe-fixes branch will be rebuilt from this `main` on the next weekly run.
+
+That empties the queue: ten items drained this session. Exchange is at thirteen responses; with the queue now inactive, compaction is an operator choice.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- ~~do [#reconcileotherlay]~~
-- ~~do [#xlaudit1]~~
-- ~~do [#xlaudit2]~~
-- ~~do [#xlaudit3]~~
-- ~~do [#xlaudit4]~~
-- ~~do [#xlaudit5]~~
-- ~~do [#xlaudit6]~~
-- ~~do [#xlaudit7]~~
-- ~~do [#cutexistenceusers]~~
-- do [#fixmanifestdrift]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -310,7 +321,6 @@ The release commit bumps `Cargo.toml`/`Cargo.lock` and flips the README command-
 - [ ] [#semantickey] The `btak/ANTHROPIC_API_KEY` entry in passage is rejected by api.anthropic.com (HTTP 401 "API key is invalid"), so `existence audit --semantic` could only be proven against the local stand-in server. Rotate the key (a new one from the Console into the same passage path), then run `ANTHROPIC_API_KEY="$(passage show btak/ANTHROPIC_API_KEY)" existence --ontology src/existence-lang/ontology audit --semantic --limit 5` once to confirm the live Messages API shape, and decide whether the weekly workflow should carry an `ANTHROPIC_API_KEY` secret and add `--semantic` (about 117 Opus 5 calls on the first run, then only changed neighbourhoods)
 - [ ] [#auditprtoken] Let the weekly Ontology audit workflow open its own `audit: safe fixes` pull request: the `existence-lang` organization forbids GitHub Actions from creating PRs, and lifting it needs an `admin:org` scope this session does not have (`gh auth refresh -h github.com -s admin:org`, then `gh api -X PUT orgs/existence-lang/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true` and the same PUT on `repos/existence-lang/ontology`), or add an `AUDIT_TOKEN` repo secret (classic PAT, `repo` scope) which `.github/workflows/audit.yml` already prefers. Until then the job pushes the branch and links the compare page in the issue; PR #2 was opened by hand and the job keeps it current
 - [ ] [#xlrequote] Decide what to do with the source drift the first real `existence audit --sources` run found in `src/existence-lang/ontology`: 206 quoted passages are no longer on their pages (87 wiktionary, 108 wikipedia, 6 etymonline; the nodes quote 2014-15 wording that has since been rewritten) and 19 have changed but still match. Per source, either refresh the blockquote from the live page or pin the historical Wayback snapshot next to the anchor so the quote stays verifiable. Also 6 dead links: `--fix` can swap cosmicscale.appspot.com (fractal, physical-system, scope), the NYT attention-schema piece, and wikipedia `Physical_information` (entity, information) for snapshots; stevenpoole.net, the AAAI SARA13 PDF, and the colorado.edu PDF have none and need a replacement source. Content decisions, not code; `audit --sources` reports them again each weekly run once Phase 6 commits the lock
-- [ ] [#fixmanifestdrift] Fix the manifest drift `existence audit --structure` reports in `src/existence-lang/ontology` (it is what the new CI job fails on): `qualitative` + `quantitative` are declared in ring 1 with no node file (create them or drop them from the ring), `contextual-systems` has an empty Ontology section (needs a lay definition), `noumena` / `phenomena` / `pneuma` are in no ring (ring 2 fits), and `universal-set.md` links `./exists`, which has no node (`exist` does). The 11 fixable suffix-less links were already rewritten by `#xlaudit2`. Then publish `terms.md` from the Pages workflow (`existence toc -o terms.md`) so the site has a glossary page
 <!-- /agent:backlog -->
 
 ## Icebox
@@ -342,4 +352,5 @@ The release commit bumps `Cargo.toml`/`Cargo.lock` and flips the README command-
 - 2026-09-11 [#xlaudit6] Phase 6 of `tasks/software/plan-ontology-audit.md`: weekly `schedule` workflow in `src/existence-lang/ontology` running `existence audit --all --format json`, upserting one `Ontology audit` issue (edit by title, diff vs last report) and one idempotent `audit: safe fixes` PR carrying only safe resolutions + refreshed lock + regenerated mirrors. Done after one real scheduled run
 - 2026-09-11 [#xlaudit7] Phase 7 of `tasks/software/plan-ontology-audit.md`: `existence audit --semantic --provider anthropic|openai` LLM contradiction pass over each node's lay definition and its linked neighbours, report only, verdicts cached by content hash so a rerun with no changes makes zero model calls. Never on the PR path
 - 2026-09-11 [#cutexistenceusers] [recommended] Cut existence 0.6.0 (`make release` in `src/existence-lang/existence`) so `install.sh` / `cargo install existence` users get `toc`; `existence --version` on `cargo install --path .` still reads 0.5.0. Bump `Cargo.toml` first, then flip the README "Commands (v0.3.0)" heading, which is already stale
+- 2026-09-11 [#fixmanifestdrift] Fix the manifest drift `existence audit --structure` reports in `src/existence-lang/ontology` (it is what the new CI job fails on): `qualitative` + `quantitative` are declared in ring 1 with no node file (create them or drop them from the ring), `contextual-systems` has an empty Ontology section (needs a lay definition), `noumena` / `phenomena` / `pneuma` are in no ring (ring 2 fits), and `universal-set.md` links `./exists`, which has no node (`exist` does). The 11 fixable suffix-less links were already rewritten by `#xlaudit2`. Then publish `terms.md` from the Pages workflow (`existence toc -o terms.md`) so the site has a glossary page
 <!-- /agent:done -->

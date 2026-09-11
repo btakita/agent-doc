@@ -190,6 +190,26 @@ Done. `existence audit --contradictions` shipped in [`2eaa91d`](https://github.c
 - **Unlinked mentions.** A known term named in a lay definition that never links it. The first cut flagged 61 nodes; it also flagged `abstraction` for `entity`, which its first sentence links and a later sentence repeats in prose. That is ordinary writing, so the rule became "never linked anywhere in this definition", which leaves 36 nodes, with `entity` (23 before the refinement) and `system` the usual unlinked words. Slugs under four letters are skipped as too ambiguous.
 
 Selecting `--contradictions` alone gives 0 errors and 39 warnings on the ontology; the full audit is now 7 errors (the `#fixmanifestdrift` set) and 56 warnings, and the PR CI job still runs `--structure` only, so this class adds nothing to the PR path. Tests: a fixture with a planted lay-definition 2-cycle, a broader 3-cycle closed through a `narrower` inverse, and an unlinked mention; and the cycle enumerator's uniqueness and rotation on a hand-built graph. The `existence` worktree's other-session `AGENTS.md`/`CLAUDE.md` edits stayed out of the commit. Exchange is at six responses; the queue is active so no compaction.
+
+### Re: do #xlaudit4 — fable
+
+> **Queue prompt:**
+>
+> do [#xlaudit4]
+
+Done. `existence audit --sources` shipped in [`21da1f8`](https://github.com/existence-lang/existence/commit/21da1f8) on `main`, CI run [34637556868](https://github.com/existence-lang/existence/actions/runs/34637556868) green. Local `make check` is green with 87 tests, and the binary is installed. It never runs unless asked for (`--sources`, or `--all` which Phase 6's weekly job will use).
+
+```
+existence audit --sources [--lock PATH] [--rate-ms 1000] [--wayback URL] [--fix]
+```
+
+**What a pass does.** For each URL in the lock (derived fresh from the nodes, merged with the existing file), one request per second with a `User-Agent`: record the status, a SHA-256 of the page's text (scripts, styles, tags stripped, entities decoded), and per citing term whether each quoted passage is still there. `present` is an exact match after lowercasing and dropping punctuation; `moved` is a window of the page within one word of the quote's length matching at ≥ 0.9 normalised Levenshtein; otherwise `missing`. Dead link (≥ 400) and missing quote are errors, moved is a warning, a changed page whose quotes survive is only recorded. A host that does not answer is skipped after one attempt with one warning per host, its URLs keeping their previous lock values. Dead links get a snapshot pinned through the Wayback availability API, and `--fix` rewrites the citing node's `href` to that copy. New deps: `ureq`, `sha2`, `strsim`, and `tiny_http` as a dev-dependency.
+
+**Tests** run against a local HTTP server: a live page, a near-miss page, a 404, a fake availability endpoint, and a host with nothing listening. They assert the lock's status/quote/hash/archive fields, one skip warning per unreachable host rather than per URL, the wayback endpoint asked exactly once (for the dead link), the rate limit honoured across five requests, and `--fix` swapping only the dead `href`. Plus HTML-to-text and quote matching, and the RFC 3339 formatter.
+
+**The first real run, on a scratch copy of the ontology** (282 URLs, 2 requests per second, about four minutes): 272 answered 200, 6 are dead, 4 hosts were unreachable (`juneroca.com`, `ncatlab.org:8080`, `theunboundedspirit.com`, `www.cs.nott.ac.uk`). Of the 256 quote checks, **206 are missing, 19 moved, 31 present**. I did not believe that number, so I checked two by hand: Wiktionary's `entity` now reads "organizations" for the node's "organisations" (the quote scores 0.99 and lands as `moved`) but its second sense, "An existent something that has the properties of being real…", is gone; `scope`'s "The breadth, depth or reach of a subject; a domain." is gone too. The nodes quote Wiktionary and Wikipedia as they read in 2014–15, and those pages have been rewritten since. So the matcher is right and the source record is stale for about four fifths of the quotes. That is a content decision per source (refresh the quote, or pin the historical snapshot beside the anchor), now `#xlrequote` at the top of the backlog together with the six dead links, three of which have no Wayback snapshot. Nothing was written into the real ontology; the lock lives in the scratch copy until Phase 6 commits it from the weekly job.
+
+The `existence` worktree's other-session `AGENTS.md`/`CLAUDE.md` edits stayed out of the commit. Exchange is at eight responses; queue active, no compaction.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
@@ -200,7 +220,7 @@ Selecting `--contradictions` alone gives 0 errors and 39 warnings on the ontolog
 - ~~do [#xlaudit1]~~
 - ~~do [#xlaudit2]~~
 - ~~do [#xlaudit3]~~
-- do [#xlaudit4]
+- ~~do [#xlaudit4]~~
 - do [#xlaudit5]
 - do [#xlaudit6]
 - do [#xlaudit7]
@@ -211,7 +231,7 @@ Selecting `--contradictions` alone gives 0 errors and 39 warnings on the ontolog
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#xlaudit4] Phase 4 of `tasks/software/plan-ontology-audit.md`: `existence audit --sources` re-fetches each lock URL (1 req/s, User-Agent, skip-not-fail on unreachable host), compares reachability / quote presence (fuzzy ≥0.9) / page hash, pins a Wayback snapshot; `--fix` swaps a dead link to the snapshot. Test against a local http fixture
+- [ ] [#xlrequote] Decide what to do with the source drift the first real `existence audit --sources` run found in `src/existence-lang/ontology`: 206 quoted passages are no longer on their pages (87 wiktionary, 108 wikipedia, 6 etymonline; the nodes quote 2014-15 wording that has since been rewritten) and 19 have changed but still match. Per source, either refresh the blockquote from the live page or pin the historical Wayback snapshot next to the anchor so the quote stays verifiable. Also 6 dead links: `--fix` can swap cosmicscale.appspot.com (fractal, physical-system, scope), the NYT attention-schema piece, and wikipedia `Physical_information` (entity, information) for snapshots; stevenpoole.net, the AAAI SARA13 PDF, and the colorado.edu PDF have none and need a replacement source. Content decisions, not code; `audit --sources` reports them again each weekly run once Phase 6 commits the lock
 - [ ] [#xlaudit5] Phase 5 of `tasks/software/plan-ontology-audit.md`: `[[mirrors]]` in existence.toml (`kind = nodes|toc`) + `existence audit --mirrors`; `--fix` regenerates toc mirrors (`terms.md`); register the `~/.claude/CLAUDE.md` philosophy table and the sibling `philosophy/` repo so the genus-port drift is reported per term. The nodes comparator must strip link titles (`"broader"`) before diffing: 5 of the 11 terms `#reconcileotherlay` was handed differed only by that, and it should compare the first Ontology paragraph, not the whole section, so a missing Axiology section is not reported as lay-definition drift
 - [ ] [#xlaudit6] Phase 6 of `tasks/software/plan-ontology-audit.md`: weekly `schedule` workflow in `src/existence-lang/ontology` running `existence audit --all --format json`, upserting one `Ontology audit` issue (edit by title, diff vs last report) and one idempotent `audit: safe fixes` PR carrying only safe resolutions + refreshed lock + regenerated mirrors. Done after one real scheduled run
 - [ ] [#xlaudit7] Phase 7 of `tasks/software/plan-ontology-audit.md`: `existence audit --semantic --provider anthropic|openai` LLM contradiction pass over each node's lay definition and its linked neighbours, report only, verdicts cached by content hash so a rerun with no changes makes zero model calls. Never on the PR path
@@ -243,4 +263,5 @@ Selecting `--contradictions` alone gives 0 errors and 39 warnings on the ontolog
 - 2026-09-11 [#xlaudit1] Phase 1 of `tasks/software/plan-ontology-audit.md`: `existence sources [term] --json` derives (url, citing term, quoted passages) from the anchor+blockquote markdown SPEC rules 7/8 already mandate, plus the `audit/sources.lock.json` schema and writer (no network yet). Done when a fixture node round-trips and the real ontology lists all 313 anchors
 - 2026-09-11 [#xlaudit2] Phase 2 of `tasks/software/plan-ontology-audit.md`: `existence audit --structure` wraps lint + `toc --check` + links missing the `.md` suffix (`evolution.md` → `./environment`) + near-duplicate slugs (`signal`/`signals`, `human`/`humans`); JSON report with exit codes 0/1/2; `--fix` appends `.md` only. Then a CI job on ontology PRs
 - 2026-09-11 [#xlaudit3] Phase 3 of `tasks/software/plan-ontology-audit.md`: `existence audit --contradictions`: typed-link cycles in the broader graph after inverses, 2-cycles in lay-definition links (the `entity`/`information` shape the canonical-chain work fixed by hand), unlinked mentions of known terms in lay definitions. Report only, both sentences side by side
+- 2026-09-11 [#xlaudit4] Phase 4 of `tasks/software/plan-ontology-audit.md`: `existence audit --sources` re-fetches each lock URL (1 req/s, User-Agent, skip-not-fail on unreachable host), compares reachability / quote presence (fuzzy ≥0.9) / page hash, pins a Wayback snapshot; `--fix` swaps a dead link to the snapshot. Test against a local http fixture
 <!-- /agent:done -->

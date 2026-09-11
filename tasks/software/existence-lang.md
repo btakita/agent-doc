@@ -154,6 +154,26 @@ existence sources --lock [PATH]            # write audit/sources.lock.json
 **Tests** (7, in `src/commands/sources.rs`): both shapes plus block termination and wrapped labels on one fixture node; an orphan blockquote before any anchor is ignored; `build` ordering, term filter, and unknown-term error; aggregation by URL with the exact pretty-printed lock JSON round-tripping through `write_lock`/`read_lock`; merge with an existing lock preserving fetch fields and dropping stale entries; the `--lock`/term conflict and the relative-path default; the exact text and JSON output shapes.
 
 One content fix fell out of running it: `create.md` had the only anchor of the 313 with no label text (`<a href=…></a>`). Labelled it "Create (Wikipedia)" in `existence-lang/ontology@116fc11`. The `existence` worktree still holds another session's `AGENTS.md`/`CLAUDE.md` edits; I committed only the four files of this feature.
+
+### Re: do #xlaudit2 — fable
+
+> **Queue prompt:**
+>
+> do [#xlaudit2]
+
+Done. `existence audit --structure` shipped in [`9414a8a`](https://github.com/existence-lang/existence/commit/9414a8a) (CI run [34636238853](https://github.com/existence-lang/existence/actions/runs/34636238853) in progress at closeout; the Phase 1 run before it is green). The ontology got its first PR/push CI job in [`2c32e36`](https://github.com/existence-lang/ontology/commit/2c32e36), together with the safe fixes the audit found. Local `make check` is green (81 tests, five new), and the local binary is installed.
+
+```
+existence audit [--structure] [--format text|json] [--fix] [-o FILE]
+```
+
+**What it wraps and what it adds.** Lint now exposes its findings as data (`lint::collect`), so the audit folds lint errors and warnings, the `toc --check` manifest problems, and two new checks into one report: node links that miss the `.md` suffix, which lint's link regex never counted and the toc rebaser never rewrote; and near-duplicate slugs, paired when two slugs share a candidate stem after one suffix strip, with the Jaccard similarity of their lay definitions attached so each pair reads as merge or keep. Every finding carries `class`, `check`, `severity`, `term`, `message`, `fix`, `fixed`. Exit 0 clean, 1 on any error-severity finding, 2 when the audit cannot run; warnings never fail it, which is what keeps the 11 known lint subsection warnings from turning CI permanently red.
+
+**On the real ontology** it reported 18 errors and 17 warnings. The errors were the 6 manifest drifts from `#fixmanifestdrift` plus **12** suffix-less links, not the one the plan named: `./environment` in seven nodes, and `./being`, `./scope`, `./abstraction`, `./consciousness`, `./exists`. Eleven had an existing target and `--fix` rewrote them (the diff is `.md` insertions only, anchors and titles preserved); `universal-set.md` links `./exists`, which has no node, so it stays reported. The warnings are the lint vocabulary notes plus six near-duplicate pairs: the plan's four (`signal`/`signals` 1.00, `human`/`humans` 1.00, `agree`/`agreement` 1.00, `redefine`/`redefinition` 0.00) and two more the stemmer surfaced, `abstract`/`abstraction` (0.03) and `exist`/`existence` (0.00). The three at 1.00 have byte-identical definitions and look like merge candidates; the 0.00 pairs are verb/noun splits that are probably deliberate.
+
+**CI.** `.github/workflows/ci.yml` in the ontology runs `audit --structure` on every pull request and push to `main`, pins `existence` by commit (cached like the Pages job; switch to a tag once `#cutexistenceusers` releases), prints the text view, and uploads the JSON report as an artifact. Run [34636271438](https://github.com/existence-lang/ontology/actions/runs/34636271438) will fail on the seven remaining errors until `#fixmanifestdrift` lands; that item's text is updated to what is actually left (the `evolution.md` link is done, the `./exists` link is added).
+
+**Tests** (5 new): every check on one fixture ontology; `--fix` rewriting only existing targets and the second-pass residue; suffix rewriting with anchors and titles; the stem pairing with five negatives (`art`/`arts`, `spirit`/`spirituality`, `belief`/`believe`); and the clean report's exact JSON and text plus the class-defaulting and format-error paths. Both worktrees still hold another session's `AGENTS.md`/`CLAUDE.md` edits, which I left out of both commits. Exchange is large (5 responses); the queue is active so I did not compact.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
@@ -162,7 +182,7 @@ One content fix fell out of running it: `create.md` had the only anchor of the 3
 <!-- agent:queue priority go -->
 - ~~do [#reconcileotherlay]~~
 - ~~do [#xlaudit1]~~
-- do [#xlaudit2]
+- ~~do [#xlaudit2]~~
 - do [#xlaudit3]
 - do [#xlaudit4]
 - do [#xlaudit5]
@@ -175,14 +195,13 @@ One content fix fell out of running it: `create.md` had the only anchor of the 3
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#xlaudit2] Phase 2 of `tasks/software/plan-ontology-audit.md`: `existence audit --structure` wraps lint + `toc --check` + links missing the `.md` suffix (`evolution.md` → `./environment`) + near-duplicate slugs (`signal`/`signals`, `human`/`humans`); JSON report with exit codes 0/1/2; `--fix` appends `.md` only. Then a CI job on ontology PRs
 - [ ] [#xlaudit3] Phase 3 of `tasks/software/plan-ontology-audit.md`: `existence audit --contradictions`: typed-link cycles in the broader graph after inverses, 2-cycles in lay-definition links (the `entity`/`information` shape the canonical-chain work fixed by hand), unlinked mentions of known terms in lay definitions. Report only, both sentences side by side
 - [ ] [#xlaudit4] Phase 4 of `tasks/software/plan-ontology-audit.md`: `existence audit --sources` re-fetches each lock URL (1 req/s, User-Agent, skip-not-fail on unreachable host), compares reachability / quote presence (fuzzy ≥0.9) / page hash, pins a Wayback snapshot; `--fix` swaps a dead link to the snapshot. Test against a local http fixture
 - [ ] [#xlaudit5] Phase 5 of `tasks/software/plan-ontology-audit.md`: `[[mirrors]]` in existence.toml (`kind = nodes|toc`) + `existence audit --mirrors`; `--fix` regenerates toc mirrors (`terms.md`); register the `~/.claude/CLAUDE.md` philosophy table and the sibling `philosophy/` repo so the genus-port drift is reported per term. The nodes comparator must strip link titles (`"broader"`) before diffing: 5 of the 11 terms `#reconcileotherlay` was handed differed only by that, and it should compare the first Ontology paragraph, not the whole section, so a missing Axiology section is not reported as lay-definition drift
 - [ ] [#xlaudit6] Phase 6 of `tasks/software/plan-ontology-audit.md`: weekly `schedule` workflow in `src/existence-lang/ontology` running `existence audit --all --format json`, upserting one `Ontology audit` issue (edit by title, diff vs last report) and one idempotent `audit: safe fixes` PR carrying only safe resolutions + refreshed lock + regenerated mirrors. Done after one real scheduled run
 - [ ] [#xlaudit7] Phase 7 of `tasks/software/plan-ontology-audit.md`: `existence audit --semantic --provider anthropic|openai` LLM contradiction pass over each node's lay definition and its linked neighbours, report only, verdicts cached by content hash so a rerun with no changes makes zero model calls. Never on the PR path
 - [ ] [#cutexistenceusers] [recommended] Cut existence 0.6.0 (`make release` in `src/existence-lang/existence`) so `install.sh` / `cargo install existence` users get `toc`; `existence --version` on `cargo install --path .` still reads 0.5.0. Bump `Cargo.toml` first, then flip the README "Commands (v0.3.0)" heading, which is already stale
-- [ ] [#fixmanifestdrift] Fix the manifest drift `existence toc --check` found in `src/existence-lang/ontology`: `qualitative` + `quantitative` are declared in ring 1 with no node file (create them or drop them from the ring), `contextual-systems` has an empty Ontology section (needs a lay definition), `noumena` / `phenomena` / `pneuma` are in no ring (ring 2 fits), and `evolution.md` links `./environment` without `.md` so neither lint nor the rebaser sees it. Then add `existence toc --check` next to `lint` in the ontology CI and publish `terms.md` from the Pages workflow (`existence toc -o terms.md`) so the site has a glossary page
+- [ ] [#fixmanifestdrift] Fix the manifest drift `existence audit --structure` reports in `src/existence-lang/ontology` (it is what the new CI job fails on): `qualitative` + `quantitative` are declared in ring 1 with no node file (create them or drop them from the ring), `contextual-systems` has an empty Ontology section (needs a lay definition), `noumena` / `phenomena` / `pneuma` are in no ring (ring 2 fits), and `universal-set.md` links `./exists`, which has no node (`exist` does). The 11 fixable suffix-less links were already rewritten by `#xlaudit2`. Then publish `terms.md` from the Pages workflow (`existence toc -o terms.md`) so the site has a glossary page
 <!-- /agent:backlog -->
 
 ## Icebox
@@ -207,4 +226,5 @@ One content fix fell out of running it: `create.md` had the only anchor of the 3
 - 2026-09-11 [#xlgenusport] [recommended] Port the two genus decisions from `#xlchaingaps` to the sibling `philosophy/` repo (what `~/.claude/philosophy` resolves to; its `src/entity.md` still reads "Any information in Existence" and `src/abstraction.md` still says "a concept that models") and to the `<!-- philosophy:start -->` table in `~/.claude/CLAUDE.md` (Entity row). Content, two files plus one table row; decide whether `philosophy/` should track `existence-lang/ontology` instead of drifting
 - 2026-09-11 [#reconcileotherlay] Reconcile the other 11 lay definitions that differ between `philosophy/src` and `src/existence-lang/ontology/src` (abstraction, concept, context, domain, information, noumena, phenomena, pneuma, scope, state, tool) — decide direction per term (ontology is canonical for the 110 shared nodes; philosophy keeps its 49 extras), port the sentence, and keep the CLAUDE.md table row in `philosophy/install.sh` in step. Until Phase 5 of `tasks/software/plan-ontology-audit.md` declares philosophy as a `kind = nodes` mirror, this list is the drift record
 - 2026-09-11 [#xlaudit1] Phase 1 of `tasks/software/plan-ontology-audit.md`: `existence sources [term] --json` derives (url, citing term, quoted passages) from the anchor+blockquote markdown SPEC rules 7/8 already mandate, plus the `audit/sources.lock.json` schema and writer (no network yet). Done when a fixture node round-trips and the real ontology lists all 313 anchors
+- 2026-09-11 [#xlaudit2] Phase 2 of `tasks/software/plan-ontology-audit.md`: `existence audit --structure` wraps lint + `toc --check` + links missing the `.md` suffix (`evolution.md` → `./environment`) + near-duplicate slugs (`signal`/`signals`, `human`/`humans`); JSON report with exit codes 0/1/2; `--fix` appends `.md` only. Then a CI job on ontology PRs
 <!-- /agent:done -->

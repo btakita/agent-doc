@@ -2256,6 +2256,7 @@ pub fn relay_replica_update_for_file(
         canonical_projection_pending,
         corruption_restored,
         isolation_refused_lossy,
+        isolation_regions_restored,
     ) = with_hub_seeded_from_file(file, |hub| -> Result<_> {
             let registered = hub.is_registered(client_id);
             let decision = decide_cold_start_replica_update(
@@ -2269,7 +2270,7 @@ pub fn relay_replica_update_for_file(
             // component close marker) can be rejected and the canonical restored
             // before the corruption ever becomes authoritative.
             let before_text = hub.canonical_text();
-            let (packet, reattached, mut canonical_projection_pending) = match decision {
+            let (packet, reattached, canonical_projection_pending) = match decision {
                 ColdStartReplicaUpdateDecision::Relay => {
                     (Some(hub.relay_update(client_id, update)?), false, false)
                 }
@@ -2283,18 +2284,22 @@ pub fn relay_replica_update_for_file(
                 }
             };
             let mut corruption_restored = None;
-            if packet
+            // `#reconcilesyntheticbase`: a region-scoped restore rides the normal
+            // delta in `packet.update` and names `origin` among its targets, so the
+            // editor that produced the update converges from that delta like any
+            // peer. It deliberately does NOT force a whole-document canonical
+            // projection: overwriting that editor's buffer is the same wholesale
+            // reset — for one member instead of all of them — that the narrow
+            // repair exists to avoid.
+            let isolation_regions_restored = packet
                 .as_ref()
-                .is_some_and(|packet| packet.component_isolation_reconciled)
-            {
-                canonical_projection_pending = true;
-                corruption_restored = Some("cross_component_raw_union".to_string());
-            }
-            // `#queuelineclobber`: the reconcile refused to publish a result that
-            // would have dropped text this member just typed, so the raw union was
-            // published instead. Surface it: a refusal means the isolation merge
-            // and the member disagree about operator-authored bytes, and until
-            // that merge is fixed this is the only record that it happened.
+                .is_some_and(|packet| packet.component_isolation_reconciled);
+            // `#queuelineclobber`: the region-scoped repair refused to publish a
+            // result that would have dropped text this member just typed, so the
+            // raw union was published instead. Surface it: the member's characters
+            // landed outside the component it was editing and the only repair
+            // available would delete them, so this is the record that a real
+            // cross-component materialization happened (`#reconcilesyntheticbase`).
             let isolation_refused_lossy = packet
                 .as_ref()
                 .is_some_and(|packet| packet.component_isolation_refused_lossy);
@@ -2335,8 +2340,19 @@ pub fn relay_replica_update_for_file(
                 canonical_projection_pending,
                 corruption_restored,
                 isolation_refused_lossy,
+                isolation_regions_restored,
             ))
         })??;
+    if isolation_regions_restored {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_component_isolation_regions_restored file={} authority=multi_replica client_id={} reason=member_ops_materialized_outside_edited_component recovery=region_scoped_delta_fanout",
+                file.display(),
+                client_id,
+            ),
+        );
+    }
     if isolation_refused_lossy {
         agent_doc_ops_log_io::log_op(
             file,

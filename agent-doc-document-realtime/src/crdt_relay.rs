@@ -51,11 +51,9 @@ use parking_lot::{Condvar, Mutex};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use agent_doc_element::element::{self, Component};
 use agent_doc_merge::document_cell::{ThreadSafeDocumentCellTree, project_document};
-use agent_doc_merge::{
-    crdt::{CrdtDoc, merge_by_component},
-    crdt_sync::{ReplicaState, commit_barrier_ready, flush_to_commit_barrier},
-};
+use agent_doc_merge::crdt_sync::{ReplicaState, commit_barrier_ready, flush_to_commit_barrier};
 
 use crate::crdt_authority::CrdtAuthority;
 
@@ -155,17 +153,23 @@ pub struct BroadcastPacket {
     pub origin: u64,
     /// The incremental update (only the new op(s)) to apply on each target.
     pub update: Vec<u8>,
-    /// The currently-live OTHER replicas that should receive `update`.
+    /// The currently-live replicas that should receive `update` — the OTHER
+    /// members, plus `origin` itself when `component_isolation_reconciled` is set
+    /// (a repair has to reach the buffer that can see the damage).
     pub targets: Vec<u64>,
-    /// The raw character union disagreed with a component-scoped merge, so the
-    /// hub atomically rebuilt from the isolated result and queued every live
-    /// editor for replace-capable re-bootstrap instead of exposing this delta.
+    /// `#reconcilesyntheticbase`: the raw union materialized this member's ops in
+    /// a region the member never edited, and the hub restored ONLY those regions
+    /// to the content the canonical already held. `update` carries the restoring
+    /// ops like any other delta; no lineage is rotated and no replica is
+    /// rebootstrapped. Previously this reported a whole-document rebuild from a
+    /// merge taken over a synthetic base, which reset every replica.
     pub component_isolation_reconciled: bool,
-    /// `#queuelineclobber`: the component-scoped reconcile was REFUSED because its
-    /// result would have dropped text this member had just inserted. The raw union
-    /// was published instead. Callers log this — a refusal means the isolation
-    /// merge and the member disagree about operator-authored bytes, which is a
-    /// defect to investigate, not a steady state.
+    /// `#queuelineclobber`: the region-scoped repair was REFUSED because it would
+    /// have dropped text this member had just inserted, so the raw union was
+    /// published instead. Callers log this: the member's characters demonstrably
+    /// landed outside the component it was editing, and the only repair available
+    /// would delete them, which is a defect to investigate rather than a steady
+    /// state.
     pub component_isolation_refused_lossy: bool,
 }
 
@@ -609,10 +613,18 @@ impl DeliveryConvergenceSubscription {
 /// does not contain it, the reconcile is losing operator-authored bytes.
 ///
 /// Counts are multisets so a duplicated insertion is not masked by one surviving
-/// copy, and comparison is on trimmed non-blank lines so pure re-indentation or
-/// blank-line normalization inside the isolation merge is not reported as loss.
-/// Lines the canonical already held independently only make the check more
-/// permissive, which keeps it conservative against false alarms.
+/// copy, and non-blank lines are compared trimmed so pure re-indentation inside
+/// the repair is not reported as loss. Blank lines are counted under their own
+/// key: a blank line the member typed is still operator-authored text, and
+/// skipping it was a hole in the net (`#reconcilesyntheticbase`). Lines the
+/// canonical already held independently only make the check more permissive,
+/// which keeps it conservative against false alarms.
+///
+/// The surviving-count comparison is against the member's POST-edit count, not
+/// against the inserted delta. A member that duplicates a line the document
+/// already held inserts one copy while one copy survives, so comparing against
+/// the delta alone read `1 < 1` and reported no loss even though the duplicate
+/// was dropped (`#reconcilesyntheticbase`).
 fn member_insertions_lost_by(
     intent_before: &str,
     intent_after: &str,
@@ -621,10 +633,7 @@ fn member_insertions_lost_by(
     fn line_counts(text: &str) -> BTreeMap<&str, usize> {
         let mut counts = BTreeMap::new();
         for line in text.lines() {
-            let trimmed = line.trim();
-            if !trimmed.is_empty() {
-                *counts.entry(trimmed).or_default() += 1;
-            }
+            *counts.entry(line.trim()).or_default() += 1;
         }
         counts
     }
@@ -634,11 +643,189 @@ fn member_insertions_lost_by(
     let mut lost = Vec::new();
     for (line, after_count) in after {
         let inserted = after_count.saturating_sub(before.get(line).copied().unwrap_or(0));
-        if inserted > 0 && result.get(line).copied().unwrap_or(0) < inserted {
+        if inserted > 0 && result.get(line).copied().unwrap_or(0) < after_count {
             lost.push(line.to_string());
         }
     }
     lost
+}
+
+/// One comparable region of a session document: either a component occurrence's
+/// body, or the framing text between two bodies (the markers themselves plus any
+/// prose that sits outside every component).
+///
+/// Regions are the unit the component firewall reasons over. Component bodies are
+/// keyed by `component:<name>:<occurrence>` so a body edit elsewhere in the
+/// document cannot shift a region's identity, and each framing run is keyed by the
+/// component it follows (`frame:head` for the leading run) so it is equally stable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DocumentRegion {
+    key: String,
+    /// Byte offset of the region's first character in the source document.
+    start: usize,
+    /// Byte offset past the region's last character in the source document.
+    end: usize,
+}
+
+/// Split `doc` into stably keyed regions, or `None` when it does not parse as a
+/// component document.
+///
+/// Only top-level occurrences contribute a body region: a nested component's body
+/// is already inside its parent's body, so projecting both would count one change
+/// twice.
+fn document_regions(doc: &str) -> Option<Vec<DocumentRegion>> {
+    let components = element::parse(doc).ok()?;
+    let mut top: Vec<&Component> = components
+        .iter()
+        .filter(|c| {
+            !components.iter().any(|other| {
+                !std::ptr::eq(other, *c)
+                    && other.open_start <= c.open_start
+                    && c.close_end <= other.close_end
+            })
+        })
+        .collect();
+    top.sort_by_key(|c| c.open_start);
+
+    let mut occurrences: HashMap<&str, usize> = HashMap::new();
+    let mut out: Vec<DocumentRegion> = Vec::with_capacity(top.len() * 2 + 1);
+    let mut cursor = 0usize;
+    let mut previous = "head".to_string();
+    for comp in top {
+        let occurrence = occurrences.entry(comp.name.as_str()).or_insert(0);
+        let key = format!("component:{}:{}", comp.name, *occurrence);
+        *occurrence += 1;
+        out.push(DocumentRegion {
+            key: format!("frame:{previous}"),
+            start: cursor,
+            end: comp.open_end,
+        });
+        out.push(DocumentRegion {
+            key: key.clone(),
+            start: comp.open_end,
+            end: comp.close_start,
+        });
+        cursor = comp.close_start;
+        previous = key;
+    }
+    out.push(DocumentRegion {
+        key: format!("frame:{previous}"),
+        start: cursor,
+        end: doc.len(),
+    });
+    Some(out)
+}
+
+/// The keyed region contents of `doc`, or `None` when it does not parse.
+fn region_texts(doc: &str) -> Option<BTreeMap<String, &str>> {
+    Some(
+        document_regions(doc)?
+            .into_iter()
+            .map(|region| (region.key, &doc[region.start..region.end]))
+            .collect(),
+    )
+}
+
+/// Regions of the raw peer union that hold **positive evidence** of
+/// cross-component damage: they changed, and the member that produced the update
+/// never touched them in its own buffer.
+///
+/// `#reconcilesyntheticbase`. The previous trigger was a disagreement between the
+/// union and a component-scoped three-way merge taken over a SYNTHETIC
+/// `CrdtDoc::from_text` base — an arbiter reasoning over fabricated op identities,
+/// which the code could not trust to decide anything, least of all to authorize a
+/// repair that rebootstrapped every replica. Merge disagreement is not damage: the
+/// component-scoped merge and a native union routinely order the same
+/// non-conflicting result differently.
+///
+/// This asks the question the firewall actually exists to answer. `union_after` is
+/// `canonical_before` plus exactly one delta — the ops pulled from this member's
+/// mirror — so a region that changed while the member's own before/after buffers
+/// agree on it can only have changed because the member's characters materialized
+/// there. That is the cross-component materialization, observed rather than
+/// inferred. A region the member DID edit is native single-component convergence
+/// and is never reported.
+///
+/// A region key missing from either the canonical or the member's own projection
+/// is not comparable (the member is editing a projection with different framing),
+/// and is deliberately not reported: an unprovable suspicion must not authorize a
+/// repair that can cost operator bytes. Structural breakage that reaches the
+/// canonical is still caught downstream by the `agent-doc-crdt-relay-io` parse
+/// guard, which restores the pre-update canonical.
+fn cross_component_union_damage(
+    canonical_before: &str,
+    union_after: &str,
+    intent_before: &str,
+    intent_after: &str,
+) -> Vec<String> {
+    let (Some(before), Some(after), Some(intent_pre), Some(intent_post)) = (
+        region_texts(canonical_before),
+        region_texts(union_after),
+        region_texts(intent_before),
+        region_texts(intent_after),
+    ) else {
+        return Vec::new();
+    };
+    let mut damaged = Vec::new();
+    for (key, after_text) in &after {
+        let Some(before_text) = before.get(key) else {
+            continue;
+        };
+        if after_text == before_text {
+            continue;
+        }
+        let (Some(member_pre), Some(member_post)) = (intent_pre.get(key), intent_post.get(key))
+        else {
+            continue;
+        };
+        if member_pre != member_post {
+            continue;
+        }
+        damaged.push(key.clone());
+    }
+    damaged
+}
+
+/// Byte-span replacements that restore the named damaged regions of `union_after`
+/// to the content the canonical held before the update, ordered by DESCENDING
+/// start offset so each edit addresses pre-edit text.
+///
+/// This is the narrow half of `#reconcilesyntheticbase`. The repair it replaces —
+/// `rebuild_component_isolated_epoch` — rebuilt the canonical and every member
+/// replica from a merge result, which is the only mechanism in the system that can
+/// reset an operator's buffer wholesale; a single misjudged trigger cost every
+/// replica its unacknowledged typing. Restoring only the regions that carry
+/// evidence of damage is structurally incapable of touching the region the member
+/// was actually editing, so the worst case of a wrong call is a reverted marker
+/// run rather than a lost document.
+fn component_scoped_region_restore(
+    union_after: &str,
+    canonical_before: &str,
+    damaged: &[String],
+) -> Option<Vec<(usize, usize, String)>> {
+    let regions = document_regions(union_after)?;
+    let before = region_texts(canonical_before)?;
+    let mut edits = Vec::new();
+    for region in regions.iter().rev() {
+        if !damaged.iter().any(|key| key == &region.key) {
+            continue;
+        }
+        edits.push((
+            region.start,
+            region.end,
+            (*before.get(&region.key)?).to_string(),
+        ));
+    }
+    Some(edits)
+}
+
+/// Apply [`component_scoped_region_restore`] edits to a document string.
+fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> String {
+    let mut out = union_after.to_string();
+    for (start, end, text) in edits {
+        out.replace_range(*start..*end, text);
+    }
+    out
 }
 
     impl RelayHub {
@@ -1286,10 +1473,10 @@ fn member_insertions_lost_by(
         // identity. A member editing an older projection can therefore produce
         // a causally valid insertion that a raw union materializes on the far
         // side of a component marker after a concurrent broad replacement.
-        // Compare that union with the component-scoped three-way authority
-        // before publishing it. Prefer the editor-acknowledged frontier; fall
-        // back to the optimistic member mirror only when a causally incomplete
-        // update cannot yet materialize against that frontier.
+        // Reconstruct what that member actually intended before deciding whether
+        // the union did that. Prefer the editor-acknowledged frontier; fall back
+        // to the optimistic member mirror only when a causally incomplete update
+        // cannot yet materialize against that frontier.
         let (intent_before_text, intent_after_text) = if observed_before_text != observed_after_text
         {
             (&observed_before_text, &observed_after_text)
@@ -1301,66 +1488,97 @@ fn member_insertions_lost_by(
         // active once the canonical document actually contains component cells.
         let component_scoped = !project_document(&before_text).is_empty();
         let mut component_isolation_refused_lossy = false;
+        let mut component_isolation_reconciled = false;
         if component_scoped
             && (intent_before_text != &before_text || intent_after_text != &after_text)
         {
-            let base_state = CrdtDoc::from_text(intent_before_text).encode_state();
-            let isolated = merge_by_component(Some(&base_state), &before_text, intent_after_text)?;
-            if isolated != after_text {
-                // `#queuelineclobber`: the reconcile must never drop text this
-                // member just inserted. `rebuild_component_isolated_epoch`
-                // rebootstraps the canonical AND every member replica from
-                // `isolated`, so anything missing from it is gone everywhere with
-                // no recovery path — the operator watches their own queue line or
-                // exchange paragraph disappear as they type.
-                //
-                // The merge base here is a SYNTHETIC `CrdtDoc::from_text`, so the
-                // causality-aware arbiter inside `merge_by_component` is reasoning
-                // over fabricated op identities. It cannot be trusted to decide
-                // that a member insertion was legitimately deleted — and nothing
-                // else can have deleted it, because no other replica has seen it
-                // yet. When the result would lose one, publish the raw union
-                // instead: it still carries the member's own op, and a character
-                // landing on the wrong side of a component marker is visible and
-                // repairable, where a silent deletion is neither. The structural
-                // safety net is unaffected — `agent-doc-crdt-relay-io` still
-                // restores the canonical if the union introduces a parse failure.
-                let lost = member_insertions_lost_by(
-                    intent_before_text,
-                    intent_after_text,
-                    &isolated,
-                );
-                if lost.is_empty() {
-                    self.rebuild_component_isolated_epoch(&before_text, &isolated)?;
-                    return Ok(BroadcastPacket {
-                        origin: client_id,
-                        update: Vec::new(),
-                        targets: Vec::new(),
-                        component_isolation_reconciled: true,
-                        component_isolation_refused_lossy: false,
-                    });
+            // `#reconcilesyntheticbase`: the trigger is positive evidence of
+            // cross-component damage — a region that changed while the member's
+            // own before/after buffers agree it was untouched, so the member's
+            // characters demonstrably materialized outside the component it was
+            // editing. It is no longer a disagreement with a merge taken over a
+            // synthetic base; that arbiter reasoned over fabricated op identities
+            // and its verdict could not authorize anything, let alone a repair
+            // that rebootstrapped every replica.
+            let damaged = cross_component_union_damage(
+                &before_text,
+                &after_text,
+                intent_before_text,
+                intent_after_text,
+            );
+            if !damaged.is_empty() {
+                match component_scoped_region_restore(&after_text, &before_text, &damaged) {
+                    Some(edits) if !edits.is_empty() => {
+                        // `#queuelineclobber`: the repair must never drop text
+                        // this member just inserted. Region-scoped restoration
+                        // cannot reach the region the member edited, so this is a
+                        // post-condition rather than a gamble — but it is checked
+                        // on the prospective result, before any op reaches the
+                        // canonical, so a refusal costs nothing.
+                        let prospective = apply_region_restore(&after_text, &edits);
+                        let lost = member_insertions_lost_by(
+                            intent_before_text,
+                            intent_after_text,
+                            &prospective,
+                        );
+                        if lost.is_empty() {
+                            for (start, end, text) in &edits {
+                                let offset = after_text[..*start].chars().count() as u32;
+                                let delete_len =
+                                    after_text[*start..*end].chars().count() as u32;
+                                self.canonical.apply_local_edit(offset, delete_len, text);
+                            }
+                            component_isolation_reconciled = true;
+                            eprintln!(
+                                "[crdt] component_isolation_regions_restored client_id={client_id} regions={damaged:?}"
+                            );
+                        } else {
+                            component_isolation_refused_lossy = true;
+                            eprintln!(
+                                "[crdt] component_isolation_restore_refused reason=member_insertion_would_be_lost client_id={client_id} regions={damaged:?} lost_lines={} first={:?}",
+                                lost.len(),
+                                lost.first().map(|line| line.chars().take(120).collect::<String>()),
+                            );
+                        }
+                    }
+                    // The union no longer parses into regions, so no narrow
+                    // repair can be expressed. Publish the raw union: the
+                    // `agent-doc-crdt-relay-io` parse guard restores the
+                    // pre-update canonical for exactly this case, and a
+                    // whole-document rebuild here would cost every replica its
+                    // unacknowledged typing to fix a structural break that guard
+                    // already owns.
+                    _ => {
+                        component_isolation_refused_lossy = true;
+                        eprintln!(
+                            "[crdt] component_isolation_restore_refused reason=region_map_unavailable client_id={client_id} regions={damaged:?}"
+                        );
+                    }
                 }
-                component_isolation_refused_lossy = true;
-                eprintln!(
-                    "[crdt] component_isolation_reconcile_refused reason=member_insertion_would_be_lost client_id={client_id} lost_lines={} first={:?}",
-                    lost.len(),
-                    lost.first().map(|line| line.chars().take(120).collect::<String>()),
-                );
             }
         }
-        self.sync_live_document_projection(&before_text, &after_text);
+        let published_text = self.canonical.text();
+        self.sync_live_document_projection(&before_text, &published_text);
         let delta = self.canonical.diff(&before)?;
+        // A restored region has to reach the ORIGIN editor too. Convergence is
+        // deterministic, so the editor that produced the update will materialize
+        // the same cross-component result as soon as it applies the canonical's
+        // concurrent write; excluding it would leave the one buffer that can see
+        // the damage uncorrected. Deltas are idempotent, so re-sending the
+        // member's own ops back to it is a no-op.
         let targets: Vec<u64> = self
             .members
             .keys()
             .copied()
-            .filter(|id| *id != client_id && self.is_live(*id))
+            .filter(|id| {
+                (component_isolation_reconciled || *id != client_id) && self.is_live(*id)
+            })
             .collect();
         let packet = BroadcastPacket {
             origin: client_id,
             update: delta,
             targets,
-            component_isolation_reconciled: false,
+            component_isolation_reconciled,
             component_isolation_refused_lossy,
         };
         self.enqueue_delivery(&packet);
@@ -2331,6 +2549,496 @@ mod tests {
 
     static CELL_DOC_TREE_ENV_LOCK: Mutex<()> = Mutex::new(());
 
+    /// Document shared by the `#reconcilesyntheticbase` region tests.
+    const REGION_DOC: &str = concat!(
+        "<!-- agent:exchange -->\n",
+        "Prompt.\n",
+        "<!-- /agent:exchange -->\n",
+        "<!-- agent:queue -->\n",
+        "- do [#a]\n",
+        "<!-- /agent:queue -->\n",
+    );
+
+    #[test]
+    fn document_regions_key_component_bodies_and_the_framing_runs_between_them() {
+        let regions = document_regions(REGION_DOC).expect("component document");
+        let keys: Vec<&str> = regions.iter().map(|r| r.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            vec![
+                "frame:head",
+                "component:exchange:0",
+                "frame:component:exchange:0",
+                "component:queue:0",
+                "frame:component:queue:0",
+            ],
+            "a body region per component, and a framing run keyed by the component it follows"
+        );
+        let texts = region_texts(REGION_DOC).expect("component document");
+        assert_eq!(texts["component:exchange:0"], "Prompt.\n");
+        assert_eq!(texts["component:queue:0"], "- do [#a]\n");
+        // The markers themselves live in the framing runs, so text that lands
+        // between two components is attributed to a region of its own rather
+        // than silently folded into a neighbouring body.
+        assert_eq!(
+            texts["frame:component:exchange:0"],
+            "<!-- /agent:exchange -->\n<!-- agent:queue -->\n"
+        );
+        // Regions tile the document exactly: every byte is attributed once.
+        let mut cursor = 0usize;
+        for region in &regions {
+            assert_eq!(region.start, cursor, "regions must be contiguous");
+            cursor = region.end;
+        }
+        assert_eq!(cursor, REGION_DOC.len(), "regions must cover the document");
+        assert!(document_regions("plain prose, no components\n").is_some());
+        assert!(
+            document_regions("<!-- agent:queue -->\nunclosed\n").is_none(),
+            "an unparseable document has no comparable regions"
+        );
+    }
+
+    #[test]
+    fn cross_component_union_damage_reports_a_member_op_that_materialized_outside_its_component() {
+        // The positive evidence the firewall exists to find: the member typed
+        // `typed` inside its own projection, and the union materialized those
+        // characters in the framing run between two components instead.
+        let canonical_before = REGION_DOC;
+        let union_after = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt.\n",
+            "<!-- /agent:exchange -->\n",
+            "typed\n",
+            "<!-- agent:queue -->\n",
+            "- do [#a]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let intent_after = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#a]\n",
+            "typed\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert_eq!(
+            cross_component_union_damage(
+                canonical_before,
+                union_after,
+                canonical_before,
+                intent_after
+            ),
+            vec!["frame:component:exchange:0".to_string()],
+            "a framing run the member never edited changed, so the member's ops landed there"
+        );
+    }
+
+    #[test]
+    fn cross_component_union_damage_ignores_the_region_the_member_was_editing() {
+        // `#reconcilesyntheticbase`: an intra-component disagreement is native
+        // single-component CRDT convergence. Reporting it as damage is what let a
+        // merge heuristic authorize a repair that reset every replica.
+        let canonical_before = REGION_DOC;
+        let union_after = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#a]\n",
+            "- do [#typed]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert!(
+            cross_component_union_damage(
+                canonical_before,
+                union_after,
+                canonical_before,
+                union_after
+            )
+            .is_empty(),
+            "the member edited queue, so a queue change is not cross-component damage"
+        );
+    }
+
+    #[test]
+    fn cross_component_union_damage_is_silent_when_regions_are_not_comparable() {
+        // An unprovable suspicion must not authorize a repair. A member editing a
+        // projection whose framing no longer exists yields no comparable key, and
+        // structural breakage that reaches the canonical is owned by the
+        // `agent-doc-crdt-relay-io` parse guard, not by a whole-document rebuild.
+        // The canonical grew a `status` component the member has never seen, and
+        // it is the only region that changed.
+        let canonical_before = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#a]\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:status -->\n",
+            "idle\n",
+            "<!-- /agent:status -->\n",
+        );
+        let union_after = canonical_before.replace("idle\n", "busy\n");
+        assert!(
+            cross_component_union_damage(
+                canonical_before,
+                &union_after,
+                REGION_DOC,
+                REGION_DOC
+            )
+            .is_empty(),
+            "`component:status:0` has no counterpart in the member projection"
+        );
+        assert!(
+            cross_component_union_damage(
+                "<!-- agent:queue -->\nunclosed\n",
+                &union_after,
+                REGION_DOC,
+                REGION_DOC
+            )
+            .is_empty(),
+            "an unparseable side yields no regions and therefore no verdict"
+        );
+    }
+
+    #[test]
+    fn component_scoped_region_restore_touches_only_the_damaged_region() {
+        let union_after = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt. typed\n",
+            "<!-- /agent:exchange -->\n",
+            "leaked\n",
+            "<!-- agent:queue -->\n",
+            "- do [#a]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let damaged = vec!["frame:component:exchange:0".to_string()];
+        let edits = component_scoped_region_restore(union_after, REGION_DOC, &damaged)
+            .expect("both sides parse");
+        assert_eq!(edits.len(), 1);
+        let repaired = apply_region_restore(union_after, &edits);
+        assert_eq!(
+            repaired,
+            concat!(
+                "<!-- agent:exchange -->\n",
+                "Prompt. typed\n",
+                "<!-- /agent:exchange -->\n",
+                "<!-- agent:queue -->\n",
+                "- do [#a]\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            "the leaked framing run is restored and the member's own edit is untouched"
+        );
+        // Descending order is the caller's contract: each span addresses the
+        // pre-edit text, so a lower offset must never be applied first.
+        let two = component_scoped_region_restore(
+            union_after,
+            REGION_DOC,
+            &[
+                "component:exchange:0".to_string(),
+                "frame:component:exchange:0".to_string(),
+            ],
+        )
+        .expect("both sides parse");
+        assert_eq!(two.len(), 2);
+        assert!(
+            two.windows(2).all(|pair| pair[0].0 > pair[1].0),
+            "edits must be ordered by descending offset, got {two:?}"
+        );
+        assert!(
+            component_scoped_region_restore(union_after, REGION_DOC, &["component:absent:0".into()])
+                .is_some_and(|edits| edits.is_empty()),
+            "an unknown region names nothing to restore"
+        );
+    }
+
+    #[test]
+    fn a_synthetic_base_merge_disagreement_alone_no_longer_resets_every_replica() {
+        // `#reconcilesyntheticbase`, and the reproduction the previous
+        // investigation could not find. The old trigger was `isolated !=
+        // after_text`, where `isolated` came from `merge_by_component` over a
+        // SYNTHETIC `CrdtDoc::from_text(intent_before)` base — an arbiter the code
+        // itself said "cannot be trusted". Every shape below makes that arbiter
+        // disagree with the native union, and in four of them the disagreement was
+        // deletion-shaped, so the `#queuelineclobber` net saw no lost insertion and
+        // the reconcile ran: `rebuild_component_isolated_epoch` rebuilt the
+        // canonical AND rebootstrapped every member replica, discarding whatever
+        // each editor had typed but not yet acknowledged. Not one of these shapes
+        // carries any cross-component evidence — they are all ordinary
+        // intra-component convergence.
+        use agent_doc_merge::crdt::{CrdtDoc, merge_by_component};
+
+        const BASE: &str = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:notes -->\n",
+            "alpha\n",
+            "<!-- /agent:notes -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#a]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        const REPLACE_EXCHANGE: &str = concat!(
+            "<!-- agent:exchange -->\n",
+            "Response.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:notes -->\n",
+            "alpha\n",
+            "<!-- /agent:notes -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#a]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        const REPLACE_ALL: &str = concat!(
+            "<!-- agent:exchange -->\n",
+            "Response.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:notes -->\n",
+            "beta\n",
+            "<!-- /agent:notes -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#b]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        const GENERATION_ONE: &str = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt.\nOne.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:notes -->\n",
+            "alpha\n",
+            "<!-- /agent:notes -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#a]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        const GENERATION_TWO: &str = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt.\nOne.\nTwo.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:notes -->\n",
+            "gamma\n",
+            "<!-- /agent:notes -->\n",
+            "<!-- agent:queue -->\n",
+            "- ~~do [#a]~~\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        // (label, canonical writes in order, member edit, whether the old
+        // `#queuelineclobber` net would have let the rebuild run)
+        struct Shape {
+            label: &'static str,
+            writes: &'static [&'static str],
+            anchor: &'static str,
+            at_end_of_anchor: bool,
+            delete_chars: u32,
+            insert: &'static str,
+            old_rebuild: bool,
+        }
+        let shapes = [
+            Shape {
+                label: "replace-exchange-body / member deletes that body",
+                writes: &[REPLACE_EXCHANGE],
+                anchor: "Prompt.\n",
+                at_end_of_anchor: false,
+                delete_chars: 8,
+                insert: "",
+                old_rebuild: true,
+            },
+            Shape {
+                label: "replace-every-body / member deletes notes",
+                writes: &[REPLACE_ALL],
+                anchor: "alpha\n",
+                at_end_of_anchor: false,
+                delete_chars: 6,
+                insert: "",
+                old_rebuild: true,
+            },
+            Shape {
+                label: "replace-every-body / member deletes exchange",
+                writes: &[REPLACE_ALL],
+                anchor: "Prompt.\n",
+                at_end_of_anchor: false,
+                delete_chars: 8,
+                insert: "",
+                old_rebuild: true,
+            },
+            Shape {
+                label: "two generations stale / member deletes notes",
+                writes: &[GENERATION_ONE, GENERATION_TWO],
+                anchor: "alpha\n",
+                at_end_of_anchor: false,
+                delete_chars: 6,
+                insert: "",
+                old_rebuild: true,
+            },
+            Shape {
+                label: "two generations stale / member types at the exchange tail",
+                writes: &[GENERATION_ONE, GENERATION_TWO],
+                anchor: "<!-- /agent:exchange -->",
+                at_end_of_anchor: false,
+                delete_chars: 0,
+                insert: "typed\n",
+                old_rebuild: false,
+            },
+            Shape {
+                label: "two generations stale / member types after the prompt",
+                writes: &[GENERATION_ONE, GENERATION_TWO],
+                anchor: "Prompt.\n",
+                at_end_of_anchor: true,
+                delete_chars: 0,
+                insert: "typed\n",
+                old_rebuild: false,
+            },
+        ];
+
+        for shape in &shapes {
+            let label = shape.label;
+            let mut hub = RelayHub::from_text(1, BASE);
+            hub.register(2).unwrap();
+            hub.register(3).unwrap();
+            let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+            let frontier = editor.state_vector();
+            let anchor_at = BASE.find(shape.anchor).unwrap();
+            let at = if shape.at_end_of_anchor {
+                anchor_at + shape.anchor.len()
+            } else {
+                anchor_at
+            };
+            editor.apply_local_edit(
+                BASE[..at].chars().count() as u32,
+                shape.delete_chars,
+                shape.insert,
+            );
+            let intent_after = editor.text();
+            let update = editor.diff(&frontier).unwrap();
+
+            let mut previous = BASE;
+            for write in shape.writes {
+                hub.apply_canonical_replace(previous, write).unwrap();
+                previous = write;
+            }
+            let before_text = hub.canonical_text();
+            let packet = hub.relay_update(2, &update).unwrap();
+            let after_text = hub.canonical_text();
+
+            // The old trigger fires on every one of these shapes.
+            let base_state = CrdtDoc::from_text(BASE).encode_state();
+            let isolated =
+                merge_by_component(Some(&base_state), &before_text, &intent_after).unwrap();
+            assert_ne!(
+                isolated, after_text,
+                "{label}: this shape must still make the synthetic-base arbiter disagree, \
+                 otherwise it no longer covers the regression"
+            );
+            assert_eq!(
+                member_insertions_lost_by(BASE, &intent_after, &isolated).is_empty(),
+                shape.old_rebuild,
+                "{label}: the recorded pre-fix outcome must still be the one this shape produces"
+            );
+
+            // And none of it is cross-component damage, so nothing is repaired and
+            // no replica is reset.
+            assert!(
+                cross_component_union_damage(&before_text, &after_text, BASE, &intent_after)
+                    .is_empty(),
+                "{label}: an intra-component disagreement is not cross-component damage"
+            );
+            assert!(
+                !packet.component_isolation_reconciled,
+                "{label}: a merge disagreement alone must not authorize a repair"
+            );
+            assert!(
+                !packet.component_isolation_refused_lossy,
+                "{label}: nothing was refused because nothing was attempted"
+            );
+            assert!(
+                hub.pending_rebootstrap_members().is_empty(),
+                "{label}: no replica may be rebootstrapped"
+            );
+            if !shape.insert.is_empty() {
+                assert!(
+                    after_text.contains("typed"),
+                    "{label}: the member's just-typed text must survive; canonical was:\n{after_text}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_member_insertion_that_lands_outside_every_component_is_flagged_not_deleted() {
+        // End-to-end cover for the detector's positive path. The controller removes
+        // the `notes` component while the operator is typing inside it, so every
+        // character around the operator's caret is tombstoned and the insertion
+        // materializes in the framing run between `exchange` and `queue` — a
+        // member character on the far side of a component marker, which is the
+        // damage the firewall exists to see.
+        //
+        // The narrow repair is then correctly REFUSED: restoring that framing run
+        // would delete the operator's line, and no other replica has seen it yet,
+        // so nothing can legitimately have deleted it. Publishing the raw union
+        // leaves the text misplaced but present and visible, which the operator can
+        // fix; deleting it is unrecoverable.
+        const BASE: &str = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:notes -->\n",
+            "alpha\n",
+            "<!-- /agent:notes -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#a]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        const NOTES_REMOVED: &str = concat!(
+            "<!-- agent:exchange -->\n",
+            "Prompt.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#a]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let mut hub = RelayHub::from_text(1, BASE);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        let frontier = editor.state_vector();
+        let caret = BASE.find("alpha\n").unwrap();
+        editor.apply_local_edit(BASE[..caret].chars().count() as u32, 0, "typed\n");
+        let intent_after = editor.text();
+        let update = editor.diff(&frontier).unwrap();
+
+        hub.apply_canonical_replace(BASE, NOTES_REMOVED).unwrap();
+        let before_text = hub.canonical_text();
+        let packet = hub.relay_update(2, &update).unwrap();
+        let after_text = hub.canonical_text();
+
+        assert_eq!(
+            cross_component_union_damage(&before_text, &after_text, BASE, &intent_after),
+            vec!["frame:component:exchange:0".to_string()],
+            "the operator's characters materialized outside every component; canonical was:\n{after_text}"
+        );
+        assert!(
+            after_text.contains("typed"),
+            "the operator's just-typed line must survive; canonical was:\n{after_text}"
+        );
+        assert!(
+            packet.component_isolation_refused_lossy,
+            "the repair must refuse rather than delete operator-authored bytes"
+        );
+        assert!(
+            !packet.component_isolation_reconciled,
+            "a refused repair is not a repair"
+        );
+        assert!(
+            hub.pending_rebootstrap_members().is_empty(),
+            "and no replica is reset to publish a raw union"
+        );
+    }
+
     #[test]
     fn live_document_projection_is_default_off_and_tracks_opt_in_canonical_deltas() {
         let _guard = CELL_DOC_TREE_ENV_LOCK.lock();
@@ -2508,6 +3216,28 @@ mod tests {
         // more permissive — it must never be reported as a member loss.
         assert!(
             member_insertions_lost_by("", "- shared\n", "- shared\n- shared\n").is_empty(),
+        );
+        // `#reconcilesyntheticbase`: two holes the net used to fall through.
+        // Comparing survivors against the inserted DELTA rather than the
+        // member's post-edit count read `1 < 1` for a duplicate of a line the
+        // document already held, so duplicating a queue line and watching the
+        // copy vanish was not a "loss".
+        assert_eq!(
+            member_insertions_lost_by("- x\n", "- x\n- x\n", "- x\n"),
+            vec!["- x".to_string()],
+            "a dropped duplicate of an existing line is still a dropped insertion"
+        );
+        // And a blank line the member typed is operator-authored text; skipping
+        // blank lines entirely meant a whitespace-only insertion could never be
+        // reported.
+        assert_eq!(
+            member_insertions_lost_by("a\n", "a\n\n", "a\n"),
+            vec![String::new()],
+            "a dropped blank line the member typed is a loss"
+        );
+        assert!(
+            member_insertions_lost_by("a\n", "a\n\n", "a\n\n").is_empty(),
+            "a preserved blank line is not a loss"
         );
     }
 

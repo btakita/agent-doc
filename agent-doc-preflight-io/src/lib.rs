@@ -31,7 +31,8 @@ use agent_doc_queue::{
         queue_currently_active_for_free_text_admission, queue_free_text_admission_scope,
     },
     queue_convergence::{
-        inactive_queue_changed_vs_snapshot, queue_entries_are_drained_residue,
+        inactive_queue_changed_vs_snapshot, queue_body_clear_is_lossless,
+        queue_entries_are_drained_residue,
         queue_region_differs_from_snapshot, selected_queue_head_unchanged_in_snapshot,
     },
     queue_response::{free_text_head_answered_by_response, queue_prompt_text_is_free_text},
@@ -4225,8 +4226,28 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     let need_strip_auto = has_auto && !queue_has_prompts;
     let need_clear_non_auto_residue =
         !has_auto && !activation.active && !activation.deferred && drained_residue;
-    let need_clear_drained_body =
-        (need_strip_auto || need_clear_non_auto_residue) && !activation.deferred;
+    // `#queuelineclobber`: a drain clear blanks the ENTIRE queue body, and
+    // neither predicate above can see operator text. `need_strip_auto` asks only
+    // whether an actionable `do` prompt remains, and `drained_residue` classifies
+    // by entry kind — a `Freeform` line (where the parser puts an operator's
+    // `re [#id]: <question>` reference, or any prose they typed into the queue)
+    // satisfies "no prompts" while carrying words nothing else holds.
+    //
+    // Reported live on `src/haiven-dev/tasks/infra.md`: the operator wrote
+    // `- re [#fpeidentitysecondclient]: Since we moved over to a Secret Bearer
+    // Token…` into the queue and flipped `queue: go`; preflight found no
+    // drainable prompt, called the queue drained, blanked the body, and set
+    // `queue: stop` — their question was gone and the activation they had just
+    // asked for was revoked. Reproduced deterministically from a seeded document.
+    //
+    // Gate the whole decision, not just the body write: if the clear would be
+    // lossy the queue is not drained, so the auto-strip and the
+    // `queue: stop` revocation it drives are wrong for the same reason. The body
+    // then surfaces through the `inactive_queue_residue` warning below, which is
+    // what an unanswered operator queue line should do.
+    let need_clear_drained_body = (need_strip_auto || need_clear_non_auto_residue)
+        && !activation.deferred
+        && queue_body_clear_is_lossless(&activation.entries_after);
 
     if need_clear_drained_body {
         let comps = agent_doc_element::element::parse(&current_content)?;
@@ -9428,6 +9449,69 @@ mod tests {
         assert!(snap.contains("queue: stop"));
         assert!(!snap.contains("agent:queue auto"));
         assert!(!snap.contains("- do [#alpha]"));
+    }
+
+    #[test]
+    fn queue_maintenance_never_clears_a_drained_body_over_operator_text() {
+        // `#queuelineclobber`, the live `src/haiven-dev/tasks/infra.md` shape:
+        // the operator types a `re [#id]: <question>` line straight into the
+        // queue. It parses as `Freeform` — deliberately not an actionable prompt
+        // — so the drain path saw "no prompts", called the queue drained, and
+        // blanked the WHOLE body, deleting a question nothing else held.
+        //
+        // A genuinely drained body must still clear (the sibling test above), so
+        // the assertion here is specifically that residue clears AROUND operator
+        // text while the operator text stays.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let operator_line = "- re [#alpha]: Since we moved over to a Secret Bearer Token \
+                             between the fpe + backend, is this still applicable?";
+        let content = format!(
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "queue_active: true\n",
+                "---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior — gpt-5\n\n",
+                "Done.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue auto -->\n",
+                "- do [#alpha]\n",
+                "{operator_line}\n",
+                "<!-- /agent:queue -->\n\n",
+                "## Completed / Reaped\n\n",
+                "<!-- agent:done -->\n",
+                "- [x] [#alpha] First done.\n",
+                "<!-- /agent:done -->\n"
+            ),
+            operator_line = operator_line,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains(operator_line),
+            "operator queue text must survive a drain clear: {updated}"
+        );
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(
+            snap.contains(operator_line),
+            "the snapshot must keep it too, or the next preflight re-drops it: {snap}"
+        );
     }
 
     #[test]

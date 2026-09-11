@@ -125,6 +125,37 @@ pub fn inactive_queue_changed_vs_snapshot(
     document_queue::render(&snapshot_entries) != document_queue::render(current_entries)
 }
 
+/// True when an entry carries operator-authored text that a drain clear must
+/// never discard.
+///
+/// `#queuelineclobber`: `Freeform` is the bucket the parser routes every line it
+/// does not recognize as a prompt into — including an operator's
+/// `re [#id]: <question>` reference and any prose they typed straight into the
+/// queue. Such a line is deliberately not an actionable prompt, so
+/// `document_queue::prompts()` is empty and the drain path concludes the queue is
+/// "drained"; blanking the body then deletes text the operator typed and that
+/// nothing else holds.
+///
+/// Structural separators (blank, a bare `---`, a `~~~` fence line) carry no
+/// operator content, so they must not pin an otherwise-drained body open forever.
+pub fn entry_carries_operator_text(entry: &document_queue::QueueEntry) -> bool {
+    match entry {
+        document_queue::QueueEntry::Prompt(_) => true,
+        document_queue::QueueEntry::Freeform(line) => {
+            let trimmed = line.trim();
+            !(trimmed.is_empty() || trimmed == "---" || trimmed.starts_with("~~~"))
+        }
+        _ => false,
+    }
+}
+
+/// True when blanking the whole queue body would discard no operator-authored
+/// text (`#queuelineclobber`). "No drainable prompt" is NOT the same question:
+/// a queue can hold zero prompts and still hold an operator's words.
+pub fn queue_body_clear_is_lossless(entries: &[document_queue::QueueEntry]) -> bool {
+    !entries.iter().any(entry_carries_operator_text)
+}
+
 /// True when the queue body contains only drained non-live residue.
 pub fn queue_entries_are_drained_residue(entries: &[document_queue::QueueEntry]) -> bool {
     !entries.is_empty()
@@ -316,6 +347,46 @@ mod tests {
             "no queue component",
             &same_entries
         ));
+    }
+
+    /// `#queuelineclobber`, reproduced from the live `infra.md` shape: the
+    /// operator's own `re [#id]: <question>` line parses as `Freeform`, so it is
+    /// not a prompt and not residue. Blanking the body around it deletes their
+    /// words.
+    #[test]
+    fn an_operator_freeform_queue_line_is_never_safe_to_clear() {
+        let operator = document_queue::QueueEntry::Freeform(
+            "- re [#fpeidentitysecondclient]: Since we moved over to a Secret Bearer Token \
+             between the fpe + backend, is this still applicable?"
+                .to_string(),
+        );
+        let completed = document_queue::QueueEntry::Completed(document_queue::QueuePrompt {
+            text: "do [#done]".to_string(),
+            multiline: false,
+            indent: 0,
+            ordered_marker: None,
+        });
+
+        // The predicate the drain path used to rely on cannot see it: the entry
+        // is neither a prompt nor residue, so "no prompts" reads as "drained".
+        assert!(document_queue::prompts(&[operator.clone()]).is_empty());
+        assert!(!queue_entries_are_drained_residue(&[operator.clone()]));
+
+        assert!(entry_carries_operator_text(&operator));
+        assert!(!queue_body_clear_is_lossless(&[operator.clone()]));
+        assert!(
+            !queue_body_clear_is_lossless(&[completed.clone(), operator]),
+            "residue alongside operator text still must not blank the body"
+        );
+
+        // Genuinely drained bodies still clear, or the queue never deactivates.
+        assert!(queue_body_clear_is_lossless(&[]));
+        assert!(queue_body_clear_is_lossless(&[completed]));
+        assert!(queue_body_clear_is_lossless(&[
+            document_queue::QueueEntry::Freeform(String::new()),
+            document_queue::QueueEntry::Freeform("---".to_string()),
+            document_queue::QueueEntry::Freeform("   ".to_string()),
+        ]));
     }
 
     #[test]

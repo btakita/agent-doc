@@ -721,6 +721,31 @@ impl HarnessConfig {
     /// Return true when the line represents an empty composer that route may
     /// safely inject into. Prompt lines with drafted user text are not idle for
     /// dispatch even if they still begin with the harness prompt glyph.
+    /// True for a composer placeholder that proves the harness is BUSY and is
+    /// QUEUEING operator input rather than executing it — Claude Code's
+    /// `❯ Press up to edit queued messages`.
+    ///
+    /// `#clearqueuedcomposer`: this is a strict subset of
+    /// [`Self::is_dispatch_ready_prompt_line`], and the two answer different
+    /// questions. For *dispatch*, a queued composer is fine: the trigger was
+    /// accepted and the harness runs it when the turn ends. For a command whose
+    /// contract is an immediate state transition — `/clear` — acceptance into a
+    /// queue is not execution, and conflating them reports "whether the clear
+    /// ran is unknown" about a pane whose state is perfectly well known.
+    ///
+    /// Deliberately excludes `❯ describe a task for a new session`: that
+    /// placeholder also renders in an empty composer, but it means IDLE.
+    pub fn is_queued_input_placeholder_line(&self, line: &str) -> bool {
+        if self.binary != "claude" {
+            return false;
+        }
+        let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(line);
+        stripped
+            .trim()
+            .strip_prefix("\u{276f} ")
+            .is_some_and(|rest| rest.trim() == "Press up to edit queued messages")
+    }
+
     pub fn is_dispatch_ready_prompt_line(&self, line: &str) -> bool {
         let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(line);
         let trimmed = stripped.trim();

@@ -21,7 +21,8 @@ use agent_doc_turn_executor_tmux::context_clear::{
     ContextClearSubmitPollState, ContextClearSubmitRetryAction, ContextClearSubmitRetryFacts,
     ContextClearSubmitRetryProofFacts, ContextClearSubmitStatus, InterruptClearTimeoutFacts,
     busy_clear_already_deferred_message, busy_clear_deferred_message, busy_clear_refusal_message,
-    context_clear_command_visible_in_active_input, context_clear_history_proves_cleared_state,
+    context_clear_capture_shows_queued_input, context_clear_command_visible_in_active_input,
+    context_clear_history_proves_cleared_state,
     context_clear_submit_blocked_line, context_clear_submit_blocked_message,
     context_clear_submit_observation_line, context_clear_submit_resubmit_proof_line,
     context_clear_submit_retry_action, interrupt_clear_timeout_message,
@@ -2270,6 +2271,23 @@ fn upgrade_unobserved_clear_from_pane_history(
             return ContextClearSubmitStatus::Unobserved;
         }
     };
+    // `#clearqueuedcomposer`: ask the cheaper, more specific question first. A
+    // composer showing `❯ Press up to edit queued messages` proves the harness is
+    // mid-turn and QUEUED the command rather than running it. That is a known
+    // state with an exact unblocker, not the unknown `Unobserved` reports — and
+    // it is why a resend 2s later lands in the same queue instead of clearing.
+    if context_clear_capture_shows_queued_input(&history, |line| {
+        harness_config.is_queued_input_placeholder_line(line)
+    }) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "session_clear_submit_cleared_state_probe file={} pane={pane} harness={harness} phase={phase} result=harness_queued_input",
+                file.display()
+            ),
+        );
+        return ContextClearSubmitStatus::HarnessQueuedInput;
+    }
     let proven = live_pane_prompt_ready_at_cursor(&harness_config, &history, None)
         && context_clear_history_proves_cleared_state(
             &history,

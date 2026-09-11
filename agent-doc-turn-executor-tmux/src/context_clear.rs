@@ -28,6 +28,10 @@ pub enum ContextClearSubmitStatus {
     AcceptedClearedState,
     StillVisible,
     Unobserved,
+    /// (`#clearqueuedcomposer`) The harness is mid-turn and QUEUED the command
+    /// instead of executing it. The clear did not run, and it is not unknown
+    /// whether it ran — waiting or interrupting is what unblocks it.
+    HarnessQueuedInput,
     CaptureFailed,
     Unrendered,
 }
@@ -39,6 +43,7 @@ impl ContextClearSubmitStatus {
             Self::AcceptedClearedState => "accepted_cleared_state",
             Self::StillVisible => "command_still_visible",
             Self::Unobserved => "submission_unobserved",
+            Self::HarnessQueuedInput => "harness_queued_input",
             Self::CaptureFailed => "capture_failed",
             Self::Unrendered => "pane_not_rendered",
         }
@@ -54,6 +59,7 @@ impl ContextClearSubmitStatus {
         match self {
             Self::StillVisible => Some("prompt_not_submitted"),
             Self::Unobserved => Some("submit_unobserved"),
+            Self::HarnessQueuedInput => Some("clear_queued_during_busy_turn"),
             Self::CaptureFailed => Some("submit_unverified_capture_failed"),
             Self::Unrendered => Some("submit_unverified_unrendered"),
             Self::Accepted | Self::AcceptedClearedState => None,
@@ -67,6 +73,7 @@ impl ContextClearSubmitStatus {
         match self {
             Self::StillVisible => "clear_command_not_consumed",
             Self::Unobserved => "clear_submission_unobserved",
+            Self::HarnessQueuedInput => "clear_queued_behind_busy_turn",
             Self::CaptureFailed => "clear_submit_capture_failed",
             Self::Unrendered => "wait_for_pane_render",
             Self::Accepted | Self::AcceptedClearedState => "none",
@@ -77,10 +84,33 @@ impl ContextClearSubmitStatus {
         match self {
             Self::StillVisible => "restore_idle_prompt_and_retry",
             Self::Unobserved | Self::CaptureFailed => "verify_pane_state_then_retry",
+            Self::HarnessQueuedInput => "wait_for_turn_or_interrupt_then_retry",
             Self::Unrendered => "wait_for_pane_render",
             Self::Accepted | Self::AcceptedClearedState => "none",
         }
     }
+}
+
+/// (`#clearqueuedcomposer`) Does the capture show a harness composer that is
+/// QUEUEING operator input rather than executing it?
+///
+/// Observed live 2026-09-11 on `src/haiven-dev/tasks/sdk.md`, pane `%1`: a
+/// Claude Code session mid-turn (`❯ Press up to edit queued messages`, two
+/// subagents running) took a `/clear`, queued it, and the acceptance poll
+/// reported `submission_unobserved` — "whether the clear ran is unknown" about a
+/// pane whose state was fully legible. Both the initial attempt and the command
+/// repair resend landed in the same queue, 2s apart.
+///
+/// A queued clear is still NOT accepted: this changes the label and the
+/// unblocker, never the acceptance rule (same contract as `#clearsubmitlabel`).
+pub fn context_clear_capture_shows_queued_input(
+    capture: &str,
+    is_queued_input_placeholder_line: impl Fn(&str) -> bool,
+) -> bool {
+    capture
+        .lines()
+        .map(crate::prompt::strip_ansi)
+        .any(|line| is_queued_input_placeholder_line(line.trim()))
 }
 
 /// Scrollback lines a pane may retain and still count as cleared.
@@ -344,6 +374,7 @@ pub fn context_clear_submit_resubmit_proof_line(
         ContextClearSubmitStatus::AcceptedClearedState => "accepted_cleared_state",
         ContextClearSubmitStatus::StillVisible => "still_visible",
         ContextClearSubmitStatus::Unobserved => "unobserved",
+        ContextClearSubmitStatus::HarnessQueuedInput => "harness_queued_input",
         ContextClearSubmitStatus::CaptureFailed => "capture_failed",
         ContextClearSubmitStatus::Unrendered => "pane_not_rendered",
     };
@@ -756,6 +787,70 @@ mod tests {
                 is_dispatch_ready_prompt_line,
             ),
             "OpenCode can also surface the selected command id before submission"
+        );
+    }
+
+    /// `#clearqueuedcomposer`: a Claude Code pane mid-turn QUEUES operator input
+    /// instead of executing it, and its composer says so.
+    ///
+    /// Observed live 2026-09-11 on `src/haiven-dev/tasks/sdk.md`, pane `%1`: two
+    /// subagents running, `❯ Press up to edit queued messages` in the composer,
+    /// and a `/clear` plus its 2s-later repair resend both landing in that queue.
+    /// The acceptance poll reported `submission_unobserved` — "whether the clear
+    /// ran is unknown" — about a pane whose state was fully legible, sending the
+    /// operator to check a pane the binary had already read.
+    #[test]
+    fn a_queued_composer_is_recognized_as_the_harness_queueing_input() {
+        let is_queued = |line: &str| line.trim() == "\u{276f} Press up to edit queued messages";
+
+        let busy_with_queued_clear = concat!(
+            "  \u{276f} /agent-doc src/haiven-dev/tasks/sdk.md\n",
+            "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n",
+            "\u{276f} Press up to edit queued messages\n",
+            "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n",
+            "  Opus 5 (1M context) ctx:17% ~/src/haiven-sdk brian@host\n",
+            "  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle) \u{b7} \u{2190} 2 agents\n",
+        );
+        assert!(context_clear_capture_shows_queued_input(
+            busy_with_queued_clear,
+            is_queued
+        ));
+
+        // An idle composer is not queueing. Neither is Claude's OTHER empty-
+        // composer placeholder, which renders on a fresh, idle pane.
+        let idle = concat!(
+            "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n",
+            "\u{276f}\n",
+            "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n",
+        );
+        assert!(!context_clear_capture_shows_queued_input(idle, is_queued));
+        let fresh = "\u{276f} describe a task for a new session\n";
+        assert!(!context_clear_capture_shows_queued_input(fresh, is_queued));
+    }
+
+    /// `#clearqueuedcomposer`: a queued clear did NOT run, so the acceptance rule
+    /// is unchanged — only the label and the unblocker are. Same contract
+    /// `#clearsubmitlabel` set: never report a clear that may not have run as
+    /// done, and never hand the operator a guess when the state is known.
+    #[test]
+    fn a_queued_clear_stays_unaccepted_but_names_its_real_unblocker() {
+        let queued = ContextClearSubmitStatus::HarnessQueuedInput;
+
+        assert!(!queued.is_accepted(), "a queued clear has not run");
+        assert_eq!(queued.as_str(), "harness_queued_input");
+        assert_eq!(queued.issue(), Some("clear_queued_during_busy_turn"));
+        assert_eq!(queued.unblocker(), "clear_queued_behind_busy_turn");
+        assert_eq!(queued.next_action(), "wait_for_turn_or_interrupt_then_retry");
+
+        // The unknown it replaces sent the operator to inspect the pane; this one
+        // names what actually unblocks it, and must not read as the same thing.
+        assert_ne!(
+            queued.unblocker(),
+            ContextClearSubmitStatus::Unobserved.unblocker()
+        );
+        assert_ne!(
+            queued.next_action(),
+            ContextClearSubmitStatus::Unobserved.next_action()
         );
     }
 

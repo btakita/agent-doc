@@ -97,6 +97,48 @@ Name validation is enforced up front (Prometheus metric/label grammar, reserved 
 **Verification:** 39 new tests in `tests/test_metrics.py`; `make check` green (ty, ruff, `run_readme`, 893 tests, conformance coverage, interop peer, assertion-ordering, ci-reach). New `lazily[prometheus]` extra, pulled into `lazily[dev]` so CI exercises the adapter rather than skipping it. Docs in README, SPEC, CHANGELOG. Committed `lazily-py c0f04dd`, superproject `aa0a66a423`, both pushed.
 
 Also: the previous item's CI run (34614969844) finished **green**, so `#lzpystructcell` is confirmed beyond the local `make check` it was reported on. Run 34616209898 for this commit is queued.
+
+### Re: #lzpykeyedfold — a key has one owner — opus-5
+
+> **Queue prompt:** do [#lzpykeyedfold]
+
+`lazily.keyed_fold`. A `KeyedFoldWriter`'s entire surface names its own key, so "clear only your own" is not a rule to follow — there is no argument that reaches another key.
+
+```python
+errors = KeyedFold[str, str, dict[str, str]](ctx)
+intake = errors.claim("intake")          # exclusive; a second claim raises
+dispatcher = errors.claim("dispatcher")
+
+intake.set("connection refused")
+dispatcher.set("timeout")
+intake.clear()                           # dispatcher's entry survives
+errors.value                             # {'dispatcher': 'timeout'}
+```
+
+`claim` being exclusive is the part that catches the FPE `last_errors` bug *before* it happens: two components writing one key is the defect, not a sharing mechanism, so it raises. `writer(key)` is there when a shared handle really is intended.
+
+Entries are independent cells in a `SourceMap`, so a key reader is never invalidated by a sibling write. The summary depends on membership **and** every live value and on nothing else, so a `summarize` that counts entries is untouched when a value moves. `policy=` selects the `MergePolicy` `merge` folds under; a first write seeds the entry with the operand, because a `MergePolicy` is an associative merge, not a monoid — there is no identity to start from. `set` bypasses the policy. Eager by default, matching `HealthCell`, which is what makes the summary guard observable.
+
+### Re: the kernel defect this uncovered — opus-5
+
+Building it surfaced a real bug, so it is fixed here rather than filed.
+
+**An eager `Computed` froze permanently when an upstream node was disposed.** Two individually-correct rules in `_dirty_disposed_dependents` combine badly: the walk clears each dirtied node's dependent set on the way through, and it deliberately schedules none of the effects it reaches (a disposal publishes nothing). For a user effect both are right. For an eager computed's puller they are fatal together — the memo edge that would rerun it is exactly the edge the walk removed. The computed then served the value it held at disposal time **forever**, and stopped tracking every *other* dependency too, so no later write could repair it:
+
+```python
+m = SourceMap(ctx); m.set("a", 1); m.set("b", 2)
+v = computed(ctx, lambda c: {k: m.get(k, c) for k in m.keys(c)}).eager()
+m.remove("a");  v.value   # {'a': 1, 'b': 2}  — stale, and permanently deaf
+m.set("c", 3);  v.value   # {'a': 1, 'b': 2}  — still
+```
+
+That is `KeyedFold.clear()` exactly, which is how it showed up. `_EagerPuller._drop_cached` now re-registers the memo edge and marks the owner stale; `Computed.value` re-materializes through the puller on the next read — the first moment it can recompute without running an effect inside `dispose`. The eager form now agrees with the lazy one after an upstream disposal (both recompute; both raise `DisposedError` if the body still reads the disposed cell).
+
+**A trap worth naming.** My first attempt at this fix appeared to do nothing. `lazily-py` keeps in-place mypyc `.so` files beside the sources, so `import lazily.signal` loads `signal.cpython-314-*.so`, not `signal.py` — every kernel edit is inert until `make compile`. The `.so` on disk was about six weeks older than the checked-out sources, which means the suite had been validating a stale kernel. Both regression tests were then verified against a neutered hook with a recompile on **each** leg, so neither is vacuous. Recorded in operator memory.
+
+**Verification:** 18 new `KeyedFold` tests plus 2 kernel regression tests; `make check` green (913 tests, ty, ruff, `run_readme`, conformance coverage, interop peer, assertion-ordering, ci-reach). Docs in README, SPEC, CHANGELOG (`Added` + `Fixed`). Committed `lazily-py 6d54f3b`, superproject `484dcae3e1`, both pushed.
+
+`#lzpypromegress`'s CI run (34616209898) came back green.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -105,7 +147,7 @@ Also: the previous item's CI run (34614969844) finished **green**, so `#lzpystru
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzpystructcell]: should we use pyproject extras or another project? This adapter should be generic to handle other competing libraries such as pydantic and dataclasses.~~
 - ~~do [#lzpypromegress]~~
-- do [#lzpykeyedfold]
+- ~~do [#lzpykeyedfold]~~
 - do [#lzpyworkflowdeterminism]
 - do [#lzpyreplayproof]
 - do [#lzpyprojectedchart]
@@ -114,7 +156,6 @@ Also: the previous item's CI run (34614969844) finished **green**, so `#lzpystru
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzpykeyedfold] [recommended] [lazily-py] named `KeyedFold` cell: N independent writers each own a key and clear only their own, with the summary as a guarded `Computed` over the live set. `service.HealthCell` does this for booleans only; `merge.MergeCell` has the algebra but no documented keyed-fold surface. Generalizes the FPE `last_errors` fix (#fpelasterrorlww, fpe PR #92). Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
 - [ ] [#lzpyworkflowdeterminism] [recommended] [lazily-py] temporal.io workflow-safe context: bind `TimelineSource` to `workflow.now()`, route scheduled effects through Temporal timers/activity starts, and raise on any non-deterministic read instead of corrupting replay. Also rename or loudly document `lazily.temporal` (time operators) to avoid the temporal.io collision. Blocks any workflow-side adoption. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
 - [ ] [#lzpyreplayproof] [recommended] [lazily-py] replay-equivalence harness: rebuild the graph from an ordered event log and assert cell values match a recorded fingerprint, failing loudly on divergence -- the durable-execution analogue of tsift's BLAKE3 body-hash revalidation for crux excerpts. `reliable_sync` and `latest_durable_projection` have the machinery but no stated contract. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md
 - [ ] [#lzpyprojectedchart] [recommended] [lazily-py] statechart mode that projects an external authority: feed it observed states, have it validate each transition was legal, and expose a derived 'wedged' cell (in a state past its deadline with no advance). FPE's workflow_run.status is owned by Postgres/Temporal, not the graph. Would express the #fpelasterrorlww wedge declaratively. Repo: src/lazily-py. Source: src/haiven-dev/tasks/fpe.md

@@ -9,7 +9,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -1306,6 +1306,11 @@ Queue is drained. Exchange is at ~1290 lines / 39 sections, well past the clear 
 
 ### Re: Does lazily have integration with the temporal service? — opus-5
 
+> **Queue prompt:**
+>
+> do [#lazilyintegrationtempora]
+
+
 Ambiguous phrase, so both readings:
 
 **1. Temporal.io (the durable workflow orchestration service) — no.**
@@ -1355,13 +1360,12 @@ So the integration between `#lztime` and the rest of the families is a shared cl
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lazilyintegrationtempora]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lazilyintegrationtempora] Does lazily have integration with the temporal service?
+- [ ] [#reconcilecompositionclai] Reconcile the `#lztime` composition claim: `src/lazily-spec/docs/temporal-sources.md` says `DeadlineCell` is "used to build every deadline-driven primitive downstream" (`#lzcoord` lease expiry, `#lzpresence` ephemeral expiry, `#lzresilience` RPC timeouts), but in lazily-rs `coordination.rs`, `presence.rs`, `resilience.rs` and `windowing.rs` each reimplement expiry over the same `tick(now: u64)` contract and never import `DeadlineCore`/`TimerCore` — only `stdlib.rs` composes `TimerCore`. Decide: soften the doc to "shares the logical-clock discipline", or actually compose the core, then apply the decision across all 9 bindings.
 <!-- /agent:backlog -->
 
 ## Review

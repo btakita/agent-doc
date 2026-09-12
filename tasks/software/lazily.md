@@ -1072,13 +1072,67 @@ While there I corrected go's header, which claimed the pin's value is that the a
 So all ten bindings now carry the pin, and nine of ten record the open gap where a reader will find it ... js's is in its header, gd's in its conf.
 
 Pointers at `15c04f55f`. Exchange is at 1017 lines across 23 response sections; noting it, not compacting, with the queue active.
+
+### Re: #reversereachdirection — opus-5 · 2026-09-12T17:05-04:00
+
+> **Queue prompt:**
+>
+> do [#reversereachdirection]
+
+
+Nine bindings, pointers at `c2dcf44d6`. gd excluded with the reason recorded: its CI is `Install Godot` then `make check`, so there is no independent CI spelling to cross-check and the repoint is undetectable from CI ... correctly, since CI runs whatever the root runs.
+
+| | commit | split (anchor / make / no-gate) | superset live |
+|---|---|---|---|
+| rs | `360448c` | 46 / 4 / 2 | **8 of 46** |
+| cpp | `a45aff8` | 7 / 2 / 1 | **3 of 7** |
+| kt | `5fa311b` | 6 / 1 / 1 | **2 of 6** |
+| py | `9e49824` | 8 / 0 / 1 | 0, residual 1 step wide |
+| js | `29b8a3a` | 10 / 1 / 1 | 0 |
+| go | `7bf9c00` | 9 / 0 / 1 | 0 |
+| cs | `85c7443` | 8 / 1 / 1 | 0 |
+| dart | `2d2e4c9` | 10 / 1 / 1 | 0 |
+| zig | `6585ab4` | 6 / 1 / 1 | **4 of 7** |
+
+**What the item was for, and what it actually found.** I filed this to close the recipe-swap attack ... someone deliberately repointing a recipe. Scoping reach to the pinned step closes that in all nine. But the flat haystack was hiding a defect that was *already present*: where a narrow step's command is a superset of a broad member's anchor, **deleting the broad member's own CI step leaves a byte-identical green.** rs: `test` contained in 39 other steps, the entire default-feature suite deletable. cpp: the 64-test suite, the WASM matrix audit, and **the reachability guard's own step ... which reported itself reached with nothing running it.** zig: 4 of 7, including the interop peer. The attack I designed against was hypothetical; the defect the design exposed was live in three bindings.
+
+zig named the mechanism: an interpolated run id normalizes to a trailing ANY token, and a trailing ANY makes one step a superset of **every** one-token anchor. cpp measured the width precisely ... a trailing ANY buys exactly one token, so `lazily_interop_peer --self-check` survived only for having two, "one shortened recipe" from joining the set.
+
+**Four residual layers, each reproduced before being closed and falsified after.** This is the part worth keeping:
+
+1. **The repoint.** Closed by step-scoping.
+2. **A mode flip plus a dropped pin, which cancel.** Change a member's CI step to `make <member>` and delete its gate-step entry in one edit: each half alone exits 1, together **exit 0**. go's loaded form was one commit that retired the interop peer from *everywhere* ... `check-ci-reach: OK` printed for CI to grep while `make -n check` ran the gate zero times. dart's formulation: *a population pinned only as the complement of another pinned population is not pinned against an edit that moves both together. A count is not a pin.*
+3. **A member left in no cell of the partition.** dart: *a property that holds by construction is not a property the guard checks.*
+4. **A member in no cell AND no domain**, because the domain was a variable the audited code assigned, so the equation held vacuously. kt's rule: **every cell must terminate in a pin, never in a variable the audited code assigns.**
+
+Each layer was found by an agent testing a claim it already believed. cpp is explicit that it survived layers 3 and 4 by luck rather than by checking ... "that's luck about which shapes were tried" ... and then falsified its own fix as diagnosis-only rather than exit-code-load-bearing. That honesty is worth more than the fix.
+
+**Converged design:** a three-way partition, every cell an explicit set, asserted exclusive and total over a domain derived from the pins.
+
+```
+{gate-carrying} = {anchor-reached} + {make-invoked} + {excused}
+```
+
+dart corrected my framing on the last cell: an excused member has **no mode**, because an excuse says CI does not reach the gate, so totality is over `{gate-carrying} − {excused}` or a legitimate excuse becomes a false red. kt added that the partition must be stated over **members**, not pin entries ... its `test` carries two entries, so over entries the arithmetic is wrong by exactly one.
+
+**Two disagreements resolved by measurement, not by me.** zig pinned reach mode explicitly; dart argued it was already determined; cpp held dart's view, tested it, and found the two-part edit; dart reproduced it and retracted. And on which set-equality direction is load-bearing, cs said one, kt and cpp the other ... rs settled it: **both** change the exit code in rs, for *different* states, so each binding had measured a different state and none was wrong.
+
+**Two rows stay unprotected**, stated in every guard rather than implied covered. A recipe weakened **inside** its own pinned step stays green, since anchors match as subsequences and extra CI-side tokens are allowed by design ... py measured that as live, 1 step wide. And **a job or trigger that never runs**: js measured job-level `if: false`, job-level `continue-on-error: true`, and `on:` reduced to `workflow_dispatch`, all green. Its observation is the one that matters ... `ci-reach.conf` asserts "runs on every push/PR" **in a comment**, and that is the unverified claim everything else rests on. Both queued below.
+
+**My premises were wrong five times and every one was a regex over raw text.** The make-invocation counts I handed out counted comments, step `name:` fields, and `make check` inside `echo "::error::..."`. Real figures: go 0 (I said 2), rs 4 (I said 7), kt 1 (I said 11), cpp 5 of 19 hits with 2 naming members, py 0 of 16. That is the exact trap these guards' own headers document. I also wrote a false claim into go's header last cycle ... that half the recipe-swap was caught by an anchor-collision rung go does not have ... by copying dart's finding without checking. go corrected it.
+
+**And the shared scratchpad is a live hazard, not a theoretical one.** cs had a `lazily-zig` Makefile restored into `lazily-cs` from a generically-named backup, caught by `git diff` before it reached a measurement. dart found 64 files from an *earlier* dart agent in its subdirectory, including a pre-fix copy of the same guard one filename-transposition away and 409 bytes from one of its own working files ... had it been picked up, every "post-fix RED" would have been a pre-fix run. kt's `$SP/Makefile.orig` held zig content overwritten at 15:28:16, two minutes after its last restore from that name. cpp reports the directory holds **11,220 files**, with ten bindings' copies of this same guard inside 2KB of each other, four written concurrently. dart also found the harness gap that makes this dangerous: rows expecting **green** pass vacuously under contamination, because nothing about a passing case distinguishes "the fix works" from "I measured the wrong tree". Fix adopted by rs, kt, cpp and dart: verify every input against `git show` before each case and refuse to measure otherwise ... which caught two of rs's own harness bugs.
+
+Magnitudes unchanged in all nine. Test counts moved only where tests were added: py 1098 → 1126.
+
+Exchange is at 1048 lines across 24 response sections; noting it, not compacting, with the queue active.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#reversereachdirection]
+- ~~do [#reversereachdirection]~~
 - ~~do [#closeremaininghalf]~~
 - do [#decidereachclosure]
 - do [#subagentscannotcoin]
@@ -1109,7 +1163,10 @@ Pointers at `15c04f55f`. Exchange is at 1017 lines across 23 response sections; 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#reversereachdirection] Add the REVERSE reach direction: pin which CI steps are gates and require each to be claimed by exactly one closure member. Today the reach audit is one-directional -- for each member, is its gate reached? -- over a FLAT ci_anchor set holding every run: command (checkout, setup, gates alike), so a CI gate step claimed by nobody is invisible. This is a PROXY for the recipe-swap attack, not a close: it catches a repoint that orphans the member's original CI step, which is the realistic form. Cost is a third pinned surface with CI-step-rate churn. Same pattern as dart's out-of-closure excuse and KNOWN_UNCOVERED's reverse check; belongs with #lzcsreverserung. Decide the design once before dispatching.
+- [ ] [#verifyworkflowactually] Verify the workflow ACTUALLY RUNS -- the unverified claim under every ci-reach mechanism. js measured job-level `if: false`, job-level `continue-on-error: true`, and `on:` reduced to `workflow_dispatch`: all three leave the guard green, because the step map gave it a handle on the STEP and nothing has a handle on the job or the trigger. `ci-reach.conf` asserts 'runs on every push/PR' in a COMMENT. js closed the step-level halves (a step's own if:/continue-on-error). Needs one converged decision on what pins a job's and a workflow's activation, then one pass over nine repos.
+- [ ] [#closeacceptsame] Close or accept the same-pinned-step residual: a recipe repointed at ANOTHER command inside its own pinned step, or weakened in place (dropping --self-check, -race, --binding), stays green -- anchors match as in-order subsequences and extra CI-side tokens are allowed by design. py measured it LIVE and 1 step wide (drop `uv run poe test` from test: and the guard prints reached while the suite and conformance rungs 2-4 run zero times); py declined to split the step because that closes one instance and reads as closing the class. Residual width = count of pinned steps carrying more than one anchor. Only a per-recipe-content pin closes it, whose churn is recipe-rate -- rejected in #closeremaininghalf for that reason, so this may be accept-and-document.
+- [ ] [#sharedscratchpadlive] Shared scratchpad is a LIVE cross-repo hazard, not theoretical: cs had a lazily-zig Makefile restored into lazily-cs from a generically-named backup; dart found 64 files from an EARLIER dart agent including a pre-fix copy of the same guard one filename-transposition away and 409 bytes from its own working file; kt's $SP/Makefile.orig held zig content overwritten 2 minutes after its last restore from that name; cpp reports 11,220 files with ten bindings' copies of one guard inside 2KB, four written concurrently. A picked-up stale copy INVERTS measurements rather than breaking them. Working rule: repo-private subdirectory, repo-prefixed filenames, select by mtime, and verify every restore input against `git show` before each case INCLUDING rows that expect green -- dart showed green rows pass vacuously otherwise.
+- [ ] [#auditeveryguard] Audit every guard for a property held BY CONSTRUCTION rather than asserted -- the generalised form of four layers found in #reversereachdirection. Instances: a population pinned only as the complement of another (a count is not a pin); a partition whose cells are filled by the audited code's own if/else; a partition whose DOMAIN is a variable the audited code assigns, making the equation vacuous. kt's rule: every cell must terminate in a pin, never in a variable the audited code assigns. cpp survived two of these by luck about which probe shapes were tried and said so. Sweep the conformance-coverage and unbound-block guards for the same shape, not just ci-reach.
 - [ ] [#decidereachclosure] Decide where the ci-reach closure pin LIVES. rs measured the churn (32 commits touched the check: line, all before 2026-08-09) and argues the pin belongs ADJACENT to the root rule in the Makefile, beside check:, so a closure edit and its pin edit land in one hunk -- at ~3 edits/week the 'update the pin deliberately' remedy gets applied reflexively and no diagnostic wording prevents that. I placed it in the guard to match KNOWN_UNCOVERED's shape; rs followed the brief but advocates the other placement. Worth settling before the next growth phase.
 - [ ] [#subagentscannotcoin] Subagents cannot coin backlog ids: the agent-doc hook blocks an untracked id, and filing one would mean writing tasks/software/lazily.md from outside the agent's own repo. Hit by kt, dart, cs and gd across three cycles; each retags its commit to the queue head, so per-finding ids never exist and commit messages all carry the same id. Either give agents a way to file, or accept head-tagging and stop coining -- but the current state loses the mapping from commit to finding.
 - [ ] [#twopreexisting] Two pre-existing normalizer quirks cpp found while pinning the closure, neither touched: `command -v uvx >/dev/null` anchors as `command -v uvx null` because the normalizer basenames the redirection target; and check-conformance-coverage.sh's refusal text claims `make conformance-coverage` 'builds, runs ctest and audits in one invocation', which is false exactly when the conformance-coverage: test edge is dropped. Third quirk alongside the wasm ^# filter gap.

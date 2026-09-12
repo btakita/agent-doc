@@ -26,6 +26,99 @@ pub fn strip_assistant_heading(response: &str) -> String {
     result
 }
 
+/// Separator between the model short name and the response timestamp inside a
+/// `### Re:` heading's attribution segment (`#timestampresponseheader`).
+///
+/// Deliberately NOT another spaced em dash. Four separate parsers read this
+/// heading, and they do not agree on which dash bounds the attribution: three
+/// take the FIRST (`response_prompt_target_from_re_heading` here,
+/// `agent_doc_queue::queue_response::response_heading_topic`, and
+/// `agent_doc_turn::response_replay::normalize_replay_topic`) while
+/// `agent_doc_document::transient_markers::strip_re_heading_attribution` takes the
+/// LAST, via `rfind(" — ")`. A second em dash would therefore leave the model name
+/// behind on the strip path, and since that strip backs
+/// `normalize_post_commit_re_heading_drift` — the post-commit comparison that lets
+/// an attributed heading match an unattributed one — the residue would read as
+/// permanent heading drift on every committed response.
+///
+/// Keeping exactly one ` — ` in the heading preserves all four readings unchanged:
+/// the topic is everything before it, the attribution everything after.
+pub const RESPONSE_ATTRIBUTION_SEPARATOR: &str = " · ";
+
+/// The spaced em dash that separates a response topic from its attribution.
+pub const RESPONSE_TOPIC_ATTRIBUTION_SEPARATOR: &str = " \u{2014} ";
+
+/// Build the attribution segment of a `### Re:` heading: model short name, then
+/// the response timestamp.
+///
+/// An empty timestamp yields the model alone, which is the pre-timestamp shape —
+/// so a harness that cannot resolve a clock degrades to the old heading instead of
+/// emitting a dangling separator.
+pub fn response_heading_attribution(model_short_name: &str, timestamp: &str) -> String {
+    let model = model_short_name.trim();
+    let timestamp = timestamp.trim();
+    if timestamp.is_empty() {
+        return model.to_string();
+    }
+    if model.is_empty() {
+        return timestamp.to_string();
+    }
+    format!("{model}{RESPONSE_ATTRIBUTION_SEPARATOR}{timestamp}")
+}
+
+/// Build a complete `### Re:` heading line.
+pub fn response_heading(topic: &str, model_short_name: &str, timestamp: &str) -> String {
+    let attribution = response_heading_attribution(model_short_name, timestamp);
+    if attribution.is_empty() {
+        return format!("### Re: {}", topic.trim());
+    }
+    format!(
+        "### Re: {}{RESPONSE_TOPIC_ATTRIBUTION_SEPARATOR}{attribution}",
+        topic.trim()
+    )
+}
+
+/// Split a `### Re:` heading's attribution segment into model and timestamp.
+///
+/// Returns `None` when the heading carries no attribution at all. The timestamp is
+/// `None` for a pre-timestamp heading, which stays valid.
+pub fn response_heading_model_and_timestamp(line: &str) -> Option<(&str, Option<&str>)> {
+    let trimmed = line.trim().trim_start_matches('❯').trim();
+    let without_hashes = trimmed.trim_start_matches('#').trim_start();
+    let rest = without_hashes.strip_prefix("Re:")?.trim();
+    let (_, attribution) = rest.split_once(RESPONSE_TOPIC_ATTRIBUTION_SEPARATOR)?;
+    let attribution = attribution.trim();
+    match attribution.split_once(RESPONSE_ATTRIBUTION_SEPARATOR) {
+        Some((model, timestamp)) => Some((model.trim(), Some(timestamp.trim()))),
+        None => Some((attribution, None)),
+    }
+}
+
+/// Whether a response timestamp matches the documented
+/// `YYYY-MM-DDTHH:MM±HH:MM` shape (`#timestampresponseheader`).
+///
+/// A shape check, not a calendar check: it exists so a guard can tell a real
+/// timestamp from prose that happened to land in the attribution slot, without
+/// pulling a date library into a pure text module.
+pub fn response_heading_timestamp_is_wellformed(timestamp: &str) -> bool {
+    let bytes = timestamp.as_bytes();
+    if bytes.len() != 22 {
+        return false;
+    }
+    let digits_at = |positions: &[usize]| {
+        positions
+            .iter()
+            .all(|index| bytes[*index].is_ascii_digit())
+    };
+    digits_at(&[0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18, 20, 21])
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[10] == b'T'
+        && bytes[13] == b':'
+        && matches!(bytes[16], b'+' | b'-')
+        && bytes[19] == b':'
+}
+
 /// Extract the session prompt target from the first `### Re:`-style response
 /// heading, dropping the model suffix after a dash separator.
 pub fn response_prompt_target_from_re_heading(response_body: &str) -> Option<String> {
@@ -306,6 +399,117 @@ fn contains_commit_hash(line: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// `#timestampresponseheader`: the whole reason the timestamp joins the model with
+    /// `·` instead of a second spaced em dash. Four parsers read this heading and they
+    /// disagree about which dash bounds the attribution — three take the first, and
+    /// `strip_re_heading_attribution` takes the LAST. This drives all four off one
+    /// timestamped heading, so a future format change cannot satisfy one and break the
+    /// others silently.
+    #[test]
+    fn a_timestamped_heading_reads_the_same_through_every_parser() {
+        let heading = super::response_heading("do [#fix1]", "opus-5", "2026-09-11T23:45-04:00");
+        assert_eq!(
+            heading,
+            "### Re: do [#fix1] \u{2014} opus-5 \u{00B7} 2026-09-11T23:45-04:00"
+        );
+        assert_eq!(
+            heading.matches(" \u{2014} ").count(),
+            1,
+            "exactly one spaced em dash must separate topic from attribution: {heading}"
+        );
+
+        // 1. This module's own parser (first dash).
+        assert_eq!(
+            super::response_prompt_target_from_re_heading(&heading).as_deref(),
+            Some("do [#fix1]")
+        );
+        // 2. The queue-closeout parser (first dash).
+        assert_eq!(
+            agent_doc_queue::queue_response::response_heading_topic(&heading),
+            Some("do [#fix1]")
+        );
+        // 3. The compact digest's topic summarizer.
+        assert_eq!(
+            agent_doc_topic::summarize_compacted_exchange(&format!("{heading}\nbody\n")),
+            vec!["Archived 1 response topic(s): do [#fix1]".to_string()]
+        );
+        // 4. The post-commit drift strip (LAST dash) must remove model AND timestamp.
+        assert_eq!(
+            agent_doc_document::transient_markers::strip_re_heading_attribution(&format!(
+                "{heading}\n"
+            )),
+            "### Re: do [#fix1]\n",
+            "the attribution strip must not leave the model name behind"
+        );
+    }
+
+    /// The pre-timestamp heading stays valid — a harness with no clock must degrade to
+    /// it rather than emit a dangling separator.
+    #[test]
+    fn an_untimestamped_heading_still_round_trips() {
+        let heading = super::response_heading("do [#fix1]", "gpt-5", "");
+        assert_eq!(heading, "### Re: do [#fix1] \u{2014} gpt-5");
+        assert_eq!(
+            super::response_heading_model_and_timestamp(&heading),
+            Some(("gpt-5", None))
+        );
+        assert_eq!(
+            agent_doc_document::transient_markers::strip_re_heading_attribution(&format!(
+                "{heading}\n"
+            )),
+            "### Re: do [#fix1]\n"
+        );
+    }
+
+    #[test]
+    fn heading_attribution_splits_into_model_and_timestamp() {
+        let heading = super::response_heading("topic", "opus-5", "2026-09-11T23:45-04:00");
+        assert_eq!(
+            super::response_heading_model_and_timestamp(&heading),
+            Some(("opus-5", Some("2026-09-11T23:45-04:00")))
+        );
+        // No attribution at all.
+        assert_eq!(
+            super::response_heading_model_and_timestamp("### Re: topic"),
+            None
+        );
+        // The active-prompt marker and heading level must not defeat the split.
+        assert_eq!(
+            super::response_heading_model_and_timestamp(
+                "\u{276F} #### Re: topic \u{2014} opus-5 \u{00B7} 2026-09-11T23:45-04:00"
+            ),
+            Some(("opus-5", Some("2026-09-11T23:45-04:00")))
+        );
+    }
+
+    /// A shape check, so a guard can tell a timestamp from prose that landed in the
+    /// attribution slot. The offset sign sits at index 16 and the offset colon at 19 —
+    /// transposing them accepts `...23:45:04-00` and rejects the real format.
+    #[test]
+    fn timestamp_shape_check_pins_each_separator_position() {
+        assert!(super::response_heading_timestamp_is_wellformed(
+            "2026-09-11T23:45-04:00"
+        ));
+        assert!(super::response_heading_timestamp_is_wellformed(
+            "2026-09-11T23:45+05:30"
+        ));
+        for bad in [
+            "2026-09-11T23:45:04-00",  // sign/colon transposed
+            "2026-09-11T23:45",        // no offset
+            "2026-09-11 23:45-04:00",  // space instead of T
+            "2026-9-11T23:45-04:00",   // unpadded month
+            "2026-09-11T23:45-04:0",   // too short
+            "2026-09-11T23:45-04:000", // too long
+            "opus-5",
+            "",
+        ] {
+            assert!(
+                !super::response_heading_timestamp_is_wellformed(bad),
+                "must reject {bad:?}"
+            );
+        }
+    }
+
     use super::*;
 
     #[test]

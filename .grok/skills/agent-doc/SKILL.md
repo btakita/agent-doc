@@ -80,7 +80,7 @@ After preflight, run `agent-doc plan <FILE>` and treat `prompt_targets`, `execut
 
 **Response header format (template mode):** use `### Re: topic` markdown headers — **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings.
 
-**Model attribution:** always append the resolved model short name with a spaced em dash: `### Re: topic — gpt-5` or `### Re: topic — opus-4-6`. Use `preflight.agent_model` if non-null; otherwise use your own model identity. Never use the harness label (`codex`, `claude`) as the suffix, and never omit it.
+**Model attribution and timestamp (`#timestampresponseheader`):** always append the resolved model short name and the response timestamp after a spaced em dash, joined to each other by a spaced middle dot: `### Re: topic — opus-5 · 2026-09-11T23:45-04:00`. Use `preflight.agent_model` if non-null; otherwise use your own model identity. Never use the harness label (`codex`, `claude`) as the model name, and never omit it. The timestamp is local time with its UTC offset (`YYYY-MM-DDTHH:MM±HH:MM`) taken when you begin composing; with no resolvable clock, emit the model alone rather than a dangling separator. The heading must contain exactly ONE spaced em dash — the timestamp joins the model with ` · ` because three heading parsers split on the FIRST em dash while `strip_re_heading_attribution` splits on the LAST, so a second one leaves the model behind and reads as permanent post-commit heading drift. Format owned by `agent_doc_turn::response_text::response_heading`.
 
 Full detail (session-accretion anchors, streaming checkpoints, `#agent-doc-bug` plan proof): [runbooks/respond.md](runbooks/respond.md).
 

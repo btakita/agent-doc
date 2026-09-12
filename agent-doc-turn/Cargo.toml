@@ -28,5 +28,9 @@ serde = { version = "1", features = ["derive"] }
 similar = "3"
 
 [dev-dependencies]
+# `#timestampresponseheader`: the cross-parser heading test drives the compact
+# digest's topic summarizer alongside the three closeout parsers, so a format
+# change cannot satisfy some readers and silently break others.
+agent-doc-topic = { path = "../agent-doc-topic", version = "0.35.367" }
 proptest = "1"
 serde_json = "1"

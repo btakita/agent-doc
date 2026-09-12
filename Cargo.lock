@@ -2683,6 +2683,7 @@ dependencies = [
  "agent-doc-queue",
  "agent-doc-state-scope",
  "agent-doc-template",
+ "agent-doc-topic",
  "lazily 0.57.1",
  "proptest",
  "regex",

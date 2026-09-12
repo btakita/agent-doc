@@ -3548,9 +3548,18 @@ mod tests {
 
     #[test]
     fn bundled_skill_contains_model_short_name_attribution_rule() {
-        assert!(SKILL_TEMPLATE.contains("### Re: topic — gpt-5"));
-        assert!(SKILL_TEMPLATE.contains("### Re: topic — opus-4-6"));
+        // `#timestampresponseheader`: the heading now carries model AND timestamp.
+        assert!(SKILL_TEMPLATE.contains("### Re: topic — opus-5 · 2026-09-11T23:45-04:00"));
+        assert!(SKILL_TEMPLATE.contains("YYYY-MM-DDTHH:MM"));
         assert!(SKILL_TEMPLATE.contains("Never use the harness label (`codex`, `claude`)"));
+        // The one-em-dash invariant is what keeps all four heading parsers agreeing;
+        // three split on the first em dash and `strip_re_heading_attribution` on the
+        // last, so a second one leaves the model name behind as permanent commit drift.
+        assert!(SKILL_TEMPLATE.contains("exactly ONE spaced em dash"));
+        assert!(
+            !SKILL_TEMPLATE.contains("### Re: topic — gpt-5"),
+            "the untimestamped example must not survive alongside the timestamped rule"
+        );
     }
 
     #[test]
@@ -3589,7 +3598,8 @@ mod tests {
         assert!(content.contains("Project-scoped remote hosts"));
         assert!(content.contains("globally approved SSH commands"));
         assert!(content.contains("project-local `.agent-doc/config.toml`"));
-        assert!(content.contains("### Re: topic — gpt-5"));
+        // `#timestampresponseheader`: the documented example carries model AND timestamp.
+        assert!(content.contains("### Re: topic — opus-5 · 2026-09-11T23:45-04:00"));
         assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
         assert!(content.contains("Imperative edits are executable directives"));
         assert!(content.contains("Do not require the same instruction to be repeated in chat"));
@@ -3853,8 +3863,11 @@ mod tests {
         assert!(content.contains("Do **not** type `/agent-doc`"));
         assert!(content.contains("agent-doc <FILE>"));
         assert!(content.contains("bare `agent-doc write`"));
-        assert!(content.contains("### Re: topic — gpt-5"));
-        assert!(content.contains("### Re: topic — opus-4-6"));
+        // `#timestampresponseheader`: the timestamped example, plus the two
+        // harness-label counter-examples this runbook shows as WRONG.
+        assert!(content.contains("### Re: topic — opus-5 · 2026-09-11T23:45-04:00"));
+        assert!(content.contains("YYYY-MM-DDTHH:MM"));
+        assert!(content.contains("exactly one** spaced em dash"));
         assert!(content.contains("### Re: topic — codex"));
         assert!(content.contains("### Re: topic — claude"));
         assert!(content.contains("Manual repair / missed patchback"));

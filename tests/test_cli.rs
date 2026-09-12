@@ -15820,6 +15820,60 @@ fn test_dispatch_turn_start_is_recorded_on_the_busy_transition() {
     }
 }
 
+/// `#timestampresponseheader`: the response-header contract is an instruction surface,
+/// so the rule has to live in SKILL.md and the respond runbook, and the format has to
+/// live in exactly one place in the binary. The cross-parser property itself is
+/// behaviour-tested by `a_timestamped_heading_reads_the_same_through_every_parser` in
+/// `agent-doc-turn`; this guard stops the instruction text and the owner from drifting.
+#[test]
+fn test_response_header_timestamp_contract_is_documented_and_singly_owned() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    let response_text =
+        fs::read_to_string(manifest_dir.join("agent-doc-turn/src/response_text.rs")).unwrap();
+    for required in [
+        "pub const RESPONSE_ATTRIBUTION_SEPARATOR",
+        "pub const RESPONSE_TOPIC_ATTRIBUTION_SEPARATOR",
+        "pub fn response_heading_attribution(",
+        "pub fn response_heading(",
+        "pub fn response_heading_model_and_timestamp(",
+        "pub fn response_heading_timestamp_is_wellformed(",
+    ] {
+        assert!(
+            response_text.contains(required),
+            "agent-doc-turn must own the response heading format: {required}"
+        );
+    }
+
+    // The timestamp must NOT be joined with a second spaced em dash: three parsers
+    // split the heading on the first one and `strip_re_heading_attribution` on the
+    // last, so a second one leaves the model name behind as permanent commit drift.
+    assert!(
+        response_text.contains("pub const RESPONSE_ATTRIBUTION_SEPARATOR: &str = \" \u{00B7} \";"),
+        "the model/timestamp separator must stay a middle dot, not a second em dash"
+    );
+
+    for relative in ["SKILL.md", "runbooks/respond.md"] {
+        let surface = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            surface.contains("#timestampresponseheader"),
+            "{relative} must carry the response-header timestamp rule"
+        );
+        assert!(
+            surface.contains("2026-09-11T23:45-04:00"),
+            "{relative} must show the concrete timestamped heading example"
+        );
+        assert!(
+            surface.contains("YYYY-MM-DDTHH:MM"),
+            "{relative} must state the timestamp shape"
+        );
+        assert!(
+            surface.contains("exactly ONE spaced em dash"),
+            "{relative} must state the one-em-dash invariant that keeps all four parsers agreeing"
+        );
+    }
+}
+
 #[test]
 fn test_agent_doc_controller_owns_handoff_staleness_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));

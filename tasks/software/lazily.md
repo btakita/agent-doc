@@ -899,14 +899,57 @@ Also `#lzstampprefixdrift` (go already machine-enforces the producer/guard prefi
 ### Stated plainly
 
 `grep -c "result: FAILED"` is valid in rs, which does emit it — so the vacuity filed under `#lzfailedgrepvacuous` is per-binding rather than universal, and that item now has calibration data from all ten. And RTK hid the cache indicator in **two** bindings: it stripped kt's Gradle task lines and filtered go's `go test` output into a summary that omitted `(cached)` entirely. The tool I rely on for output concealed precisely the signal this bug travels on, in both places it travels.
+
+### Re: #lzstampprefixdrift + #lzstampsatisfiesnonempty — opus-5 · 2026-09-12T12:05-04:00
+
+> **Queue prompt:**
+>
+> do [#lzstampprefixdrift]
+>
+> do [#lzstampsatisfiesnonempty]
+
+
+Both drained in one pass, one agent per repo, ten commits, ten green CI runs, superproject pointers committed as `b67502b29`. I merged the two heads because they touch the same guard and producer files in the same ten repos; sending nine agents for a one-test change and then ten more for the emptiness audit would have meant two commits and two CI runs per repo for work that belongs in one.
+
+| | commit | Part A spellings found | Part B byte checks | misdiagnosis measured |
+|---|---|---|---|---|
+| rs | `c0cbf4b` | 4 | 6 | 150 "NOT opened" + 166 "never REPLAYED" |
+| py | `d0a13c1` | 4 | 3 | 145 |
+| js | `849dc40` | 4 | already closed | n/a |
+| go | `81cd492` | already coupled | 3 | 147 |
+| kt | `2883933` | 2 (uncoupled) | 2 | 179 |
+| cs | `d17946c` | 3 | 2 | 151 |
+| cpp | `5343ac5` | 5 | already closed | n/a |
+| zig | `2a329f4` | 2 | 1 | 138 |
+| dart | `4444ded` | 3 | 4 | 144 / 153 / 712 |
+| gd | `b32c3c3` | 3 + a record-tag pair | 1 | 91 |
+
+**My framing of Part B was wrong in one direction and right in another.** I filed it as a possible false green. It is not: nine of nine bindings with a live byte check refused a stamp-only file anyway, on floors that sit below the byte test. What the stamp destroyed is the **diagnosis**. Every one of them reported a recorder that never ran as a corpus regression, and the numbers above are wrong findings, not real ones. zig's guard carried a comment asserting the case was already handled: "a run that produced nothing leaves an empty file and the `-s` check above already fails it". That sentence stopped being true the day the stamp landed, and nothing in the repo noticed. cpp's workflow step was the only true false pass anyone found, and `9b5af3d` had already closed it.
+
+**The structural cause, named by go, is worth keeping.** Its two `[ ! -s ]` tests sat at the **call sites** while the record check sat *inside* the reader and ran after them. "That split, bytes at the call site and substance inside, is what let the stamp weaken this silently." Both call-site tests are gone; one reader per file now handles absent, zero-records, stamp-with-zero-records, unstamped and other-run, each naming the file and the variable to set.
+
+**Producer-side stamping is not equivalent to recipe-side, and which is correct is per binding.** cpp and gd reached opposite conclusions for structural reasons rather than preference, and both are right about their own repo. cpp cannot stamp producer-side at all: 38 binaries append in `ios::app`, so "first writer stamps" is a race, which is why truncation is the stamping point. gd must not: `append_line` is append-only across gdUnit4 passes by design, so a producer-side stamp cannot clear a leftover file, and the leftover file is gd's measured hole, a hand-driven scene appending 250 records onto the previous run's 317. Truncation and the stamp have to be the same act there. rs, dart and zig write the stamp and its triggering record in one call under one lock, so in those three a stamp-only file is unreachable by the recorder and the stamp genuinely attests "the recorder reached this file". Where it cannot, only a record count can, which is what makes Part B load-bearing in gd and cpp rather than cosmetic.
+
+**On the immunity claim rs made earlier:** it survives, and only by the producer's spelling, which is exactly the coupling this series removes. `tests/common/mod.rs` claimed that stamping per process and stamping from the first writer close the stale-evidence hole identically. With byte tests present that claim was false, and six byte tests were weakened, including the same three `test -s` assertions in the CI evidence step that cpp independently found.
+
+Four traps came out of this that apply beyond the two items:
+
+- `grep -c` exits 1 on a zero count, so under `set -o pipefail` a records rung aborts the script with no message at all. zig and dart both hit it and switched to `awk`; go counts with `grep -c .` over data lines and survives only because that call is not in a pipeline.
+- Interpolating a variable into `sed 's///'` makes its characters a regex rather than text. gd moved prefix-stripping to a bash `case` for this.
+- A realistic-looking fixture path inside a *new* test file is picked up by js's `AREA_OF_FIXTURE`, which derives areas from string literals across every test source. js's first draft reddened `make check` with a probe record shaped like `reactive/graph.json`.
+- `std.mem.trimLeft`/`trimRight` exist on zig 0.15.2 and are gone on 0.16.0+. A first attempt that compiles on master breaks both pinned releases.
+
+Magnitudes are unchanged in all ten. Test counts moved only by the new coupling tests: kt 489 to 492, cs 325 to 326 plus 7, py 1073 to 1081, js 665 to 668, dart 733 to 736. zig's `Zig master` job failed at exit 124 on its `timeout 90` under `continue-on-error`; the immediately prior unrelated run shows the identical timeout, so it is pre-existing and advisory, and the five gating jobs are green.
+
+Exchange is at 875 lines across 20 response sections. Noting it rather than compacting, since the queue is active.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lzstampprefixdrift]
-- do [#lzstampsatisfiesnonempty]
+- ~~do [#lzstampprefixdrift]~~
+- ~~do [#lzstampsatisfiesnonempty]~~
 - do [#lzrscorpusrootvacuous]
 - do [#lzmakepfootgun]
 - ~~do [#lzstalemanifest]~~
@@ -945,8 +988,10 @@ Also `#lzstampprefixdrift` (go already machine-enforces the producer/guard prefi
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzstampprefixdrift] [lazily-rs, lazily-py, lazily-js, lazily-kt, lazily-cpp, lazily-zig, lazily-cs, lazily-dart, lazily-gd] The run-id stamp prefix now exists in TWO SPELLINGS in every binding — the producer writes `# lazily-run-id <value>` from test-side code, and the guard recognises it from a separate constant. lazily-kt flagged this explicitly as a caveat: a drift between them fails closed (the guard refuses), so it is safe by construction, but it is NOT machine-enforced and the failure would look like a stale-evidence bug rather than a prefix typo, which is a bad diagnostic for a confusing failure. LAZILY-GO ALREADY SOLVED IT and is the reference: `TestGuardAndRecorderAgreeOnTheStampPrefix` couples the Go constant to the bash `RUN_ID_PREFIX`, and it is one of four mutations that redden its probe suite. Adopt that test in the other nine. The general principle is the one this whole series keeps rediscovering: two definitions of one string, held together by a comment, is the shape that drifts — lazily-cpp found the same thing structurally this cycle when its `assertion_json` clone had silently diverged for every number-carrying block, and lazily-rs found it in scenario-id resolution that agreed with the shared rule only by coincidence of input. A test that fails when the two disagree costs a few lines.
-- [ ] [#lzstampsatisfiesnonempty] [audit all ten, lazily-js and lazily-cpp already fixed] THE RUN-ID PROTOCOL INTRODUCES A HAZARD IT MUST ALSO CLOSE, and exactly two bindings caught it independently. Stamping an evidence file makes it NON-EMPTY, so every existing `test -s`, `statSync().size`, `[ ! -s ]` and "manifest written" check can no longer distinguish a real run from a detached recorder that wrote nothing but a stamp. lazily-js added a stamp-with-no-records check and verified a 33-byte stamp-only file now refuses. lazily-cpp found the same thing in its CI workflow — the "manifest written" step tested `-s`, which a bare stamp satisfies — and changed it to count records BELOW the stamp. THE OTHER EIGHT MAY HAVE WEAKENED AN EXISTING EMPTINESS CHECK WITHOUT NOTICING. For each: find every emptiness or existence test over a now-stamped evidence file and confirm it counts records rather than bytes. lazily-zig is the one where this matters most and where it may already be fine by accident — its whole prevention was a `: >` truncation paired with `[ ! -s ]`, so if that pair still tests size it now passes on a stamp alone. lazily-rs is likely fine because its `conformance-manifest-reset` empties the files and its rungs fail closed on empty, but it stamps from the first writer after the reset, so verify the ordering. Probe each one the way js did: a stamp-only file must refuse, naming the file.
+- [ ] [#auditeveryguard] #lzgrepcpipefail: audit every guard's record/count rung for `grep -c` under `set -o pipefail` -- a zero count exits 1 and aborts the script with NO message, silently converting a refusal into a crash. zig and dart hit it in this pass and switched to awk; go's `grep -c .` survives only because it is not in a pipeline. Check all ten.
+- [ ] [#lazilycpptwo] #lzwasmstampchannel: lazily-cpp's two wasm conformance manifests are deliberately unstamped, and `scripts/check-wasm-tiers.sh:99` filters `^@` but not `^#` -- stamping them would inflate both tier counts by 1 and slacken both floors by one. Belongs to the wasm channel's own change.
+- [ ] [#lazilyderivesreplayed] #lzareaderivetestfile: lazily-js's `AREA_OF_FIXTURE` derives replayed areas from string literals across EVERY test source, so a realistic-looking fixture path inside a new test file registers as a replayed area and reddens the corpus check. Audit which other bindings derive coverage from source literals rather than from run evidence.
+- [ ] [#documentbindingsstamp] #lzstampsitedoc: document which bindings can stamp producer-side and which cannot, with the reason -- cpp cannot (38 binaries append in ios::app, first-writer-stamps is a race), gd must not (append_line is append-only across gdUnit4 passes, so a producer-side stamp cannot clear a leftover file), rs/dart/zig write stamp+record in one locked call so a stamp-only file is unreachable. Recipe-side and producer-side are NOT equivalent and the correct choice is per binding.
 - [ ] [#lzrscorpusrootvacuous] [lazily-rs] The corpus-root guard reports `corpus-root guard OK: 0 default-root reference(s) across 0 file(s), all baselined` while the script's own header describes FORTY-FIVE baselined sites that should fail when they disappear. Found incidentally during #lzstalemanifest, byte-identical in the pre-change baseline log, so it is NOT caused by that work — but as the agent put it, the rung looks vacuous. This is the exact shape #lzvacuousrun exists to refuse: zero references across zero files is OK over nothing, and a guard whose population has silently gone to zero reports success by construction. DETERMINE WHICH IT IS, because both are plausible: either the 45 sites were legitimately removed and the header is stale prose (in which case the rung is dead and should be deleted or re-pointed), or the scan's discovery step has silently stopped finding files (in which case a real guard is inert). The discriminator is cheap: the header names what it baselined, so check whether those 45 sites still exist in the tree under any spelling. If the rung is live, it needs a zero-guard like every other magnitude in this family — 0 of 0 must fail, not pass.
 - [ ] [#lzmakepfootgun] [docs, all ten] `make -p` BUILDS THE DEFAULT GOAL, and piping it into a short-circuiting reader corrupts state. lazily-rs lost a probe to this: `make -p | grep -m1 ...` started `make check`, ran `conformance-manifest-reset`, and then SIGPIPE'd when grep exited — SILENTLY TRUNCATING every file under build/ mid-analysis. The analysis command destroyed the evidence it was analysing. Use `make -pn` (dry run) or `make --eval` instead, and never pipe `make -p` into `head`/`grep -m1`/anything that closes the pipe early. Record this in the conformance docs beside the plant-probe method (#lzplantprobemethod), because every binding's Makefile is now load-bearing for the run-id protocol and inspecting those Makefiles is now a routine step — this trap is reachable by anyone auditing them, and its symptom (empty build/, guards failing as missing evidence) looks exactly like the bug under investigation rather than like self-inflicted damage.
 - [ ] [#lzfailedgrepvacuous] [all ten, plus the agent-doc closeout instructions] `grep -c "result: FAILED"` IS VACUOUS IN AT LEAST FOUR BINDINGS, and I asked every agent in this session to use it as the closeout check. Proven, not suspected: lazily-dart deliberately failed a run (exit 1, tally `+14 -1`) and that string appeared ZERO times; lazily-gd's gdUnit4 never emits it; lazily-kt's Gradle/JUnit never emits it (0 on green AND would be 0 on red); lazily-js's `node --test` never emits it. So for those four the check has been reporting success by construction all night — it did not mask a real failure, because the exit codes were captured separately and were 0, but it contributed nothing and would not have caught anything. THE WORK: for each of the ten bindings, determine the real failure signal its runner emits and record it, then replace the generic grep with the per-binding signal. Known good substitutes: dart test's `+passed -failed` tally, gdUnit4's `Statistics: ... N failures`, JUnit XML failure/error counts for kt, `node --test`'s `ℹ fail N` for js, ctest's `N/M tests passed` for cpp. AND FIX THE INSTRUCTION SOURCE: the closeout guidance that propagates this lives in the agent-doc skill runbooks and in how I brief subagents — a check that is vacuous in 40 percent of targets should not be the standard one. The durable rule is the one every agent applied correctly anyway: capture $? explicitly and additionally assert the runner's own count, because an exit code can be masked by a pipe and a grep can be vacuous, but not both at once.

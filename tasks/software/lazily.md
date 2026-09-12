@@ -465,6 +465,59 @@ This is the third appearance of one failure mode: a guard anchored on a **litera
 go's retired names now read as undeclared in the central audit, which is a **NOTE and not a failure**, and the same state py and gd are in. That is expected, and it means the audit's "declared floor" dimension is now mostly unused across the family — if it is never going to be declared again, it is dead surface, and that is worth deciding rather than letting drift. I have not filed it, because `#lzscenariofloormissing` in the queue is adjacent and may subsume it.
 
 I also let one CI wait exceed its timeout and move to the background rather than shortening it; the result came back green for both commits, so nothing was reported before it was proven.
+
+### Re: `#lzgoasyncflake` — root-caused, and `got 127, want 8` is what cracked it — opus-5 · 2026-09-12T06:01-04:00
+
+> **Queue prompt:**
+>
+> do [#lzgoasyncflake]
+
+
+Fixed, not waived. `a4faa3a`, CI green, pointer `c9c2d67a4`. And it **reproduces deterministically at `GOMAXPROCS=1`**, so it was never really a flake — it was a starvation-sensitive defect that the default scheduler usually hid.
+
+### The number redirected the diagnosis
+
+```
+DIVERGENCE AsyncContext/churn_returns_to_baseline.json#3:observed_count — got 127, want 8
+```
+
+I had pointed at go's history of reading off the context lock, and a torn counter read gives 7 or 9. It gave 127. That rules out the lead I was most confident in, which is the useful thing a real number does.
+
+### The cause was in the conformance model, not the library and not the fixture
+
+`asyncModel.settle()` tested quiescence by scanning `ctx.effects` for a handle with `running` set. But `AsyncEffectHandle.DisposeAsync` deletes the handle from that map **while its body goroutine is still in flight** — it cancels the goctx, and `runningEffects` is only decremented later when the completion posts back through `onEffectDone`. So a **disposed-but-still-running effect is invisible to the scan** and correctly counted by the counter.
+
+Step 2 of the fixture is 500 `dispose_then_create` cycles at `live_width: 8` — roughly 4000 dispose-while-running events — so its settle returned with bodies still pending. Those runs then landed *after* step 3's `runsBefore` watermark, and `observed := runLog()[runsBefore:]` counted them as step 3's own. Step 2 still passed its own `dependents_of` check because edge bookkeeping is synchronous in the loop and only the bodies lag. At `GOMAXPROCS=1` the settle loop's do/sleep cycle starves those bodies outright, which is why forcing the scheduler made it certain.
+
+The part I find most instructive: **AsyncContext already maintains `runningEffects` and `pendingReruns` for exactly this question** — its own comment says the pair "make quiescence an O(1) test", and `resetDrainIfQuiescent` uses it. The conformance model re-derived a weaker predicate *beside* the correct one that was already there. That is a different failure from a missing guard, and harder to see, because the right answer was sitting adjacent the whole time.
+
+On my three leads: the context-lock lead was the right **shape** but the read was properly locked — the defect was an incomplete predicate, not an unlocked one. The fixture is correct and **no assertion was relaxed**: 8 is exactly right for a publish to 8 live subscribers. Varying the scheduler was the instrument that worked, first try.
+
+### A vacuous green in the same predicate
+
+Worth calling out separately because it is this repo's recurring shape: `do()`'s return value was **discarded**, and the verdict was initialized to `idle = true`. So a sample whose closure never ran reported quiescence it had never observed. Same family as asserting fixtures ran from what the suite *loaded* rather than what it *did*. Now the return value is read, and a settle whose 30s deadline expires with work in flight reports a fault naming all three counts and fatals at both settle sites — it used to return silently.
+
+### Both outcomes landed, not just the fix
+
+I offered root-cause-and-fix or make-the-next-one-diagnosable. It did both. An `observed_count` divergence now names its window:
+
+```
+observed_count context: 127 run(s) in this step's window, want 8;
+runs=[127 run(s), 8 distinct] live_0 x15, live_1 x16, ... live_7 x16
+```
+
+Eight distinct names at about sixteen runs each *is* the preceding churn, visibly — the distinction a bare count cannot make. Capped at 12 distinct names with the rest tallied.
+
+And it is proven to bite: `TestAsyncSettleWaitsForDisposedRunningEffects` asserts as a **precondition** that the scan sees nothing while `runningEffects` is 1 — documenting the hole rather than assuming it — then that settle waits. Against the old predicate it fails. Restoring the old predicate reproduces 127-vs-8 at `GOMAXPROCS=1`; with the fix, zero divergences across `GOMAXPROCS` 1/2/8/32, `-cpu=1,2,8`, and `-race`.
+
+### Two side checks it reported rather than skipped
+
+- **Not** a `#lzrsbindpending`-style optional read: `observed_count` is dispatched from a fail-closed `expect` switch whose `default` fatals on an unknown key, and the comparison always runs. It can diverge; it cannot be silently skipped.
+- Noted and deliberately not changed: `clearDrain()` clears only `lastDrainExhaustion`, not `drainIterations`. Harmless here — worst case ~8000 runs against a `DefaultDrainBudget` of 100,000 — and it was ruled out before the real cause surfaced.
+
+### Stated plainly
+
+This one cost about ten minutes of scheduler variation after seven useless clean runs, which is the lesson worth keeping: for an intermittent failure, changing the *conditions* beats repeating the *experiment*. I had that in the brief only because the earlier reruns had already failed; it should be the first instinct, not the third lead.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -477,7 +530,7 @@ I also let one CI wait exceed its timeout and move to the background rather than
 - ~~do [#lzledgerratchet]~~
 - ~~do [#lzzigenvsecretleak]~~
 - ~~do [#lzgotypedfloors]~~
-- do [#lzgoasyncflake]
+- ~~do [#lzgoasyncflake]~~
 - ~~do [#lzledgerceiling]~~
 - do [#lzunreachableunprobed]
 - ~~do [#lzrsbindpending]~~
@@ -494,7 +547,6 @@ I also let one CI wait exceed its timeout and move to the background rather than
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzgoasyncflake] [lazily-go] TestReactiveGraphConformance failed a divergence check on AsyncContext/churn_returns_to_baseline.json#3:observed_count during #lzledgerceiling, then did not reproduce in two reruns of the identical probe, with control green 3 of 3. So it is pre-existing and intermittent, not caused by that change — the agent flagged it rather than chasing it. An intermittent divergence in an ASYNC conformance runner is the shape that hides a real race behind a retry, and `observed_count` is exactly the kind of key a missed or doubled cascade step perturbs. Reproduce it under load or with a seeded scheduler rather than by rerunning, and treat a run that merely goes green again as no evidence. Repo: src/lazily-go
 - [ ] [#lzunreachableunprobed] [lazily-rs] The `unreachable` ledger class in rs's block guard has NEVER had an entry, so its failure path has never been exercised, and with `MAX_LEDGERED_BLOCKS` now 0 the ceiling would refuse such an entry before the class logic ran. Either probe the class against a scratch corpus that legitimately carries an unreachable site (raising the ceiling for that probe only), or delete the class and its vocabulary entry as dead code. Do not leave an enforced-but-unexercised branch: it reads as coverage and is not. Repo: src/lazily-rs
 - [ ] [#lzdartboundfloor] [lazily-dart] scripts/check-unbound-blocks.py still carries two typed `>=` floors that #lzblockmagnitudeaudit deliberately left alone because they are different rungs: MIN_BOUND_BLOCKS=697 (blocks BOUND) and MIN_BLOCK_FIXTURES=144 (fixtures opened). MIN_BOUND_BLOCKS is now the last number in this repo a person re-pins by hand — it read 697 when pinned and the run reports 700 today, so it is already 3 slack and guarding nothing in that range, the exact drift the block magnitude just stopped. MIN_BLOCK_FIXTURES is now REDUNDANT: the site-set equality subsumes it, since the derived site set is keyed by fixture and a missing fixture takes its sites with it. Derive the bound count the same way (declared minus the excuse ledger, asserted EQUAL) or retire it in favour of the unbound-set check that already exists, and delete MIN_BLOCK_FIXTURES. Repo: src/lazily-dart
 - [ ] [#lzdartarrayblocks] [lazily-dart] dart`s walk is object-valued only, so array-valued tracked keys contribute no site: the same 144 opened fixtures give 725 sites / 616 digests under dart`s rule and 737/628 when array ELEMENTS count. The gap is exactly 12 blocks and they are all in one fixture — `signaling/anti_spoof_session.json`, whose eight array-valued steps[].expect keys carry 1+2+3+1+1+1+1+2 elements. lazily-js instruments each element (which is why js derives 747 where dart derives 725); dart`s objects-only rule sees none of them, so whatever those 12 blocks assert — one of them is the anti-spoof invariant the fixture exists for — is outside rung 0 in this binding. Decide deliberately: either instrument array elements as js does, or record why an array-valued block has no bindable site here. Related and worth settling in the same pass: dart reads its block-name set out of the tracker, so a name the CORPUS grows is invisible on both the inventory and the derivation at once (a NAME-OPEN `^(assert|expect)` scan finds nothing beyond the five names today — `expected` 405, `expect` 294, `assertions` 32, `expect_initial` 3, `expect_after` 3 — but that is today`s corpus, not a guarantee). Repo: src/lazily-dart

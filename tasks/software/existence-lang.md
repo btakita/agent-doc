@@ -526,6 +526,40 @@ Moving an anchor between Epistemology subsections could have changed what `audit
 I added one clause to SPEC rule 9 recording the `####`-under-`Pattern Expression` convention and the bare-anchor-in-`Cultural Definition` rule. Without it the next contributor re-promotes a scale to `###` and the 11 warnings come back; the spec now says why the vocabulary survives the nesting.
 
 The linking commit's CI came back green ([34668531331](https://github.com/existence-lang/ontology/actions/runs/34668531331)); this one ([34668699255](https://github.com/existence-lang/ontology/actions/runs/34668699255)) was queued at closeout, and its gate is `audit --structure`, which I ran locally at exit 0 with nothing to report.
+
+### Re: do #xlgenuscycles — opus-5
+
+> **Queue prompt:**
+>
+> do [#xlgenuscycles]
+
+All four settled, `mutual_definition` 4 → 0. [`0a43843`](https://github.com/existence-lang/ontology/commit/0a43843) in `ontology`, [`6c77ada`](https://github.com/existence-lang/ontology/commit/6c77ada) porting the same sentences to `philosophy/`.
+
+**One correction to the item's framing.** It says "pick which side is the genus" for all four, but `qualitative`/`quantitative` have no genus — they are siblings, two complementary ways of distinguishing an entity, and declaring either one broader would be wrong. So three pairs got a genus decision and the fourth got a different fix; I'll take them in that order.
+
+**axiology is the genus of both `aesthetics` and `ethics`.** What made this easy is that the back-edges were content-free: both nodes ended with "X is related to Axiology", which asserts nothing beyond the fact that a link exists. They now name what they actually are — "the branch of [axiology](./axiology.md \"broader\") concerned with beauty" and "...concerned with conduct". `axiology`'s own "Axiology includes Ethics and Aesthetics" moves to a second Ontology paragraph, typed `"narrower"`.
+
+That second-paragraph move is the `#xlchaingaps` convention, and I confirmed it is a real rule rather than my inference: `entity` names `Existence` as broader in its first paragraph and enumerates `abstraction`/`concept`/`collective` as `"narrower"` in its *second*, and `concept` links `entity` from its own lay definition with no cycle reported. So the check reads the first paragraph only, and the convention is one direction per lay definition — species names genus, genus lists species separately.
+
+**violence is the genus of `coercion`**, which is violence applied to compel. The old sentence gave this away twice over: "Violence is physical and/or coercion action of one entity against another entity" both named its own species and was ungrammatical. It now reads "forceful action of one [entity](./entity.md) against another entity, physical or otherwise", which keeps the author's point that violence is not only physical — the thing "and/or coercion" was reaching for. `coercion` keeps its violence link and types it `"broader"`.
+
+**`qualitative`/`quantitative` — siblings, so keep the contrast in exactly one node.** The asymmetry that decides which node is already written in `quantitative`'s second paragraph: *"Quantity presupposes quality: something must first be recognised as a kind before its instances can be counted."* Quality is the prior term, so `qualitative` should stand alone and `quantitative` carries the contrast. One link dropped from `qualitative`'s "not of quantity"; `quantitative`'s "Where a qualitative signal says what sort of thing is present" stays untyped `related`, which is correct for siblings.
+
+The hierarchy is now explicit in the export rather than implied by prose:
+
+```
+aesthetics  skos:broader   axiology       axiology  skos:narrower  aesthetics, ethics
+ethics      skos:broader   axiology       violence  skos:narrower  coercion
+coercion    skos:broader   violence
+```
+
+`mutual_definition` 0, `lint` clean, `audit --structure --contradictions --mirrors` 0 errors, `toc --check` clean on 116 terms, export parses at 2975 triples.
+
+I also ported the five sentences to `philosophy/`, which was not in the item but would otherwise have been a self-inflicted regression: philosophy carried the identical pre-fix text for all five nodes, so editing only the ontology would have created four fresh `mirror_drift` findings. Same precedent as `#xlgenusport`. `audit --mirrors` is back to exactly the nine `~/.claude/CLAUDE.md` rows that `#xlclaudetable` owns, so the port is verified complete rather than assumed. In that repo I committed only my five `src/*.md` files — another session has uncommitted `.gitignore` and `AGENTS.md` work there, which I left alone.
+
+CI green on this commit ([34668887710](https://github.com/existence-lang/ontology/actions/runs/34668887710)) and on the previous one ([34668699255](https://github.com/existence-lang/ontology/actions/runs/34668699255)).
+
+That leaves `#xlclaudetable` as the last queued head, and it is the one you marked as yours to direct.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
@@ -535,7 +569,7 @@ The linking commit's CI came back green ([34668531331](https://github.com/existe
 - ~~do [#xldupenodes]~~
 - ~~do [#xlunlinked]~~
 - ~~do [#xlepistemsubs]~~
-- do [#xlgenuscycles]
+- ~~do [#xlgenuscycles]~~
 - do [#xlclaudetable]
 <!-- /agent:queue -->
 
@@ -544,7 +578,6 @@ The linking commit's CI came back green ([34668531331](https://github.com/existe
 <!-- agent:backlog priority -->
 - [ ] [#xlthreshrev] Ship the `near_duplicate` similarity threshold to the ontology workflows: `existence` commit ddc0cc9 gates the check on 0.25 definition overlap, but `.github/workflows/{audit,ci,pages}.yml` in `src/existence-lang/ontology` all pin `EXISTENCE_REV: v0.8.0`, so the weekly audit issue keeps listing abstract/abstraction, exist/existence and redefine/redefinition as warnings. Cut existence 0.8.1 (`make release`) and bump the three `EXISTENCE_REV` values to `v0.8.1`. Note the tag also runs the crates.io publish job, which 403s until [#cratestoken] is resolved; the GitHub Release and tag land either way, which is all `cargo install --git --tag` needs
 - [ ] [#xlmentionkeep] Give the audit a way to record a reviewed-and-intentionally-unlinked mention, so `contradictions/unlinked_mention` stops re-listing the 11 permanent keeps every weekly run (axiology nature/type, ontology type, domain unique, type science, consciousness being, unique being, belief-system system, evolutionary-linguistics linguistics, physical-system system, epistemology concept — plus exist being once [#xlgenuscycles] settles it). Design decision first, then code: the marker could be an `[audit]` allow table in `existence.toml` keyed by term+mention, an inline HTML comment in the node, or a SPEC rule that exempts quoted/borrowed sentences from the scan. Same class of problem as [#xlthreshrev] — a check whose true positives are already resolved but unrecordable trains the reader to skip the report. Discuss the shape before editing
-- [ ] [#xlgenuscycles] Decide the genus for the 4 remaining definitional cycles (audit `contradictions/mutual_definition`): aesthetics -> axiology, axiology -> ethics, coercion -> violence, qualitative -> quantitative. Same procedure `#xlchaingaps` used for entity/information: pick which side is the genus and reword one sentence so the pair stops defining each other. Content decision, four sentences
 - [ ] [#xlclaudetable] Decide what the `~/.claude/CLAUDE.md` philosophy table is (audit `mirrors/mirror_drift`, 9 rows: context, domain, evolution, existence, focus, perspective, resolution, story, system). Every row summarises rather than quotes its node, so word overlap runs 0.00-0.21 and the mirror check calls it drift. Either reword the rows to the node lay definitions, making the table a real mirror, or declare the summary style intended and give the comparator a looser rule for `kind = toc` style mirrors. That file is your global instruction surface, so the direction is yours
 <!-- /agent:backlog -->
 
@@ -591,4 +624,5 @@ The linking commit's CI came back green ([34668531331](https://github.com/existe
 - 2026-09-11 [#xldupenodes] Merge the three node pairs whose lay definitions are byte-identical (audit `structure/near_duplicate`, similarity 1.00): `agree`/`agreement`, `human`/`humans`, `signal`/`signals` in `src/existence-lang/ontology/src`. Per pair keep one slug, redirect inbound `[x](./x.md)` links, drop the other from its ring in `existence.toml`, rerun `existence audit --structure`. The other three pairs it flags are genuinely distinct (`abstract`/`abstraction` 0.03, `exist`/`existence` 0.00, `redefine`/`redefinition` 0.00) ... keep them and consider an allowlist so the check stops reporting them
 - 2026-09-11 [#xlunlinked] Link the 32 lay definitions that name another node without linking it (audit `contradictions/unlinked_mention`), e.g. `aesthetics` mentions philosophy, `agree` mentions definition, `axiology` mentions nature and type. Each link densifies the skos:related graph and several are candidates for a typed `"broader"`. Editorial per mention ... a definition that uses "state" or "model" as ordinary English should stay unlinked, so review each rather than scripting it. `existence audit --contradictions` lists them with the exact term
 - 2026-09-11 [#xlepistemsubs] Fix the 11 non-standard Epistemology subsections across 6 nodes (audit `structure/lint`): `intelligence` uses `Links` and `Human Intelligence`, `evolutionary-linguistics` uses a raw `<a href>` anchor as a heading, plus `perspective`, `presence`, `this-philosophy`, `unconsciousness`. Rename to the recognized vocabulary (`Cultural Definition` | `Sources`, `Pattern Expression` | `Examples`) or move the content under one of them; SPEC rule 9 keeps these advisory, so the alternative is widening the vocabulary in the spec
+- 2026-09-11 [#xlgenuscycles] Decide the genus for the 4 remaining definitional cycles (audit `contradictions/mutual_definition`): aesthetics -> axiology, axiology -> ethics, coercion -> violence, qualitative -> quantitative. Same procedure `#xlchaingaps` used for entity/information: pick which side is the genus and reword one sentence so the pair stops defining each other. Content decision, four sentences
 <!-- /agent:done -->

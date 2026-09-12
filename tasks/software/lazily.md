@@ -1132,6 +1132,9 @@ Exchange is at 1048 lines across 24 response sections; noting it, not compacting
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- 🚧 do [#verifyworkflowactually]
+- do [#closeacceptsame]
+- do [#sharedscratchpadlive]
 - ~~do [#reversereachdirection]~~
 - ~~do [#closeremaininghalf]~~
 - do [#decidereachclosure]

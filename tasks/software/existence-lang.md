@@ -491,6 +491,41 @@ On typed links: several of these are real `"broader"` candidates — `signal`→
 The open question this leaves is the same one `#xlthreshrev` raised for `near_duplicate`: those 11 keeps are correct, permanent, and will be re-listed in every weekly audit issue. There is no way to record "reviewed, intentionally unlinked" today. Filed as `#xlmentionkeep`; it needs a design decision on where the marker lives before any code, so I did not invent one.
 
 Both of last cycle's CI runs came back green ([existence 34668262758](https://github.com/existence-lang/existence/actions/runs/34668262758), [ontology 34668262152](https://github.com/existence-lang/ontology/actions/runs/34668262152)). This commit's run ([34668531331](https://github.com/existence-lang/ontology/actions/runs/34668531331)) was still queued at closeout; the CI gate is `audit --structure`, which I ran locally at exit 0.
+
+### Re: do #xlepistemsubs — opus-5
+
+> **Queue prompt:**
+>
+> do [#xlepistemsubs]
+
+Conformed all 11 rather than widening the vocabulary, and `audit --structure` is now **0 errors, 0 warnings** — the first time it has been completely silent. [`c73d5fc`](https://github.com/existence-lang/ontology/commit/c73d5fc).
+
+The item offered widening the spec as the alternative. I went the other way because reading the content made the choice obvious: in every one of the 11 cases it already belonged under `Cultural Definition` or `Pattern Expression`. Widening would have been loosening the vocabulary to accommodate content that fit it fine.
+
+The unlock was SPEC rule 9's own sentence — *"Examples should show the pattern at more than one scale or resolution (not a flat list of instances)"*. `intelligence`'s four sections (`Human Intelligence`, `Collective Intelligence`, `Inanimate Object Inanimate`, `Conceptual Intelligence`) are precisely that: the same pattern at human, collective, inanimate and conceptual scale. They were not violating the convention, they were *implementing* it with the wrong heading depth. Same for `presence`'s `A Human with Presence` and `unconsciousness`'s `Scope, or Being Present within an Entity`. I checked `lint.rs:220` first — it tests `starts_with("### ")`, so `####` is unchecked by design — which makes nesting the correct fix rather than a loophole.
+
+Per node:
+
+- **`intelligence`** — `Links` held a reference anchor, so it moved into `Cultural Definition`, where the sources pass already reads anchors. The four scale sections became `####` under `Pattern Expression`. I also dropped the duplicated word in `Inanimate Object Inanimate`.
+- **`evolutionary-linguistics`** — a raw `<a href>` was serving as a heading. It is a cited source, so it now sits in `Cultural Definition` as one, with its prose following.
+- **`perspective`** — the only **Ontology** offender. `Imperceptible` was a single sentence scoping the definition; it is neither a Pattern nor a Sense, so it folded into the Ontology prose as "Entities that are not contained within the Entity's perspective are imperceptible to it."
+- **`this-philosophy`** — both subsections situate the term against surrounding philosophical culture, which is what `Cultural Definition` is for, and the node had no such section at all. They became `####` beneath a new one.
+- **`presence`**, **`unconsciousness`** — nested under `Pattern Expression`.
+
+Two things I verified rather than assumed, because both were ways this edit could have done quiet damage:
+
+```
+$ existence --ontology . sources --json    # before vs after
+same
+$ existence --ontology . export | rapper -i turtle -c
+2976 triples        (unchanged)
+```
+
+Moving an anchor between Epistemology subsections could have changed what `audit --sources` treats as a cited source and invalidated a pin — `#xlrequote` is already carrying the colorado.edu PDF as a dead link with no snapshot, and this is that node. The sources output is byte-identical, so no pin moved. `existence lint` passes, `toc --check` is clean on 116 terms, and the triple count is unchanged.
+
+I added one clause to SPEC rule 9 recording the `####`-under-`Pattern Expression` convention and the bare-anchor-in-`Cultural Definition` rule. Without it the next contributor re-promotes a scale to `###` and the 11 warnings come back; the spec now says why the vocabulary survives the nesting.
+
+The linking commit's CI came back green ([34668531331](https://github.com/existence-lang/ontology/actions/runs/34668531331)); this one ([34668699255](https://github.com/existence-lang/ontology/actions/runs/34668699255)) was queued at closeout, and its gate is `audit --structure`, which I ran locally at exit 0 with nothing to report.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
@@ -499,7 +534,7 @@ Both of last cycle's CI runs came back green ([existence 34668262758](https://gi
 <!-- agent:queue priority go -->
 - ~~do [#xldupenodes]~~
 - ~~do [#xlunlinked]~~
-- do [#xlepistemsubs]
+- ~~do [#xlepistemsubs]~~
 - do [#xlgenuscycles]
 - do [#xlclaudetable]
 <!-- /agent:queue -->
@@ -509,7 +544,6 @@ Both of last cycle's CI runs came back green ([existence 34668262758](https://gi
 <!-- agent:backlog priority -->
 - [ ] [#xlthreshrev] Ship the `near_duplicate` similarity threshold to the ontology workflows: `existence` commit ddc0cc9 gates the check on 0.25 definition overlap, but `.github/workflows/{audit,ci,pages}.yml` in `src/existence-lang/ontology` all pin `EXISTENCE_REV: v0.8.0`, so the weekly audit issue keeps listing abstract/abstraction, exist/existence and redefine/redefinition as warnings. Cut existence 0.8.1 (`make release`) and bump the three `EXISTENCE_REV` values to `v0.8.1`. Note the tag also runs the crates.io publish job, which 403s until [#cratestoken] is resolved; the GitHub Release and tag land either way, which is all `cargo install --git --tag` needs
 - [ ] [#xlmentionkeep] Give the audit a way to record a reviewed-and-intentionally-unlinked mention, so `contradictions/unlinked_mention` stops re-listing the 11 permanent keeps every weekly run (axiology nature/type, ontology type, domain unique, type science, consciousness being, unique being, belief-system system, evolutionary-linguistics linguistics, physical-system system, epistemology concept — plus exist being once [#xlgenuscycles] settles it). Design decision first, then code: the marker could be an `[audit]` allow table in `existence.toml` keyed by term+mention, an inline HTML comment in the node, or a SPEC rule that exempts quoted/borrowed sentences from the scan. Same class of problem as [#xlthreshrev] — a check whose true positives are already resolved but unrecordable trains the reader to skip the report. Discuss the shape before editing
-- [ ] [#xlepistemsubs] Fix the 11 non-standard Epistemology subsections across 6 nodes (audit `structure/lint`): `intelligence` uses `Links` and `Human Intelligence`, `evolutionary-linguistics` uses a raw `<a href>` anchor as a heading, plus `perspective`, `presence`, `this-philosophy`, `unconsciousness`. Rename to the recognized vocabulary (`Cultural Definition` | `Sources`, `Pattern Expression` | `Examples`) or move the content under one of them; SPEC rule 9 keeps these advisory, so the alternative is widening the vocabulary in the spec
 - [ ] [#xlgenuscycles] Decide the genus for the 4 remaining definitional cycles (audit `contradictions/mutual_definition`): aesthetics -> axiology, axiology -> ethics, coercion -> violence, qualitative -> quantitative. Same procedure `#xlchaingaps` used for entity/information: pick which side is the genus and reword one sentence so the pair stops defining each other. Content decision, four sentences
 - [ ] [#xlclaudetable] Decide what the `~/.claude/CLAUDE.md` philosophy table is (audit `mirrors/mirror_drift`, 9 rows: context, domain, evolution, existence, focus, perspective, resolution, story, system). Every row summarises rather than quotes its node, so word overlap runs 0.00-0.21 and the mirror check calls it drift. Either reword the rows to the node lay definitions, making the table a real mirror, or declare the summary style intended and give the comparator a looser rule for `kind = toc` style mirrors. That file is your global instruction surface, so the direction is yours
 <!-- /agent:backlog -->
@@ -556,4 +590,5 @@ Both of last cycle's CI runs came back green ([existence 34668262758](https://gi
 - 2026-09-11 [#xlrequote2] Decide the 45 quotes no single Wayback snapshot carries (the strict pin rule wants every passage a node quotes from one page in one copy): 27 on Wiktionary (abstraction, conscious, context, create, creativity, evolution ×2, existence, explicit, focus, fractal, history, human ×2, intelligence, love, model, physical, science, spirit, story, system ×3, tool, type, violence) and 18 on Wikipedia (Abstract_object ×3, Algorithm, Emotion, Evolution_(disambiguation), Formal_system, Information ×2, Intelligence, Natural_law, Nature, Platonic_realism, Sexual_reproduction, Spirituality, Story, Technology, Type–token_distinction). Per source: split the blockquote so each passage sits under its own anchor and let `existence audit --sources --fix` pin each, or requote from today’s page. `audit --sources` lists them as `quote_missing` with no fix each week; see `tasks/software/existence-lang.md` for the pinning decision
 - 2026-09-11 [#xldupenodes] Merge the three node pairs whose lay definitions are byte-identical (audit `structure/near_duplicate`, similarity 1.00): `agree`/`agreement`, `human`/`humans`, `signal`/`signals` in `src/existence-lang/ontology/src`. Per pair keep one slug, redirect inbound `[x](./x.md)` links, drop the other from its ring in `existence.toml`, rerun `existence audit --structure`. The other three pairs it flags are genuinely distinct (`abstract`/`abstraction` 0.03, `exist`/`existence` 0.00, `redefine`/`redefinition` 0.00) ... keep them and consider an allowlist so the check stops reporting them
 - 2026-09-11 [#xlunlinked] Link the 32 lay definitions that name another node without linking it (audit `contradictions/unlinked_mention`), e.g. `aesthetics` mentions philosophy, `agree` mentions definition, `axiology` mentions nature and type. Each link densifies the skos:related graph and several are candidates for a typed `"broader"`. Editorial per mention ... a definition that uses "state" or "model" as ordinary English should stay unlinked, so review each rather than scripting it. `existence audit --contradictions` lists them with the exact term
+- 2026-09-11 [#xlepistemsubs] Fix the 11 non-standard Epistemology subsections across 6 nodes (audit `structure/lint`): `intelligence` uses `Links` and `Human Intelligence`, `evolutionary-linguistics` uses a raw `<a href>` anchor as a heading, plus `perspective`, `presence`, `this-philosophy`, `unconsciousness`. Rename to the recognized vocabulary (`Cultural Definition` | `Sources`, `Pattern Expression` | `Examples`) or move the content under one of them; SPEC rule 9 keeps these advisory, so the alternative is widening the vocabulary in the spec
 <!-- /agent:done -->

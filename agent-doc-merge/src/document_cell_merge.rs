@@ -2517,6 +2517,85 @@ Steps:
     }
 
     #[test]
+    fn exchange_response_mixing_bullets_prose_and_ordered_list_keeps_authored_order() {
+        // `#ocreverselist` live shape, observed 2026-09-12 in
+        // `src/haiven-dev/tasks/docs.md`: a response block whose body is a bullet
+        // run, then plain prose, then an ordered list came back with EVERY list
+        // line reversed (`2.` above `1.`, the bullets bottom-to-top) and the
+        // intervening prose dropped entirely. The two existing `#ocreverselist`
+        // tests each hold one list shape alone; neither mixes bullets, prose and
+        // an ordered list in one block, which is what real responses look like.
+        let base = "\
+<!-- agent:exchange -->
+### Re: prior — opus-4-8
+
+Prior answer.
+<!-- /agent:exchange -->
+";
+        let ours = "\
+<!-- agent:exchange -->
+### Re: prior — opus-4-8
+
+Prior answer.
+
+### Re: new turn — opus-4-8
+
+What changed:
+
+- **Shape chosen:** alpha.
+- **All nine applied:** bravo.
+- **Routes moved:** charlie.
+- **Launch condition:** delta.
+- **Ripple:** echo.
+- **Pending question:** foxtrot.
+
+**Verification:** lint clean.
+
+**Two things need you:**
+
+1. First thing.
+2. Second thing.
+<!-- /agent:exchange -->
+";
+        let theirs = base;
+        let m = document_cell_merge(base, ours, theirs);
+
+        let at = |needle: &str| {
+            m.merged_doc
+                .find(needle)
+                .unwrap_or_else(|| panic!("missing {needle} in merged doc:\n{}", m.merged_doc))
+        };
+        let order = [
+            "**Shape chosen:**",
+            "**All nine applied:**",
+            "**Routes moved:**",
+            "**Launch condition:**",
+            "**Ripple:**",
+            "**Pending question:**",
+            "1. First thing.",
+            "2. Second thing.",
+        ];
+        let offsets: Vec<usize> = order.iter().map(|n| at(n)).collect();
+        assert!(
+            offsets.windows(2).all(|w| w[0] < w[1]),
+            "list lines reordered in merged exchange (offsets={offsets:?}):\n{}",
+            m.merged_doc
+        );
+        // The prose between the bullet run and the ordered list is part of the
+        // block, not a list item, and must survive the split/merge round trip.
+        assert!(
+            m.merged_doc.contains("**Verification:** lint clean."),
+            "prose between the lists was dropped:\n{}",
+            m.merged_doc
+        );
+        assert!(
+            m.merged_doc.contains("**Two things need you:**"),
+            "prose heading before the ordered list was dropped:\n{}",
+            m.merged_doc
+        );
+    }
+
+    #[test]
     fn qdup_one_changed_node_leaves_siblings_byte_identical() {
         // #hap7 / #qdup test 3 (per-node isolation): an agent edit to ONE queue
         // node must leave every sibling node's serialized line byte-identical — a

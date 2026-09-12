@@ -6,7 +6,7 @@ agent: claude
 claude_model: fable
 agent_doc_format: template
 agent_doc_write: crdt
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -365,24 +365,43 @@ Done. The decision is **pin, do not requote**: the ontology keeps quoting the 20
 **What is left: 45 quotes, now `#xlrequote2`.** No single snapshot carries every passage those nodes quote from one page, usually because the quotes came from different years (`system` quotes six Wiktionary senses, one of them newer than the rest). Each needs a person: split the blockquote so each passage has its own anchor and let `--fix` pin them separately, or requote. The weekly run lists them as `quote_missing` with no fix and re-searches them, about five minutes of its runtime. The generated `audit/` directory stayed out of `main`; the safe-fixes PR owns the lock, as before.
 
 That empties the queue: three items drained this session; `#semantickey` and `#auditprtoken` are gated on credentials only you can mint. Exchange is at sixteen responses.
+
+### Re: do #xlrequote2 — fable
+
+> **Queue prompt:**
+>
+> do [#xlrequote2]
+
+Done. All 45 quotes now verify: 38 are pinned, one was rescued by an audit fix, and 13 are requoted from today's pages. The weekly run has nothing left to re-search.
+
+**The advice in the backlog item was wrong, and the fix was in the tool.** "Split the blockquote so each passage has its own anchor" could never work: the audit pooled every quote a node takes from one URL and kept a single pin per URL, so a page quoted in different years had no snapshot that carried all of it. existence 0.8.0 ([`d858170`](https://github.com/existence-lang/existence/commit/d858170), started by this pane before the `/clear`) verifies each quote on its own against the live page or any pin, searches the nearest six snapshots for a full cover, then the best partial covers, then one snapshot per year, and writes one pin per era on the anchor line. Run over the ontology it pinned 38 of the 45 (32 nodes; `abstraction` now carries a 2015 and a 2012 pin).
+
+**One more audit defect hid a quote that was there all along.** The 2015 Technology snapshot carries the ontology's intro paragraph, but Wikipedia renders a `[1]` inside the parenthesis and the letters-and-digits normalisation kept the digit, so the passage read as absent. [`ac165a9`](https://github.com/existence-lang/existence/commit/ac165a9) drops reference superscripts from page text and bracketed markers (`[1]`, `[a]`, `[note 2]`, `[citation needed]`) from page and quote alike, with a test; `make check` is green at 100 tests.
+
+**The 13 with no snapshot anywhere are requoted by hand** ([`7fba977`](https://github.com/existence-lang/ontology/commit/7fba977)), each verbatim from today's page, and each was a passage the archive search could never satisfy: Wikipedia's Algorithm intro had an audio-icon artefact (`Listeni/ˈæl…`) glued into it; Sexual_reproduction, Emotion (two), Nature, Spirituality (two), and Type–token_distinction were 2014 paragraphs rewritten before any surviving snapshot; the Wiktionary `abstraction`, `love`, `type`, and `physical` senses had inline usage examples glued to the sense text, so they now quote the sense alone with today's labels; Physical_information quotes the 2021 archived copy the anchor already points at, since the live page is now a 404. The McLuhan line under Technology was a book subtitle, never a passage of that Wikipedia page, so it now cites *Understanding Media* directly. I verified the requotes in a scratch ontology holding only the edited nodes: 95 seconds instead of a 20-minute full pass, clean.
+
+**Released and green.** `existence` v0.8.0 is tagged with all seven binary assets; the ontology workflows are pinned to it, and ontology CI and the Pages deploy are green on the new commit. SPEC rule 8 now says a page quoted in different years carries one pin per year, in line order.
+
+**One thing only you can do: the crates.io token expired.** The Release run's publish job returned 403 `authentication failed`, and the same token in `passage` fails the same way against crates.io's identity endpoint; it published v0.7.0 an hour earlier, so it is a two-week expiry from 2026-08-28. Nothing downstream needs crates.io (ontology CI installs from the git tag), but 0.8.0 will not be on crates.io until a new token is minted; `#cratestoken` in review has the exact steps, and the publish job is idempotent so a rerun finishes the release.
+
+The queue is empty again; the exchange is at seventeen responses.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- 🚧 do [#xlrequote2]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] 🚧 [#xlrequote2] Decide the 45 quotes no single Wayback snapshot carries (the strict pin rule wants every passage a node quotes from one page in one copy): 27 on Wiktionary (abstraction, conscious, context, create, creativity, evolution ×2, existence, explicit, focus, fractal, history, human ×2, intelligence, love, model, physical, science, spirit, story, system ×3, tool, type, violence) and 18 on Wikipedia (Abstract_object ×3, Algorithm, Emotion, Evolution_(disambiguation), Formal_system, Information ×2, Intelligence, Natural_law, Nature, Platonic_realism, Sexual_reproduction, Spirituality, Story, Technology, Type–token_distinction). Per source: split the blockquote so each passage sits under its own anchor and let `existence audit --sources --fix` pin each, or requote from today’s page. `audit --sources` lists them as `quote_missing` with no fix each week; see `tasks/software/existence-lang.md` for the pinning decision
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#cratestoken] Mint a new crates.io API token (https://crates.io/settings/tokens, scope publish-update, crate `existence`, long or no expiry): the one stored at `passage btak/CARGO_REGISTRY_TOKEN` and as the `CARGO_REGISTRY_TOKEN` secret on existence-lang/existence is a single token set 2026-08-28 that answered 403 `authentication failed` from 2026-09-12T00:06Z (it published v0.7.0 at 22:51Z the evening before), so existence 0.8.0 is on GitHub Releases and the tag but not on crates.io. Then `passage edit btak/CARGO_REGISTRY_TOKEN`, `passage show btak/CARGO_REGISTRY_TOKEN | gh secret set CARGO_REGISTRY_TOKEN -R existence-lang/existence`, and `gh run rerun 34660273106 --failed`; the publish job is idempotent
 - [/] [#auditprtoken] Let the weekly Ontology audit workflow open its own `audit: safe fixes` pull request: the `existence-lang` organization forbids GitHub Actions from creating PRs, and lifting it needs an `admin:org` scope this session does not have (`gh auth refresh -h github.com -s admin:org`, then `gh api -X PUT orgs/existence-lang/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true` and the same PUT on `repos/existence-lang/ontology`), or add an `AUDIT_TOKEN` repo secret (classic PAT, `repo` scope) which `.github/workflows/audit.yml` already prefers. Until then the job pushes the branch and links the compare page in the issue; PR #2 was opened by hand and the job keeps it current
 - [/] [#semantickey] Mint a Console API key (console.anthropic.com/settings/keys, `sk-ant-api03-...`) and store it with `passage edit btak/ANTHROPIC_API_KEY`: the entry today holds a Claude OAuth access token (`sk-ant-oat01-...`), which the Messages API rejects with HTTP 401, and `btak/OPENAI_API_KEY` is rejected too, so the semantic audit has only been proven against the local stand-in server. Then run `ANTHROPIC_API_KEY="$(passage show btak/ANTHROPIC_API_KEY)" existence --ontology src/existence-lang/ontology audit --semantic --limit 5` once to confirm the live Messages API shape, and `gh secret set ANTHROPIC_API_KEY -R existence-lang/ontology` to switch on the weekly semantic pass that `audit.yml` already gates on that secret (about 117 Opus 5 calls the first week, then only changed neighbourhoods)
 <!-- /agent:review -->
@@ -418,4 +437,5 @@ That empties the queue: three items drained this session; `#semantickey` and `#a
 - 2026-09-11 [#cutexistenceusers] [recommended] Cut existence 0.6.0 (`make release` in `src/existence-lang/existence`) so `install.sh` / `cargo install existence` users get `toc`; `existence --version` on `cargo install --path .` still reads 0.5.0. Bump `Cargo.toml` first, then flip the README "Commands (v0.3.0)" heading, which is already stale
 - 2026-09-11 [#fixmanifestdrift] Fix the manifest drift `existence audit --structure` reports in `src/existence-lang/ontology` (it is what the new CI job fails on): `qualitative` + `quantitative` are declared in ring 1 with no node file (create them or drop them from the ring), `contextual-systems` has an empty Ontology section (needs a lay definition), `noumena` / `phenomena` / `pneuma` are in no ring (ring 2 fits), and `universal-set.md` links `./exists`, which has no node (`exist` does). The 11 fixable suffix-less links were already rewritten by `#xlaudit2`. Then publish `terms.md` from the Pages workflow (`existence toc -o terms.md`) so the site has a glossary page
 - 2026-09-11 [#xlrequote] Decide what to do with the source drift the first real `existence audit --sources` run found in `src/existence-lang/ontology`: 206 quoted passages are no longer on their pages (87 wiktionary, 108 wikipedia, 6 etymonline; the nodes quote 2014-15 wording that has since been rewritten) and 19 have changed but still match. Per source, either refresh the blockquote from the live page or pin the historical Wayback snapshot next to the anchor so the quote stays verifiable. Also 6 dead links: `--fix` can swap cosmicscale.appspot.com (fractal, physical-system, scope), the NYT attention-schema piece, and wikipedia `Physical_information` (entity, information) for snapshots; stevenpoole.net, the AAAI SARA13 PDF, and the colorado.edu PDF have none and need a replacement source. Content decisions, not code; `audit --sources` reports them again each weekly run once Phase 6 commits the lock
+- 2026-09-11 [#xlrequote2] Decide the 45 quotes no single Wayback snapshot carries (the strict pin rule wants every passage a node quotes from one page in one copy): 27 on Wiktionary (abstraction, conscious, context, create, creativity, evolution ×2, existence, explicit, focus, fractal, history, human ×2, intelligence, love, model, physical, science, spirit, story, system ×3, tool, type, violence) and 18 on Wikipedia (Abstract_object ×3, Algorithm, Emotion, Evolution_(disambiguation), Formal_system, Information ×2, Intelligence, Natural_law, Nature, Platonic_realism, Sexual_reproduction, Spirituality, Story, Technology, Type–token_distinction). Per source: split the blockquote so each passage sits under its own anchor and let `existence audit --sources --fix` pin each, or requote from today’s page. `audit --sources` lists them as `quote_missing` with no fix each week; see `tasks/software/existence-lang.md` for the pinning decision
 <!-- /agent:done -->

@@ -3577,6 +3577,58 @@ fn test_preflight_hook_never_emits_silence_on_admission_failure() {
     );
 }
 
+/// `#hooksilentonmangledarg`: session tracking and the admission guard read the
+/// prompt with two DIFFERENT parsers, so a prompt tracking recognized, bound a
+/// document from, and then failed on was reported to the agent as silence — the
+/// one state `SKILL.md` defines as "the hook never ran", i.e. a harness-wiring
+/// defect the agent cannot diagnose rather than the path typo it actually is.
+///
+/// Observed 2026-09-12: a doubled slash-command argument
+/// (`/agent-doc <FILE>.md/agent-doc <FILE>.md`) made tracking canonicalize
+/// `<FILE>.md/agent-doc`, which fails with `Not a directory (os error 20)`. The
+/// hook printed that to stderr and exited 0 having emitted NEITHER stdout
+/// marker.
+///
+/// This drives the real hook over stdin rather than asserting on source text,
+/// because the defect was entirely in which parser a runtime branch consulted.
+#[test]
+fn preflight_hook_names_its_refusal_when_tracking_fails_on_a_mangled_file_argument() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    fs::create_dir_all(root.join(".agent-doc")).unwrap();
+    let doc = root.join("plan.md");
+    fs::write(&doc, "# plan\n").unwrap();
+
+    // The field shape: the FILE token has a second invocation glued onto it, so
+    // it names a path *under* an existing regular file.
+    let mangled = format!("/agent-doc {0}/agent-doc {0}", doc.display());
+    let payload = serde_json::json!({
+        "session_id": "mangled-file-argument",
+        "cwd": root.display().to_string(),
+        "prompt": mangled,
+    })
+    .to_string();
+
+    let output = agent_doc_cmd()
+        .arg("hook")
+        .arg("preflight-user-prompt-submit")
+        .write_stdin(payload)
+        .output()
+        .expect("hook must run");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("cycle contract UNAVAILABLE"),
+        "a trigger whose tracking failed must NAME its refusal on stdout instead of \
+         leaving the agent in the 'hook never ran' state; stdout={stdout:?} stderr={stderr:?}"
+    );
+    assert!(
+        !stdout.contains("preflight already ran in the binary"),
+        "a failed admission must never emit the success seal; stdout={stdout:?}"
+    );
+}
+
 #[test]
 fn test_agent_doc_repair_io_owns_repair_state_adapters() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));

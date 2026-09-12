@@ -269,6 +269,23 @@ pub fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
     Ok(())
 }
 
+/// Does this prompt name an agent-doc document *by the same rule tracking uses*
+/// to bind one?
+///
+/// `#hooksilentonmangledarg`: [`apply_user_prompt_submit`] binds its document
+/// through [`resolve_agent_doc_path`], which is deliberately more permissive
+/// than the strict admission parser
+/// (`preflight_user_prompt_submit::invoked_document`) — the strict one refuses a
+/// second positional argument so that `agent-doc compact exchange FILE` and
+/// friends are left alone. That asymmetry is fine until tracking *fails*: the
+/// failure guard asked the strict parser whether to report, so a prompt tracking
+/// had recognized, tried to bind, and errored on was reported as though the hook
+/// had never run. Exposing tracking's own predicate lets the guard ask the
+/// parser that actually made the attempt.
+pub fn prompt_names_agent_doc_document(prompt: &str) -> bool {
+    agent_doc_prompt_contract::harness_prompt::agent_doc_invocation_file_from_text(prompt).is_some()
+}
+
 pub fn resolve_agent_doc_path(prompt: &str, cwd: &Path) -> Option<PathBuf> {
     let file =
         agent_doc_prompt_contract::harness_prompt::agent_doc_invocation_file_from_text(prompt)?;

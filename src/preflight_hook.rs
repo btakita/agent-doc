@@ -146,6 +146,31 @@ fn emit_user_prompt_submit_context(context: &str) {
     println!("{output}");
 }
 
+/// Would a session-tracking failure on this prompt leave the agent in silence?
+///
+/// `#hooksilentonmangledarg`: two different parsers read the prompt in
+/// [`handle_user_prompt_submit`]. Session tracking binds its document with the
+/// permissive `resolve_agent_doc_path`; the admission guard asked the strict
+/// `invoked_document`, which refuses a second positional argument. A prompt the
+/// permissive parser accepted and the strict one rejected — a mistyped or
+/// doubled `FILE` argument is the shape seen in the wild — therefore failed
+/// tracking loudly on stderr and emitted NEITHER stdout marker, which
+/// `SKILL.md` tells the agent to read as "the hook never ran": a harness-wiring
+/// defect it cannot diagnose, rather than the one-line path typo it is.
+///
+/// Observed 2026-09-12: `/agent-doc <path>.md/agent-doc <path>.md` (a doubled
+/// slash-command argument) canonicalized `<path>.md/agent-doc`, failed with
+/// `Not a directory (os error 20)`, and exited 0 with no contract of either
+/// kind.
+///
+/// The union is deliberate: this only ever *adds* a named refusal on a path
+/// that already failed, and never suppresses one. Trigger recognition for
+/// admission itself is untouched — the strict parser still owns that.
+fn tracking_recognized_trigger(prompt: &str) -> bool {
+    invoked_document(prompt).is_some()
+        || agent_doc_codex_hook_io::prompt_names_agent_doc_document(prompt)
+}
+
 /// Emit a machine-readable admission failure as injected turn context.
 ///
 /// stdout only, on purpose — see [`ADMISSION_FAILURE_MARKER`]. Callers log their
@@ -427,7 +452,7 @@ pub fn handle_user_prompt_submit() -> anyhow::Result<()> {
     // Stop boundary capable of finding the document again.
     if let Err(err) = agent_doc_codex_hook_io::apply_user_prompt_submit(&input) {
         eprintln!("[agent-doc] Claude session tracking failed: {err:#}");
-        if invoked_document(&input.prompt).is_some() {
+        if tracking_recognized_trigger(&input.prompt) {
             emit_admission_failure(&input.cwd, &err.context("Claude session tracking failed"));
         }
         return Ok(());
@@ -469,7 +494,7 @@ pub fn handle_codex_user_prompt_submit() -> anyhow::Result<()> {
         // cannot find. When this prompt *was* an `agent-doc <FILE>` trigger the
         // agent would otherwise see silence, so name the refusal
         // (`#hookcontractlost`). Ordinary prompts stay untouched.
-        if invoked_document(&input.prompt).is_some() {
+        if tracking_recognized_trigger(&input.prompt) {
             emit_admission_failure(&input.cwd, &err.context("Codex session tracking failed"));
         }
         return Ok(());

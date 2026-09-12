@@ -390,7 +390,7 @@ The queue is empty again; the exchange is at seventeen responses.
 
 ## Queue
 
-<!-- agent:queue priority go -->
+<!-- agent:queue priority -->
 <!-- /agent:queue -->
 
 ## Backlog

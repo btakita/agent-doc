@@ -303,15 +303,65 @@ Accept-set confirmed everywhere: the committed value and its leading-zero form p
 **My severity framing was right and I am not upgrading it.** Every parser was fail-closed on obvious garbage, and a wrong pin fails the equality loudly, so this was an inconsistency rather than an open hole — with the two exceptions above, which came from the ratchet work itself rather than from anything older. No corpus was touched, no superproject pointers were bumped by the agent, and zig's build output was never written to a file, per the live exposure in `#lzzigenvsecretleak`.
 
 Exchange is at 228 lines across 5 response sections and the queue is active, so I am noting the size rather than pausing to compact.
+
+### Re: `#lzzigenvsecretleak` — the leak does not reproduce, and I should not have relayed it — opus-5 · 2026-09-12T05:01-04:00
+
+> **Queue prompt:**
+>
+> do [#lzzigenvsecretleak]
+
+
+I filed this item from a subagent's report without testing the claim. The claim is wrong, and the correction is the substance of this cycle.
+
+### What I told you, and what is actually true
+
+I said a green `make check` in lazily-zig prints the ambient environment including live publish tokens, on six `failed command:` lines. Measured on the real repo, real toolchain, green run: **exit 0, zero `result: FAILED`, exactly six `failed command:` lines — and those six lines carry zero environment variables.** Not even `LAZILY_CONFORMANCE_MANIFEST`. Zero token-shaped values anywhere in the log, which I then shredded.
+
+The six lines are real. The environment in them is not.
+
+### The mechanism, read rather than guessed
+
+`std.Build.Step.allocPrintCmd` prints an env entry **only when the child value differs from, or is absent in, the parent**:
+
+```zig
+if (env.parent.get(key)) |process_value| {
+    if (std.mem.eql(u8, value, process_value)) continue;
+}
+```
+
+And `setEnvironmentVariable` clones the step's map from zig's *own* process environment (`Run.zig:584-599`). So an ambient variable is byte-identical on both sides and always skipped. It is structurally incapable of printing an inherited token. Verified across all three toolchains this repo gates on: 0.17.0-dev empirically with decoys, 0.15.2 at `Step.zig:805-812` and 0.16.0 at `Step.zig:788-794` statically.
+
+The decoy test is the one I should have run first: two token-shaped fakes in the parent environment, one child-only variable set on the step, deliberate failure. Output printed the child-only variable and **neither decoy**.
+
+### The hazard is real but inverted, and that is the fix
+
+What zig discloses is a **child-only** variable. So the rule worth pinning is the opposite of a scrub: never set a secret-bearing variable on a Run step. A path is safe; a token is not. That is now a comment at the call site in `build.zig` — `ec9bd33`, CI green, pointer `a87928c99` — where someone editing that block will read it, rather than in a doc they would not open.
+
+It carries the corollary, because it is genuinely counterintuitive: **`env -u TOKEN make check` manufactures the disclosure.** The scrub removes the variable from the parent while anything re-injecting it into the child makes it child-only — which is precisely the shape zig prints. The agent's mitigation attempt was the most dangerous thing in the sequence, and it reported the attempt as evidence of the problem.
+
+### The two things that survive
+
+- **`#lzambienttokenresolve`** — verified and yours. `.env` holds `$(passage ...)` references and is untracked and gitignored, which is correct; the subagent misread those refs as literal tokens, and I corrected that last cycle. But `.mise.toml` resolves them at shell startup, so `CARGO_REGISTRY_TOKEN` (35 chars) and `NPM_TOKEN` (40 chars) are live in the ambient environment right now — verified by presence check, never printed. Nothing here was found printing them. It means every tool in the tree is one env-dumping code path away, and build systems have many. The fix is substitution at the point of use, and it is yours because changing `.mise.toml` alters the environment of every session started from this tree — thirty peers were live, several mid-build.
+- **Rotation still stands, for one reason only.** Not because a build printed them: because the resolved values passed through a subagent's tool output while it diagnosed this, which puts them in that transcript permanently. Shredding a log does not reach a transcript. `CARGO_REGISTRY_TOKEN`, `NPM_TOKEN`, `PYPI_PUBLISH_TOKEN`.
+
+Also filed `#lzzigemptyparentdump` as low: zig **0.15.2**, one of the two toolchains CI gates on, has a silent full-dump path the others lack — `Step.zig:806` falls back to an *empty* parent map on `getEnvMap` failure, and an empty parent makes every child key print. Reaching it needs an allocation failure, so it is latent; it is worth holding because the fallback is silent and the consequence is the whole environment.
+
+### What I take from this
+
+The report was specific, confident, and came with a count that turned out to be correct (six lines) attached to a claim that was not (what those lines contain). A precise detail next to a wrong conclusion is more persuasive than either alone, and I passed it to you as fact and wrote it into operator memory before testing a single thing. Memory is now corrected, including the index line. The decoy test cost about two minutes.
+
+The operator-memory note I wrote in the same breath was wrong in the same way, and it is worth saying that a false fact recorded is worse than no fact, because the next session inherits it as settled.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- do [#lzambienttokenresolve]
+- do [#lzzigemptyparentdump]
 - ~~do [#lzpinparsestrict]~~
 - ~~do [#lzledgerratchet]~~
-- do [#lzzigenvsecretleak]
+- ~~do [#lzzigenvsecretleak]~~
 - do [#lzgotypedfloors]
 - do [#lzgoasyncflake]
 - ~~do [#lzledgerceiling]~~
@@ -330,7 +380,8 @@ Exchange is at 228 lines across 5 response sections and the queue is active, so 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzzigenvsecretleak] [SECURITY, lazily-zig] zig's noisy `failed command:` lines — which are NOT failures and print on ordinary green runs — dump the ENTIRE environment alongside the command. On this machine that environment carries CARGO_REGISTRY_TOKEN (35 chars) and NPM_TOKEN (40 chars), both verified SET by presence check on 2026-09-12. So any `make test` / `make check` scroll in a lazily-zig checkout prints two live publish credentials in cleartext, on a command nobody treats as sensitive. This is a livestream and screen-share exposure. Found incidentally by the #lzledgerceiling agent, which deleted three captured logs containing the token. TWO PARTS, and the second is the real fix: (1) filter or suppress the environment dump in zig's build output for this repo; (2) ROOT CAUSE — publish tokens are exported into every shell instead of being substituted at the point of use. They belong in passage, referenced as `$(passage ...)` inside the publish command only, which is the documented pattern for the crates.io token and is being bypassed. Until the ambient exports are gone, treat every lazily-zig build log as containing secrets. Recorded in operator memory as reference_lazily_zig_failed_command_dumps_env_secrets.md.
+- [ ] [#lzambienttokenresolve] [operator-decision, agent-loop superproject] agent-loop/.mise.toml has `[env] _.source = ".env"`, and .env holds $(passage ...) REFERENCES for every credential — correct hygiene, untracked and gitignored. But mise RESOLVES those substitutions at shell startup, so the resolved cleartext sits in the ambient environment of every process spawned from this tree. Verified by presence check on 2026-09-12, values never printed: CARGO_REGISTRY_TOKEN (35 chars) and NPM_TOKEN (40 chars) are live in the environment right now. That is not a leak by itself — nothing here was found printing them, and the lazily-zig build specifically does NOT (see #lzzigenvsecretleak, measured) — but it means every tool in the tree is one env-dumping code path away from disclosure, and there are many such paths in build systems, crash handlers and CI log collectors. THE FIX IS SUBSTITUTION AT THE POINT OF USE: keep the refs in .env for documentation, but let the publish commands resolve them (`CARGO_REGISTRY_TOKEN=$(passage ...) cargo publish`) rather than mise resolving them into every shell. WHY THIS IS YOURS AND NOT MINE: changing .mise.toml alters the environment of every session started from this tree, and thirty peer sessions were live when this was filed — several mid-build. A change like that wants a quiet moment and someone watching, not a queue drain. SEPARATELY AND MORE URGENTLY: rotate CARGO_REGISTRY_TOKEN, NPM_TOKEN and PYPI_PUBLISH_TOKEN. Not because a build printed them, but because the resolved values passed through a subagent's tool output while it was diagnosing the (non-)leak, which puts them in that transcript permanently. Log shredding does not reach a transcript. crates.io has no Revoke button, only Regenerate — see reference_cargo_publish_token_passage.md.
+- [ ] [#lzzigemptyparentdump] [lazily-zig, low] zig 0.15.2 — one of the two toolchains this repo gates CI on — carries a silent full-environment-dump path that 0.16.0 and 0.17.0-dev do not. Step.zig:806 reads `const process_env_map = std.process.getEnvMap(arena) catch std.process.EnvMap.init(arena);` and then diffs the child map against it. On the catch branch the parent map is EMPTY, and an empty parent means `process_env_map.get(key)` returns null for EVERY key, so every variable in the child map is printed in full on the next `failed command:` line. Reaching it requires getEnvMap to fail, which in practice means allocation failure, so this is a latent path and not an everyday one — it is filed as low for that reason and not because the consequence is small. Two things make it worth holding: the fallback is silent (no diagnostic distinguishes an empty parent from a genuinely identical environment), and the consequence is the whole ambient environment, which on this machine includes resolved publish tokens (#lzambienttokenresolve). It is upstream code, so the options are to stop pinning 0.15.2, or to avoid ever putting a secret-bearing variable on a Run step — which build.zig now says at the call site as of ec9bd33. Worth a note to zig upstream if the fallback is still present on a current release.
 - [ ] [#lzgotypedfloors] [lazily-go] go's scripts/check-conformance-coverage.sh still carries two TYPED floors that mirror their own set equalities: MIN_FIXTURES=147 (156 corpus fixtures minus 9 KNOWN_UNCOVERED) and MIN_SCENARIOS=151 (151 scenarios minus 0 excuses). Both are the MIN_BLOCKS family, but of the COVERAGE ledger rather than the bind ledger — which is why #lzledgerceiling deliberately left them alone. They cannot simply be deleted: they are the only thing in that file that can see a SHRINKING corpus, because `total` is read from the overridable SPEC_DIR, so a corpus that loses fixtures still satisfies both directions of every equality there. The correct move is the conversion lazily-rs already landed under #lzrstypedfloors (see lazily-rs/scripts/check-conformance-coverage.sh:535-560): replace each typed floor with an expectation DERIVED from the corpus listing, keeping a zero-guard so #lzvacuousrun cannot pass over nothing. Note the related trap py hit: lazily-spec's check-corpus-floors.mjs greps the whole scripts/ directory for the literal MIN_FIXTURES=${MIN_FIXTURES:-N} spelling, so quoting a retired pin verbatim in a COMMENT keeps the upstream audit deriving and comparing a floor that no longer runs. Reword, do not quote. Repo: src/lazily-go
 - [ ] [#lzgoasyncflake] [lazily-go] TestReactiveGraphConformance failed a divergence check on AsyncContext/churn_returns_to_baseline.json#3:observed_count during #lzledgerceiling, then did not reproduce in two reruns of the identical probe, with control green 3 of 3. So it is pre-existing and intermittent, not caused by that change — the agent flagged it rather than chasing it. An intermittent divergence in an ASYNC conformance runner is the shape that hides a real race behind a retry, and `observed_count` is exactly the kind of key a missed or doubled cascade step perturbs. Reproduce it under load or with a seeded scheduler rather than by rerunning, and treat a run that merely goes green again as no evidence. Repo: src/lazily-go
 - [ ] [#lzunreachableunprobed] [lazily-rs] The `unreachable` ledger class in rs's block guard has NEVER had an entry, so its failure path has never been exercised, and with `MAX_LEDGERED_BLOCKS` now 0 the ceiling would refuse such an entry before the class logic ran. Either probe the class against a scratch corpus that legitimately carries an unreachable site (raising the ceiling for that probe only), or delete the class and its vocabulary entry as dead code. Do not leave an enforced-but-unexercised branch: it reads as coverage and is not. Repo: src/lazily-rs

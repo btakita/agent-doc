@@ -648,12 +648,54 @@ Its probe table is that theorem showing up as a procedure — **every single pro
 ### Stated plainly
 
 That is the second consecutive cycle where the agent corrected my premise, and the fourth in a row overall. The pattern in all four is the same: I stated an inference as an observation. Here the inference was inherited from a comment in the reference implementation, which is the most seductive form — it looked like established doctrine rather than something to check, and it survived three bindings because each time I cited it instead of testing it. The `sort -u` was on the line below the claim the whole time.
+
+### Re: `#lzdartarrayblocks` — 12 element sites bound, and the gap is exactly 12 corpus-wide — opus-5 · 2026-09-12T07:16-04:00
+
+> **Queue prompt:**
+>
+> do [#lzdartarrayblocks]
+
+
+Done. `510e1c1`, CI green on all three jobs, pointer `c7cf0e252`. `make check` exit 0, zero `result: FAILED`.
+
+Sites **725 → 737**, exactly +12 and confirmed rather than assumed. Digests **616 → 628**, so all 12 elements are content-distinct. Bound **700 → 712**. `EXPECTED_LEDGERED_BLOCKS` stayed **25** and `KNOWN_UNBOUND_BLOCKS` is untouched — these became bound, not ledgered, which is what I asked to see.
+
+### What the groundwork changed before dispatch
+
+I established three things myself rather than relaying the item, and each one altered the work:
+
+- **The 12 are real assertions, and dart's runner already asserted them** — frame count, per-element target, every key of each expected frame. So this was the bind-pending shape: read and asserted, missing only the routing. Falsifying a value was already caught; a runner that silently stopped asserting them was not.
+- **lazily-spec already had the vocabulary and the pin.** `check-corpus-floors.mjs:177` emits a `${key}[]` bucket per plain-object element, `corpus-counts.json` pins that fixture at `{"assertions": 1, "expect[]": 12}`, and the audit defines the bindings' current dimension literally as `!bucket.endsWith("[]")`. So widening dart aligned it with a dimension the spec already tracked.
+- **The gap is exactly 12 sites in exactly 1 fixture, corpus-wide** — 783 objects-only + 12 = the audit's 795. Nothing else carries an array-valued tracked key.
+
+### The part I would not have specified well
+
+Over-widening is the real hazard here and the corpus exercises only one shape, so the agent probed the walk on **synthetic** shapes: object value unchanged, array of objects emitting both, array of scalars emitting none, **mixed array keeping true indexes** (`expect[0]`, `expect[2]`), nested array `[[{...}]]` emitting none because the rule is one level, and an untracked key still not a block. That table is the guardrail, not the corpus.
+
+It also widened `isAssertionBlockPath` and the guard's `walk` **in step and pinned them against each other**: a recorded site the walk does not enumerate fails as a corrupted evidence channel, and an enumerated site nobody records fails as unbound. Either being wider than the other makes a green run impossible.
+
+And disambiguation was proven rather than assumed — detaching two elements of the same 3-element step names `steps[2].expect[0]` and `steps[2].expect[2]` **separately**, where a per-array label would have collapsed them. Detaching the middle element alone names `steps[2].expect[1]` exactly. Throughout every detach probe, `dart test` stayed green at 733 tests: the suite itself never misses them, which is precisely why rung 0 has to.
+
+### The higher rung, fixed and honestly reported
+
+The per-key loop visited only keys the **fixture** named, so a field the room emitted that the fixture omitted was compared by nothing — the same weakness rs's stdlib had. Since `frame` is object-valued, the tracker now requires `assertKeySet(exp, 'frame', actualWire.keys)` in both directions, ahead of any value comparison, and `to` moved from a bare read to `assertKey`.
+
+It then said plainly that **the key sets already agreed for all 12 frames**. The hole is closed; it did not expose a live divergence. That is the right way to report a guard that found nothing.
+
+### Filed, and smaller than I expected
+
+`#lzarrayelementsites` for the remaining bindings — and the agent found this reduces the scope: **`lazily-js` is already on the wider dimension** at 747/638, which I verified from the audit's per-binding rows. So it is **eight** bindings, not nine: rs, py, kt, go, cpp, zig, cs, gd. Each already has its target numbers computed and waiting in `--report-blocks` (rs 783/673 against its current 771/661), and the item carries dart's three load-bearing techniques plus the expectation of one higher-rung failure each.
+
+### Stated plainly
+
+dart now sits on lazily-spec's "all five names, + array elements" row while eight bindings sit on "objects only", so cross-binding site counts are temporarily incomparable between those two groups. That is a real cost of doing one binding first, and it is the reason the follow-up should not sit long. The audit itself is unaffected — exit 0, still `795 assertion-block site(s) across 148 fixture(s) pinned exactly`.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- do [#lzarrayelementsites]
 - ~~do [#lzdartcoveragefloors]~~
 - ~~do [#lzambienttokenresolve]~~
 - ~~do [#lzzigemptyparentdump]~~
@@ -666,7 +708,7 @@ That is the second consecutive cycle where the agent corrected my premise, and t
 - ~~do [#lzunreachableunprobed]~~
 - ~~do [#lzrsbindpending]~~
 - ~~do [#lzdartboundfloor]~~
-- do [#lzdartarrayblocks]
+- ~~do [#lzdartarrayblocks]~~
 - do [#lzorderinganchors]
 - do [#lzktareapartition]
 - do [#lzscenariofloormissing]
@@ -678,7 +720,7 @@ That is the second consecutive cycle where the agent corrected my premise, and t
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzdartarrayblocks] [lazily-dart] dart`s walk is object-valued only, so array-valued tracked keys contribute no site: the same 144 opened fixtures give 725 sites / 616 digests under dart`s rule and 737/628 when array ELEMENTS count. The gap is exactly 12 blocks and they are all in one fixture — `signaling/anti_spoof_session.json`, whose eight array-valued steps[].expect keys carry 1+2+3+1+1+1+1+2 elements. lazily-js instruments each element (which is why js derives 747 where dart derives 725); dart`s objects-only rule sees none of them, so whatever those 12 blocks assert — one of them is the anti-spoof invariant the fixture exists for — is outside rung 0 in this binding. Decide deliberately: either instrument array elements as js does, or record why an array-valued block has no bindable site here. Related and worth settling in the same pass: dart reads its block-name set out of the tracker, so a name the CORPUS grows is invisible on both the inventory and the derivation at once (a NAME-OPEN `^(assert|expect)` scan finds nothing beyond the five names today — `expected` 405, `expect` 294, `assertions` 32, `expect_initial` 3, `expect_after` 3 — but that is today`s corpus, not a guarantee). Repo: src/lazily-dart
+- [ ] [#lzarrayelementsites] [lazily-rs, lazily-py, lazily-kt, lazily-go, lazily-cpp, lazily-zig, lazily-cs, lazily-gd] EIGHT bindings still treat an array-valued tracked key as contributing NO rung-0 site, so the 12 plain-object elements of signaling/anti_spoof_session.json's eight array-valued `expect` keys are invisible to their bind ledgers. lazily-dart fixed this in 510e1c1 and lazily-js was already on the wider dimension, so those two are done; these eight are not. THE GAP IS EXACTLY 12 SITES IN EXACTLY 1 FIXTURE CORPUS-WIDE — I checked every pinned bucket in lazily-spec/corpus-counts.json: 783 objects-only + 12 array-element = the 795 the audit reports. Nothing else in the corpus carries an array-valued tracked key, so this is contained work per binding, not a migration. lazily-spec ALREADY has the vocabulary and the pin: check-corpus-floors.mjs:177 emits a `${key}[]` bucket per plain-object element, corpus-counts.json pins that fixture at {"assertions": 1, "expect[]": 12}, and `--report-blocks` prints an "all five names, + array elements" row per binding — so each of the eight already has its target numbers computed and waiting (rs 783/673 against its current 771/661, for instance). Use dart's 510e1c1 as the reference. THREE THINGS THAT MADE IT WORK. (1) Widen the walk AND the path predicate in step and pin them against each other, so a recorded site the walk does not enumerate fails as a corrupted channel and an enumerated site nobody records fails as unbound — over-widening is the real risk and the corpus exercises only one shape. (2) Probe the widening on SYNTHETIC shapes, because the corpus cannot: object value, array of objects, array of scalars, mixed array (true indexes must be kept), nested array (one level only), untracked key. (3) Site labels must disambiguate elements of the SAME array — dart proved this by detaching two elements of its 3-element step and confirming `steps[2].expect[0]` and `steps[2].expect[2]` are named separately; a per-array label collapses them and that is the set-identity failure this family cares about. EXPECT A HIGHER-RUNG FAILURE PER BINDING and fix it rather than excusing it: dart's was a per-key loop that visited only keys the fixture named, so a field the run produced that the fixture omitted was compared by nothing — the same weakness rs's stdlib had. Binding the element makes a key-set check available; assert it in both directions. Each binding's ledger pin should stay where it is: these become BOUND, not ledgered.
 - [ ] [#lzorderinganchors] [lazily-spec] scripts/check-assertion-ordering.py ORDERED_CHECKS anchors its ordering contract on the EXACT floor literals the bindings are now removing - regexes like 'assert accepted == 6', 'assert replayed == 12', 'assert.equal(accepted, 10)' for py/js/cs. lazily-py could not delete three of its floors this cycle and shipped them as DEAD ANCHORS, kept only to satisfy this guard, with the live constant-free assertion sitting above them. That is debt the guard created. Re-anchor on something stable that is not a value - a named helper call, or a marker the runner declares - so removing a constant does not break an unrelated ordering contract. Note the anchor must also be UNIQUE in the file (py tripped 'anchors are not unique' by quoting the literal in an explanatory comment). Repo: src/lazily-spec, then src/lazily-py to drop the dead anchors.
 - [ ] [#lzktareapartition] [lazily-kt] check-conformance-coverage.sh declares REQUIRED_AREAS (27 areas) with no EXCUSED_AREAS complement, so the area list scopes the AUDIT and not the set the suite OPENS: kt opens 148 fixtures / replays 157 scenarios where deriving from the areas alone gives 147 / 151. lazily-spec's check-corpus-floors.mjs therefore declines to derive any floor for kt (it would otherwise have called an honest MIN_FIXTURES=148 unsatisfiable). lazily-cpp pairs the two arrays and its own guard enforces the exact complement, and there the derivation is exact. Add the EXCUSED_AREAS complement (or the equivalent partition assertion) so kt's floors become auditable from the corpus side. Repo: src/lazily-kt
 - [ ] [#lzscenariofloormissing] [lazily-py, lazily-kt, lazily-gd] No MIN_SCENARIOS floor is declared at all - lazily-spec's check-corpus-floors.mjs reports this rather than failing, because lazily-kt deliberately retired MIN_FIXTURES for an area-partition assertion and that is a stronger invariant. But a binding with NEITHER is relying on nothing: py replays 151 scenarios and kt 157 with no positive-evidence floor under either, so a run that silently stopped replaying scenarios would report green. Derive each floor from the gate's own output, add it, and prove it exact by failing at n+1. lazily-gd is staged and may legitimately have nothing to floor yet - check before adding. Repos: src/lazily-py, src/lazily-kt, src/lazily-gd

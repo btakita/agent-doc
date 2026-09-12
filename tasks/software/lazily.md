@@ -193,12 +193,76 @@ That leaves a live design question rather than a settled answer, filed as `#lzle
 ### Stated plainly
 
 **kt's `unreachable`-class coverage is argued, not demonstrated** — as is rs's `unreachable` class generally, which still has no entries and an unprobed failure path (`#lzunreachableunprobed`). **py's `signal.py` is newer than its mypyc `.so`** in this checkout (2026-09-10 source against a 2026-07-31 build), so the suite there runs stale signal code; the agent correctly declined to `make compile` since nothing it touched is in the compiled extension and another pane may own that build state. **cs edited `AGENTS.md` around another pane's uncommitted tsift block** by hand-building the blob as `HEAD` plus its own hunk and bare-committing, rather than `--only`, which would have swept that change in — the right call, and verified after.
+
+### Re: `#lzledgerratchet` — the ceiling self-disables, measured ten times — opus-5 · 2026-09-12T03:58-04:00
+
+> **Queue prompt:**
+>
+> do [#lzledgerratchet]
+
+
+Decided and landed in all ten bindings. `EXPECTED_LEDGERED_BLOCKS`, exact equality in both directions, no alias — the retired name returns **zero files** family-wide. Values unchanged, so every landing was a no-op: `kt 537 · cpp/zig/dart/py 25 · rs/js/cs/gd/go 0`. All CI green on their exact SHAs: `rs 959c004 · py 30ad1ab · js 293b200 · kt b40c8d7 · go b420a30 · cpp 4b5910c · zig eb738c8 · cs 998dafa · dart 23e397f · gd a2dd7dc`, pointers in `8dc0effe4`.
+
+### The decision, and the better framing rs gave it
+
+I argued a `<=` ceiling is wrong because it starts at zero slack and accumulates slack with every migration, converging on the `MIN_BLOCKS = 30` defect it replaced. rs — the author of the position I was sharpening — agreed and then improved the cut:
+
+> The distinguishing property is not policy-vs-measurement; it is **fails-when-stale vs passes-when-stale**.
+
+That is better than what I wrote, and it explains why py's deleted `MIN_FIXTURES=145` and kt's deleted `MIN_BIND_PENDING` land on opposite sides despite both being typed numbers: the first was implied by a derivation in its own script and so could never fail, while the second could. rs also caught that its own comment was self-refuting — it invited a raise ("Raise it ONLY for a genuinely unbindable block"), and that invitation is precisely what arms the self-disabling path. At a pin of 0 the ceiling was safe only because a ledger cannot go below zero. **The policy framing was doing none of the work; zero was.**
+
+### Measured, not argued — ten times, both operators, same world state
+
+Every binding ran the two-step with the old and new operators against byte-identical evidence. The flaw reproduces everywhere:
+
+- **py put the stale pin in the file**, the way a real migration commit does, and the attack ran **fully green**: exit 0, zero `result: FAILED`, 1026 passed, guard printing `729 site(s) / 620 distinct digest(s) … 26/26 of the ceiling in use`. One migration's slack bought the attack outright. Supplying the same stale pin by *env* was still caught by a self-test — so only the file edit reproduces the real hazard, and an env-based probe would have under-reported it.
+- **gd and cs used a second site** so the two-step is genuine: migrate site A, then attack with site B. A single-site probe cannot show this, because migrating the only target removes the thing you need to attack with.
+- **cpp built the faithful migration** — an `LZCPP_ATTACH_BIND` hook emitting an extra `@block_bound` line, so a ledgered site actually *starts* binding rather than merely losing its entry.
+- **kt reproduced the exact case I quoted at it**: `>` exits 0 at `536 ledgered of at most 537`; the equality exits 1 naming the pin to lower.
+- **go stated the mechanism most cleanly:** under the equality, step 1 is already red, so the stale pin never survives to admit step 2. The growth check does not need to catch the laundering if the shrink check makes its precondition unreachable.
+- **js proved the equality is fail-closed by construction** where `>` was not: with the validation block deleted in a scratch copy, a malformed pin still exits 1 on `0 !== NaN`, while the same deletion under `>` exits 0 with a green OK line.
+
+### Three defects found inside the work itself
+
+- **cs's own prior commit accepted `-1` as a pin**, and three of four malformed values died on an unhandled `ValueError` traceback rather than a named error.
+- **py had a false green in its self-tests**: one planting test asserted with `any(...)` over the report and let a stray pin line slip past. Four others failed outright once the operator became exact, each reading as `GREW to 1 against a pin of 0`. Fixed in the fixture *and* the plants — without both halves they fail in both directions.
+- **go's site-list cap could have hidden entries from the count.** I told them to cap the displayed list; go added `TestLedgerSiteListIsCapped` asserting the reported *count* stays the full population. That failure mode was mine to spot and I did not.
+
+### rs's caveat, which belongs with `#lzktbindpending`
+
+> The equality costs one deliberate edit per migration … That cost is real and I now think it is the *feature* — but it is only cheap because the pin is 0 and the ledger is empty. A binding sitting at a pin of 200 mid-migration pays it on every commit. rs is not in that state; kt may be.
+
+Correct, and worth carrying rather than discovering later: kt has 512 `bind-pending` sites to work through, so its pin rides every migration batch. That is the intended friction, but it is friction rs does not pay and kt will.
+
+### Reconciling the drift rs declined to touch
+
+rs flagged two comment-drift items in its guard. It fixed one (prose claiming "113 entries, all `bind-pending`" directly above an empty array) and deliberately left the other: its comment says "all THREE blocks bound here needed a fix above rung 0" while AGENTS.md says 7 blocks, 4 real fixes. It said rewriting migration history it had not run felt worse than leaving the contradiction visible.
+
+That was the right instinct, and the two statements are **both true at different scopes** — the records are in this session. `#lzrsblockwalk` bound 3 blocks and all 3 needed higher-rung fixes (3 of 3). `#lzrsbindpending` measured 4 of 7 cumulatively: those same 3, plus `semtree_incremental`'s `expect_initial.b`, the key asserted by the corpus and read by nothing. So 3-of-3 describes the first pass and 4-of-7 the total. No defect, and I am not filing one.
+
+### Stated plainly
+
+The one new item is `#lzpinparsestrict`: the ten parsers disagree about what counts as a number, and rs's stricter rule is right — `int("1_0")` is 10, `int(" 7 ")` is 7, and `"٣".isdigit()` is True. All ten are fail-closed on obvious garbage, so this is an inconsistency rather than a hole, but the pin is now the rung a consistent pair cannot satisfy, which makes its parse load-bearing in a way it was not as a ceiling.
+
+Also unchanged and still true: gd's `FLOOR = 8` stays (it guards a directory *walk*, which no equality sees), dart's `MIN_BOUND_BLOCKS`/`MIN_BLOCK_FIXTURES` are byte-identical for `#lzdartboundfloor`, go's `MIN_FIXTURES`/`MIN_SCENARIOS` are untouched for `#lzgotypedfloors`, and `#lzgoasyncflake` did not reproduce across four verbose runs plus a `-race` run. Exchange is at 169+ lines; the queue is active, so I am noting the size rather than stalling to compact.
+
+### On `#lzzigenvsecretleak` — I had the at-rest source wrong, and so did zig's agent
+
+zig reported "three live PyPI tokens in cleartext" in the superproject `.env`. **That is wrong, and I checked rather than relaying it.** Every credential key in that file is a `$(passage ...)` reference, and the file is untracked and gitignored — correct hygiene, not a secret. Classifying a passage reference as a literal is exactly the trap.
+
+The real chain is one step later: `.mise.toml` carries `[env] _.source = ".env"`, which **resolves** those substitutions at shell startup, so every process's ambient environment holds the cleartext — which is why a presence check sees `CARGO_REGISTRY_TOKEN` at 35 chars. zig's `failed command:` lines then print the resolved values, **on green runs** (six such lines at exit 0 with zero FAILED), and a caller-side `env -u` scrub of 20 token-shaped variables was *defeated*.
+
+So the fix is to stop resolving publish tokens into the ambient environment, not to move them out of `.env`. The item is updated accordingly. **The rotation recommendation stands for a different reason:** the resolved values passed through a subagent's tool output while it diagnosed this, which puts them in a transcript that no log shredding reaches. `PYPI_PUBLISH_TOKEN`, `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN` want rotating, and that needs your credentials, so it is genuinely yours rather than something I can close.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- ~~do [#lzledgerratchet]~~
+- do [#lzzigenvsecretleak]
+- do [#lzgotypedfloors]
+- do [#lzgoasyncflake]
 - ~~do [#lzledgerceiling]~~
 - do [#lzunreachableunprobed]
 - ~~do [#lzrsbindpending]~~
@@ -215,7 +279,7 @@ That leaves a live design question rather than a settled answer, filed as `#lzle
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzledgerratchet] [lazily-kt, lazily-rs, and the other eight] OPEN DESIGN QUESTION raised by #lzledgerceiling, and it partly contradicts the argument that item shipped. rs argued a typed count beside the set equality carries no information. kt showed that is true only of a count DERIVED from the ledger — kt's MIN_BIND_PENDING was a typed PIN at 512, and a pin is TWO-SIDED: it failed on growth (so kt was never vulnerable to the any-consistent-pair hole — proven by running the probe against pre-change kt, which caught it) AND it failed on SHRINK, forcing a downward re-pin in the same commit as each migration. MAX_LEDGERED_BLOCKS uses `>`, so it keeps the growth half and discards the shrink half. Measured in kt: binding one site and deleting its entry now exits 0 at `536 ledgered of at most 537` where the old pin failed and demanded 511. Headroom therefore ACCUMULATES as areas migrate, and a ledger can silently regrow into slack it earned by shrinking. DECIDE, one way, across all ten bindings: either (a) make the ceiling an EQUALITY — a ratchet that must be lowered in the migration commit, which is what a typed pin already was and reinstates the re-pin burden deliberately, or (b) keep `>` and accept the slack, in which case say so in each guard's comment so nobody re-adds a pin thinking it was an oversight. Do not leave the ten bindings split on it, which is the state #lzrsbindpending was filed to resolve and this item has now reproduced one level up. Secondary: kt's AGENTS.md documents none of this because another pane held the file, while rs's does — reconcile once (b) or (a) is chosen.
+- [ ] [#lzpinparsestrict] [lazily-rs, lazily-py, lazily-js, lazily-kt, lazily-go, lazily-cpp, lazily-zig, lazily-cs, lazily-dart, lazily-gd] The ten EXPECTED_LEDGERED_BLOCKS parsers disagree about what counts as a number, and nine of them are looser than they look. lazily-rs went deliberately stricter than `int()` and gave the reasons: `int("1_0")` is 10, `int(" 7 ")` is 7, and `"٣".isdigit()` is True — so a bare `int()` or `.isdigit()` parse silently accepts a pin nobody wrote, including a PEP-515 underscore literal and a non-ASCII numeral. The others use a mix: plain `int()` in a try/except (cs), `.strip().isdigit()` (gd), a regex (dart), `Number()` with an explicit NaN/empty/negative rejection (js), and bash `${VAR-N}` plus a python reader (kt). Every one of them is fail-CLOSED on the obvious garbage, so this is not a hole — it is an inconsistency that makes the family's weakest parser the real contract. Converge on rs's rule: accept only a bare run of ASCII digits, reject underscores, surrounding whitespace, signs, non-ASCII digits, floats and hex, and name the offending value. Worth doing in one pass because the pin is now the rung that a consistent pair cannot satisfy, so its parse is load-bearing in a way it was not when it was a ceiling.
 - [ ] [#lzzigenvsecretleak] [SECURITY, lazily-zig] zig's noisy `failed command:` lines — which are NOT failures and print on ordinary green runs — dump the ENTIRE environment alongside the command. On this machine that environment carries CARGO_REGISTRY_TOKEN (35 chars) and NPM_TOKEN (40 chars), both verified SET by presence check on 2026-09-12. So any `make test` / `make check` scroll in a lazily-zig checkout prints two live publish credentials in cleartext, on a command nobody treats as sensitive. This is a livestream and screen-share exposure. Found incidentally by the #lzledgerceiling agent, which deleted three captured logs containing the token. TWO PARTS, and the second is the real fix: (1) filter or suppress the environment dump in zig's build output for this repo; (2) ROOT CAUSE — publish tokens are exported into every shell instead of being substituted at the point of use. They belong in passage, referenced as `$(passage ...)` inside the publish command only, which is the documented pattern for the crates.io token and is being bypassed. Until the ambient exports are gone, treat every lazily-zig build log as containing secrets. Recorded in operator memory as reference_lazily_zig_failed_command_dumps_env_secrets.md.
 - [ ] [#lzgotypedfloors] [lazily-go] go's scripts/check-conformance-coverage.sh still carries two TYPED floors that mirror their own set equalities: MIN_FIXTURES=147 (156 corpus fixtures minus 9 KNOWN_UNCOVERED) and MIN_SCENARIOS=151 (151 scenarios minus 0 excuses). Both are the MIN_BLOCKS family, but of the COVERAGE ledger rather than the bind ledger — which is why #lzledgerceiling deliberately left them alone. They cannot simply be deleted: they are the only thing in that file that can see a SHRINKING corpus, because `total` is read from the overridable SPEC_DIR, so a corpus that loses fixtures still satisfies both directions of every equality there. The correct move is the conversion lazily-rs already landed under #lzrstypedfloors (see lazily-rs/scripts/check-conformance-coverage.sh:535-560): replace each typed floor with an expectation DERIVED from the corpus listing, keeping a zero-guard so #lzvacuousrun cannot pass over nothing. Note the related trap py hit: lazily-spec's check-corpus-floors.mjs greps the whole scripts/ directory for the literal MIN_FIXTURES=${MIN_FIXTURES:-N} spelling, so quoting a retired pin verbatim in a COMMENT keeps the upstream audit deriving and comparing a floor that no longer runs. Reword, do not quote. Repo: src/lazily-go
 - [ ] [#lzgoasyncflake] [lazily-go] TestReactiveGraphConformance failed a divergence check on AsyncContext/churn_returns_to_baseline.json#3:observed_count during #lzledgerceiling, then did not reproduce in two reruns of the identical probe, with control green 3 of 3. So it is pre-existing and intermittent, not caused by that change — the agent flagged it rather than chasing it. An intermittent divergence in an ASYNC conformance runner is the shape that hides a real race behind a retry, and `observed_count` is exactly the kind of key a missed or doubled cascade step perturbs. Reproduce it under load or with a seeded scheduler rather than by rerunning, and treat a run that merely goes green again as no evidence. Repo: src/lazily-go

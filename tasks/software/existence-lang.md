@@ -450,6 +450,47 @@ One loose end I did not close on my own: all three ontology workflows pin `EXIST
 Also worth knowing before the next item: dropping the three nodes took `unlinked_mention` from 36 to 32, since four of those mentions lived in the deleted files. I corrected `#xlunlinked`'s count and its example, which cited `agreement`.
 
 CI on both repos was still queued at closeout ([existence 34668262758](https://github.com/existence-lang/existence/actions/runs/34668262758), [ontology 34668262152](https://github.com/existence-lang/ontology/actions/runs/34668262152)); local verification above is the evidence.
+
+### Re: do #xlunlinked — opus-5
+
+> **Queue prompt:**
+>
+> do [#xlunlinked]
+
+Reviewed all 32 one at a time, as the item asked. 21 of them genuinely name the node and are now linked; 11 are deliberate keeps. [`84e5d57`](https://github.com/existence-lang/ontology/commit/84e5d57).
+
+**Linked** — `aesthetics`→philosophy, `agree`/`implicit-scope`/`redefine`→definition, `category-theory`→concept + abstraction + context, `create`→existence, `culture`/`type`→system, `disagree`→agree, `emotion`/`feeling`/`presence`→state, `exist`→existence + reality, `human`/`technology`→tool, `linguistics`→language + human, `natural-law`→phenomena + system, `novelty`→entity + context + unique, `ontology`→entity, `pneuma`→tradition, `signal`→information, `this-philosophy`→domain, `tool`→create, `unconsciousness`→signal. 24 files, 33 new edges.
+
+**Kept unlinked, and why** — these are the cases where the word is not the concept:
+
+- *Ordinary English inside a borrowed dictionary sentence.* `axiology` is "the origin, nature, functions, types, and interrelations of values" — that `nature` is not the unabstracted entity of existence and those `types` are not type theory. Same for `ontology`'s "fundamental types of entity" (kinds), `domain`'s "her unique characteristics" (an adjective), and `type`'s "computer science", which is half a compound noun.
+- *A participle, not the noun.* `consciousness` says "the ability of being present"; `unique` opens "Being the only one of its kind". The `being` node is "To be, to exist" — neither sentence invokes it.
+- *The node's own name.* `belief-system`'s "Belief System" and `evolutionary-linguistics`'s "Evolutionary linguistics".
+- *Self-reference.* `physical-system`'s "everything outside the system" is the node talking about itself.
+- *A quoted example, not the definition.* `epistemology`'s `concept` is inside the Plato sentence the wiktionary entry supplies.
+
+One held back for a concrete reason rather than an editorial one: **`exist`→`being`**. `being.md` is literally "To be, to [exist](./exist.md)", so linking the reverse direction manufactures a fresh mutual-definition cycle. That pair belongs with `#xlgenuscycles`, which is already queued and already owns exactly this kind of genus decision, so I left `existence` and `reality` linked in `exist.md` and left `being` alone.
+
+That restraint is the thing I actually verified rather than assumed — `mutual_definition` is still 4, not 5, and the broader graph is still acyclic:
+
+```
+$ existence --ontology . audit --structure --contradictions
+0 error(s), 26 warning(s) — clean
+unlinked_mention  32 → 11
+mutual_definition  4 → 4
+$ existence --ontology . toc --check
+toc: 116 term(s), no problems.
+$ existence --ontology . export | rapper -i turtle -c
+rapper: Parsing returned 2976 triples
+```
+
+`terms.md` regenerated, so `audit --mirrors` is back to only the nine `~/.claude/CLAUDE.md` rows that `#xlclaudetable` owns. I also confirmed the `philosophy/` nodes mirror needs no port: its `signal.md` still reads "Useful information, as opposed to noise." unlinked, and the comparator reports no drift, which proves it strips link markup before diffing the way `#xlaudit5` specified. So link-only edits never diverge the two repos.
+
+On typed links: several of these are real `"broader"` candidates — `signal`→information, `technology`→tool, `linguistics`→language, `aesthetics`→philosophy all read as genus. I deliberately left every new edge untyped. `#xlgenuscycles` is the next-but-one queue item and genus typing interacts with the cycle detector, so deciding it here would pre-empt an item that exists to decide it carefully.
+
+The open question this leaves is the same one `#xlthreshrev` raised for `near_duplicate`: those 11 keeps are correct, permanent, and will be re-listed in every weekly audit issue. There is no way to record "reviewed, intentionally unlinked" today. Filed as `#xlmentionkeep`; it needs a design decision on where the marker lives before any code, so I did not invent one.
+
+Both of last cycle's CI runs came back green ([existence 34668262758](https://github.com/existence-lang/existence/actions/runs/34668262758), [ontology 34668262152](https://github.com/existence-lang/ontology/actions/runs/34668262152)). This commit's run ([34668531331](https://github.com/existence-lang/ontology/actions/runs/34668531331)) was still queued at closeout; the CI gate is `audit --structure`, which I ran locally at exit 0.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
@@ -457,7 +498,7 @@ CI on both repos was still queued at closeout ([existence 34668262758](https://g
 
 <!-- agent:queue priority go -->
 - ~~do [#xldupenodes]~~
-- do [#xlunlinked]
+- ~~do [#xlunlinked]~~
 - do [#xlepistemsubs]
 - do [#xlgenuscycles]
 - do [#xlclaudetable]
@@ -467,7 +508,7 @@ CI on both repos was still queued at closeout ([existence 34668262758](https://g
 
 <!-- agent:backlog priority -->
 - [ ] [#xlthreshrev] Ship the `near_duplicate` similarity threshold to the ontology workflows: `existence` commit ddc0cc9 gates the check on 0.25 definition overlap, but `.github/workflows/{audit,ci,pages}.yml` in `src/existence-lang/ontology` all pin `EXISTENCE_REV: v0.8.0`, so the weekly audit issue keeps listing abstract/abstraction, exist/existence and redefine/redefinition as warnings. Cut existence 0.8.1 (`make release`) and bump the three `EXISTENCE_REV` values to `v0.8.1`. Note the tag also runs the crates.io publish job, which 403s until [#cratestoken] is resolved; the GitHub Release and tag land either way, which is all `cargo install --git --tag` needs
-- [ ] [#xlunlinked] Link the 32 lay definitions that name another node without linking it (audit `contradictions/unlinked_mention`), e.g. `aesthetics` mentions philosophy, `agree` mentions definition, `axiology` mentions nature and type. Each link densifies the skos:related graph and several are candidates for a typed `"broader"`. Editorial per mention ... a definition that uses "state" or "model" as ordinary English should stay unlinked, so review each rather than scripting it. `existence audit --contradictions` lists them with the exact term
+- [ ] [#xlmentionkeep] Give the audit a way to record a reviewed-and-intentionally-unlinked mention, so `contradictions/unlinked_mention` stops re-listing the 11 permanent keeps every weekly run (axiology nature/type, ontology type, domain unique, type science, consciousness being, unique being, belief-system system, evolutionary-linguistics linguistics, physical-system system, epistemology concept — plus exist being once [#xlgenuscycles] settles it). Design decision first, then code: the marker could be an `[audit]` allow table in `existence.toml` keyed by term+mention, an inline HTML comment in the node, or a SPEC rule that exempts quoted/borrowed sentences from the scan. Same class of problem as [#xlthreshrev] — a check whose true positives are already resolved but unrecordable trains the reader to skip the report. Discuss the shape before editing
 - [ ] [#xlepistemsubs] Fix the 11 non-standard Epistemology subsections across 6 nodes (audit `structure/lint`): `intelligence` uses `Links` and `Human Intelligence`, `evolutionary-linguistics` uses a raw `<a href>` anchor as a heading, plus `perspective`, `presence`, `this-philosophy`, `unconsciousness`. Rename to the recognized vocabulary (`Cultural Definition` | `Sources`, `Pattern Expression` | `Examples`) or move the content under one of them; SPEC rule 9 keeps these advisory, so the alternative is widening the vocabulary in the spec
 - [ ] [#xlgenuscycles] Decide the genus for the 4 remaining definitional cycles (audit `contradictions/mutual_definition`): aesthetics -> axiology, axiology -> ethics, coercion -> violence, qualitative -> quantitative. Same procedure `#xlchaingaps` used for entity/information: pick which side is the genus and reword one sentence so the pair stops defining each other. Content decision, four sentences
 - [ ] [#xlclaudetable] Decide what the `~/.claude/CLAUDE.md` philosophy table is (audit `mirrors/mirror_drift`, 9 rows: context, domain, evolution, existence, focus, perspective, resolution, story, system). Every row summarises rather than quotes its node, so word overlap runs 0.00-0.21 and the mirror check calls it drift. Either reword the rows to the node lay definitions, making the table a real mirror, or declare the summary style intended and give the comparator a looser rule for `kind = toc` style mirrors. That file is your global instruction surface, so the direction is yours
@@ -514,4 +555,5 @@ CI on both repos was still queued at closeout ([existence 34668262758](https://g
 - 2026-09-11 [#xlrequote] Decide what to do with the source drift the first real `existence audit --sources` run found in `src/existence-lang/ontology`: 206 quoted passages are no longer on their pages (87 wiktionary, 108 wikipedia, 6 etymonline; the nodes quote 2014-15 wording that has since been rewritten) and 19 have changed but still match. Per source, either refresh the blockquote from the live page or pin the historical Wayback snapshot next to the anchor so the quote stays verifiable. Also 6 dead links: `--fix` can swap cosmicscale.appspot.com (fractal, physical-system, scope), the NYT attention-schema piece, and wikipedia `Physical_information` (entity, information) for snapshots; stevenpoole.net, the AAAI SARA13 PDF, and the colorado.edu PDF have none and need a replacement source. Content decisions, not code; `audit --sources` reports them again each weekly run once Phase 6 commits the lock
 - 2026-09-11 [#xlrequote2] Decide the 45 quotes no single Wayback snapshot carries (the strict pin rule wants every passage a node quotes from one page in one copy): 27 on Wiktionary (abstraction, conscious, context, create, creativity, evolution ×2, existence, explicit, focus, fractal, history, human ×2, intelligence, love, model, physical, science, spirit, story, system ×3, tool, type, violence) and 18 on Wikipedia (Abstract_object ×3, Algorithm, Emotion, Evolution_(disambiguation), Formal_system, Information ×2, Intelligence, Natural_law, Nature, Platonic_realism, Sexual_reproduction, Spirituality, Story, Technology, Type–token_distinction). Per source: split the blockquote so each passage sits under its own anchor and let `existence audit --sources --fix` pin each, or requote from today’s page. `audit --sources` lists them as `quote_missing` with no fix each week; see `tasks/software/existence-lang.md` for the pinning decision
 - 2026-09-11 [#xldupenodes] Merge the three node pairs whose lay definitions are byte-identical (audit `structure/near_duplicate`, similarity 1.00): `agree`/`agreement`, `human`/`humans`, `signal`/`signals` in `src/existence-lang/ontology/src`. Per pair keep one slug, redirect inbound `[x](./x.md)` links, drop the other from its ring in `existence.toml`, rerun `existence audit --structure`. The other three pairs it flags are genuinely distinct (`abstract`/`abstraction` 0.03, `exist`/`existence` 0.00, `redefine`/`redefinition` 0.00) ... keep them and consider an allowlist so the check stops reporting them
+- 2026-09-11 [#xlunlinked] Link the 32 lay definitions that name another node without linking it (audit `contradictions/unlinked_mention`), e.g. `aesthetics` mentions philosophy, `agree` mentions definition, `axiology` mentions nature and type. Each link densifies the skos:related graph and several are candidates for a typed `"broader"`. Editorial per mention ... a definition that uses "state" or "model" as ordinary English should stay unlinked, so review each rather than scripting it. `existence audit --contradictions` lists them with the exact term
 <!-- /agent:done -->

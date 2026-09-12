@@ -74,14 +74,72 @@ One thing I fixed myself: `AGENTS.md` claimed 571 sites bound where the gate pri
 **And one genuine disagreement between bindings that I have filed rather than resolved by fiat.** rs pins only the set equality and argues that a separate typed count "can only ever disagree with it, and is the `MIN_BLOCKS = 30` defect in a new costume". kt pins *both* a count and the per-site ledger. Both arguments are coherent and only one can be right; `#lzrsbindpending` carries it so whoever takes the next pass settles it deliberately instead of copying whichever they saw first.
 
 Phase 2 filed and appended: 201 sites, all reachable and none excusable, across reactive-graph 113, stdlib 54, ingress 28 and semtree 6.
+
+### Re: `#lzrsbindpending` — 201 bind-pending sites to zero, and a hole in set equality that no count closes — opus-5 · 2026-09-12T02:52-04:00
+
+> **Queue prompt:**
+>
+> do [#lzrsbindpending]
+
+
+Done. All four areas landed, `KNOWN_UNBOUND_BLOCKS` is **empty**, and rs now reports **771 of 771 sites bound with nothing excused**.
+
+| area | sites | what it took |
+|---|---|---|
+| `collections/semtree_incremental.json` | 6 | 1 real gap |
+| `ingress/boundary_ingress_adapter.json` | 28 | 2 hand-rolled rung 2s deleted |
+| stdlib (timer 14, timeout 18, revision_barrier 22) | 54 | whole-value equality split + key-set claim |
+| reactive-graph (21 fixtures) | 113 | 1 hand-rolled rung 2 deleted |
+
+### The 100% higher-rung rate did not generalise, and the predictor is consumption shape
+
+I told the agent to expect 100%, measured twice. It came back **4 of 7 blocks**, and the miss is the useful part, because the split is not random — it tracks how the runner consumed the block *before* binding:
+
+- **Per-key optional** (`if let Some(k) = block.get("k")`) — **every single one hid a real gap.** The new one this phase is the sharpest yet: `semtree_incremental`'s `expect_initial.b` was asserted by the corpus and **read by nothing at all**, because the runner only ever checked node `a`. An optional read is silent on absence *and* on a key the runner forgot to look for.
+- **Exhaustive** (a whole-value `assert_eq!`, or a hand-rolled key loop that panics on an unknown key) — **none hid a gap.** stdlib's whole-value equality and all three hand-rolled rung 2s were wrong *in place, not in effect*: blind to rung 3, unreusable, and leaving rung 0 blind — but they did close the unconsumed-key hole.
+
+So the 195-site step loops were the cheap ones and the 6-site fixture was the expensive one. Budget the remaining bindings by consumption shape, not by site count. kt's 28-of-28 was 28 optional reads; that is why it read as a law.
+
+Three hand-rolled rung 2s found and deleted — `boundary_ingress_conformance` had **two**, and the reactive-graph engine had the one covering all 113 sites. Each iterated fixture keys and panicked on an unrecognised one: right instinct, wrong place, and rung 0 still saw nothing. All three are replaced by inverted iteration — the runner names what it implements, the tracker reports what nothing read — with object-valued keys consumed by descent, which *is* the key-set claim and is what retires `assert_delivery`'s loop.
+
+Two traps worth keeping: splitting a whole-value `assert_eq!` per key is **strictly weaker** unless the key set is asserted beside it, because per-key comparisons cannot see a key the *run* produced that the block does not carry (stdlib now asserts both); and every closure must compare against the value the tracker hands over — at 54 sites through one helper, a single `|_|` would have been 54 fake binds.
+
+### kt vs rs: both partly right, and I had it wrong to frame it as either/or
+
+I said only one of them could be right. That was the wrong frame, and the agent's answer is better than my question.
+
+rs is right that a typed count **mirroring** the current population is redundant: equal sets have equal counts, so it carries no information and adds an edit site that drifts — the `MIN_BLOCKS = 30` shape in a new costume.
+
+But set equality alone is **satisfied by any consistent pair**, and that is a genuine hole. A commit that detaches fifty binds and writes the fifty matching ledger entries passes both directions, and the magnitude rung does not catch it either, because the sites are still *declared*, merely no longer bound. Demonstrated, not argued: dropping one `bound` line and adding its entry gets past both directions.
+
+What closes it is not a count of what *is* excused but a **ceiling on how much may be**. That is policy rather than measurement — it does not move with the corpus, needs re-pinning only deliberately and upward, and at zero needs no maintenance at all. `MAX_LEDGERED_BLOCKS` ships at 0 in `962923a`, and the gate line now reads `771 sites BOUND, 0 ledgered of at most 0`.
+
+Filed as `#lzledgerceiling` for the other nine ledgers, carrying the one exception the agent identified: kt may keep a number **if** its pending set is matched by *pattern* rather than enumerated per site, since a pattern can widen silently and set equality cannot see that. An enumerated list cannot — growing it is the most visible diff there is. Check which kt has before removing anything.
+
+### Verification
+
+`make check` exit 0 captured explicitly, `grep -c "result: FAILED"` → 0. Three intermediate reds fixed rather than waived (a dead `expect_field_i64`, an unused `scenario_index`, `cargo fmt`). Probes ran per area in both directions, and the backward direction — the one nothing else catches — got a free live proof: the first full ingress run after binding, with all 28 entries still present, failed with **exactly 28 stale entries and zero forward failures**. The ceiling has its own probe: a detached bind plus its matching entry passes both directions and is refused only by the ceiling.
+
+Six commits, `5dbaa6c` → `95fd125`, in sync with `origin/main`; superproject pointer `a5f99415c`. **CI green on `84b4dea`, `242cd2a`, and `95fd125`** — all four jobs on each, with the final log carrying the gate line.
+
+Three things stated plainly rather than smoothed over:
+
+- **CI ran on 3 of the 6 heads.** `5dbaa6c`, `2c4ba79`, and `962923a` are ancestors of green heads, so their content is validated, but those individual tree states were verified only locally. I am accepting that rather than spending three more runs: the content is covered and the head is green.
+- **The `unreachable` class still has no entries** and its failure path is unprobed — now doubly so, since a ceiling of 0 would refuse such an entry before the class logic ran. Filed as `#lzunreachableunprobed`, because an enforced-but-unexercised branch reads as coverage and is not.
+- The `5.0`/`5e0` digest fold and the untested float rendering in the guard's Python twin carry over unchanged from `#lzrsblockwalk`.
+
+### `#lzfollowupqueueorder` now has four witnesses
+
+`#lzrsbindpending` was filed to backlog at the end of last cycle and arrived as this cycle's head, ahead of `#lzdartboundfloor` and the six items behind it. Same mechanism as the previous three: the closeout that filed it hit the retained-write deferral, so the `--backlog-queue-placement append` path never ran, and the next preflight's backlog→queue sync reinstated it in backlog order, which is prepend.
+
+Separately, this head took three preflight admissions (`cycle-1789191617647`, `cycle-1789194895273`, `cycle-1789200...`) while one dispatch was in flight. My re-entries came through the Skill tool — a compaction resume, then two Stop-hook blocks — and a Skill-tool re-entry does not claim the `claude_loop` drain-owner lease the way a submitted `/loop agent-doc <FILE>` prompt does, so the supervisor idle-queue watch injected its own trigger each time. Re-arming through `ScheduleWakeup` produces a real submitted prompt and does claim the lease, which is the shape I have settled on.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lzrsbindpending]
-- ~~do [#lzrsblockwalk]~~
+- ~~do [#lzrsbindpending]~~
 - do [#lzdartboundfloor]
 - do [#lzdartarrayblocks]
 - do [#lzorderinganchors]
@@ -95,7 +153,8 @@ Phase 2 filed and appended: 201 sites, all reachable and none excusable, across 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzrsbindpending] [lazily-rs] PHASE 2 of #lzrsblockwalk: migrate rs`s 201 bind-pending assertion-block sites onto the Expect tracker. All 201 are REACHABLE — each is a per-step or per-scenario expectation its runner already reads and compares, missing only the routing — so none is excusable and the count can only go down. Three step loops account for 195: reactive-graph 113, stdlib 54, ingress 28, plus collections/semtree_incremental.json 6. The ledger is `fixture|where|class|reason` in KNOWN_UNBOUND_BLOCKS and is an EQUALITY against the RUN failing in BOTH directions — an unbound site missing from it fails naming the site, and an entry for a site the run DID bind, or for a site the corpus no longer carries, fails as stale. Note the deliberate design choice rs made and lazily-kt did not: there is NO separate typed count beside the set equality, on the grounds that a number which can only ever disagree with the set is the `MIN_BLOCKS = 30` defect in a new costume. Worth settling whether kt should drop its count too, or rs gain one — the two bindings currently disagree about this and only one of them can be right. EXPECT A 100 PERCENT HIGHER-RUNG FAILURE RATE, measured twice now: kt`s first pass was 28 of 28, and rs`s three-block pass was 3 of 3 after its own correction in 0ecfce0. Binding a block makes the rungs ABOVE rung 0 start applying to it, so an unconsumed or read-but-unasserted key that was invisible becomes a failure — that is the point, not a regression. Two of rs`s three were instructive about what to look for: the registers runner carried a HAND-ROLLED COPY of rung 2 (it matched every key and panicked on an unrecognised one — right instinct, wrong place, and rung 0 still saw nothing), and arena_blob.json`s `expected` was consumed only by a serde deserialize into a typed struct, so it was read, asserted, and invisible; binding it also required comparing against the BOUND value rather than the struct`s copy, since a closure that ignores `want` satisfies the tracker while asserting nothing. Take one step loop per pass, delete exactly that area`s entries, and verify the equality fires on an off-by-one in both directions. Every higher-rung failure must be FIXED, never excused, and never laundered back into the ledger. Repo: src/lazily-rs
+- [ ] [#lzledgerceiling] [lazily-kt, lazily-zig, lazily-py, lazily-js, lazily-cs, lazily-dart, lazily-gd, lazily-cpp, lazily-go] rs proved set equality alone has a hole that no count closes: a commit that detaches N binds and writes the N matching ledger entries passes the equality in BOTH directions, and the magnitude rung does not see it either because the sites are still DECLARED, just no longer bound. Demonstrated by dropping one `bound` line and adding its entry. The guard that catches it is not a count of what IS excused but a CEILING on how much MAY be — policy, not measurement, so it does not move with the corpus and never needs re-pinning except deliberately and upward. rs shipped `MAX_LEDGERED_BLOCKS` defaulting to 0 in 962923a. Propagate a ceiling to every other binding that carries a block ledger, set to that binding's CURRENT ledgered count so it is a no-op on landing and a fail on any growth, then drive it down as the pending sets shrink. TWO SPECIFIC COROLLARIES. (1) lazily-kt must ALSO drop its typed count beside the set equality: a count that MIRRORS the current population adds no information (equal sets have equal counts) and adds an edit site that drifts — the `MIN_BLOCKS = 30` shape in a new costume. The ONE case kt may keep a number is if its pending set is matched by PATTERN rather than enumerated per site, because a pattern can widen silently and set equality cannot see that; an enumerated list cannot, since growing it is the most visible diff there is. Check which kt has before removing anything. (2) Budget the remaining bind-pending work by CONSUMPTION SHAPE, not site count — see #lzrsbindpending's measured 4-of-7.
+- [ ] [#lzunreachableunprobed] [lazily-rs] The `unreachable` ledger class in rs's block guard has NEVER had an entry, so its failure path has never been exercised, and with `MAX_LEDGERED_BLOCKS` now 0 the ceiling would refuse such an entry before the class logic ran. Either probe the class against a scratch corpus that legitimately carries an unreachable site (raising the ceiling for that probe only), or delete the class and its vocabulary entry as dead code. Do not leave an enforced-but-unexercised branch: it reads as coverage and is not. Repo: src/lazily-rs
 - [ ] [#lzdartboundfloor] [lazily-dart] scripts/check-unbound-blocks.py still carries two typed `>=` floors that #lzblockmagnitudeaudit deliberately left alone because they are different rungs: MIN_BOUND_BLOCKS=697 (blocks BOUND) and MIN_BLOCK_FIXTURES=144 (fixtures opened). MIN_BOUND_BLOCKS is now the last number in this repo a person re-pins by hand — it read 697 when pinned and the run reports 700 today, so it is already 3 slack and guarding nothing in that range, the exact drift the block magnitude just stopped. MIN_BLOCK_FIXTURES is now REDUNDANT: the site-set equality subsumes it, since the derived site set is keyed by fixture and a missing fixture takes its sites with it. Derive the bound count the same way (declared minus the excuse ledger, asserted EQUAL) or retire it in favour of the unbound-set check that already exists, and delete MIN_BLOCK_FIXTURES. Repo: src/lazily-dart
 - [ ] [#lzdartarrayblocks] [lazily-dart] dart`s walk is object-valued only, so array-valued tracked keys contribute no site: the same 144 opened fixtures give 725 sites / 616 digests under dart`s rule and 737/628 when array ELEMENTS count. The gap is exactly 12 blocks and they are all in one fixture — `signaling/anti_spoof_session.json`, whose eight array-valued steps[].expect keys carry 1+2+3+1+1+1+1+2 elements. lazily-js instruments each element (which is why js derives 747 where dart derives 725); dart`s objects-only rule sees none of them, so whatever those 12 blocks assert — one of them is the anti-spoof invariant the fixture exists for — is outside rung 0 in this binding. Decide deliberately: either instrument array elements as js does, or record why an array-valued block has no bindable site here. Related and worth settling in the same pass: dart reads its block-name set out of the tracker, so a name the CORPUS grows is invisible on both the inventory and the derivation at once (a NAME-OPEN `^(assert|expect)` scan finds nothing beyond the five names today — `expected` 405, `expect` 294, `assertions` 32, `expect_initial` 3, `expect_after` 3 — but that is today`s corpus, not a guarantee). Repo: src/lazily-dart
 - [ ] [#lzorderinganchors] [lazily-spec] scripts/check-assertion-ordering.py ORDERED_CHECKS anchors its ordering contract on the EXACT floor literals the bindings are now removing - regexes like 'assert accepted == 6', 'assert replayed == 12', 'assert.equal(accepted, 10)' for py/js/cs. lazily-py could not delete three of its floors this cycle and shipped them as DEAD ANCHORS, kept only to satisfy this guard, with the live constant-free assertion sitting above them. That is debt the guard created. Re-anchor on something stable that is not a value - a named helper call, or a marker the runner declares - so removing a constant does not break an unrelated ordering contract. Note the anchor must also be UNIQUE in the file (py tripped 'anchors are not unique' by quoting the literal in an explanatory comment). Repo: src/lazily-spec, then src/lazily-py to drop the dead anchors.

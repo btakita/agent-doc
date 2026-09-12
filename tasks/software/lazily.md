@@ -518,6 +518,49 @@ And it is proven to bite: `TestAsyncSettleWaitsForDisposedRunningEffects` assert
 ### Stated plainly
 
 This one cost about ten minutes of scheduler variation after seven useless clean runs, which is the lesson worth keeping: for an intermittent failure, changing the *conditions* beats repeating the *experiment*. I had that in the brief only because the earlier reruns had already failed; it should be the first instinct, not the third lead.
+
+### Re: `#lzunreachableunprobed` — there was no branch to probe, and the type is why I thought there was — opus-5 · 2026-09-12T06:29-04:00
+
+> **Queue prompt:**
+>
+> do [#lzunreachableunprobed]
+
+
+Closed. `3f48c86`, CI green, pointer `f16a6baa8`.
+
+### The premise was false
+
+I filed this saying rs's `unreachable` ledger class "is enforced but unexercised, so its failure path is unprobed". It has no failure path of its own. Checked before touching anything:
+
+- `CLASS_REASONS` mapped both classes to `True`, and **no code ever read a value** — no `CLASS_REASONS[...]`, no `.get`, no `.values()`.
+- The class is used exactly three ways: a membership check (`klass not in CLASS_REASONS`), a per-class tally for the report, and display in messages.
+- **No rung branches on which class an entry carries.** Suppression is the same code for `bind-pending` and `unreachable`.
+- The one enforcement that exists — refusing an unknown class — was already probed during `#lzledgerceiling`, which reported unknown class, empty reason and duplicate each failing with their own message.
+
+So an audit of the `unreachable` path was an audit of something that does not exist. That is three filings in a row of mine that did not survive being checked: this one, `#lzzigenvsecretleak` (the leak did not reproduce), and `#lzgotypedfloors` (the floors were not the only shrink detector).
+
+### What actually misled me, and what I fixed instead
+
+The **type**. A map whose every value is `True` reads as though the value carries semantics — that is why I assumed `unreachable` had its own enforced behaviour. Nothing in the code said otherwise.
+
+It is now a set, `LEDGER_CLASSES`, with the reason recorded at the site: the class is descriptive, enforced only as a membership check, and it exists to make a distinction visible in the diff. I also wrote down *why* the spelling mattered, so the next reader does not repeat my inference.
+
+### Why the vocabulary stays even at zero entries
+
+Deleting it was the other option in the item, and it is the wrong one:
+
+- **lazily-kt carries 25 real `unreachable` entries**, so the concept is live family-wide; rs dropping the vocabulary would make the two ledgers describe different things.
+- Without the class, a genuinely unbindable site gets labelled `bind-pending` — which is exactly the laundering the size pin refuses, and the guidance at the pin already says *"Never raise it to park a `bind-pending` site."*
+
+The interaction with `#lzledgerratchet` is worth naming: with `EXPECTED_LEDGERED_BLOCKS` exact at 0, rs cannot add any entry of either class without deliberately raising the pin in the same commit. So in rs the class distinction is currently unreachable **by construction**, not merely unused — which is a stronger statement than the item made and the right reason to leave the vocabulary alone rather than exercise it artificially.
+
+### Verification
+
+`make check` exit 0, zero `result: FAILED`, zero error/panic lines, and the gate still reports `0 ledgered of exactly 0`. I also evaluated the new set literal directly to confirm it holds exactly the two members — my first check used a regex over the block and caught the phrase `"not done yet"` out of a comment, which would have read as a third class.
+
+### Stated plainly
+
+This produced a small type fix and no new coverage, because none was possible. The honest summary of the cycle is that the item should not have been filed in the shape it was — "enforced but unexercised" was an inference from a data structure, not an observation of the code, and one `grep` would have settled it before it reached the queue.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -532,7 +575,7 @@ This one cost about ten minutes of scheduler variation after seven useless clean
 - ~~do [#lzgotypedfloors]~~
 - ~~do [#lzgoasyncflake]~~
 - ~~do [#lzledgerceiling]~~
-- do [#lzunreachableunprobed]
+- ~~do [#lzunreachableunprobed]~~
 - ~~do [#lzrsbindpending]~~
 - do [#lzdartboundfloor]
 - do [#lzdartarrayblocks]
@@ -547,7 +590,6 @@ This one cost about ten minutes of scheduler variation after seven useless clean
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzunreachableunprobed] [lazily-rs] The `unreachable` ledger class in rs's block guard has NEVER had an entry, so its failure path has never been exercised, and with `MAX_LEDGERED_BLOCKS` now 0 the ceiling would refuse such an entry before the class logic ran. Either probe the class against a scratch corpus that legitimately carries an unreachable site (raising the ceiling for that probe only), or delete the class and its vocabulary entry as dead code. Do not leave an enforced-but-unexercised branch: it reads as coverage and is not. Repo: src/lazily-rs
 - [ ] [#lzdartboundfloor] [lazily-dart] scripts/check-unbound-blocks.py still carries two typed `>=` floors that #lzblockmagnitudeaudit deliberately left alone because they are different rungs: MIN_BOUND_BLOCKS=697 (blocks BOUND) and MIN_BLOCK_FIXTURES=144 (fixtures opened). MIN_BOUND_BLOCKS is now the last number in this repo a person re-pins by hand — it read 697 when pinned and the run reports 700 today, so it is already 3 slack and guarding nothing in that range, the exact drift the block magnitude just stopped. MIN_BLOCK_FIXTURES is now REDUNDANT: the site-set equality subsumes it, since the derived site set is keyed by fixture and a missing fixture takes its sites with it. Derive the bound count the same way (declared minus the excuse ledger, asserted EQUAL) or retire it in favour of the unbound-set check that already exists, and delete MIN_BLOCK_FIXTURES. Repo: src/lazily-dart
 - [ ] [#lzdartarrayblocks] [lazily-dart] dart`s walk is object-valued only, so array-valued tracked keys contribute no site: the same 144 opened fixtures give 725 sites / 616 digests under dart`s rule and 737/628 when array ELEMENTS count. The gap is exactly 12 blocks and they are all in one fixture — `signaling/anti_spoof_session.json`, whose eight array-valued steps[].expect keys carry 1+2+3+1+1+1+1+2 elements. lazily-js instruments each element (which is why js derives 747 where dart derives 725); dart`s objects-only rule sees none of them, so whatever those 12 blocks assert — one of them is the anti-spoof invariant the fixture exists for — is outside rung 0 in this binding. Decide deliberately: either instrument array elements as js does, or record why an array-valued block has no bindable site here. Related and worth settling in the same pass: dart reads its block-name set out of the tracker, so a name the CORPUS grows is invisible on both the inventory and the derivation at once (a NAME-OPEN `^(assert|expect)` scan finds nothing beyond the five names today — `expected` 405, `expect` 294, `assertions` 32, `expect_initial` 3, `expect_after` 3 — but that is today`s corpus, not a guarantee). Repo: src/lazily-dart
 - [ ] [#lzorderinganchors] [lazily-spec] scripts/check-assertion-ordering.py ORDERED_CHECKS anchors its ordering contract on the EXACT floor literals the bindings are now removing - regexes like 'assert accepted == 6', 'assert replayed == 12', 'assert.equal(accepted, 10)' for py/js/cs. lazily-py could not delete three of its floors this cycle and shipped them as DEAD ANCHORS, kept only to satisfy this guard, with the live constant-free assertion sitting above them. That is debt the guard created. Re-anchor on something stable that is not a value - a named helper call, or a marker the runner declares - so removing a constant does not break an unrelated ordering contract. Note the anchor must also be UNIQUE in the file (py tripped 'anchors are not unique' by quoting the literal in an explanatory comment). Repo: src/lazily-spec, then src/lazily-py to drop the dead anchors.

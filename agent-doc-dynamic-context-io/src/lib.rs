@@ -61,6 +61,19 @@ pub struct DynamicContextChunkManifest {
     pub expanded_text: Option<String>,
 }
 
+impl DynamicContextChunkManifest {
+    /// Whether this chunk names a command that actually re-resolves it.
+    ///
+    /// `#ctxrefsynthsource`: a chunk agent-doc synthesized from the cycle's own
+    /// report has no file behind it and no durable text in `state.db` (the
+    /// injection ledger records identity, never payload), so nothing can read it
+    /// back. Saying so is the honest answer; the alternative it replaces was a
+    /// `tsift source-read` of the session document, which returns the document.
+    pub fn is_expandable(&self) -> bool {
+        !self.expansion_command.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DynamicContextSnapshot {
     pub contract_version: String,
@@ -130,12 +143,12 @@ impl DynamicContextSnapshot {
         )];
         for chunk in &self.chunks {
             lines.push(format!(
-                "<context_ref handle=\"{}\" hash=\"{}\" source=\"{}\" mode=\"{}\" expand=\"{}\" />",
+                "<context_ref handle=\"{}\" hash=\"{}\" source=\"{}\" mode=\"{}\" {} />",
                 escape_attribute(&chunk.handle_reference),
                 escape_attribute(&chunk.content_hash),
                 escape_attribute(&chunk.source_uri),
                 escape_attribute(&chunk.injection_mode),
-                escape_attribute(&chunk.expansion_command)
+                expansion_attribute(chunk),
             ));
         }
         lines.push("</dynamic_context_ref>".to_string());
@@ -170,28 +183,46 @@ impl DynamicContextSnapshot {
             let owns_expansion = chunk_index % child_count == child_index;
             if let Some(text) = chunk.expanded_text.as_ref().filter(|_| owns_expansion) {
                 lines.push(format!(
-                    "<context_chunk handle=\"{}\" hash=\"{}\" source=\"{}\" expand=\"{}\">",
+                    "<context_chunk handle=\"{}\" hash=\"{}\" source=\"{}\" {}>",
                     escape_attribute(&chunk.handle_reference),
                     escape_attribute(&chunk.content_hash),
                     escape_attribute(&chunk.source_uri),
-                    escape_attribute(&chunk.expansion_command)
+                    expansion_attribute(chunk),
                 ));
                 lines.push(text.clone());
                 lines.push("</context_chunk>".to_string());
             } else {
                 lines.push(format!(
-                    "<context_ref handle=\"{}\" hash=\"{}\" source=\"{}\" mode=\"{}\" expand=\"{}\" />",
+                    "<context_ref handle=\"{}\" hash=\"{}\" source=\"{}\" mode=\"{}\" {} />",
                     escape_attribute(&chunk.handle_reference),
                     escape_attribute(&chunk.content_hash),
                     escape_attribute(&chunk.source_uri),
                     escape_attribute(&chunk.injection_mode),
-                    escape_attribute(&chunk.expansion_command)
+                    expansion_attribute(chunk),
                 ));
             }
         }
         lines.push("</dynamic_context>".to_string());
         Some(lines.join("\n"))
     }
+}
+
+/// Scheme for a chunk agent-doc synthesized from the cycle's own report rather
+/// than read out of a file (`#ctxrefsynthsource`).
+const SYNTHESIZED_SOURCE_SCHEME: &str = "agent-doc://";
+
+/// Render the expansion half of a context reference.
+///
+/// A chunk that can be re-read names the command; one that cannot says so
+/// outright rather than carrying a command that returns something else.
+fn expansion_attribute(chunk: &DynamicContextChunkManifest) -> String {
+    if chunk.is_expandable() {
+        return format!(
+            "expand=\"{}\"",
+            escape_attribute(&chunk.expansion_command)
+        );
+    }
+    "expandable=\"false\"".to_string()
 }
 
 const CONTEXT_REFERENCE_OPEN: &str = "<dynamic_context_ref";
@@ -204,6 +235,22 @@ const CONTEXT_REFERENCE_CLOSE: &str = "</dynamic_context_ref>";
 /// project root). Writing "re-read the file you are already reading" handles into
 /// that same file is noise, not continuity, so they are dropped from every
 /// document-facing reference projection. SQLite still holds the full manifest.
+/// Whether a recorded injection is worth carrying into the session document.
+///
+/// Two shapes are not. A handle naming the document itself says "re-read the file
+/// you are already reading" (`#fixcompactexchange`). A handle with no expansion
+/// command cannot be resolved by anyone (`#ctxrefsynthsource`) — it used to be
+/// indistinguishable from the first, because a synthesized chunk was labelled with
+/// the session document; now that it names itself, the reason it is dropped is the
+/// accurate one rather than a path coincidence.
+fn chunk_is_actionable_continuity(
+    chunk: &DynamicContextChunkManifest,
+    document: &Path,
+    root: &Path,
+) -> bool {
+    chunk.is_expandable() && !chunk_source_is_document(&chunk.source_uri, document, root)
+}
+
 fn chunk_source_is_document(source_uri: &str, document: &Path, root: &Path) -> bool {
     let candidate = Path::new(source_uri);
     let candidate = if candidate.is_absolute() {
@@ -281,7 +328,7 @@ pub fn durable_context_reference_for_document(
         context_injections_for_cycle(&conn, &document_id, &manifest.cycle_id)?
             .into_iter()
             .map(stored_chunk_manifest)
-            .filter(|chunk| !chunk_source_is_document(&chunk.source_uri, &canonical, &root))
+            .filter(|chunk| chunk_is_actionable_continuity(chunk, &canonical, &root))
             .collect();
     if chunks.is_empty() {
         return Ok(None);
@@ -668,7 +715,13 @@ fn candidate_payloads(report: &Value) -> Result<Vec<CandidatePayload>> {
         "tspack-{}",
         agent_doc_hash::short_content_hash(&format!("{root}\0{target}"))
     );
-    let mut values = Vec::<Value>::new();
+    // `#ctxrefsynthsource`: a synthesized chunk is built FROM the report, not read
+    // out of a file, so it carries its own source identity. Falling through to the
+    // pack target labelled it with the session document and emitted
+    // `expand="tsift --envelope source-read <the document>"` — a command that
+    // returns the document instead of the chunk. Exploration items keep `None`
+    // because they carry a real `file`/`target` of their own.
+    let mut values = Vec::<(Option<&'static str>, Value)>::new();
     if let Some(next_context) = report.get("next_context") {
         let compact = json!({
             "prompt_targets": next_context.get("prompt_targets"),
@@ -676,32 +729,38 @@ fn candidate_payloads(report: &Value) -> Result<Vec<CandidatePayload>> {
             "unresolved_failures": next_context.get("unresolved_failures"),
             "next_token_actions": next_context.get("next_token_actions"),
         });
-        values.push(compact);
+        values.push((Some("agent-doc://cycle/next-context"), compact));
     }
     if let Some(queue) = report.get("agent_doc_queue") {
-        values.push(json!({
-            "active_queue_prompt": queue.get("active_queue_prompt"),
-            "expansion_handles": queue.get("expansion_handles"),
-        }));
+        values.push((
+            Some("agent-doc://cycle/agent-doc-queue"),
+            json!({
+                "active_queue_prompt": queue.get("active_queue_prompt"),
+                "expansion_handles": queue.get("expansion_handles"),
+            }),
+        ));
     }
     for pointer in ["/exploration/worker_context", "/exploration/source_windows"] {
         if let Some(items) = report.pointer(pointer).and_then(Value::as_array) {
-            values.extend(items.iter().cloned());
+            values.extend(items.iter().cloned().map(|item| (None, item)));
         }
     }
     values.truncate(MAX_CANDIDATE_CHUNKS);
     if values.is_empty() {
-        values.push(json!({
-            "target": report.get("target"),
-            "target_kind": report.get("target_kind"),
-            "status_reminders": report.get("status_reminders"),
-        }));
+        values.push((
+            Some("agent-doc://cycle/report-summary"),
+            json!({
+                "target": report.get("target"),
+                "target_kind": report.get("target_kind"),
+                "status_reminders": report.get("status_reminders"),
+            }),
+        ));
     }
 
     values
         .into_iter()
         .enumerate()
-        .map(|(index, value)| {
+        .map(|(index, (synthesized_source, value))| {
             let full_text = serde_json::to_string(&value).context("serialize context chunk")?;
             let content_hash = agent_doc_hash::content_hash(&full_text);
             let text = truncate_utf8(&full_text, MAX_EXPANDED_CHUNK_BYTES);
@@ -712,12 +771,14 @@ fn candidate_payloads(report: &Value) -> Result<Vec<CandidatePayload>> {
                 .filter(|value| !value.is_empty())
                 .unwrap_or_else(|| format!("section-{}", index + 1));
             let chunk_id = format!("{}-{}", handle, &content_hash[..12]);
-            let source_uri = value
-                .get("file")
-                .or_else(|| value.get("target"))
-                .and_then(Value::as_str)
-                .unwrap_or(target)
-                .to_string();
+            let source_uri = synthesized_source.map(str::to_string).unwrap_or_else(|| {
+                value
+                    .get("file")
+                    .or_else(|| value.get("target"))
+                    .and_then(Value::as_str)
+                    .unwrap_or(target)
+                    .to_string()
+            });
             let range_start = value
                 .get("start")
                 .and_then(Value::as_u64)
@@ -821,6 +882,12 @@ fn source_read_command(
     range_start: Option<usize>,
     range_end: Option<usize>,
 ) -> String {
+    // `#ctxrefsynthsource`: there is no file to read and the injection ledger
+    // records identity without payload, so nothing can resolve this chunk after
+    // the cycle that built it. An empty command renders as `expandable="false"`.
+    if source_uri.starts_with(SYNTHESIZED_SOURCE_SCHEME) {
+        return String::new();
+    }
     let source = shell_quote(source_uri);
     match (range_start, range_end) {
         (Some(start), Some(end)) if end >= start => format!(
@@ -1230,6 +1297,106 @@ mod tests {
             "relative self-handle survived: {reference}"
         );
         assert!(reference.contains("modes=\"expanded:1\""), "{reference}");
+    }
+
+    /// `#ctxrefsynthsource`: a chunk agent-doc builds from the cycle's own report
+    /// has no file behind it. Falling through to the pack target labelled it with
+    /// the session document and emitted
+    /// `expand="tsift --envelope source-read <the document>"` — a command that
+    /// returns the document instead of the chunk.
+    #[test]
+    fn a_synthesized_chunk_names_itself_and_declares_no_expansion() {
+        let report = json!({
+            "target": "/home/dev/repo/tasks/session.md",
+            "root": "/home/dev/repo",
+            "next_context": {
+                "prompt_targets": ["do #x"],
+                "touched_files": ["src/a.rs"],
+                "unresolved_failures": [],
+                "next_token_actions": [],
+            },
+            "agent_doc_queue": {
+                "active_queue_prompt": "do #x",
+                "expansion_handles": [],
+            },
+        });
+
+        let payloads = candidate_payloads(&report).unwrap();
+        let sources: Vec<&str> = payloads
+            .iter()
+            .map(|payload| payload.chunk.source_uri.as_str())
+            .collect();
+        assert_eq!(
+            sources,
+            vec![
+                "agent-doc://cycle/next-context",
+                "agent-doc://cycle/agent-doc-queue"
+            ],
+            "a synthesized chunk must not borrow the session document's identity"
+        );
+        for payload in &payloads {
+            assert!(
+                source_read_command(&payload.chunk.source_uri, None, None).is_empty(),
+                "a synthesized chunk must not claim a source-read command: {}",
+                payload.chunk.source_uri
+            );
+        }
+    }
+
+    /// A real file window keeps its own source and its working `source-read`; the
+    /// fix must not make every chunk unexpandable.
+    #[test]
+    fn an_exploration_window_keeps_its_file_source_and_expansion() {
+        let report = json!({
+            "target": "/home/dev/repo/tasks/session.md",
+            "root": "/home/dev/repo",
+            "exploration": {
+                "source_windows": [{"file": "src/real.rs", "start": 10, "end": 20}],
+            },
+        });
+
+        let payloads = candidate_payloads(&report).unwrap();
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0].chunk.source_uri, "src/real.rs");
+        assert_eq!(
+            source_read_command(&payloads[0].chunk.source_uri, Some(10), Some(20)),
+            "tsift --envelope source-read src/real.rs --start 10 --lines 11 --budget normal"
+        );
+    }
+
+    /// The rendered reference must say which of the two it is, so a reader never
+    /// runs a command that resolves to something other than the chunk.
+    #[test]
+    fn a_reference_renders_expandable_false_instead_of_a_command_that_lies() {
+        let expandable = chunk_manifest(
+            "pack".to_string(),
+            "chunk-real".to_string(),
+            "hash-real".to_string(),
+            "src/real.rs".to_string(),
+            None,
+            None,
+            4,
+            "expanded",
+            None,
+        );
+        let synthesized = chunk_manifest(
+            "pack".to_string(),
+            "chunk-next".to_string(),
+            "hash-next".to_string(),
+            "agent-doc://cycle/next-context".to_string(),
+            None,
+            None,
+            4,
+            "expanded",
+            None,
+        );
+        assert!(expandable.is_expandable());
+        assert!(!synthesized.is_expandable());
+        assert_eq!(
+            expansion_attribute(&expandable),
+            "expand=\"tsift --envelope source-read src/real.rs --budget normal\""
+        );
+        assert_eq!(expansion_attribute(&synthesized), "expandable=\"false\"");
     }
 
     /// `#fixcompactexchange`: a manifest that holds nothing but self-references has no

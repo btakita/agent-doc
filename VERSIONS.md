@@ -2,6 +2,39 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.374
+
+- **A synthesized context chunk names itself instead of borrowing the session
+  document's identity (`#ctxrefsynthsource`).** `candidate_payloads` fell through
+  to `source_uri = report.target` for any candidate with no `file`/`target` key,
+  so the `next_context` and `agent_doc_queue` chunks agent-doc builds FROM the
+  cycle report were recorded against the session document and rendered
+  `expand="tsift --envelope source-read <the document>"` — a command that returns
+  the document instead of the chunk. That reached `as_prompt_section` and
+  `as_orchestration_child_section`, not only compaction.
+
+  Those chunks now carry `agent-doc://cycle/next-context`,
+  `agent-doc://cycle/agent-doc-queue`, and `agent-doc://cycle/report-summary`.
+  Exploration windows are untouched: they already carry a real `file`/`target`,
+  and they keep their working `source-read`.
+
+  There is no command that resolves a synthesized chunk — the injection ledger
+  records identity, never payload, so nothing can read one back after the cycle
+  that built it. Claiming a command would just move the lie, so the reference
+  renders `expandable="false"` in place of `expand="…"`.
+
+  `#fixcompactexchange` had to DROP document-sourced handles because of that
+  mislabel. The document-facing projection now drops on the accurate predicate —
+  a handle nobody can expand, or one naming the document itself — rather than on
+  a path coincidence.
+
+  **The backlog's landing note was wrong, and checking it was the point:
+  `source_uri` does NOT participate in the `already_injected` dedup key.** That
+  lookup keys on `chunk_id` then `content_hash`
+  (`agent-doc-sqlite/src/context_injection_ledger.rs`), and `chunk_id` is
+  `<handle>-<content_hash[..12]>`. Neither derives from `source_uri`, so changing
+  it re-expands nothing.
+
 ## 0.35.373
 
 - **The mid-cycle reload gate was reading a record that can be empty, and

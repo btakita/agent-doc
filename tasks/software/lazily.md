@@ -1041,12 +1041,47 @@ Magnitudes unchanged everywhere. Test counts moved only by new coverage: py 1088
 One piece of process friction, third cycle running: the agent-doc hook blocks a subagent coining an id, because filing one would mean writing this document from outside its repo, so each agent retags to the queue head. Queued below.
 
 Exchange is at 969 lines across 22 response sections. Noting it, not compacting, with the queue active.
+
+### Re: #closeremaininghalf — opus-5 · 2026-09-12T14:45-04:00
+
+> **Queue prompt:**
+>
+> do [#closeremaininghalf]
+
+
+**Decision: not closing it. Both mechanisms rejected, with their costs.** And verifying the premise first turned up two things I had got wrong, so this cycle is mostly me fixing my own closeout.
+
+## The decision
+
+The remaining attack points a closure member's recipe at a real workflow step that no member runs. After that edit **both derivations agree**: the Makefile text and `make -n` both say member X runs step S. So by rs's own structural rule one level down ... no consistency check can see a consistent change, only a comparison against a remembered state can ... the sole complete close is a **per-member recipe-content pin**.
+
+Rejected, on churn. Its churn is **recipe-rate, not closure-rate**: the normalizer keeps flag *names*, so adding `--verbose` to any recipe moves it. rs measured the closure line itself at 32 edits in ten weeks and warned that even that rate makes the "update the pin deliberately" remedy reflexive. Recipe churn is strictly higher, so this pin would be updated without thought, which turns it into the **passes-when-stale** check this family already removed once when `MAX_LEDGERED_BLOCKS` became `EXPECTED_LEDGERED_BLOCKS`. Paying that to close half an attack whose other half dart already closed for free is a bad trade.
+
+I looked for a cheaper derivation and there is none. I read the matcher rather than reasoning about it: `anchor_reached` asks whether *some* CI command contains a member's anchors as an in-order subsequence, over a **flat** `ci_anchor` set that holds every `run:` command ... checkout, setup and gates alike. So requiring each member to match a *distinct* CI command still passes after the repoint, because S is claimed by no other member. The one real alternative is pinning which CI steps are gates and requiring each to be claimed; that is a third pinned surface and a **proxy** rather than a close (it catches the repoint that orphans the member's original CI step, not the general case). It is also the reverse direction of the reach audit, which is a pattern this family keeps rediscovering ... dart's out-of-closure excuse, `KNOWN_UNCOVERED`'s reverse check, and `#lzcsreverserung` still queued. Filed separately below rather than smuggled in here.
+
+One argument I am **not** using: that a recipe rewrite is the most reviewable edit there is. That is the visibility argument kt retracted after measuring it explained one attack in five, so it is not available to me either.
+
+## Two things I had wrong
+
+**js had no pin at all.** It argued the originally-dispatched names-only design was insufficient and landed nothing, which was correct. The design was then corrected and shipped in nine bindings ... and I closed `#pinreachclosure` reporting "landed in nine repos" without ever re-dispatching js. It was the only binding with no oracle, no membership pin and no classification pin. Now `f8aa26d`, CI green: all three parts plus the collision rung and the stability re-probe. Its falsification matrix is the best of the set because two of its eight rows are **not attacks** ... a healthy recipe with the run id in a leading `VAR=$(ID)` is green under every part-revert and exit 1 under raw-line matching, reproducing in js the measured reason for anchors; and the positional-token row shows the re-probe naming the recipe instead of blaming the closure. Collision precheck first, as asked: all 11 gated members distinct in both representations, so rs's raw-lines alternative is genuinely unnecessary there. It also found a seventh attack ... `CI_REACH_ROOT_TARGET=test` pre-fix collapsed the whole closure to one target and printed `OK — 1 target(s) reached by CI` at exit 0.
+
+**My grep for the recorded gaps was wrong, and it produced one false positive and one real finding.** I scanned only the guard scripts. gd had documented all three gaps properly ... in `ci-reach.conf`, lines 68-84, which its own header points at. That was my measurement error, not gd's omission. go genuinely had them nowhere but its commit message, which is not where the next reader looks. Fixed in `d8cc305`, comments only, every magnitude identical (9 reached / 0 excused / 1 no gate, 10 pinned, 1 exempt), `make check` exit 0 read unpiped.
+
+While there I corrected go's header, which claimed the pin's value is that the attack "was invisible in a diff of one line". kt measured that against five attacks and it explains exactly one. It now says what the pins buy, in gd's words: **no silent change, never correctness** ... a pin cannot name a gate that never existed, and written from a broken Makefile it would faithfully pin the breakage. All three gaps are stated there too: the recipe swap (half caught by the collision rung, half deliberately open), order, and edges.
+
+So all ten bindings now carry the pin, and nine of ten record the open gap where a reader will find it ... js's is in its header, gd's in its conf.
+
+Pointers at `15c04f55f`. Exchange is at 1017 lines across 23 response sections; noting it, not compacting, with the queue active.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- ~~do [#closeremaininghalf]~~
+- do [#decidereachclosure]
+- do [#subagentscannotcoin]
+- do [#twopreexisting]
 - ~~do [#pinreachclosure]~~
 - do [#lazilycppcheck]
 - do [#lazilycheckconformance]
@@ -1073,7 +1108,7 @@ Exchange is at 969 lines across 22 response sections. Noting it, not compacting,
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#closeremaininghalf] Close the remaining half of the recipe-swap attack, or decide deliberately not to: pointing a closure member's recipe at a real workflow step that NO member runs gives a byte-identical verdict at exit 0 in every binding. dart's anchor-collision rung closed the member-to-member half. Closing this half needs per-target recipe anchors -- a second spelling of every recipe inside the guard -- which check-ci-reach.sh's own header records as the mistake that already cost lazily-cpp a duplicate path plus a hand-written equality assertion. Decide once for the family; do not let ten repos each invent it.
+- [ ] [#reversereachdirection] Add the REVERSE reach direction: pin which CI steps are gates and require each to be claimed by exactly one closure member. Today the reach audit is one-directional -- for each member, is its gate reached? -- over a FLAT ci_anchor set holding every run: command (checkout, setup, gates alike), so a CI gate step claimed by nobody is invisible. This is a PROXY for the recipe-swap attack, not a close: it catches a repoint that orphans the member's original CI step, which is the realistic form. Cost is a third pinned surface with CI-step-rate churn. Same pattern as dart's out-of-closure excuse and KNOWN_UNCOVERED's reverse check; belongs with #lzcsreverserung. Decide the design once before dispatching.
 - [ ] [#decidereachclosure] Decide where the ci-reach closure pin LIVES. rs measured the churn (32 commits touched the check: line, all before 2026-08-09) and argues the pin belongs ADJACENT to the root rule in the Makefile, beside check:, so a closure edit and its pin edit land in one hunk -- at ~3 edits/week the 'update the pin deliberately' remedy gets applied reflexively and no diagnostic wording prevents that. I placed it in the guard to match KNOWN_UNCOVERED's shape; rs followed the brief but advocates the other placement. Worth settling before the next growth phase.
 - [ ] [#subagentscannotcoin] Subagents cannot coin backlog ids: the agent-doc hook blocks an untracked id, and filing one would mean writing tasks/software/lazily.md from outside the agent's own repo. Hit by kt, dart, cs and gd across three cycles; each retags its commit to the queue head, so per-finding ids never exist and commit messages all carry the same id. Either give agents a way to file, or accept head-tagging and stop coining -- but the current state loses the mapping from commit to finding.
 - [ ] [#twopreexisting] Two pre-existing normalizer quirks cpp found while pinning the closure, neither touched: `command -v uvx >/dev/null` anchors as `command -v uvx null` because the normalizer basenames the redirection target; and check-conformance-coverage.sh's refusal text claims `make conformance-coverage` 'builds, runs ctest and audits in one invocation', which is false exactly when the conformance-coverage: test edge is dropped. Third quirk alongside the wasm ^# filter gap.

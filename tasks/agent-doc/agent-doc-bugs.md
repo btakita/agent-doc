@@ -110,41 +110,68 @@ What I ruled out, each by direct check rather than reading:
 The signature (keyed *list items* only, prose skipped, exact reversal, wrong anchor, ×3) points at a keyed-list re-emit inserting each item at a fixed index against a base it does not belong to. I could not localize it further: `src/haiven-dev/.agent-doc/logs/ops.log` no longer reaches back to 13:28 on 09-11, and I could not construct a live repro. Filing it at the top of the backlog with this forensic record rather than landing a speculative change to the merge path that guards operator text.
 
 **Queue:** `queue_drainable_head_count` is 0 — no in-session-drainable head remains, so I am not looping. `#fixtmuxpane` also carries a semantic-completion warning: it may already be resolved by `#stashfocuswindow` in `agent-doc-bugs.done.md`.
+
+### Re: hook silence on a mangled FILE argument, fixed — opus-5 · 2026-09-12T02:51-04:00
+
+Your two deletions are read as closeout: `#fixtmuxpane` is gone from backlog (its queue entry was already struck), and the answered `docs.md` free-text prompt is gone from the queue. Nothing owed on either.
+
+**One stray keystroke needs your editor, not mine.** The `## Pending / Not Built` heading currently reads `t## Pending / Not Built`, so it renders as a paragraph rather than a heading. It sits outside every managed component, so no `agent-doc write` flag owns it, and hand-patching disk under the attached editor is the one move that manufactures the divergence class this document tracks. One character, in your editor.
+
+**The hook defect from the failed invocation is fixed, tested, and pushed (`aa695fd39`).**
+
+`handle_user_prompt_submit` read the prompt with two different parsers. Session tracking binds its document through the permissive `resolve_agent_doc_path`; the tracking-failure guard asked the strict `invoked_document`, which refuses a second positional argument so `agent-doc compact exchange FILE` is left alone. That asymmetry is harmless until tracking *fails* — and then a prompt tracking had recognized, bound a document from, and errored on emitted **neither** stdout marker. That is the exact state `SKILL.md` defines as "the hook never ran", so the agent reports an undiagnosable harness-wiring defect instead of the path typo it actually is.
+
+The doubled slash-command argument `/agent-doc <FILE>.md/agent-doc <FILE>.md` canonicalized `<FILE>.md/agent-doc`, failed with `Not a directory (os error 20)`, and exited 0 in silence.
+
+Both tracking-failure guards — Claude and Codex — now consult `tracking_recognized_trigger`, the union of the two parsers. The union only ever *adds* a named refusal on a path that already failed and never suppresses one; trigger recognition for admission itself is untouched, so the strict parser still owns which prompts open a cycle.
+
+The regression test drives the real hook over stdin rather than asserting on source text, because the whole defect was which parser one runtime branch consulted — the existing `test_preflight_hook_never_emits_silence_on_admission_failure` is a source-text check and passed throughout. Mutation-checked cold: restoring `invoked_document` at the two call sites reproduces the field symptom byte for byte (`stdout=""`, canonicalize error on stderr only).
+
+`make check`: **9419 tests run, 9419 passed**, 259 skipped, `EXIT=0` — captured directly, not via the RTK-wrapped status. CI run `34677869227` was still in progress for an earlier commit when observed, so this is local evidence; `aa695fd39` has not had its own run yet.
+
+Per `#installstrandsreplica` in this document's own backlog, the mandated post-fix `make install` goes **after** this closeout, not before it.
+
+### Re: why the queue reports zero drainable heads — opus-5 · 2026-09-12T02:51-04:00
+
+Worth stating plainly, because it is not a stall and not a bug: `queue_drainable_head_count: 0` alongside `queue_active: true` and seventeen live heads is **activation scope**.
+
+`active_queue` calls `active_queue_for_supervisor_start(content, false)`, so `explicit_start` is hard-wired off for the in-session loop. This document carries `queue: start` in frontmatter and `start` on the queue marker, and no `go` anywhere. The gate `if !explicit_go && !explicit_start { return None }` therefore returns `None`, and `drainable_head_count` short-circuits to `0` before it ever looks at an item. `DrainScope::Supervisor` passes `true` for that same flag, which is the whole design: **`start` authorizes the supervisor drain; `go` additionally authorizes the in-session loop.** Your queue is not stranded — the supervisor idle-watch owns it. Set `queue: go` if you want this session draining it instead.
+
+**But preflight should have told me that, and it did not.** It emitted `queue_continuation_required: false` with `queue_continuation_guidance` null and no `ui_outcome`, routing a full supervisor-scoped queue through the same silent branch a genuinely drained queue uses. `effective_continuation_output_with_preemption` deliberately stays silent when `raw_required` is false — "there is no reason to give" — and that premise is false here: there are seventeen heads and the reason is scope. This is the same failure mode `#queueblockquoteintent` already fixed one branch of, and I only recovered the cause by reading `active_queue_for_supervisor_start`. Filed as `#queuestartscopesilent` at the top of the backlog with the insertion points.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
-## Pending / Not Built
+t## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- 🚧 do [#fixtmuxpane]
-- docs.md had reverse order ordered lists (2 then 1). Please fix agent-doc causes.
-- do [#installstrandsreplica]
-- do [#dispatchturnstartreceipt]
-- do [#dispatchreceiptperturn]
-- do [#ctxrefsynthsource]
-- do [#ctxrefdocnoise]
-- do [#cargotokenwire]
-- do [#jbplugin382restart]
-- do [#isolationrelocate]
-- do [#clearunobservedrecycle]
-- do [#clearsubmitpanesettle]
-- do [#queuegorevokedonfreetext]
-- do [#layoutbindstale]
-- do [#jbfocusdocroute]
-- do [#compactackflake]
-- do [#retainedresumewakeflake]
-- do [#cargotokenrevoke]
-- How can we make the pypi package slim? Can we make it download & extract the tarballs from github instead of sending the entire binary into PYPI? When we do the release, please aggresively delete old releases.
+- ~~do [#fixtmuxpane]~~
+- 🚧 📌 do [#installstrandsreplica]
+- 📌 do [#dispatchturnstartreceipt]
+- 📌 do [#dispatchreceiptperturn]
+- 📌 do [#ctxrefsynthsource]
+- 📌 do [#ctxrefdocnoise]
+- 📌 do [#cargotokenwire]
+- 📌 do [#jbplugin382restart]
+- 📌 do [#isolationrelocate]
+- 📌 do [#clearunobservedrecycle]
+- 📌 do [#clearsubmitpanesettle]
+- 📌 do [#queuegorevokedonfreetext]
+- 📌 do [#layoutbindstale]
+- 📌 do [#jbfocusdocroute]
+- 📌 do [#compactackflake]
+- 📌 do [#retainedresumewakeflake]
+- 📌 do [#cargotokenrevoke]
+- 📌 How can we make the pypi package slim? Can we make it download & extract the tarballs from github instead of sending the entire binary into PYPI? When we do the release, please aggresively delete old releases.
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#queuestartscopesilent] [P2] A supervisor-scoped queue reports zero drainable heads with NO reason, through the same silent branch a genuinely drained queue uses. `active_queue` (agent-doc-queue/src/queue_continuation.rs:637) calls `active_queue_for_supervisor_start(content, false)`, so `explicit_start` is hard-wired off for DrainScope::InSessionLoop and the `if !explicit_go && !explicit_start { return None }` gate short-circuits `drainable_head_count` to 0 BEFORE looking at any item. That is correct design (`start` = supervisor drain, `go` = in-session loop too), but preflight then emits `queue_active: true` + `queue_drainable_head_count: 0` + `queue_continuation_required: false` + `queue_continuation_guidance: null` + no `ui_outcome`, which is indistinguishable from a drained queue. Observed 2026-09-12 on tasks/agent-doc/agent-doc-bugs.md with SEVENTEEN live heads; the cause was recoverable only by reading the source. Same failure mode as #queueblockquoteintent, which already fixed the exchange-preemption branch on the premise that "a stop with heads remaining must name its reason" — `effective_continuation_output_with_preemption` (queue_continuation.rs:114) still returns silence whenever `raw_required` is false, on the comment "genuinely nothing to drain stays silent - there is no reason to give", and that premise does not hold for the scope case. FIX: add `supervisor_scoped_activation_guidance(content)` in agent-doc-queue/src/queue_continuation.rs returning Some(reason) when `active_queue(content).is_none()` AND `active_queue_for_supervisor_start(content, true).is_some()` AND that activation has >0 prompts; thread it into the guidance at the single production caller, agent-doc-preflight-command-io/src/run.rs:1867. Guidance must say the heads are supervisor-owned and NOT stalled, and that `queue: go` hands the drain to the in-session loop. Extend the `a_preempted_drain_names_its_reason_instead_of_going_silent` test with the scope case.
 - [ ] [#ocreverselistsplice] 2026-09-12 [P1] Three copies of an 8-line run spliced into the WRONG response block, list lines only, exact reverse order, prose dropped. Provenance pinned: src/haiven-dev commit 9b084e4 (2026-09-11 13:28:19), 91s after 02d8cb7, during a queue:start->queue:go drain write; same cycle also appended two CORRECT new blocks. Source run = the list lines of the LATER '### Re: PR 20 - ADR 0012 review addressed' block. RULED OUT (checked, do not re-check): document_cell_merge on the mixed bullets/prose/ordered-list shape (test exchange_response_mixing_bullets_prose_and_ordered_list_keeps_authored_order, commit 54296e903, passes); order_union/weave_order (j=i-1 lookup always resolves); component_scoped_region_restore/apply_region_restore (descending offsets + replace_range). Signature points at a keyed-list re-emit inserting each item at a FIXED index against a base it does not belong to. haiven-dev ops.log no longer reaches 13:28 on 09-11; needs a constructed repro.
-- [ ] 🚧 [#fixtmuxpane] Fix tmux pane auto-focus when selecting the opposite pane
-- [ ] [#installstrandsreplica] [P1] The post-fix `make install` that #deploy-just-do-it mandates hot-reloads the cdylib and STRANDS the Lazily replica of any attached document, blocking that document's own closeout with no self-recovery. Observed 2026-09-11 23:36 on tasks/agent-doc/agent-doc-bugs.md, one minute after the session's second install: `respond` fails at `prevalidate_tracked_work_response` and `session-check` at `session_check_response_replay_dedup_current`, both with 'editor is still attached ...; missing_replica recovery exhausted and disk read authority is refused'. ops.log: `crdt_current_text_unavailable ... authority=multi_replica reason=missing_replica` for two process_pids, then `realtime_doc_resolve_missing_replica_terminal_rebuild_failed ... editor authority stayed in editor_attached_model_missing after a bounded Lazily-current observation request ... recovery=retry_without_disk_write ... operator_action=none`, then `realtime_doc_resolve_disk_read_refused ... invariant=attached_editor_never_descends_to_disk`. The refusal is CORRECT; the defect is that re-registration never converges. Smoking gun: the IDE (pid 2238596) had BOTH `libagent_doc-1789182099748.so` (23:01 install) and `libagent_doc-1789184163251.so` (23:36 install) mapped — the replica lived in the library the reload replaced; the epoch in the filename is a unix-ms timestamp that dates each install. The plugin jar was CURRENT (0.2.382, matching what the IDE loaded), so no `stale_plugin` warning fires and this reads as a different bug class. `admin reload-lib` reported `1/3 editor endpoints (3 unavailable)` and did NOT clear it, though it is the memory-documented recovery for editor_attached_model_missing; `admin detect` reported no anomalies; a sibling document (tasks/software/existence-lang.md) resolved normally throughout, so the wedge is per-document. It cleared only after the operator re-attached in the editor. Fix direction: a cdylib reload must re-register every attached document's replica into the new instance before the old one is dropped, or refuse the reload while an attached document has an open cycle — the supervisor already has `supervisor_recycle_deferred_cycle_open` for exactly that shape. Until then the ordering is a trap: every mandated post-fix install can block the closeout of the very session that made the fix, so close the document out FIRST and install after.
+- [ ] 🚧 [#installstrandsreplica] [P1] The post-fix `make install` that #deploy-just-do-it mandates hot-reloads the cdylib and STRANDS the Lazily replica of any attached document, blocking that document's own closeout with no self-recovery. Observed 2026-09-11 23:36 on tasks/agent-doc/agent-doc-bugs.md, one minute after the session's second install: `respond` fails at `prevalidate_tracked_work_response` and `session-check` at `session_check_response_replay_dedup_current`, both with 'editor is still attached ...; missing_replica recovery exhausted and disk read authority is refused'. ops.log: `crdt_current_text_unavailable ... authority=multi_replica reason=missing_replica` for two process_pids, then `realtime_doc_resolve_missing_replica_terminal_rebuild_failed ... editor authority stayed in editor_attached_model_missing after a bounded Lazily-current observation request ... recovery=retry_without_disk_write ... operator_action=none`, then `realtime_doc_resolve_disk_read_refused ... invariant=attached_editor_never_descends_to_disk`. The refusal is CORRECT; the defect is that re-registration never converges. Smoking gun: the IDE (pid 2238596) had BOTH `libagent_doc-1789182099748.so` (23:01 install) and `libagent_doc-1789184163251.so` (23:36 install) mapped — the replica lived in the library the reload replaced; the epoch in the filename is a unix-ms timestamp that dates each install. The plugin jar was CURRENT (0.2.382, matching what the IDE loaded), so no `stale_plugin` warning fires and this reads as a different bug class. `admin reload-lib` reported `1/3 editor endpoints (3 unavailable)` and did NOT clear it, though it is the memory-documented recovery for editor_attached_model_missing; `admin detect` reported no anomalies; a sibling document (tasks/software/existence-lang.md) resolved normally throughout, so the wedge is per-document. It cleared only after the operator re-attached in the editor. Fix direction: a cdylib reload must re-register every attached document's replica into the new instance before the old one is dropped, or refuse the reload while an attached document has an open cycle — the supervisor already has `supervisor_recycle_deferred_cycle_open` for exactly that shape. Until then the ordering is a trap: every mandated post-fix install can block the closeout of the very session that made the fix, so close the document out FIRST and install after.
 - [ ] [#dispatchturnstartreceipt] [P2] The #idledispatchstack turn-start observation keys off the lifecycle transition's `caller` STRING being `dispatch` (agent-doc-controller-io/src/project_controller/rpc.rs, the Busy branch beside the Ready release). That was the only discriminator available — the 2026-09-12 fpe.md log shows `caller=dispatch reason=auto_trigger_inject` as a dispatch's own turn start (2 occurrences) versus 27 supervisor/operator side-effect Busy transitions — but it is an inference from a diagnostic field, not a receipt. Only claude was in that log. Audit every path that can start a dispatched turn per harness (codex, opencode, grok) and confirm each arrives with `caller=dispatch`; where one does not, the receipt is held until DISPATCH_PRE_TURN_GRACE_SECS (120s) elapses, so dispatches for that document coalesce for up to two minutes — bounded and non-wedging, but a real stall. Durable fix: have the route/submit path publish an explicit typed turn-start receipt carrying the dispatch identity, so promotion consumes a fact rather than pattern-matching a caller label.
 - [ ] [#dispatchreceiptperturn] [P3] Both `mark_open_dispatches_turn_started` and `mark_open_dispatches_consumed` operate on EVERY open row for a document, not on the receipt whose turn actually ran. Two receipts can legitimately be open at once — an operator reopen deliberately bypasses in-flight coalescing — and then one observed turn promotes and releases both. Noticed while fixing #idledispatchstack; NOT observed as a symptom, and not fixed there because the lifecycle request carries no receipt identity, so threading one through is a controller request-shape change rather than a narrowing of this rule. Scope: give the promotion/consume pair a receipt id (or the dispatch's generation+epoch) and make each transition settle exactly the receipt it belongs to.
 - [ ] [#ctxrefsynthsource] [P2] `collect_candidates` (agent-doc-dynamic-context-io/src/lib.rs:716-721) falls back to `source_uri = report.target` for any candidate value with no `file`/`target` key, so the synthesized `next_context` and `agent_doc_queue` chunks are RECORDED against the session document and emit `expand="tsift --envelope source-read <the document>"` — a command that returns the document instead of the chunk. That mislabel is why #fixcompactexchange had to DROP document-sourced handles rather than keep them: the honest fix is to give a synthesized chunk its own source identity (e.g. `agent-doc://cycle/next-context`) plus an expansion command that actually resolves it, or mark it unexpandable. NOTE before landing: `source_uri` participates in the `already_injected` dedup key (agent-doc-sqlite/src/context_injection_ledger.rs), so changing it re-expands those chunks once per document — check that path first. Affects `as_prompt_section` and `as_orchestration_child_section` too, not just compaction.

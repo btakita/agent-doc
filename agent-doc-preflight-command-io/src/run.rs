@@ -1652,6 +1652,29 @@ pub fn run_with_options_to_writer(
             let file_len = file_content.len();
             agent_doc_controller_io::project_controller::ensure_controller_running_for_file(file)?;
             agent_doc_cycle_state_io::start_preflight(file, snap.as_deref(), Some(&file_content))?;
+            // `#dispatchturnstartreceipt`: this cycle IS a dispatched turn starting,
+            // whatever harness or route submitted the trigger. Promote the document's
+            // open dispatch receipts from that fact instead of leaving them to the
+            // supervisor-only `caller=dispatch` lifecycle edge, which the route
+            // dispatch paths never emit — their receipts used to sit unpromoted for the
+            // whole 120s pre-turn grace. Non-fatal: a promotion failure must not refuse
+            // a turn that is already admitted, and the grace still bounds the receipt.
+            match agent_doc_controller_io::project_controller::mark_dispatch_turn_started_for_file(
+                file,
+            ) {
+                Ok(promoted) if promoted > 0 => agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "dispatch_turn_started file={} count={} reason=preflight_started",
+                        file.display(),
+                        promoted
+                    ),
+                ),
+                Ok(_) => {}
+                Err(error) => eprintln!(
+                    "[preflight] #dispatchturnstartreceipt turn-start record failed (non-fatal): {error:#}"
+                ),
+            }
             preflight_effects
                 .settle(PreflightEffect::CycleOpen)
                 .context("preflight cycle-open effect settlement")?;

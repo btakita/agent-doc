@@ -6552,6 +6552,47 @@ fn insert_admin_operation_record(
     })
 }
 
+/// `#dispatchturnstartreceipt`: record that a dispatched turn has actually STARTED,
+/// from the turn's own preflight rather than from a lifecycle `caller` label.
+///
+/// `#idledispatchstack` promotes open receipts to `running` on a `Busy` transition
+/// whose `caller` string is `dispatch`. That discriminator was the only one available
+/// then, and it is exact where it fires — but an audit of every path that can start a
+/// dispatched turn shows it fires on only TWO, both supervisor-side:
+///
+/// - `agent_doc_start_runtime_io::auto_trigger_inject_command` (`auto_trigger_inject`)
+/// - `agent_doc_supervisor_io::ipc::mark_supervisor_inject_dispatched` (`ipc_inject`)
+///
+/// The route dispatch paths — `agent-doc-route-io`'s `dispatch.rs` and
+/// `dispatch_only.rs`, the Claude Code / OpenCode dispatch-only routes — submit
+/// straight to the pane and never transition the actor at all; that crate contains no
+/// `transition_actor_state` call. Their receipts were therefore NEVER promoted, and
+/// every one of them waited out the full [`DISPATCH_PRE_TURN_GRACE_SECS`] (120s)
+/// before `mark_open_dispatches_consumed` would release it, coalescing that
+/// document's dispatches for up to two minutes. Bounded and non-wedging, but a real
+/// stall — and invisible in the original repro, whose log carried only supervisor-
+/// driven claude turns.
+///
+/// Preflight is the fix because it is a FACT rather than a label: `#preflightinbinary`
+/// runs it in the binary for the arriving prompt, so it executes inside the dispatched
+/// turn itself, on every harness and every route. That also makes it strictly better
+/// evidence than the `Busy` edge, which the supervisor emits before its own pane
+/// write. This is additive — the `caller` promotion stays — and it is idempotent: a
+/// re-entrant preflight, or a preflight with no dispatch in flight, promotes 0 rows.
+///
+/// [`DISPATCH_PRE_TURN_GRACE_SECS`]: agent_doc_sqlite::state_store::DISPATCH_PRE_TURN_GRACE_SECS
+pub fn mark_dispatch_turn_started_for_file(file: &Path) -> Result<usize> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Ok(0);
+    };
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &project_root,
+        &file.to_string_lossy(),
+    );
+    let conn = open_state_db(&project_root)?;
+    state_store::mark_open_dispatches_turn_started(&conn, &document_id)
+}
+
 pub fn persist_session_actor_closeout(file: &Path) -> Result<bool> {
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(false);
@@ -12209,6 +12250,103 @@ agent:queue\n\
             ]
         );
     }
+    /// `#dispatchturnstartreceipt`: a route-dispatched receipt is promoted by the
+    /// turn's own preflight, not by a supervisor-only lifecycle label.
+    ///
+    /// The audit behind this: only `auto_trigger_inject_command` and
+    /// `mark_supervisor_inject_dispatched` ever transition the actor `Busy` with
+    /// `caller = "dispatch"`, and both are supervisor-side. `agent-doc-route-io`
+    /// contains no `transition_actor_state` call at all, so a dispatch submitted
+    /// through `dispatch.rs` / `dispatch_only.rs` never produced that edge and its
+    /// receipt sat unpromoted until `DISPATCH_PRE_TURN_GRACE_SECS` (120s) aged it out,
+    /// coalescing the document's dispatches for two minutes.
+    ///
+    /// Asserted through the release gate rather than the row alone: an unpromoted
+    /// receipt must NOT be released inside the grace (that is `#idledispatchstack`'s
+    /// protection, which this must not weaken), and a preflight-promoted one must be.
+    #[test]
+    fn preflight_promotes_a_route_dispatched_receipt_that_no_actor_transition_covers() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/route-dispatched.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "---\nagent: claude\n---\nBody\n").unwrap();
+
+        let project_root = agent_doc_project_root_io::project_root_containing(&doc).unwrap();
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &project_root,
+            &doc.to_string_lossy(),
+        );
+        let insert_open_receipt = || {
+            let conn = open_state_db(&project_root).unwrap();
+            state_store::insert_dispatch_attempt_in_db(
+                &conn,
+                &state_store::DispatchAttemptInsert {
+                    document_id: &document_id,
+                    generation: 1,
+                    command_kind: "route_dispatch_only",
+                    accepted_stage: Some("ready"),
+                    failed_stage: None,
+                    diagnostic_payload: "route dispatch, no actor transition",
+                    result_status: "accepted",
+                    proof_scope: "accepted_only",
+                    dispatch_start_proven: false,
+                },
+            )
+            .unwrap();
+        };
+        let open_receipts = || -> i64 {
+            let conn = open_state_db(&project_root).unwrap();
+            conn.query_row(
+                "SELECT COUNT(*) FROM dispatch_attempts \
+                 WHERE document_id = ?1 AND failed_stage IS NULL AND dispatch_start_proven = 0",
+                params![document_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+
+        // Baseline: with no turn-start observation, a `Ready` inside the grace must
+        // leave the receipt open. This is the behaviour that stalled the route paths.
+        insert_open_receipt();
+        let conn = open_state_db(&project_root).unwrap();
+        assert_eq!(
+            state_store::mark_open_dispatches_consumed(&conn, &document_id).unwrap(),
+            0,
+            "an unobserved receipt must not be released inside the pre-turn grace"
+        );
+        drop(conn);
+        assert_eq!(open_receipts(), 1);
+
+        // Preflight starting this document's turn IS the observation.
+        assert_eq!(
+            mark_dispatch_turn_started_for_file(&doc).unwrap(),
+            1,
+            "preflight must promote the open route-dispatched receipt"
+        );
+        let conn = open_state_db(&project_root).unwrap();
+        let status: String = conn
+            .query_row(
+                "SELECT result_status FROM dispatch_attempts WHERE document_id = ?1",
+                params![document_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "running", "the promoted receipt records a live turn");
+
+        // Now the same `Ready` releases it, with no 120s wait.
+        assert_eq!(
+            state_store::mark_open_dispatches_consumed(&conn, &document_id).unwrap(),
+            1,
+            "a promoted receipt is released by the next Ready, not by the grace timeout"
+        );
+        drop(conn);
+        assert_eq!(open_receipts(), 0);
+
+        // Idempotent: a re-entrant preflight with nothing open promotes nothing.
+        assert_eq!(mark_dispatch_turn_started_for_file(&doc).unwrap(), 0);
+    }
+
     #[test]
     fn controller_restart_recovery_rebuilds_memory_from_state_db() {
         let dir = tempfile::TempDir::new().unwrap();

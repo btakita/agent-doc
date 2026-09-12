@@ -426,6 +426,28 @@ diagnostic payload and route error: active queue head byte count/hash and, when
 the caller names a harness, the harness trigger byte count/hash. The controller
 must not persist raw prompt text for this proof path.
 
+A receipt is promoted to `Running` when its turn is **observed to start**, and
+only a started turn is consumed by the next actor `Ready`; an unobserved receipt
+is held for a bounded pre-turn grace so a lost trigger cannot wedge the
+coalescing gate. Turn start has two independent observations, and the second is
+authoritative for routes the first cannot see:
+
+- the actor lifecycle edge — a `Busy` transition whose `caller` is `dispatch`.
+  Only the two supervisor-side dispatch paths emit it (the idle-watch auto
+  trigger and the supervisor IPC inject). It is a diagnostic label, not a
+  receipt.
+- **the turn's own preflight.** `#preflightinbinary` runs preflight in the binary
+  for the arriving prompt, so a `preflight_started` cycle IS the dispatched turn
+  starting, on every harness and every route. The route dispatch paths submit
+  directly to a pane and never transition the actor, so before this observation
+  existed their receipts were never promoted and every one of them waited out the
+  full pre-turn grace.
+
+The two are additive and idempotent: whichever is observed first promotes, and a
+promotion with nothing open is a no-op. Neither may release a receipt whose turn
+has not been observed — "the actor is idle" covers pre-turn idle as well as
+post-turn idle, and collapsing them releases a receipt before its own turn runs.
+
 ## Admin API
 
 The admin API is controller-backed and sufficient to manage the actor pool

@@ -15870,6 +15870,41 @@ fn test_dispatch_turn_start_is_recorded_on_the_busy_transition() {
             "{call} drifted away from its {state} guard; the lifecycle edge is no longer paired"
         );
     }
+
+    // `#dispatchturnstartreceipt`: the `caller = "dispatch"` edge above fires on only
+    // two paths, both supervisor-side (`auto_trigger_inject_command`,
+    // `mark_supervisor_inject_dispatched`). `agent-doc-route-io` never transitions the
+    // actor at all, so route-dispatched receipts got NO turn-start observation and
+    // waited out the full pre-turn grace. Preflight is the harness- and
+    // route-independent fact, so pin that wiring the same structural way: the
+    // promotion must sit in the branch that opens the cycle.
+    let route_io = ["dispatch.rs", "dispatch_only.rs"].map(|name| {
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src").join(name)).unwrap()
+    });
+    for (name, source) in ["dispatch.rs", "dispatch_only.rs"].iter().zip(&route_io) {
+        assert!(
+            !source.contains("transition_actor_state("),
+            "agent-doc-route-io/{name} now transitions the actor; re-audit whether it \
+             arrives with caller=\"dispatch\" before relying on the preflight promotion alone"
+        );
+    }
+
+    let preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
+    let promote = "project_controller::mark_dispatch_turn_started_for_file(";
+    let promote_at = preflight_run
+        .find(promote)
+        .expect("preflight must record the dispatched turn's start");
+    let cycle_open = "agent_doc_cycle_state_io::start_preflight(file,";
+    let cycle_open_at = preflight_run[..promote_at]
+        .rfind(cycle_open)
+        .expect("the turn-start record must follow the cycle-open that proves the turn started");
+    // Wider than the 600 above only because the call carries its own rationale
+    // comment; still tight enough that the record cannot migrate to another branch.
+    assert!(
+        promote_at - cycle_open_at < 1200,
+        "the turn-start record drifted away from the preflight cycle-open it is evidence of"
+    );
 }
 
 /// `#timestampresponseheader`: the response-header contract is an instruction surface,

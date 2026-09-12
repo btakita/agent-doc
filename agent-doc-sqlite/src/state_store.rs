@@ -4022,11 +4022,70 @@ pub fn has_any_open_in_flight_dispatch_as_of(conn: &Connection, now_secs: i64) -
     Ok(count > 0)
 }
 
+/// How long a dispatch whose turn was never observed to start may still be treated
+/// as pre-turn rather than consumed (`#idledispatchstack`).
+///
+/// A trigger that has been transport-submitted into a pane does NOT start its turn
+/// immediately: the harness runs admission first (agent-doc's own `UserPromptSubmit`
+/// preflight hook is a measured 15-18s, and Claude Code's default hook timeout is
+/// 30s), so the actor projects `Ready` for that whole pre-turn window. Live repro
+/// 2026-09-12 on `src/haiven-dev/tasks/fpe.md`: dispatch opened 02:08:33, trigger
+/// submitted 02:08:35, actor still idle at 02:09:06 — **33s** — which released the
+/// receipt, then the turn finally went busy at 02:09:07 and a duplicate dispatch was
+/// admitted at 02:09:12. So the window has to exceed the whole admission budget;
+/// this sits above both measurements and far below
+/// [`OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS`], which remains the leak bound.
+pub const DISPATCH_PRE_TURN_GRACE_SECS: i64 = 120;
+
+/// `#idledispatchstack`: record that the turn for this document's open dispatches has
+/// actually STARTED. Called when the actor transitions to `Busy`.
+///
+/// This is the observation that `dispatch_start_proven` is named for. Before it
+/// existed, [`mark_open_dispatches_consumed`] inferred the start from an idle actor,
+/// which cannot distinguish "the turn finished" from "the turn has not begun".
+/// Promoting the row to `running` makes the distinction durable; `running` is already
+/// inside the open-set predicate, so the coalescing and recycle gates see no change.
+/// Returns the number of receipts promoted.
+pub fn mark_open_dispatches_turn_started(conn: &Connection, document_id: &str) -> Result<usize> {
+    let promoted = conn.execute(
+        r#"
+        UPDATE dispatch_attempts
+        SET result_status = 'running'
+        WHERE document_id = ?1
+          AND failed_stage IS NULL
+          AND COALESCE(result_status, '') IN ('accepted', 'queued')
+          AND dispatch_start_proven = 0
+        "#,
+        params![document_id],
+    )?;
+    Ok(promoted)
+}
+
 /// `#qflood`: mark every open in-flight dispatch for this document consumed. Called
-/// when the actor transitions to `Ready` (the turn finished → its dispatch is done),
-/// keeping the open-dispatch set accurate for the next busy episode's coalescing and
-/// for restart recovery. Returns the number of receipts released.
+/// when the actor transitions to `Ready`, keeping the open-dispatch set accurate for
+/// the next busy episode's coalescing and for restart recovery. Returns the number of
+/// receipts released.
+///
+/// `#idledispatchstack`: "actor is Ready" is NOT by itself proof that a dispatch was
+/// consumed. A `Ready` projection covers both post-turn idle and the pre-turn idle of
+/// a trigger that is submitted but has not started — collapsing them released a
+/// receipt seconds before its own turn began, and the idle watch then stacked a second
+/// trigger into the same composer. A row is consumed when its turn was actually
+/// observed (`running`, set by [`mark_open_dispatches_turn_started`]); a row with no
+/// observed turn is held for [`DISPATCH_PRE_TURN_GRACE_SECS`] and only then released,
+/// so a genuinely lost trigger still cannot wedge the per-generation coalescing gate
+/// (which, unlike the recycle gate, has no staleness horizon of its own).
 pub fn mark_open_dispatches_consumed(conn: &Connection, document_id: &str) -> Result<usize> {
+    mark_open_dispatches_consumed_as_of(conn, document_id, timestamp_secs() as i64)
+}
+
+/// [`mark_open_dispatches_consumed`] with an injectable clock so the pre-turn grace is
+/// testable without sleeping.
+pub fn mark_open_dispatches_consumed_as_of(
+    conn: &Connection,
+    document_id: &str,
+    now_secs: i64,
+) -> Result<usize> {
     let released = conn.execute(
         r#"
         UPDATE dispatch_attempts
@@ -4035,8 +4094,12 @@ pub fn mark_open_dispatches_consumed(conn: &Connection, document_id: &str) -> Re
           AND failed_stage IS NULL
           AND COALESCE(result_status, '') IN ('accepted', 'queued', 'running')
           AND dispatch_start_proven = 0
+          AND (
+            COALESCE(result_status, '') = 'running'
+            OR timestamp <= ?2
+          )
         "#,
-        params![document_id],
+        params![document_id, now_secs - DISPATCH_PRE_TURN_GRACE_SECS],
     )?;
     Ok(released)
 }
@@ -5266,6 +5329,171 @@ mod tests {
             has_any_open_in_flight_dispatch_as_of(&conn, now)?,
             "a recent unproven dispatch must still block the controller idle self-recycle"
         );
+        Ok(())
+    }
+
+    /// `#idledispatchstack`: `Ready` is ambiguous — it is both post-turn idle and the
+    /// pre-turn idle of a trigger that is submitted but has not started. Live repro
+    /// 2026-09-12 on `tasks/fpe.md`: receipt opened 02:08:33, trigger submitted
+    /// 02:08:35, actor still idle at 02:09:06 (33s) which released it, turn went busy
+    /// 02:09:07, duplicate dispatch admitted 02:09:12.
+    #[test]
+    fn a_ready_projection_does_not_consume_a_dispatch_whose_turn_never_started() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        // The 2026-09-12 timings, to the second.
+        insert_open_dispatch(&conn, "doc", now - 33, "accepted")?;
+
+        assert_eq!(
+            mark_open_dispatches_consumed_as_of(&conn, "doc", now)?,
+            0,
+            "a 33s-old receipt with no observed turn is pre-turn, not consumed"
+        );
+        assert!(
+            has_open_in_flight_dispatch(&conn, "doc", 1)?,
+            "the receipt must keep blocking a duplicate dispatch into the same composer"
+        );
+
+        // The turn then starts, runs, and ends — the normal sequence still releases.
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 1);
+        assert_eq!(
+            mark_open_dispatches_consumed_as_of(&conn, "doc", now)?,
+            1,
+            "an observed turn reaching Ready consumes its receipt immediately"
+        );
+        assert!(!has_open_in_flight_dispatch(&conn, "doc", 1)?);
+        Ok(())
+    }
+
+    /// A promoted row stays inside the open set, so neither gate changes meaning while
+    /// the turn runs.
+    #[test]
+    fn a_running_dispatch_still_pins_both_in_flight_gates() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        insert_open_dispatch(&conn, "doc", now - 5, "accepted")?;
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 1);
+
+        assert!(has_open_in_flight_dispatch(&conn, "doc", 1)?);
+        assert!(has_any_open_in_flight_dispatch_as_of(&conn, now)?);
+        Ok(())
+    }
+
+    /// `#idledispatchstack`: the hold must be bounded. Unlike the project-wide recycle
+    /// gate, `has_open_in_flight_dispatch` has no staleness horizon of its own, so a
+    /// trigger that is genuinely lost (killed pane, crashed harness) would otherwise
+    /// block every later dispatch for that document forever — a wedge strictly worse
+    /// than the duplicate it prevents.
+    #[test]
+    fn a_lost_trigger_is_released_once_past_the_pre_turn_grace() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        insert_open_dispatch(
+            &conn,
+            "doc",
+            now - DISPATCH_PRE_TURN_GRACE_SECS - 1,
+            "accepted",
+        )?;
+
+        assert_eq!(
+            mark_open_dispatches_consumed_as_of(&conn, "doc", now)?,
+            1,
+            "a receipt past the pre-turn grace with no observed turn is lost, not pending"
+        );
+        assert!(!has_open_in_flight_dispatch(&conn, "doc", 1)?);
+        Ok(())
+    }
+
+    /// A dispatch into an already-busy actor is recorded `queued`, and that shape needs
+    /// the same turn-start promotion as `accepted`.
+    #[test]
+    fn a_queued_dispatch_is_promoted_by_an_observed_turn_too() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        insert_open_dispatch(&conn, "doc", now - 10, "queued")?;
+
+        assert_eq!(mark_open_dispatches_consumed_as_of(&conn, "doc", now)?, 0);
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 1);
+        assert_eq!(mark_open_dispatches_consumed_as_of(&conn, "doc", now)?, 1);
+        Ok(())
+    }
+
+    /// Turn-start promotion is document-scoped: a concurrent pane's turn must not
+    /// vouch for another document's pre-turn receipt.
+    #[test]
+    fn turn_start_promotion_does_not_cross_documents() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        insert_open_dispatch(&conn, "doc-a", now - 20, "accepted")?;
+        insert_open_dispatch(&conn, "doc-b", now - 20, "accepted")?;
+
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "doc-a")?, 1);
+        assert_eq!(
+            mark_open_dispatches_consumed_as_of(&conn, "doc-b", now)?,
+            0,
+            "doc-b's receipt has no observed turn of its own"
+        );
+        assert_eq!(mark_open_dispatches_consumed_as_of(&conn, "doc-a", now)?, 1);
+        Ok(())
+    }
+
+    /// An already-consumed or failed receipt is never re-promoted or re-released.
+    #[test]
+    fn turn_start_and_consume_ignore_closed_receipts() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        conn.execute(
+            "INSERT INTO dispatch_attempts \
+             (document_id, generation, command_kind, result_status, dispatch_start_proven, timestamp) \
+             VALUES ('doc', 1, 'run', 'accepted', 1, ?1)",
+            [now - 5],
+        )?;
+        conn.execute(
+            "INSERT INTO dispatch_attempts \
+             (document_id, generation, command_kind, failed_stage, result_status, dispatch_start_proven, timestamp) \
+             VALUES ('doc', 1, 'run', 'submit', 'accepted', 0, ?1)",
+            [now - 5],
+        )?;
+
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 0);
+        assert_eq!(mark_open_dispatches_consumed_as_of(&conn, "doc", now)?, 0);
+        Ok(())
+    }
+
+    fn dispatch_attempts_fixture() -> Result<Connection> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            r#"
+            CREATE TABLE dispatch_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                document_id TEXT NOT NULL,
+                generation INTEGER NOT NULL,
+                command_kind TEXT NOT NULL,
+                accepted_stage TEXT,
+                failed_stage TEXT,
+                diagnostic_payload TEXT,
+                result_status TEXT,
+                proof_scope TEXT,
+                dispatch_start_proven INTEGER NOT NULL DEFAULT 0,
+                timestamp INTEGER NOT NULL
+            );
+            "#,
+        )?;
+        Ok(conn)
+    }
+
+    fn insert_open_dispatch(
+        conn: &Connection,
+        document_id: &str,
+        timestamp: i64,
+        result_status: &str,
+    ) -> Result<()> {
+        conn.execute(
+            "INSERT INTO dispatch_attempts \
+             (document_id, generation, command_kind, result_status, dispatch_start_proven, timestamp) \
+             VALUES (?1, 1, 'run', ?2, 0, ?3)",
+            params![document_id, result_status, timestamp],
+        )?;
         Ok(())
     }
 

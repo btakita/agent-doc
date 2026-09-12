@@ -17247,11 +17247,45 @@ pub(crate) fn handle_mark_lifecycle(
             ),
         }
     }
-    // #qflood: a transition to Ready means the turn finished, so any dispatch in
-    // flight for this document is now consumed — release the in-flight marker so the
-    // open-dispatch set stays accurate for the next busy episode's coalescing and for
-    // restart recovery. A Ready projection alone is not sufficient to bypass an
-    // open receipt; only this controller-owned lifecycle boundary consumes it.
+    // `#idledispatchstack`: a `Busy` transition **caused by a dispatch** is the moment a
+    // dispatched trigger's turn actually STARTS, and it is the only positive evidence of
+    // that. Record it on the open receipts so the Ready release below can tell a
+    // consumed dispatch from one whose turn has not begun. Without this edge, `Ready`
+    // covered both and a receipt was released ~33s before its own turn started (live
+    // repro 2026-09-12 on `tasks/fpe.md`), after which the idle watch stacked a second
+    // trigger into the same composer.
+    //
+    // The `caller` filter is load-bearing, not defensive. In that same repro an
+    // UNRELATED `state=busy caller=supervisor reason=restart_continue_spawn` landed two
+    // seconds before the premature release; accepting any `Busy` would have let a
+    // supervisor restart vouch for a trigger that had not run, and the duplicate would
+    // still have stacked. Across that log only `caller=dispatch` marks a dispatch's own
+    // turn start (2 occurrences) versus 27 supervisor/operator side-effect transitions.
+    // A harness path that starts a dispatched turn under some other caller degrades to
+    // holding the receipt until `DISPATCH_PRE_TURN_GRACE_SECS` elapses — a bounded
+    // delay, never a wedge.
+    if matches!(state, agent_doc_controller::actor::ActorState::Busy) && caller == "dispatch" {
+        match open_state_db(&bootstrap.project_root).and_then(|conn| {
+            state_store::mark_open_dispatches_turn_started(&conn, &document_id)
+        }) {
+            Ok(promoted) if promoted > 0 => agent_doc_ops_log_io::log_op(
+                &file,
+                &format!(
+                    "dispatch_turn_started document_id={} count={} reason=actor_busy",
+                    document_id, promoted
+                ),
+            ),
+            Ok(_) => {}
+            Err(e) => eprintln!(
+                "[controller] #idledispatchstack turn-start record on Busy failed (non-fatal): {e}"
+            ),
+        }
+    }
+    // #qflood: a transition to Ready releases the in-flight marker so the open-dispatch
+    // set stays accurate for the next busy episode's coalescing and for restart
+    // recovery. A Ready projection alone is not sufficient to bypass an open receipt;
+    // only this controller-owned lifecycle boundary consumes it. `#idledispatchstack`:
+    // and only for a receipt whose turn was observed, or one past the pre-turn grace.
     if matches!(state, agent_doc_controller::actor::ActorState::Ready) {
         match open_state_db(&bootstrap.project_root)
             .and_then(|conn| state_store::mark_open_dispatches_consumed(&conn, &document_id))
@@ -29556,27 +29590,80 @@ mod tests {
             .unwrap();
         assert_eq!(coalesced, 1, "the coalesced re-dispatch must be recorded");
 
-        // A genuine controller-owned Ready boundary releases the in-flight marker
-        // so the next turn dispatches cleanly.
-        let mark_ready = ControllerRequest {
+        // `#idledispatchstack`: a controller-owned Ready is NOT on its own proof that
+        // this receipt's trigger ran. Provenance was the original qflood
+        // discriminator (controller boundary vs. the direct write above), and the live
+        // 2026-09-12 repro on `tasks/fpe.md` defeated it: `dispatch_in_flight_released
+        // ... reason=actor_ready` fired from this very blessed path at 02:09:06, and the
+        // trigger's turn then started at 02:09:07 — so the receipt was consumed one
+        // second BEFORE the work it represented began, and the idle watch stacked a
+        // duplicate at 02:09:12. The turn start has to be observed, not inferred.
+        let mark_lifecycle = |state: &str, caller: &str, reason: &str| ControllerRequest {
             command: "mark_lifecycle".to_string(),
             file: Some(doc.clone()),
             session_id: Some("session-qf".to_string()),
             pane_id: Some("%41".to_string()),
             window_id: None,
             generation: Some(1),
-            state: Some("ready".to_string()),
-            caller: Some("supervisor".to_string()),
-            reason: Some("prompt_ready".to_string()),
+            state: Some(state.to_string()),
+            caller: Some(caller.to_string()),
+            reason: Some(reason.to_string()),
             supervisor_pid: None,
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: None,
         };
-        handle_mark_lifecycle(&bootstrap, None, mark_ready).expect("mark ready");
+
+        // The premature Ready, now through the controller's own boundary. Still no
+        // observed turn for this receipt, so it must survive.
+        handle_mark_lifecycle(
+            &bootstrap,
+            None,
+            mark_lifecycle("ready", "supervisor", "prompt_ready"),
+        )
+        .expect("mark ready");
+        assert!(
+            state_store::has_open_in_flight_dispatch(&conn, &document_id, 1).unwrap(),
+            "a controller Ready with no observed turn start must NOT consume the receipt"
+        );
+
+        // An unrelated supervisor-caused Busy episode must not vouch for it either —
+        // this is the `reason=restart_continue_spawn` transition that landed two seconds
+        // before the live premature release.
+        handle_mark_lifecycle(
+            &bootstrap,
+            None,
+            mark_lifecycle("busy", "supervisor", "restart_continue_spawn"),
+        )
+        .expect("mark busy");
+        handle_mark_lifecycle(
+            &bootstrap,
+            None,
+            mark_lifecycle("ready", "supervisor", "prompt_ready"),
+        )
+        .expect("mark ready");
+        assert!(
+            state_store::has_open_in_flight_dispatch(&conn, &document_id, 1).unwrap(),
+            "an unrelated supervisor busy episode must not vouch for this receipt"
+        );
+
+        // The dispatched trigger finally starts its own turn, and the Ready that ends
+        // THAT turn releases the marker so the next turn dispatches cleanly.
+        handle_mark_lifecycle(
+            &bootstrap,
+            None,
+            mark_lifecycle("busy", "dispatch", "auto_trigger_inject"),
+        )
+        .expect("mark busy");
+        handle_mark_lifecycle(
+            &bootstrap,
+            None,
+            mark_lifecycle("ready", "supervisor", "prompt_ready"),
+        )
+        .expect("mark ready");
         assert!(
             !state_store::has_open_in_flight_dispatch(&conn, &document_id, 1).unwrap(),
-            "the Ready transition must release the in-flight marker"
+            "the Ready after an observed dispatch turn must release the in-flight marker"
         );
     }
     #[test]

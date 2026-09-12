@@ -15771,6 +15771,55 @@ fn test_agent_doc_controller_owns_route_trigger_matching_policy() {
     );
 }
 
+/// `#idledispatchstack`: a dispatch receipt's start must be proven by an observed
+/// `Busy` transition, never inferred from a `Ready` projection — `Ready` covers both
+/// post-turn idle and the pre-turn idle of a submitted-but-unstarted trigger, and
+/// collapsing them released a receipt ~33s before its own turn began (live repro
+/// 2026-09-12 on `tasks/fpe.md`), after which the idle watch stacked a second trigger
+/// into the same composer.
+///
+/// The release rule itself is behaviour-tested in `agent-doc-sqlite`. What has no test
+/// harness is the lifecycle WIRING, so pin it structurally: the turn-start record must
+/// sit inside the `ActorState::Busy` branch, and the release inside `ActorState::Ready`.
+#[test]
+fn test_dispatch_turn_start_is_recorded_on_the_busy_transition() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state_store =
+        fs::read_to_string(manifest_dir.join("agent-doc-sqlite/src/state_store.rs")).unwrap();
+    for required in [
+        "pub fn mark_open_dispatches_turn_started(",
+        "pub fn mark_open_dispatches_consumed_as_of(",
+        "pub const DISPATCH_PRE_TURN_GRACE_SECS",
+    ] {
+        assert!(
+            state_store.contains(required),
+            "agent-doc-sqlite must own the dispatch consume/turn-start rule: {required}"
+        );
+    }
+
+    let rpc = fs::read_to_string(
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    for (state, call) in [
+        ("Busy", "state_store::mark_open_dispatches_turn_started("),
+        ("Ready", "state_store::mark_open_dispatches_consumed("),
+    ] {
+        let call_at = rpc
+            .find(call)
+            .unwrap_or_else(|| panic!("controller lifecycle must call {call}"));
+        let guard = format!("matches!(state, agent_doc_controller::actor::ActorState::{state})");
+        let guard_at = rpc[..call_at].rfind(&guard).unwrap_or_else(|| {
+            panic!("{call} must be guarded by the {state} lifecycle transition")
+        });
+        // The guard is the branch this call sits in, not some earlier unrelated match.
+        assert!(
+            call_at - guard_at < 600,
+            "{call} drifted away from its {state} guard; the lifecycle edge is no longer paired"
+        );
+    }
+}
+
 #[test]
 fn test_agent_doc_controller_owns_handoff_staleness_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));

@@ -12,7 +12,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: start
+queue: go
 ---
 
 ## Status
@@ -394,16 +394,54 @@ Widened, and the widening is where the work was. `lazily-zig aecf1a1` (CI ✅), 
 **Verification.** `make check` exit 0 in both repos: zig's fmt on both pinned toolchains, full suite, interop peer, Lean formal model, 613/613 blocks bound, 138/156 fixtures, 151/151 scenarios, assertion ordering, ci-reach; spec's 13 guards. `assertKeyWith` callbacks needed two shapes fixed for lazily-spec's consumption guard — a multi-line signature whose `zig fmt` trailing comma reads as an empty final parameter, and callbacks resolved by name rather than through a generic factory or a local `const`.
 
 Exchange is at 335 lines / 13 sections with the queue active — noting it, not stopping for it.
+
+### Re: do[#lzblocksitepin] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzblocksitepin]
+
+
+Done in **four** bindings, not three, and each one has a probe that discriminates between the two dimensions rather than a claim that it does.
+
+| binding | sites | distinct digests | commit | CI |
+|---|---|---|---|---|
+| lazily-zig | 722 | 613 | `bf512e2` | ✅ |
+| lazily-py | 729 | 620 | `48cff68` | ✅ |
+| lazily-js | 747 | 638 | `ae58951` | ✅ |
+| lazily-cs | 743 | 634 | `0b59e41` | ✅ |
+
+Derived and inventoried agree on the nose in all eight cells. Every comparison is an equality, both dimensions come off the one walk the inventory itself uses, and every expectation still comes from the corpus listing minus that binding's own ledger — never from a run artifact.
+
+**The fourth binding is the finding.** The item scoped py/js/zig because those three derive digests. `lazily-cs` was the mirror image: it asserts 743 **sites** and carries a comment arguing that sites beat digests — which is true and is only half of it. The two dimensions are blind to what the other sees, in *opposite* directions. A digest count absorbs a deletion of a block whose bytes recur elsewhere. A site count absorbs a **content edit**: rewriting one block so it is spelled exactly like another's leaves 743 sites untouched and takes the digest set from 634 to 633, and the corpus has genuinely lost a distinct claim. So cs got the digest half, with `SpecCorpus.BlockDigest` ported rule for rule — numbers folded by their raw lexical form, everything else as `z` — and verified against the run's own ledger *before* being asserted.
+
+**Each probe had to be the one where the new dimension is the sole signal.** That took more care than expected and two of the three agents rejected their first candidate for it:
+
+- **zig** — deleting `stdlib/timer.json` `scenarios[0].steps[0].expect`, `{"outcome": "pending", "deadline": 10}`, a shape several stdlib steps share. This is the exact perturbation that ran GREEN earlier in this session under digest-only: now 722 sites vs 721.
+- **cs** — collapsing `scenarios[2].steps[0].expect` from `{"outcome": "pending", "deadline": 7}` (a unique digest) to `{… "deadline": 10}`. The digest rung fires at 634 vs 633 and the site rung stays **completely silent** — zero occurrences in the output.
+- **py** — `rateshape/debounce.json` `steps[0].expected`, a shape recurring at 15 sites. Chosen over the timer block because deleting that one aborted a fixture-looping runner, which shrank the opened set and moved the digest count too: a confounded probe. Then it ran HEAD's files against the same doctored corpus and got exit 0 / `620 == 620` — green over a corpus that lost a block.
+- **js** — detaching `rateshape/debounce.json` from the opened set: 7 blocks whose 4 distinct digests all recur in `sample_time.json` and `throttle_trailing.json`. Site equality red at 740 vs 747 naming all seven; the same inputs against a digest-only copy of the guard, exit 0.
+
+**One limitation, measured rather than assumed.** js tried the probe as I specified it — deleting `coordination/lock.json` `steps[2].expected` from the corpus — and found it does **not** discriminate: both sides went 747 → 746 and the guard stayed green. Both sides of both equalities read `SPEC_DIR`, so a corpus deletion moves the expectation and the inventory together. No expectation derived from the corpus can see the corpus itself move. That applies to all four bindings — my zig probe only fired because it held a manifest from an unperturbed run against a perturbed corpus, which is not what CI does. **What is pinned here is the agreement between the run and the corpus, per site and per digest;** the corpus-against-its-own-history half is `lazily-spec/corpus-counts.json`, which `#lzblockfloorpin` already grew to pin 795 block sites across 148 fixtures. The pair is complete across the two repos, and js recorded the boundary in its source so nobody re-derives it.
+
+js also reports its walk counts **array elements** individually, so the row to read against `make corpus-blocks-report` is 747/638 (all five names + array elements), not 735/626.
+
+`#lzblockmagnitudeaudit` edited to say a magnitude now means both dimensions, so the six bindings it covers cannot land a digest-only pin.
+
+**Verification.** `make check` exit 0 in all four repos, captured explicitly: zig (fmt on both pinned toolchains, full suite, interop peer, Lean model, 613+722, 151/151 scenarios), py (1017 tests, 729+620), js (665 tests, 747+747 as *sets* — two sites that move cancel in a count and cannot cancel in a set), cs (332 tests, 743+634). Every zero-guard covers either dimension. Nothing touched `lazily-spec`'s shared corpus; all perturbations were `/tmp` copies.
+
+Exchange is at 370 lines / 15 sections with the queue active — noting it, not stopping for it.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- ~~do [#lzblocksitepin]~~
 - ~~do [#lzblockfloorpin]~~
 - ~~do [#lzzigblockwalk]~~
 - do [#lzblockmagnitudeaudit]
-- do[#lzorderinganchors]
+- ⏭️ do[#lzorderinganchors]
 - do[#lzktareapartition]
 - do[#lzscenariofloormissing]
 <!-- /agent:queue -->
@@ -411,8 +449,7 @@ Exchange is at 335 lines / 13 sections with the queue active — noting it, not 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzblocksitepin] [lazily-py, lazily-js, lazily-zig] The derived assertion-block magnitude is compared as DISTINCT DIGESTS, and a probe this cycle showed that is one dimension short: deleting `stdlib/timer.json` scenarios[0].steps[0].expect from a scratch corpus left lazily-zig`s guard GREEN, because that block`s digest (`{"outcome":"pending","deadline":10}`) recurs elsewhere and the distinct count did not move. Only a block with a unique digest is visible. The SITE count is what closes it — lazily-zig already prints 722 sites and compares 613 digests, and lazily-cs is the one binding that asserts sites (743 == 743). Assert BOTH in every binding that derives a magnitude, and prove each exact by failing at n+1. lazily-spec`s corpus-counts.json pins sites per fixture upstream, so the corpus side is covered; this is the binding-side rung. Repos: src/lazily-py, src/lazily-js, src/lazily-zig
-- [ ] [#lzblockmagnitudeaudit] [lazily-rs, lazily-kt, lazily-dart, lazily-go, lazily-cpp, lazily-gd] #lzblockfloorpin covered only the four bindings that DECLARED an assertion-block magnitude; the other six were never checked for whether they declare one at all. rs/kt/dart/go/cpp each carry some form of unbound-block rung (lazily-rs/scripts/check-conformance-coverage.sh + tests/common/mod.rs, lazily-kt/scripts/check-conformance-coverage.sh + ConformanceFixtures.kt, lazily-dart/scripts/check-unbound-blocks.py, lazily-go's per-area *_conformance_test.go, lazily-cpp/tests/test_spec_fixture.hpp) and lazily-gd appears to carry none — but a rung with no positive-evidence magnitude reports OK over an inventory of zero, which is the #lzvacuousrun hole the four floors existed to close. For each: determine whether a magnitude is asserted, and if not derive one the same way (corpus directory listing minus that binding's committed ledger, walked with that binding's OWN rule, asserted EQUAL). lazily-spec's `make corpus-blocks-report` prints sites and distinct digests per binding in the three rows a walk can vary over. Repos: src/lazily-rs, src/lazily-kt, src/lazily-dart, src/lazily-go, src/lazily-cpp, src/lazily-gd
+- [ ] [#lzblockmagnitudeaudit] [lazily-rs, lazily-kt, lazily-dart, lazily-go, lazily-cpp, lazily-gd] #lzblockfloorpin covered only the four bindings that DECLARED an assertion-block magnitude; the other six were never checked for whether they declare one at all. rs/kt/dart/go/cpp each carry some form of unbound-block rung (lazily-rs/scripts/check-conformance-coverage.sh + tests/common/mod.rs, lazily-kt/scripts/check-conformance-coverage.sh + ConformanceFixtures.kt, lazily-dart/scripts/check-unbound-blocks.py, lazily-go`s per-area *_conformance_test.go, lazily-cpp/tests/test_spec_fixture.hpp) and lazily-gd appears to carry none — but a rung with no positive-evidence magnitude reports OK over an inventory of zero, which is the #lzvacuousrun hole the four floors existed to close. For each: determine whether a magnitude is asserted, and if not derive one the same way (corpus directory listing minus that binding`s committed ledger, walked with that binding`s OWN rule, asserted EQUAL). As of #lzblocksitepin a magnitude means BOTH dimensions — SITES and DISTINCT DIGESTS, each asserted EQUAL — because each is blind to what the other sees: a digest count absorbs the deletion of a block whose bytes recur (109 of lazily-py`s 729 sites and 109 of lazily-js`s 747 carry a recurring shape), and a site count absorbs a content edit that collapses two distinct claims into one. All four bindings that already declared a magnitude now assert both, with a discriminating probe each. lazily-spec`s `make corpus-blocks-report` prints sites and distinct digests per binding in the three rows a walk can vary over. Repos: src/lazily-rs, src/lazily-kt, src/lazily-dart, src/lazily-go, src/lazily-cpp, src/lazily-gd
 - [ ] [#lzorderinganchors] [lazily-spec] scripts/check-assertion-ordering.py ORDERED_CHECKS anchors its ordering contract on the EXACT floor literals the bindings are now removing - regexes like 'assert accepted == 6', 'assert replayed == 12', 'assert.equal(accepted, 10)' for py/js/cs. lazily-py could not delete three of its floors this cycle and shipped them as DEAD ANCHORS, kept only to satisfy this guard, with the live constant-free assertion sitting above them. That is debt the guard created. Re-anchor on something stable that is not a value - a named helper call, or a marker the runner declares - so removing a constant does not break an unrelated ordering contract. Note the anchor must also be UNIQUE in the file (py tripped 'anchors are not unique' by quoting the literal in an explanatory comment). Repo: src/lazily-spec, then src/lazily-py to drop the dead anchors.
 - [ ] [#lzktareapartition] [lazily-kt] check-conformance-coverage.sh declares REQUIRED_AREAS (27 areas) with no EXCUSED_AREAS complement, so the area list scopes the AUDIT and not the set the suite OPENS: kt opens 148 fixtures / replays 157 scenarios where deriving from the areas alone gives 147 / 151. lazily-spec's check-corpus-floors.mjs therefore declines to derive any floor for kt (it would otherwise have called an honest MIN_FIXTURES=148 unsatisfiable). lazily-cpp pairs the two arrays and its own guard enforces the exact complement, and there the derivation is exact. Add the EXCUSED_AREAS complement (or the equivalent partition assertion) so kt's floors become auditable from the corpus side. Repo: src/lazily-kt
 - [ ] [#lzscenariofloormissing] [lazily-py, lazily-kt, lazily-gd] No MIN_SCENARIOS floor is declared at all - lazily-spec's check-corpus-floors.mjs reports this rather than failing, because lazily-kt deliberately retired MIN_FIXTURES for an area-partition assertion and that is a stronger invariant. But a binding with NEITHER is relying on nothing: py replays 151 scenarios and kt 157 with no positive-evidence floor under either, so a run that silently stopped replaying scenarios would report green. Derive each floor from the gate's own output, add it, and prove it exact by failing at n+1. lazily-gd is staged and may legitimately have nothing to floor yet - check before adding. Repos: src/lazily-py, src/lazily-kt, src/lazily-gd

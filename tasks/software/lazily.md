@@ -252,12 +252,64 @@ zig reported "three live PyPI tokens in cleartext" in the superproject `.env`. *
 The real chain is one step later: `.mise.toml` carries `[env] _.source = ".env"`, which **resolves** those substitutions at shell startup, so every process's ambient environment holds the cleartext — which is why a presence check sees `CARGO_REGISTRY_TOKEN` at 35 chars. zig's `failed command:` lines then print the resolved values, **on green runs** (six such lines at exit 0 with zero FAILED), and a caller-side `env -u` scrub of 20 token-shaped variables was *defeated*.
 
 So the fix is to stop resolving publish tokens into the ambient environment, not to move them out of `.env`. The item is updated accordingly. **The rotation recommendation stands for a different reason:** the resolved values passed through a subagent's tool output while it diagnosed this, which puts them in a transcript that no log shredding reaches. `PYPI_PUBLISH_TOKEN`, `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN` want rotating, and that needs your credentials, so it is genuinely yours rather than something I can close.
+
+### Re: `#lzpinparsestrict` — one author, and two of the parsers were worse than I said — opus-5 · 2026-09-12T04:50-04:00
+
+> **Queue prompt:**
+>
+> do [#lzpinparsestrict]
+
+
+Done in all ten bindings, ten commits, all CI green on their exact SHAs, all verified against the reported hashes: `rs d62fb11 · py c4a5019 · js 1b9caba · kt 4458b3d · go d497195 · cpp 7ced215 · zig 56673bf · cs 2d8ccd5 · dart abe57c4 · gd 66e77cd`, pointers in `8af66b58a`.
+
+The rule as landed: a non-empty run of ASCII `0`-`9`, validated **before** any parse runs; unset takes the committed default, explicitly empty is a rejection; leading zeros fine, `0` still valid.
+
+### One agent, not ten — and that is what found the real bugs
+
+I ran this as a single agent across all ten repos rather than one per repo, because ten independent authors is what *created* this defect: the family's contract had become whichever parser was loosest. Fixing it with ten more authors risked the same divergence.
+
+It paid off in a way parallel agents could not have managed. The agent noticed that **Go's `\d` is ASCII-only while Python's `\d` is Unicode**, and that dart had built its reader on the wrong half of that asymmetry. That is a cross-language observation; no per-repo author sees it.
+
+### I mischaracterised two of the ten, and the corrections matter
+
+In filing this I described dart as using "a regex" and js as using "`Number()` with an explicit NaN/empty/negative rejection", implying both were already reasonable. Both were wrong:
+
+- **dart** used `re.fullmatch(r"\d+", raw.strip())`, and Python's `\d` matches `٣`, so the non-ASCII numeral passed. Worse, it then called `int()` on the **unstripped** value — validation and parse were reading different strings.
+- **js** used `Number()`, which was the loosest of the ten: `" 7 "` → 7, `+1` → 1, `1.0` → 1 with `isInteger` agreeing, and **`0x19` → 25**. A hex literal silently enforcing an unrelated number.
+
+Two findings I would call more than cosmetic, and both were latent in commits from the previous two cycles:
+
+- **cpp accepted `-1`.** Under a `<=` ceiling a negative pin merely fails every non-empty ledger. Under an exact equality it makes the rung **unsatisfiable** — no ledger size can ever match it. The ratchet change converted a harmless value into a wedge.
+- **go and py silently turned an explicitly empty override into the committed default.** `os.Getenv` plus `TrimSpace` in go, `not raw.strip()` in py. So `EXPECTED_LEDGERED_BLOCKS= make check` read as "use the default" rather than as an error.
+
+### Two tests were asserting the defect
+
+Both repos had encoded the wrong behaviour as an expectation, which is why it survived:
+
+- **py's `test_an_empty_size_pin_override_is_the_committed_pin`** asserted exactly what this item removes. Replaced, and **mutation-checked**: reverting the reader to `int(raw.strip())` with the empty fall-through turns 7 of 20 selected tests red, so the replacements are not vacuous.
+- **go's test labelled `t.Setenv(env, "")` as "unset"** and asserted `" 3 "` parses as 3. Unset now uses `os.Unsetenv` — after a `t.Setenv` to register the restore, since `t.Setenv` cannot express absence.
+
+### Where a language forced a divergence, stated rather than hidden
+
+- **go** has no `strip(charset)`, so the class is byte-wise `isBareASCIIDigits` — deliberately not `unicode.IsDigit`, which is true for `٣`.
+- **kt** uses bash `case ''|*[!0123456789]*`, enumerating the ten digits rather than writing `0-9`, because a bracket **range** is resolved by locale collation and only `LC_COLLATE=C` guarantees it means the ASCII ten. It behaved correctly under `en_US.UTF-8` already; the enumeration removes the dependency.
+- **cpp** kept its deferred-failure shape (`failed = True`, report the remaining rungs, then exit) rather than exiting inline.
+- **js** uses `/^[0-9]+$/` rather than `\d`, same reason as go.
+
+Accept-set confirmed everywhere: the committed value and its leading-zero form pass, and a wrong-but-well-formed value like `26` or `538` parses and then fails on the **equality** with a visibly different message from the parse rejection. That distinction was the point — a bad pin and a bad *number* should not look alike. All ten: unset variable, `make check` exit 0, zero `result: FAILED`.
+
+### Stated plainly
+
+**My severity framing was right and I am not upgrading it.** Every parser was fail-closed on obvious garbage, and a wrong pin fails the equality loudly, so this was an inconsistency rather than an open hole — with the two exceptions above, which came from the ratchet work itself rather than from anything older. No corpus was touched, no superproject pointers were bumped by the agent, and zig's build output was never written to a file, per the live exposure in `#lzzigenvsecretleak`.
+
+Exchange is at 228 lines across 5 response sections and the queue is active, so I am noting the size rather than pausing to compact.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- ~~do [#lzpinparsestrict]~~
 - ~~do [#lzledgerratchet]~~
 - do [#lzzigenvsecretleak]
 - do [#lzgotypedfloors]
@@ -278,7 +330,6 @@ So the fix is to stop resolving publish tokens into the ambient environment, not
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzpinparsestrict] [lazily-rs, lazily-py, lazily-js, lazily-kt, lazily-go, lazily-cpp, lazily-zig, lazily-cs, lazily-dart, lazily-gd] The ten EXPECTED_LEDGERED_BLOCKS parsers disagree about what counts as a number, and nine of them are looser than they look. lazily-rs went deliberately stricter than `int()` and gave the reasons: `int("1_0")` is 10, `int(" 7 ")` is 7, and `"٣".isdigit()` is True — so a bare `int()` or `.isdigit()` parse silently accepts a pin nobody wrote, including a PEP-515 underscore literal and a non-ASCII numeral. The others use a mix: plain `int()` in a try/except (cs), `.strip().isdigit()` (gd), a regex (dart), `Number()` with an explicit NaN/empty/negative rejection (js), and bash `${VAR-N}` plus a python reader (kt). Every one of them is fail-CLOSED on the obvious garbage, so this is not a hole — it is an inconsistency that makes the family's weakest parser the real contract. Converge on rs's rule: accept only a bare run of ASCII digits, reject underscores, surrounding whitespace, signs, non-ASCII digits, floats and hex, and name the offending value. Worth doing in one pass because the pin is now the rung that a consistent pair cannot satisfy, so its parse is load-bearing in a way it was not when it was a ceiling.
 - [ ] [#lzzigenvsecretleak] [SECURITY, lazily-zig] zig's noisy `failed command:` lines — which are NOT failures and print on ordinary green runs — dump the ENTIRE environment alongside the command. On this machine that environment carries CARGO_REGISTRY_TOKEN (35 chars) and NPM_TOKEN (40 chars), both verified SET by presence check on 2026-09-12. So any `make test` / `make check` scroll in a lazily-zig checkout prints two live publish credentials in cleartext, on a command nobody treats as sensitive. This is a livestream and screen-share exposure. Found incidentally by the #lzledgerceiling agent, which deleted three captured logs containing the token. TWO PARTS, and the second is the real fix: (1) filter or suppress the environment dump in zig's build output for this repo; (2) ROOT CAUSE — publish tokens are exported into every shell instead of being substituted at the point of use. They belong in passage, referenced as `$(passage ...)` inside the publish command only, which is the documented pattern for the crates.io token and is being bypassed. Until the ambient exports are gone, treat every lazily-zig build log as containing secrets. Recorded in operator memory as reference_lazily_zig_failed_command_dumps_env_secrets.md.
 - [ ] [#lzgotypedfloors] [lazily-go] go's scripts/check-conformance-coverage.sh still carries two TYPED floors that mirror their own set equalities: MIN_FIXTURES=147 (156 corpus fixtures minus 9 KNOWN_UNCOVERED) and MIN_SCENARIOS=151 (151 scenarios minus 0 excuses). Both are the MIN_BLOCKS family, but of the COVERAGE ledger rather than the bind ledger — which is why #lzledgerceiling deliberately left them alone. They cannot simply be deleted: they are the only thing in that file that can see a SHRINKING corpus, because `total` is read from the overridable SPEC_DIR, so a corpus that loses fixtures still satisfies both directions of every equality there. The correct move is the conversion lazily-rs already landed under #lzrstypedfloors (see lazily-rs/scripts/check-conformance-coverage.sh:535-560): replace each typed floor with an expectation DERIVED from the corpus listing, keeping a zero-guard so #lzvacuousrun cannot pass over nothing. Note the related trap py hit: lazily-spec's check-corpus-floors.mjs greps the whole scripts/ directory for the literal MIN_FIXTURES=${MIN_FIXTURES:-N} spelling, so quoting a retired pin verbatim in a COMMENT keeps the upstream audit deriving and comparing a floor that no longer runs. Reword, do not quote. Repo: src/lazily-go
 - [ ] [#lzgoasyncflake] [lazily-go] TestReactiveGraphConformance failed a divergence check on AsyncContext/churn_returns_to_baseline.json#3:observed_count during #lzledgerceiling, then did not reproduce in two reruns of the identical probe, with control green 3 of 3. So it is pre-existing and intermittent, not caused by that change — the agent flagged it rather than chasing it. An intermittent divergence in an ASYNC conformance runner is the shape that hides a real race behind a retry, and `observed_count` is exactly the kind of key a missed or doubled cascade step perturbs. Reproduce it under load or with a seeded scheduler rather than by rerunning, and treat a run that merely goes green again as no evidence. Repo: src/lazily-go

@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
-  codex: 01a08387-676c-7d10-9667-16c9ddf4765a
+  codex: 01a093e4-2a62-7d70-902a-b29046babb50
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -42,12 +42,32 @@ See [src/tsift/SPEC.md](../../src/tsift/SPEC.md) for the AST-Aware Code RAG spec
 Compacted content:
 - Archived 8 response topic(s): Session resumed; Issue #25 fixed and v0.1.97 published; tsift compared with Graft; 5 more
 - Prior summary/context: prior compacted content: Archived 6 response topic(s): tsift 0.1.96 released; Response; do [#fixcompactexchange]; 3 more
-<!-- agent:boundary:3ab8db0e:tsift -->
+> **Queue prompt:** fpe.md had a tsift task running for 1hr 51min before I killed it. Fix it.
+
+### Re: fpe.md runaway tsift task — gpt-5 · 2026-09-12T00:37-04:00
+
+Fixed. This was an `agent-doc` dispatch-lifecycle race, not a tsift execution bug: a `Ready` projection consumed the in-flight receipt before the dispatched turn actually started, so the idle watcher admitted a duplicate long-lived task into the same composer.
+
+The exact `fpe.md` trace was already fixed, committed, and pushed as agent-doc commit `b666a8d7` (`fix(dispatch): prove a dispatch's turn started instead of inferring it from Ready`). Dispatch receipts now move to `running` only after an observed `Busy` transition from `caller=dispatch`; `Ready` consumes only a proven-running receipt, with a bounded 120-second grace path for genuinely lost triggers. Unrelated supervisor `Busy` transitions cannot vouch for a dispatch.
+
+The installed `agent-doc 0.35.367` binary was built at 00:06, after the fix commit at 23:35. I did not reinstall over the unrelated concurrent `0.35.368` source edits.
+
+Verification is green:
+
+- exact state-store regression for the 33-second premature-Ready race;
+- lost-trigger grace regression;
+- controller lifecycle/coalescing regression;
+- structural Busy/Ready wiring regression;
+- latest GitHub Actions CI run `34672029496` completed successfully.
+
+No additional source changes were necessary in this cycle; all three fix-owned paths are clean.
+<!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 fpe.md had a tsift task running for 1hr 51min before I killed it. Fix it.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

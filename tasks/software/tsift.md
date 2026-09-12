@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -61,13 +61,23 @@ Verification is green:
 - latest GitHub Actions CI run `34672029496` completed successfully.
 
 No additional source changes were necessary in this cycle; all three fix-owned paths are clean.
+
+### Re: agent-doc commit and push check — gpt-5 · 2026-09-12T00:40-04:00
+
+> **Queue prompt:**
+>
+> do [#changecommitpush]
+
+
+I made no `agent-doc` source change, so there is no new change of mine to commit or push. The `fpe.md` fix is already committed as `b666a8d7` and present on `origin/main`.
+
+The three fix-owned paths remain clean. Local `agent-doc` `main` is currently one commit ahead at `8912cc44` with additional dirty editor files, but that commit and those edits were created concurrently by another session; I did not push or fold them into this task.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 fpe.md had a tsift task running for 1hr 51min before I killed it. Fix it.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

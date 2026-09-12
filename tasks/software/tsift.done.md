@@ -540,3 +540,4 @@
 - 2026-09-11 [#graftcrux] [recommended] Add optional source-verified crux excerpts to tsift summaries and symbol context, anchored to symbol spans and body hashes with explicit stale-state handling.
 - 2026-09-11 [#graftimpactcontext] [recommended] Extend existing tsift impact output with grouped production modules, changed-symbol evidence paths, and separate test signals; expose bounded context to post-edit integrations.
 - 2026-09-11 [#graftlspedges] [recommended] Prototype optional LSP call-edge enrichment using installed servers, preserving extractor fallback, provenance, confidence, coverage diagnostics, and tsift freshness contracts; validate Rust and TypeScript resolution precision.
+- 2026-09-12 [#changecommitpush] If you made a change to agent-doc, please commit and push it.

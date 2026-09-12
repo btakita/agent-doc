@@ -421,6 +421,50 @@ I filed this saying 0.15.2 is *"one of the two toolchains this repo gates CI on"
 The mitigation from the previous cycle is the one that matters and it is already landed (`ec9bd33`): never set a secret-bearing variable on a Run step, because zig prints child-only variables. That rule holds on every toolchain and does not depend on this analysis.
 
 Worth stating what it does *not* cover, since I checked: on the 0.15.2 fallback the printed map is the **child** map, which `setEnvironmentVariable` clones from the ambient environment — so that path would dump everything regardless of the comment's advice. The only fix that would cover it is an explicit minimal env map for those Run steps, which would strip the test binaries of `PATH`, `HOME` and locale. Given the path is unreachable here, that trade is not worth making, and I am recording the reasoning rather than leaving a future reader to re-derive it.
+
+### Re: `#lzgotypedfloors` — the floors go, and rs was quoting its retired ones — opus-5 · 2026-09-12T05:48-04:00
+
+> **Queue prompt:**
+>
+> do [#lzgotypedfloors]
+
+
+Done. `go a5d44f8` and `rs 3bf4d73`, both CI green, pointers in `cd2f158b7`.
+
+### I filed this with the wrong justification, and it was checked rather than trusted
+
+I wrote that go's `MIN_FIXTURES=147` and `MIN_SCENARIOS=151` "are the only thing in that script that can see a SHRINKING corpus". They are not. `lazily-spec/corpus-counts.json` pins `"fixtures": 156` plus per-fixture scenario counts, and `check-corpus-floors.mjs:447` asserts equality against it across all ten bindings.
+
+I asked go to verify that rather than take my word, because the case for deleting the floors rested entirely on it. It did, against a scratch corpus with one fixture removed:
+
+```
+ERROR: the corpus carries 155 fixtures; corpus-counts.json pins 156.
+corpus floors FAILED: 7 problem(s)     exit=1
+```
+
+One edit site, an exact equality, in the repo the corpus lives in. The ten hand-typed floors were the weaker half of that pair.
+
+**What the conversion actually buys** is what rs's own comment says, and it is not shrink detection: *"a duplicated excuse entry passes both directions while making the count disagree."* Arithmetic. Which is why the work had three parts rather than one — derived equalities with `-ne`, duplicate checks **ordered ahead** of them, and both zero-guards kept (plus two new `expectation <= 0` guards).
+
+The probe that justifies the ordering is the good one: with the duplicate check neutralised, the equality fires with exactly the misleading message the ordering exists to avoid — *"147 distinct fixtures were OPENED but the corpus minus KNOWN_UNCOVERED derives only 146 … not the same tree"*. And with the directional loops neutralised where they report first, the equality's *unique reachable* contribution really is the arithmetic case. That is the difference between believing rs's comment and confirming it.
+
+One detail worth keeping: the scenario expectation walks the **corpus listing** minus `KNOWN_UNCOVERED`, not `SCENARIO_TOTAL`. The latter walks only manifest-opened fixtures, so a detached recorder drags manifest, total and replayed down together — the derived-from-the-manifest trap, avoided.
+
+### The finding I fixed rather than filed
+
+go noticed that **lazily-rs was in the trap py had already hit.** rs's `#lzrstypedfloors` comments quoted both retired constants in their greppable assignment forms, at `check-conformance-coverage.sh:543` and `:827`. `check-corpus-floors.mjs` greps `scripts/` for that literal shape, so it was still deriving and comparing floors of **150 and 166** — numbers nothing in rs runs. It passed only because the derivation happened to agree, and would have broken the moment rs's `KNOWN_UNCOVERED` changed.
+
+The tell was visible in the audit's own output and I had read past it: the NOTE listed py, go and gd as undeclared and **not rs**. rs was the only binding still read as declaring floors it had deleted.
+
+Reworded to describe rather than quote, with the reason recorded at the site so nobody restores the verbatim form. The audit now lists rs too — 6 → 8 undeclared dimensions, exit 0 — and rs's `make check` is exit 0 with zero `result: FAILED`.
+
+This is the third appearance of one failure mode: a guard anchored on a **literal** rather than a name. py hit it, rs shipped it, and `#lzorderinganchors` — still queued — is the same thing in lazily-spec's `ORDERED_CHECKS`. Worth treating as a family-level hazard rather than three coincidences.
+
+### Stated plainly
+
+go's retired names now read as undeclared in the central audit, which is a **NOTE and not a failure**, and the same state py and gd are in. That is expected, and it means the audit's "declared floor" dimension is now mostly unused across the family — if it is never going to be declared again, it is dead surface, and that is worth deciding rather than letting drift. I have not filed it, because `#lzscenariofloormissing` in the queue is adjacent and may subsume it.
+
+I also let one CI wait exceed its timeout and move to the background rather than shortening it; the result came back green for both commits, so nothing was reported before it was proven.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -432,7 +476,7 @@ Worth stating what it does *not* cover, since I checked: on the 0.15.2 fallback 
 - ~~do [#lzpinparsestrict]~~
 - ~~do [#lzledgerratchet]~~
 - ~~do [#lzzigenvsecretleak]~~
-- do [#lzgotypedfloors]
+- ~~do [#lzgotypedfloors]~~
 - do [#lzgoasyncflake]
 - ~~do [#lzledgerceiling]~~
 - do [#lzunreachableunprobed]
@@ -450,7 +494,6 @@ Worth stating what it does *not* cover, since I checked: on the 0.15.2 fallback 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzgotypedfloors] [lazily-go] go's scripts/check-conformance-coverage.sh still carries two TYPED floors that mirror their own set equalities: MIN_FIXTURES=147 (156 corpus fixtures minus 9 KNOWN_UNCOVERED) and MIN_SCENARIOS=151 (151 scenarios minus 0 excuses). Both are the MIN_BLOCKS family, but of the COVERAGE ledger rather than the bind ledger — which is why #lzledgerceiling deliberately left them alone. They cannot simply be deleted: they are the only thing in that file that can see a SHRINKING corpus, because `total` is read from the overridable SPEC_DIR, so a corpus that loses fixtures still satisfies both directions of every equality there. The correct move is the conversion lazily-rs already landed under #lzrstypedfloors (see lazily-rs/scripts/check-conformance-coverage.sh:535-560): replace each typed floor with an expectation DERIVED from the corpus listing, keeping a zero-guard so #lzvacuousrun cannot pass over nothing. Note the related trap py hit: lazily-spec's check-corpus-floors.mjs greps the whole scripts/ directory for the literal MIN_FIXTURES=${MIN_FIXTURES:-N} spelling, so quoting a retired pin verbatim in a COMMENT keeps the upstream audit deriving and comparing a floor that no longer runs. Reword, do not quote. Repo: src/lazily-go
 - [ ] [#lzgoasyncflake] [lazily-go] TestReactiveGraphConformance failed a divergence check on AsyncContext/churn_returns_to_baseline.json#3:observed_count during #lzledgerceiling, then did not reproduce in two reruns of the identical probe, with control green 3 of 3. So it is pre-existing and intermittent, not caused by that change — the agent flagged it rather than chasing it. An intermittent divergence in an ASYNC conformance runner is the shape that hides a real race behind a retry, and `observed_count` is exactly the kind of key a missed or doubled cascade step perturbs. Reproduce it under load or with a seeded scheduler rather than by rerunning, and treat a run that merely goes green again as no evidence. Repo: src/lazily-go
 - [ ] [#lzunreachableunprobed] [lazily-rs] The `unreachable` ledger class in rs's block guard has NEVER had an entry, so its failure path has never been exercised, and with `MAX_LEDGERED_BLOCKS` now 0 the ceiling would refuse such an entry before the class logic ran. Either probe the class against a scratch corpus that legitimately carries an unreachable site (raising the ceiling for that probe only), or delete the class and its vocabulary entry as dead code. Do not leave an enforced-but-unexercised branch: it reads as coverage and is not. Repo: src/lazily-rs
 - [ ] [#lzdartboundfloor] [lazily-dart] scripts/check-unbound-blocks.py still carries two typed `>=` floors that #lzblockmagnitudeaudit deliberately left alone because they are different rungs: MIN_BOUND_BLOCKS=697 (blocks BOUND) and MIN_BLOCK_FIXTURES=144 (fixtures opened). MIN_BOUND_BLOCKS is now the last number in this repo a person re-pins by hand — it read 697 when pinned and the run reports 700 today, so it is already 3 slack and guarding nothing in that range, the exact drift the block magnitude just stopped. MIN_BLOCK_FIXTURES is now REDUNDANT: the site-set equality subsumes it, since the derived site set is keyed by fixture and a missing fixture takes its sites with it. Derive the bound count the same way (declared minus the excuse ledger, asserted EQUAL) or retire it in favour of the unbound-set check that already exists, and delete MIN_BLOCK_FIXTURES. Repo: src/lazily-dart

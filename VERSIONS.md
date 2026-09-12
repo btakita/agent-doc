@@ -2,6 +2,36 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.375
+
+- **Compact no longer writes the durable context-reference block into the
+  document (`#ctxrefdocnoise`, decision (b)).** The block was added deliberately
+  in July to carry context handles across a compact without re-injecting payload.
+  Two facts retire it from the compact path.
+
+  It is redundant inside a checkout: the block is a projection of
+  `.agent-doc/state.db`, and `agent-doc plan` / prompt-context rebuild it from
+  those same rows every cycle, so a compacted document that stays where it lives
+  gains nothing from carrying a copy. Its one unique use — a document that travels
+  **without** that database — is the transfer/extract path, which renders it
+  directly and is unchanged.
+
+  And measured across this workspace it rendered nothing at all: three live
+  projects hold 4 recorded injections between them (agent-loop 0, agent-doc 0,
+  haiven-dev 4), and every one of the four names the session document itself, so
+  `#fixcompactexchange`'s self-reference filter drops all of them and
+  `durable_context_reference_for_document` returns `None` for every document. That
+  also rules out option (a): narrowing document-facing pack selection to
+  source/work files tunes a selector whose output is already empty, and the
+  handles the item worried about surviving — `AGENTS.md`, `.gitignore`,
+  `.gitmodules` — are instruction and repo-metadata files the harness already
+  loads.
+
+  The `#fixcompactexchange` **strip** stays and now earns its keep on its own:
+  a compact cleans up whatever block an earlier compact left in the preamble,
+  instead of replacing it with a newer one. `durable_context_reference_for_document`
+  stays public and unchanged for transfer/extract.
+
 ## 0.35.374
 
 - **A synthesized context chunk names itself instead of borrowing the session

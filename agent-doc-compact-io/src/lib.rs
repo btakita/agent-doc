@@ -2082,35 +2082,33 @@ fn append_boundary_marker(content: &str, target: &str, old_content: &str) -> Str
     out
 }
 
-/// Replace any durable context-reference block in `content` with the current one.
+/// Remove any durable context-reference block from `content`.
 ///
-/// `#fixcompactexchange`: the partial compact keeps the previous preamble verbatim,
-/// and that preamble already holds the block a previous compact appended. Appending
-/// without stripping accretes one identical `<dynamic_context_ref>` block per
-/// compact. Stripping unconditionally — including when there is no current manifest
-/// to append — also keeps a cleared ledger from leaving a stale block behind
-/// forever. The document ends up with exactly zero or one block.
-fn append_durable_context_reference(
-    file: &Path,
-    document: &str,
-    content: &mut String,
-) -> Result<()> {
+/// `#fixcompactexchange` made this strip-then-append so repeated partial compacts
+/// could not accrete one identical `<dynamic_context_ref>` block each. The append
+/// half is gone (`#ctxrefdocnoise`); the strip stays, and now also cleans up the
+/// blocks earlier compacts left behind.
+///
+/// **Why the append went.** Inside a checkout the block is strictly redundant: it is
+/// a projection of `.agent-doc/state.db`, and `agent-doc plan` / prompt-context
+/// rebuild it from those same rows every cycle, so a compacted document that stays
+/// in its checkout gains nothing from carrying a copy. Its one unique use — a
+/// document that travels *without* the state db — is the transfer/extract path, and
+/// that path renders it directly (`src/extract.rs`).
+///
+/// And measured across this workspace it rendered nothing at all: three live
+/// projects held 4 recorded injections between them (agent-loop 0, agent-doc 0,
+/// haiven-dev 4), and every one of the four named the session document itself, so
+/// `#fixcompactexchange`'s self-reference filter dropped all of them and
+/// `durable_context_reference_for_document` returned `None` for every document. The
+/// surviving handles the item worried about — `AGENTS.md`, `.gitignore`,
+/// `.gitmodules` — are instruction and repo-metadata files the harness already
+/// loads, which is why narrowing the selector was not the fix either.
+fn drop_durable_context_reference(content: &mut String) {
     let stripped = agent_doc_dynamic_context_io::strip_context_reference_blocks(content);
     if stripped != *content {
         *content = stripped;
     }
-    let Some(reference) =
-        agent_doc_dynamic_context_io::durable_context_reference_for_document(file, document)?
-    else {
-        return Ok(());
-    };
-    if !content.ends_with('\n') {
-        content.push('\n');
-    }
-    content.push('\n');
-    content.push_str(&reference);
-    content.push('\n');
-    Ok(())
 }
 
 /// Returns both the live compacted document and the committed snapshot. They differ
@@ -2161,7 +2159,7 @@ fn run_component_compact_with_options(
         ),
     };
     if target == "exchange" {
-        append_durable_context_reference(file, content, &mut summary)?;
+        drop_durable_context_reference(&mut summary);
     }
 
     let mut visible_content = summary.clone();
@@ -2314,7 +2312,7 @@ fn run_component_compact_partial(
         archive_path.display()
     ));
     if target == "exchange" {
-        append_durable_context_reference(file, content, &mut base_new_content)?;
+        drop_durable_context_reference(&mut base_new_content);
     }
 
     // Kept sections
@@ -4177,8 +4175,13 @@ mod tests {
         assert!(!exchange.contains("### Re: topic one"));
     }
 
+    /// `#ctxrefdocnoise`: compact no longer carries the durable context-reference
+    /// block into the document. Inside a checkout it is a projection of the same
+    /// `state.db` rows `agent-doc plan` rebuilds every cycle, so the copy is
+    /// redundant; the transfer/extract path still renders it for a document that
+    /// travels without that database.
     #[test]
-    fn exchange_compact_preserves_durable_context_handles_without_payload() {
+    fn exchange_compact_does_not_carry_a_durable_context_block_into_the_document() {
         let doc = concat!(
             "---\nagent_doc_session: context-session\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
@@ -4237,12 +4240,25 @@ mod tests {
             .find(|component| component.name == "exchange")
             .unwrap()
             .content(&compacted);
-        assert!(exchange.contains("<dynamic_context_ref"));
-        assert!(exchange.contains("tsift://pack-context/chunk-context"));
-        assert!(exchange.contains("modes=\"expanded:1\""));
+        // A live, non-self-referential manifest exists in `state.db` — this is the
+        // shape that used to produce a block — and the compacted document still
+        // holds none of it.
+        assert!(
+            !exchange.contains("<dynamic_context_ref"),
+            "compact must not write a context-reference block:\n{exchange}"
+        );
+        assert!(!exchange.contains("tsift://pack-context/chunk-context"));
         assert!(!exchange.contains("<context_chunk"));
+        // The compaction itself still happened.
         assert!(!exchange.contains("First response."));
         assert!(!exchange.contains("Second response."));
+        // And the manifest is still durable, so transfer/extract can still render it.
+        assert!(
+            agent_doc_dynamic_context_io::durable_context_reference_for_document(&file, doc)
+                .unwrap()
+                .is_some_and(|reference| reference.contains("tsift://pack-context/chunk-context")),
+            "the durable manifest must survive for the transfer/extract path"
+        );
     }
 
     fn record_one_context_manifest(dir: &Path, file: &Path, session_id: &str, cycle_id: &str) {
@@ -4285,12 +4301,12 @@ mod tests {
             .to_string()
     }
 
-    /// `#fixcompactexchange`: the partial compact keeps the previous preamble verbatim,
-    /// and that preamble already holds the reference block an earlier compact appended.
-    /// Without a strip, each compact appends another identical block and the operator's
-    /// exchange accretes manifest XML without bound.
+    /// `#fixcompactexchange` + `#ctxrefdocnoise`: the partial compact keeps the
+    /// previous preamble verbatim, and that preamble can still hold a block an
+    /// earlier compact appended. The strip survives the append's removal precisely
+    /// so those blocks are cleaned up rather than carried forward forever.
     #[test]
-    fn repeated_partial_compact_keeps_exactly_one_context_reference_block() {
+    fn repeated_partial_compact_clears_a_carried_forward_context_reference_block() {
         let prior_block = concat!(
             "<dynamic_context_ref contract=\"agent-doc-dynamic-context-manifest-v1\" ",
             "session=\"accrete-session\" cycle=\"cycle-old\" fingerprint=\"old\" ",
@@ -4349,13 +4365,11 @@ mod tests {
         let exchange = exchange_of(&once);
         assert_eq!(
             exchange.matches("<dynamic_context_ref").count(),
-            1,
-            "first partial compact left {} block(s):\n{exchange}",
-            exchange.matches("<dynamic_context_ref").count()
+            0,
+            "the carried-forward block must be cleaned up, not replaced:\n{exchange}"
         );
-        // The current manifest is what survives; the carried-forward copy is gone.
-        assert!(exchange.contains("chunk-cycle-new"), "{exchange}");
         assert!(!exchange.contains("cycle=\"cycle-old\""), "{exchange}");
+        assert!(!exchange.contains("chunk-cycle-new"), "{exchange}");
         // Real prose in the kept preamble is untouched.
         assert!(exchange.contains("- Archived 2 response topic(s): older one; older two"));
 
@@ -4382,13 +4396,13 @@ mod tests {
         let exchange = exchange_of(&twice);
         assert_eq!(
             exchange.matches("<dynamic_context_ref").count(),
-            1,
-            "second partial compact accreted a block:\n{exchange}"
+            0,
+            "a second compact must not reintroduce a block:\n{exchange}"
         );
         assert_eq!(
             exchange.matches("<context_ref ").count(),
-            1,
-            "second partial compact accreted a handle:\n{exchange}"
+            0,
+            "a second compact must not reintroduce a handle:\n{exchange}"
         );
     }
 

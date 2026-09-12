@@ -296,6 +296,66 @@ pub enum RetainedProjectionOwnership {
     PrewriteMutation,
 }
 
+/// The marker every retained-write refusal carries in its rendered message.
+///
+/// `#retaineddeferisnotafailure`: the refusal is emitted by
+/// `agent-doc-document-realtime-io`, but the crates that must *classify* it sit
+/// on the other side of a dependency edge (and, for the ops-log `reason_head`
+/// and the harness hooks, on the other side of a process boundary), so a typed
+/// `downcast_ref` cannot reach it. Stamping one token from one constructor makes
+/// the classification structural rather than remembered.
+///
+/// It lives here rather than in the emitting crate because every consumer
+/// already depends on `agent-doc-turn` for the remedy wording, and the two must
+/// not be reachable independently: a site that can render the remedy must also
+/// be able to recognize the refusal that carries it.
+pub const AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN: &str =
+    "recovery=await_editor_replica_no_disk_write";
+
+/// The additional marker carried ONLY by a retained write whose editor replica
+/// is live and whose delivery projection has simply not converged yet.
+///
+/// The class token above spans three refusals, and they are NOT equally safe to
+/// continue past. Two of them — an attached editor with no registered replica,
+/// and editor sync pending — mean the editor authority is **unreachable**, which
+/// is exactly the shape closeout must fail closed on so it never writes behind
+/// an active listener. Only this one has a live replica that will converge on
+/// its own, which is what makes deferring idempotent bookkeeping past it safe.
+///
+/// Told apart by a token rather than by the wording of the refusal for the same
+/// reason the class carries one: a prose needle is a rule that holds only while
+/// every author remembers it, and the wedge this exists to prevent was caused by
+/// exactly that.
+pub const RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN: &str =
+    "retained=delivery_projection_pending";
+
+/// Whether a rendered error is a retained-write refusal.
+///
+/// True means the write **reached the editor authority and was retained** — the
+/// CRDT accepted it, disk was deliberately not touched, and only the secondary
+/// snapshot/commit boundary is waiting on a delivery projection. It is NOT a
+/// failed write, and a caller whose own work is idempotent bookkeeping must not
+/// escalate it into a failure of the surrounding operation.
+///
+/// Matching prose instead of this token is how the same class stayed unhandled
+/// in two crates at once: `agent-doc-repair-command-io` listed three phrases and
+/// a retained refusal matched none of them (`#retainconv`), and preflight's
+/// pending-maintenance defer listed two more and missed it as well — which
+/// failed turn admission outright, so `/agent-doc <FILE>` produced no cycle
+/// contract and the session could not start.
+pub fn is_retained_write_refusal(message: &str) -> bool {
+    message.contains(AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN)
+}
+
+/// Whether a rendered error is the one retained-write refusal that a live
+/// editor replica will resolve on its own.
+///
+/// Requires both tokens, so the narrow case cannot drift out of the class it is
+/// a subset of.
+pub fn is_retained_delivery_projection_pending(message: &str) -> bool {
+    is_retained_write_refusal(message) && message.contains(RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN)
+}
+
 /// The remedy every retained-projection refusal appends, derived from one owner.
 pub fn retained_projection_remedy(ownership: RetainedProjectionOwnership, file: &str) -> String {
     match ownership {

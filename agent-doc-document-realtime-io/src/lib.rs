@@ -189,8 +189,11 @@ impl std::error::Error for AwaitEditorReplicaNoDiskWrite {}
 /// centralizes the remedy — and it survives the process boundaries a typed
 /// `downcast_ref` cannot reach: the ops-log `reason_head`, the retained-capture
 /// reason, and the Codex stop hook all carry this failure as a bare string.
-pub const AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN: &str =
-    "recovery=await_editor_replica_no_disk_write";
+/// Re-exported from [`agent_doc_turn::write_ownership`], which also owns the
+/// remedy wording this crate appends. Consumers that cannot depend on this crate
+/// (preflight maintenance) classify against the same constant there, so the
+/// emitter and every classifier cannot drift apart.
+pub use agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN;
 
 fn await_editor_replica_no_disk_write(message: String) -> anyhow::Error {
     AwaitEditorReplicaNoDiskWrite(format!(
@@ -5785,8 +5788,14 @@ fn defer_visible_delivery_projection_with_ownership(
     // lost" re-answers or resubmits, which is precisely what `#percellconverge`
     // forbids. Derive the wording from the one ownership predicate so an agent
     // gets the same answer whichever refusal it reaches first.
+    // The narrow marker is appended HERE rather than by a wrapper around the
+    // constructor. `#retaineddeferisnotafailure`: a wrapper is exactly how a site
+    // could launder a missing remedy past
+    // `every_constructed_retained_write_refusal_names_its_remedy`, which reads the
+    // constructor's own argument — so the token joins the remedy in that argument
+    // instead of hiding behind another call.
     Err(await_editor_replica_no_disk_write(format!(
-        "visible document write for {} is retained by the lazy delivery projection because the editor state projection has not converged; no secondary snapshot/commit or forced disk write was attempted. {}",
+        "visible document write for {} is retained by the lazy delivery projection because the editor state projection has not converged; no secondary snapshot/commit or forced disk write was attempted. {} [{}]",
         file.display(),
         agent_doc_turn::write_ownership::retained_projection_remedy(
             match ownership {
@@ -5799,6 +5808,7 @@ fn defer_visible_delivery_projection_with_ownership(
             },
             &file.display().to_string(),
         ),
+        agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN,
     )))
 }
 
@@ -5863,6 +5873,47 @@ mod retained_refusal_token_tests {
             err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
                 .is_some(),
             "the supervisor still needs the typed state-edge recovery class"
+        );
+    }
+
+    /// `#retaineddeferisnotafailure`: the class token spans three refusals and
+    /// only one of them is safe to continue past, so the narrow marker must be
+    /// stamped by the converging branch and by nothing else.
+    ///
+    /// Drives the real builders. A hand-written message would prove only that
+    /// `str::contains` works.
+    #[test]
+    fn only_the_converging_branch_claims_a_live_replica_will_resolve_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "# plan\n").expect("write");
+
+        let converging = format!(
+            "{:#}",
+            defer_visible_delivery_projection(&file, "test", 14, 1)
+                .expect_err("a non-converged delivery projection must refuse")
+        );
+        assert!(
+            agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&converging),
+            "a live replica mid-convergence must be distinguishable: {converging}"
+        );
+
+        // The two unreachable-authority branches must NOT claim it: closeout
+        // fails closed on them so it never writes behind an active listener.
+        let unreachable = format!(
+            "{:#}",
+            retained_refusal(
+                &file,
+                "the attached editor replica is not registered".to_string(),
+            )
+        );
+        assert!(
+            agent_doc_turn::write_ownership::is_retained_write_refusal(&unreachable),
+            "it is still the same retained-write class: {unreachable}"
+        );
+        assert!(
+            !agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(&unreachable),
+            "an unreachable replica must not read as a converging one: {unreachable}"
         );
     }
 

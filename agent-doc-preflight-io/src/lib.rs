@@ -1313,6 +1313,12 @@ fn run_pending_maintenance_with_options(
     // snapshot masks a same-cycle reorder.
     let snapshot_at_start = snapshot_content.clone();
     let mut mutated = false;
+    // `#retaineddeferisnotafailure`: set when the maintenance write was deferred
+    // rather than persisted. The reap verification below asserts that completed
+    // items are GONE from the working tree; when the write never reached disk
+    // that assertion is guaranteed to fail and would abort preflight anyway —
+    // reinstating the exact wedge the defer exists to avoid.
+    let mut maintenance_deferred = false;
     // #pending-gate-snapshot-desync: the snapshot may need re-syncing to the
     // file's tracked surfaces even when maintenance itself makes no change —
     // the write phase can apply --pending-gate / --pending-edit / --review-add
@@ -1695,6 +1701,40 @@ fn run_pending_maintenance_with_options(
             let deferable_realtime_drift = err_message
                 .contains("document changed after the response merge was computed")
                 || err_message.contains("editor typing did not settle");
+            // `#retaineddeferisnotafailure`: a retained-write refusal is the SAME
+            // class, and missing it wedged turn admission outright.
+            //
+            // `converge_or_disk_write` reports this as `Err`, but the write did
+            // not fail: `try_editor_converge` already returned true, so the
+            // maintenance content is in the editor's CRDT authority and disk was
+            // deliberately untouched. Only the secondary snapshot/commit boundary
+            // is waiting for the delivery projection to converge. Every other
+            // branch of the same guard already defers — an unconverged projection
+            // is the one that did not, because the predicate matched prose
+            // instead of the token the refusal actually stamps.
+            //
+            // Observed 2026-09-12 on `tasks/agent-doc/agent-doc-bugs.md`: the
+            // relay logged `delivery_converged=true delivery_version=19` in the
+            // same second the guard observed `18`, so a 100ms projection-edge
+            // grace that gets ~2 IPC round trips deferred a projection that
+            // converged immediately afterwards. That deferral is correct on its
+            // own; escalating it to a preflight failure is not. Preflight refused
+            // admission, so `/agent-doc <FILE>` emitted no cycle contract at all
+            // and the session could not start — a whole session lost to
+            // idempotent bookkeeping that is re-derived from scratch next cycle.
+            //
+            // Narrow deliberately: the retained-write class spans three refusals
+            // and only this one has a live replica. An attached editor with no
+            // registered replica, and editor sync pending, both mean the editor
+            // authority is UNREACHABLE — the case
+            // `force_disk_closeout_pending_maintenance_bypasses_active_listener`
+            // exists to keep failing closed, so a closeout never continues behind
+            // an active listener. Deferring those too made that test go green in
+            // the wrong direction.
+            let deferable_retained_projection =
+                agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(
+                    &err_message,
+                );
             if stale_supervisor_marker_mutated && !stale_marker_before.2 && deferable_status_error {
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -1713,27 +1753,35 @@ fn run_pending_maintenance_with_options(
                 snapshot_content = stale_marker_before.1;
                 mutated = stale_marker_before.2;
                 snapshot_mutated = stale_marker_before.3;
-            } else if deferable_realtime_drift {
+            } else if deferable_realtime_drift || deferable_retained_projection {
+                let reason = if deferable_retained_projection {
+                    "retained_delivery_projection"
+                } else {
+                    "realtime_buffer_busy"
+                };
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "pending_maintenance_deferred_realtime_buffer_busy file={} source=pending_maintenance error={}",
+                        "pending_maintenance_deferred_{reason} file={} source=pending_maintenance error={}",
                         file.display(),
                         err_message.replace('\n', " ")
                     ),
                 );
                 eprintln!(
-                    "[preflight] pending: deferred maintenance write for {} (realtime buffer busy; not aborting preflight): {}",
+                    "[preflight] pending: deferred maintenance write for {} ({reason}; not aborting preflight): {}",
                     file.display(),
                     err
                 );
                 // Revert to the pre-maintenance baseline so nothing is
-                // half-persisted: the visible write failed before touching the
-                // file, and skipping the snapshot save keeps the two in sync.
+                // half-persisted: the visible write either failed before touching
+                // the file or was retained by the delivery projection, and
+                // skipping the snapshot save keeps the two in sync. Maintenance
+                // is re-derived from scratch next cycle either way.
                 current_content = content.clone();
                 snapshot_content = snapshot_at_start.clone();
                 mutated = false;
                 snapshot_mutated = false;
+                maintenance_deferred = true;
             } else {
                 return Err(err);
             }
@@ -1750,7 +1798,7 @@ fn run_pending_maintenance_with_options(
         eprintln!("[preflight] pending: snapshot sync warning: {}", e);
     }
 
-    if saw_completed_before {
+    if saw_completed_before && !maintenance_deferred {
         let persisted_content = if mutated {
             current_content.clone()
         } else {
@@ -5510,6 +5558,17 @@ mod tests {
         authority_checks: std::cell::Cell<usize>,
         converge_calls: std::cell::Cell<usize>,
         visible_write_error: String,
+        /// Raise the failure from `converge_or_disk_write` instead of the
+        /// pre-write authority check.
+        ///
+        /// `#retaineddeferisnotafailure`: the two are NOT interchangeable. The
+        /// pre-write check fails before anything is delivered; the retained
+        /// refusal is raised by `guard_visible_delivery_convergence` *after*
+        /// `try_editor_converge` already returned true, so the content is in the
+        /// editor's CRDT authority and only the snapshot/commit boundary is
+        /// waiting. Every existing defer test failed at the earlier site, which
+        /// is why the production shape had no coverage at all.
+        fail_at_converge: bool,
     }
 
     impl Default for GuardFailingPreflightMaintenanceWriteEffects {
@@ -5519,6 +5578,7 @@ mod tests {
                 converge_calls: std::cell::Cell::new(0),
                 visible_write_error: "failed to resolve editor authority for test document"
                     .to_string(),
+                fail_at_converge: false,
             }
         }
     }
@@ -5527,6 +5587,16 @@ mod tests {
         fn with_error(message: &str) -> Self {
             Self {
                 visible_write_error: message.to_string(),
+                ..Self::default()
+            }
+        }
+
+        /// Fail the way the live delivery guard does: after the editor converge
+        /// has already been accepted.
+        fn with_converge_error(message: &str) -> Self {
+            Self {
+                visible_write_error: message.to_string(),
+                fail_at_converge: true,
                 ..Self::default()
             }
         }
@@ -5542,6 +5612,9 @@ mod tests {
             _expected_current: &str,
         ) -> Result<()> {
             self.authority_checks.set(self.authority_checks.get() + 1);
+            if self.fail_at_converge {
+                return Ok(());
+            }
             anyhow::bail!("{}", self.visible_write_error)
         }
 
@@ -5553,6 +5626,9 @@ mod tests {
             _source: &str,
         ) -> Result<()> {
             self.converge_calls.set(self.converge_calls.get() + 1);
+            if self.fail_at_converge {
+                anyhow::bail!("{}", self.visible_write_error)
+            }
             Ok(())
         }
     }
@@ -10061,6 +10137,173 @@ mod tests {
         assert_eq!(
             snapshot_after, content,
             "deferred mirror reap must not desync the snapshot from the file"
+        );
+    }
+
+    /// `#retaineddeferisnotafailure` — the 2026-09-12 `/agent-doc` admission wedge.
+    ///
+    /// `guard_visible_delivery_convergence` refuses AFTER `try_editor_converge`
+    /// accepted the write, so the maintenance content is already in the editor's
+    /// CRDT authority and disk was deliberately untouched. Preflight's defer
+    /// predicate matched two prose phrases and this refusal carried neither, so
+    /// the `?` on `run_pending_maintenance` failed turn admission: the
+    /// `UserPromptSubmit` hook emitted no cycle contract and the session could
+    /// not start at all — a whole session lost to bookkeeping that is re-derived
+    /// from scratch next cycle.
+    ///
+    /// Asserted against the emitting crate's exported token rather than a copy of
+    /// the message, so the classifier cannot drift away from the constructor.
+    #[test]
+    fn a_retained_delivery_refusal_defers_maintenance_instead_of_failing_admission() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#reap1] Already-done mirror\n",
+            "- [ ] [#keep1] Keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Done\n\n",
+            "<!-- agent:done -->\n",
+            "- [x] [#reap1] Already-done mirror\n",
+            "<!-- /agent:done -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let effects = GuardFailingPreflightMaintenanceWriteEffects::with_converge_error(&format!(
+            "pending_maintenance: visible document write for session.md is retained by the lazy \
+             delivery projection because the editor state projection has not converged; no \
+             secondary snapshot/commit or forced disk write was attempted. [{}] [{}]",
+            agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN,
+            agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN,
+        ));
+
+        run_pending_maintenance(&doc, &effects).expect(
+            "a retained delivery projection must defer maintenance, not fail turn admission",
+        );
+
+        assert_eq!(
+            effects.converge_calls.get(),
+            1,
+            "the refusal must come from the converge step, the way the live guard raises it"
+        );
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            file_after, content,
+            "a retained write must leave the working-tree file untouched"
+        );
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            snapshot_after, content,
+            "nothing may be committed behind a retained delivery projection"
+        );
+    }
+
+    /// A deferred maintenance write must not then assert the reap it never made.
+    ///
+    /// `#retaineddeferisnotafailure`: the post-maintenance verification asserts
+    /// that completed tracked items are GONE from the working tree. When the
+    /// write was deferred, disk still holds them by construction, so the
+    /// assertion fails and aborts preflight anyway — reinstating the exact wedge
+    /// the defer exists to prevent. Covers both defer branches: this shape was
+    /// already reachable through the older realtime-drift defer.
+    #[test]
+    fn a_deferred_maintenance_write_does_not_assert_the_reap_it_never_persisted() {
+        for error in [
+            format!(
+                "pending_maintenance: visible document write for session.md is retained by the \
+                 lazy delivery projection. [{}] [{}]",
+                agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN,
+                agent_doc_turn::write_ownership::RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN,
+            ),
+            "pending_maintenance: document changed after the response merge was computed"
+                .to_string(),
+        ] {
+            let dir = setup_project();
+            let doc = dir.path().join("session.md");
+            // A completed item live in a tracked surface is what sets
+            // `saw_completed_before`, arming the post-write reap verification.
+            let content = concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "## Backlog\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [x] [#reap1] Completed in place\n",
+                "- [ ] [#keep1] Keep me\n",
+                "<!-- /agent:backlog -->\n"
+            );
+            std::fs::write(&doc, content).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &doc,
+                content,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
+
+            let effects =
+                GuardFailingPreflightMaintenanceWriteEffects::with_converge_error(&error);
+
+            run_pending_maintenance(&doc, &effects).unwrap_or_else(|err| {
+                panic!("deferred maintenance must not verify an unpersisted reap ({error}): {err}")
+            });
+
+            assert_eq!(
+                std::fs::read_to_string(&doc).unwrap(),
+                content,
+                "a deferred reap must leave the working-tree file untouched"
+            );
+        }
+    }
+
+    /// The retained-write class is NOT uniformly safe to continue past.
+    ///
+    /// `#retaineddeferisnotafailure`: an attached editor with no registered
+    /// replica means the editor authority is unreachable, not converging. A
+    /// closeout that continued past it would write behind an active listener —
+    /// the invariant
+    /// `force_disk_closeout_pending_maintenance_bypasses_active_listener` owns.
+    /// So the defer keys on the narrow projection-pending token, and the broad
+    /// class token alone must still fail closed.
+    #[test]
+    fn an_unreachable_editor_replica_still_fails_maintenance_closed() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#reap1] Already-done mirror\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Done\n\n",
+            "<!-- agent:done -->\n",
+            "- [x] [#reap1] Already-done mirror\n",
+            "<!-- /agent:done -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let effects = GuardFailingPreflightMaintenanceWriteEffects::with_converge_error(&format!(
+            "pending_maintenance: visible document write for session.md is retained by the lazy \
+             delivery projection; the attached editor replica is not registered, so no snapshot \
+             or commit effect is eligible. [{}]",
+            agent_doc_turn::write_ownership::AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN,
+        ));
+
+        run_pending_maintenance(&doc, &effects).expect_err(
+            "an unreachable editor replica must still fail closed, not defer like a converging one",
         );
     }
 

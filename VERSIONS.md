@@ -2,6 +2,52 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.369
+
+- **A retained delivery projection no longer fails turn admission
+  (`#retaineddeferisnotafailure`).** Live sighting 2026-09-12 05:20:27 on
+  `tasks/agent-doc/agent-doc-bugs.md`: `/agent-doc <FILE>` produced the
+  `[agent-doc] cycle contract UNAVAILABLE (preflight admission failed; ...)`
+  hook output and the session could not start at all, reporting the visible
+  edits as STRANDED. Nothing was stranded. Preflight's step-1c pending
+  maintenance (mirror reap, dedupe, backfill, status reconcile) had its visible
+  write **accepted** by the editor relay — `crdt_cp_write ... applied=true`,
+  then `pending_maintenance_writeback ... transport=crdt_relay` — and it was the
+  *secondary* guard `guard_visible_delivery_convergence` that refused, because
+  it observed `delivery_version=18 delivery_converged=false` in the same second
+  the relay logged `delivery_version=19 delivery_converged=true`. That deferral
+  is correct on its own; `converge_or_disk_write` reports it as `Err`, and
+  `run_pending_maintenance(file, ..)?` escalated it into a failed preflight.
+
+  `#realtime-maintenance-defer` already established the rule this violated —
+  maintenance is idempotent bookkeeping re-derived from scratch every preflight,
+  so it must defer rather than abort — but its predicate matched two error
+  *phrases*, and a retained-write refusal carries neither. This is the same
+  failure `#retainconv` fixed in `agent-doc-repair-command-io`, where a retained
+  refusal matched none of three phrases and demanded an operator for a write
+  that had already landed. Prose matching is the shared root cause, so the
+  classification is now structural: `AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN`
+  and `is_retained_write_refusal` move to `agent_doc_turn::write_ownership`
+  beside the remedy wording every consumer already renders from
+  (`agent-doc-document-realtime-io` re-exports the constant, so the emitter and
+  every classifier cannot drift apart), and preflight defers on the token.
+
+- **A deferred maintenance write no longer verifies the reap it never
+  persisted.** Second, latent half of the same wedge, reachable through the
+  older realtime-drift defer too: the post-maintenance check asserts that
+  completed tracked items are GONE from the working tree, re-reading disk when
+  `mutated` is false. After a defer, disk still holds them by construction, so
+  the assertion failed and aborted preflight anyway — reinstating the exact
+  wedge the defer exists to prevent. The verification is now skipped when the
+  write was deferred.
+
+- The preflight maintenance test double can now raise its failure from
+  `converge_or_disk_write` instead of the pre-write authority check. The two are
+  not interchangeable: the pre-write check fails before anything is delivered,
+  while the retained refusal is raised *after* `try_editor_converge` returned
+  true. Every existing defer test failed at the earlier site, which is why the
+  production shape had no coverage at all.
+
 ## 0.35.368
 
 - **A silent editor replica no longer holds the delivery barrier forever

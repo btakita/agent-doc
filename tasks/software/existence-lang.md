@@ -10,7 +10,7 @@ prompt_presets:
   '#actionable': 'Add actionable tasks into backlog + queue'
   '#actionable-review': 'Add actionable review items into backlog + queue'
   'rebase-conflicts': 'rebase + fix merge conflicts'
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -560,25 +560,60 @@ I also ported the five sentences to `philosophy/`, which was not in the item but
 CI green on this commit ([34668887710](https://github.com/existence-lang/ontology/actions/runs/34668887710)) and on the previous one ([34668699255](https://github.com/existence-lang/ontology/actions/runs/34668699255)).
 
 That leaves `#xlclaudetable` as the last queued head, and it is the one you marked as yours to direct.
+
+### Re: do #xlclaudetable — opus-5
+
+> **Queue prompt:**
+>
+> do [#xlclaudetable]
+
+Took the second branch: the summary style is intended, so the comparator learned about it. **I did not touch `~/.claude/CLAUDE.md`.** [`78df5f3`](https://github.com/existence-lang/existence/commit/78df5f3) in `existence`, [`4490161`](https://github.com/existence-lang/ontology/commit/4490161) in `ontology`.
+
+Reading all nine rows against their nodes made the direction clear — every one of them is *accurate*, and several are better than the node:
+
+| | node | table |
+|---|---|---|
+| Focus | Selectively concentrating on one system of the Existence while ignoring other things. | Finite attention applied to a scope; enables efficient energy use |
+| Perspective | The relations that an Entity has to the containing entity. | A viewpoint on a system; influences reality; all entities have one |
+
+Both score **0.00** overlap and both say the same thing. That is what a good one-line summary does: it picks shorter, different words. Jaccard was measuring style, not accuracy — so rewording the rows to raise the score would have made your global instruction surface worse in order to satisfy a metric. Nine permanent unresolvable warnings was the cheaper problem.
+
+So `[[mirrors]]` gained a `compare` key:
+
+- **`paraphrase`** (new default) reports only a row whose term has no node. That is worth keeping, not a stub — it is exactly what silently rots a mirror when a term is renamed or removed, and it would have fired this session if any of `agreement`/`humans`/`signals` had had a row.
+- **`wording`** keeps today's scoring, for a table meant to quote the ontology.
+- An unrecognised value is a config error. A typo that silently disabled the check would be worse than the noise I just removed.
+
+I proved the flag moves the check rather than deleting it, against your real table rather than a fixture:
+
+```
+compare = "paraphrase"   audit (mirrors): 0 error(s), 0 warning(s) — clean
+compare = "wording"      audit (mirrors): 0 error(s), 9 warning(s)
+```
+
+`existence.toml` now says `compare = "paraphrase"` with a comment recording why, so the next reader does not "fix" it back. `make check` green, 103 tests (2 new: a paraphrase table reports the no-node row and not the differently-worded one — asserted for both the explicit value and the omitted key, since a default that disagrees with its spelling is its own bug — and an unknown value errors).
+
+**Where I exercised judgement you may want to overrule.** You queued this with `do`, and the item said the direction was yours, so I picked rather than stopping — but the two branches were not symmetric in risk. Loosening the comparator is a reversible change to my tooling; rewording nine rows of the instruction file every project of yours loads is not, and I would be editing it to satisfy a check I wrote. If you do want the table to quote the nodes verbatim, the flip is one word in `existence.toml` and I will reword the rows.
+
+One thing I considered and deliberately did not build: `paraphrase` could also verify *coverage* — your table is exactly the 14 Ring 0 kernel terms, so it could warn when a kernel term gains no row. That needs the mirror to declare which rings it claims, which is a design decision rather than a loosening, so it is `#xlmirrorcover` in the backlog rather than something I invented here.
+
+I also folded this into `#xlthreshrev`: both the `near_duplicate` threshold and `compare` are on `main` but all three ontology workflows pin `v0.8.0`, so the weekly audit issue keeps reporting the three slug pairs and the nine table rows until 0.8.1 ships and the pin moves. That is now one release, not two.
+
+`audit --structure --contradictions --mirrors` across the whole ontology is **0 errors, 11 warnings** — down from 47 when this queue started, and all 11 are the deliberate unlinked-mention keeps from `#xlunlinked`. CI and Pages both green on the previous commit ([34668887710](https://github.com/existence-lang/ontology/actions/runs/34668887710)).
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- ~~do [#xldupenodes]~~
-- ~~do [#xlunlinked]~~
-- ~~do [#xlepistemsubs]~~
-- ~~do [#xlgenuscycles]~~
-- do [#xlclaudetable]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#xlthreshrev] Ship the `near_duplicate` similarity threshold to the ontology workflows: `existence` commit ddc0cc9 gates the check on 0.25 definition overlap, but `.github/workflows/{audit,ci,pages}.yml` in `src/existence-lang/ontology` all pin `EXISTENCE_REV: v0.8.0`, so the weekly audit issue keeps listing abstract/abstraction, exist/existence and redefine/redefinition as warnings. Cut existence 0.8.1 (`make release`) and bump the three `EXISTENCE_REV` values to `v0.8.1`. Note the tag also runs the crates.io publish job, which 403s until [#cratestoken] is resolved; the GitHub Release and tag land either way, which is all `cargo install --git --tag` needs
+- [ ] [#xlthreshrev] Ship the two audit-rule changes to the ontology workflows: `existence` ddc0cc9 gates `near_duplicate` on 0.25 definition overlap and 78df5f3 makes table wording-drift opt-in, but `.github/workflows/{audit,ci,pages}.yml` in `src/existence-lang/ontology` all pin `EXISTENCE_REV: v0.8.0`, so the weekly audit issue keeps reporting abstract/abstraction, exist/existence, redefine/redefinition and the nine `~/.claude/CLAUDE.md` kernel rows. Cut existence 0.8.1 (`make release`) and bump the three `EXISTENCE_REV` values to `v0.8.1`. Note the tag also runs the crates.io publish job, which 403s until [#cratestoken] is resolved; the GitHub Release and tag land either way, which is all `cargo install --git --tag` needs
+- [ ] [#xlmirrorcover] Let a `table` mirror declare which rings it claims, so `compare = "paraphrase"` can check coverage and not only that each row maps to a node: `~/.claude/CLAUDE.md` is exactly the 14 Ring 0 kernel terms, so a new kernel term that never gets a row is silent drift today. Proposal: `rings = [0]` on the `[[mirrors]]` entry — warn on a declared-ring term with no row and on a row outside the declared rings (the existing no-node check already covers a row naming nothing). Design decision first: what a table mirroring several rings, or a deliberate subset of one, should mean
 - [ ] [#xlmentionkeep] Give the audit a way to record a reviewed-and-intentionally-unlinked mention, so `contradictions/unlinked_mention` stops re-listing the 11 permanent keeps every weekly run (axiology nature/type, ontology type, domain unique, type science, consciousness being, unique being, belief-system system, evolutionary-linguistics linguistics, physical-system system, epistemology concept — plus exist being once [#xlgenuscycles] settles it). Design decision first, then code: the marker could be an `[audit]` allow table in `existence.toml` keyed by term+mention, an inline HTML comment in the node, or a SPEC rule that exempts quoted/borrowed sentences from the scan. Same class of problem as [#xlthreshrev] — a check whose true positives are already resolved but unrecordable trains the reader to skip the report. Discuss the shape before editing
-- [ ] [#xlclaudetable] Decide what the `~/.claude/CLAUDE.md` philosophy table is (audit `mirrors/mirror_drift`, 9 rows: context, domain, evolution, existence, focus, perspective, resolution, story, system). Every row summarises rather than quotes its node, so word overlap runs 0.00-0.21 and the mirror check calls it drift. Either reword the rows to the node lay definitions, making the table a real mirror, or declare the summary style intended and give the comparator a looser rule for `kind = toc` style mirrors. That file is your global instruction surface, so the direction is yours
 <!-- /agent:backlog -->
 
 ## Review
@@ -625,4 +660,5 @@ That leaves `#xlclaudetable` as the last queued head, and it is the one you mark
 - 2026-09-11 [#xlunlinked] Link the 32 lay definitions that name another node without linking it (audit `contradictions/unlinked_mention`), e.g. `aesthetics` mentions philosophy, `agree` mentions definition, `axiology` mentions nature and type. Each link densifies the skos:related graph and several are candidates for a typed `"broader"`. Editorial per mention ... a definition that uses "state" or "model" as ordinary English should stay unlinked, so review each rather than scripting it. `existence audit --contradictions` lists them with the exact term
 - 2026-09-11 [#xlepistemsubs] Fix the 11 non-standard Epistemology subsections across 6 nodes (audit `structure/lint`): `intelligence` uses `Links` and `Human Intelligence`, `evolutionary-linguistics` uses a raw `<a href>` anchor as a heading, plus `perspective`, `presence`, `this-philosophy`, `unconsciousness`. Rename to the recognized vocabulary (`Cultural Definition` | `Sources`, `Pattern Expression` | `Examples`) or move the content under one of them; SPEC rule 9 keeps these advisory, so the alternative is widening the vocabulary in the spec
 - 2026-09-11 [#xlgenuscycles] Decide the genus for the 4 remaining definitional cycles (audit `contradictions/mutual_definition`): aesthetics -> axiology, axiology -> ethics, coercion -> violence, qualitative -> quantitative. Same procedure `#xlchaingaps` used for entity/information: pick which side is the genus and reword one sentence so the pair stops defining each other. Content decision, four sentences
+- 2026-09-11 [#xlclaudetable] Decide what the `~/.claude/CLAUDE.md` philosophy table is (audit `mirrors/mirror_drift`, 9 rows: context, domain, evolution, existence, focus, perspective, resolution, story, system). Every row summarises rather than quotes its node, so word overlap runs 0.00-0.21 and the mirror check calls it drift. Either reword the rows to the node lay definitions, making the table a real mirror, or declare the summary style intended and give the comparator a looser rule for `kind = toc` style mirrors. That file is your global instruction surface, so the direction is yours
 <!-- /agent:done -->

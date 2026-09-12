@@ -57,9 +57,39 @@ pub fn prepare_route_document(
         preserve_docs.push(snapshot_doc);
     }
 
-    if let Some(cleanup) =
-        scrub_duplicate_prompt_comments_for_route(&updated_content, &preserve_docs)?
-    {
+    // `#routescrubsilentfailure`: every SUCCESSFUL branch below logs an ops event;
+    // the failure path logged nothing at all. Observed 2026-09-12 on
+    // `tasks/software/tsift.md`, where the only surviving trace was the operator
+    // having pasted the stderr line into the document's notes — `ops.log` had no
+    // record, so the content that failed to parse could not be recovered and the
+    // defect could not be diagnosed at all. Record the inputs here so the next
+    // occurrence is reconstructable.
+    //
+    // The wording matters too. `.context("route duplicate prompt residue guard
+    // failed")` reads as "the residue guard found something", but a parse failure
+    // means the guard could not even look — the document itself is structurally
+    // broken (typically a component close marker tombstoned by a stale or
+    // truncated replica push, the `#replica-structure-guard` class). Naming the
+    // residue guard sent the operator after the wrong component.
+    let scrubbed = scrub_duplicate_prompt_comments_for_route(&updated_content, &preserve_docs)
+        .map_err(|err| {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_document_scrub_failed file={} source=route content_len={} content_hash={} error={}",
+                    file.display(),
+                    updated_content.len(),
+                    agent_doc_hash::content_hash(&updated_content),
+                    format!("{err:#}").replace('\n', " ")
+                ),
+            );
+            err.context(format!(
+                "route could not prepare {} for dispatch: its component structure did not parse, so duplicate-prompt cleanup could not run. This is document corruption, not duplicate prompt residue — recover the structure (reopen the editor tab to resync the replica, or `agent-doc repair {}`) before dispatching",
+                file.display(),
+                file.display()
+            ))
+        })?;
+    if let Some(cleanup) = scrubbed {
         (effects.write_document)(
             file,
             &cleanup.content,

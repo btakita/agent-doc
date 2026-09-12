@@ -2,6 +2,50 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.370
+
+- **A runaway agent turn is now reported instead of silently holding the queue
+  (`#runawayturnsurfaced`).** agent-doc already refuses to dispatch over a live
+  turn and defers indefinitely, so a turn that never finishes holds everything
+  behind it with nothing in the logs, the queue, or the editor saying so.
+  Observed 2026-09-11: a `tasks/fpe.md` turn ran **1h51m** and ended only
+  because the operator happened to notice.
+
+  The dispatch-block site already had direct proof of the turn's age — it logs
+  `cue="• Working (6m 14s • esc to interrupt)"` — and threw the number away:
+  `contains_elapsed_seconds_timer` scanned the token and returned a bool. That
+  scanner now returns the value (`elapsed_seconds_in_busy_cue`) and the
+  predicate is *defined as* "it returned one", so the two cannot drift — a
+  second hand-rolled scan of the same token is how the minute form was lost the
+  first time (`#jbsteerinterrupt`). Past
+  `agent_doc_runaway_turn_secs` (project config; default 900s, `0` disables),
+  route emits `route_active_turn_runaway ... elapsed_secs= threshold_secs=
+  action=reported_only` plus an operator-visible line.
+
+  **Reporting only — agent-doc never interrupts the turn.** A long turn can be a
+  large refactor or a slow suite, and deciding whose work may run is not the
+  dispatcher's call. A cue with no readable timer is never a runaway either:
+  "could not measure it" is not "it is old" (`#idlerevisionreactive`).
+
+- **A route cleanup that cannot parse the document now names the real fault and
+  leaves a trace (`#routescrubsilentfailure`).** Every *successful* branch of
+  route's duplicate-prompt cleanup logs an ops event; the failure path logged
+  nothing at all. Observed 2026-09-12 on `tasks/software/tsift.md`, where the
+  only surviving record was the operator having pasted the stderr line into the
+  document's own notes — `ops.log` held nothing, so the content that failed to
+  parse could not be recovered and the defect could not be diagnosed from the
+  live system at all.
+
+  The wording misattributed it too: `route duplicate prompt residue guard
+  failed: ... unclosed component: agent:notes without matching close` reads as
+  "the residue guard found something", when a parse failure means the guard
+  could not even look — the document structure is broken, typically a component
+  close marker tombstoned by a stale or truncated replica push
+  (`#replica-structure-guard`). Route now logs
+  `route_document_scrub_failed ... content_len= content_hash= error=` and the
+  error names document corruption plus its recovery (reopen the editor tab to
+  resync the replica, or `agent-doc repair <FILE>`).
+
 ## 0.35.369
 
 - **A retained delivery projection no longer fails turn admission

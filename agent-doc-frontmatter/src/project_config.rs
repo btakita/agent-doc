@@ -360,6 +360,18 @@ pub struct ProjectConfig {
     /// absent here too, the built-in default of 50 applies.
     #[serde(default, alias = "clear_threshold")]
     pub agent_doc_clear_threshold: Option<u8>,
+    /// Project-default age in seconds past which an active agent turn is
+    /// reported as a runaway (`#runawayturnsurfaced`). Absent, the built-in
+    /// `agent_doc_harness::DEFAULT_RUNAWAY_TURN_SECS` applies; `0` disables the
+    /// report entirely.
+    ///
+    /// Surfacing only. agent-doc already refuses to dispatch over a live turn
+    /// and defers indefinitely, so a turn that never finishes silently holds the
+    /// queue — observed at **1h51m** on `tasks/fpe.md`, ended only because the
+    /// operator noticed. This makes that visible; it never interrupts the turn,
+    /// because a long turn can be perfectly legitimate.
+    #[serde(default, alias = "runaway_turn_secs")]
+    pub agent_doc_runaway_turn_secs: Option<u64>,
     /// Explicit opt-in for the in-process supervisor (`agent-doc start
     /// --route-owned`) to self-recycle onto a freshly-installed binary at a turn
     /// or inter-queue-item boundary (`#ctlrecycle` R3 / `#suprecyclequeue`). When

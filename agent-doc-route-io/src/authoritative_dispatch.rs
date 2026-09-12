@@ -427,7 +427,45 @@ pub fn route_via_authoritative_actor(
         );
         actor_state = agent_doc_controller::actor::ActorState::Busy;
     }
+    // `#runawayturnsurfaced`: this is the one place agent-doc has direct proof of
+    // how long the live turn has been running, and it used to drop that proof on
+    // the floor — it deferred dispatch and said nothing about the age. A turn that
+    // never finishes therefore held the queue silently; observed at 1h51m on
+    // `tasks/fpe.md`, ended only because the operator happened to look.
+    //
+    // Report only. agent-doc does not interrupt the turn: a long turn can be a
+    // large refactor or a slow suite, and deciding whose work may run is not this
+    // site's call. `0` in config disables the report.
     if let Some(cue) = active_turn_busy_cue.as_deref() {
+        let threshold = agent_doc_project_config_io::load_project_for_doc(file)
+            .agent_doc_runaway_turn_secs
+            .unwrap_or(agent_doc_harness::DEFAULT_RUNAWAY_TURN_SECS);
+        if threshold > 0
+            && let Some(elapsed) = agent_doc_harness::elapsed_seconds_in_busy_cue(cue)
+            && elapsed >= threshold
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_active_turn_runaway file={} pane={} harness={} generation={} elapsed_secs={} threshold_secs={} action=reported_only cue={:?}",
+                    file.display(),
+                    dispatch_pane,
+                    harness.binary,
+                    actor.record.generation,
+                    elapsed,
+                    threshold,
+                    cue
+                ),
+            );
+            eprintln!(
+                "[route] the {} turn on pane {} for {} has been running {} (over the {}s runaway threshold) and is holding further dispatch; agent-doc will not interrupt it — inspect the pane, or set `agent_doc_runaway_turn_secs` in .agent-doc/config.toml (0 disables this report)",
+                harness.binary,
+                dispatch_pane,
+                file.display(),
+                agent_doc_harness::format_turn_age(elapsed),
+                threshold
+            );
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(

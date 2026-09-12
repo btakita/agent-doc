@@ -1857,36 +1857,94 @@ fn is_claude_working_spinner_line(line: &str) -> bool {
 /// immediately by `s`, so every turn running longer than 60 seconds lost its busy
 /// cue and the route promoted the actor to ready mid-turn.
 fn contains_elapsed_seconds_timer(line: &str) -> bool {
+    elapsed_seconds_in_busy_cue(line).is_some()
+}
+
+/// How long the turn in `line`'s busy cue has been running, in seconds.
+///
+/// Reads the same `(<digits><unit>` chain [`contains_elapsed_seconds_timer`]
+/// detects — `(14s`, `(3m 43s`, `(1h 2m 3s` — and sums it. The predicate is
+/// defined as "this returned a value" so the scanner exists once: a second
+/// hand-rolled scan of the same token is how the minute form was lost the first
+/// time (`#jbsteerinterrupt`), and a duplicate would be free to drift again.
+///
+/// Byte-scanned, so the multi-byte glyphs harnesses wrap the cue in
+/// (`•`, `…`, `·`) cannot split a boundary. Returns the FIRST complete chain, so
+/// a trailing context-percentage or token count later in the line cannot be read
+/// as an elapsed time.
+pub fn elapsed_seconds_in_busy_cue(line: &str) -> Option<u64> {
     let b = line.as_bytes();
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'(' {
             let mut j = i + 1;
-            // Accept a chain of `<digits><unit>` segments (`3m 43s`, `1h 2m 3s`)
-            // and report a match as soon as one segment closes with `s`.
+            let mut total: u64 = 0;
             loop {
                 let digits_start = j;
+                let mut value: u64 = 0;
                 while j < b.len() && b[j].is_ascii_digit() {
+                    value = value.saturating_mul(10).saturating_add((b[j] - b'0') as u64);
                     j += 1;
                 }
                 if j == digits_start || j >= b.len() {
                     break;
                 }
-                match b[j] {
-                    b's' => return true,
-                    b'm' | b'h' | b'd' => {
-                        j += 1;
-                        while j < b.len() && b[j] == b' ' {
-                            j += 1;
-                        }
+                // `s` closes the chain; the coarser units only continue it. A
+                // chain that never reaches `s` is not an elapsed timer — that is
+                // what keeps `(50% used)` and `(3m)` from counting.
+                let multiplier = match b[j] {
+                    b's' => {
+                        return Some(total.saturating_add(value));
                     }
+                    b'm' => 60,
+                    b'h' => 3_600,
+                    b'd' => 86_400,
                     _ => break,
+                };
+                total = total.saturating_add(value.saturating_mul(multiplier));
+                j += 1;
+                while j < b.len() && b[j] == b' ' {
+                    j += 1;
                 }
             }
         }
         i += 1;
     }
-    false
+    None
+}
+
+/// Default age past which an active turn is reported as a runaway.
+///
+/// `#runawayturnsurfaced`: agent-doc already refuses to dispatch over a live
+/// turn and will defer indefinitely, so a turn that never finishes silently
+/// holds the whole queue. Observed 2026-09-11: a `tasks/fpe.md` turn ran
+/// **1h51m** and ended only because the operator noticed and killed it; nothing
+/// in the logs, the queue, or the editor said anything was wrong.
+///
+/// Surfacing only — agent-doc never interrupts the turn. A long turn can be
+/// legitimate (a large refactor, a slow test suite), so the threshold buys
+/// visibility, not a policy about whose work may run.
+pub const DEFAULT_RUNAWAY_TURN_SECS: u64 = 900;
+
+/// Whether a busy cue describes a turn that has outlived `threshold_secs`.
+///
+/// A cue with no readable elapsed timer is never a runaway: absence of evidence
+/// is not evidence of a long turn (`#idlerevisionreactive`), and treating an
+/// unparsed cue as overdue would report every harness whose spinner format
+/// changed.
+pub fn format_turn_age(secs: u64) -> String {
+    let (h, m, s) = (secs / 3_600, (secs % 3_600) / 60, secs % 60);
+    if h > 0 {
+        format!("{h}h {m}m {s}s")
+    } else if m > 0 {
+        format!("{m}m {s}s")
+    } else {
+        format!("{s}s")
+    }
+}
+
+pub fn busy_cue_is_runaway(cue: &str, threshold_secs: u64) -> bool {
+    elapsed_seconds_in_busy_cue(cue).is_some_and(|secs| secs >= threshold_secs)
 }
 
 fn is_opencode_idle_chrome_line(trimmed: &str) -> bool {
@@ -2684,6 +2742,75 @@ mod tests {
         // No elapsed timer: minutes alone never render without a seconds field.
         assert!(!contains_elapsed_seconds_timer("(shift+tab to cycle)"));
         assert!(!contains_elapsed_seconds_timer("ctx:13% (1M context)"));
+    }
+
+    /// `#runawayturnsurfaced`: the detector already scanned this token and threw
+    /// the value away. Now that the value is load-bearing, pin the arithmetic —
+    /// including the real cue that went unreported for 1h51m.
+    #[test]
+    fn a_busy_cue_reports_how_long_its_turn_has_been_running() {
+        assert_eq!(elapsed_seconds_in_busy_cue("(14s · ↓ 200 tokens)"), Some(14));
+        assert_eq!(
+            elapsed_seconds_in_busy_cue("• Working (6m 14s • esc to interrupt)"),
+            Some(374)
+        );
+        assert_eq!(elapsed_seconds_in_busy_cue("(1h 2m 3s)"), Some(3_723));
+        assert_eq!(
+            elapsed_seconds_in_busy_cue("• Working (1h 51m 0s • esc to interrupt)"),
+            Some(6_660)
+        );
+
+        // A chain that never closes with `s` is not an elapsed timer. Without
+        // this, a context-usage or token row would be read as a turn age and
+        // every idle pane would report a runaway.
+        assert_eq!(elapsed_seconds_in_busy_cue("(shift+tab to cycle)"), None);
+        assert_eq!(elapsed_seconds_in_busy_cue("ctx:13% (1M context)"), None);
+
+        // The predicate is defined AS this scanner, so the two cannot disagree.
+        for line in [
+            "(14s · ↓ 200 tokens)",
+            "(3m 43s · ↓ 9.5k tokens)",
+            "(1h 2m 3s)",
+            "(shift+tab to cycle)",
+            "ctx:13% (1M context)",
+        ] {
+            assert_eq!(
+                contains_elapsed_seconds_timer(line),
+                elapsed_seconds_in_busy_cue(line).is_some(),
+                "the busy predicate and the age reader must read {line:?} the same way"
+            );
+        }
+    }
+
+    /// An unreadable cue is never a runaway.
+    ///
+    /// `#idlerevisionreactive`: "I could not measure it" is not "it is old". A
+    /// harness whose spinner format we do not parse would otherwise report every
+    /// turn as overdue the moment the format changed.
+    #[test]
+    fn an_unmeasurable_turn_is_not_reported_as_a_runaway() {
+        assert!(busy_cue_is_runaway(
+            "• Working (20m 0s • esc to interrupt)",
+            DEFAULT_RUNAWAY_TURN_SECS
+        ));
+        assert!(!busy_cue_is_runaway(
+            "• Working (5m 0s • esc to interrupt)",
+            DEFAULT_RUNAWAY_TURN_SECS
+        ));
+        assert!(!busy_cue_is_runaway(
+            "• Working • esc to interrupt",
+            DEFAULT_RUNAWAY_TURN_SECS
+        ));
+        // The threshold is the boundary, and it is inclusive.
+        assert!(busy_cue_is_runaway("(15m 0s)", 900));
+        assert!(!busy_cue_is_runaway("(14m 59s)", 900));
+    }
+
+    #[test]
+    fn turn_age_reads_as_a_duration_an_operator_can_act_on() {
+        assert_eq!(format_turn_age(45), "45s");
+        assert_eq!(format_turn_age(374), "6m 14s");
+        assert_eq!(format_turn_age(6_660), "1h 51m 0s");
     }
 
     #[test]

@@ -229,7 +229,9 @@ use agent_doc_route_io::dispatch_recovery::resolve_fresh_dispatch_target_after_r
 #[cfg(test)]
 use agent_doc_route_io::dispatch_target::register_dispatch_target;
 #[cfg(test)]
-use agent_doc_route_io::document_prep::scrub_duplicate_prompt_comments_for_route;
+use agent_doc_route_io::document_prep::{
+    RouteDocumentPrepEffects, prepare_route_document, scrub_duplicate_prompt_comments_for_route,
+};
 #[cfg(test)]
 use agent_doc_route_io::pane_resolution::cleanup_failed_route_panes;
 #[cfg(test)]
@@ -2120,6 +2122,70 @@ mod tests {
             "preempt prompt must sit after the preset directive and before the first prompt:\n{updated}"
         );
     }
+    /// `#routescrubsilentfailure`: a route cleanup that cannot parse the
+    /// document must say what is actually wrong and leave a trace.
+    ///
+    /// Observed 2026-09-12 on `tasks/software/tsift.md`: the only surviving
+    /// record of this failure was the operator having pasted the stderr line
+    /// into the document, and it read "route duplicate prompt residue guard
+    /// failed" — which points at duplicate prompt residue when the real fault is
+    /// a broken component structure. `ops.log` held nothing, so the content that
+    /// failed to parse was unrecoverable and the defect could not be diagnosed.
+    #[test]
+    fn a_route_scrub_that_cannot_parse_the_document_says_so_and_leaves_a_trace() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("plan.md");
+        // A tombstoned close marker — the `#replica-structure-guard` shape a
+        // stale or truncated replica push produces.
+        std::fs::write(
+            &doc,
+            concat!(
+                "---\nagent_doc_session: scrub-parse\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ do the thing\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:notes -->\n",
+                "orphaned body with no close marker\n"
+            ),
+        )
+        .unwrap();
+
+        let err = prepare_route_document(
+            &doc,
+            RouteDocumentPrepEffects {
+                write_document: |file, next, _previous, _reason| {
+                    std::fs::write(file, next)?;
+                    Ok(())
+                },
+            },
+        )
+        .expect_err("an unparseable document must not be prepared for dispatch");
+        let rendered = format!("{err:#}");
+
+        assert!(
+            rendered.contains("component structure did not parse"),
+            "the error must name the structural fault: {rendered}"
+        );
+        assert!(
+            rendered.contains("not duplicate prompt residue"),
+            "and must not send the operator after the residue guard: {rendered}"
+        );
+
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            log.contains("route_document_scrub_failed"),
+            "the failure must leave a reconstructable ops-log record, like every \
+             successful branch beside it does: {log}"
+        );
+        assert!(
+            log.contains("content_hash=") && log.contains("content_len="),
+            "and must record the content that failed to parse: {log}"
+        );
+    }
+
     #[test]
     fn managed_capability_proof_status_tracks_pending_and_failed() {
         let dir = tempfile::tempdir().unwrap();

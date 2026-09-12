@@ -10,7 +10,7 @@ prompt_presets:
   '#actionable': 'Add actionable tasks into backlog + queue'
   '#actionable-review': 'Add actionable review items into backlog + queue'
   'rebase-conflicts': 'rebase + fix merge conflicts'
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -417,20 +417,57 @@ The one I would start with is `#xldupenodes`: `agree`/`agreement`, `human`/`huma
 I did not start any of them. All five are editorial calls on your philosophy ... which term is the genus, whether a mention of "state" is the node or the English word, what the global table is for ... and the queue is stopped, so the plan is the deliverable. Queue any id to run it.
 
 One housekeeping note: the exchange is at eighteen responses and 369 lines, past the threshold where preflight starts asking. Say the word and I will run `agent-doc compact` on it; auto-compaction is off and I will not do it unprompted.
+
+### Re: do #xldupenodes — opus-5
+
+> **Queue prompt:**
+>
+> do [#xldupenodes]
+
+Merged, and the decision was easier than the item expected: all three pairs were the *same file twice*. `agreement.md`, `humans.md`, `signals.md` were byte-for-byte identical to `agree.md`, `human.md`, `signal.md` — same `# Title` (the twins were even titled `# Agree`, `# Human`, `# Signal`), same lay definition, same sources, same Pattern Expression. Hence the 1.00 similarity.
+
+What settled which slug survives: the upstream `philosophy/` repo has only `agree.md`, `human.md`, `signal.md`. No plural or noun twin exists there, so the duplicates were an import artifact, not a deliberate pair. That also agrees with every other signal — each surviving node's own `# Title` is the singular, and `signal` is already a Ring 1 term while `signals` sat in Ring 2.
+
+Two commits:
+
+**[`01fd965`](https://github.com/existence-lang/ontology/commit/01fd965) in `ontology`** — deleted the three twins, redirected the six inbound links keeping their display wording (`[agreement](./agree.md)` in `coercion`, `coherence`, `explicit-scope`; `[humans'](./human.md)` in `god`; `[signals](./signal.md)` in `language`, and the `### [Signals](./signal.md)` subhead in `reality`), dropped the three slugs from Ring 2, refreshed the counts that quoted them (Ring 2 is 85 terms, 116 total, in both `existence.toml` and README's three places), removed the three README term-table rows, and regenerated `terms.md`.
+
+```
+$ existence --ontology . audit --structure
+near_duplicate: 0 findings        (was 6)
+$ existence --ontology . toc --check
+toc: 116 term(s), no problems.
+```
+
+**[`ddc0cc9`](https://github.com/existence-lang/existence/commit/ddc0cc9) in `existence`** — the allowlist question, decided against. An allowlist would enumerate the instances; the check's *rule* is what is wrong. It pairs slugs by shared stem and treats the definition similarity as advisory context, so it asserts "`exist` and `existence` look like the same term" about two nodes that share zero content words. In a philosophy ontology that separation is the point — verb vs universal set, act vs artifact (`redefine`/`redefinition`), property vs thing (`abstract`/`abstraction`) — so the warning can never be resolved, only ignored, which is how an audit stops being read.
+
+So `near_duplicate` now requires 0.25 Jaccard overlap of the two lay definitions on top of the shared stem. The gap is wide enough to be uncontroversial: the three real duplicates scored 1.00, the three intentional pairs score 0.00, 0.00 and 0.03. A pair with a shared stem and no shared vocabulary is evidence of nothing. The empty-definition case a threshold could otherwise hide is already an error from `toc --check` ("Ontology section is missing or empty"), so nothing goes unreported.
+
+`near()` itself is unchanged, so the stem pairing still covers all six pairs — only the reporting is gated. The regression test asserts that directly: a fixture with `exist`/`existence` (disjoint definitions) plus `human`/`humans` (identical) yields exactly one finding. I checked it is not vacuous by setting the threshold to `0.0` — the test fails, then passes again on restore. `make check` is green on both feature sets: 101 tests, clippy, fmt, exit 0. `cargo install --path .` done, so local audits run the new rule.
+
+One loose end I did not close on my own: all three ontology workflows pin `EXISTENCE_REV: v0.8.0`, and the threshold is on `main` untagged, so the weekly audit issue keeps listing those three warnings until 0.8.1 ships and the pin moves. CI is not affected — `near_duplicate` is warning severity and CI only fails on errors. I left it as `#xlthreshrev` at the top of the backlog rather than cutting a release inside this item, because a tag push also triggers the crates.io publish job that `#cratestoken` says will 403 until you mint a token; your call whether to eat a red publish run or mint first.
+
+Also worth knowing before the next item: dropping the three nodes took `unlinked_mention` from 36 to 32, since four of those mentions lived in the deleted files. I corrected `#xlunlinked`'s count and its example, which cited `agreement`.
+
+CI on both repos was still queued at closeout ([existence 34668262758](https://github.com/existence-lang/existence/actions/runs/34668262758), [ontology 34668262152](https://github.com/existence-lang/ontology/actions/runs/34668262152)); local verification above is the evidence.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority -->
-- #actionable-review
+<!-- agent:queue priority go -->
+- ~~do [#xldupenodes]~~
+- do [#xlunlinked]
+- do [#xlepistemsubs]
+- do [#xlgenuscycles]
+- do [#xlclaudetable]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#xldupenodes] Merge the three node pairs whose lay definitions are byte-identical (audit `structure/near_duplicate`, similarity 1.00): `agree`/`agreement`, `human`/`humans`, `signal`/`signals` in `src/existence-lang/ontology/src`. Per pair keep one slug, redirect inbound `[x](./x.md)` links, drop the other from its ring in `existence.toml`, rerun `existence audit --structure`. The other three pairs it flags are genuinely distinct (`abstract`/`abstraction` 0.03, `exist`/`existence` 0.00, `redefine`/`redefinition` 0.00) ... keep them and consider an allowlist so the check stops reporting them
-- [ ] [#xlunlinked] Link the 36 lay definitions that name another node without linking it (audit `contradictions/unlinked_mention`), e.g. `aesthetics` mentions philosophy, `agreement` mentions agree and definition. Each link densifies the skos:related graph and several are candidates for a typed `"broader"`. Editorial per mention ... a definition that uses "state" or "model" as ordinary English should stay unlinked, so review each rather than scripting it. `existence audit --contradictions` lists them with the exact term
+- [ ] [#xlthreshrev] Ship the `near_duplicate` similarity threshold to the ontology workflows: `existence` commit ddc0cc9 gates the check on 0.25 definition overlap, but `.github/workflows/{audit,ci,pages}.yml` in `src/existence-lang/ontology` all pin `EXISTENCE_REV: v0.8.0`, so the weekly audit issue keeps listing abstract/abstraction, exist/existence and redefine/redefinition as warnings. Cut existence 0.8.1 (`make release`) and bump the three `EXISTENCE_REV` values to `v0.8.1`. Note the tag also runs the crates.io publish job, which 403s until [#cratestoken] is resolved; the GitHub Release and tag land either way, which is all `cargo install --git --tag` needs
+- [ ] [#xlunlinked] Link the 32 lay definitions that name another node without linking it (audit `contradictions/unlinked_mention`), e.g. `aesthetics` mentions philosophy, `agree` mentions definition, `axiology` mentions nature and type. Each link densifies the skos:related graph and several are candidates for a typed `"broader"`. Editorial per mention ... a definition that uses "state" or "model" as ordinary English should stay unlinked, so review each rather than scripting it. `existence audit --contradictions` lists them with the exact term
 - [ ] [#xlepistemsubs] Fix the 11 non-standard Epistemology subsections across 6 nodes (audit `structure/lint`): `intelligence` uses `Links` and `Human Intelligence`, `evolutionary-linguistics` uses a raw `<a href>` anchor as a heading, plus `perspective`, `presence`, `this-philosophy`, `unconsciousness`. Rename to the recognized vocabulary (`Cultural Definition` | `Sources`, `Pattern Expression` | `Examples`) or move the content under one of them; SPEC rule 9 keeps these advisory, so the alternative is widening the vocabulary in the spec
 - [ ] [#xlgenuscycles] Decide the genus for the 4 remaining definitional cycles (audit `contradictions/mutual_definition`): aesthetics -> axiology, axiology -> ethics, coercion -> violence, qualitative -> quantitative. Same procedure `#xlchaingaps` used for entity/information: pick which side is the genus and reword one sentence so the pair stops defining each other. Content decision, four sentences
 - [ ] [#xlclaudetable] Decide what the `~/.claude/CLAUDE.md` philosophy table is (audit `mirrors/mirror_drift`, 9 rows: context, domain, evolution, existence, focus, perspective, resolution, story, system). Every row summarises rather than quotes its node, so word overlap runs 0.00-0.21 and the mirror check calls it drift. Either reword the rows to the node lay definitions, making the table a real mirror, or declare the summary style intended and give the comparator a looser rule for `kind = toc` style mirrors. That file is your global instruction surface, so the direction is yours
@@ -476,4 +513,5 @@ One housekeeping note: the exchange is at eighteen responses and 369 lines, past
 - 2026-09-11 [#fixmanifestdrift] Fix the manifest drift `existence audit --structure` reports in `src/existence-lang/ontology` (it is what the new CI job fails on): `qualitative` + `quantitative` are declared in ring 1 with no node file (create them or drop them from the ring), `contextual-systems` has an empty Ontology section (needs a lay definition), `noumena` / `phenomena` / `pneuma` are in no ring (ring 2 fits), and `universal-set.md` links `./exists`, which has no node (`exist` does). The 11 fixable suffix-less links were already rewritten by `#xlaudit2`. Then publish `terms.md` from the Pages workflow (`existence toc -o terms.md`) so the site has a glossary page
 - 2026-09-11 [#xlrequote] Decide what to do with the source drift the first real `existence audit --sources` run found in `src/existence-lang/ontology`: 206 quoted passages are no longer on their pages (87 wiktionary, 108 wikipedia, 6 etymonline; the nodes quote 2014-15 wording that has since been rewritten) and 19 have changed but still match. Per source, either refresh the blockquote from the live page or pin the historical Wayback snapshot next to the anchor so the quote stays verifiable. Also 6 dead links: `--fix` can swap cosmicscale.appspot.com (fractal, physical-system, scope), the NYT attention-schema piece, and wikipedia `Physical_information` (entity, information) for snapshots; stevenpoole.net, the AAAI SARA13 PDF, and the colorado.edu PDF have none and need a replacement source. Content decisions, not code; `audit --sources` reports them again each weekly run once Phase 6 commits the lock
 - 2026-09-11 [#xlrequote2] Decide the 45 quotes no single Wayback snapshot carries (the strict pin rule wants every passage a node quotes from one page in one copy): 27 on Wiktionary (abstraction, conscious, context, create, creativity, evolution ×2, existence, explicit, focus, fractal, history, human ×2, intelligence, love, model, physical, science, spirit, story, system ×3, tool, type, violence) and 18 on Wikipedia (Abstract_object ×3, Algorithm, Emotion, Evolution_(disambiguation), Formal_system, Information ×2, Intelligence, Natural_law, Nature, Platonic_realism, Sexual_reproduction, Spirituality, Story, Technology, Type–token_distinction). Per source: split the blockquote so each passage sits under its own anchor and let `existence audit --sources --fix` pin each, or requote from today’s page. `audit --sources` lists them as `quote_missing` with no fix each week; see `tasks/software/existence-lang.md` for the pinning decision
+- 2026-09-11 [#xldupenodes] Merge the three node pairs whose lay definitions are byte-identical (audit `structure/near_duplicate`, similarity 1.00): `agree`/`agreement`, `human`/`humans`, `signal`/`signals` in `src/existence-lang/ontology/src`. Per pair keep one slug, redirect inbound `[x](./x.md)` links, drop the other from its ring in `existence.toml`, rerun `existence audit --structure`. The other three pairs it flags are genuinely distinct (`abstract`/`abstraction` 0.03, `exist`/`existence` 0.00, `redefine`/`redefinition` 0.00) ... keep them and consider an allowlist so the check stops reporting them
 <!-- /agent:done -->

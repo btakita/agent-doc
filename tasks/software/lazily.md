@@ -993,45 +993,75 @@ Magnitudes are unchanged in all ten. Test counts moved only by new coverage: py 
 Not fixed, and deliberately: **closure membership is unpinned in both directions**, reproduced at exit 0 in kt, dart, cpp and rs. Dropping a target from `check:`'s prerequisites reports `OK` with one fewer reached and the target never named; an `excuse:` naming a target outside the closure is silently ignored, while `KNOWN_UNCOVERED` *does* check that direction. kt found it and declined to fix it alone ... different mechanism, visible in a diff of the `check:` line, and identical across bindings, so it wants one converged decision rather than ten inventions. Queued below; it probably subsumes `#lzcireachsync`.
 
 Exchange is at 918 lines across 21 response sections. Noting it, not compacting, while the queue is active.
+
+### Re: #pinreachclosure — opus-5 · 2026-09-12T14:20-04:00
+
+> **Queue prompt:**
+>
+> do [#pinreachclosure]
+
+
+Landed in nine repos, pointers at `ae8f18ec7`. js landed nothing, correctly, and that is the most important result in the cycle.
+
+| | commit | shape |
+|---|---|---|
+| rs | `23b78f1` | 6 rungs, raw lines + positional mask, 52 names |
+| py | `954a344` | 3 rungs + 10 tests |
+| go | `399cbd5` | 3 rungs, falsification matrix |
+| kt | `6c1daa2` | 3 rungs, run id pinned for oracle invocations |
+| cs | `b5f8f9a` | 3 rungs, make oracle chosen over CI oracle |
+| cpp | `6538002` | 5 commits, 3 rungs + collision + accounting |
+| zig | `c56cb7e` | 3 rungs + limits recorded in comments |
+| dart | `d44faef` | 3 rungs + accounting + collision + stability re-probe |
+| gd | `c2ce6b7` | 3 rungs, anchors not raw lines |
+| js | — | **nothing; argued and stopped** |
+
+**I dispatched a design that does not work, and js proved it rather than implementing it.** `prereqs_of()` derives the closure by awk-scanning Makefile text for the first `^check:` line. It never asks make and ignores make conditionals, so an `ifeq` block decouples the pinned set from the executed set: `make -n check` runs no `typecheck` while the guard's verdict stays byte-identical to healthy. go, zig, dart, py, cs, kt and cpp each then reproduced it with a **dead `ifeq (0,1)` branch needing no variable and no environment at all** ... so a pristine `./scripts/check-ci-reach.sh` approves a tree with gates missing. A names-only pin passes that state by construction. js's phrase: set-equal to a set that describes nothing.
+
+The design was corrected **five** times in flight, every time by an agent measuring rather than accepting what I sent:
+
+1. js: add a make-derived oracle, or the pin describes nothing.
+2. gd: compare **anchors**, not raw command lines ... a run id minted per make invocation false-REDs the targets carrying the whole suite. Four bindings confirmed independently.
+3. dart: anchors fix only **one** of two volatile positions. A leading `VAR=$(ID) cmd` is absorbed; `cmd --tags run-$(ID)` still reds, and reds *blaming the closure*. Fix the diagnosis, keep the refusal.
+4. dart: an **anchor-collision** rung, because normalization can only merge ... and it closes **half** of the recipe-swap attack everyone (me included) had written off.
+5. rs: **do not use anchors here.** In rs anchors *create* a collision raw lines do not ... `test-lean-formal` and `test-lazily-formal` are both `cd $(DIR) && $(LAKE) build`, `cd` carries no anchor, both reduce to `lake build`, and an anchor oracle approved dropping one at `OK — 50 target(s) reached`, exit 0. Raw lines give zero collisions over 51 members.
+
+So the family is **deliberately not uniform**: nine bindings compare anchors, rs keeps raw lines plus a positional invocation mask (the root's dry run taken twice, differing token *positions* wildcarded ... positional and not by value, because masking observed values fails when the target's own dry run is a third invocation minting a third value).
+
+**What these rungs actually claim, in gd's words: no silent change, never correctness.** A pin cannot name a gate that never existed, and written from a broken Makefile it would faithfully pin the breakage. kt then retracted the argument I had been repeating from it ... that a closure change is visible in a diff ... having measured that the claim held for exactly one of five attacks, since rename, `ifeq`, neutered recipe and recipe swap are all equally visible one-line edits and three of those four went undetected. What survives is narrower and real: the pin makes a retiring edit **incomplete**, so it cannot be a one-line deletion. rs put the structural version best ... an oracle checks agreement between two derivations of the *present* state and a drop changes both consistently, so only a comparison against a remembered state can see it. The two rungs are not redundant, and measurement agrees: with the oracle present and the pin removed, drop, rename and excuse all exit 0.
+
+**Two gaps stay open and are recorded in every binding rather than implied covered.** Prerequisite **order** is invisible to a set pin, and **graph shape** is too ... dropping an intra-closure edge can leave the node set identical with the oracle green. Both are protected elsewhere by the run-id freshness rung, measured independently four times. cpp owns the only real intra-closure edge in the family and tested six paths into its coverage guard: no passing path on stale evidence, including the same-job-id case from last cycle, because the record count independently requires a complete suite's output. Its conclusion, which answers the question I put to it honestly: the completion-marker substitute is protected by **evidence**, not by the graph, and nothing in `check-ci-reach.sh` protects the edge. One row shows what the edge does buy ... with it dropped, `make -j16 check` exits 2 on a partial manifest mid-ctest where the control exits 0.
+
+Also open, and now only half: pointing a member's recipe at a real workflow step **no member runs** still gives a byte-identical verdict at exit 0. Closing that needs per-target recipe anchors, a second spelling of every recipe, which this script's own header records as a mistake that already cost cpp.
+
+Smaller things worth keeping. py **pinned the oracle's robustness as a test** rather than fixing a symptom ... it planted the interpolation that would have broken raw matching and asserted the anchor oracle stays silent. py also corrected gd's four-way division of labour by measuring that the classification pin **subsumes** the vacuity floor's trigger, leaving the floor a cheap restatement rather than the thing catching anything. dart found two attacks nobody else reported (a **rename** keeping the same recipe, byte-identical pre-fix; and `CI_REACH_ROOT_TARGET` collapsing 11 gates to 1) and corrected a false claim in its own config header. py's new stray-excuse rung refused a **pre-existing test's** planted excuse, exposing that the test had been vacuous ... it wrote `excuse: type-check: <reason>` and the parser takes the first whitespace-delimited word, so it named `type-check:` and matched nothing. rs measured the churn behind the maintainability worry (32 commits touched the `check:` line, all before 2026-08-09, none in five weeks) and concluded it was aimed at the wrong half: the 52 names are one appended line each; the oracle took three attempts and is ~150 lines.
+
+Magnitudes unchanged everywhere. Test counts moved only by new coverage: py 1088 to 1098, kt and dart and cs and go unmoved by design.
+
+One piece of process friction, third cycle running: the agent-doc hook blocks a subagent coining an id, because filing one would mean writing this document from outside its repo, so each agent retags to the queue head. Queued below.
+
+Exchange is at 969 lines across 22 response sections. Noting it, not compacting, with the queue active.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#auditeveryguard]~~
+- ~~do [#pinreachclosure]~~
+- do [#lazilycppcheck]
+- do [#lazilycheckconformance]
+- do [#deadguardcode]
 - do [#lazilycpptwo]
 - do [#lazilyderivesreplayed]
 - do [#documentbindingsstamp]
-- ~~do [#lzstampprefixdrift]~~
-- ~~do [#lzstampsatisfiesnonempty]~~
-- ~~do [#lzrscorpusrootvacuous]~~
 - do [#lzmakepfootgun]
-- ~~do [#lzstalemanifest]~~
 - do [#lzfailedgrepvacuous]
 - do [#lzastscanundercount]
-- ~~do [#lzsiblingrunnermasking]~~
 - do [#lzplantprobemethod]
-- ~~do [#lzflagcoercion]~~
-- ~~do [#lzgothreenames]~~
 - do [#lzcsreverserung]
 - do [#lzpyelementdescend]
 - do [#lzsemtreesubset]
 - do [#lzarrayelementdocs]
-- ~~do [#lzarrayelementsites]~~
-- ~~do [#lzdartcoveragefloors]~~
-- ~~do [#lzambienttokenresolve]~~
-- ~~do [#lzzigemptyparentdump]~~
-- ~~do [#lzpinparsestrict]~~
-- ~~do [#lzledgerratchet]~~
-- ~~do [#lzzigenvsecretleak]~~
-- ~~do [#lzgotypedfloors]~~
-- ~~do [#lzgoasyncflake]~~
-- ~~do [#lzledgerceiling]~~
-- ~~do [#lzunreachableunprobed]~~
-- ~~do [#lzrsbindpending]~~
-- ~~do [#lzdartboundfloor]~~
-- ~~do [#lzdartarrayblocks]~~
 - do [#lzorderinganchors]
 - do [#lzktareapartition]
 - do [#lzscenariofloormissing]
@@ -1043,7 +1073,10 @@ Exchange is at 918 lines across 21 response sections. Noting it, not compacting,
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pinreachclosure] Pin ci-reach closure MEMBERSHIP in both directions -- reproduced at exit 0 in kt, dart, cpp and rs. Dropping a target from `check:`'s prerequisites reports OK with one fewer reached and never names it; an `excuse:` naming a target outside the closure is silently ignored, while KNOWN_UNCOVERED does check that direction. Needs ONE converged cross-binding decision (what pins membership, and does an out-of-closure excuse become an error?) then one pass over ten repos. Probably subsumes #lzcireachsync.
+- [ ] [#closeremaininghalf] Close the remaining half of the recipe-swap attack, or decide deliberately not to: pointing a closure member's recipe at a real workflow step that NO member runs gives a byte-identical verdict at exit 0 in every binding. dart's anchor-collision rung closed the member-to-member half. Closing this half needs per-target recipe anchors -- a second spelling of every recipe inside the guard -- which check-ci-reach.sh's own header records as the mistake that already cost lazily-cpp a duplicate path plus a hand-written equality assertion. Decide once for the family; do not let ten repos each invent it.
+- [ ] [#decidereachclosure] Decide where the ci-reach closure pin LIVES. rs measured the churn (32 commits touched the check: line, all before 2026-08-09) and argues the pin belongs ADJACENT to the root rule in the Makefile, beside check:, so a closure edit and its pin edit land in one hunk -- at ~3 edits/week the 'update the pin deliberately' remedy gets applied reflexively and no diagnostic wording prevents that. I placed it in the guard to match KNOWN_UNCOVERED's shape; rs followed the brief but advocates the other placement. Worth settling before the next growth phase.
+- [ ] [#subagentscannotcoin] Subagents cannot coin backlog ids: the agent-doc hook blocks an untracked id, and filing one would mean writing tasks/software/lazily.md from outside the agent's own repo. Hit by kt, dart, cs and gd across three cycles; each retags its commit to the queue head, so per-finding ids never exist and commit messages all carry the same id. Either give agents a way to file, or accept head-tagging and stop coining -- but the current state loses the mapping from commit to finding.
+- [ ] [#twopreexisting] Two pre-existing normalizer quirks cpp found while pinning the closure, neither touched: `command -v uvx >/dev/null` anchors as `command -v uvx null` because the normalizer basenames the redirection target; and check-conformance-coverage.sh's refusal text claims `make conformance-coverage` 'builds, runs ctest and audits in one invocation', which is false exactly when the conformance-coverage: test edge is dropped. Third quirk alongside the wasm ^# filter gap.
 - [ ] [#lazilycppcheck] lazily-cpp check-wasm-tiers.sh two holes found during #auditeveryguard but owned by the wasm channel: :99 folds an UNREADABLE tier manifest into the same 'replayed 0, below the floor' as an empty one (missing IS distinguished), and :149's `find $build_dir/tests` is ungated where `-d $build_dir` is gated, so a configured-but-unbuilt tier dies at exit 1 with ZERO stderr. Same function owns the ^# filter gap already filed.
 - [ ] [#lazilycheckconformance] lazily-go check-conformance-coverage.sh:369 -- jq's status is unchecked in BOTH process-substitution call sites feeding scenario_ids, so a malformed fixture reads as 'no scenarios' rather than as a parse error. go flagged it as reasoning-not-measurement and did not attack it; the 151/151 scenario equality probably catches the drop, which is what needs confirming. dart has the same shape and reached the same conclusion independently.
 - [ ] [#deadguardcode] Dead guard code found across bindings during #auditeveryguard, none removed: `collect_sources()` is defined-and-never-called in js (:93), py (:89-95), go (:266) and is the vestige of the static source scan the runtime manifest replaced; py also has a dead assignment at :250. Removing them touches files lazily-spec's check-corpus-floors.mjs greps, so it wants one deliberate pass rather than incidental edits.

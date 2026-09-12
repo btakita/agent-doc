@@ -608,12 +608,53 @@ It noticed that `derive_expected` already returns `expected_fixtures` (144) and 
 All three zero-guards still fire after the deletion, probed with emptied populations — absent manifest, manifest resolving to nothing on disk, and a manifest of only the eight block-free statechart fixtures (`the 8 opened fixtures carried ZERO assertion blocks`). The expectation side too: an emptied canonical corpus reports `found 0 fixture(s), 0 site(s) and 0 distinct block(s)` rather than agreeing with an inventory of zero.
 
 `lazily-spec/conformance` was never written — the probes needed a scratch sibling layout because `canonical_corpus_dir()` ignores `LAZILY_SPEC_CONFORMANCE_DIR` by design, verified byte-identical before and after by md5. The three surviving mentions of the retired constants are prose with no live assignment, and spelled bare rather than in assignment form.
+
+### Re: `#lzdartcoveragefloors` — done, and the reasoning I gave three bindings was false — opus-5 · 2026-09-12T07:02-04:00
+
+> **Queue prompt:**
+>
+> do [#lzdartcoveragefloors]
+
+
+`dart d1ba1e1` and `rs 18c71bd`, both CI green, pointer `b9cbaeba1`. dart's `MIN_FIXTURES=144` and `MIN_SCENARIOS=153` are gone, replaced by corpus-derived equalities with duplicate checks and four zero-guards, matching go. Both derivations land on the numbers that were typed, computed, with no constant left in the file.
+
+### The correction, which is the real content of this cycle
+
+I told go and then dart that the equality earns its place because *"a duplicated excuse entry passes both directions while making the count disagree."* I took that from rs's own comment. **It is false, and it is false in rs too.**
+
+`uniq_known` is computed as `sort -u | wc -l`. Both sides of the equality **dedupe**, so a repeated entry moves neither. dart measured it rather than believing me — with the duplicate check neutralised and the dedupe left in place:
+
+```
+conformance coverage OK: 144/156 canonical fixtures OPENED (12 listed as known-uncovered;
+144 DERIVED from the corpus listing minus that ledger and asserted EQUAL...)   EXIT=0
+```
+
+Same on the scenario side: one excuse and two copies of it derive identical arithmetic. The equality only fires on a duplicate if the count is taken naively as `${#KNOWN_UNCOVERED[@]}` — and then its message is the misleading one about trees not matching.
+
+**So the `uniq -d` duplicate check is the whole of what closes that gap.** I verified the mechanism across all three bindings: rs at `:571`/`:580`, go at `:386`/`:396`, dart at `:411`/`:421` — every one dedupes *and* carries an explicit duplicate check. The check works; the equality never did.
+
+Nothing shipped broken, because go and dart both landed the duplicate check on my instruction — I asked for the right artifact for the wrong reason. But the reasoning was load-bearing for three bindings, so I corrected it at the source rather than filing it: rs's comment now says what the equality actually buys (a tripwire if a loop is ever weakened, plus the magnitude in the OK line), states plainly that it does **not** catch a duplicate, and records that the claim propagated through me until dart sent it back.
+
+### The agent held its own position, which is the other thing worth noting
+
+I asked whether it still believed these equalities are implied, having argued the opposite about `MIN_BOUND_BLOCKS` an hour earlier. It said yes, and gave the theorem: once `missing` is 0, the forward loop makes every corpus fixture opened-or-excused and the stale loop makes every excuse name an unopened corpus fixture, so `covered == total - uniq_known` identically, and the two walks then span the same fixture set so the scenario total follows.
+
+Its probe table is that theorem showing up as a procedure — **every single probe had to neutralise a loop to reach the equality at all.** It kept the equalities for parity with go and rs and flagged the decision in the commit message rather than burying it, so the family can strip them everywhere if it wants. That is the right way to hold a position I had pushed against.
+
+### Verification
+
+`make check` exit 0 with zero `result: FAILED` in both repos. Four zero-guards fire in dart — empty corpus, every fixture excused, every `scenarios` array stripped, every scenario excused. `check-corpus-floors.mjs` exits 0 at `156 fixtures pinned … 10 dimension(s) undeclared`, 8 → 10 as predicted, with dart now in the NOTE beside rs, py, go and gd. Neither retired name appears under dart's `scripts/` in any form — it described them without naming them, so all four spellings the audit matches are absent. And it independently confirmed rs is out of the trap I fixed earlier: the audit no longer reads floors of 150 and 166 from it.
+
+### Stated plainly
+
+That is the second consecutive cycle where the agent corrected my premise, and the fourth in a row overall. The pattern in all four is the same: I stated an inference as an observation. Here the inference was inherited from a comment in the reference implementation, which is the most seductive form — it looked like established doctrine rather than something to check, and it survived three bindings because each time I cited it instead of testing it. The `sort -u` was on the line below the claim the whole time.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- ~~do [#lzdartcoveragefloors]~~
 - ~~do [#lzambienttokenresolve]~~
 - ~~do [#lzzigemptyparentdump]~~
 - ~~do [#lzpinparsestrict]~~
@@ -637,7 +678,6 @@ All three zero-guards still fire after the deletion, probed with emptied populat
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzdartcoveragefloors] [lazily-dart] scripts/check-conformance-coverage.sh still carries MIN_FIXTURES="${MIN_FIXTURES:-144}" at line 371 and MIN_SCENARIOS="${MIN_SCENARIOS:-153}" at line 372 — the same implied shape #lzdartboundfloor just deleted from check-unbound-blocks.py, in a different file, which is why it was outside that item's named path. Both are subsumed by the identity assertion in their OWN file: the opened-set-equals-corpus-minus-KNOWN_UNCOVERED loop that fails with "canonical fixture '$fixture' was NOT opened by the suite" at line 155, which names the fixture instead of reporting a magnitude. This is exactly what lazily-py demonstrated when it deleted MIN_FIXTURES=145: dropping a fixture takes the count under the floor, but the run dies EARLIER on the set identity, so the floor is never reached in the state it was supposed to guard. DO NOT simply delete them: py kept its non-implied `covered -eq 0` zero-guard, because every loop above it is vacuously satisfied by an empty population, and lazily-go kept BOTH zero-guards plus added two `expectation <= 0` guards when it converted. Check what dart's equivalents are first and keep or add them. Also mind the comment trap that caught py and rs: do NOT spell either retired constant in its greppable assignment form anywhere under scripts/, because lazily-spec/scripts/check-corpus-floors.mjs greps for exactly that shape and will keep deriving and comparing a floor nothing runs — rs passed for weeks that way, reading 150 and 166 out of two comments. Describe them in prose instead, as #lzgotypedfloors did.
 - [ ] [#lzdartarrayblocks] [lazily-dart] dart`s walk is object-valued only, so array-valued tracked keys contribute no site: the same 144 opened fixtures give 725 sites / 616 digests under dart`s rule and 737/628 when array ELEMENTS count. The gap is exactly 12 blocks and they are all in one fixture — `signaling/anti_spoof_session.json`, whose eight array-valued steps[].expect keys carry 1+2+3+1+1+1+1+2 elements. lazily-js instruments each element (which is why js derives 747 where dart derives 725); dart`s objects-only rule sees none of them, so whatever those 12 blocks assert — one of them is the anti-spoof invariant the fixture exists for — is outside rung 0 in this binding. Decide deliberately: either instrument array elements as js does, or record why an array-valued block has no bindable site here. Related and worth settling in the same pass: dart reads its block-name set out of the tracker, so a name the CORPUS grows is invisible on both the inventory and the derivation at once (a NAME-OPEN `^(assert|expect)` scan finds nothing beyond the five names today — `expected` 405, `expect` 294, `assertions` 32, `expect_initial` 3, `expect_after` 3 — but that is today`s corpus, not a guarantee). Repo: src/lazily-dart
 - [ ] [#lzorderinganchors] [lazily-spec] scripts/check-assertion-ordering.py ORDERED_CHECKS anchors its ordering contract on the EXACT floor literals the bindings are now removing - regexes like 'assert accepted == 6', 'assert replayed == 12', 'assert.equal(accepted, 10)' for py/js/cs. lazily-py could not delete three of its floors this cycle and shipped them as DEAD ANCHORS, kept only to satisfy this guard, with the live constant-free assertion sitting above them. That is debt the guard created. Re-anchor on something stable that is not a value - a named helper call, or a marker the runner declares - so removing a constant does not break an unrelated ordering contract. Note the anchor must also be UNIQUE in the file (py tripped 'anchors are not unique' by quoting the literal in an explanatory comment). Repo: src/lazily-spec, then src/lazily-py to drop the dead anchors.
 - [ ] [#lzktareapartition] [lazily-kt] check-conformance-coverage.sh declares REQUIRED_AREAS (27 areas) with no EXCUSED_AREAS complement, so the area list scopes the AUDIT and not the set the suite OPENS: kt opens 148 fixtures / replays 157 scenarios where deriving from the areas alone gives 147 / 151. lazily-spec's check-corpus-floors.mjs therefore declines to derive any floor for kt (it would otherwise have called an honest MIN_FIXTURES=148 unsatisfiable). lazily-cpp pairs the two arrays and its own guard enforces the exact complement, and there the derivation is exact. Add the EXCUSED_AREAS complement (or the equivalent partition assertion) so kt's floors become auditable from the corpus side. Repo: src/lazily-kt

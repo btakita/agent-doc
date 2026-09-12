@@ -605,7 +605,7 @@ I also folded this into `#xlthreshrev`: both the `near_duplicate` threshold and 
 
 ## Queue
 
-<!-- agent:queue priority go -->
+<!-- agent:queue priority -->
 <!-- /agent:queue -->
 
 ## Backlog

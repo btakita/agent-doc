@@ -10,7 +10,7 @@ prompt_presets:
   '#actionable': 'Add actionable tasks into backlog + queue'
   '#actionable-review': 'Add actionable review items into backlog + queue'
   'rebase-conflicts': 'rebase + fix merge conflicts'
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -28,23 +28,53 @@ queue: stop
 Compacted content:
 - Archived 3 response topic(s): do [#xlthreshrev]; do [#xlmirrorcover]; do [#xlmentionkeep]
 - Prior summary/context: prior compacted content: Archived 23 response topic(s): do #fixhttpsgithub; do #planwayregularly; do #xlgenusport; 20...
+
+### Re: #actionable-review — opus-5 · 2026-09-12T00:27-04:00
+
+> **Queue prompt:** #actionable-review
+
+I checked all three `agent:review` items against live state before deciding what to queue. **None of the three is stale — every one is still genuinely blocked on an operator minting a credential**, so none converts wholesale:
+
+| item | blocking condition | verified |
+|---|---|---|
+| `#cratestoken` | crates.io token rejected | `gh secret list -R existence-lang/existence` → `CARGO_REGISTRY_TOKEN 2026-08-28`, unchanged; latest Release run `34671983928` (v0.10.0, 04:06Z today) still 403 `authentication failed`; crates.io `default_version` 0.7.0 |
+| `#auditprtoken` | org forbids Actions PRs, no `AUDIT_TOKEN` | `gh secret list -R existence-lang/ontology` is **empty**; `gh api orgs/existence-lang/actions/permissions/workflow` → 403, needs `admin:org` |
+| `#semantickey` | no Console API key | same empty secret list — no `ANTHROPIC_API_KEY` on the ontology repo |
+
+Two things that *were* stale turned up, and I queued the agent-actionable slices rather than leaving them inside operator-gated prose.
+
+**`#cratestoken` had drifted.** It described one unpublished version (0.8.0) and named run `34660273106`. Since it was written, three more tags shipped — v0.8.1, v0.9.0, v0.10.0 — and each one's Release run hit the same 403. I rewrote the review item to the real scope: four unpublished versions, newest failing run, and the fact that fixing the token alone does not backfill them.
+
+**Three new backlog items, queued:**
+
+1. `#pub403name` — the publish step compiles for 30s and then dies on a bare `403 Forbidden: authentication failed` (`release.yml:111`) that never names `CARGO_REGISTRY_TOKEN`. This repo already has the pattern: `b2848f1` names an OAuth token handed in as `ANTHROPIC_API_KEY` *before* the request. Do the same here — probe `/api/v1/me`, fail closed on an empty secret, print the `passage` + `gh secret set` remedy inline.
+2. `#pubbackfill` — the publish step keys on `GITHUB_REF_NAME`, so a new token only publishes the *next* tag. Four old runs would each need a separate `gh run rerun --failed`. A `workflow_dispatch` that walks tags and publishes what crates.io lacks is idempotent already, thanks to the version check at `release.yml:114`.
+3. `#auditcapsline` — this is the one that actually retires the review list. Both optional audit capabilities are off and **neither absence reaches the issue body a human reads**: PR creation degrades to a `::warning::` plus a compare link (`audit.yml:152-156` — that is why PR #2 is hand-opened), and the semantic class is gated off by an empty `SEMANTIC_KEY` (`audit.yml:37`), while `audit_report.py` renders only the report. Adding a Capabilities line makes `#auditprtoken` and `#semantickey` self-report every week instead of depending on this document.
+
+`#auditcapsline` is completable end to end with no operator credential. `#pub403name` is writable now — only a green 200 waits on the token. `#pubbackfill` is writable now and idempotent whenever the token lands.
+
+One thing worth flagging: the `existence` working tree is at `0.10.0` in `Cargo.toml` with local tags stopping at `v0.9.0`, while the remote already ran a `v0.10.0` release. Another session pushed there; I did not touch that repo this cycle.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
+- 🚧 #actionable-review
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
+- [ ] [#pub403name] Name the rejected crates.io credential before the publish job spends 30s compiling: `.github/workflows/release.yml:111` runs `cargo publish --locked` and, with the stale `CARGO_REGISTRY_TOKEN`, dies on a bare `403 Forbidden: authentication failed` that never names the secret — the operator has now hit it on four tags. Check the token first (`curl -fsS -H "Authorization: $CARGO_REGISTRY_TOKEN" https://crates.io/api/v1/me`), fail closed when the secret is empty, and print the remedy inline: regenerate at https://crates.io/settings/tokens, then `passage edit btak/CARGO_REGISTRY_TOKEN` and `gh secret set CARGO_REGISTRY_TOKEN -R existence-lang/existence`. Same shape as `b2848f1`, which names an OAuth token handed in as ANTHROPIC_API_KEY before any request. A live 200 waits on [#cratestoken]; the 403 path is testable now
+- [ ] [#pubbackfill] Backfill the four tagged versions crates.io never received: `default_version` there is still 0.7.0 while v0.8.0, v0.8.1, v0.9.0 and v0.10.0 are all tagged and on GitHub Releases. The publish step keys on `GITHUB_REF_NAME` (`.github/workflows/release.yml:113`), so resolving [#cratestoken] only publishes the NEXT tag — the backlog needs four separate `gh run rerun --failed` calls against four old runs. Add a `workflow_dispatch` publish-backfill path that walks the tags in version order and publishes each version crates.io lacks; the already-there check at `release.yml:114` makes it idempotent, so rerunning after the token lands is safe. Depends on [#cratestoken] for the live publish, writable now
+- [ ] [#auditcapsline] Make the weekly Ontology audit issue report which optional passes are off, so [#auditprtoken] and [#semantickey] stop living only in this document: `gh secret list -R existence-lang/ontology` is empty, so PR creation falls back to a `::warning::` plus a compare link (`.github/workflows/audit.yml:152-156`, which is why PR #2 was opened by hand) and the semantic class is gated off by an empty `SEMANTIC_KEY` (`audit.yml:37`). Neither absence reaches the issue body — `.github/scripts/audit_report.py` renders only the report. Add a short Capabilities line to the rendered body naming each optional pass as ran or off with its one-line remedy (AUDIT_TOKEN classic PAT, repo scope; ANTHROPIC_API_KEY Console key), and drop the line when everything is on. Agent-completable end to end; the three green audit runs give it a live surface to verify against
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#cratestoken] Mint a new crates.io API token (https://crates.io/settings/tokens, scope publish-update, crate `existence`, long or no expiry): the one stored at `passage btak/CARGO_REGISTRY_TOKEN` and as the `CARGO_REGISTRY_TOKEN` secret on existence-lang/existence is a single token set 2026-08-28 that answered 403 `authentication failed` from 2026-09-12T00:06Z (it published v0.7.0 at 22:51Z the evening before), so existence 0.8.0 is on GitHub Releases and the tag but not on crates.io. Then `passage edit btak/CARGO_REGISTRY_TOKEN`, `passage show btak/CARGO_REGISTRY_TOKEN | gh secret set CARGO_REGISTRY_TOKEN -R existence-lang/existence`, and `gh run rerun 34660273106 --failed`; the publish job is idempotent
+- [/] [#cratestoken] Mint a new crates.io API token (https://crates.io/settings/tokens, scope publish-update, crate `existence`, long or no expiry): the one stored at `passage btak/CARGO_REGISTRY_TOKEN` and as the `CARGO_REGISTRY_TOKEN` secret on existence-lang/existence is still the single token set 2026-08-28 (re-verified 2026-09-12 — `gh secret list` reports that same date), and it has answered 403 `authentication failed` on every Release run since 2026-09-12T00:06Z, most recently run 34671983928 for v0.10.0 at 04:06Z. crates.io is therefore stuck at `default_version` 0.7.0 while v0.8.0, v0.8.1, v0.9.0 and v0.10.0 are tagged and on GitHub Releases. Then `passage edit btak/CARGO_REGISTRY_TOKEN`, `passage show btak/CARGO_REGISTRY_TOKEN | gh secret set CARGO_REGISTRY_TOKEN -R existence-lang/existence`, and rerun the publish for each unpublished tag ([#pubbackfill] turns that into one dispatch); the publish job is idempotent
 - [/] [#auditprtoken] Let the weekly Ontology audit workflow open its own `audit: safe fixes` pull request: the `existence-lang` organization forbids GitHub Actions from creating PRs, and lifting it needs an `admin:org` scope this session does not have (`gh auth refresh -h github.com -s admin:org`, then `gh api -X PUT orgs/existence-lang/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true` and the same PUT on `repos/existence-lang/ontology`), or add an `AUDIT_TOKEN` repo secret (classic PAT, `repo` scope) which `.github/workflows/audit.yml` already prefers. Until then the job pushes the branch and links the compare page in the issue; PR #2 was opened by hand and the job keeps it current
 - [/] [#semantickey] Mint a Console API key (console.anthropic.com/settings/keys, `sk-ant-api03-...`) and store it with `passage edit btak/ANTHROPIC_API_KEY`: the entry today holds a Claude OAuth access token (`sk-ant-oat01-...`), which the Messages API rejects with HTTP 401, and `btak/OPENAI_API_KEY` is rejected too, so the semantic audit has only been proven against the local stand-in server. Then run `ANTHROPIC_API_KEY="$(passage show btak/ANTHROPIC_API_KEY)" existence --ontology src/existence-lang/ontology audit --semantic --limit 5` once to confirm the live Messages API shape, and `gh secret set ANTHROPIC_API_KEY -R existence-lang/ontology` to switch on the weekly semantic pass that `audit.yml` already gates on that secret (about 117 Opus 5 calls the first week, then only changed neighbourhoods)
 <!-- /agent:review -->

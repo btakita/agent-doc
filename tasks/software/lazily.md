@@ -561,6 +561,53 @@ The interaction with `#lzledgerratchet` is worth naming: with `EXPECTED_LEDGERED
 ### Stated plainly
 
 This produced a small type fix and no new coverage, because none was possible. The honest summary of the cycle is that the item should not have been filed in the shape it was — "enforced but unexercised" was an inference from a data structure, not an observation of the code, and one `grep` would have settled it before it reached the queue.
+
+### Re: `#lzdartboundfloor` — both floors deleted, and the second reason I gave was wrong — opus-5 · 2026-09-12T06:43-04:00
+
+> **Queue prompt:**
+>
+> do [#lzdartboundfloor]
+
+
+Done. `50ebb8a`, CI green on all three jobs, pointer `c585462a7`. `make check` exit 0, zero `result: FAILED`.
+
+### `MIN_BOUND_BLOCKS` was implied, and it was measured rather than argued
+
+The agent instrumented the guard's OK line instead of reasoning about the arithmetic:
+
+```
+IDENTITY HOLDS: bound_count 700 == declared_sites 725 - excuses 25
+```
+
+and held in the other reachable green states too — `699 == 725 - 26`, and `700 == 725 - 25` with a fixture dropped. Not a coincidence of today's corpus: reaching that line means the `problems` loop found every declared site either bound or excused, and the stale-excuse direction means none is both, so the sets partition and both sides are already pinned.
+
+The ordering detail it found earlier is the sharper form of the argument: `if problems: die` sat **ahead** of the floor, so the floor was only ever *reached* in the state where every unbound block was already excused — which is precisely the state `EXPECTED_LEDGERED_BLOCKS` owns. All three ways to move `bound_count` now fire upstream of it: a detach with no excuse hits the `problems` loop by name, a detach plus matching excuse hits the size pin (`GREW to 26 site(s); the pin is 25`), and a corpus shrink hits the magnitude rung from either side.
+
+**And the slack was reproduced live.** Detach-and-excuse takes bound to 699; with the size pin satisfied at 26, the floor at 697 is reached and prints `unbound-block guard OK: 699/725`, **exit 0**. It cannot see a one-block shrink, let alone a three-block one.
+
+### The correction: `MIN_BLOCK_FIXTURES` was **not** implied by the site-set equality
+
+I asserted it was, on the grounds that sites are keyed by fixture. That is wrong, and the reason is specific: **8 of the 144 opened fixtures carry zero assertion blocks** — all of `statechart/`. I verified this independently rather than taking the report: walking all five tracked block names across those eight files gives **exactly zero** blocks in every one.
+
+So the site set spans only **136** fixtures, and the fixture set is not recoverable from it. Dropping `statechart/flat_cycle.json` from the manifest leaves the post-deletion guard green at `700/725 ... across 143 opened fixtures`. The floor did catch that, with zero slack — 144 against 144.
+
+What covers it is one rung up, in `check-conformance-coverage.sh`: the opened-set-equals-corpus-minus-`KNOWN_UNCOVERED` identity, which on the same doctored manifest fails with `canonical fixture 'statechart/flat_cycle.json' was NOT opened by the suite`. Both guards run in `make check`, so the case stays covered — and it moved from a **count** to a **set identity that names the fixture**, which is the better failure. The deletion is still right; my justification for half of it was not.
+
+### The follow-up it escalated instead of taking
+
+It noticed that `derive_expected` already returns `expected_fixtures` (144) and `main` already computes `examined` (144), so `examined == expected_fixtures` would close the statechart hole *inside* this script — derived, fails-when-stale, no new state. It left the call to me rather than landing it, on the grounds that it would be a second definition of an identity the coverage guard already asserts.
+
+**I'm declining it, and that reasoning is why.** Two definitions of one identity is the duplication this whole series has been removing, and the existing failure is strictly better — it names the fixture rather than reporting a magnitude. Both guards run in `make check` and in CI. If they ever diverge, the fix is to make one of them authoritative, not to add a third.
+
+### Filed
+
+`#lzdartcoveragefloors` — dart's *other* guard still carries `MIN_FIXTURES=144` and `MIN_SCENARIOS=153` at `check-conformance-coverage.sh:371-372`, the same implied shape in a different file, subsumed by the identity assertion at line 155 of that same file. The item carries both traps this session has already paid for: keep the zero-guards py and go kept, and describe the retired constants in prose rather than spelling their assignment form, because that is what left rs reading floors of 150 and 166 out of its own comments.
+
+### Zero-guards and hygiene
+
+All three zero-guards still fire after the deletion, probed with emptied populations — absent manifest, manifest resolving to nothing on disk, and a manifest of only the eight block-free statechart fixtures (`the 8 opened fixtures carried ZERO assertion blocks`). The expectation side too: an emptied canonical corpus reports `found 0 fixture(s), 0 site(s) and 0 distinct block(s)` rather than agreeing with an inventory of zero.
+
+`lazily-spec/conformance` was never written — the probes needed a scratch sibling layout because `canonical_corpus_dir()` ignores `LAZILY_SPEC_CONFORMANCE_DIR` by design, verified byte-identical before and after by md5. The three surviving mentions of the retired constants are prose with no live assignment, and spelled bare rather than in assignment form.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -577,7 +624,7 @@ This produced a small type fix and no new coverage, because none was possible. T
 - ~~do [#lzledgerceiling]~~
 - ~~do [#lzunreachableunprobed]~~
 - ~~do [#lzrsbindpending]~~
-- do [#lzdartboundfloor]
+- ~~do [#lzdartboundfloor]~~
 - do [#lzdartarrayblocks]
 - do [#lzorderinganchors]
 - do [#lzktareapartition]
@@ -590,7 +637,7 @@ This produced a small type fix and no new coverage, because none was possible. T
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzdartboundfloor] [lazily-dart] scripts/check-unbound-blocks.py still carries two typed `>=` floors that #lzblockmagnitudeaudit deliberately left alone because they are different rungs: MIN_BOUND_BLOCKS=697 (blocks BOUND) and MIN_BLOCK_FIXTURES=144 (fixtures opened). MIN_BOUND_BLOCKS is now the last number in this repo a person re-pins by hand — it read 697 when pinned and the run reports 700 today, so it is already 3 slack and guarding nothing in that range, the exact drift the block magnitude just stopped. MIN_BLOCK_FIXTURES is now REDUNDANT: the site-set equality subsumes it, since the derived site set is keyed by fixture and a missing fixture takes its sites with it. Derive the bound count the same way (declared minus the excuse ledger, asserted EQUAL) or retire it in favour of the unbound-set check that already exists, and delete MIN_BLOCK_FIXTURES. Repo: src/lazily-dart
+- [ ] [#lzdartcoveragefloors] [lazily-dart] scripts/check-conformance-coverage.sh still carries MIN_FIXTURES="${MIN_FIXTURES:-144}" at line 371 and MIN_SCENARIOS="${MIN_SCENARIOS:-153}" at line 372 — the same implied shape #lzdartboundfloor just deleted from check-unbound-blocks.py, in a different file, which is why it was outside that item's named path. Both are subsumed by the identity assertion in their OWN file: the opened-set-equals-corpus-minus-KNOWN_UNCOVERED loop that fails with "canonical fixture '$fixture' was NOT opened by the suite" at line 155, which names the fixture instead of reporting a magnitude. This is exactly what lazily-py demonstrated when it deleted MIN_FIXTURES=145: dropping a fixture takes the count under the floor, but the run dies EARLIER on the set identity, so the floor is never reached in the state it was supposed to guard. DO NOT simply delete them: py kept its non-implied `covered -eq 0` zero-guard, because every loop above it is vacuously satisfied by an empty population, and lazily-go kept BOTH zero-guards plus added two `expectation <= 0` guards when it converted. Check what dart's equivalents are first and keep or add them. Also mind the comment trap that caught py and rs: do NOT spell either retired constant in its greppable assignment form anywhere under scripts/, because lazily-spec/scripts/check-corpus-floors.mjs greps for exactly that shape and will keep deriving and comparing a floor nothing runs — rs passed for weeks that way, reading 150 and 166 out of two comments. Describe them in prose instead, as #lzgotypedfloors did.
 - [ ] [#lzdartarrayblocks] [lazily-dart] dart`s walk is object-valued only, so array-valued tracked keys contribute no site: the same 144 opened fixtures give 725 sites / 616 digests under dart`s rule and 737/628 when array ELEMENTS count. The gap is exactly 12 blocks and they are all in one fixture — `signaling/anti_spoof_session.json`, whose eight array-valued steps[].expect keys carry 1+2+3+1+1+1+1+2 elements. lazily-js instruments each element (which is why js derives 747 where dart derives 725); dart`s objects-only rule sees none of them, so whatever those 12 blocks assert — one of them is the anti-spoof invariant the fixture exists for — is outside rung 0 in this binding. Decide deliberately: either instrument array elements as js does, or record why an array-valued block has no bindable site here. Related and worth settling in the same pass: dart reads its block-name set out of the tracker, so a name the CORPUS grows is invisible on both the inventory and the derivation at once (a NAME-OPEN `^(assert|expect)` scan finds nothing beyond the five names today — `expected` 405, `expect` 294, `assertions` 32, `expect_initial` 3, `expect_after` 3 — but that is today`s corpus, not a guarantee). Repo: src/lazily-dart
 - [ ] [#lzorderinganchors] [lazily-spec] scripts/check-assertion-ordering.py ORDERED_CHECKS anchors its ordering contract on the EXACT floor literals the bindings are now removing - regexes like 'assert accepted == 6', 'assert replayed == 12', 'assert.equal(accepted, 10)' for py/js/cs. lazily-py could not delete three of its floors this cycle and shipped them as DEAD ANCHORS, kept only to satisfy this guard, with the live constant-free assertion sitting above them. That is debt the guard created. Re-anchor on something stable that is not a value - a named helper call, or a marker the runner declares - so removing a constant does not break an unrelated ordering contract. Note the anchor must also be UNIQUE in the file (py tripped 'anchors are not unique' by quoting the literal in an explanatory comment). Repo: src/lazily-spec, then src/lazily-py to drop the dead anchors.
 - [ ] [#lzktareapartition] [lazily-kt] check-conformance-coverage.sh declares REQUIRED_AREAS (27 areas) with no EXCUSED_AREAS complement, so the area list scopes the AUDIT and not the set the suite OPENS: kt opens 148 fixtures / replays 157 scenarios where deriving from the areas alone gives 147 / 151. lazily-spec's check-corpus-floors.mjs therefore declines to derive any floor for kt (it would otherwise have called an honest MIN_FIXTURES=148 unsatisfiable). lazily-cpp pairs the two arrays and its own guard enforces the exact complement, and there the derivation is exact. Add the EXCUSED_AREAS complement (or the equivalent partition assertion) so kt's floors become auditable from the corpus side. Repo: src/lazily-kt

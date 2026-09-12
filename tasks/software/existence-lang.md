@@ -56,6 +56,37 @@ $ existence --ontology . audit --structure --mirrors --format json
 Zero findings — the three near-duplicate pairs (abstract/abstraction, exist/existence, redefine/redefinition) and the nine `~/.claude/CLAUDE.md` kernel rows are all gone. Those were the whole standing false-positive set, so next Monday's audit issue should come back clean on those two checks.
 
 **CI, recorded as pending, not waited on:** the Release run (`34671312780`) is in progress across all seven build targets; ontology CI (`34671335056`) and Pages (`34671335119`) are queued on the pin bump. As the backlog item anticipated, the tag also fires the crates.io publish job, which will 403 until [#cratestoken] is resolved — the GitHub Release and the tag land regardless, and `cargo install --git --tag` only needs the tag, which is what all three workflows use.
+
+### Re: do [#xlmirrorcover] — opus-5
+
+> **Queue prompt:**
+>
+> do [#xlmirrorcover]
+
+
+Decided, implemented, released, and declared on the real table.
+
+**The decision.** `rings = [0]` on a `[[mirrors]]` entry is a **completeness claim**: the table's rows are exactly the terms of those rings. The two questions the item asked:
+
+- **Several rings** → their **union**. `rings = [0, 1]` wants a row for every term of either ring and accepts a row from either. Union is the only reading that composes, because ring term lists are disjoint — an intersection would always be empty.
+- **A deliberate subset of one ring** → **not expressible, on purpose.** Such a table omits `rings` and keeps today's behaviour (each row must name a real node; nothing is required to be present). A claim that permits arbitrary omission detects nothing, which is exactly the hole this key exists to close. If a real table ever needs "ring 0 minus three terms", that is a separate `except` feature to add when something needs it — adding it now would let the coverage check be silently defeated, the same failure mode as [#xlthreshrev] and [#xlmentionkeep].
+
+Two further rules fall out: `rings` on a `nodes` or `toc` mirror is a config error (`toc` mirrors are regenerated whole; `nodes` mirrors deliberately tolerate extras), and naming an undeclared level is a config error too — the same typo protection `compare` already has, since a typo would silently claim coverage of nothing.
+
+**The code** (`existence-lang/existence` `9c9494e`, tag `v0.9.0`). `Mirror.rings: Vec<u32>`; validation in `check()`; `table_mirror` collects the union of declared rings and the set of row terms and diffs both ways. Two new check names so the report stays legible:
+
+- `mirror_coverage` — a declared-ring term with no row (the omission the item is about)
+- `mirror_extra_row` — a row naming a term outside the declared rings (the table grew past its claim)
+
+Five regression tests, including `without_a_rings_claim_coverage_is_not_checked` — that one guards the claim itself, so a later refactor cannot make coverage unconditional and break every partial-copy mirror. `make check` green: 106 tests, 108 under `--features sparql` (from 101/103), clippy `-D warnings`, `fmt --check`.
+
+Minor bump, not a patch: this adds user-visible config surface, and every prior feature in this repo took a minor. It matters practically too — `Mirror` does not `deny_unknown_fields`, so a v0.8.1 binary reads `rings = [0]` and silently ignores it. Shipping the key without the pin would have left the claim inert in CI, which is the same mistake [#xlthreshrev] had just finished cleaning up.
+
+**Declared on the real table** (`existence-lang/ontology` `195e840`): `rings = [0]` on the `~/.claude/CLAUDE.md` mirror, and `EXISTENCE_REV` → `v0.9.0` in all three workflows.
+
+**Verification.** A clean result proves nothing on its own, so I made the check fire first. Widening the live claim to `rings = [0, 1]` reported 17 `mirror_coverage` findings (`algorithm`, `coherence`, `collective`, …); restoring `rings = [0]` returned clean. So the installed binary is running the new code and the table is genuinely complete today — 14 rows, 14 Ring 0 terms, in the same order. The full audit now reports `errors: 0` with structure and mirrors clean; the only 11 warnings left are the `unlinked_mention` keeps, which is the next queue item.
+
+**Release status.** The `v0.8.1` run finished with only the crates.io `publish` job failing — the [#cratestoken] 403, as expected. GitHub Release `v0.8.1` exists with 7 assets, which is all `cargo install --git --tag` needs, so the pin bump in the previous item was never at risk. The `v0.9.0` Release run is in progress and will fail the same publish job for the same reason; ontology CI and Pages are queued on the pin bump.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
@@ -63,14 +94,13 @@ Zero findings — the three near-duplicate pairs (abstract/abstraction, exist/ex
 
 <!-- agent:queue priority go -->
 - ~~do [#xlthreshrev]~~
-- do [#xlmirrorcover]
+- ~~do [#xlmirrorcover]~~
 - do [#xlmentionkeep]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#xlmirrorcover] Let a `table` mirror declare which rings it claims, so `compare = "paraphrase"` can check coverage and not only that each row maps to a node: `~/.claude/CLAUDE.md` is exactly the 14 Ring 0 kernel terms, so a new kernel term that never gets a row is silent drift today. Proposal: `rings = [0]` on the `[[mirrors]]` entry — warn on a declared-ring term with no row and on a row outside the declared rings (the existing no-node check already covers a row naming nothing). Design decision first: what a table mirroring several rings, or a deliberate subset of one, should mean
 - [ ] [#xlmentionkeep] Give the audit a way to record a reviewed-and-intentionally-unlinked mention, so `contradictions/unlinked_mention` stops re-listing the 11 permanent keeps every weekly run: axiology nature/type, ontology type, domain unique, type science (ordinary English in a borrowed sentence), consciousness being, unique being (a participle, not the noun), belief-system system, evolutionary-linguistics linguistics (the node's own name), physical-system system (self-reference), epistemology concept (inside a quoted example), and exist being (left unlinked permanently because being.md is "To be, to exist", so the link would recreate a mutual-definition cycle — [#xlgenuscycles] settled the other four pairs and deliberately left this one). Design decision first, then code: the marker could be an `[audit]` allow table in `existence.toml` keyed by term+mention, an inline HTML comment in the node, or a SPEC rule that exempts quoted/borrowed sentences from the scan. Same class of problem as [#xlthreshrev] — a check whose true positives are already resolved but unrecordable trains the reader to skip the report. Discuss the shape before editing
 <!-- /agent:backlog -->
 
@@ -120,4 +150,5 @@ Zero findings — the three near-duplicate pairs (abstract/abstraction, exist/ex
 - 2026-09-11 [#xlgenuscycles] Decide the genus for the 4 remaining definitional cycles (audit `contradictions/mutual_definition`): aesthetics -> axiology, axiology -> ethics, coercion -> violence, qualitative -> quantitative. Same procedure `#xlchaingaps` used for entity/information: pick which side is the genus and reword one sentence so the pair stops defining each other. Content decision, four sentences
 - 2026-09-11 [#xlclaudetable] Decide what the `~/.claude/CLAUDE.md` philosophy table is (audit `mirrors/mirror_drift`, 9 rows: context, domain, evolution, existence, focus, perspective, resolution, story, system). Every row summarises rather than quotes its node, so word overlap runs 0.00-0.21 and the mirror check calls it drift. Either reword the rows to the node lay definitions, making the table a real mirror, or declare the summary style intended and give the comparator a looser rule for `kind = toc` style mirrors. That file is your global instruction surface, so the direction is yours
 - 2026-09-11 [#xlthreshrev] Ship the two audit-rule changes to the ontology workflows: `existence` ddc0cc9 gates `near_duplicate` on 0.25 definition overlap and 78df5f3 makes table wording-drift opt-in, but `.github/workflows/{audit,ci,pages}.yml` in `src/existence-lang/ontology` all pin `EXISTENCE_REV: v0.8.0`, so the weekly audit issue keeps reporting abstract/abstraction, exist/existence, redefine/redefinition and the nine `~/.claude/CLAUDE.md` kernel rows. Cut existence 0.8.1 (`make release`) and bump the three `EXISTENCE_REV` values to `v0.8.1`. Note the tag also runs the crates.io publish job, which 403s until [#cratestoken] is resolved; the GitHub Release and tag land either way, which is all `cargo install --git --tag` needs
+- 2026-09-11 [#xlmirrorcover] Let a `table` mirror declare which rings it claims, so `compare = "paraphrase"` can check coverage and not only that each row maps to a node: `~/.claude/CLAUDE.md` is exactly the 14 Ring 0 kernel terms, so a new kernel term that never gets a row is silent drift today. Proposal: `rings = [0]` on the `[[mirrors]]` entry — warn on a declared-ring term with no row and on a row outside the declared rings (the existing no-node check already covers a row naming nothing). Design decision first: what a table mirroring several rings, or a deliberate subset of one, should mean
 <!-- /agent:done -->

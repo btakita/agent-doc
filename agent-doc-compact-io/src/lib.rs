@@ -2082,11 +2082,23 @@ fn append_boundary_marker(content: &str, target: &str, old_content: &str) -> Str
     out
 }
 
+/// Replace any durable context-reference block in `content` with the current one.
+///
+/// `#fixcompactexchange`: the partial compact keeps the previous preamble verbatim,
+/// and that preamble already holds the block a previous compact appended. Appending
+/// without stripping accretes one identical `<dynamic_context_ref>` block per
+/// compact. Stripping unconditionally — including when there is no current manifest
+/// to append — also keeps a cleared ledger from leaving a stale block behind
+/// forever. The document ends up with exactly zero or one block.
 fn append_durable_context_reference(
     file: &Path,
     document: &str,
     content: &mut String,
 ) -> Result<()> {
+    let stripped = agent_doc_dynamic_context_io::strip_context_reference_blocks(content);
+    if stripped != *content {
+        *content = stripped;
+    }
     let Some(reference) =
         agent_doc_dynamic_context_io::durable_context_reference_for_document(file, document)?
     else {
@@ -4231,6 +4243,208 @@ mod tests {
         assert!(!exchange.contains("<context_chunk"));
         assert!(!exchange.contains("First response."));
         assert!(!exchange.contains("Second response."));
+    }
+
+    fn record_one_context_manifest(dir: &Path, file: &Path, session_id: &str, cycle_id: &str) {
+        let mut conn = agent_doc_sqlite::state_store::open_state_db(dir).unwrap();
+        agent_doc_sqlite::context_injection_ledger::record_context_manifest(
+            &mut conn,
+            &agent_doc_sqlite::context_injection_ledger::ContextManifestWrite {
+                document_id: agent_doc_hash::document_id_for_path(file),
+                session_id: session_id.to_string(),
+                cycle_id: cycle_id.to_string(),
+                cycle_state: "preflight_started".to_string(),
+                harness: "codex".to_string(),
+                prompt_fingerprint: format!("fingerprint-{cycle_id}"),
+                pack_ids: vec!["pack-ctx".to_string()],
+                token_count: 12,
+                injections: vec![
+                    agent_doc_sqlite::context_injection_ledger::ContextInjectionWrite {
+                        pack_id: "pack-ctx".to_string(),
+                        chunk_id: format!("chunk-{cycle_id}"),
+                        content_hash: format!("hash-{cycle_id}"),
+                        source_uri: "src/context.rs".to_string(),
+                        range_start: Some(4),
+                        range_end: Some(8),
+                        injection_mode:
+                            agent_doc_sqlite::context_injection_ledger::ContextInjectionMode::Expanded,
+                    },
+                ],
+            },
+        )
+        .unwrap();
+    }
+
+    fn exchange_of(document: &str) -> String {
+        agent_doc_element::element::parse(document)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "exchange")
+            .unwrap()
+            .content(document)
+            .to_string()
+    }
+
+    /// `#fixcompactexchange`: the partial compact keeps the previous preamble verbatim,
+    /// and that preamble already holds the reference block an earlier compact appended.
+    /// Without a strip, each compact appends another identical block and the operator's
+    /// exchange accretes manifest XML without bound.
+    #[test]
+    fn repeated_partial_compact_keeps_exactly_one_context_reference_block() {
+        let prior_block = concat!(
+            "<dynamic_context_ref contract=\"agent-doc-dynamic-context-manifest-v1\" ",
+            "session=\"accrete-session\" cycle=\"cycle-old\" fingerprint=\"old\" ",
+            "token_count=\"12\" modes=\"expanded:1\">\n",
+            "<context_ref handle=\"tsift://pack-ctx/chunk-cycle-old\" hash=\"hash-cycle-old\" ",
+            "source=\"src/context.rs\" mode=\"expanded\" ",
+            "expand=\"tsift --envelope source-read src/context.rs\" />\n",
+            "</dynamic_context_ref>\n",
+        );
+        let doc = format!(
+            concat!(
+                "---\nagent_doc_session: accrete-session\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Session Summary\n\n",
+                "*Compacted. Content archived to `.agent-doc/archives/previous.md`*\n\n",
+                "Compacted content:\n",
+                "- Archived 2 response topic(s): older one; older two\n\n",
+                "{}\n",
+                "### Re: first topic\n\nResponse one.\n\n",
+                "### Re: second topic\n\nResponse two.\n\n",
+                "### Re: third topic\n\nResponse three.\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+            prior_block
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("accrete.md");
+        std::fs::write(&file, &doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        record_one_context_manifest(dir.path(), &file, "accrete-session", "cycle-new");
+
+        run_component_compact_partial(
+            &file,
+            &doc,
+            &doc,
+            PartialCompactOptions {
+                target: "exchange",
+                keep: 2,
+                message: None,
+                force_disk: true,
+            },
+        )
+        .unwrap();
+
+        let once = std::fs::read_to_string(&file).unwrap();
+        let exchange = exchange_of(&once);
+        assert_eq!(
+            exchange.matches("<dynamic_context_ref").count(),
+            1,
+            "first partial compact left {} block(s):\n{exchange}",
+            exchange.matches("<dynamic_context_ref").count()
+        );
+        // The current manifest is what survives; the carried-forward copy is gone.
+        assert!(exchange.contains("chunk-cycle-new"), "{exchange}");
+        assert!(!exchange.contains("cycle=\"cycle-old\""), "{exchange}");
+        // Real prose in the kept preamble is untouched.
+        assert!(exchange.contains("- Archived 2 response topic(s): older one; older two"));
+
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &once,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        run_component_compact_partial(
+            &file,
+            &once,
+            &once,
+            PartialCompactOptions {
+                target: "exchange",
+                keep: 1,
+                message: None,
+                force_disk: true,
+            },
+        )
+        .unwrap();
+
+        let twice = std::fs::read_to_string(&file).unwrap();
+        let exchange = exchange_of(&twice);
+        assert_eq!(
+            exchange.matches("<dynamic_context_ref").count(),
+            1,
+            "second partial compact accreted a block:\n{exchange}"
+        );
+        assert_eq!(
+            exchange.matches("<context_ref ").count(),
+            1,
+            "second partial compact accreted a handle:\n{exchange}"
+        );
+    }
+
+    /// `#fixcompactexchange`: once the injection ledger is cleared there is no current
+    /// manifest to append, and a stale block must not survive the compact forever.
+    #[test]
+    fn partial_compact_drops_a_stale_block_when_no_manifest_remains() {
+        let doc = concat!(
+            "---\nagent_doc_session: stale-session\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\nKeep this prose.\n\n",
+            "<dynamic_context_ref contract=\"agent-doc-dynamic-context-manifest-v1\" ",
+            "session=\"stale-session\" cycle=\"cycle-gone\" fingerprint=\"gone\" ",
+            "token_count=\"12\" modes=\"expanded:1\">\n",
+            "<context_ref handle=\"tsift://pack-ctx/chunk-gone\" hash=\"hash-gone\" ",
+            "source=\"src/context.rs\" mode=\"expanded\" expand=\"x\" />\n",
+            "</dynamic_context_ref>\n\n",
+            "### Re: first topic\n\nResponse one.\n\n",
+            "### Re: second topic\n\nResponse two.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("stale.md");
+        std::fs::write(&file, doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_component_compact_partial(
+            &file,
+            doc,
+            doc,
+            PartialCompactOptions {
+                target: "exchange",
+                keep: 1,
+                message: None,
+                force_disk: true,
+            },
+        )
+        .unwrap();
+
+        let exchange = exchange_of(&std::fs::read_to_string(&file).unwrap());
+        assert!(
+            !exchange.contains("dynamic_context_ref"),
+            "stale block survived with no manifest to replace it:\n{exchange}"
+        );
+        assert!(exchange.contains("Keep this prose."), "{exchange}");
+        assert!(exchange.contains("### Re: second topic"), "{exchange}");
     }
 
     #[test]

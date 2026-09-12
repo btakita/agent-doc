@@ -194,6 +194,65 @@ impl DynamicContextSnapshot {
     }
 }
 
+const CONTEXT_REFERENCE_OPEN: &str = "<dynamic_context_ref";
+const CONTEXT_REFERENCE_CLOSE: &str = "</dynamic_context_ref>";
+
+/// True when a recorded injection points at the session document itself.
+///
+/// `#fixcompactexchange`: the tsift pack for a session document always contains
+/// that document, usually twice (once by absolute path, once relative to the
+/// project root). Writing "re-read the file you are already reading" handles into
+/// that same file is noise, not continuity, so they are dropped from every
+/// document-facing reference projection. SQLite still holds the full manifest.
+fn chunk_source_is_document(source_uri: &str, document: &Path, root: &Path) -> bool {
+    let candidate = Path::new(source_uri);
+    let candidate = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        root.join(candidate)
+    };
+    let candidate = candidate.canonicalize().unwrap_or(candidate);
+    candidate == document
+}
+
+/// Remove every rendered `<dynamic_context_ref>` block from component text.
+///
+/// `#fixcompactexchange`: a compact that carries an earlier preamble forward must
+/// drop the reference block that preamble already holds, or each compact appends
+/// another copy of it and the operator's exchange accretes identical manifest XML
+/// without bound. Callers strip first, then append the current manifest, so the
+/// document holds exactly zero or one block.
+pub fn strip_context_reference_blocks(content: &str) -> String {
+    if !content.contains(CONTEXT_REFERENCE_OPEN) {
+        return content.to_string();
+    }
+    let mut out = String::with_capacity(content.len());
+    let mut inside = false;
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if inside {
+            if trimmed.starts_with(CONTEXT_REFERENCE_CLOSE) {
+                inside = false;
+            }
+            continue;
+        }
+        if trimmed.starts_with(CONTEXT_REFERENCE_OPEN) {
+            // A one-line rendering closes on the same line.
+            if !trimmed.contains(CONTEXT_REFERENCE_CLOSE) {
+                inside = true;
+            }
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if inside {
+        // Unterminated block: everything after the opener was manifest metadata.
+        return out;
+    }
+    out
+}
+
 /// Load the latest durable context manifest for this document session and
 /// render it as handle-only continuity metadata.
 pub fn durable_context_reference_for_document(
@@ -218,10 +277,15 @@ pub fn durable_context_reference_for_document(
     else {
         return Ok(None);
     };
-    let chunks = context_injections_for_cycle(&conn, &document_id, &manifest.cycle_id)?
-        .into_iter()
-        .map(stored_chunk_manifest)
-        .collect();
+    let chunks: Vec<DynamicContextChunkManifest> =
+        context_injections_for_cycle(&conn, &document_id, &manifest.cycle_id)?
+            .into_iter()
+            .map(stored_chunk_manifest)
+            .filter(|chunk| !chunk_source_is_document(&chunk.source_uri, &canonical, &root))
+            .collect();
+    if chunks.is_empty() {
+        return Ok(None);
+    }
     Ok(DynamicContextSnapshot {
         contract_version: CONTRACT_VERSION.to_string(),
         status: "durable_session_reference".to_string(),
@@ -847,7 +911,10 @@ mod tests {
             "exploration": {
                 "worker_context": [{
                     "handle": "worker-main",
-                    "target": "session.md",
+                    // A worker window points at a source file, not at the session
+                    // document — a document-sourced handle is dropped from every
+                    // document-facing projection (`#fixcompactexchange`).
+                    "target": "src/worker.rs",
                     "summary": summary,
                     "expand": "tsift source-read src/lib.rs"
                 }]
@@ -1080,6 +1147,182 @@ mod tests {
         assert!(reference.contains("modes=\"expanded:"));
         assert!(!reference.contains("expanded secret payload"));
         assert!(!reference.contains("<context_chunk"));
+        // The synthesized `next_context` chunk inherits the report `target`, i.e. the
+        // session document itself, so it is filtered out (`#fixcompactexchange`).
+        assert!(reference.contains("source=\"src/worker.rs\""), "{reference}");
+        assert!(!reference.contains("source=\"session.md\""), "{reference}");
+    }
+
+    /// `#fixcompactexchange`: a tsift pack for a session document contains that
+    /// document, typically twice (absolute path and project-root-relative). Writing
+    /// "re-read the file you are already reading" handles into that same file is noise.
+    #[test]
+    fn durable_reference_drops_handles_that_point_at_the_document_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.md");
+        let document = concat!(
+            "---\n",
+            "agent_doc_session: session-1\n",
+            "agent: codex\n",
+            "---\n\n",
+            "# Session\n"
+        );
+        std::fs::write(&file, document).unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let mut conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        record_context_manifest(
+            &mut conn,
+            &ContextManifestWrite {
+                document_id: agent_doc_hash::document_id_for_path(&file),
+                session_id: "session-1".to_string(),
+                cycle_id: "cycle-1".to_string(),
+                cycle_state: "preflight_started".to_string(),
+                harness: "codex".to_string(),
+                prompt_fingerprint: "fingerprint".to_string(),
+                pack_ids: vec!["pack".to_string()],
+                token_count: 7,
+                injections: vec![
+                    // Absolute path to the document under compaction.
+                    ContextInjectionWrite {
+                        pack_id: "pack".to_string(),
+                        chunk_id: "chunk-self-abs".to_string(),
+                        content_hash: "hash-self-abs".to_string(),
+                        source_uri: canonical.display().to_string(),
+                        range_start: None,
+                        range_end: None,
+                        injection_mode: ContextInjectionMode::Expanded,
+                    },
+                    // Project-root-relative path to the same document.
+                    ContextInjectionWrite {
+                        pack_id: "pack".to_string(),
+                        chunk_id: "chunk-self-rel".to_string(),
+                        content_hash: "hash-self-rel".to_string(),
+                        source_uri: "session.md".to_string(),
+                        range_start: None,
+                        range_end: None,
+                        injection_mode: ContextInjectionMode::Expanded,
+                    },
+                    ContextInjectionWrite {
+                        pack_id: "pack".to_string(),
+                        chunk_id: "chunk-real".to_string(),
+                        content_hash: "hash-real".to_string(),
+                        source_uri: "src/real.rs".to_string(),
+                        range_start: Some(1),
+                        range_end: Some(40),
+                        injection_mode: ContextInjectionMode::Expanded,
+                    },
+                ],
+            },
+        )
+        .unwrap();
+        drop(conn);
+
+        let reference = durable_context_reference_for_document(&file, document)
+            .unwrap()
+            .unwrap();
+        assert!(reference.contains("chunk-real"), "real handle dropped: {reference}");
+        assert!(
+            !reference.contains("chunk-self-abs"),
+            "absolute self-handle survived: {reference}"
+        );
+        assert!(
+            !reference.contains("chunk-self-rel"),
+            "relative self-handle survived: {reference}"
+        );
+        assert!(reference.contains("modes=\"expanded:1\""), "{reference}");
+    }
+
+    /// `#fixcompactexchange`: a manifest that holds nothing but self-references has no
+    /// continuity value, so no block is written at all.
+    #[test]
+    fn durable_reference_is_absent_when_every_handle_is_the_document_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.md");
+        let document = "---\nagent_doc_session: session-1\nagent: codex\n---\n\n# Session\n";
+        std::fs::write(&file, document).unwrap();
+        let mut conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        record_context_manifest(
+            &mut conn,
+            &ContextManifestWrite {
+                document_id: agent_doc_hash::document_id_for_path(&file),
+                session_id: "session-1".to_string(),
+                cycle_id: "cycle-1".to_string(),
+                cycle_state: "preflight_started".to_string(),
+                harness: "codex".to_string(),
+                prompt_fingerprint: "fingerprint".to_string(),
+                pack_ids: vec!["pack".to_string()],
+                token_count: 7,
+                injections: vec![ContextInjectionWrite {
+                    pack_id: "pack".to_string(),
+                    chunk_id: "chunk-self".to_string(),
+                    content_hash: "hash-self".to_string(),
+                    source_uri: "session.md".to_string(),
+                    range_start: None,
+                    range_end: None,
+                    injection_mode: ContextInjectionMode::Expanded,
+                }],
+            },
+        )
+        .unwrap();
+        drop(conn);
+
+        assert!(
+            durable_context_reference_for_document(&file, document)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// `#fixcompactexchange`: strip is what keeps a carried-forward preamble from
+    /// accreting one identical manifest block per compact.
+    #[test]
+    fn stripping_context_reference_blocks_keeps_surrounding_prose() {
+        let content = concat!(
+            "### Session Summary\n\n",
+            "Compacted content:\n",
+            "- Archived 3 response topic(s): a; b; c\n\n",
+            "<dynamic_context_ref contract=\"v1\" session=\"s\" cycle=\"c1\" ",
+            "fingerprint=\"f\" token_count=\"7\" modes=\"expanded:1\">\n",
+            "<context_ref handle=\"tsift://pack/one\" hash=\"h\" source=\"a.rs\" ",
+            "mode=\"expanded\" expand=\"tsift --envelope source-read a.rs\" />\n",
+            "</dynamic_context_ref>\n\n",
+            "<dynamic_context_ref contract=\"v1\" session=\"s\" cycle=\"c2\" ",
+            "fingerprint=\"f\" token_count=\"7\" modes=\"expanded:1\">\n",
+            "<context_ref handle=\"tsift://pack/two\" hash=\"h\" source=\"b.rs\" ",
+            "mode=\"expanded\" expand=\"tsift --envelope source-read b.rs\" />\n",
+            "</dynamic_context_ref>\n",
+            "trailing prose\n",
+        );
+
+        let stripped = strip_context_reference_blocks(content);
+        assert!(!stripped.contains("dynamic_context_ref"), "{stripped}");
+        assert!(!stripped.contains("context_ref"), "{stripped}");
+        assert!(!stripped.contains("tsift://"), "{stripped}");
+        assert!(stripped.contains("### Session Summary"));
+        assert!(stripped.contains("- Archived 3 response topic(s): a; b; c"));
+        assert!(stripped.contains("trailing prose"));
+    }
+
+    /// An unterminated block must not leave its `<context_ref />` lines behind.
+    #[test]
+    fn stripping_an_unterminated_context_reference_block_drops_its_tail() {
+        let content = concat!(
+            "prose before\n",
+            "<dynamic_context_ref contract=\"v1\" session=\"s\" cycle=\"c\" ",
+            "fingerprint=\"f\" token_count=\"7\" modes=\"expanded:1\">\n",
+            "<context_ref handle=\"tsift://pack/one\" hash=\"h\" source=\"a.rs\" ",
+            "mode=\"expanded\" expand=\"x\" />\n",
+        );
+
+        let stripped = strip_context_reference_blocks(content);
+        assert_eq!(stripped, "prose before\n");
+    }
+
+    /// Content with no manifest block is returned byte-identical.
+    #[test]
+    fn stripping_content_without_a_context_reference_block_is_a_no_op() {
+        let content = "### Session Summary\n\nCompacted content:\n- Archived 1 topic\n";
+        assert_eq!(strip_context_reference_blocks(content), content);
     }
 
     #[test]

@@ -160,14 +160,31 @@ fn summarize_prior_preamble_context(preamble: &str) -> Option<String> {
     }
 
     let mut selected = Vec::new();
+    let mut in_context_reference = false;
     for line in preamble.lines() {
         let trimmed = line.trim();
+        // `#fixcompactexchange`: a `<dynamic_context_ref>` block is machine metadata,
+        // not prose. Selecting its lines put 120-char truncations of tsift handles and
+        // content hashes — broken XML — into the operator-visible summary.
+        if in_context_reference {
+            if trimmed.starts_with("</dynamic_context_ref>") {
+                in_context_reference = false;
+            }
+            continue;
+        }
+        if trimmed.starts_with("<dynamic_context_ref") {
+            if !trimmed.contains("</dynamic_context_ref>") {
+                in_context_reference = true;
+            }
+            continue;
+        }
         if trimmed.is_empty()
             || trimmed == "### Session Summary"
             || trimmed == "Compacted content:"
             || trimmed.starts_with("*Compacted. Content archived to `")
             || trimmed.starts_with("- Prior summary/context:")
             || trimmed.starts_with("- Trailing prompt/context:")
+            || is_partial_compact_archive_pointer(trimmed)
             || is_markdown_ordered_item(trimmed)
             || (is_session_summary && trimmed.starts_with("- "))
         {
@@ -232,6 +249,18 @@ fn summarize_prior_compact_summary(preamble: &str) -> Option<String> {
     ))
 }
 
+/// True for the partial compact's own archive pointer line.
+///
+/// `#fixcompactexchange`: the full compact's pointer (`*Compacted. Content archived
+/// to ...*`) was already filtered, but the partial compact writes
+/// `*N earlier topic(s) archived to `path`*`, which is the same machine pointer and
+/// was being quoted back as if it were prior context.
+fn is_partial_compact_archive_pointer(line: &str) -> bool {
+    line.starts_with('*')
+        && line.contains(" earlier topic(s) archived to `")
+        && line.ends_with('*')
+}
+
 fn is_markdown_ordered_item(line: &str) -> bool {
     let mut chars = line.chars().peekable();
     let mut saw_digit = false;
@@ -286,6 +315,61 @@ mod tests {
         let (preamble, sections) = parse_topic_sections(content);
         assert!(sections.is_empty());
         assert_eq!(preamble.trim(), "just preamble\nmore preamble");
+    }
+
+    /// `#fixcompactexchange`: the manifest block is machine metadata. Before the fix
+    /// its lines were selected as "prior context" and truncated at 120 chars, putting
+    /// broken `<context_ref handle="tsift://...` fragments into the visible summary.
+    #[test]
+    fn compact_summary_never_quotes_a_dynamic_context_reference_block() {
+        let content = concat!(
+            "### Session Summary\n\n",
+            "*Compacted. Content archived to `.agent-doc/archives/previous.md`*\n\n",
+            "<dynamic_context_ref contract=\"agent-doc-dynamic-context-manifest-v1\" ",
+            "session=\"s\" cycle=\"c\" fingerprint=\"f\" token_count=\"748\" modes=\"expanded:2\">\n",
+            "<context_ref handle=\"tsift://tspack-7fd447e44bac/section-1-defbf5a0bc5b\" ",
+            "hash=\"defbf5a0bc5bc203687c3fd33086227353c577f4d1550e756ce61e6015e4d73f\" ",
+            "source=\"AGENTS.md\" mode=\"expanded\" expand=\"tsift --envelope source-read AGENTS.md\" />\n",
+            "</dynamic_context_ref>\n\n",
+            "### Re: topic one\nbody\n",
+        );
+
+        let summary = summarize_compacted_exchange(content);
+        let joined = summary.join("\n");
+        assert!(
+            !joined.contains("dynamic_context_ref"),
+            "manifest opener leaked into summary: {joined}"
+        );
+        assert!(
+            !joined.contains("context_ref"),
+            "manifest handle leaked into summary: {joined}"
+        );
+        assert!(!joined.contains("tsift://"), "handle leaked: {joined}");
+        assert_eq!(
+            summary,
+            vec!["Archived 1 response topic(s): topic one".to_string()]
+        );
+    }
+
+    /// `#fixcompactexchange`: same class as the already-filtered full-compact pointer.
+    #[test]
+    fn compact_summary_does_not_quote_the_partial_compact_archive_pointer() {
+        let content = concat!(
+            "Operator preamble worth keeping.\n\n",
+            "*3 earlier topic(s) archived to `.agent-doc/archives/partial.md`*\n\n",
+            "### Re: kept topic\nbody\n",
+        );
+
+        let summary = summarize_compacted_exchange(content);
+        let joined = summary.join("\n");
+        assert!(
+            !joined.contains("earlier topic(s) archived to"),
+            "partial pointer leaked into summary: {joined}"
+        );
+        assert!(
+            joined.contains("Operator preamble worth keeping."),
+            "real preamble prose was dropped: {joined}"
+        );
     }
 
     #[test]

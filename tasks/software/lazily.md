@@ -193,7 +193,6 @@ That leaves a live design question rather than a settled answer, filed as `#lzle
 ### Stated plainly
 
 **kt's `unreachable`-class coverage is argued, not demonstrated** — as is rs's `unreachable` class generally, which still has no entries and an unprobed failure path (`#lzunreachableunprobed`). **py's `signal.py` is newer than its mypyc `.so`** in this checkout (2026-09-10 source against a 2026-07-31 build), so the suite there runs stale signal code; the agent correctly declined to `make compile` since nothing it touched is in the compiled extension and another pane may own that build state. **cs edited `AGENTS.md` around another pane's uncommitted tsift block** by hand-building the blob as `HEAD` plus its own hunk and bare-committing, rather than `--only`, which would have swept that change in — the right call, and verified after.
-
 ### Re: `#lzledgerratchet` — the ceiling self-disables, measured ten times — opus-5 · 2026-09-12T03:58-04:00
 
 > **Queue prompt:**

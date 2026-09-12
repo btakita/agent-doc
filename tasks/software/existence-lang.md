@@ -10,7 +10,7 @@ prompt_presets:
   '#actionable': 'Add actionable tasks into backlog + queue'
   '#actionable-review': 'Add actionable review items into backlog + queue'
   'rebase-conflicts': 'rebase + fix merge conflicts'
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -87,21 +87,59 @@ Minor bump, not a patch: this adds user-visible config surface, and every prior 
 **Verification.** A clean result proves nothing on its own, so I made the check fire first. Widening the live claim to `rings = [0, 1]` reported 17 `mirror_coverage` findings (`algorithm`, `coherence`, `collective`, …); restoring `rings = [0]` returned clean. So the installed binary is running the new code and the table is genuinely complete today — 14 rows, 14 Ring 0 terms, in the same order. The full audit now reports `errors: 0` with structure and mirrors clean; the only 11 warnings left are the `unlinked_mention` keeps, which is the next queue item.
 
 **Release status.** The `v0.8.1` run finished with only the crates.io `publish` job failing — the [#cratestoken] 403, as expected. GitHub Release `v0.8.1` exists with 7 assets, which is all `cargo install --git --tag` needs, so the pin bump in the previous item was never at risk. The `v0.9.0` Release run is in progress and will fail the same publish job for the same reason; ontology CI and Pages are queued on the pin bump.
+
+### Re: do [#xlmentionkeep] — opus-5
+
+> **Queue prompt:**
+>
+> do [#xlmentionkeep]
+
+
+Decided, implemented, released, and all twelve keeps recorded. The offline audit is now fully clean.
+
+**The shape.** An `[audit]` allow table in `existence.toml`, keyed by term + mention, over the two alternatives:
+
+```toml
+[[audit.keep_unlinked]]
+term = "type"
+mention = "science"
+reason = "\"mathematics, logic, and computer science\" names a field in a borrowed sentence"
+```
+
+A per-node HTML comment puts the note next to the prose, which reads well, but scatters twelve decisions across twelve files where no one can review them together, and it would show up in the published Pages markdown. A SPEC rule exempting quoted or borrowed sentences is heuristic and covers only two of the twelve — it cannot express `exist`/`being` at all, which is a deliberate keep for a structural reason, not a quoting accident. The table sits where `[[mirrors]]` and `rings` already live, is greppable, and shows up as a reviewable diff.
+
+**Two rules stop it becoming a drawer of forgotten exemptions** — the item's own worry, that a check whose true positives are already resolved but unrecordable trains the reader to skip the report. An allow list nobody prunes is the same failure in slower motion:
+
+- **`reason` has no default.** An exemption with no stated reason cannot be told apart from silencing the check, so omitting it is a parse error.
+- **An entry that no longer matches anything is reported as `stale_keep`** — the mention got linked, the sentence was rewritten, or the term is misspelled. A typo lands here too, since a misspelled term or mention matches nothing.
+
+**The code** (`existence-lang/existence` `fba8e0d`, tag `v0.10.0`). `[audit] keep_unlinked` in config; `unlinked_mentions` consults the keeps, tracks which ones matched, and emits `stale_keep` for the rest. Three tests: a kept mention reports nothing, a keep matching nothing reports `stale_keep` *and still reports the real mention* (a stale entry exempts nothing), and a missing `reason` fails the parse. `make check` green: 109 tests, 111 under `--features sparql` (from 106/108). Minor bump for the same reason as last cycle — new config surface, and a v0.9.0 binary would read the key and ignore it.
+
+**The twelve keeps** (`existence-lang/ontology` `3c6309e`), each checked against the actual prose rather than taken from the backlog text: ordinary English about values or kinds (`axiology` nature, `axiology` type, `ontology` type), an adjective (`domain` unique — "her unique characteristics"), a field in a borrowed sentence (`type` science), a gerund or participle rather than the noun Being (`consciousness` "the ability of being present", `unique` "Being the only one of its kind"), a node naming itself (`belief-system`, `evolutionary-linguistics`, and `physical-system`, where "outside the system" refers back to the node), the quoted Plato example (`epistemology` concept), and `exist`/`being`, left unlinked permanently by [#xlgenuscycles] because `being.md` is "To be, to exist" and the link would recreate the cycle. `EXISTENCE_REV` → `v0.10.0` in all three workflows.
+
+**Verification, again by making the check fire rather than trusting a clean run.** With the twelve recorded, `--contradictions` reports zero findings and zero `stale_keep`, so every entry matched something real. Then I mistyped one entry's mention (`linguistics` → `language`) and the installed binary reported both the real `unlinked_mention` and a `stale_keep` for the bogus entry; restoring returned it to clean.
+
+The full offline audit is now clean for the first time:
+
+```
+$ existence --ontology . audit --structure --contradictions --mirrors --format json
+{ "summary": { "errors": 0, "warnings": 0, ... }, "clean": true }
+```
+
+**Release status.** `v0.9.0` finished exactly like `v0.8.1` — only the crates.io `publish` job failed on the [#cratestoken] 403, GitHub Release has its 7 assets, and ontology CI on that pin passed. `v0.10.0` is in progress and will fail the same job for the same reason. That is the third consecutive release blocked on the token, all of them still fully usable through `cargo install --git --tag`.
+
+Queue drained — all three items closed. What remains is the three gated review items, each genuinely blocked on a credential or permission this session cannot mint: [#cratestoken] (a Console-minted crates.io token), [#auditprtoken] (`admin:org` scope or an `AUDIT_TOKEN` secret), [#semantickey] (a real `sk-ant-api03-` key).
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- ~~do [#xlthreshrev]~~
-- ~~do [#xlmirrorcover]~~
-- do [#xlmentionkeep]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#xlmentionkeep] Give the audit a way to record a reviewed-and-intentionally-unlinked mention, so `contradictions/unlinked_mention` stops re-listing the 11 permanent keeps every weekly run: axiology nature/type, ontology type, domain unique, type science (ordinary English in a borrowed sentence), consciousness being, unique being (a participle, not the noun), belief-system system, evolutionary-linguistics linguistics (the node's own name), physical-system system (self-reference), epistemology concept (inside a quoted example), and exist being (left unlinked permanently because being.md is "To be, to exist", so the link would recreate a mutual-definition cycle — [#xlgenuscycles] settled the other four pairs and deliberately left this one). Design decision first, then code: the marker could be an `[audit]` allow table in `existence.toml` keyed by term+mention, an inline HTML comment in the node, or a SPEC rule that exempts quoted/borrowed sentences from the scan. Same class of problem as [#xlthreshrev] — a check whose true positives are already resolved but unrecordable trains the reader to skip the report. Discuss the shape before editing
 <!-- /agent:backlog -->
 
 ## Review
@@ -151,4 +189,5 @@ Minor bump, not a patch: this adds user-visible config surface, and every prior 
 - 2026-09-11 [#xlclaudetable] Decide what the `~/.claude/CLAUDE.md` philosophy table is (audit `mirrors/mirror_drift`, 9 rows: context, domain, evolution, existence, focus, perspective, resolution, story, system). Every row summarises rather than quotes its node, so word overlap runs 0.00-0.21 and the mirror check calls it drift. Either reword the rows to the node lay definitions, making the table a real mirror, or declare the summary style intended and give the comparator a looser rule for `kind = toc` style mirrors. That file is your global instruction surface, so the direction is yours
 - 2026-09-11 [#xlthreshrev] Ship the two audit-rule changes to the ontology workflows: `existence` ddc0cc9 gates `near_duplicate` on 0.25 definition overlap and 78df5f3 makes table wording-drift opt-in, but `.github/workflows/{audit,ci,pages}.yml` in `src/existence-lang/ontology` all pin `EXISTENCE_REV: v0.8.0`, so the weekly audit issue keeps reporting abstract/abstraction, exist/existence, redefine/redefinition and the nine `~/.claude/CLAUDE.md` kernel rows. Cut existence 0.8.1 (`make release`) and bump the three `EXISTENCE_REV` values to `v0.8.1`. Note the tag also runs the crates.io publish job, which 403s until [#cratestoken] is resolved; the GitHub Release and tag land either way, which is all `cargo install --git --tag` needs
 - 2026-09-11 [#xlmirrorcover] Let a `table` mirror declare which rings it claims, so `compare = "paraphrase"` can check coverage and not only that each row maps to a node: `~/.claude/CLAUDE.md` is exactly the 14 Ring 0 kernel terms, so a new kernel term that never gets a row is silent drift today. Proposal: `rings = [0]` on the `[[mirrors]]` entry — warn on a declared-ring term with no row and on a row outside the declared rings (the existing no-node check already covers a row naming nothing). Design decision first: what a table mirroring several rings, or a deliberate subset of one, should mean
+- 2026-09-12 [#xlmentionkeep] Give the audit a way to record a reviewed-and-intentionally-unlinked mention, so `contradictions/unlinked_mention` stops re-listing the 11 permanent keeps every weekly run: axiology nature/type, ontology type, domain unique, type science (ordinary English in a borrowed sentence), consciousness being, unique being (a participle, not the noun), belief-system system, evolutionary-linguistics linguistics (the node's own name), physical-system system (self-reference), epistemology concept (inside a quoted example), and exist being (left unlinked permanently because being.md is "To be, to exist", so the link would recreate a mutual-definition cycle — [#xlgenuscycles] settled the other four pairs and deliberately left this one). Design decision first, then code: the marker could be an `[audit]` allow table in `existence.toml` keyed by term+mention, an inline HTML comment in the node, or a SPEC rule that exempts quoted/borrowed sentences from the scan. Same class of problem as [#xlthreshrev] — a check whose true positives are already resolved but unrecordable trains the reader to skip the report. Discuss the shape before editing
 <!-- /agent:done -->

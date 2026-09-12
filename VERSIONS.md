@@ -2,6 +2,43 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.371
+
+- **A `make install` mid-cycle no longer strands the attached document that
+  ordered it (`#installstrandsreplica`).** `#deploy-just-do-it` mandates an
+  install after every fix, and install fans a typed `reload_library` intent out
+  to every hot-reload-capable editor process. Retiring a native cdylib
+  generation discards the Lazily replicas it owns; the JetBrains handoff
+  re-registers them, but that re-registration does **not** converge for a
+  document that is attached and mid-cycle. The binary then observes
+  `editor_attached_model_missing`, `missing_replica` recovery exhausts, and the
+  disk descent is correctly refused — so the session that made the fix cannot
+  close itself out, with no in-binary recovery.
+
+  Observed 2026-09-11 23:36 on `tasks/agent-doc/agent-doc-bugs.md`, one minute
+  after that session's second install. The IDE (pid 2238596) had BOTH
+  `libagent_doc-1789182099748.so` (23:01) and `libagent_doc-1789184163251.so`
+  (23:36) mapped, and the replica lived in the library the reload replaced. The
+  plugin jar was current, so no `stale_plugin` warning fired; `admin reload-lib`
+  reported `1/3 editor endpoints` and did not clear it; a sibling document
+  resolved normally throughout. Only an operator re-attach in the editor cleared
+  it. The ordering was a trap: every mandated post-fix install could block the
+  closeout of the very session that made the fix.
+
+  The fan-out now reads the same open-cycle fact the recycle and restart gates
+  read (`native_reload_admission`, beside `supervisor_recycle_action` and
+  `supervisor_restart_admission` — a test pins all three to one answer). An
+  endpoint holding an attached document with an open cycle keeps its working
+  generation, logs `reload_library_deferred_cycle_open`, and records the
+  deferred version; the owning supervisor's idle watch publishes it at the first
+  tick after the cycle closes, so the editor reaches the new build with no
+  operator step. A *stalled* open cycle does not hold it — an abandoned older
+  turn must not freeze every editor on the build it happened to load, which is
+  the same deadline the recycle path force-closes past. An unreadable projection
+  defers, because the safe outcome is an editor keeping a generation that
+  demonstrably works. `lib-install` and `admin reload-lib` both report the
+  deferred count.
+
 ## 0.35.370
 
 - **A runaway agent turn is now reported instead of silently holding the queue

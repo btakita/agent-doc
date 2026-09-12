@@ -206,6 +206,103 @@ mod restart_admission_tests {
     }
 }
 
+/// Whether a native cdylib `reload_library` intent may be published to one live
+/// editor process now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeReloadAdmission {
+    /// No attached document is mid-cycle — retire the old generation.
+    Publish,
+    /// An attached document holds an open cycle. Publishing now retires the
+    /// native generation that owns that document's Lazily replica, and the
+    /// replacement generation does not carry it forward.
+    DeferCycleOpen,
+}
+
+/// Gate a native cdylib reload on the same open-cycle condition the recycle and
+/// restart paths use (`#installstrandsreplica`).
+///
+/// `#deploy-just-do-it` mandates a `make install` after every fix, and install
+/// fans a typed `reload_library` intent out to every hot-reload-capable editor
+/// process. The JetBrains handoff quiesces each replica against the outgoing
+/// generation, publishes the replacement, and re-registers. When the document
+/// that *ordered* the install is itself attached and mid-cycle, that
+/// re-registration does not converge: the binary then observes
+/// `editor_attached_model_missing`, `missing_replica` recovery exhausts, and the
+/// disk descent is correctly refused — so the session that made the fix cannot
+/// close itself out, with no in-binary recovery. Observed 2026-09-11 23:36 on
+/// `tasks/agent-doc/agent-doc-bugs.md`, one minute after that session's second
+/// install; the IDE had BOTH `libagent_doc-1789182099748.so` and
+/// `libagent_doc-1789184163251.so` mapped, and the replica lived in the one the
+/// reload replaced. `admin reload-lib` did not clear it; only an operator
+/// re-attach in the editor did.
+///
+/// The old generation keeps working, so deferring costs the editor nothing but
+/// running the previous build until the cycle closes. Stranding it costs the
+/// operator the whole closeout. Defer.
+pub fn native_reload_admission(attached_cycle_open: bool) -> NativeReloadAdmission {
+    if attached_cycle_open {
+        return NativeReloadAdmission::DeferCycleOpen;
+    }
+    NativeReloadAdmission::Publish
+}
+
+#[cfg(test)]
+mod native_reload_admission_tests {
+    use super::*;
+
+    /// `#installstrandsreplica`: the exact 2026-09-11 shape — the document that
+    /// ordered the install was attached and mid-cycle when the fan-out ran.
+    #[test]
+    fn open_cycle_on_an_attached_document_defers_the_reload() {
+        assert_eq!(
+            native_reload_admission(true),
+            NativeReloadAdmission::DeferCycleOpen
+        );
+    }
+
+    /// Deferring forever would freeze every editor on the build it happened to
+    /// load first, so a closed cycle must publish immediately.
+    #[test]
+    fn closed_cycle_publishes_the_new_generation() {
+        assert_eq!(
+            native_reload_admission(false),
+            NativeReloadAdmission::Publish
+        );
+    }
+
+    /// All three generation-retiring gates read the same fact. The recycle and
+    /// restart pair already had to be reconciled once (`#haivendupsession`); the
+    /// reload fan-out is the third path that retires live state mid-cycle.
+    #[test]
+    fn reload_gate_agrees_with_recycle_and_restart_gates_on_an_open_cycle() {
+        let recycle = supervisor_recycle_action(
+            false, // stale
+            true,  // auto_recycle
+            SupervisorRecycleCheckpoint::SafeIntraTurn,
+            false, // head_pending
+            true,  // explicit_admin
+            false, // write_wedged
+            false, // editor_delivery_stale
+            false, // reexec_failed
+            true,  // cycle_open
+        );
+        assert!(
+            matches!(recycle, SupervisorRecycleAction::DeferCycleOpen),
+            "recycle must defer on an open cycle, got {recycle:?}"
+        );
+        assert_eq!(
+            supervisor_restart_admission(true, true),
+            SupervisorRestartAdmission::DeferCycleOpen,
+            "restart must defer on the same facts"
+        );
+        assert_eq!(
+            native_reload_admission(true),
+            NativeReloadAdmission::DeferCycleOpen,
+            "the native reload fan-out must defer on the same facts"
+        );
+    }
+}
+
 /// A `start_session` failure during supervisor recycle is a transient controller
 /// teardown race while retry budget remains.
 pub fn start_session_retryable_during_recycle(

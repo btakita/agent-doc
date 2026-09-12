@@ -14983,6 +14983,20 @@ fn test_editor_hot_path_has_no_filesystem_sidecar_or_reload_broadcast_transport(
     assert!(ipc.contains("pub fn send_reload_library_to_editor("));
     assert!(controller.contains("pub fn reload_library_all_projects("));
     assert!(install.contains("reload_library_all_projects(version)"));
+    // `#installstrandsreplica`: the fan-out must consult the open-cycle gate
+    // before retiring a native generation, and a deferral must re-arm at the
+    // supervisor idle boundary rather than waiting for an operator `reload-lib`.
+    assert!(
+        controller.contains("document_cycle_blocks_native_reload(file)")
+            && controller.contains("record_pending_native_reload(project_root, lib_version)")
+            && controller.contains("reload_library_deferred_cycle_open"),
+        "the reload fan-out must defer, and record, an endpoint whose attached document is mid-cycle"
+    );
+    assert!(
+        controller.contains("pub fn publish_pending_native_reload(")
+            && idle_watch.contains("publish_pending_native_reload("),
+        "a deferred native reload must be published by the owning supervisor's idle watch"
+    );
     assert!(
         idle_watch.contains("enum QueueHeadObservation")
             && idle_watch.contains("QueueHeadObservation::AuthorityUnavailable")

@@ -309,9 +309,24 @@ pub(crate) fn run_paths(
 fn signal_reload_after_install(version: &str) {
     let report = agent_doc_controller_io::project_controller::reload_library_all_projects(version);
     eprintln!(
-        "[lib-install] reload_library intent: delivered {}/{} editor endpoints across {} projects ({} restart required, {} unavailable)",
-        report.delivered, report.endpoints, report.projects, report.restart_required, report.failed
+        "[lib-install] reload_library intent: delivered {}/{} editor endpoints across {} projects ({} restart required, {} deferred mid-cycle, {} unavailable)",
+        report.delivered,
+        report.endpoints,
+        report.projects,
+        report.restart_required,
+        report.deferred_cycle_open,
+        report.failed
     );
+    if report.deferred_cycle_open > 0 {
+        // `#installstrandsreplica`: retiring the native generation that owns an
+        // attached document's replica strands that document's own closeout. The
+        // owning supervisor publishes the deferred reload at its next idle
+        // boundary, so the editor reaches this build without an operator step.
+        eprintln!(
+            "[lib-install] {} editor endpoint(s) kept the previous native generation because an attached document is mid-cycle; the reload publishes at the next idle boundary",
+            report.deferred_cycle_open
+        );
+    }
 }
 
 /// Deterministic report from [`reload_lib`].
@@ -324,6 +339,9 @@ pub struct ReloadLibReport {
     pub delivered: usize,
     pub restart_required: usize,
     pub failed: usize,
+    /// `#installstrandsreplica` — endpoints that kept the previous generation
+    /// because an attached document was mid-cycle.
+    pub deferred_cycle_open: usize,
 }
 
 /// Send a typed `reload_library` intent to safe hot-reload editor members.
@@ -337,6 +355,7 @@ pub fn reload_lib() -> Result<ReloadLibReport> {
         delivered: fanout.delivered,
         restart_required: fanout.restart_required,
         failed: fanout.failed,
+        deferred_cycle_open: fanout.deferred_cycle_open,
     })
 }
 

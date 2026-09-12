@@ -3437,6 +3437,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                     _ => {}
                 }
+                // `#installstrandsreplica`: an install that landed mid-cycle
+                // deferred its `reload_library` fan-out rather than retiring the
+                // native generation that owns this document's Lazily replica.
+                // The cycle is closed now, so publish it — this is the same
+                // boundary the recycle gate above waits for, and it is what
+                // keeps the deferral from needing an operator `admin reload-lib`.
+                if !effective_cycle_open {
+                    agent_doc_controller_io::project_controller::publish_pending_native_reload(
+                        &path,
+                    );
+                }
                 // `#midturn-wedge-recycle`: if this tick's recycle is being driven by a
                 // proven editor-IPC wedge, latch the once-per-episode guard on the
                 // dewedge marker BEFORE any recycle path runs — the `execve` below never

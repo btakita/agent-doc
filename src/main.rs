@@ -5812,17 +5812,19 @@ fn try_main() -> anyhow::Result<()> {
                             "editor_endpoints": report.editor_endpoints,
                             "delivered": report.delivered,
                             "restart_required": report.restart_required,
+                            "deferred_cycle_open": report.deferred_cycle_open,
                             "failed": report.failed,
                                 })
                         );
                     } else {
                         println!(
-                            "[admin] reload-lib: cdylib v{} typed reload delivered to {}/{} editor endpoints across {} projects ({} restart required, {} unavailable)",
+                            "[admin] reload-lib: cdylib v{} typed reload delivered to {}/{} editor endpoints across {} projects ({} restart required, {} deferred mid-cycle, {} unavailable)",
                             report.lib_version,
                             report.delivered,
                             report.editor_endpoints,
                             report.editor_projects,
                             report.restart_required,
+                            report.deferred_cycle_open,
                             report.failed,
                         );
                     }

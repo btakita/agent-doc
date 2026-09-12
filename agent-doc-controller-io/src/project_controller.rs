@@ -7692,6 +7692,10 @@ fn record_projection_diagnostic_with_metadata(
 mod rpc;
 pub use rpc::*;
 
+/// `#installstrandsreplica` — native cdylib reload admission + deferred intent.
+mod native_reload;
+pub use native_reload::*;
+
 /// `#agent-doc-command-plane` — agent-doc control-plane ops on lazily command-plane-v1.
 pub mod command_plane;
 

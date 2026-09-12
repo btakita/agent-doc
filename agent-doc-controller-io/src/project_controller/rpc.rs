@@ -10173,6 +10173,10 @@ pub struct ReloadLibraryFanoutReport {
     pub delivered: usize,
     pub restart_required: usize,
     pub failed: usize,
+    /// `#installstrandsreplica` — endpoints holding an attached document with an
+    /// open cycle. Their reload is recorded as pending and published by the
+    /// owning supervisor's idle watch once that cycle closes.
+    pub deferred_cycle_open: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10212,57 +10216,149 @@ pub fn reload_library_all_projects(lib_version: &str) -> ReloadLibraryFanoutRepo
         if !project_root.join(".agent-doc").is_dir() {
             continue;
         }
-        report.projects += 1;
-        let Ok(status) = reliable_sync_status(&project_root) else {
+        let project = reload_library_for_project(&project_root, lib_version);
+        report.projects += project.projects;
+        report.endpoints += project.endpoints;
+        report.delivered += project.delivered;
+        report.restart_required += project.restart_required;
+        report.failed += project.failed;
+        report.deferred_cycle_open += project.deferred_cycle_open;
+    }
+    report
+}
+
+/// One project's leg of [`reload_library_all_projects`].
+///
+/// Split out so the deferred-reload re-arm can publish a single project without
+/// re-running process-scoped controller discovery (`#installstrandsreplica`).
+pub fn reload_library_for_project(
+    project_root: &Path,
+    lib_version: &str,
+) -> ReloadLibraryFanoutReport {
+    let mut report = ReloadLibraryFanoutReport {
+        projects: 1,
+        ..ReloadLibraryFanoutReport::default()
+    };
+    let Ok(status) = reliable_sync_status(project_root) else {
+        report.failed += 1;
+        return report;
+    };
+    // Documents this fan-out would strand, keyed by the editor process holding
+    // them. A pid discovered by socket fallback below has no registration and so
+    // no known document set; it is checked against every attached document in
+    // the project instead, which fails toward deferral.
+    let mut attached_by_pid: std::collections::BTreeMap<u64, Vec<PathBuf>> =
+        std::collections::BTreeMap::new();
+    let mut attached_any: Vec<PathBuf> = Vec::new();
+    for registration in &status.registrations {
+        if registration.path.is_empty() {
+            continue;
+        }
+        let path = PathBuf::from(&registration.path);
+        attached_by_pid
+            .entry(registration.pid)
+            .or_default()
+            .push(path.clone());
+        attached_any.push(path);
+    }
+    let mut endpoints = status
+        .registrations
+        .into_iter()
+        .map(|registration| {
+            (
+                registration.pid,
+                registration.editor_id,
+                registration.capabilities,
+            )
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    // `#editorendpointzero`: the registration record can be empty while the
+    // editor is alive and listening on its PID-scoped socket — the state that
+    // made this fan-out report `0/0` and leave the document permanently
+    // wedged. Fall back to socket+liveness discovery so a live editor is
+    // always reachable, whatever the record says. `editor_id` is only a
+    // payload field, so an unknown one does not block delivery.
+    for pid in agent_doc_ipc_io::discover_listening_editor_pids(project_root) {
+        if !endpoints.iter().any(|(known, _, _)| *known == pid) {
+            endpoints.insert((pid, String::new(), Vec::new()));
+        }
+    }
+    report.endpoints += endpoints.len();
+    for (pid, editor_id, capabilities) in endpoints {
+        if !agent_doc_ipc_io::is_listener_active_for_pid(project_root, pid) {
             report.failed += 1;
             continue;
-        };
-        let mut endpoints = status
-            .registrations
-            .into_iter()
-            .map(|registration| {
-                (
-                    registration.pid,
-                    registration.editor_id,
-                    registration.capabilities,
-                )
-            })
-            .collect::<std::collections::BTreeSet<_>>();
-        // `#editorendpointzero`: the registration record can be empty while the
-        // editor is alive and listening on its PID-scoped socket — the state that
-        // made this fan-out report `0/0` and leave the document permanently
-        // wedged. Fall back to socket+liveness discovery so a live editor is
-        // always reachable, whatever the record says. `editor_id` is only a
-        // payload field, so an unknown one does not block delivery.
-        for pid in agent_doc_ipc_io::discover_listening_editor_pids(&project_root) {
-            if !endpoints.iter().any(|(known, _, _)| *known == pid) {
-                endpoints.insert((pid, String::new(), Vec::new()));
-            }
         }
-        report.endpoints += endpoints.len();
-        for (pid, editor_id, capabilities) in endpoints {
-            if !agent_doc_ipc_io::is_listener_active_for_pid(&project_root, pid) {
-                report.failed += 1;
-                continue;
-            }
-            if editor_native_reload_policy(&editor_id, &capabilities)
-                == EditorNativeReloadPolicy::RestartRequired
-            {
-                report.restart_required += 1;
-                continue;
-            }
-            match agent_doc_ipc_io::send_reload_library_to_editor(
-                &project_root,
-                pid,
-                &editor_id,
-                lib_version,
-            ) {
-                Ok(true) => report.delivered += 1,
-                Ok(false) | Err(_) => report.failed += 1,
-            }
+        if editor_native_reload_policy(&editor_id, &capabilities)
+            == EditorNativeReloadPolicy::RestartRequired
+        {
+            report.restart_required += 1;
+            continue;
+        }
+        // `#installstrandsreplica`: retiring this endpoint's native generation
+        // discards the Lazily replicas it owns. Re-registration does not
+        // converge for a document that is attached and mid-cycle, so the reload
+        // waits for the same open-cycle boundary the recycle and restart gates
+        // wait for.
+        let candidates = attached_by_pid.get(&pid).unwrap_or(&attached_any);
+        let blocking = candidates
+            .iter()
+            .find(|file| crate::project_controller::document_cycle_blocks_native_reload(file));
+        if let Some(file) = blocking {
+            report.deferred_cycle_open += 1;
+            crate::project_controller::record_pending_native_reload(project_root, lib_version);
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "reload_library_deferred_cycle_open file={} editor_pid={pid} \
+                     lib_version={lib_version} reason=agent_doc_cycle_open \
+                     rearm=supervisor_idle_boundary (#installstrandsreplica)",
+                    file.display(),
+                ),
+            );
+            continue;
+        }
+        match agent_doc_ipc_io::send_reload_library_to_editor(
+            project_root,
+            pid,
+            &editor_id,
+            lib_version,
+        ) {
+            Ok(true) => report.delivered += 1,
+            Ok(false) | Err(_) => report.failed += 1,
         }
     }
     report
+}
+
+/// Publish a reload that [`reload_library_for_project`] deferred, now that
+/// `file`'s cycle has closed (`#installstrandsreplica`).
+///
+/// Called from the owning supervisor's idle watch. Returns `None` when nothing is
+/// pending, which is the ordinary case on every tick. The marker survives only
+/// while an attached document is still mid-cycle, so a project whose endpoints
+/// have gone away clears itself rather than retrying forever.
+pub fn publish_pending_native_reload(file: &Path) -> Option<ReloadLibraryFanoutReport> {
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(file);
+    let lib_version = crate::project_controller::read_pending_native_reload(&project_root)?;
+    let report = reload_library_for_project(&project_root, &lib_version);
+    if report.deferred_cycle_open == 0 {
+        crate::project_controller::clear_pending_native_reload(&project_root);
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "reload_library_deferred_published file={} lib_version={lib_version} \
+                 delivered={} endpoints={} restart_required={} failed={} \
+                 reason=agent_doc_cycle_closed (#installstrandsreplica)",
+                file.display(),
+                report.delivered,
+                report.endpoints,
+                report.restart_required,
+                report.failed,
+            ),
+        );
+    }
+    Some(report)
 }
 
 /// M4 (#stuckhandoff2) — client handoff drop-guard. The two-phase handoff is

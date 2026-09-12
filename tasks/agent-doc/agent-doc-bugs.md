@@ -955,7 +955,7 @@ This sits a layer below the `#backlogeditcorruptsreview` guard (`ensure_only_com
 **Verification.** Mutation-checked cold: replacing the outside-scope comparison with `false` reddens both `a_scoped_cp_write_that_would_touch_another_component_is_refused` and `an_empty_scope_refuses_every_change`; restoring it (from a scratch copy, with a `touch` so cargo could not reuse the mutated build) returns all six hub tests to green. `an_unscoped_cp_write_still_publishes_a_cross_component_target` is deliberately in the suite as the negative control — it pins the old behaviour, so a future change that made the scope a no-op would not read as a pass. CI `34659107871` was green on the parent commit; this commit's run is new.
 
 Two notes from this cycle's preflight, neither blocking: the `queue_maintenance_not_persisted` warning means the previous queue text is still in effect, so a newly added backlog id may not have reached the `agent:queue` mirror yet; and the exchange is at 902 lines across 36 sections.
-❯ 🚧 Fix Compact Exchange on fpe.md. Corrupted content in agent:exchange:
+❯ Fix Compact Exchange on fpe.md. Corrupted content in agent:exchange:
 ```
 <dynamic_context_ref contract="agent-doc-dynamic-context-manifest-v1" session="b69e5aeb-eab5-4a25-bc03-a9ddb69f84fc" cycle="cycle-1789167305907" fingerprint="42b6c436b2fdbaa2b9b0077601e304dc5ff8c7a4b05bac21fca356ec79350a4e" token_count="748" modes="expanded:6">
 <context_ref handle="tsift://tspack-7fd447e44bac/section-1-defbf5a0bc5b" hash="defbf5a0bc5bc203687c3fd33086227353c577f4d1550e756ce61e6015e4d73f" source="/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md" mode="expanded" expand="tsift --envelope source-read /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md --budget normal" />

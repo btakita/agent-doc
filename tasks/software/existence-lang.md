@@ -23,112 +23,11 @@ queue: stop
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/856921561b0186a44005bdcf3ba664046ec8d73bc5511ec83f3294de47388042-20260912-034542.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/856921561b0186a44005bdcf3ba664046ec8d73bc5511ec83f3294de47388042-20260912-042457.md`*
 
 Compacted content:
-- Archived 23 response topic(s): do #fixhttpsgithub; do #planwayregularly; do #xlgenusport; 20 more
-- Prior summary/context: prior compacted content: Archived 9 response topic(s): Can existence-lang integrate with OWL, RDF, and SPARQL?; do #x...
-
-### Re: do [#xlthreshrev] — opus-5
-
-> **Queue prompt:**
->
-> do [#xlthreshrev]
-
-
-Shipped. existence 0.8.1 is tagged and the three workflows now pin it.
-
-**existence** (`existence-lang/existence`, `ea3fa2b`, tag `v0.8.1`)
-`Cargo.toml` 0.8.0 → 0.8.1 plus the lockfile; `make check` green (clippy `-D warnings`, 101 tests, then both again under `--features sparql` at 103, `cargo fmt --check`); `make release` tagged, pushed, and reinstalled `existence`/`xist` locally. `git tag --contains` confirms both rule commits — ddc0cc9 (near-duplicate needs 0.25 definition overlap on top of a shared stem) and 78df5f3 (table-mirror wording drift is opt-in) — are in `v0.8.1` and in no earlier tag, which is exactly why the weekly issue kept re-reporting them.
-
-**ontology** (`existence-lang/ontology`, `38138f6`)
-`EXISTENCE_REV: v0.8.0` → `v0.8.1` in `.github/workflows/{audit,ci,pages}.yml`. Pushed.
-
-**Verification on the new binary**, from the ontology root:
-
-```
-$ existence --version
-existence 0.8.1
-$ existence --ontology . audit --structure --mirrors --format json
-{ "findings": [], "summary": { "errors": 0, "warnings": 0, ... }, "clean": true }
-```
-
-Zero findings — the three near-duplicate pairs (abstract/abstraction, exist/existence, redefine/redefinition) and the nine `~/.claude/CLAUDE.md` kernel rows are all gone. Those were the whole standing false-positive set, so next Monday's audit issue should come back clean on those two checks.
-
-**CI, recorded as pending, not waited on:** the Release run (`34671312780`) is in progress across all seven build targets; ontology CI (`34671335056`) and Pages (`34671335119`) are queued on the pin bump. As the backlog item anticipated, the tag also fires the crates.io publish job, which will 403 until [#cratestoken] is resolved — the GitHub Release and the tag land regardless, and `cargo install --git --tag` only needs the tag, which is what all three workflows use.
-
-### Re: do [#xlmirrorcover] — opus-5
-
-> **Queue prompt:**
->
-> do [#xlmirrorcover]
-
-
-Decided, implemented, released, and declared on the real table.
-
-**The decision.** `rings = [0]` on a `[[mirrors]]` entry is a **completeness claim**: the table's rows are exactly the terms of those rings. The two questions the item asked:
-
-- **Several rings** → their **union**. `rings = [0, 1]` wants a row for every term of either ring and accepts a row from either. Union is the only reading that composes, because ring term lists are disjoint — an intersection would always be empty.
-- **A deliberate subset of one ring** → **not expressible, on purpose.** Such a table omits `rings` and keeps today's behaviour (each row must name a real node; nothing is required to be present). A claim that permits arbitrary omission detects nothing, which is exactly the hole this key exists to close. If a real table ever needs "ring 0 minus three terms", that is a separate `except` feature to add when something needs it — adding it now would let the coverage check be silently defeated, the same failure mode as [#xlthreshrev] and [#xlmentionkeep].
-
-Two further rules fall out: `rings` on a `nodes` or `toc` mirror is a config error (`toc` mirrors are regenerated whole; `nodes` mirrors deliberately tolerate extras), and naming an undeclared level is a config error too — the same typo protection `compare` already has, since a typo would silently claim coverage of nothing.
-
-**The code** (`existence-lang/existence` `9c9494e`, tag `v0.9.0`). `Mirror.rings: Vec<u32>`; validation in `check()`; `table_mirror` collects the union of declared rings and the set of row terms and diffs both ways. Two new check names so the report stays legible:
-
-- `mirror_coverage` — a declared-ring term with no row (the omission the item is about)
-- `mirror_extra_row` — a row naming a term outside the declared rings (the table grew past its claim)
-
-Five regression tests, including `without_a_rings_claim_coverage_is_not_checked` — that one guards the claim itself, so a later refactor cannot make coverage unconditional and break every partial-copy mirror. `make check` green: 106 tests, 108 under `--features sparql` (from 101/103), clippy `-D warnings`, `fmt --check`.
-
-Minor bump, not a patch: this adds user-visible config surface, and every prior feature in this repo took a minor. It matters practically too — `Mirror` does not `deny_unknown_fields`, so a v0.8.1 binary reads `rings = [0]` and silently ignores it. Shipping the key without the pin would have left the claim inert in CI, which is the same mistake [#xlthreshrev] had just finished cleaning up.
-
-**Declared on the real table** (`existence-lang/ontology` `195e840`): `rings = [0]` on the `~/.claude/CLAUDE.md` mirror, and `EXISTENCE_REV` → `v0.9.0` in all three workflows.
-
-**Verification.** A clean result proves nothing on its own, so I made the check fire first. Widening the live claim to `rings = [0, 1]` reported 17 `mirror_coverage` findings (`algorithm`, `coherence`, `collective`, …); restoring `rings = [0]` returned clean. So the installed binary is running the new code and the table is genuinely complete today — 14 rows, 14 Ring 0 terms, in the same order. The full audit now reports `errors: 0` with structure and mirrors clean; the only 11 warnings left are the `unlinked_mention` keeps, which is the next queue item.
-
-**Release status.** The `v0.8.1` run finished with only the crates.io `publish` job failing — the [#cratestoken] 403, as expected. GitHub Release `v0.8.1` exists with 7 assets, which is all `cargo install --git --tag` needs, so the pin bump in the previous item was never at risk. The `v0.9.0` Release run is in progress and will fail the same publish job for the same reason; ontology CI and Pages are queued on the pin bump.
-
-### Re: do [#xlmentionkeep] — opus-5
-
-> **Queue prompt:**
->
-> do [#xlmentionkeep]
-
-
-Decided, implemented, released, and all twelve keeps recorded. The offline audit is now fully clean.
-
-**The shape.** An `[audit]` allow table in `existence.toml`, keyed by term + mention, over the two alternatives:
-
-```toml
-[[audit.keep_unlinked]]
-term = "type"
-mention = "science"
-reason = "\"mathematics, logic, and computer science\" names a field in a borrowed sentence"
-```
-
-A per-node HTML comment puts the note next to the prose, which reads well, but scatters twelve decisions across twelve files where no one can review them together, and it would show up in the published Pages markdown. A SPEC rule exempting quoted or borrowed sentences is heuristic and covers only two of the twelve — it cannot express `exist`/`being` at all, which is a deliberate keep for a structural reason, not a quoting accident. The table sits where `[[mirrors]]` and `rings` already live, is greppable, and shows up as a reviewable diff.
-
-**Two rules stop it becoming a drawer of forgotten exemptions** — the item's own worry, that a check whose true positives are already resolved but unrecordable trains the reader to skip the report. An allow list nobody prunes is the same failure in slower motion:
-
-- **`reason` has no default.** An exemption with no stated reason cannot be told apart from silencing the check, so omitting it is a parse error.
-- **An entry that no longer matches anything is reported as `stale_keep`** — the mention got linked, the sentence was rewritten, or the term is misspelled. A typo lands here too, since a misspelled term or mention matches nothing.
-
-**The code** (`existence-lang/existence` `fba8e0d`, tag `v0.10.0`). `[audit] keep_unlinked` in config; `unlinked_mentions` consults the keeps, tracks which ones matched, and emits `stale_keep` for the rest. Three tests: a kept mention reports nothing, a keep matching nothing reports `stale_keep` *and still reports the real mention* (a stale entry exempts nothing), and a missing `reason` fails the parse. `make check` green: 109 tests, 111 under `--features sparql` (from 106/108). Minor bump for the same reason as last cycle — new config surface, and a v0.9.0 binary would read the key and ignore it.
-
-**The twelve keeps** (`existence-lang/ontology` `3c6309e`), each checked against the actual prose rather than taken from the backlog text: ordinary English about values or kinds (`axiology` nature, `axiology` type, `ontology` type), an adjective (`domain` unique — "her unique characteristics"), a field in a borrowed sentence (`type` science), a gerund or participle rather than the noun Being (`consciousness` "the ability of being present", `unique` "Being the only one of its kind"), a node naming itself (`belief-system`, `evolutionary-linguistics`, and `physical-system`, where "outside the system" refers back to the node), the quoted Plato example (`epistemology` concept), and `exist`/`being`, left unlinked permanently by [#xlgenuscycles] because `being.md` is "To be, to exist" and the link would recreate the cycle. `EXISTENCE_REV` → `v0.10.0` in all three workflows.
-
-**Verification, again by making the check fire rather than trusting a clean run.** With the twelve recorded, `--contradictions` reports zero findings and zero `stale_keep`, so every entry matched something real. Then I mistyped one entry's mention (`linguistics` → `language`) and the installed binary reported both the real `unlinked_mention` and a `stale_keep` for the bogus entry; restoring returned it to clean.
-
-The full offline audit is now clean for the first time:
-
-```
-$ existence --ontology . audit --structure --contradictions --mirrors --format json
-{ "summary": { "errors": 0, "warnings": 0, ... }, "clean": true }
-```
-
-**Release status.** `v0.9.0` finished exactly like `v0.8.1` — only the crates.io `publish` job failed on the [#cratestoken] 403, GitHub Release has its 7 assets, and ontology CI on that pin passed. `v0.10.0` is in progress and will fail the same job for the same reason. That is the third consecutive release blocked on the token, all of them still fully usable through `cargo install --git --tag`.
-
-Queue drained — all three items closed. What remains is the three gated review items, each genuinely blocked on a credential or permission this session cannot mint: [#cratestoken] (a Console-minted crates.io token), [#auditprtoken] (`admin:org` scope or an `AUDIT_TOKEN` secret), [#semantickey] (a real `sk-ant-api03-` key).
+- Archived 3 response topic(s): do [#xlthreshrev]; do [#xlmirrorcover]; do [#xlmentionkeep]
+- Prior summary/context: prior compacted content: Archived 23 response topic(s): do #fixhttpsgithub; do #planwayregularly; do #xlgenusport; 20...
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 

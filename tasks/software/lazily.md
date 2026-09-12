@@ -12,7 +12,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -484,18 +484,53 @@ One finding that clears the way for the next queue item: **`#lzktareapartition` 
 Six follow-ups filed: gd's ledger (topmost — it carries the live defect), the three walk widenings, and two dart items (`MIN_BOUND_BLOCKS=697` is now the last hand-repinned floor there, already 3 slack at 700; and 12 array-valued blocks in `signaling/anti_spoof_session.json` sit outside dart's objects-only rule, one of them the anti-spoof invariant the fixture exists for).
 
 Exchange is at 407 lines / 16 sections with the queue active — noting it, not stopping for it.
+
+### Re: do[#lzrstypedfloors] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzrstypedfloors]
+
+
+Done — `lazily-rs f50dce6` (CI ✅), superproject `6b70ba4ad`. And the honest headline is that **this is a smaller win than the item claimed, because I went looking for the detection the equality adds and it isn't there.**
+
+`MIN_FIXTURES=150` and `MIN_SCENARIOS=166` are now derived from the corpus listing minus rs's own `KNOWN_UNCOVERED` and asserted EQUAL, with the scenario side walked through the *same* `scenario_ids` the rung above it uses. The scenario derivation is also the genuinely better witness in principle: `total` was walked from the manifest-derived `opened`, so a detached recorder shrank `total`, `replayed` and the comparison together, and the typed floor was the only thing standing outside that.
+
+**What I could not find.** I looked for a perturbation the new equality catches and the guard's existing loops do not, and there is none. Both rungs were *already exact*: every corpus fixture must be opened or excused, every excuse must name something the run did not open, every manifest id must resolve against the corpus root, and the mirror-image pair for scenarios. Deleting a fixture from a scratch corpus is caught by the id-resolution check, not the floor; adding or removing a scenario is caught by direction 1. The floors were belt-and-braces on rungs their own neighbours already pinned. I'd rather say that than dress up a maintenance change as a new guard.
+
+**What it does fix, both measured against the guard it replaces.**
+
+*The treadmill was real.* Newly excusing one scenario-bearing fixture — a routine, legitimate act — made the old guard **fail**: `only 149 distinct canonical fixtures were OPENED, expected >= 150`. Both constants then have to be re-pinned by hand, which is exactly the ritual the old comments prescribed ("read the gate's own output, set this to that `<n>`, then prove it exact by `<n>+1`"). Probed by excusing `codec/blob_backend_discriminator.json` and stripping it from both evidence channels: old guard errors, new guard tracks it — 149/156 fixtures and 152/152 scenarios, both derived, both OK. That is a guard that punishes correct maintenance, and it is why `MIN_SCENARIOS` had reached 24 below reality before someone re-pinned it.
+
+*One real hole, closed.* A **duplicated** `KNOWN_UNCOVERED` entry passes both directions — each occurrence names a real corpus file the run did not open — so the old guard exited 0 and printed `7 listed as known-uncovered` as its evidence, a number that was simply wrong. The derived arithmetic needs distinctness, so a duplicate check now comes first and refuses it. Probed both ways: old exit 0, new exit 1 naming the repeated fixture.
+
+*And no false positive in the subtle place.* An excuse naming an **uncovered** fixture must not subtract, since that fixture contributes no scenario to the derived total. Probed: 166/166, exit 0, the excuse counted in the report and not in the expectation.
+
+`make check` exit 0, zero `result: FAILED`, with 36 sites / 30 digests still exact.
+
+Two things from the audit that needed doing and are done: rs's `AGENTS.md` still told readers to validate the deleted `MIN_BLOCKS` floor "when raised above the real count" — corrected in `63f1008`, pointer `fe9905788`, and it now records the narrow-walk scope the old text left implicit.
+
+**The queue clobber left a residue.** The mirror rebuilt itself at this preflight — the binary synced 7 items into the empty body and flipped `queue: go` back on, so no operator action was needed there. But it synced **7 of 9**: `#lzorderinganchors`, `#lzktareapartition` and `#lzscenariofloormissing` are open in `agent:backlog` and absent from `agent:queue`, because the clobbered generation recorded them as consumed. Left as-is they would never drain. I'll run `agent-doc queue sync` and verify after this closeout rather than mutating the queue mid-cycle; it is recorded on `#adqueueclobber21` either way.
+
+Exchange is at 460 lines / 17 sections with the queue active — noting it, not stopping for it.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- ~~do [#lzrstypedfloors]~~
+- do [#lzgdblockledger]
+- do [#lzcppblockwalk]
+- do [#lzktblockwalk]
+- do [#lzrsblockwalk]
+- do [#lzdartboundfloor]
+- do [#lzdartarrayblocks]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzrstypedfloors] [lazily-rs] scripts/check-conformance-coverage.sh still carries two typed `>=` floors that #lzblockmagnitudeaudit deliberately left alone because they are adjacent rungs, not the block magnitude: MIN_FIXTURES="${MIN_FIXTURES:-150}" (line ~554) and MIN_SCENARIOS = ... "166" (line ~797). They are the same two defects the block magnitude just had — hand-typed and floored — on the fixture and scenario dimensions, and both are derivable from the SAME corpus listing minus the SAME committed ledgers the block derivation already reads (KNOWN_UNCOVERED for fixtures, KNOWN_UNREPLAYED_SCENARIOS for scenarios), so the plumbing is already in the file. Derive each and assert EQUAL, then prove each exact by failing at n+1. Note lazily-spec`s check-corpus-floors.mjs audits these two dimensions from the corpus side and currently reports rs as derivable, so a wrong number here is caught cross-repo — but a SLACK floor is not, which is exactly the state dart`s MIN_BLOCKS=722 was in for an afternoon. Repo: src/lazily-rs
 - [ ] [#lzgdblockledger] [lazily-gd] gd has NO rung-0 assertion-block ledger of any kind — proven at runtime, not by grep: after a green `make check`, build/conformance-fixtures-loaded.txt holds 22 lines, all bare fixture ids, zero blocks-declared/blocks-bound. tests/conformance/fixture_loader.gd records only the id. AND IT IS HIDING A LIVE DEFECT: of gd`s 136 block sites, 135 are bound and one is not — `reactive-graph/scope_teardown_equals_fold_of_disposals.json` fixture-top-level `expected`, carrying `observationally_equal: ["scope_teardown","individual_disposal"]` plus `final_state` and `after_publish`. That is the fixture`s headline claim, the thing its filename asserts. Measured: falsifying EVERY value in that block (topic:999, read.outside:-1, observed_by:["bogus"], scenario names that do not exist) exits 0 GREEN, and deleting the block entirely also exits 0 GREEN — while falsifying four step-level `expect.value` in the SAME fixture exits 2 red, so the override reaches the suite and the green isolates the unbound block. gd`s runner reads only step.get("expect"), so a fixture-top-level block is structurally unreachable; lazily-js and lazily-py both bind it and js says why: skipping the relation leaves the fixture`s entire point unverified. Staging is NOT a reason to wait: gd`s 22-fixture scope is stable and exactly ledgered (corpus ∩ IMPLEMENTED_FAMILY_PREFIXES − KNOWN_UNCOVERED = 22 → 136 sites / 127 digests, reproduced from the arrays alone), which is the paired-array shape that makes a floor auditable, and a derived magnitude moves in the same commit that adds a family prefix. Smallest honest shape, in order: (1) fixture_loader emits blocks-declared at load time; (2) a shared block_ledger.gd emitting blocks-bound; (3) bind calls in BOTH independent consumers (reactive_graph_runner._check and latest_durable_projection_test._replay_scenario); (4) a KNOWN_UNBOUND_BLOCKS excuse ledger with the three staleness checks; (5) the python twin walk plus both dimensions derived from the two arrays, asserted EQUAL; (6) bind or honestly excuse that one block — binding it means teaching gd a cross-scenario relation (capture a per-scenario observation record before _replay resets state, then compare), which is real behavioral work. GDScript obstacle to settle in (2)/(5) BEFORE starting: lazily-cs keys its digest on GetRawText() and Godot has no per-node raw JSON access — JSON.parse_string returns every number as a float — so gd needs a number-folding rule reproduced identically on both sides; all 240 numbers in gd`s 136 blocks are whole and < 2^53 today so "integer-when-whole else %.17e" agrees, but that is a property of today`s corpus and must be pinned deliberately. Also GDScript has no unsigned 64-bit, so FNV-1a needs explicit masking. Repo: src/lazily-gd
 - [ ] [#lzcppblockwalk] [lazily-cpp] cpp`s rung-0 walk reads the TOP-LEVEL `assertions` object only, no descent, no other block name: 15 sites / 15 distinct digests of the 704/601 the same 143 opened fixtures carry — 2.1%. 128 of those 143 fixtures carry no top-level `assertions` object at all, so rung 0 reports nothing whatsoever about them; corpus-wide only 18 of 156 fixtures have one. This is narrower in KIND than lazily-zig`s was (zig read several names at depth 1; cpp reads one name at depth 1), and it should be much cheaper than zig`s 239-site job: cpp`s `bound` set already holds 628 digests, so most nested blocks ARE bound by a tracker already and the widening is mostly bookkeeping rather than new runner work. Widen tests/test_assertion_keys.hpp`s declare_assertion_block to the whole block-name set at every depth, keep the guard`s python twin in lock step (it already compares digests as SETS, so a divergent rendering fails rather than passing), then bind or excuse whatever it surfaces. Verify against `make corpus-blocks-report` in lazily-spec. Repo: src/lazily-cpp
 - [ ] [#lzktblockwalk] [lazily-kt] kt`s rung-0 walk is the narrowest in the family: top-level `assertions`, object-valued, ONE candidate per fixture, no recursion, no expect/expected/expect_initial/expect_after — 18 sites / 18 distinct digests of the 725/616 the same 148 opened fixtures carry, 2.5%. The one-block-per-fixture ceiling is STRUCTURAL, not incidental: declaredBlocks in src/test/kotlin/io/github/lazily/ConformanceFixtures.kt is a Map<String, JsonObject> keyed by fixture path, so widening means changing the inventory`s data structure before changing its walk. Expect roughly 600 unbound digests to surface (lazily-zig`s comparable widening surfaced 204 over 239 sites and took a full cycle across nine runners). The magnitude guard at scripts/check-conformance-coverage.sh already states the 18-vs-725 gap and forbids narrowing the walk to make a red go away; the comment at line ~958 is where this id belongs once it exists. Verify against `make corpus-blocks-report` in lazily-spec. Repo: src/lazily-kt

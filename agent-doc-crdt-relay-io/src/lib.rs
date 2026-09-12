@@ -3877,6 +3877,32 @@ pub fn await_delivery_convergence_for_file(
         };
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
         if remaining.is_zero() || !subscription.wait_for_change(witness.version, remaining) {
+            // `#silentreplicabarrier`: the wait reached its deadline without the
+            // delivery epoch moving, so nothing was delivered, ACKed, enqueued or
+            // disconnected while we parked. That is the one observation that
+            // distinguishes a replica which is slowly converging from one that has
+            // stopped answering entirely, so charge it against the live barrier
+            // holders. A replica that merely pulls without ACKing clears this
+            // streak and stays bounded by `MAX_REDELIVERIES_WITHOUT_ACK` instead.
+            let released = {
+                let mut hub = handle.lock();
+                hub.charge_barrier_wait_without_progress()
+            };
+            if !released.is_empty() {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "crdt_replica_barrier_released_without_progress file={} clients={} waits={}",
+                        file.display(),
+                        released
+                            .iter()
+                            .map(u64::to_string)
+                            .collect::<Vec<_>>()
+                            .join(","),
+                        agent_doc_document_realtime::crdt_relay::MAX_BARRIER_WAITS_WITHOUT_PROGRESS,
+                    ),
+                );
+            }
             return delivery_convergence_witness_for_file(file);
         }
     }

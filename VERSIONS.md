@@ -2,6 +2,40 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.368
+
+- **A silent editor replica no longer holds the delivery barrier forever
+  (`#silentreplicabarrier`).** Live sighting 2026-09-12 04:06:44 on
+  `tasks/agent-doc/agent-doc-bugs.md`: a JetBrains replica restart churned
+  register/deregister five times, and the surviving client
+  `2121428668057853` registered with a queued canonical projection receipt
+  (`ensure_canonical_projection_receipt`, whose whole purpose is to hold the
+  barrier across a replica replacement) and then sent nothing at all — no
+  pull, no ACK, no projection. `crdt_current_text` reported
+  `live_editors=1 delivery_converged=false delivery_version=3` unchanged for
+  the next five minutes, so every `agent-doc <FILE>` invocation was refused
+  with `preflight deferred ...: Lazily current authority remained
+  delivery_pending`, while the operator's queue edits sat on disk (35988
+  bytes) that the canonical (35716 bytes) had never ingested.
+  `#pullnoackdeadlock`'s escape valve could not fire: its counter only
+  advances inside `RelayHub::pending_updates`, i.e. on a *pull*, so a replica
+  that never pulls keeps `redeliveries_without_ack` at 0 and
+  `member_holds_delivery_barrier` true forever. The barrier now also bounds
+  total silence. `RelayHub::charge_barrier_wait_without_progress` charges one
+  expired delivery-convergence wait against every live barrier holder, and
+  `MAX_BARRIER_WAITS_WITHOUT_PROGRESS` releases a member past its budget on
+  the same terms an offline member already is — the queued update stays
+  queued, so a recovered editor still receives it. The charge site is the
+  bounded await in `agent_doc_crdt_relay_io::await_delivery_convergence_for_file`,
+  which returns early on *any* delivery-epoch change: reaching its deadline is
+  itself the proof that nothing moved, keeping this a function of the delivery
+  stream rather than a wall clock. A replica that merely pulls without ACKing
+  clears the new streak and stays bounded by the 50-redelivery budget sized
+  for it, so a slow editor is not released early. The release is named in the
+  ops log as `crdt_replica_barrier_released_without_progress`, and
+  `nonconverging_replicas` now reports both wedge shapes instead of only the
+  pull-without-ACK one.
+
 ## 0.35.367
 
 - **A CP write no longer tombstones the components it did not touch

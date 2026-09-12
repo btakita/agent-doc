@@ -126,6 +126,23 @@ struct Member {
     /// undelivered head without its ACK ever advancing. Reset by any ACK that
     /// moves `last_ack_generation`, and by a fresh enqueue.
     redeliveries_without_ack: u32,
+    /// `#silentreplicabarrier`: bounded delivery-convergence waits that expired
+    /// against this member's unacked head without the member saying anything at
+    /// all — not even a pull. Reset by any pull, ACK, or projection.
+    barrier_waits_without_progress: u32,
+}
+
+impl Member {
+    /// Forward progress from this member clears every non-convergence streak.
+    ///
+    /// The two streaks bound different wedges (`#pullnoackdeadlock` a replica
+    /// that pulls forever without ACKing, `#silentreplicabarrier` one that never
+    /// pulls at all), but they are released by exactly the same evidence, so
+    /// they are cleared together rather than at eight separate call sites each.
+    fn clear_nonconvergence_streaks(&mut self) {
+        self.redeliveries_without_ack = 0;
+        self.barrier_waits_without_progress = 0;
+    }
 }
 
 /// `#pullnoackdeadlock`: redeliveries of one unacked head before a replica stops
@@ -142,6 +159,28 @@ struct Member {
 /// At the observed ~2 pulls/second this is roughly 25 seconds of a replica
 /// asking for the same bytes over and over, which no healthy editor does.
 pub const MAX_REDELIVERIES_WITHOUT_ACK: u32 = 50;
+
+/// `#silentreplicabarrier`: expired delivery-convergence waits before a replica
+/// that has said *nothing* stops holding the barrier.
+///
+/// [`MAX_REDELIVERIES_WITHOUT_ACK`] bounds a replica that keeps pulling the same
+/// head. It cannot bound a replica that never pulls: its counter only advances
+/// inside [`RelayHub::pending_updates`], so a member that registers and then goes
+/// silent holds [`RelayHub::delivery_converged`] false forever. Observed
+/// 2026-09-12 on `tasks/agent-doc/agent-doc-bugs.md`, where a JetBrains replica
+/// restart left client `2121428668057853` registered with a queued canonical
+/// projection receipt and zero subsequent traffic — no pull, no ACK, no
+/// projection — so `redeliveries_without_ack` stayed at 0 while every preflight
+/// refused admission with `Lazily current authority remained delivery_pending`.
+///
+/// The charge is one expired bounded wait on the delivery-convergence cell. That
+/// wait returns early on *any* delivery-epoch change, so an expiry proves nothing
+/// moved: no ACK, no enqueue, no liveness transition. Preflight parks in 500ms
+/// slices for a ~3s budget, so a single preflight attempt charges ~6 and fails
+/// closed on a frontier it cannot yet distinguish from a slow one; a second
+/// attempt crosses this threshold and admits. A merely slow editor never accrues
+/// the streak at all, because a plain pull clears it.
+pub const MAX_BARRIER_WAITS_WITHOUT_PROGRESS: u32 = 12;
 
 /// A fan-out packet: an `update` (delta) originating from `origin` that must be
 /// delivered to each replica in `targets`. Returned by
@@ -1337,6 +1376,7 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
                 last_ack_generation: 0,
                 pending: VecDeque::new(),
                 redeliveries_without_ack: 0,
+                barrier_waits_without_progress: 0,
             },
         );
         // Materialize this member's liveness cell (live-on-register) and bump the
@@ -1421,7 +1461,7 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
         let existed = match self.members.get_mut(&client_id) {
             Some(m) => {
                 m.pending.clear();
-                m.redeliveries_without_ack = 0;
+                m.clear_nonconvergence_streaks();
                 true
             }
             None => false,
@@ -1444,7 +1484,7 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
             .get_mut(&client_id)
             .ok_or_else(|| anyhow!("replica {client_id} is not registered"))?;
         member.pending.clear();
-        member.redeliveries_without_ack = 0;
+        member.clear_nonconvergence_streaks();
         // Pull the member's offline ops into canonical, then push back everything
         // the member missed. Both directions are state-vector deltas.
         let to_canonical = member.replica.diff(&self.canonical.state_vector())?;
@@ -1897,7 +1937,7 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
             // where the same client re-armed at `redeliveries=0` on generation 7
             // while `last_ack_generation` had been stuck at 5.
             if member.pending.is_empty() {
-                member.redeliveries_without_ack = 0;
+                member.clear_nonconvergence_streaks();
             }
             member.pending.push_back(PendingReplicaUpdate {
                 patch_id: format!("crdt:{}:{}:{}", packet.origin, target, generation),
@@ -1945,7 +1985,7 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
         // `#pullnoackdeadlock`: same rule as the fan-out enqueue — only a
         // caught-up member earns a fresh budget.
         if member.pending.is_empty() {
-            member.redeliveries_without_ack = 0;
+            member.clear_nonconvergence_streaks();
         }
         member.pending.push_back(PendingReplicaUpdate {
             patch_id: format!("crdt-bootstrap:{canonical_id}:{client_id}:{generation}"),
@@ -1972,6 +2012,10 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
         // the same shape `#idlerevisionreactive` settled on.
         if !member.pending.is_empty() {
             member.redeliveries_without_ack = member.redeliveries_without_ack.saturating_add(1);
+            // `#silentreplicabarrier`: a pull is not ACK progress, but it does
+            // prove the member is still servicing delivery. Only total silence
+            // accrues the barrier-wait streak.
+            member.barrier_waits_without_progress = 0;
         }
         Ok(member.pending.iter().cloned().collect())
     }
@@ -1985,12 +2029,52 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
     /// The update stays queued either way — this only removes the replica from
     /// the barrier, exactly as an offline member already is, so a recovered
     /// editor still receives it.
+    ///
+    /// `#silentreplicabarrier`: a member that has not even *pulled* across
+    /// [`MAX_BARRIER_WAITS_WITHOUT_PROGRESS`] expired convergence waits is not
+    /// converging either, and is released on the same terms.
     fn member_holds_delivery_barrier(member: &Member) -> bool {
         !member.pending.is_empty()
             && member.redeliveries_without_ack <= MAX_REDELIVERIES_WITHOUT_ACK
+            && member.barrier_waits_without_progress <= MAX_BARRIER_WAITS_WITHOUT_PROGRESS
     }
 
-    /// Replicas that are live but have stopped converging (`#pullnoackdeadlock`).
+    /// Charge one expired delivery-convergence wait against every live member
+    /// still holding the barrier, and return the ids this charge released.
+    ///
+    /// `#silentreplicabarrier`: the caller is the bounded await on the
+    /// delivery-convergence cell, which returns early on any delivery-epoch
+    /// change. Reaching its deadline therefore *is* the observation that the
+    /// barrier did not move, which makes this a function of the delivery stream
+    /// rather than a wall clock — the same shape `#pullnoackdeadlock` settled on.
+    pub fn charge_barrier_wait_without_progress(&mut self) -> Vec<u64> {
+        let live_holders: Vec<u64> = self
+            .members
+            .iter()
+            .filter(|(id, member)| self.is_live(**id) && Self::member_holds_delivery_barrier(member))
+            .map(|(id, _)| *id)
+            .collect();
+        let mut released = Vec::new();
+        for id in live_holders {
+            let Some(member) = self.members.get_mut(&id) else {
+                continue;
+            };
+            member.barrier_waits_without_progress =
+                member.barrier_waits_without_progress.saturating_add(1);
+            if !Self::member_holds_delivery_barrier(member) {
+                released.push(id);
+            }
+        }
+        if !released.is_empty() {
+            // Releasing the last holder converges delivery, so waiters must wake.
+            self.bump_delivery_epoch();
+            released.sort_unstable();
+        }
+        released
+    }
+
+    /// Replicas that are live but have stopped converging (`#pullnoackdeadlock`,
+    /// `#silentreplicabarrier`).
     pub fn nonconverging_replicas(&self) -> Vec<u64> {
         let mut ids: Vec<u64> = self
             .members
@@ -1998,7 +2082,7 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
             .filter(|(id, member)| {
                 self.is_live(**id)
                     && !member.pending.is_empty()
-                    && member.redeliveries_without_ack > MAX_REDELIVERIES_WITHOUT_ACK
+                    && !Self::member_holds_delivery_barrier(member)
             })
             .map(|(id, _)| *id)
             .collect();
@@ -2080,7 +2164,7 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
             member.pending.drain(..=matched_pos);
             member.last_ack_generation = member.last_ack_generation.max(acknowledged_generation);
             // `#pullnoackdeadlock`: forward progress clears the redelivery streak.
-            member.redeliveries_without_ack = 0;
+            member.clear_nonconvergence_streaks();
             self.pending_rebootstrap.remove(&client_id);
             if acknowledged_projection {
                 self.canonical_projection_required
@@ -2095,7 +2179,7 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
             .remove(pos)
             .is_some_and(|update| update.patch_id.starts_with("crdt-bootstrap:"));
         member.last_ack_generation = member.last_ack_generation.max(generation);
-        member.redeliveries_without_ack = 0;
+        member.clear_nonconvergence_streaks();
         if acknowledged_projection {
             self.canonical_projection_required
                 .set(&self.ctx, client_id, false);
@@ -2158,7 +2242,7 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
         }
         member.pending.drain(..=matched_pos);
         member.last_ack_generation = member.last_ack_generation.max(projected_generation);
-        member.redeliveries_without_ack = 0;
+        member.clear_nonconvergence_streaks();
         self.pending_rebootstrap.remove(&client_id);
         if acknowledged_projection {
             self.canonical_projection_required
@@ -2490,7 +2574,7 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
                 member.observed_replica = observed_replica;
                 member.pending.clear();
                 member.last_ack_generation = member.generation;
-                member.redeliveries_without_ack = 0;
+                member.clear_nonconvergence_streaks();
             }
         }
         let live: Vec<u64> = self
@@ -4201,6 +4285,114 @@ mod tests {
         // The update is NOT discarded — a recovered editor still receives it,
         // exactly as an offline member would.
         assert_eq!(hub.pending_updates(3).unwrap().len(), 1);
+    }
+
+    /// `#silentreplicabarrier`: a replica that says NOTHING must also stop
+    /// holding the delivery barrier.
+    ///
+    /// Observed 2026-09-12 on `tasks/agent-doc/agent-doc-bugs.md`. A JetBrains
+    /// replica restart churned register/deregister five times; the surviving
+    /// client `2121428668057853` registered at 04:06:44 with a queued canonical
+    /// projection receipt (`ensure_canonical_projection_receipt`, whose whole
+    /// purpose is to hold the barrier across a replica replacement) and then sent
+    /// nothing at all — no pull, no ACK, no projection — for the next five
+    /// minutes. `#pullnoackdeadlock`'s budget could not fire, because
+    /// `redeliveries_without_ack` only advances inside `pending_updates`, so it
+    /// sat at 0 while `delivery_converged` stayed false and every preflight
+    /// refused admission with `Lazily current authority remained
+    /// delivery_pending`. The barrier needs an observable that advances when the
+    /// member is silent, which is exactly an expired convergence wait.
+    #[test]
+    fn a_silent_replica_stops_holding_the_barrier() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+
+        // The exact shape that wedged: a queued canonical projection receipt on a
+        // replacement replica identity that then never speaks again.
+        assert!(hub.ensure_canonical_projection_receipt(3).unwrap());
+        assert!(
+            !hub.delivery_converged(),
+            "precondition: the queued receipt blocks convergence"
+        );
+
+        for _ in 0..MAX_BARRIER_WAITS_WITHOUT_PROGRESS {
+            assert!(
+                hub.charge_barrier_wait_without_progress().is_empty(),
+                "within the budget the barrier must still hold — an editor that is \
+                 merely slow to schedule is not a broken one"
+            );
+            assert!(!hub.delivery_converged());
+        }
+
+        assert_eq!(
+            hub.charge_barrier_wait_without_progress(),
+            vec![3],
+            "past the budget the release must name the replica it released"
+        );
+        assert!(
+            hub.delivery_converged(),
+            "a replica that never answers must stop wedging everyone else"
+        );
+        assert_eq!(hub.nonconverging_replicas(), vec![3]);
+
+        // The receipt is NOT discarded — a recovered editor still receives it.
+        assert_eq!(hub.pending_updates(3).unwrap().len(), 1);
+    }
+
+    /// `#silentreplicabarrier`: the silent-replica budget must not be reachable
+    /// by a replica that is actually servicing delivery.
+    ///
+    /// A pull is not ACK progress, so it deliberately does NOT clear
+    /// `#pullnoackdeadlock`'s streak. It does prove the member is still there,
+    /// which is the whole distinction this budget rests on — without the reset, a
+    /// healthy-but-slow editor would be released after a dozen waits instead of
+    /// the 50 redeliveries `#pullnoackdeadlock` sized for it.
+    #[test]
+    fn a_pulling_replica_never_accrues_the_silent_streak() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+        assert!(hub.ensure_canonical_projection_receipt(3).unwrap());
+
+        for _ in 0..(MAX_BARRIER_WAITS_WITHOUT_PROGRESS * 4) {
+            assert!(hub.charge_barrier_wait_without_progress().is_empty());
+            // One pull between waits is all it takes to prove liveness.
+            assert_eq!(hub.pending_updates(3).unwrap().len(), 1);
+        }
+
+        assert!(
+            !hub.delivery_converged(),
+            "a replica that keeps pulling stays inside the redelivery budget, \
+             which is the bound sized for it"
+        );
+    }
+
+    /// `#silentreplicabarrier`: a projection ACK clears the silent streak, so a
+    /// replica that recovers is a first-class member again rather than one wait
+    /// away from being dropped from the barrier forever.
+    #[test]
+    fn acking_clears_the_silent_streak() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+        assert!(hub.ensure_canonical_projection_receipt(3).unwrap());
+
+        for _ in 0..MAX_BARRIER_WAITS_WITHOUT_PROGRESS {
+            assert!(hub.charge_barrier_wait_without_progress().is_empty());
+        }
+
+        let canonical_hash = content_hash(&hub.canonical_text());
+        assert!(hub.observe_delivery_projection(3, &canonical_hash).unwrap());
+        assert!(hub.delivery_converged(), "the receipt was projected");
+
+        // A fresh obligation gets the full budget again.
+        assert!(hub.ensure_canonical_projection_receipt(3).unwrap());
+        assert!(!hub.delivery_converged());
+        for _ in 0..MAX_BARRIER_WAITS_WITHOUT_PROGRESS {
+            assert!(hub.charge_barrier_wait_without_progress().is_empty());
+        }
+        assert_eq!(hub.charge_barrier_wait_without_progress(), vec![3]);
     }
 
     /// `#pullnoackdeadlock`: a replica that never ACKs must not re-earn the

@@ -2489,6 +2489,7 @@ fn apply_cp_write_on_hub(
     authority: CrdtAuthority,
     expected_current: &str,
     content: &str,
+    scope: Option<&agent_doc_element::ComponentWriteScope>,
 ) -> Result<CpRelayWrite> {
     let ready = hub.commit_barrier_under_authority(authority)?;
     if !ready {
@@ -2524,7 +2525,34 @@ fn apply_cp_write_on_hub(
             agent_doc_hash::content_hash(&canonical)
         );
     }
-    let packet = hub.apply_canonical_replace(expected_current, content)?;
+    let packet = hub.apply_canonical_replace_scoped(expected_current, content, scope)?;
+    // `#cpwritecomponentscoped`: the ops log is the only place a scoped write is
+    // distinguishable from an unscoped one after the fact, and `unresolvable` is
+    // the signal worth chasing — a steady-state CP write that names components it
+    // cannot resolve is declaring the wrong scope.
+    if let Some(scope) = scope {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_cp_write_component_scope file={} outcome={} components=[{}]",
+                file.display(),
+                match packet.component_scope {
+                    agent_doc_document_realtime::crdt_relay::ComponentScopeOutcome::Enforced =>
+                        "enforced",
+                    agent_doc_document_realtime::crdt_relay::ComponentScopeOutcome::Unresolvable =>
+                        "unresolvable",
+                    agent_doc_document_realtime::crdt_relay::ComponentScopeOutcome::NotRequested =>
+                        "not_requested",
+                },
+                scope
+                    .components()
+                    .iter()
+                    .map(|component| format!("{}:{}", component.name, component.occurrence))
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
+        );
+    }
     let targets = packet.targets.len();
     Ok(CpRelayWrite {
         applied: true,
@@ -2760,6 +2788,22 @@ pub fn apply_cp_write_for_file(
     content: &str,
     source: &str,
 ) -> Result<Option<CpRelayWrite>> {
+    apply_cp_write_for_file_scoped(file, expected_current, content, source, None)
+}
+
+/// [`apply_cp_write_for_file`] for a CP write that declared which components it
+/// mutates (`#cpwritecomponentscoped`).
+///
+/// With a scope the relay diffs only those component bodies, so the write cannot
+/// emit an edit for any other component; a target that moved text outside its own
+/// scope is refused before anything reaches a replica.
+pub fn apply_cp_write_for_file_scoped(
+    file: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+    scope: Option<&agent_doc_element::ComponentWriteScope>,
+) -> Result<Option<CpRelayWrite>> {
     let authority = authority_for_file(&file.display().to_string());
     if !authority.editor_attached() {
         return Ok(None);
@@ -2773,7 +2817,7 @@ pub fn apply_cp_write_for_file(
     // a controller recycle / editor restart, or the FFI replica dropped), the hub
     // is absent and `with_existing_hub` returns `None`.
     let result = if let Some(result) = with_existing_hub(file, |hub| {
-        apply_cp_write_on_hub(hub, file, authority, expected_current, content)
+        apply_cp_write_on_hub(hub, file, authority, expected_current, content, scope)
     })? {
         result
     } else {
@@ -2791,7 +2835,7 @@ pub fn apply_cp_write_for_file(
         let recovered = recover_missing_hub_from_retained_projection(file, &hash)?;
         match if recovered {
             with_existing_hub(file, |hub| {
-                apply_cp_write_on_hub(hub, file, authority, expected_current, content)
+                apply_cp_write_on_hub(hub, file, authority, expected_current, content, scope)
             })?
         } else {
             None

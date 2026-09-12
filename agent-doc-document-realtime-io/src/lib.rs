@@ -2640,11 +2640,15 @@ pub fn apply_cp_write_through_relay_authority(
     if controller_document_mutation_in_progress()
         || agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file)
     {
-        return agent_doc_crdt_relay_io::apply_cp_write_for_file(
+        // `#cpwritecomponentscoped`: same ambient scope the controller RPC path
+        // forwards, read here because this branch reaches the hub in-process.
+        let scope = agent_doc_element::component_scope::current_component_write_scope();
+        return agent_doc_crdt_relay_io::apply_cp_write_for_file_scoped(
             file,
             expected_current,
             content,
             source,
+            scope.as_ref(),
         );
     }
     agent_doc_controller_io::project_controller::apply_cp_write_via_controller_model_for_doc(

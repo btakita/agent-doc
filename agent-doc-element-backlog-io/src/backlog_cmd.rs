@@ -19,6 +19,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::done_archive::{archive_pending_done, external_done_archive_ids};
+use agent_doc_element::component_scope::{self, ComponentWriteScope};
 use agent_doc_element::element;
 use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_backlog::backlog;
@@ -40,6 +41,28 @@ struct DeferredPendingWrite {
     initial: String,
     target: String,
     force_disk: bool,
+    /// `#cpwritecomponentscoped`: the union of the component occurrences every
+    /// staged mutation declared it changes, or `None` once any mutation in the
+    /// envelope is not expressible as component-body edits (it created or removed
+    /// a component, or moved the framing text between them). `None` publishes
+    /// unscoped, because an incomplete scope would refuse a legitimate write.
+    component_scope: Option<ComponentWriteScope>,
+}
+
+/// Union `addition` into an accumulated scope, where `None` on either side means
+/// "scope unknown" and poisons the result.
+fn merge_component_scope(
+    accumulated: Option<ComponentWriteScope>,
+    addition: Option<ComponentWriteScope>,
+) -> Option<ComponentWriteScope> {
+    let (accumulated, addition) = (accumulated?, addition?);
+    Some(ComponentWriteScope::new(
+        accumulated
+            .components()
+            .iter()
+            .chain(addition.components().iter())
+            .cloned(),
+    ))
 }
 
 #[derive(Debug)]
@@ -115,6 +138,7 @@ fn register_transaction_document(file: &Path, content: &str) {
             initial: content.to_string(),
             target: content.to_string(),
             force_disk: false,
+            component_scope: Some(ComponentWriteScope::default()),
         });
     });
 }
@@ -143,6 +167,7 @@ fn stage_transaction_pending_write(
                 initial: current.to_string(),
                 target: current.to_string(),
                 force_disk,
+                component_scope: Some(ComponentWriteScope::default()),
             });
             transaction
                 .documents
@@ -165,6 +190,10 @@ fn stage_transaction_pending_write(
                 );
             }
         }
+        document.component_scope = merge_component_scope(
+            document.component_scope.take(),
+            component_scope::changed_component_scope(current, target),
+        );
         document.target = target.to_string();
         document.force_disk |= force_disk;
         Ok(true)
@@ -201,7 +230,31 @@ fn persist_pending_write(file: &Path, current: &str, target: &str) -> Result<()>
     if stage_transaction_pending_write(file, current, target, force_disk)? {
         return Ok(());
     }
-    persist_pending_write_now(file, current, target, force_disk)
+    persist_pending_write_scoped(
+        file,
+        current,
+        target,
+        force_disk,
+        component_scope::changed_component_scope(current, target),
+    )
+}
+
+/// Publish one tracked-work write under its declared component scope
+/// (`#cpwritecomponentscoped`), so the relay diffs only those component bodies
+/// and refuses a target that drifted outside them.
+fn persist_pending_write_scoped(
+    file: &Path,
+    current: &str,
+    target: &str,
+    force_disk: bool,
+    scope: Option<ComponentWriteScope>,
+) -> Result<()> {
+    match scope {
+        Some(scope) => component_scope::with_component_write_scope(scope, || {
+            persist_pending_write_now(file, current, target, force_disk)
+        }),
+        None => persist_pending_write_now(file, current, target, force_disk),
+    }
 }
 
 /// Plan every tracked-work command in `f` against virtual document contents and
@@ -289,11 +342,12 @@ fn run_pending_write_transaction<T>(
         if document.initial == document.target {
             continue;
         }
-        persist_pending_write_now(
+        persist_pending_write_scoped(
             &document.file,
             &document.initial,
             &document.target,
             document.force_disk,
+            document.component_scope.clone(),
         )?;
     }
     Ok(value)
@@ -1591,6 +1645,73 @@ pub fn icebox_list(file: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// `#cpwritecomponentscoped`: the envelope's declared scope is the union of
+    /// every staged mutation's own component delta, and any mutation that is not
+    /// expressible as component-body edits makes the whole envelope unscoped.
+    mod declared_write_scope {
+        use super::super::merge_component_scope;
+        use agent_doc_element::ComponentWriteScope;
+        use agent_doc_element::component_scope::changed_component_scope;
+
+        const DOC: &str = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#a] one\n",
+            "<!-- /agent:backlog -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#a]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        fn scope(pairs: &[(&str, usize)]) -> Option<ComponentWriteScope> {
+            Some(ComponentWriteScope::from_pairs(
+                pairs
+                    .iter()
+                    .map(|(name, occurrence)| ((*name).to_string(), *occurrence)),
+            ))
+        }
+
+        #[test]
+        fn two_mutations_union_into_one_declared_scope() {
+            let after_backlog = DOC.replace("- [ ] [#a] one\n", "- [ ] [#a] one\n- [ ] [#b] two\n");
+            let after_queue = after_backlog.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
+
+            let accumulated = merge_component_scope(
+                scope(&[]),
+                changed_component_scope(DOC, &after_backlog),
+            );
+            let accumulated = merge_component_scope(
+                accumulated,
+                changed_component_scope(&after_backlog, &after_queue),
+            );
+
+            assert_eq!(accumulated, scope(&[("backlog", 0), ("queue", 0)]));
+        }
+
+        #[test]
+        fn one_unscopable_mutation_makes_the_whole_envelope_unscoped() {
+            // Materializing `review` cannot be expressed as component-body edits,
+            // so the envelope must publish unscoped rather than refuse.
+            let with_review = DOC.replace(
+                "<!-- agent:queue -->\n",
+                "<!-- agent:review -->\n<!-- /agent:review -->\n<!-- agent:queue -->\n",
+            );
+
+            let accumulated =
+                merge_component_scope(scope(&[("backlog", 0)]), changed_component_scope(DOC, &with_review));
+
+            assert_eq!(accumulated, None);
+        }
+
+        #[test]
+        fn an_already_unknown_scope_stays_unknown() {
+            let after = DOC.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
+            assert_eq!(
+                merge_component_scope(None, changed_component_scope(DOC, &after)),
+                None
+            );
+        }
+    }
+
     /// `#backlogeditcorruptsreview`: the observed corruption shape, and the
     /// legitimate edit it must not block.
     mod component_scope_guard {

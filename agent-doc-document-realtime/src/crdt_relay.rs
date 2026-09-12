@@ -171,6 +171,11 @@ pub struct BroadcastPacket {
     /// would delete them, which is a defect to investigate rather than a steady
     /// state.
     pub component_isolation_refused_lossy: bool,
+    /// `#cpwritecomponentscoped`: whether this packet's edits were bounded by a
+    /// caller-declared component scope, and if not, why. Only a CP write can
+    /// declare a scope; member-originated packets are always
+    /// [`ComponentScopeOutcome::NotRequested`].
+    pub component_scope: ComponentScopeOutcome,
 }
 
 /// One supervisor-to-editor delivery awaiting a matching visible-state projection.
@@ -307,6 +312,88 @@ fn minimal_char_span_edits(current: &str, content: &str) -> Result<Vec<(u32, u32
     }
     edits.sort_unstable_by_key(|edit| std::cmp::Reverse(edit.0));
     Ok(edits)
+}
+
+/// Outcome of the component-scope check a CP write carried (`#cpwritecomponentscoped`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComponentScopeOutcome {
+    /// The caller supplied no scope, so the changed regions were rediscovered
+    /// by a whole-document text diff.
+    NotRequested,
+    /// The scope resolved against both documents and the edits were computed
+    /// **only** inside the scoped component bodies.
+    Enforced,
+    /// A scoped component is absent from one of the two documents, so the write
+    /// is materializing or removing a component rather than editing one. The
+    /// scope cannot bound such a write, so the unscoped path was used; callers
+    /// log this because a steady-state CP write should not hit it.
+    Unresolvable,
+}
+
+/// Char offset of `byte_offset` in `doc`.
+fn char_offset_of(doc: &str, byte_offset: usize) -> usize {
+    doc[..byte_offset].chars().count()
+}
+
+/// Edits for a CP write that declared which components it mutates
+/// (`#cpwritecomponentscoped`).
+///
+/// The whole-document diff is never taken. Each scoped component body is diffed
+/// against its counterpart and the resulting spans are shifted into document
+/// space, so no edit can be emitted for any other region — the property the
+/// scope exists to provide. Everything outside the scoped bodies must match
+/// exactly; a target that moved text outside its own scope is a CP defect and is
+/// refused here rather than published to every replica.
+fn component_scoped_char_span_edits(
+    current: &str,
+    content: &str,
+    scope: &agent_doc_element::ComponentWriteScope,
+) -> Result<Option<Vec<(u32, u32, String)>>> {
+    let (Some(current_bodies), Some(content_bodies)) = (
+        agent_doc_element::component_scope::scoped_component_bodies(current, scope),
+        agent_doc_element::component_scope::scoped_component_bodies(content, scope),
+    ) else {
+        return Ok(None);
+    };
+    if current_bodies.len() != content_bodies.len() {
+        return Ok(None);
+    }
+    if agent_doc_element::component_scope::text_outside_bodies(current, &current_bodies)
+        != agent_doc_element::component_scope::text_outside_bodies(content, &content_bodies)
+    {
+        return Err(anyhow!(
+            "CP write changed text outside its declared component scope [{}]; refusing to publish (#cpwritecomponentscoped)",
+            scope
+                .components()
+                .iter()
+                .map(|component| format!("{}:{}", component.name, component.occurrence))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    let mut edits = Vec::new();
+    for (current_body, content_body) in current_bodies.iter().zip(content_bodies.iter()) {
+        let before = &current[current_body.clone()];
+        let after = &content[content_body.clone()];
+        if before == after {
+            continue;
+        }
+        let base: u32 = char_offset_of(current, current_body.start)
+            .try_into()
+            .map_err(|_| anyhow!("canonical edit offset exceeds CRDT codepoint range"))?;
+        for (offset, delete_len, insert) in minimal_char_span_edits(before, after)? {
+            edits.push((
+                base.checked_add(offset)
+                    .ok_or_else(|| anyhow!("canonical edit offset exceeds CRDT codepoint range"))?,
+                delete_len,
+                insert,
+            ));
+        }
+    }
+    // Highest offset first, so applying them in order keeps every later offset
+    // valid — the same contract `minimal_char_span_edits` publishes.
+    edits.sort_unstable_by_key(|edit| std::cmp::Reverse(edit.0));
+    Ok(Some(edits))
 }
 
 /// Split on `\n` while keeping each terminator with its line, so concatenating
@@ -1424,6 +1511,7 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
             targets,
             component_isolation_reconciled: false,
             component_isolation_refused_lossy: false,
+            component_scope: ComponentScopeOutcome::NotRequested,
         };
         self.enqueue_delivery(&packet);
         Ok(packet)
@@ -1580,6 +1668,7 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
             targets,
             component_isolation_reconciled,
             component_isolation_refused_lossy,
+            component_scope: ComponentScopeOutcome::NotRequested,
         };
         self.enqueue_delivery(&packet);
         Ok(packet)
@@ -1633,6 +1722,7 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
             targets,
             component_isolation_reconciled: false,
             component_isolation_refused_lossy: false,
+            component_scope: ComponentScopeOutcome::NotRequested,
         };
         self.enqueue_delivery(&packet);
         Ok(packet)
@@ -1716,6 +1806,26 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
         expected_current: &str,
         content: &str,
     ) -> Result<BroadcastPacket> {
+        self.apply_canonical_replace_scoped(expected_current, content, None)
+    }
+
+    /// [`Self::apply_canonical_replace`] for a CP write that declared which
+    /// components it mutates (`#cpwritecomponentscoped`).
+    ///
+    /// With a scope, the changed regions are not rediscovered from a
+    /// whole-document diff: only the scoped component bodies are diffed, so the
+    /// write is structurally incapable of emitting an edit for any other
+    /// component. A target whose text moved outside its own scope is refused.
+    /// When the scope cannot be resolved against both documents — the write is
+    /// creating or removing a component rather than editing one — this falls
+    /// back to the unscoped path and reports
+    /// [`ComponentScopeOutcome::Unresolvable`] so the caller can log it.
+    pub fn apply_canonical_replace_scoped(
+        &mut self,
+        expected_current: &str,
+        content: &str,
+        scope: Option<&agent_doc_element::ComponentWriteScope>,
+    ) -> Result<BroadcastPacket> {
         let current = self.canonical.text();
         if current != expected_current {
             return Err(anyhow!(
@@ -1725,10 +1835,23 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
             ));
         }
         let before = self.canonical.state_vector();
+        let (component_scope, edits) = match scope {
+            None => (
+                ComponentScopeOutcome::NotRequested,
+                minimal_char_span_edits(&current, content)?,
+            ),
+            Some(scope) => match component_scoped_char_span_edits(&current, content, scope)? {
+                Some(edits) => (ComponentScopeOutcome::Enforced, edits),
+                None => (
+                    ComponentScopeOutcome::Unresolvable,
+                    minimal_char_span_edits(&current, content)?,
+                ),
+            },
+        };
         // `#exchangetypingrevert`: one span per changed region, highest offset
         // first, so an untouched component between two changed ones is never
         // tombstoned and a concurrent member insertion inside it survives.
-        for (offset, delete_len, insert) in minimal_char_span_edits(&current, content)? {
+        for (offset, delete_len, insert) in edits {
             self.canonical.apply_local_edit(offset, delete_len, &insert);
         }
         self.sync_live_document_projection(&current, content);
@@ -1746,6 +1869,7 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
             targets,
             component_isolation_reconciled: false,
             component_isolation_refused_lossy: false,
+            component_scope,
         };
         self.enqueue_delivery(&packet);
         for target in &packet.targets {
@@ -3037,6 +3161,144 @@ mod tests {
             hub.pending_rebootstrap_members().is_empty(),
             "and no replica is reset to publish a raw union"
         );
+    }
+
+    /// `#cpwritecomponentscoped` fixture: three components, so a scope can name
+    /// one and leave an untouched neighbour on each side of it.
+    const SCOPED_BASE: &str = concat!(
+        "<!-- agent:exchange -->\n",
+        "Prompt.\n",
+        "<!-- /agent:exchange -->\n",
+        "<!-- agent:notes -->\n",
+        "alpha\n",
+        "<!-- /agent:notes -->\n",
+        "<!-- agent:queue -->\n",
+        "- do [#a]\n",
+        "<!-- /agent:queue -->\n",
+    );
+
+    fn queue_scope() -> agent_doc_element::ComponentWriteScope {
+        agent_doc_element::ComponentWriteScope::new([agent_doc_element::ScopedComponent::new(
+            "queue", 0,
+        )])
+    }
+
+    #[test]
+    fn a_scoped_cp_write_applies_only_inside_its_declared_component() {
+        let target = SCOPED_BASE.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
+        let mut hub = RelayHub::from_text(1, SCOPED_BASE);
+        let scope = queue_scope();
+
+        let packet = hub
+            .apply_canonical_replace_scoped(SCOPED_BASE, &target, Some(&scope))
+            .unwrap();
+
+        assert_eq!(packet.component_scope, ComponentScopeOutcome::Enforced);
+        assert_eq!(hub.canonical_text(), target);
+    }
+
+    #[test]
+    fn a_scoped_cp_write_that_would_touch_another_component_is_refused() {
+        // The CP declared `queue` but its target image also rewrote `notes`.
+        // Without the scope this publishes, and the only thing standing between
+        // the stray rewrite and every replica is a diff noticing afterwards.
+        let target = SCOPED_BASE
+            .replace("- do [#a]\n", "- do [#a]\n- do [#b]\n")
+            .replace("alpha\n", "clobbered\n");
+        let mut hub = RelayHub::from_text(1, SCOPED_BASE);
+        let scope = queue_scope();
+
+        let err = hub
+            .apply_canonical_replace_scoped(SCOPED_BASE, &target, Some(&scope))
+            .expect_err("a write outside its declared scope must be refused");
+
+        assert!(
+            err.to_string()
+                .contains("outside its declared component scope"),
+            "unexpected refusal: {err}"
+        );
+        assert_eq!(
+            hub.canonical_text(),
+            SCOPED_BASE,
+            "a refused scoped write must leave canonical untouched"
+        );
+    }
+
+    #[test]
+    fn an_unscoped_cp_write_still_publishes_a_cross_component_target() {
+        // The same target, with no scope declared: this is the pre-
+        // `#cpwritecomponentscoped` behaviour, and it is what makes the scope
+        // worth carrying rather than a redundant assertion.
+        let target = SCOPED_BASE
+            .replace("- do [#a]\n", "- do [#a]\n- do [#b]\n")
+            .replace("alpha\n", "clobbered\n");
+        let mut hub = RelayHub::from_text(1, SCOPED_BASE);
+
+        let packet = hub.apply_canonical_replace(SCOPED_BASE, &target).unwrap();
+
+        assert_eq!(packet.component_scope, ComponentScopeOutcome::NotRequested);
+        assert_eq!(hub.canonical_text(), target);
+    }
+
+    #[test]
+    fn a_scope_naming_an_absent_component_falls_back_instead_of_refusing() {
+        // A write that materializes a component cannot be bounded by a scope
+        // resolved against both documents; it must still land.
+        let target = SCOPED_BASE.replace(
+            "<!-- agent:queue -->\n",
+            "<!-- agent:review -->\n<!-- /agent:review -->\n<!-- agent:queue -->\n",
+        );
+        let mut hub = RelayHub::from_text(1, SCOPED_BASE);
+        let scope = agent_doc_element::ComponentWriteScope::new([
+            agent_doc_element::ScopedComponent::new("review", 0),
+        ]);
+
+        let packet = hub
+            .apply_canonical_replace_scoped(SCOPED_BASE, &target, Some(&scope))
+            .unwrap();
+
+        assert_eq!(packet.component_scope, ComponentScopeOutcome::Unresolvable);
+        assert_eq!(hub.canonical_text(), target);
+    }
+
+    #[test]
+    fn scoped_edits_carry_document_offsets_inside_the_scoped_body_only() {
+        let target = SCOPED_BASE.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
+        let scope = queue_scope();
+
+        let edits = component_scoped_char_span_edits(SCOPED_BASE, &target, &scope)
+            .unwrap()
+            .expect("scope resolves against both documents");
+
+        assert!(!edits.is_empty(), "the queue body did change");
+        let body_start = SCOPED_BASE.find("- do [#a]\n").unwrap();
+        let body_end = SCOPED_BASE.find("<!-- /agent:queue -->").unwrap();
+        let first = char_offset_of(SCOPED_BASE, body_start) as u32;
+        let last = char_offset_of(SCOPED_BASE, body_end) as u32;
+        for (offset, delete_len, _) in &edits {
+            assert!(
+                *offset >= first && offset + delete_len <= last,
+                "edit ({offset}, {delete_len}) escaped the queue body [{first}, {last})"
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_scope_refuses_every_change() {
+        let target = SCOPED_BASE.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
+        let mut hub = RelayHub::from_text(1, SCOPED_BASE);
+        let scope = agent_doc_element::ComponentWriteScope::default();
+
+        let err = hub
+            .apply_canonical_replace_scoped(SCOPED_BASE, &target, Some(&scope))
+            .expect_err("a write that declared no component may change none");
+
+        assert!(
+            err.to_string()
+                .contains("outside its declared component scope"),
+            "unexpected refusal: {err}"
+        );
+        assert_eq!(hub.canonical_text(), SCOPED_BASE);
     }
 
     #[test]

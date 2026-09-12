@@ -6691,6 +6691,12 @@ struct ControllerCrdtCpWritePayload {
     expected_current: String,
     content: String,
     source: Option<String>,
+    /// `#cpwritecomponentscoped`: the component occurrences this CP write
+    /// declared it mutates, as `(name, occurrence)` pairs. Absent on writes that
+    /// do not know their scope, and on payloads from a client predating the
+    /// field — both keep the unscoped whole-document path.
+    #[serde(default)]
+    component_scope: Option<Vec<(String, usize)>>,
 }
 
 pub fn apply_cp_write_via_controller_model_for_doc(
@@ -6729,6 +6735,11 @@ pub fn apply_cp_write_via_controller_model_for_doc(
         expected_current: expected_current.to_string(),
         content: content.to_string(),
         source: Some(source.to_string()),
+        // The scope is ambient rather than a parameter because it has to survive
+        // the whole `persist_pending_write` -> `converge_or_disk_write` chain that
+        // every other write shares (`#cpwritecomponentscoped`).
+        component_scope: agent_doc_element::component_scope::current_component_write_scope()
+            .map(|scope| scope.to_pairs()),
     };
     let result: ControllerCrdtCpWriteResult = request_controller(
         &project_root,
@@ -8104,11 +8115,16 @@ fn handle_crdt_cp_write_rpc(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("controller_cp_write");
-    let write = agent_doc_crdt_relay_io::apply_cp_write_for_file(
+    let scope = payload
+        .component_scope
+        .clone()
+        .map(agent_doc_element::ComponentWriteScope::from_pairs);
+    let write = agent_doc_crdt_relay_io::apply_cp_write_for_file_scoped(
         &canonical,
         &payload.expected_current,
         &payload.content,
         source,
+        scope.as_ref(),
     )?;
     Ok(ControllerCrdtCpWriteResult { write })
 }

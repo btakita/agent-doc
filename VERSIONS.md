@@ -2,6 +2,38 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.373
+
+- **The mid-cycle reload gate was reading a record that can be empty, and
+  published silently (`#editorendpointzero-reloadgate`).** 0.35.371's
+  `#installstrandsreplica` gate derived the set of at-risk documents from
+  `reliable_sync_status.registrations` alone. That record **can be empty while the
+  editor is alive and listening on its PID-scoped socket** — the fan-out's own
+  socket-discovery fallback exists for exactly that state — and with no candidate
+  documents there is nothing to find an open cycle on, so the gate published as if
+  the project were idle.
+
+  Measured live 2026-09-12 18:25 on this repo, which is why the fix is here and
+  not filed: `tasks/agent-doc/agent-doc-bugs.md` held open `cycle-1789236397866`
+  in `state.db`, its replica registration was in the ops log, and `lib-install`
+  still reported `0 deferred mid-cycle` while the IDE went on to deregister
+  replicas for the retired generation. The gate had shipped inert.
+
+  Candidates now come from the union of the registration record and
+  `open_supervisor_documents`, which walks live `agent-doc start --route-owned`
+  processes and therefore never consults the editor record; a document with an
+  open cycle is exactly a document with a live supervisor. The set is no longer
+  narrowed per editor pid — one cdylib serves a whole editor process, so a reload
+  delivered through any endpoint retires the generation holding every replica in
+  that process, and per-pid precision only reintroduced a blind spot. An
+  over-broad defer costs an editor the previous build until the idle boundary,
+  which is the cheap direction.
+
+  An empty candidate set is legitimate for a genuinely idle project, but it is
+  also the shape a silently-defeated gate takes, so it now logs
+  `reload_library_no_document_candidates` with the registration count rather than
+  leaving the next occurrence undiagnosable.
+
 ## 0.35.372
 
 - **One observed turn now settles exactly the dispatch receipt it belongs to

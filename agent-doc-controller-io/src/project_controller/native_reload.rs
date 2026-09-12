@@ -16,6 +16,7 @@
 //! cycle closes, so the editor reaches the current generation without an
 //! operator step.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -58,6 +59,50 @@ pub fn document_cycle_blocks_native_reload(file: &Path) -> bool {
         Ok(None) => false,
         Err(_) => true,
     }
+}
+
+/// Documents a native generation handoff on `project_root` could strand.
+///
+/// `#editorendpointzero-reloadgate`: the first cut of this gate read the attached
+/// set from `reliable_sync_status.registrations` alone, and that record **can be
+/// empty while the editor is alive and listening on its PID-scoped socket** — the
+/// same hole the fan-out's own socket-discovery fallback exists for. With no
+/// candidates there is nothing to find an open cycle on, so the gate published
+/// silently. Measured 2026-09-12 18:25 on this project: `agent-doc-bugs.md` held
+/// open `cycle-1789236397866` in `state.db`, its replica was registered in the ops
+/// log, and `lib-install` still reported `0 deferred mid-cycle`.
+///
+/// `open_supervisor_documents` is the independent source: it walks live
+/// `agent-doc start --route-owned` processes, so it does not consult the editor
+/// record at all, and a document with an open cycle is exactly a document with a
+/// live supervisor. Both sources are unioned and scoped to this project.
+///
+/// The result is deliberately **not** narrowed per editor pid. One cdylib serves a
+/// whole editor process, so a reload delivered through any endpoint retires the
+/// generation holding every replica in that process; per-pid precision would only
+/// reintroduce a blind spot. An over-broad defer costs an editor the previous build
+/// until the idle boundary, which is the cheap direction.
+pub fn native_reload_candidate_documents<R, S>(
+    registration_paths: R,
+    supervisor_documents: S,
+    project_root: &Path,
+) -> Vec<PathBuf>
+where
+    R: IntoIterator<Item = String>,
+    S: IntoIterator<Item = PathBuf>,
+{
+    let mut candidates: BTreeSet<PathBuf> = BTreeSet::new();
+    for path in registration_paths {
+        if path.is_empty() {
+            continue;
+        }
+        candidates.insert(PathBuf::from(path));
+    }
+    candidates.extend(supervisor_documents);
+    candidates
+        .into_iter()
+        .filter(|path| path.starts_with(project_root))
+        .collect()
 }
 
 /// Record that `lib_version`'s reload was deferred for `project_root`.
@@ -124,6 +169,45 @@ mod tests {
             !document_cycle_blocks_native_reload(&doc),
             "a committed cycle must publish the reload instead of pinning the old generation"
         );
+    }
+
+    /// `#editorendpointzero-reloadgate`: the registration record can be empty while
+    /// the editor is alive, and reading the attached set from it alone published the
+    /// reload with nothing to check. The supervisor walk does not consult that record.
+    #[test]
+    fn an_empty_registration_record_still_yields_the_live_supervisor_documents() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let doc = root.join("tasks/agent-doc/agent-doc-bugs.md");
+
+        let candidates =
+            native_reload_candidate_documents(Vec::new(), vec![doc.clone()], root);
+        assert_eq!(
+            candidates,
+            vec![doc],
+            "a live supervisor's document must reach the gate even with no editor registration"
+        );
+    }
+
+    /// The two sources overlap in the healthy case and must not double-count, and a
+    /// document served by a different project is not this fan-out's to defer on.
+    #[test]
+    fn candidates_are_deduplicated_and_scoped_to_the_project() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let doc = root.join("plan.md");
+        let foreign = PathBuf::from("/elsewhere/other.md");
+
+        let candidates = native_reload_candidate_documents(
+            vec![
+                doc.to_string_lossy().to_string(),
+                String::new(),
+                foreign.to_string_lossy().to_string(),
+            ],
+            vec![doc.clone(), foreign],
+            root,
+        );
+        assert_eq!(candidates, vec![doc]);
     }
 
     #[test]

@@ -14997,6 +14997,15 @@ fn test_editor_hot_path_has_no_filesystem_sidecar_or_reload_broadcast_transport(
             && idle_watch.contains("publish_pending_native_reload("),
         "a deferred native reload must be published by the owning supervisor's idle watch"
     );
+    // `#editorendpointzero-reloadgate`: the editor registration record can be empty
+    // while the editor is alive, so the gate's candidate documents must also come from
+    // a source that does not consult that record.
+    assert!(
+        controller.contains("native_reload_candidate_documents(")
+            && controller.contains("crate::process::open_supervisor_documents(std::process::id())")
+            && !controller.contains("attached_by_pid"),
+        "the reload gate's document candidates must not come from the editor registration record alone"
+    );
     assert!(
         idle_watch.contains("enum QueueHeadObservation")
             && idle_watch.contains("QueueHeadObservation::AuthorityUnavailable")

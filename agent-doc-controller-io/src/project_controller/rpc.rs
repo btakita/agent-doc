@@ -10243,24 +10243,20 @@ pub fn reload_library_for_project(
         report.failed += 1;
         return report;
     };
-    // Documents this fan-out would strand, keyed by the editor process holding
-    // them. A pid discovered by socket fallback below has no registration and so
-    // no known document set; it is checked against every attached document in
-    // the project instead, which fails toward deferral.
-    let mut attached_by_pid: std::collections::BTreeMap<u64, Vec<PathBuf>> =
-        std::collections::BTreeMap::new();
-    let mut attached_any: Vec<PathBuf> = Vec::new();
-    for registration in &status.registrations {
-        if registration.path.is_empty() {
-            continue;
-        }
-        let path = PathBuf::from(&registration.path);
-        attached_by_pid
-            .entry(registration.pid)
-            .or_default()
-            .push(path.clone());
-        attached_any.push(path);
-    }
+    // Documents a generation handoff on this project could strand. The editor
+    // registration record alone is NOT enough — it can be empty while the editor is
+    // alive (`#editorendpointzero-reloadgate`), which published the reload with
+    // nothing to check — so the live supervisor walk is unioned in as an independent
+    // source. Not narrowed per editor pid: one cdylib serves a whole editor process.
+    let at_risk_documents = crate::project_controller::native_reload_candidate_documents(
+        status
+            .registrations
+            .iter()
+            .map(|registration| registration.path.clone()),
+        crate::process::open_supervisor_documents(std::process::id()),
+        project_root,
+    );
+    let registration_count = status.registrations.len();
     let mut endpoints = status
         .registrations
         .into_iter()
@@ -10300,8 +10296,22 @@ pub fn reload_library_for_project(
         // converge for a document that is attached and mid-cycle, so the reload
         // waits for the same open-cycle boundary the recycle and restart gates
         // wait for.
-        let candidates = attached_by_pid.get(&pid).unwrap_or(&attached_any);
-        let blocking = candidates
+        if at_risk_documents.is_empty() {
+            // Publishing here is correct — a project with nothing open has nothing to
+            // strand — but it is also the shape a silently-defeated gate takes, so name
+            // it once rather than leaving the next occurrence undiagnosable.
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "reload_library_no_document_candidates project_root={} editor_pid={pid} \
+                     lib_version={lib_version} registrations={} \
+                     reason=no_attached_or_supervised_document (#editorendpointzero-reloadgate)",
+                    project_root.display(),
+                    registration_count,
+                ),
+            );
+        }
+        let blocking = at_risk_documents
             .iter()
             .find(|file| crate::project_controller::document_cycle_blocks_native_reload(file));
         if let Some(file) = blocking {

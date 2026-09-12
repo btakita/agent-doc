@@ -27,59 +27,11 @@ completed
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/44ae7f3a5c03b112ffe17aa5c85d000e3d79a6e9a4875e16442309ebf1c06a1c-20260912-033614.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/44ae7f3a5c03b112ffe17aa5c85d000e3d79a6e9a4875e16442309ebf1c06a1c-20260912-041014.md`*
 
 Compacted content:
-- Archived 24 response topic(s): #lzpystructcell; what shipped; #lzpypromegress; 21 more
-- Prior summary/context: prior compacted content: Archived 43 response topic(s): #lzzigcanonrunner; #lzzigforkhlcpeer; #adjshashprivatefield; ...
-
-### Re: do[#lzktblockwalk] — opus-5
-
-> **Queue prompt:**
->
-> do [#lzktblockwalk]
-
-
-Done — `lazily-kt f0c012d` then `7895f21` (CI ✅), superproject `f12dda9aa`. **18 sites / 18 digests → 737 / 628**, the narrowest walk in the family and a 41× increase in the pinned population.
-
-**The structural blocker had to go first,** exactly as the audit predicted: `declaredBlocks` was a `Map<String, JsonObject>` keyed on the fixture path, so one block per fixture was the *data structure's* ceiling and no traversal change could have widened anything. It is now keyed by site, with the walk as one pure function shared by three callers — the inventory, the clone proof, and the guard's twin.
-
-**`#lzrunnerownjsonclone` ruled out with a test, not an argument** — and this is where the obligation I moved onto this item last cycle earned itself. kt's loader returns **text**, so every runner re-parses and hands the tracker an object from its *own* parse: structurally cpp's exact shape. The new `AssertionBlockDigestCloneTest` asserts both `Json` spellings reproduce the loader's digest and `JsonObject` equality across number-, string- and nested-bearing blocks, **and** that the digest separates `5` / `5.0` / `5e0` — without which the first assertion could be satisfied by a digest that folds the very divergence it is looking for. No divergence exists; kotlinx keeps the raw token on both sides. So the 565 unbound sites are 565 real facts, not one bug wearing 565 hats.
-
-**Of those 565: 25 unreachable, 540 bind-pending — and Phase 2 is not done.** The 25 are the six `EXPECTED_SKIPS` fixtures, the same 25 zig, cpp and dart each landed independently from their own corpora. The 540 are sites where the block *is* reached and the runner *does* assert its keys, by direct indexing rather than through a tracker.
-
-**I sent it back once, and that round is why this is a closeout rather than a gate.** The first commit documented the two reason classes beautifully and the guard read neither word — so a `bind-pending` entry was just an accepted excuse and the count could **grow**: a new runner area could add its sites and stay green. A slack floor wearing a reason string, which is precisely the rot this ladder exists to refuse and would have quietly undone the point of widening the walk.
-
-Now `unreachable` is **derived from `EXPECTED_SKIPS`** in the Kotlin source, compared both ways, with a zero-parse hard error — no number anywhere, so when a `merge_cell` op lands upstream and a fixture leaves that map, its entries fail as stale instead of surviving as folklore. And `bind-pending` is an **equality at 540 failing in both directions, derived from the run** rather than from the ledger, so a ledger edit alone cannot satisfy it: above means sites appeared and the ledger absorbed them, below means a migration landed and the number must move in the same commit. An unknown reason class is an error too. Six probes, A–F, including a fixture leaving `EXPECTED_SKIPS` and an unparseable `EXPECTED_SKIPS`.
-
-That is the distinction I care about: 540 sites are *enumerated, classified, and pinned to a number that can only be re-pinned downward* — not invisible, and not absorbable.
-
-Phase 2 filed and appended as `#lzktbindpending`, with the per-area breakdown so it can be taken one area at a time: collections 132, reactive-graph 88, stdlib 54, ingress 42, rateshape 33, coordination 29, and twelve more. Worth flagging in advance — migrating a block onto the tracker makes the rungs *above* rung 0 start applying to it, so unconsumed and read-but-unasserted keys that were invisible will become failures. That is the point of the migration, not a regression in it.
-
-Exchange is at 641 lines / 24 sections with the queue active — noting it, not stopping for it.
-
-### Re: do[#lzktbindpending] — opus-5
-
-First pass landed — `lazily-kt 93420ff` (CI ✅), superproject `0c996b524`. **28 sites bound across five areas, pin re-pinned downward 540 → 512.** The item stays **open and narrowed**, not done: 512 sites across 13 areas remain, and saying otherwise would be the rounding-up this ladder exists to stop.
-
-**The measurement I asked for is the headline, and it is worse than I expected in the useful direction.**
-
-**28 of 28 blocks failed a higher rung once bound** — and it was measured, not estimated: four areas were migrated first as *faithful wraps* (tracker-routed, original semantics preserved verbatim) and run, producing 4 red methods over 6 distinct keys. **Half the blocks — 14 of 28 — needed a real fix rather than a routing change.** Six distinct defects, each a hole rung 0's narrowness was hiding:
-
-- **`ordinary_snapshot_count`** (6 blocks) compared against the **literal `0`** — the fixture's value reached the comparison and the run's never did, so the key asserted the corpus against itself and a binding that admitted a purposeless snapshot passed.
-- **`rpc.terminal_status`** and **`conflict`** were **present in the fixture and never read** — the second being the headline claim of `terminal_conflict_fail_closed`, verified against `HEAD` as genuinely unread rather than read elsewhere.
-- **`target_epoch_bumped`** was read but asserted only when *true*, so a `false` upstream would have made the assertion vanish while the fixture still reported replayed.
-- **`ignored_frame_indices`** asserted one way only; **`*_after_frame_index`** let the fixture's own value steer which assertion to make instead of comparing against the run's.
-
-Plus 14 object-valued keys consumed with no key-set check, and one red the agent *introduced* and the cross-binding ordering guard caught by name — two `assertKeyWith` callbacks that ignored the value handed in and re-read the key. **Nothing was excused**; every finding is fixed.
-
-**What that means for sizing, stated as a measured rate and not a forecast:** if it holds, the remaining 512 sites carry on the order of 250 more genuine assertion gaps. The easy classes may be exhausted first, so the item now asks each pass to *re-measure* its own gap rate rather than assume this one. Either way this is a substantially larger programme than the site count suggested — which is exactly what I wanted to learn at area 5 rather than area 15, and it argues for continuing, not stopping.
-
-The re-pin is not a formality: `513` fails naming the shrink, `511` fails as grown, both probed against the real committed state.
-
-**reactive-graph (88) stayed untouched deliberately**, and the agent came back with a resolution to the blocker rather than just a description of it. The apparent conflict dissolves once the two mechanisms are named as answering different questions: accumulation is right for *value divergences* (a property of each model), throwing is right for *coverage defects* (a property of the runner, identical across all three, so accumulating it three times buys nothing). Filed as `#lzktreactivemodelfailures`, appended, including the caveat that `assertKeyWith` marks a key asserted immediately — so reactive-graph's rung-3 signal will be weaker than the other areas' and whoever takes it should know that going in.
-
-One operational note from the agent worth repeating: a filtered `./gradlew test` reported "0 failures" when `compileTestKotlin` had actually failed on a missing import, so `:test` never ran. **"0 XML failures" means nothing unless the timestamps also moved** — which is the Gradle trap in its sharpest form yet.
+- Archived 2 response topic(s): do[#lzktblockwalk]; do[#lzktbindpending]
+- Prior summary/context: prior compacted content: Archived 24 response topic(s): #lzpystructcell; what shipped; #lzpypromegress; 21 more
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -87,7 +39,6 @@ One operational note from the agent worth repeating: a filtered `./gradlew test`
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - do [#lzrsblockwalk]
-- ~~do [#lzktblockwalk]~~
 - do [#lzdartboundfloor]
 - do [#lzdartarrayblocks]
 - do [#lzorderinganchors]

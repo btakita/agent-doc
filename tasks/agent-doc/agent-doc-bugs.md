@@ -92,6 +92,24 @@ Now the turn start is observed: a `Busy` with `caller=dispatch` promotes receipt
 Two notes on this turn's own mechanics. The exchange was compacted at 23:28 and the new summary carries **no** `dynamic_context_ref` block — `#fixcompactexchange` working incidentally. And `make check` reported `EXIT=2` twice while its wrapper reported exit 0, the RTK exit-masking trap; both failures were real and are fixed.
 
 CI: `fc0f992c6` (`#fixcompactexchange`) came back green (`34669245364`); `b666a8d71` is run `34670800452`, in progress when last observed; `dec47694f` is new.
+
+### Re: preflight stall fixed; docs.md reverse-order lists traced to one cycle — opus-5 · 2026-09-12T00:54-04:00
+
+**The stall that blocked this document is fixed and shipped as 0.35.368.** A JetBrains replica restart at 04:06:44 left client `2121428668057853` registered with a queued canonical projection receipt and then silent — no pull, no ACK, no projection — so `delivery_converged` stayed false for five minutes and every invocation was refused with `Lazily current authority remained delivery_pending` while your queue edits sat unread on disk. `#pullnoackdeadlock`'s escape valve only advances on a *pull*, so a replica that never pulls held the barrier forever. The barrier now bounds total silence too (`charge_barrier_wait_without_progress` + `MAX_BARRIER_WAITS_WITHOUT_PROGRESS`, charged from the expired delivery-convergence await); a replica that merely pulls without ACKing clears the new streak and stays under the 50-redelivery budget sized for it. Three regression tests, one mutation-checked. Authority and disk are now byte-identical at 36048 bytes with `delivery_converged=true`.
+
+> **Queue prompt:** docs.md had reverse order ordered lists (2 then 1). Please fix agent-doc causes.
+
+**Traced to one cycle, cause not yet proven — I did not guess at a fix.** Provenance is exact: `src/haiven-dev` commit `9b084e4` (2026-09-11 13:28:19), 91 seconds after `02d8cb7`, during a `queue: start` → `queue: go` drain write. That cycle appended two correct new response blocks **and** spliced **three copies** of an 8-line run into the middle of the earlier `### Re: #plcite` block. The run is the list lines of the *later* `### Re: PR 20 — ADR 0012 review addressed` block in **exact reverse order** (`2.`, `1.`, then the six bullets bottom-to-top), with the intervening prose (`**Verification:**`, `**Two things need you:**`) dropped. So: list lines only, reversed, anchored into the wrong block, three times.
+
+What I ruled out, each by direct check rather than reading:
+
+- `document_cell_merge` on that exact mixed shape (bullet run + prose + ordered list in one block) does **not** reverse — I wrote the test and it passes. Committed as `54296e903`; the two existing `#ocreverselist` tests each hold one list shape alone, so this shape had no coverage.
+- `order_union` / `weave_order` preserve order: the `j = i-1` lookup always resolves, because every earlier theirs key is either in the spine or was just inserted.
+- `component_scoped_region_restore` / `apply_region_restore` are correct — descending start offsets with `replace_range`, so each edit addresses pre-edit text.
+
+The signature (keyed *list items* only, prose skipped, exact reversal, wrong anchor, ×3) points at a keyed-list re-emit inserting each item at a fixed index against a base it does not belong to. I could not localize it further: `src/haiven-dev/.agent-doc/logs/ops.log` no longer reaches back to 13:28 on 09-11, and I could not construct a live repro. Filing it at the top of the backlog with this forensic record rather than landing a speculative change to the merge path that guards operator text.
+
+**Queue:** `queue_drainable_head_count` is 0 — no in-session-drainable head remains, so I am not looping. `#fixtmuxpane` also carries a semantic-completion warning: it may already be resolved by `#stashfocuswindow` in `agent-doc-bugs.done.md`.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -101,8 +119,16 @@ CI: `fc0f992c6` (`#fixcompactexchange`) came back green (`34669245364`); `b666a8
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- ~~do [#timestampresponseheader]~~
-- ~~do [#idledispatchstack]~~
+- 🚧 do [#fixtmuxpane]
+- docs.md had reverse order ordered lists (2 then 1). Please fix agent-doc causes.
+- do [#installstrandsreplica]
+- do [#dispatchturnstartreceipt]
+- do [#dispatchreceiptperturn]
+- do [#ctxrefsynthsource]
+- do [#ctxrefdocnoise]
+- do [#cargotokenwire]
+- do [#jbplugin382restart]
+- do [#isolationrelocate]
 - do [#clearunobservedrecycle]
 - do [#clearsubmitpanesettle]
 - do [#queuegorevokedonfreetext]
@@ -116,6 +142,8 @@ CI: `fc0f992c6` (`#fixcompactexchange`) came back green (`34669245364`); `b666a8
 
 
 <!-- agent:backlog priority -->
+- [ ] [#ocreverselistsplice] 2026-09-12 [P1] Three copies of an 8-line run spliced into the WRONG response block, list lines only, exact reverse order, prose dropped. Provenance pinned: src/haiven-dev commit 9b084e4 (2026-09-11 13:28:19), 91s after 02d8cb7, during a queue:start->queue:go drain write; same cycle also appended two CORRECT new blocks. Source run = the list lines of the LATER '### Re: PR 20 - ADR 0012 review addressed' block. RULED OUT (checked, do not re-check): document_cell_merge on the mixed bullets/prose/ordered-list shape (test exchange_response_mixing_bullets_prose_and_ordered_list_keeps_authored_order, commit 54296e903, passes); order_union/weave_order (j=i-1 lookup always resolves); component_scoped_region_restore/apply_region_restore (descending offsets + replace_range). Signature points at a keyed-list re-emit inserting each item at a FIXED index against a base it does not belong to. haiven-dev ops.log no longer reaches 13:28 on 09-11; needs a constructed repro.
+- [ ] 🚧 [#fixtmuxpane] Fix tmux pane auto-focus when selecting the opposite pane
 - [ ] [#installstrandsreplica] [P1] The post-fix `make install` that #deploy-just-do-it mandates hot-reloads the cdylib and STRANDS the Lazily replica of any attached document, blocking that document's own closeout with no self-recovery. Observed 2026-09-11 23:36 on tasks/agent-doc/agent-doc-bugs.md, one minute after the session's second install: `respond` fails at `prevalidate_tracked_work_response` and `session-check` at `session_check_response_replay_dedup_current`, both with 'editor is still attached ...; missing_replica recovery exhausted and disk read authority is refused'. ops.log: `crdt_current_text_unavailable ... authority=multi_replica reason=missing_replica` for two process_pids, then `realtime_doc_resolve_missing_replica_terminal_rebuild_failed ... editor authority stayed in editor_attached_model_missing after a bounded Lazily-current observation request ... recovery=retry_without_disk_write ... operator_action=none`, then `realtime_doc_resolve_disk_read_refused ... invariant=attached_editor_never_descends_to_disk`. The refusal is CORRECT; the defect is that re-registration never converges. Smoking gun: the IDE (pid 2238596) had BOTH `libagent_doc-1789182099748.so` (23:01 install) and `libagent_doc-1789184163251.so` (23:36 install) mapped — the replica lived in the library the reload replaced; the epoch in the filename is a unix-ms timestamp that dates each install. The plugin jar was CURRENT (0.2.382, matching what the IDE loaded), so no `stale_plugin` warning fires and this reads as a different bug class. `admin reload-lib` reported `1/3 editor endpoints (3 unavailable)` and did NOT clear it, though it is the memory-documented recovery for editor_attached_model_missing; `admin detect` reported no anomalies; a sibling document (tasks/software/existence-lang.md) resolved normally throughout, so the wedge is per-document. It cleared only after the operator re-attached in the editor. Fix direction: a cdylib reload must re-register every attached document's replica into the new instance before the old one is dropped, or refuse the reload while an attached document has an open cycle — the supervisor already has `supervisor_recycle_deferred_cycle_open` for exactly that shape. Until then the ordering is a trap: every mandated post-fix install can block the closeout of the very session that made the fix, so close the document out FIRST and install after.
 - [ ] [#dispatchturnstartreceipt] [P2] The #idledispatchstack turn-start observation keys off the lifecycle transition's `caller` STRING being `dispatch` (agent-doc-controller-io/src/project_controller/rpc.rs, the Busy branch beside the Ready release). That was the only discriminator available — the 2026-09-12 fpe.md log shows `caller=dispatch reason=auto_trigger_inject` as a dispatch's own turn start (2 occurrences) versus 27 supervisor/operator side-effect Busy transitions — but it is an inference from a diagnostic field, not a receipt. Only claude was in that log. Audit every path that can start a dispatched turn per harness (codex, opencode, grok) and confirm each arrives with `caller=dispatch`; where one does not, the receipt is held until DISPATCH_PRE_TURN_GRACE_SECS (120s) elapses, so dispatches for that document coalesce for up to two minutes — bounded and non-wedging, but a real stall. Durable fix: have the route/submit path publish an explicit typed turn-start receipt carrying the dispatch identity, so promotion consumes a fact rather than pattern-matching a caller label.
 - [ ] [#dispatchreceiptperturn] [P3] Both `mark_open_dispatches_turn_started` and `mark_open_dispatches_consumed` operate on EVERY open row for a document, not on the receipt whose turn actually ran. Two receipts can legitimately be open at once — an operator reopen deliberately bypasses in-flight coalescing — and then one observed turn promotes and releases both. Noticed while fixing #idledispatchstack; NOT observed as a symptom, and not fixed there because the lifecycle request carries no receipt identity, so threading one through is a controller request-shape change rather than a narrowing of this rule. Scope: give the promotion/consume pair a receipt id (or the dispatch's generation+epoch) and make each transition settle exactly the receipt it belongs to.

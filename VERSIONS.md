@@ -2,6 +2,44 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.372
+
+- **One observed turn now settles exactly the dispatch receipt it belongs to
+  (`#dispatchreceiptperturn`).** Both `mark_open_dispatches_turn_started` and
+  `mark_open_dispatches_consumed` operated on EVERY open row for a document. Two
+  receipts can legitimately be open at once — an operator reopen deliberately
+  bypasses in-flight coalescing — and a single turn then promoted and released
+  both, vouching for a trigger still sitting unsubmitted in the composer. The
+  reopen's receipt stopped blocking a duplicate dispatch into that same composer,
+  which is the `#idledispatchstack` stacking shape the receipt exists to prevent.
+
+  A turn's receipt is the **oldest open** one, because a stacked composer runs its
+  entries in submission order; one `Ready` ends one turn and settles one `running`
+  row. The pre-turn grace stays a sweep rather than a settlement — a trigger that
+  never started is lost, not pending, and every such row is released together so
+  none can wedge the per-generation coalescing gate, which has no staleness
+  horizon of its own.
+
+  The `NOT EXISTS` guard on promotion is load-bearing, not defensive. TWO edges
+  promote for the same turn — the `caller=dispatch` `Busy` transition and
+  `mark_dispatch_turn_started_for_file` from the turn's own preflight
+  (`#dispatchturnstartreceipt`, 0.35.370) — and under promote-every-row the second
+  was a natural no-op because the first left nothing in `accepted`/`queued`.
+  Narrowed to one row it would instead promote the NEXT receipt and claim a turn
+  that has not started, so the idempotence had to become deliberate: a document's
+  actor runs one turn at a time, and an unconsumed `running` receipt means this
+  turn is already accounted for.
+
+  A state ledger written by an older binary can already hold two `running` rows
+  for one document — promote-every-row is what put them there — so an upgraded
+  binary settles one per `Ready` rather than inheriting the over-release on the
+  first turn after the upgrade.
+
+  Not observed as a live symptom; found while fixing `#idledispatchstack` and left
+  open then because the lifecycle request carries no receipt identity. It does not
+  need one: oldest-open plus the one-turn-at-a-time guard identifies the receipt
+  without a controller request-shape change.
+
 ## 0.35.371
 
 - **A `make install` mid-cycle no longer strands the attached document that

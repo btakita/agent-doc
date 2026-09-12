@@ -29743,8 +29743,49 @@ mod tests {
             "an unrelated supervisor busy episode must not vouch for this receipt"
         );
 
-        // The dispatched trigger finally starts its own turn, and the Ready that ends
-        // THAT turn releases the marker so the next turn dispatches cleanly.
+        // The first dispatched trigger finally starts its own turn, and the Ready that
+        // ends THAT turn releases its receipt.
+        //
+        // `#dispatchreceiptperturn`: it releases ONLY its own. Two receipts are open
+        // here — the coalescing-bypassed operator reopen above is the second — and this
+        // single turn used to release both, which stopped the reopen's still-unsubmitted
+        // trigger from blocking a duplicate stacked into the same composer. That is the
+        // `#idledispatchstack` shape the receipt exists to prevent.
+        let open_receipts = || -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM dispatch_attempts \
+                 WHERE document_id = ?1 AND failed_stage IS NULL AND dispatch_start_proven = 0",
+                params![document_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(open_receipts(), 2, "the reopen opened a second live receipt");
+
+        handle_mark_lifecycle(
+            &bootstrap,
+            None,
+            mark_lifecycle("busy", "dispatch", "auto_trigger_inject"),
+        )
+        .expect("mark busy");
+        handle_mark_lifecycle(
+            &bootstrap,
+            None,
+            mark_lifecycle("ready", "supervisor", "prompt_ready"),
+        )
+        .expect("mark ready");
+        assert_eq!(
+            open_receipts(),
+            1,
+            "one observed turn settles one receipt, not both"
+        );
+        assert!(
+            state_store::has_open_in_flight_dispatch(&conn, &document_id, 1).unwrap(),
+            "the operator reopen's trigger has not run yet; its receipt must still block a duplicate"
+        );
+
+        // The reopen's own turn then runs, and the marker clears so the next turn
+        // dispatches cleanly.
         handle_mark_lifecycle(
             &bootstrap,
             None,
@@ -29759,7 +29800,7 @@ mod tests {
         .expect("mark ready");
         assert!(
             !state_store::has_open_in_flight_dispatch(&conn, &document_id, 1).unwrap(),
-            "the Ready after an observed dispatch turn must release the in-flight marker"
+            "the Ready after every dispatched turn must release the in-flight marker"
         );
     }
     #[test]

@@ -4038,7 +4038,8 @@ pub fn has_any_open_in_flight_dispatch_as_of(conn: &Connection, now_secs: i64) -
 pub const DISPATCH_PRE_TURN_GRACE_SECS: i64 = 120;
 
 /// `#idledispatchstack`: record that the turn for this document's open dispatches has
-/// actually STARTED. Called when the actor transitions to `Busy`.
+/// actually STARTED. Called when the actor transitions to `Busy`, and from the
+/// arriving turn's own preflight.
 ///
 /// This is the observation that `dispatch_start_proven` is named for. Before it
 /// existed, [`mark_open_dispatches_consumed`] inferred the start from an idle actor,
@@ -4046,15 +4047,45 @@ pub const DISPATCH_PRE_TURN_GRACE_SECS: i64 = 120;
 /// Promoting the row to `running` makes the distinction durable; `running` is already
 /// inside the open-set predicate, so the coalescing and recycle gates see no change.
 /// Returns the number of receipts promoted.
+///
+/// `#dispatchreceiptperturn`: **one turn promotes one receipt.** Two receipts can
+/// legitimately be open at once — an operator reopen deliberately bypasses in-flight
+/// coalescing — and promoting every open row let a single observed turn vouch for a
+/// trigger still sitting unsubmitted in the composer. The receipt a turn belongs to is
+/// the oldest open one, because a stacked composer runs its entries in submission
+/// order.
+///
+/// The `NOT EXISTS` guard is what keeps this idempotent, and it is load-bearing rather
+/// than defensive. TWO edges promote for the same turn — the `caller=dispatch` `Busy`
+/// transition and `mark_dispatch_turn_started_for_file` from preflight — and under the
+/// old promote-every-row rule the second was a natural no-op because the first left
+/// nothing in `accepted`/`queued`. Narrowed to one row, the second edge would instead
+/// promote the NEXT receipt and claim a turn that has not started. A document's actor
+/// runs one turn at a time, so an unconsumed `running` receipt means this turn is
+/// already accounted for.
 pub fn mark_open_dispatches_turn_started(conn: &Connection, document_id: &str) -> Result<usize> {
     let promoted = conn.execute(
         r#"
         UPDATE dispatch_attempts
         SET result_status = 'running'
-        WHERE document_id = ?1
-          AND failed_stage IS NULL
-          AND COALESCE(result_status, '') IN ('accepted', 'queued')
-          AND dispatch_start_proven = 0
+        WHERE id = (
+            SELECT id
+            FROM dispatch_attempts
+            WHERE document_id = ?1
+              AND failed_stage IS NULL
+              AND COALESCE(result_status, '') IN ('accepted', 'queued')
+              AND dispatch_start_proven = 0
+            ORDER BY timestamp ASC, id ASC
+            LIMIT 1
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM dispatch_attempts
+            WHERE document_id = ?1
+              AND failed_stage IS NULL
+              AND COALESCE(result_status, '') = 'running'
+              AND dispatch_start_proven = 0
+          )
         "#,
         params![document_id],
     )?;
@@ -4086,7 +4117,32 @@ pub fn mark_open_dispatches_consumed_as_of(
     document_id: &str,
     now_secs: i64,
 ) -> Result<usize> {
-    let released = conn.execute(
+    // `#dispatchreceiptperturn`: one `Ready` ends one turn, so it settles exactly the
+    // receipt whose turn was observed — never a second receipt that is still waiting
+    // its own turn in the composer.
+    let settled = conn.execute(
+        r#"
+        UPDATE dispatch_attempts
+        SET dispatch_start_proven = 1
+        WHERE id = (
+            SELECT id
+            FROM dispatch_attempts
+            WHERE document_id = ?1
+              AND failed_stage IS NULL
+              AND COALESCE(result_status, '') = 'running'
+              AND dispatch_start_proven = 0
+            ORDER BY timestamp ASC, id ASC
+            LIMIT 1
+          )
+        "#,
+        params![document_id],
+    )?;
+    // The pre-turn grace is a leak bound, not a turn settlement: a trigger that never
+    // started is lost, not pending, and every such row is swept together so one cannot
+    // wedge the per-generation coalescing gate (which has no staleness horizon of its
+    // own). The settle above already marked its row proven, so it cannot be counted
+    // twice here.
+    let swept = conn.execute(
         r#"
         UPDATE dispatch_attempts
         SET dispatch_start_proven = 1
@@ -4094,14 +4150,11 @@ pub fn mark_open_dispatches_consumed_as_of(
           AND failed_stage IS NULL
           AND COALESCE(result_status, '') IN ('accepted', 'queued', 'running')
           AND dispatch_start_proven = 0
-          AND (
-            COALESCE(result_status, '') = 'running'
-            OR timestamp <= ?2
-          )
+          AND timestamp <= ?2
         "#,
         params![document_id, now_secs - DISPATCH_PRE_TURN_GRACE_SECS],
     )?;
-    Ok(released)
+    Ok(settled + swept)
 }
 
 pub fn insert_dispatch_attempt_in_db(
@@ -5458,6 +5511,153 @@ mod tests {
         assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 0);
         assert_eq!(mark_open_dispatches_consumed_as_of(&conn, "doc", now)?, 0);
         Ok(())
+    }
+
+    /// `#dispatchreceiptperturn`: two receipts can legitimately be open at once — an
+    /// operator reopen deliberately bypasses in-flight coalescing — and one observed
+    /// turn used to promote AND release both, vouching for a trigger still sitting
+    /// unsubmitted in the composer. Each transition must settle exactly the receipt it
+    /// belongs to.
+    #[test]
+    fn one_observed_turn_settles_exactly_one_of_two_open_receipts() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        insert_open_dispatch(&conn, "doc", now - 20, "accepted")?;
+        insert_open_dispatch(&conn, "doc", now - 10, "accepted")?;
+
+        // The first turn starts. Only the older receipt — the one whose trigger a
+        // stacked composer runs first — records a live turn.
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 1);
+        assert_eq!(receipt_status(&conn, 1)?, "running");
+        assert_eq!(
+            receipt_status(&conn, 2)?,
+            "accepted",
+            "the reopen's receipt has no turn of its own yet"
+        );
+
+        // It ends. Only that receipt is released; the reopen still blocks a duplicate
+        // dispatch into the same composer.
+        assert_eq!(mark_open_dispatches_consumed_as_of(&conn, "doc", now)?, 1);
+        assert!(receipt_proven(&conn, 1)?);
+        assert!(
+            !receipt_proven(&conn, 2)?,
+            "a turn that never ran must not release the reopen's receipt"
+        );
+        assert!(has_open_in_flight_dispatch(&conn, "doc", 1)?);
+
+        // The reopen's own turn then starts and ends on its own receipt.
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 1);
+        assert_eq!(receipt_status(&conn, 2)?, "running");
+        assert_eq!(mark_open_dispatches_consumed_as_of(&conn, "doc", now)?, 1);
+        assert!(receipt_proven(&conn, 2)?);
+        assert!(!has_open_in_flight_dispatch(&conn, "doc", 1)?);
+        Ok(())
+    }
+
+    /// Two edges promote for the SAME turn: the `caller=dispatch` `Busy` transition
+    /// and `mark_dispatch_turn_started_for_file` from the turn's own preflight
+    /// (`#dispatchturnstartreceipt`). Promoting every open row made the second a
+    /// natural no-op; narrowed to one receipt it would instead promote the NEXT one
+    /// and claim a turn that has not started. The idempotence has to be deliberate.
+    #[test]
+    fn a_second_promotion_edge_for_the_same_turn_promotes_nothing() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        insert_open_dispatch(&conn, "doc", now - 20, "accepted")?;
+        insert_open_dispatch(&conn, "doc", now - 10, "accepted")?;
+
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 1);
+        assert_eq!(
+            mark_open_dispatches_turn_started(&conn, "doc")?,
+            0,
+            "the turn is already accounted for by a live receipt"
+        );
+        assert_eq!(
+            receipt_status(&conn, 2)?,
+            "accepted",
+            "a second promotion edge must not start the next receipt's turn"
+        );
+        Ok(())
+    }
+
+    /// A state ledger written by a pre-`#dispatchreceiptperturn` binary can already
+    /// hold TWO `running` rows for one document, because promote-every-row is exactly
+    /// what put them there. An upgraded binary reading that ledger must still settle
+    /// one receipt per `Ready`, or it inherits the same over-release on the first turn
+    /// after the upgrade.
+    #[test]
+    fn a_legacy_ledger_with_two_running_receipts_releases_one_per_ready() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        insert_open_dispatch(&conn, "doc", now - 20, "running")?;
+        insert_open_dispatch(&conn, "doc", now - 10, "running")?;
+
+        assert_eq!(
+            mark_open_dispatches_consumed_as_of(&conn, "doc", now)?,
+            1,
+            "one Ready ends one turn, whatever the ledger inherited"
+        );
+        assert!(receipt_proven(&conn, 1)?);
+        assert!(!receipt_proven(&conn, 2)?);
+
+        assert_eq!(mark_open_dispatches_consumed_as_of(&conn, "doc", now)?, 1);
+        assert!(receipt_proven(&conn, 2)?);
+        Ok(())
+    }
+
+    /// The leak bound is a sweep, not a turn settlement: several lost triggers are
+    /// released together so none can wedge the per-generation coalescing gate, which
+    /// has no staleness horizon of its own.
+    #[test]
+    fn the_pre_turn_grace_sweep_still_releases_every_lost_trigger_at_once() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        let stale = now - DISPATCH_PRE_TURN_GRACE_SECS - 1;
+        insert_open_dispatch(&conn, "doc", stale, "accepted")?;
+        insert_open_dispatch(&conn, "doc", stale, "queued")?;
+
+        assert_eq!(
+            mark_open_dispatches_consumed_as_of(&conn, "doc", now)?,
+            2,
+            "every receipt past the pre-turn grace is lost, not pending"
+        );
+        assert!(!has_open_in_flight_dispatch(&conn, "doc", 1)?);
+        Ok(())
+    }
+
+    /// A settled receipt must not also be counted by the staleness sweep in the same
+    /// call — the two arms write the same column.
+    #[test]
+    fn a_stale_running_receipt_is_released_exactly_once() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        insert_open_dispatch(
+            &conn,
+            "doc",
+            now - DISPATCH_PRE_TURN_GRACE_SECS - 1,
+            "running",
+        )?;
+
+        assert_eq!(mark_open_dispatches_consumed_as_of(&conn, "doc", now)?, 1);
+        assert_eq!(mark_open_dispatches_consumed_as_of(&conn, "doc", now)?, 0);
+        Ok(())
+    }
+
+    fn receipt_status(conn: &Connection, id: i64) -> Result<String> {
+        Ok(conn.query_row(
+            "SELECT COALESCE(result_status, '') FROM dispatch_attempts WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )?)
+    }
+
+    fn receipt_proven(conn: &Connection, id: i64) -> Result<bool> {
+        let proven: i64 = conn.query_row(
+            "SELECT dispatch_start_proven FROM dispatch_attempts WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        Ok(proven == 1)
     }
 
     fn dispatch_attempts_fixture() -> Result<Connection> {

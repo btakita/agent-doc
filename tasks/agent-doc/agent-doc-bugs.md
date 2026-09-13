@@ -282,6 +282,21 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md source=socket_visible_write patch_id=0c51c73f-9745-4dc1-9286-87fb437ded73 invariant=live_prompt_drift_after_preflight recovery=visible_repair_required snap_source=lazily_visible_write_event candidate_len=23716 candidate_hash=cc5974fb0aaf3c7920b284a83e10d91419c1d8fa916fb77f4858aaede2cc75cc content_ours_len=26405 content_ours_hash=7535cbc69b449d68b00fdfde129ac2f357697209f25c0cd0e8f1733fe52c21ea doc=agent-doc-bugs session=3f069c68-7119-4c7b-84a9-4baeb84be35c turn=cycle-1788997134080
 ```
+
+### Re: Response
+
+Continued option (b), based on the prior Claude session already updating `existence-lang/existence`.
+
+- Updated the remaining eight stale GitHub secrets.
+- Configured the two missing consumers: `signal-space/signal-space-rs` and `btakita/tmux-router`.
+- Verified `CARGO_REGISTRY_TOKEN` is present across all eleven repositories.
+- Never printed the token value.
+
+The [agent-doc cycle](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md:314) did not commit: a stale IntelliJ editor lease reports zero live replicas and blocks reconciliation, matching `#jbreloadreregconverge`. I did not resubmit or force-write.
+
+Safe unblock: restart IntelliJ to load plugin 0.2.382, then reopen/focus this document and invoke `agent-doc tasks/agent-doc/agent-doc-bugs.md` again.
+
+The VOD still needs its URL or platform/start time. The exposed output occurred at `2026-09-12T02:57:27.170Z` and remained visible until approximately `02:57:52Z`.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -291,10 +306,6 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/
 t## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- ~~📌 do [#installstrandsreplica]~~
-- ~~📌 do [#dispatchreceiptperturn]~~
-- ~~📌 do [#ctxrefsynthsource]~~
-- ~~📌 do [#ctxrefdocnoise]~~
 - 🚧 📌 do [#cargotokenwire]
 - 📌 do [#jbplugin382restart]
 - 📌 do [#isolationrelocate]

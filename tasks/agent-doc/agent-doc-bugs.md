@@ -608,6 +608,30 @@ Verification and delivery:
 The new JetBrains package is installed on disk, but the running IDE still needs a restart to activate plugin 0.2.384. That live activation/proof remains intentionally routed through the separate `#jbplugin382restart` item; no IDE process was terminated during this cycle.
 
 **Proof:** changed paths are the two JetBrains handoff owners, their focused test, the cross-editor reload-intent test, release metadata/version projections, and the focused reload memory. Confidence is high from the full green repository check and installed artifacts. Escalation: none; the only remaining operator-visible action is the already-tracked IDE restart verification.
+
+### Re: #queuestartscopesilent — gpt-5 · 2026-09-13T14:47:41-04:00
+
+Implemented, verified, installed, committed, tagged, and pushed as agent-doc **0.35.386**.
+
+The silent state now has an explicit owner and reason. When `queue: start` leaves ready prompts for the supervisor but intentionally gives the attended in-session loop zero drainable heads, preflight still emits `queue_continuation_required: false`, but `queue_continuation_guidance` now says that the supervisor idle-watch owns the drain, the queue is neither stalled nor drained, and `queue: go` hands ownership to the in-session loop.
+
+Architecture closeout:
+
+- **Invariant:** every suppression with prompt work remaining names its reason; a zero in-session count cannot masquerade as an empty queue when supervisor activation is live.
+- **Owner:** `agent-doc-queue::queue_continuation` owns the pure scope classification and canonical guidance; preflight owns serialization into the user-visible contract.
+- **Transitions:** exchange-preemption and recycle-yield guidance retain precedence. Only an otherwise-guidanceless result falls back to supervisor-scope guidance, and only when in-session activation is absent, supervisor activation is present, and that activation still contains prompts.
+- **Topology:** unchanged—this adds an observation to the existing queue-policy → preflight-projection path, with no new controller state, polling, or dispatch path.
+
+Verification and delivery:
+
+- Focused queue-policy regression passed.
+- End-to-end preflight JSON regression passed with `drainable_head_count=0`, `continuation_required=false`, and non-null supervisor guidance.
+- `make check` passed: 9,449/9,449 Rust tests plus all editor, parity, bootstrap, integration, and model checks.
+- `make install` installed CLI/native 0.35.386 and rebuilt/installed editor artifacts. The active document correctly deferred its native reload until the next idle boundary.
+- Source commit `89ada744e` and tag `v0.35.386` were pushed; CI, Release, PyPI, Book, and Pages workflows started. The latest earlier CI run was still in progress, so local full-suite evidence is the closeout authority.
+- Superproject release record commit: `745e80a31`; the document response commit follows this response.
+
+**Proof:** changed paths are `agent-doc-queue/src/queue_continuation.rs`, `agent-doc-preflight-command-io/src/run.rs`, release/version projections, and the parity ledger. Commands were the two focused tests, `rustfmt --check`, `make check`, `make install`, exact-path staging, commit/tag, and pushes. Confidence is high. Escalation: none.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -622,13 +646,12 @@ t## Pending / Not Built
 - ~~do [#restartlazilyverify]~~
 - ~~do [#reloadgateperprocess]~~
 - ~~do [#jbreloadreregconverge]~~
-- do [#queuestartscopesilent]
+- ~~do [#queuestartscopesilent]~~
 - do [#ocreverselistsplice]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#queuestartscopesilent] [P2] A supervisor-scoped queue reports zero drainable heads with NO reason, through the same silent branch a genuinely drained queue uses. `active_queue` (agent-doc-queue/src/queue_continuation.rs:637) calls `active_queue_for_supervisor_start(content, false)`, so `explicit_start` is hard-wired off for DrainScope::InSessionLoop and the `if !explicit_go && !explicit_start { return None }` gate short-circuits `drainable_head_count` to 0 BEFORE looking at any item. That is correct design (`start` = supervisor drain, `go` = in-session loop too), but preflight then emits `queue_active: true` + `queue_drainable_head_count: 0` + `queue_continuation_required: false` + `queue_continuation_guidance: null` + no `ui_outcome`, which is indistinguishable from a drained queue. Observed 2026-09-12 on tasks/agent-doc/agent-doc-bugs.md with SEVENTEEN live heads; the cause was recoverable only by reading the source. Same failure mode as #queueblockquoteintent, which already fixed the exchange-preemption branch on the premise that "a stop with heads remaining must name its reason" — `effective_continuation_output_with_preemption` (queue_continuation.rs:114) still returns silence whenever `raw_required` is false, on the comment "genuinely nothing to drain stays silent - there is no reason to give", and that premise does not hold for the scope case. FIX: add `supervisor_scoped_activation_guidance(content)` in agent-doc-queue/src/queue_continuation.rs returning Some(reason) when `active_queue(content).is_none()` AND `active_queue_for_supervisor_start(content, true).is_some()` AND that activation has >0 prompts; thread it into the guidance at the single production caller, agent-doc-preflight-command-io/src/run.rs:1867. Guidance must say the heads are supervisor-owned and NOT stalled, and that `queue: go` hands the drain to the in-session loop. Extend the `a_preempted_drain_names_its_reason_instead_of_going_silent` test with the scope case.
 - [ ] [#ocreverselistsplice] 2026-09-12 [P1] Three copies of an 8-line run spliced into the WRONG response block, list lines only, exact reverse order, prose dropped. Provenance pinned: src/haiven-dev commit 9b084e4 (2026-09-11 13:28:19), 91s after 02d8cb7, during a queue:start->queue:go drain write; same cycle also appended two CORRECT new blocks. Source run = the list lines of the LATER '### Re: PR 20 - ADR 0012 review addressed' block. RULED OUT (checked, do not re-check): document_cell_merge on the mixed bullets/prose/ordered-list shape (test exchange_response_mixing_bullets_prose_and_ordered_list_keeps_authored_order, commit 54296e903, passes); order_union/weave_order (j=i-1 lookup always resolves); component_scoped_region_restore/apply_region_restore (descending offsets + replace_range). Signature points at a keyed-list re-emit inserting each item at a FIXED index against a base it does not belong to. haiven-dev ops.log no longer reaches 13:28 on 09-11; needs a constructed repro.
 ```
 <dynamic_context_ref contract="agent-doc-dynamic-context-manifest-v1" session="b69e5aeb-eab5-4a25-bc03-a9ddb69f84fc" cycle="cycle-1789167305907" fingerprint="42b6c436b2fdbaa2b9b0077601e304dc5ff8c7a4b05bac21fca356ec79350a4e" token_count="748" modes="expanded:6">

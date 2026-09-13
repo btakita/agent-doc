@@ -15838,6 +15838,15 @@ revised operator request
                 .contains_key(&document_hash),
             "delivery projection cannot wake closeout before the retained intent settles"
         );
+        // `capture_response` cleared the ordinary wake from the map, but its
+        // published frame remains valid channel history. Pin the current cursor
+        // so the wait below observes this retained-resume publication itself.
+        let wake_cursor = runtime.subscribe_state_plane(
+            rpc::CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
+            None,
+            0,
+            Duration::ZERO,
+        );
         runtime.document_retained_write_observe_authority(
             &document_hash,
             &file,
@@ -15851,8 +15860,8 @@ revised operator request
             !runtime
                 .subscribe_state_plane(
                     rpc::CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
-                    None,
-                    0,
+                    Some(wake_cursor.controller_generation),
+                    wake_cursor.latest_version,
                     Duration::from_secs(2),
                 )
                 .timed_out
@@ -15989,6 +15998,14 @@ revised operator request
                 .contains_key(&document_hash),
             "intent admission cannot turn an earlier delivery observation into an acknowledgement"
         );
+        // Do not let the ordinary ResponseCaptured wake still retained in the
+        // channel history satisfy the retained-resume barrier.
+        let wake_cursor = runtime.subscribe_state_plane(
+            rpc::CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
+            None,
+            0,
+            Duration::ZERO,
+        );
         runtime.document_retained_write_observe_authority(
             &document_hash,
             &file,
@@ -15999,8 +16016,8 @@ revised operator request
             !runtime
                 .subscribe_state_plane(
                     rpc::CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
-                    None,
-                    0,
+                    Some(wake_cursor.controller_generation),
+                    wake_cursor.latest_version,
                     Duration::from_secs(2),
                 )
                 .timed_out,

@@ -2,6 +2,14 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.382
+
+- **Retained-resume tests now wait from the exact pre-trigger state-plane cursor
+  (`#retainedresumewakeflake`).** The test barrier can no longer consume the
+  ordinary `ResponseCaptured` wake frame that remains in channel history after
+  its in-memory wake is cleared. Both delivery/intent arrival orders therefore
+  observe the new reactive resume publication before asserting its identity.
+
 ## 0.35.381
 
 - **The delayed editor-ACK regression test is scheduler-independent

@@ -2288,6 +2288,20 @@ fn upgrade_unobserved_clear_from_pane_history(
         );
         return ContextClearSubmitStatus::HarnessQueuedInput;
     }
+    if agent_doc_turn_executor_tmux::context_clear::context_clear_history_shows_pane_restarting(
+        &history,
+        harness,
+        |line| harness_config.is_dispatch_ready_prompt_line(line),
+    ) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "session_clear_submit_cleared_state_probe file={} pane={pane} harness={harness} phase={phase} result=pane_restarting",
+                file.display()
+            ),
+        );
+        return ContextClearSubmitStatus::PaneRestarting;
+    }
     let proven = live_pane_prompt_ready_at_cursor(&harness_config, &history, None)
         && context_clear_history_proves_cleared_state(
             &history,

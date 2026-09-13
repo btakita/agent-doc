@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.378
+
+- **Clear reports a restarting harness pane separately from an unobserved
+  submission (`#clearsubmitpanesettle`).** A recognized Claude Code, Codex, or
+  OpenCode startup banner without a dispatch-ready prompt now yields the
+  non-accepted `pane_restarting` state. Its diagnostic tells the operator to
+  wait for startup to finish, and the bounded repair path cannot mistake that
+  state for authority to resend the full clear command.
+
 ## 0.35.377
 
 - **Clear waits for controller promotion before touching a recycling session

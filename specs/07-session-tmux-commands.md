@@ -691,7 +691,10 @@ the harness submit key. If delivery is unobserved and retained conversation
 history proves the clear did not take effect, recovery may resend the full
 idempotent clear command once within the same bounded retry budget. Capture
 failure is not resend authority, and an accepted or already-cleared observation
-must never receive another command.
+must never receive another command. A recognized harness startup banner without
+a dispatch-ready prompt is the distinct non-accepted `pane_restarting` state;
+its only recovery is to wait for harness startup to finish, and it must never
+authorize a full-command resend (`#clearsubmitpanesettle`).
   is an explicit operator action and must not fail solely because direct tmux
   evidence classifies the resolved pane as `alive-busy` or because the current
   pane command is an agent wrapper; ordinary active/status panes are allowed

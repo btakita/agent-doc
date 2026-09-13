@@ -34,6 +34,10 @@ pub enum ContextClearSubmitStatus {
     HarnessQueuedInput,
     CaptureFailed,
     Unrendered,
+    /// (`#clearsubmitpanesettle`) The harness startup banner is visible but no
+    /// dispatch-ready prompt exists yet. Clear remains unaccepted, but the
+    /// state and its unblocker are known rather than submission-ambiguous.
+    PaneRestarting,
 }
 
 impl ContextClearSubmitStatus {
@@ -46,6 +50,7 @@ impl ContextClearSubmitStatus {
             Self::HarnessQueuedInput => "harness_queued_input",
             Self::CaptureFailed => "capture_failed",
             Self::Unrendered => "pane_not_rendered",
+            Self::PaneRestarting => "pane_restarting",
         }
     }
 
@@ -62,6 +67,7 @@ impl ContextClearSubmitStatus {
             Self::HarnessQueuedInput => Some("clear_queued_during_busy_turn"),
             Self::CaptureFailed => Some("submit_unverified_capture_failed"),
             Self::Unrendered => Some("submit_unverified_unrendered"),
+            Self::PaneRestarting => Some("clear_submit_pane_restarting"),
             Self::Accepted | Self::AcceptedClearedState => None,
         }
     }
@@ -76,6 +82,7 @@ impl ContextClearSubmitStatus {
             Self::HarnessQueuedInput => "clear_queued_behind_busy_turn",
             Self::CaptureFailed => "clear_submit_capture_failed",
             Self::Unrendered => "wait_for_pane_render",
+            Self::PaneRestarting => "wait_for_harness_startup",
             Self::Accepted | Self::AcceptedClearedState => "none",
         }
     }
@@ -86,6 +93,7 @@ impl ContextClearSubmitStatus {
             Self::Unobserved | Self::CaptureFailed => "verify_pane_state_then_retry",
             Self::HarnessQueuedInput => "wait_for_turn_or_interrupt_then_retry",
             Self::Unrendered => "wait_for_pane_render",
+            Self::PaneRestarting => "wait_for_harness_to_finish_starting",
             Self::Accepted | Self::AcceptedClearedState => "none",
         }
     }
@@ -111,6 +119,41 @@ pub fn context_clear_capture_shows_queued_input(
         .lines()
         .map(crate::prompt::strip_ansi)
         .any(|line| is_queued_input_placeholder_line(line.trim()))
+}
+
+/// (`#clearsubmitpanesettle`) Distinguish a pane that is visibly booting its
+/// harness from a settled pane where the clear submission was simply not
+/// observed. A ready prompt always wins over an old banner in scrollback.
+pub fn context_clear_history_shows_pane_restarting(
+    history: &str,
+    harness: &str,
+    is_dispatch_ready_prompt_line: impl Fn(&str) -> bool,
+) -> bool {
+    let harness = harness.trim().to_ascii_lowercase();
+    let mut saw_startup_banner = false;
+
+    for raw_line in history.lines() {
+        let normalized = crate::prompt::strip_ansi(raw_line);
+        let line = normalized.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if is_dispatch_ready_prompt_line(line) {
+            return false;
+        }
+
+        let line = line.to_ascii_lowercase();
+        saw_startup_banner |= match harness.as_str() {
+            "claude" | "claude-code" | "claude_code" => {
+                line.contains("welcome to claude code") || line.contains("claude code v")
+            }
+            "codex" => line.contains("welcome to codex") || line.contains("openai codex"),
+            "opencode" | "open-code" | "open_code" => line.contains("opencode"),
+            _ => false,
+        };
+    }
+
+    saw_startup_banner
 }
 
 /// Scrollback lines a pane may retain and still count as cleared.
@@ -399,6 +442,7 @@ pub fn context_clear_submit_resubmit_proof_line(
         ContextClearSubmitStatus::AcceptedClearedState => "accepted_cleared_state",
         ContextClearSubmitStatus::StillVisible => "still_visible",
         ContextClearSubmitStatus::Unobserved => "unobserved",
+        ContextClearSubmitStatus::PaneRestarting => "pane_restarting",
         ContextClearSubmitStatus::HarnessQueuedInput => "harness_queued_input",
         ContextClearSubmitStatus::CaptureFailed => "capture_failed",
         ContextClearSubmitStatus::Unrendered => "pane_not_rendered",
@@ -456,6 +500,9 @@ pub fn context_clear_submit_blocked_message(
     let remedy = match observation.status {
         ContextClearSubmitStatus::Unrendered => format!(
             "The {harness} pane stayed blank while awaiting its repaint. No duplicate clear was sent; wait for the prompt to render and check its context"
+        ),
+        ContextClearSubmitStatus::PaneRestarting => format!(
+            "The {harness} startup banner is visible but its prompt is not ready. No duplicate clear was sent; wait for the harness to finish starting"
         ),
         ContextClearSubmitStatus::Unobserved => format!(
             "No submission evidence was seen in either direction, so whether the clear ran is unknown. Check the {harness} pane before retrying — run Clear Session Context again if the context is still there"
@@ -1132,6 +1179,85 @@ Welcome to Claude Code
         assert!(
             !context_clear_history_proves_cleared_state(no_prompt, "/clear", 200, is_ready),
             "a pane with no dispatch-ready prompt is not settled"
+        );
+    }
+
+    #[test]
+    fn startup_banner_without_prompt_is_classified_as_pane_restarting() {
+        // `#clearsubmitpanesettle`: the live failure was previously reported as
+        // `submission_unobserved`, indistinguishable from a swallowed clear.
+        let is_ready = |line: &str| line.trim() == ">";
+        for (harness, history) in [
+            ("claude", "Claude Code v2.1.109\nStarting…\n"),
+            (
+                "codex",
+                "Welcome to Codex, OpenAI's command-line coding agent\nLoading configuration…\n",
+            ),
+            ("opencode", "OpenCode 1.18.3\nStarting…\n"),
+        ] {
+            assert!(
+                context_clear_history_shows_pane_restarting(history, harness, is_ready),
+                "{harness} startup banner must name the settling pane state"
+            );
+        }
+        assert!(
+            !context_clear_history_shows_pane_restarting(
+                "Welcome to Claude Code\n>\n",
+                "claude",
+                is_ready
+            ),
+            "a ready prompt makes the pane settled even when its banner remains"
+        );
+        assert!(
+            !context_clear_history_shows_pane_restarting(
+                "ordinary retained conversation\n",
+                "claude",
+                is_ready
+            ),
+            "banner-free history remains the genuinely unobserved case"
+        );
+    }
+
+    #[test]
+    fn pane_restarting_status_names_the_wait_only_unblocker() {
+        let status = ContextClearSubmitStatus::PaneRestarting;
+        assert_eq!(status.as_str(), "pane_restarting");
+        assert_eq!(status.issue(), Some("clear_submit_pane_restarting"));
+        assert_eq!(status.unblocker(), "wait_for_harness_startup");
+        assert_eq!(status.next_action(), "wait_for_harness_to_finish_starting");
+        assert!(!status.is_accepted());
+        let message = context_clear_submit_blocked_message(
+            "/tmp/doc.md",
+            "%16",
+            "claude",
+            "/clear",
+            "supervisor_ipc_acceptance",
+            ContextClearSubmitObservation {
+                status,
+                elapsed: Duration::from_millis(908),
+                command_visible: false,
+                content_changed_since_delivery: false,
+            },
+        );
+        assert!(
+            message.contains("wait for the harness to finish starting"),
+            "{message}"
+        );
+        assert!(message.contains("result=pane_restarting"), "{message}");
+        assert_eq!(
+            context_clear_submit_retry_action(ContextClearSubmitRetryFacts {
+                observation: ContextClearSubmitObservation {
+                    status,
+                    elapsed: Duration::from_millis(908),
+                    command_visible: false,
+                    content_changed_since_delivery: false,
+                },
+                pending_draft_enter_resubmit: false,
+                attempts_sent: 1,
+                max_attempts: 2,
+            }),
+            None,
+            "a restarting pane must not authorize a duplicate clear"
         );
     }
 

@@ -677,7 +677,11 @@ command into the authoritative session through the same canonical
   disabled` (`#codex-capability-proof-unrecoverable`). For Codex, it still
   records the clear prompt state so the next reroute can reapply the original
   launch contract. Before contacting tmux or the supervisor, it must record a
-  controller operator-command acceptance or fail with the rejected stage. Clear
+  controller operator-command acceptance or fail with the rejected stage. A
+  controller generation in a non-stable handoff state must refuse that
+  authorization without writing an acceptance receipt; the client waits for
+  the promoted generation and retries before any `/clear` delivery
+  (`#clearunobservedrecycle`). Clear
   is a session-context operation only: it must not rewrite the session markdown,
 save a snapshot, or delete live text below an `agent:boundary` marker.
 Clear delivery is successful only after observable command consumption, a pane

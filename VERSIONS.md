@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.377
+
+- **Clear waits for controller promotion before touching a recycling session
+  (`#clearunobservedrecycle`).** Operator-command authorization now refuses a
+  non-stable controller generation before actor lookup or receipt insertion.
+  The existing bounded handoff retry reconnects to the promoted generation and
+  only then permits `/clear` delivery, preventing a retiring supervisor from
+  acknowledging a command that never renders and later surfaces as
+  `submission_unobserved`.
+
 ## 0.35.376
 
 - **Restart Agent can reclaim an abandoned Ready-boundary preflight and replace

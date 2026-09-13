@@ -22317,6 +22317,22 @@ pub(crate) fn handle_operator_command(
 ) -> Result<DispatchAuthorization> {
     let file = request_file(&request)?;
     let command_kind = request_string(&request.command_kind, "command_kind")?;
+    // (`#clearunobservedrecycle`) An operator command is authorization to
+    // mutate or contact the actor owned by this controller generation. A
+    // retiring generation cannot issue that authorization: its supervisor and
+    // pane projection may already be moving to the replacement. Returning the
+    // standard retryable handoff refusal here lets the client reconnect after
+    // promotion before it sends `/clear`, rather than accepting against stale
+    // authority and later reporting `submission_unobserved` from a blank pane.
+    // This guard precedes actor lookup and receipt insertion so a refused
+    // generation leaves no durable acceptance behind.
+    if bootstrap.handoff_state != ControllerHandoffState::Stable {
+        anyhow::bail!(
+            "operator command `{command_kind}` refused for {}: controller not authoritative (handoff_state={:?}); retry against the promoted generation",
+            file.display(),
+            bootstrap.handoff_state
+        );
+    }
     let diagnostic_payload = request
         .diagnostic_payload
         .as_deref()
@@ -28678,6 +28694,92 @@ mod tests {
         assert_eq!(attempt.result_status.as_deref(), Some("accepted"));
         assert_eq!(attempt.proof_scope.as_deref(), Some("accepted_only"));
         assert!(!attempt.dispatch_start_proven);
+    }
+
+    #[test]
+    fn clear_authorization_waits_out_a_non_authoritative_controller_generation() {
+        // `#clearunobservedrecycle`: Clear used to accept against a retiring
+        // controller and immediately inject through a supervisor whose actor pane
+        // was still being recycled. The pane never rendered `/clear`, leaving the
+        // submit verifier with `submission_unobserved`. The operator-command
+        // acceptance must instead be the retryable barrier: only the promoted
+        // controller may issue the one durable acceptance receipt.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/clear-during-recycle.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-clear-recycle\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-clear-recycle",
+            "%42",
+            "@1",
+            1,
+        )
+        .unwrap();
+        agent_doc_session_actor_io::transition_state_direct(
+            &doc,
+            "session-clear-recycle",
+            "%42",
+            Some(1),
+            agent_doc_controller::actor::ActorState::Ready,
+            "supervisor",
+            "prompt_ready",
+        )
+        .unwrap();
+
+        let operator_command = ControllerRequest {
+            command: "operator_command".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("session_clear".to_string()),
+            diagnostic_payload: Some("clear during controller recycle".to_string()),
+        };
+        let mut attempts = 0usize;
+        let authorization = retry_controller_handoff_refusal(
+            &doc,
+            "operator_command",
+            Duration::from_secs(1),
+            Duration::ZERO,
+            |_| {},
+            || {
+                attempts += 1;
+                let mut generation = bootstrap.clone();
+                generation.handoff_state = if attempts < 3 {
+                    ControllerHandoffState::Preparing
+                } else {
+                    ControllerHandoffState::Stable
+                };
+                handle_operator_command(&generation, None, operator_command.clone())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(attempts, 3, "clear must wait for controller promotion");
+        assert_eq!(authorization.accepted_stage, "operator_ready");
+        let status = session_operator_status(dir.path(), &doc).unwrap();
+        assert_eq!(
+            status.dispatch_attempts.len(),
+            1,
+            "retiring generations must not write false acceptance receipts"
+        );
+        assert_eq!(
+            status.dispatch_attempts[0].receipt_id,
+            authorization.receipt.receipt_id
+        );
     }
 
     #[test]

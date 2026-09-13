@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.389
+
+- **Backlog backfill removes spliced dynamic-context manifests
+  (`#fixcausesleftover`).** The cleanup path now recognizes the complete fenced
+  prompt-context block, removes every manifest/fence segment while preserving
+  neighboring work items and legitimate section headings, and reports the
+  dropped fragments. This lets the supported backlog command repair debris left
+  by older unscoped retained projections.
+
 ## 0.35.388
 
 - **Retained transition retries preserve component boundaries (`#fixcausesleftover`).**

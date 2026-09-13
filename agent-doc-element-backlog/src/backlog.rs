@@ -443,24 +443,37 @@ impl PendingLayout {
     /// supported, tested feature, and a blanket rule would have deleted operator
     /// content. (`parse_pending_edit_payload` refuses non-item text in an *edit
     /// payload*, which is narrower than the stored-content contract — I had
-    /// over-read it.) So only two observed corruption shapes qualify:
+    /// over-read it.) So only three observed corruption shapes qualify:
     ///
     /// 1. an `### Re:` heading — that is the *exchange response* form and belongs
     ///    to `agent:exchange`; a legitimate section header is a topic label;
     /// 2. a line carrying `] [#id]` — the signature of an item whose leading
-    ///    `- [ ` was eaten, i.e. a destroyed item boundary.
+    ///    `- [ ` was eaten, i.e. a destroyed item boundary;
+    /// 3. a fenced `<dynamic_context_ref>` manifest — prompt input that belongs
+    ///    to `agent:exchange`, never a tracked-work section.
     ///
     /// Everything else survives: headers, prose, blank spacing, continuation.
     fn drop_spliced_non_item_text(&self) -> (Self, Vec<String>) {
         let mut segments = Vec::with_capacity(self.segments.len());
         let mut dropped = Vec::new();
-        for segment in &self.segments {
-            match segment {
+        let mut index = 0usize;
+        while index < self.segments.len() {
+            if let Some(end) = dynamic_context_splice_end(&self.segments, index) {
+                for segment in &self.segments[index..end] {
+                    if let PendingSegment::Text(raw) = segment {
+                        dropped.push(raw.clone());
+                    }
+                }
+                index = end;
+                continue;
+            }
+            match &self.segments[index] {
                 PendingSegment::Text(raw) if text_is_splice_debris(raw) => {
                     dropped.push(raw.clone())
                 }
                 other => segments.push(other.clone()),
             }
+            index += 1;
         }
         (Self { segments }, dropped)
     }
@@ -3225,8 +3238,51 @@ fn text_is_splice_debris(text: &str) -> bool {
         // An item whose leading `- [ ` was eaten, leaving the checkbox's closing
         // bracket immediately before its hash id.
         let has_orphaned_item_boundary = trimmed.contains("] [#");
-        is_response_heading || has_orphaned_item_boundary
+        // Prompt-context manifests belong to the exchange input envelope. A
+        // manifest in a tracked-work Text segment is necessarily a whole-block
+        // splice from a response-cycle projection, even when its surrounding
+        // Markdown fence otherwise looks like valid prose.
+        let has_dynamic_context_manifest = trimmed.starts_with("<dynamic_context_ref ");
+        is_response_heading || has_orphaned_item_boundary || has_dynamic_context_manifest
     })
+}
+
+fn dynamic_context_splice_end(segments: &[PendingSegment], start: usize) -> Option<usize> {
+    let text_at = |index| match segments.get(index) {
+        Some(PendingSegment::Text(raw)) => Some(raw.as_str()),
+        _ => None,
+    };
+    let first = text_at(start)?;
+    let first_is_fence = first.trim().starts_with("```") || first.trim().starts_with("~~~");
+    let manifest_start = if first_is_fence {
+        let next = text_at(start + 1)?;
+        next.lines()
+            .any(|line| line.trim().starts_with("<dynamic_context_ref "))
+            .then_some(start + 1)?
+    } else if first
+        .lines()
+        .any(|line| line.trim().starts_with("<dynamic_context_ref "))
+    {
+        start
+    } else {
+        return None;
+    };
+
+    let mut index = manifest_start;
+    while let Some(raw) = text_at(index) {
+        index += 1;
+        if raw.contains("</dynamic_context_ref>") {
+            if first_is_fence
+                && text_at(index).is_some_and(|next| {
+                    next.trim().starts_with("```") || next.trim().starts_with("~~~")
+                })
+            {
+                index += 1;
+            }
+            return Some(index);
+        }
+    }
+    None
 }
 
 /// True when `text` is nothing but a `do [#id]` queue directive.
@@ -5071,6 +5127,11 @@ mod tests {
         let body = concat!(
             "### Active\n",
             "- [ ] [#keep] a real item\n",
+            "```\n",
+            "<dynamic_context_ref contract=\"agent-doc-dynamic-context-manifest-v1\">\n",
+            "<context_ref handle=\"tsift://sample/context\" />\n",
+            "</dynamic_context_ref>\n",
+            "```\n",
             "### Re: #bbpe — gpt-5\n",
             "\n",
             "This remains an operator/live-editor v ] [#fmgc] [focused-cycle] stale duplicate\n",
@@ -5078,15 +5139,17 @@ mod tests {
         );
         let (new_body, changed, dropped) = backfill_reporting_dropped_text(body, DOC_ID, &ids());
         assert!(changed);
-        assert_eq!(
-            dropped.len(),
-            2,
-            "both orphan segments must be reported: {dropped:?}"
+        assert!(
+            dropped.len() >= 3,
+            "the context manifest and orphan response fragments must be reported: {dropped:?}"
         );
+        assert!(dropped.iter().any(|d| d.contains("<dynamic_context_ref")));
         assert!(dropped.iter().any(|d| d.contains("### Re: #bbpe")));
         assert!(dropped.iter().any(|d| d.contains("[#fmgc]")));
         assert!(!new_body.contains("### Re: #bbpe"));
         assert!(!new_body.contains("operator/live-editor v"));
+        assert!(!new_body.contains("<dynamic_context_ref"));
+        assert!(!new_body.contains("<context_ref"));
 
         // The real items either side are untouched — the drop must not take
         // neighbours with it.

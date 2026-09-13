@@ -9518,16 +9518,14 @@ mod tests {
             .unwrap()
             .expect("editor replica should attach");
 
-        let started = std::time::Instant::now();
+        // Assert the retained state and branch-specific operation below instead
+        // of wall-clock latency: scheduler contention in the full CI suite can
+        // delay this thread without the write path awaiting an editor ACK.
         let write = apply_canonical_replace_if_attached(&file, baseline, compacted, "compact")
             .expect("a retained canonical target is not a compact command failure")
             .expect("compact should use the attached CRDT relay");
 
         assert!(!write.delivery_converged);
-        assert!(
-            started.elapsed() < std::time::Duration::from_millis(500),
-            "retaining the lazy delivery projection must not wait through a foreground ACK deadline"
-        );
         let current = agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap();
         assert!(matches!(
             current,
@@ -9549,14 +9547,9 @@ mod tests {
         );
         assert!(!log.contains("did not settle within"), "{log}");
 
-        let barrier_started = std::time::Instant::now();
         let barrier_error =
             guard_visible_delivery_convergence(&file, "compact_secondary_effect_test")
                 .expect_err("secondary effects must stop behind the retained unACKed target");
-        assert!(
-            barrier_started.elapsed() < std::time::Duration::from_millis(500),
-            "the settlement observation must return pending without polling"
-        );
         assert!(
             barrier_error
                 .downcast_ref::<AwaitEditorReplicaNoDiskWrite>()

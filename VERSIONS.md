@@ -2,6 +2,13 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.381
+
+- **The delayed editor-ACK regression test is scheduler-independent
+  (`#compactackflake`).** It now proves the retained receipt, deferred-delivery
+  operation, and typed secondary-effect refusal directly instead of imposing a
+  500 ms wall-clock ceiling that could fail under full-suite CI contention.
+
 ## 0.35.380
 
 - **JetBrains input-required notifications route to the pane that owns their

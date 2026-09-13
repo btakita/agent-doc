@@ -450,6 +450,32 @@ Verification:
 Confidence: high. The failure condition was reproduced from the exact CI log, replaced with deterministic semantic assertions, stress-run locally, and validated by the full release suite.
 
 Escalation: none.
+
+### Re: `#retainedresumewakeflake` — gpt-5 · 2026-09-13T02:57-04:00
+
+Completed and released as agent-doc **0.35.382** (`5cc22b566`, tag `v0.35.382`).
+
+The CI-only failure was a stale state-plane barrier in the retained-resume regression itself. `capture_response` publishes the ordinary captured-finalize wake and then the test clears only the in-memory wake map; subscribing later from version zero could immediately consume that historical frame before the reactive retained-resume path inserted its new wake. Both intent/delivery arrival-order tests now snapshot the exact pre-trigger channel cursor and wait for a strictly newer publication, whose producer has already populated the wake map.
+
+Changed paths:
+
+- `agent-doc-controller-io/src/project_controller.rs` — pin the pre-trigger wake cursor in both retained-resume arrival-order tests.
+- `VERSIONS.md`, `editors/release-parity.tsv`, workspace manifests, lockfile, and bundled skill surfaces — project release 0.35.382.
+
+Commands and verification:
+
+- Reproduced CI run `34621201563` and traced the failed assertion to the stale historical `ResponseCaptured` frame.
+- Ran both `retained_resume_reacts_when_` regressions 100 times each (200 executions): passed.
+- Ran full `make check`: passed (`tart-b91fb8ef2c`).
+- Pushed commit `5cc22b566` to `main`, pushed tag `v0.35.382`, and ran `make install` successfully.
+- Installed CLI reports `agent-doc 0.35.382`; native library resolves to `libagent_doc-0.35.382.so`; JetBrains 0.2.383 and VS Code 0.2.70 packages installed.
+- GitHub CI `34743942989` and Release `34743946714` are in progress; the preceding 0.35.380 CI/release are green.
+- Preserved the existing 27-file dirty development checkout while advancing its baseline to `5cc22b566` and merging only this cursor patch into its already-modified controller source.
+- Checked `/tasks/software/lazily.md`: the replacement receipt has reconciled from pending to an abandoned interrupted cycle (`cancel_preflight_cycle_abandoned`), while its original “Resume multiple Claude code sessions…” prompt remains queued for a fresh continuation.
+
+Confidence: high.
+
+Escalation: none.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -468,7 +494,7 @@ t## Pending / Not Built
 - ~~📌 do [#layoutbindstale]~~
 - ~~📌 do [#jbfocusdocroute]~~
 - ~~📌 do [#compactackflake]~~
-- 📌 do [#retainedresumewakeflake]
+- ~~📌 do [#retainedresumewakeflake]~~
 - 📌 do [#cargotokenrevoke]
 - 📌 How can we make the pypi package slim? Can we make it download & extract the tarballs from github instead of sending the entire binary into PYPI? When we do the release, please aggresively delete old releases.
 <!-- /agent:queue -->
@@ -491,7 +517,6 @@ t## Pending / Not Built
 </dynamic_context_ref>
 ```
 - [ ] [#jbplugin382restart] [operator-verify] [P2] Restart IntelliJ to load JetBrains plugin 0.2.382. `make install` at 19:43 (binary 0.35.367) staged `~/.local/share/JetBrains/IntelliJIdea2026.1/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.382.jar`; the live IDE is still on 0.2.379, which is what preflight's standing `stale_plugin` warning reports. Same shape as the closed `#restartideaplugin` — it re-broke the plugin floor for `#tmuxfocussyncverify`, `#activateinstalledjetbrai`, and `#harnessswitchverify`, and for the `#jbfocusdocroute` half already shipped in 0.2.381.
-- [ ] [#retainedresumewakeflake] CI run 34621201563 (0.35.364) went red on agent-doc-controller-io `project_controller::tests::retained_resume_reacts_when_the_intent_arrives_after_delivery` — `assertion left == right failed; left: None, right: Some("retained_settled_delivery_reactive")` at project_controller.rs:15843. Already checked, do not re-walk: it does NOT reproduce locally (~900 executions, including `taskset -c 0` with --test-threads=8 and a 2-core taskset), and neither 0.35.364 change is reachable from it — pane_layout_projection_converged is in the pane-layout worker this test never drives, and capture_resume_unowned is in agent-doc-capture-io, which agent-doc-controller-io's lib test binary does not link. That CI run took 805s vs 166s locally, so the runner was heavily contended. Lead: the test's synchronization is a proxy, not a wait. It asserts `!subscribe_state_plane(CAPTURED_FINALIZE_WAKE_STATE_CHANNEL, None, 0, 2s).timed_out` and then reads runtime.captured_finalize_wakes immediately. record_captured_finalize_wake (rpc.rs:18944) inserts into that map BEFORE publishing the frame, so an absent key proves the subscribe returned for something other than this wake — check what state_plane_effective_after_version(None, 0, gen) plus the generationless-cursor reset makes `subscribe` return when the channel has no frames yet. Fix: wait on the condition (poll captured_finalize_wakes for the expected reason under a bounded deadline) rather than on subscribe-return, and apply it to all three sites using this pattern (15694, 15843, 15898). Keep both assertions — that settlement publishes the receipt AND that it records the reason.
 - [ ] [#cargotokenrevoke] REVOCATION NO LONGER NEEDED — closed by expiry, verified 2026-09-11 23:0x on the live https://crates.io/settings/tokens page: the exposed `publish-token` (created 3 months ago, last used ~4h ago) shows **Expired about 4 hours ago** and crates.io offers it no Revoke action at all, only Regenerate. An expired token cannot authenticate, so the security goal of this item is met. Re-issue also happened: a replacement `publish-token` was minted and is in `passage btak/CARGO_REGISTRY_TOKEN`. What remains is not revocation but wiring — tracked as #cargotokenwire (nine repo secrets still hold the pre-rotation token), plus one operator decision because the new token's cleartext reached this session's output.
 <!-- /agent:backlog -->
 

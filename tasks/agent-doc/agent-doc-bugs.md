@@ -428,6 +428,28 @@ Verification: focused JetBrains Gradle tests passed in both the shared checkout 
 The additional `lazily.md` operator verification failed and has been moved back into the active bug queue as `#restartlazilyverify`. Live receipts 662–664 reproduced a split authority: actor/status reported `harness: codex`, but the supervisor repeatedly launched Claude with the old Claude resume ID because restart-time frontmatter came from the attached editor CRDT revision still containing `agent: restart`. The temporary disk edit was restored so no divergent session-document edit remains. The queued fix now requires one retained target-harness/document-revision intent across controller admission, supervisor recycle, and child launch, plus proof that Claude and both subagents terminate before Codex starts.
 
 Confidence: high for the JetBrains routing fix and live `lazily.md` reproduction. Escalation: none; the remaining restart defect is queued with exact lifecycle evidence rather than being misreported as a successful switch.
+
+### Re: `#compactackflake` — gpt-5 · 2026-09-13T02:41-04:00
+
+Fixed and released as agent-doc 0.35.381 (commit `75d1b5f17`, tag `v0.35.381`).
+
+The referenced CI failure was a test-harness flake, not a retained-write behavior failure: run 34626410869 completed the delayed-ACK path correctly, but the regression test required the calling thread to be scheduled again within 500 ms during a saturated 9,325-test run. The test now asserts the semantic proof directly—the unconverged retained receipt, the `compact_crdt_delivery_deferred` operation with `recovery=retained_async_editor_delivery`, and the typed refusal that blocks snapshots/commits—without using scheduler latency as control-flow evidence.
+
+Changed paths:
+- `agent-doc-document-realtime-io/src/lib.rs`: removed both brittle 500 ms assertions and documented why the state/operation assertions are authoritative.
+- `VERSIONS.md` and `editors/release-parity.tsv`: recorded 0.35.381.
+- Release-version projection updated the workspace manifests, lockfile, package metadata, and bundled skill surfaces to 0.35.381.
+
+Verification:
+- The focused delayed-ACK regression passed 25 consecutive runs.
+- `make check` passed completely, including 9,325 Rust tests, JetBrains and VS Code suites, native cross-editor parity, release-version checks, and editor-parity audit.
+- `agent-doc --version` reports 0.35.381; `libagent_doc.so` resolves to `libagent_doc-0.35.381.so`.
+- JetBrains 0.2.383 and VS Code 0.2.70 were rebuilt/reinstalled.
+- CI run 34743219946 and Release run 34743227480 started for `75d1b5f17` and remain in progress; the preceding 0.35.380 CI and Release runs completed green.
+
+Confidence: high. The failure condition was reproduced from the exact CI log, replaced with deterministic semantic assertions, stress-run locally, and validated by the full release suite.
+
+Escalation: none.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -445,7 +467,7 @@ t## Pending / Not Built
 - ~~📌 do [#queuegorevokedonfreetext]~~
 - ~~📌 do [#layoutbindstale]~~
 - ~~📌 do [#jbfocusdocroute]~~
-- 📌 do [#compactackflake]
+- ~~📌 do [#compactackflake]~~
 - 📌 do [#retainedresumewakeflake]
 - 📌 do [#cargotokenrevoke]
 - 📌 How can we make the pypi package slim? Can we make it download & extract the tarballs from github instead of sending the entire binary into PYPI? When we do the release, please aggresively delete old releases.
@@ -469,7 +491,6 @@ t## Pending / Not Built
 </dynamic_context_ref>
 ```
 - [ ] [#jbplugin382restart] [operator-verify] [P2] Restart IntelliJ to load JetBrains plugin 0.2.382. `make install` at 19:43 (binary 0.35.367) staged `~/.local/share/JetBrains/IntelliJIdea2026.1/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.382.jar`; the live IDE is still on 0.2.379, which is what preflight's standing `stale_plugin` warning reports. Same shape as the closed `#restartideaplugin` — it re-broke the plugin floor for `#tmuxfocussyncverify`, `#activateinstalledjetbrai`, and `#harnessswitchverify`, and for the `#jbfocusdocroute` half already shipped in 0.2.381.
-- [ ] [#compactackflake] [P2] CI run 34626410869 (0.35.366, workflow CI) is RED on agent-doc-document-realtime-io tests::compact_exchange_returns_retained_success_when_editor_ack_stays_delayed, panicking at agent-doc-document-realtime-io/src/lib.rs:9472 (3183 passed / 1 failed / 259 skipped, 1025s). It predates the #fixdocsturn commit 0f959e11f and is not reachable from it (that change touches agent-doc-diff + baseline_comparison only), and local `make check` on the same tree is green. Same delayed-editor-ack shape as #retainedresumewakeflake, and that item already carries the diagnosis to apply here: the test synchronises on a subscribe RETURNING rather than on the condition holding, so a contended runner returns from subscribe for something other than the awaited event. Check whether :9472 waits on a subscribe/timeout proxy and convert it to a bounded poll of the actual condition.
 - [ ] [#retainedresumewakeflake] CI run 34621201563 (0.35.364) went red on agent-doc-controller-io `project_controller::tests::retained_resume_reacts_when_the_intent_arrives_after_delivery` — `assertion left == right failed; left: None, right: Some("retained_settled_delivery_reactive")` at project_controller.rs:15843. Already checked, do not re-walk: it does NOT reproduce locally (~900 executions, including `taskset -c 0` with --test-threads=8 and a 2-core taskset), and neither 0.35.364 change is reachable from it — pane_layout_projection_converged is in the pane-layout worker this test never drives, and capture_resume_unowned is in agent-doc-capture-io, which agent-doc-controller-io's lib test binary does not link. That CI run took 805s vs 166s locally, so the runner was heavily contended. Lead: the test's synchronization is a proxy, not a wait. It asserts `!subscribe_state_plane(CAPTURED_FINALIZE_WAKE_STATE_CHANNEL, None, 0, 2s).timed_out` and then reads runtime.captured_finalize_wakes immediately. record_captured_finalize_wake (rpc.rs:18944) inserts into that map BEFORE publishing the frame, so an absent key proves the subscribe returned for something other than this wake — check what state_plane_effective_after_version(None, 0, gen) plus the generationless-cursor reset makes `subscribe` return when the channel has no frames yet. Fix: wait on the condition (poll captured_finalize_wakes for the expected reason under a bounded deadline) rather than on subscribe-return, and apply it to all three sites using this pattern (15694, 15843, 15898). Keep both assertions — that settlement publishes the receipt AND that it records the reason.
 - [ ] [#cargotokenrevoke] REVOCATION NO LONGER NEEDED — closed by expiry, verified 2026-09-11 23:0x on the live https://crates.io/settings/tokens page: the exposed `publish-token` (created 3 months ago, last used ~4h ago) shows **Expired about 4 hours ago** and crates.io offers it no Revoke action at all, only Regenerate. An expired token cannot authenticate, so the security goal of this item is met. Re-issue also happened: a replacement `publish-token` was minted and is in `passage btak/CARGO_REGISTRY_TOKEN`. What remains is not revocation but wiring — tracked as #cargotokenwire (nine repo secrets still hold the pre-rotation token), plus one operator decision because the new token's cleartext reached this session's output.
 <!-- /agent:backlog -->

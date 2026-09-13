@@ -369,6 +369,30 @@ Verification:
 - GitHub Actions CI run `34739714791` for this commit is in progress; local verification is complete.
 
 Confidence: high. Escalation: none.
+
+### Re: `#queuegorevokedonfreetext` — gpt-5 · 2026-09-13 01:22 EDT
+
+Decision: keep the current activation revocation. This is intentional queue semantics, not a defect.
+
+A `re [#id]: <question>` residue line is preserved operator text but is not an addressable, drainable queue head. Queue activation represents executable priority work, so retaining `queue: go` when no executable prompt remains would leave an active queue with nothing it can consume and reintroduce the `#qchurn` failure mode. The correct outcome is therefore:
+
+- preserve the operator text in the document and snapshot;
+- strip the one-shot activation token and set `queue: stop`;
+- emit `inactive_queue_residue` for the edit cycle so the text is surfaced rather than silently ignored.
+
+When execution is intended, the operator should use an addressable `do [#id]` queue prompt or place the question in the exchange. No production or specification change was needed: the existing format contract already says activation requires prompts, freeform content is inert, and an empty queue drains.
+
+Changed paths: none.
+
+Commands and verification:
+
+- Inspected `run_queue_maintenance`, activation resolution, queue parsing, lossless drain gating, and the queue-format/orchestration specifications.
+- `cargo test -p agent-doc-preflight-io queue_maintenance_never_clears_a_drained_body_over_operator_text -- --nocapture` passed and reproduced the intended `stripped activation token (drained)` / `queue: stop` outcome while preserving the exact operator line.
+- `cargo test -p agent-doc-queue activation_start_fence_bare_no_prompts_after -- --nocapture` passed, confirming a consumed start fence with no remaining prompt resolves inactive.
+- The full `make check` gate already passed on this unchanged v0.35.378 tree in the immediately preceding cycle.
+- Latest CI run `34739714791` remains in progress.
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -383,7 +407,7 @@ t## Pending / Not Built
 - ~~📌 do [#isolationrelocate]~~
 - ~~📌 do [#clearunobservedrecycle]~~
 - ~~📌 do [#clearsubmitpanesettle]~~
-- 📌 do [#queuegorevokedonfreetext]
+- ~~📌 do [#queuegorevokedonfreetext]~~
 - 📌 do [#layoutbindstale]
 - 📌 do [#jbfocusdocroute]
 - 📌 do [#compactackflake]
@@ -409,7 +433,6 @@ t## Pending / Not Built
 </dynamic_context_ref>
 ```
 - [ ] [#jbplugin382restart] [operator-verify] [P2] Restart IntelliJ to load JetBrains plugin 0.2.382. `make install` at 19:43 (binary 0.35.367) staged `~/.local/share/JetBrains/IntelliJIdea2026.1/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.382.jar`; the live IDE is still on 0.2.379, which is what preflight's standing `stale_plugin` warning reports. Same shape as the closed `#restartideaplugin` — it re-broke the plugin floor for `#tmuxfocussyncverify`, `#activateinstalledjetbrai`, and `#harnessswitchverify`, and for the `#jbfocusdocroute` half already shipped in 0.2.381.
-- [ ] [#queuegorevokedonfreetext] [P2] After #queuelineclobber, an operator who writes a free-text `re [#id]: <question>` queue line and flips `queue: go` keeps their text but still gets the activation revoked (`[preflight] queue: stripped activation token (drained)` then `queue: set queue: stop`) — that path is separate from the now-gated need_clear_drained_body. Defensible as-is (a `re` line is not a drainable head, and the inactive_queue_residue warning routes it to the next cycle's prompt), so this is a design question, not a proven defect: decide whether an operator activation should survive a body that holds only non-drainable operator text, or whether the revoke plus the residue warning is the intended answer. Decide before changing it — go-mode churn (#qchurn) is the failure mode on the other side.
 - [ ] [#layoutbindstale] [P2] `derive_layout_actor_bindings` (src/agent-doc/agent-doc-controller-io/src/project_controller.rs:746-784) builds `desired_windows` from the RECORDED `record.window_id`, then binds every other actor whose recorded window is in that set as a co-window sibling of the layout. The record is provably untrustworthy: `agent-doc session doctor src/haiven-dev/tasks/infra.md` reports actor+registry `window=@0` for pane %14 while tmux has %14 in @3 (@0=agent-doc visible, @3=stash). So a stashed pane can be joined into a layout it is not part of, and after a `session doctor --repair` (which rebinds the record to the LIVE window) every stashed pane would share the stash window id and be bound together. Decide whether this join should consume a window id at all, or key on the desired document set alone. NOTE from #stashfocuswindow: resolving live is NOT automatically the right answer — for a selection effect the live window is the stash, which is precisely what must not be used. Status: a reading of the join, not an observed symptom; needs a repro before changing it.
 - [ ] [#jbfocusdocroute] [P2] The JB "Focus Agent Terminal" notification is per-document ("Agent input required for $fileName", TurnStateBannerRefresher.notifyInputRequired) but IdeTerminalHost.focusExisting(project) ignores the file and focuses a single project-wide terminal tab named "agent-doc". In a multi-document tmux layout the correct target is the pane that OWNS that document. The plugin already has the machinery (TmuxPaneFocusSync.recordEditorFocusIntent takes a documentPath, though it only records a lease — the actual routing goes through the command plane via EditorFocusSyncListener). Do this together with #stashfocuswindow: both are pane->window/document resolution, and solving it in two places separately is how three tmux focus reports became three separate reports. The silent-no-op half of this is already fixed in plugin 0.2.381 (commit 50bc06de5); what remains is routing to the right pane rather than merely always navigating somewhere.
 - [ ] [#compactackflake] [P2] CI run 34626410869 (0.35.366, workflow CI) is RED on agent-doc-document-realtime-io tests::compact_exchange_returns_retained_success_when_editor_ack_stays_delayed, panicking at agent-doc-document-realtime-io/src/lib.rs:9472 (3183 passed / 1 failed / 259 skipped, 1025s). It predates the #fixdocsturn commit 0f959e11f and is not reachable from it (that change touches agent-doc-diff + baseline_comparison only), and local `make check` on the same tree is green. Same delayed-editor-ack shape as #retainedresumewakeflake, and that item already carries the diagnosis to apply here: the test synchronises on a subscribe RETURNING rather than on the condition holding, so a contended runner returns from subscribe for something other than the awaited event. Check whether :9472 waits on a subscribe/timeout proxy and convert it to a bounded poll of the actual condition.

@@ -13,7 +13,7 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -635,6 +635,11 @@ Verification and delivery:
 
 ### Re: #ocreverselistsplice — gpt-5 · 2026-09-13T15:05-04:00
 
+> **Queue prompt:**
+>
+> 📌 do [#jbplugin382restart]
+
+
 Fixed and released as agent-doc 0.35.387.
 
 The provenance at `src/haiven-dev` commit `9b084e4` matches the constructed failure exactly: eight newly introduced list nodes were emitted in authored order, but every IPC insert named the same last-existing `after` anchor. Applying those patches sequentially inserted at one fixed boundary, so the run landed in exact reverse order. Repeated delivery explains the three identical copies; this was not the already-ruled-out document-cell merge, order weave, or region-restore path.
@@ -674,13 +679,6 @@ Confidence: high. Escalation: none.
 t## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- ⏭️ 📌 do [#jbplugin382restart]
-- ~~📌 How can we make the pypi package slim? Can we make it download & extract the tarballs from github instead of sending the entire binary into PYPI? When we do the release, please aggresively delete old releases.~~
-- ~~do [#restartlazilyverify]~~
-- ~~do [#reloadgateperprocess]~~
-- ~~do [#jbreloadreregconverge]~~
-- ~~do [#queuestartscopesilent]~~
-- ~~do [#ocreverselistsplice]~~
 <!-- /agent:queue -->
 
 
@@ -695,7 +693,6 @@ t## Pending / Not Built
 <context_ref handle="tsift://tspack-7fd447e44bac/xwrk-66eb936119-217282636f1b" hash="217282636f1b0ab83d4b4ce18436bbc86656805b3b92981b1459de789f74758e" source="tasks/fpe.md" mode="expanded" expand="tsift --envelope source-read tasks/fpe.md --budget normal" />
 </dynamic_context_ref>
 ```
-- [ ] [#jbplugin382restart] [operator-verify] [P2] Restart IntelliJ to load JetBrains plugin 0.2.382. `make install` at 19:43 (binary 0.35.367) staged `~/.local/share/JetBrains/IntelliJIdea2026.1/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.382.jar`; the live IDE is still on 0.2.379, which is what preflight's standing `stale_plugin` warning reports. Same shape as the closed `#restartideaplugin` — it re-broke the plugin floor for `#tmuxfocussyncverify`, `#activateinstalledjetbrai`, and `#harnessswitchverify`, and for the `#jbfocusdocroute` half already shipped in 0.2.381.
 <!-- /agent:backlog -->
 
 ## Review

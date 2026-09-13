@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.385
+
+- **JetBrains native-generation handoffs now preserve and prove every open
+  document replica (`#jbreloadreregconverge`).** Each attached replica is
+  checkpointed on its serialized document lane into JVM-owned encoded state
+  before workers stop or the old cdylib can unload. A missing checkpoint keeps
+  the old generation active. After the generation swap, the coordinator waits
+  for each current Markdown tab to register against the replacement and reports
+  exact missing paths instead of completing the handoff after a fire-and-forget
+  sweep. This ships in JetBrains plugin 0.2.384.
+
 ## 0.35.384
 
 - **Native-library reload admission is now scoped to the editor process rather

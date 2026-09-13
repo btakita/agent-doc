@@ -40,6 +40,34 @@ internal fun nativeReloadRemainingWaitMillis(deadlineNanos: Long, nowNanos: Long
     if (remainingNanos <= 0L) return null
     return TimeUnit.NANOSECONDS.toMillis(remainingNanos).coerceAtLeast(1L)
 }
+
+internal data class NativeReloadReplicaRestartReport(
+    val expected: Int,
+    val attached: Int,
+    val failedPaths: List<String>,
+) {
+    val converged: Boolean
+        get() = expected == attached && failedPaths.isEmpty()
+}
+
+internal data class NativeReloadReplicaHandoff(
+    val projectDocuments: Map<Project, Set<String>>,
+    val reloadSafe: Boolean,
+)
+
+internal fun nativeReloadReplicaRestartReport(
+    expectedPaths: Collection<String>,
+    attachedPaths: Collection<String>,
+): NativeReloadReplicaRestartReport {
+    val expected = expectedPaths.toSortedSet()
+    val attached = attachedPaths.toSet()
+    val failed = expected.filterNot(attached::contains)
+    return NativeReloadReplicaRestartReport(
+        expected = expected.size,
+        attached = expected.count(attached::contains),
+        failedPaths = failed,
+    )
+}
 private const val CRDT_EDT_WARN_MS = 50L
 private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L
 private const val CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS = 2_000L
@@ -621,6 +649,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     }
 
     override fun documentChanged(event: DocumentEvent) {
+        if (disposed.get()) return
         val started = System.nanoTime()
         var loggedFilePath: String? = null
         try {
@@ -3092,6 +3121,66 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
     }
 
+    /**
+     * Serialize a native-generation checkpoint behind each document lane's
+     * accepted work. Returning null is a hard refusal to unload the generation:
+     * an attached replica without encoded state cannot be reconstructed exactly.
+     */
+    private fun captureNativeReloadResumeStates(
+        deadlineNanos: Long,
+    ): Map<String, ReplicaResumeState>? {
+        val pending =
+            forwarders.entries
+                .filter { (_, forwarder) -> forwarder.attached }
+                .associate { (filePath, forwarder) ->
+                    filePath to documentWorkers.forDocument(filePath).submit<ReplicaResumeState?> {
+                        if (forwarders[filePath] !== forwarder) {
+                            null
+                        } else {
+                            forwarder.captureResumeState()
+                        }
+                    }
+                }
+        val captured = LinkedHashMap<String, ReplicaResumeState>()
+        for ((filePath, future) in pending) {
+            val remainingMs =
+                nativeReloadRemainingWaitMillis(deadlineNanos, System.nanoTime())
+            if (remainingMs == null) {
+                pending.values.forEach { it.cancel(true) }
+                log.warn(
+                    "[crdt-replica] native reload checkpoint timed out before ${File(filePath).name}; " +
+                        "retaining old generation",
+                )
+                return null
+            }
+            val state =
+                try {
+                    future.get(remainingMs, TimeUnit.MILLISECONDS)
+                } catch (_: TimeoutException) {
+                    null
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    null
+                } catch (error: Exception) {
+                    log.warn(
+                        "[crdt-replica] native reload checkpoint failed for ${File(filePath).name}",
+                        error,
+                    )
+                    null
+                }
+            if (state == null) {
+                pending.values.forEach { it.cancel(true) }
+                log.warn(
+                    "[crdt-replica] native reload checkpoint unavailable for ${File(filePath).name}; " +
+                        "retaining old generation",
+                )
+                return null
+            }
+            captured[filePath] = state
+        }
+        return captured
+    }
+
     companion object {
         private val instances = ConcurrentHashMap<Project, CrdtReplicaManager>()
         private val applyingAgentMutations = ConcurrentHashMap.newKeySet<String>()
@@ -3109,15 +3198,37 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             instances.remove(project)?.dispose()
         }
 
-        internal fun quiesceAllForNativeReload(): Pair<List<Project>, Boolean> {
-            val managers = instances.entries.mapNotNull { (project, manager) ->
-                if (instances.remove(project, manager)) project to manager else null
+        internal fun quiesceAllForNativeReload(): NativeReloadReplicaHandoff {
+            val managers = instances.entries.map { (project, manager) -> project to manager }
+            managers.forEach { (_, manager) -> manager.disposed.set(true) }
+
+            // Capture on each document's serialized lane BEFORE stopping or disposing
+            // anything. The previous aggregate `if (quiesced)` capture skipped every
+            // document when one busy lane missed the worker deadline, but disposal
+            // dropped all replicas anyway. A native generation may now be retired only
+            // after every attached forwarder has a JVM-owned encoded checkpoint.
+            val captureDeadlineNanos =
+                System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(NATIVE_RELOAD_WORKER_TIMEOUT_MS)
+            val capturedByProject = LinkedHashMap<Project, Map<String, ReplicaResumeState>>()
+            for ((project, manager) in managers) {
+                val captured = manager.captureNativeReloadResumeStates(captureDeadlineNanos)
+                if (captured == null) {
+                    managers.forEach { (_, activeManager) -> activeManager.disposed.set(false) }
+                    return NativeReloadReplicaHandoff(emptyMap(), reloadSafe = false)
+                }
+                capturedByProject[project] = captured
             }
-            // Stop the control worker and every document lane first, but keep
-            // native replicas open long enough to copy their encoded state into
-            // JVM-owned memory.
-            managers.forEach { (_, manager) ->
-                manager.disposed.set(true)
+
+            capturedByProject.values.forEach { captured ->
+                captured.forEach { (filePath, state) ->
+                    nativeReloadResumeStates[filePath] = state
+                }
+            }
+            managers.forEach { (project, manager) ->
+                manager.settledShadows.forEach { (filePath, settled) ->
+                    nativeReloadSettledShadows[filePath] = settled
+                }
+                instances.remove(project, manager)
                 manager.executor.shutdownNow()
                 manager.documentWorkers.shutdownNow()
             }
@@ -3133,32 +3244,57 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 ) ?: return@all false
                 manager.awaitWorkerTermination(remainingMs)
             }
-            if (quiesced) {
-                managers.forEach { (_, manager) ->
-                manager.forwarders.forEach { (filePath, forwarder) ->
-                    forwarder.captureResumeState()?.let { state ->
-                        nativeReloadResumeStates[filePath] = state
-                    }
-                    manager.settledShadows[filePath]?.let { settled ->
-                        nativeReloadSettledShadows[filePath] = settled
-                    }
-                }
-                }
-            }
             managers.forEach { (_, manager) -> manager.dispose() }
-            return managers.map { it.first } to quiesced
+            return NativeReloadReplicaHandoff(
+                projectDocuments = capturedByProject.mapValues { (_, captured) -> captured.keys },
+                reloadSafe = quiesced,
+            )
         }
 
-        internal fun restartAfterNativeReload(projects: List<Project>) {
-            projects
-                .filterNot { it.isDisposed }
-                .forEach { project ->
-                    runOnEdtNonBlocking {
-                        if (project.isDisposed) return@runOnEdtNonBlocking
-                        getInstance(project)
-                        forceRefreshOpenDocumentReplicas(project, "native-generation-handoff")
+        internal fun restartAfterNativeReload(
+            handoff: NativeReloadReplicaHandoff,
+        ): NativeReloadReplicaRestartReport {
+            val targets = mutableListOf<Triple<CrdtReplicaManager, String, Document>>()
+            val collectTargets = {
+                handoff.projectDocuments.keys
+                    .filterNot { it.isDisposed }
+                    .forEach { project ->
+                        val manager = getInstance(project)
+                        val fileDocumentManager = FileDocumentManager.getInstance()
+                        FileEditorManager.getInstance(project).openFiles
+                            .asSequence()
+                            .filter { it.name.endsWith(".md") }
+                            .forEach { file ->
+                                fileDocumentManager.getDocument(file)?.let { document ->
+                                    targets.add(Triple(manager, file.path, document))
+                                }
+                            }
                     }
+            }
+            if (SwingUtilities.isEventDispatchThread()) {
+                collectTargets()
+            } else {
+                ApplicationManager.getApplication().invokeAndWait(collectTargets)
+            }
+
+            val expectedPaths = targets.map { it.second }.toSortedSet()
+            val attachedPaths = linkedSetOf<String>()
+            targets.forEach { (manager, filePath, document) ->
+                manager.log.info(
+                    "[crdt-replica] awaiting native-generation re-register for ${File(filePath).name}",
+                )
+                if (
+                    manager.ensureOpenDocumentReplica(
+                        filePath,
+                        document,
+                        await = true,
+                        forceRefresh = true,
+                    )
+                ) {
+                    attachedPaths.add(filePath)
                 }
+            }
+            return nativeReloadReplicaRestartReport(expectedPaths, attachedPaths)
         }
 
         fun requestRemoteDrain(project: Project, filePath: String? = null, reason: String = "event") {

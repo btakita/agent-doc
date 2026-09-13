@@ -56,7 +56,11 @@ internal object NativeReloadCoordinator {
         val handoff = reloadGate.begin() ?: return
         try {
             ApplicationManager.getApplication().executeOnPooledThread {
-                var replicaProjects = emptyList<com.intellij.openapi.project.Project>()
+                var replicaHandoff =
+                    NativeReloadReplicaHandoff(
+                        projectDocuments = emptyMap(),
+                        reloadSafe = false,
+                    )
                 var watchers = emptyList<PatchWatcher>()
                 var surfaceProjects = emptyList<com.intellij.openapi.project.Project>()
                 try {
@@ -73,9 +77,12 @@ internal object NativeReloadCoordinator {
                         return@executeOnPooledThread
                     }
                     val replicaQuiesce = CrdtReplicaManager.quiesceAllForNativeReload()
-                    replicaProjects = replicaQuiesce.first
-                    if (!replicaQuiesce.second) {
-                        log.warn("[native] reload failed closed; a CRDT worker did not terminate")
+                    replicaHandoff = replicaQuiesce
+                    if (!replicaQuiesce.reloadSafe) {
+                        log.warn(
+                            "[native] reload failed closed; every attached CRDT replica could not be " +
+                                "checkpointed and quiesced",
+                        )
                         return@executeOnPooledThread
                     }
                     when (val outcome = AgentDocLib.hotReload(libVersion)) {
@@ -98,7 +105,19 @@ internal object NativeReloadCoordinator {
                             log.warn("[native] reload watcher restart failed", error)
                         }
                         try {
-                            CrdtReplicaManager.restartAfterNativeReload(replicaProjects)
+                            val report = CrdtReplicaManager.restartAfterNativeReload(replicaHandoff)
+                            if (report.converged) {
+                                log.info(
+                                    "[native] replica restart converged " +
+                                        "attached=${report.attached}/${report.expected}",
+                                )
+                            } else {
+                                log.warn(
+                                    "[native] replica restart incomplete " +
+                                        "attached=${report.attached}/${report.expected} " +
+                                        "failed=${report.failedPaths.joinToString(",")}",
+                                )
+                            }
                         } catch (error: Throwable) {
                             log.warn("[native] reload replica restart failed", error)
                         }

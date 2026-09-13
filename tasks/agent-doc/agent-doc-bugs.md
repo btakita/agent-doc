@@ -393,6 +393,27 @@ Commands and verification:
 - Latest CI run `34739714791` remains in progress.
 
 Confidence: high. Escalation: none.
+
+### Re: `#layoutbindstale` — gpt-5 · 2026-09-13 01:40 EDT
+
+Implemented and released as agent-doc v0.35.379 (`86b71340a`, tag `v0.35.379`, pushed to origin).
+
+The reproduction confirmed the defect: when a requested actor and an unrelated stashed actor both had the repaired recorded window `@3`, `derive_layout_actor_bindings` included both documents even though only one appeared in the desired columns. Recorded-window equality cannot prove layout membership because unrelated stashed actors legitimately share the stash window.
+
+The reactive join is now keyed strictly by the desired document set. Actor records provide bindings only for requested documents, while the existing structural-receipt fallback remains generation- and desired-document-fenced. Actor-store changes still invalidate the Computed projection, but cannot widen layout ownership by coincidental window ID.
+
+Changed paths: `agent-doc-controller-io/src/project_controller.rs`, `specs/07-session-tmux-commands.md`, `VERSIONS.md`, `editors/release-parity.tsv`, and the v0.35.379 manifest/skill projections. Pre-existing unrelated worktree edits were excluded from the commit.
+
+Commands and verification:
+
+- Added a common-stash-window regression and captured its pre-fix failure: bindings incorrectly contained both `infra.md` and `lazily.md`.
+- The new regression passed after narrowing the join.
+- `pane_layout_actor_authority_is_a_reactive_join` passed with its expectation corrected to the desired document set.
+- Full `make check` passed.
+- Installed and verified `agent-doc 0.35.379` and `libagent_doc-0.35.379.so` from a clean tagged worktree; VS Code is 0.2.70 and the intentionally newer local JetBrains build 0.2.382 was restored.
+- GitHub Actions CI run `34740585562` for this commit is in progress; local verification is complete.
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -408,7 +429,7 @@ t## Pending / Not Built
 - ~~📌 do [#clearunobservedrecycle]~~
 - ~~📌 do [#clearsubmitpanesettle]~~
 - ~~📌 do [#queuegorevokedonfreetext]~~
-- 📌 do [#layoutbindstale]
+- ~~📌 do [#layoutbindstale]~~
 - 📌 do [#jbfocusdocroute]
 - 📌 do [#compactackflake]
 - 📌 do [#retainedresumewakeflake]
@@ -433,7 +454,6 @@ t## Pending / Not Built
 </dynamic_context_ref>
 ```
 - [ ] [#jbplugin382restart] [operator-verify] [P2] Restart IntelliJ to load JetBrains plugin 0.2.382. `make install` at 19:43 (binary 0.35.367) staged `~/.local/share/JetBrains/IntelliJIdea2026.1/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.382.jar`; the live IDE is still on 0.2.379, which is what preflight's standing `stale_plugin` warning reports. Same shape as the closed `#restartideaplugin` — it re-broke the plugin floor for `#tmuxfocussyncverify`, `#activateinstalledjetbrai`, and `#harnessswitchverify`, and for the `#jbfocusdocroute` half already shipped in 0.2.381.
-- [ ] [#layoutbindstale] [P2] `derive_layout_actor_bindings` (src/agent-doc/agent-doc-controller-io/src/project_controller.rs:746-784) builds `desired_windows` from the RECORDED `record.window_id`, then binds every other actor whose recorded window is in that set as a co-window sibling of the layout. The record is provably untrustworthy: `agent-doc session doctor src/haiven-dev/tasks/infra.md` reports actor+registry `window=@0` for pane %14 while tmux has %14 in @3 (@0=agent-doc visible, @3=stash). So a stashed pane can be joined into a layout it is not part of, and after a `session doctor --repair` (which rebinds the record to the LIVE window) every stashed pane would share the stash window id and be bound together. Decide whether this join should consume a window id at all, or key on the desired document set alone. NOTE from #stashfocuswindow: resolving live is NOT automatically the right answer — for a selection effect the live window is the stash, which is precisely what must not be used. Status: a reading of the join, not an observed symptom; needs a repro before changing it.
 - [ ] [#jbfocusdocroute] [P2] The JB "Focus Agent Terminal" notification is per-document ("Agent input required for $fileName", TurnStateBannerRefresher.notifyInputRequired) but IdeTerminalHost.focusExisting(project) ignores the file and focuses a single project-wide terminal tab named "agent-doc". In a multi-document tmux layout the correct target is the pane that OWNS that document. The plugin already has the machinery (TmuxPaneFocusSync.recordEditorFocusIntent takes a documentPath, though it only records a lease — the actual routing goes through the command plane via EditorFocusSyncListener). Do this together with #stashfocuswindow: both are pane->window/document resolution, and solving it in two places separately is how three tmux focus reports became three separate reports. The silent-no-op half of this is already fixed in plugin 0.2.381 (commit 50bc06de5); what remains is routing to the right pane rather than merely always navigating somewhere.
 - [ ] [#compactackflake] [P2] CI run 34626410869 (0.35.366, workflow CI) is RED on agent-doc-document-realtime-io tests::compact_exchange_returns_retained_success_when_editor_ack_stays_delayed, panicking at agent-doc-document-realtime-io/src/lib.rs:9472 (3183 passed / 1 failed / 259 skipped, 1025s). It predates the #fixdocsturn commit 0f959e11f and is not reachable from it (that change touches agent-doc-diff + baseline_comparison only), and local `make check` on the same tree is green. Same delayed-editor-ack shape as #retainedresumewakeflake, and that item already carries the diagnosis to apply here: the test synchronises on a subscribe RETURNING rather than on the condition holding, so a contended runner returns from subscribe for something other than the awaited event. Check whether :9472 waits on a subscribe/timeout proxy and convert it to a bounded poll of the actual condition.
 - [ ] [#retainedresumewakeflake] CI run 34621201563 (0.35.364) went red on agent-doc-controller-io `project_controller::tests::retained_resume_reacts_when_the_intent_arrives_after_delivery` — `assertion left == right failed; left: None, right: Some("retained_settled_delivery_reactive")` at project_controller.rs:15843. Already checked, do not re-walk: it does NOT reproduce locally (~900 executions, including `taskset -c 0` with --test-threads=8 and a 2-core taskset), and neither 0.35.364 change is reachable from it — pane_layout_projection_converged is in the pane-layout worker this test never drives, and capture_resume_unowned is in agent-doc-capture-io, which agent-doc-controller-io's lib test binary does not link. That CI run took 805s vs 166s locally, so the runner was heavily contended. Lead: the test's synchronization is a proxy, not a wait. It asserts `!subscribe_state_plane(CAPTURED_FINALIZE_WAKE_STATE_CHANNEL, None, 0, 2s).timed_out` and then reads runtime.captured_finalize_wakes immediately. record_captured_finalize_wake (rpc.rs:18944) inserts into that map BEFORE publishing the frame, so an absent key proves the subscribe returned for something other than this wake — check what state_plane_effective_after_version(None, 0, gen) plus the generationless-cursor reset makes `subscribe` return when the channel has no frames yet. Fix: wait on the condition (poll captured_finalize_wakes for the expected reason under a bounded deadline) rather than on subscribe-return, and apply it to all three sites using this pattern (15694, 15843, 15898). Keep both assertions — that settlement publishes the receipt AND that it records the reason.

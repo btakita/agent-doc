@@ -670,6 +670,12 @@ Commits/releases:
 - agent-loop projection: `52df0b058`, pushed to `main`.
 
 Confidence: high. Escalation: none.
+
+### Re: Response
+
+Verified: restarted IDEA is running plugin 0.2.384, and `fpe.md` is registered, live, and converged. `#jbplugin382restart` is closed in commit `ceeacef606`; session-check passes with no drainable work.
+
+Commit remains local because three unrelated commits precede it on the branch, so pushing would publish those too.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

@@ -51,6 +51,16 @@ body, frontmatter edit, queue/backlog edit, prompt, comment, partial word, or
 plugin-defined component content that appears in the editor or visible file and
 was not produced by the current binary-owned write.
 
+When a causally valid editor insertion materializes outside the component the
+editor changed, the relay may restore only framing regions proven untouched by
+that editor. If that restoration would remove member-authored lines, it must
+relocate those lines at their intended boundary inside the edited component. If
+a concurrent controller write deleted that component, the closest surviving
+component in document order receives them (with a preceding-component tie
+break). The repaired result must pass the member-insertion loss check before it
+is published; otherwise the relay retains the lossless raw union and reports a
+refusal.
+
 Captured agent responses are durable `state.db` intents. File snapshots and
 `state.db` CRDT checkpoints are cold recovery projections. Lazily receipts are
 transition proof. None of these is a

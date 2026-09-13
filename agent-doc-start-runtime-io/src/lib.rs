@@ -2416,14 +2416,28 @@ impl SupervisorShared {
         }
     }
 
-    /// Send SIGTERM to the child process to unblock `wait()`.
+    /// Send SIGTERM to the foreground PTY process group so an agent restart
+    /// terminates the harness together with subagents/background descendants.
+    /// Fall back to the direct child PID when the PTY has no foreground group.
     #[cfg(unix)]
     fn kill_child(&self) {
         let pid = self.child_pid.load(Ordering::Relaxed);
-        if pid > 0 {
-            unsafe {
-                libc::kill(pid as libc::pid_t, libc::SIGTERM);
+        if pid == 0 {
+            return;
+        }
+        let master_fd = self.master_fd.load(Ordering::Relaxed);
+        if master_fd >= 0 {
+            let foreground_pgid = unsafe { libc::tcgetpgrp(master_fd) };
+            let supervisor_pgid = unsafe { libc::getpgrp() };
+            if child_process_group_target(foreground_pgid, supervisor_pgid).is_some() {
+                let result = unsafe { libc::kill(-foreground_pgid, libc::SIGTERM) };
+                if result == 0 {
+                    return;
+                }
             }
+        }
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGTERM);
         }
     }
 
@@ -2432,6 +2446,14 @@ impl SupervisorShared {
         // On non-Unix, we can't send signals. The main loop will detect
         // the flags after the child exits naturally or via other means.
     }
+}
+
+#[cfg(unix)]
+fn child_process_group_target(
+    foreground_pgid: libc::pid_t,
+    supervisor_pgid: libc::pid_t,
+) -> Option<libc::pid_t> {
+    (foreground_pgid > 0 && foreground_pgid != supervisor_pgid).then_some(foreground_pgid)
 }
 
 impl agent_doc_supervisor_io::detection::SupervisorDetectionState for SupervisorShared {
@@ -2712,6 +2734,14 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
     use tmux_router::IsolatedTmux;
+
+    #[cfg(unix)]
+    #[test]
+    fn child_process_group_target_never_selects_the_supervisor_group() {
+        assert_eq!(child_process_group_target(4201, 4200), Some(4201));
+        assert_eq!(child_process_group_target(4200, 4200), None);
+        assert_eq!(child_process_group_target(-1, 4200), None);
+    }
 
     #[test]
     fn supervisor_restart_prompt_is_flushed_to_operator_output() {

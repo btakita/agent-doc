@@ -22630,10 +22630,18 @@ fn spawn_supervisor_replacement_worker(work: SupervisorReplacementWork) -> Resul
 
 #[cfg(not(any(test, feature = "test-support")))]
 fn spawn_supervisor_replacement_worker(work: SupervisorReplacementWork) -> Result<bool> {
+    // `#replacementreceipt`: do not acknowledge a detached worker before its
+    // first authoritative lifecycle decision. The worker may still own a slow
+    // reexec/cold-start completion, but an immediate live-supervisor refusal
+    // must reach the operator synchronously instead of being buried later as
+    // `background_failed` after a false-success receipt.
+    let (admission_sender, admission_receiver) = std::sync::mpsc::sync_channel(1);
     std::thread::Builder::new()
         .name("agent-doc-supervisor-replacement".to_string())
         .spawn(move || {
-            if let Err(err) = drive_supervisor_replacement_background(work.clone()) {
+            if let Err(err) =
+                drive_supervisor_replacement_background(work.clone(), admission_sender)
+            {
                 agent_doc_ops_log_io::log_op(
                     &work.file,
                     &format!(
@@ -22644,11 +22652,20 @@ fn spawn_supervisor_replacement_worker(work: SupervisorReplacementWork) -> Resul
             }
         })
         .context("failed to spawn supervisor replacement background worker")?;
-    Ok(true)
+    match admission_receiver.recv() {
+        Ok(Ok(())) => Ok(true),
+        Ok(Err(err)) => anyhow::bail!(err),
+        Err(err) => {
+            anyhow::bail!("supervisor replacement worker exited before lifecycle admission: {err}")
+        }
+    }
 }
 
 #[cfg(not(any(test, feature = "test-support")))]
-fn drive_supervisor_replacement_background(work: SupervisorReplacementWork) -> Result<()> {
+fn drive_supervisor_replacement_background(
+    work: SupervisorReplacementWork,
+    admission_sender: std::sync::mpsc::SyncSender<Result<(), String>>,
+) -> Result<()> {
     let initial_pid = agent_doc_supervisor_io::process::supervisor_pid_for_doc(&work.file);
     let initial_host_stale = host_supervisor_stale_warning_for_doc(&work.file).is_some();
     let socket = agent_doc_supervisor_io::ipc::socket_path(&work.project_root, &work.session_id);
@@ -22686,6 +22703,7 @@ fn drive_supervisor_replacement_background(work: SupervisorReplacementWork) -> R
             // deliberately waits for the active turn to drain before execve;
             // the foreground proof timeout is observation only, never authority
             // to kill that supervisor or its live harness child.
+            let _ = admission_sender.send(Ok(()));
             agent_doc_ops_log_io::log_op(
                 &work.file,
                 &format!(
@@ -22701,6 +22719,7 @@ fn drive_supervisor_replacement_background(work: SupervisorReplacementWork) -> R
             return Ok(());
         }
         SupervisorReplacementEscalation::WaitThenEscalate => {
+            let _ = admission_sender.send(Ok(()));
             if wait_for_supervisor_replacement_completion(
                 &work.file,
                 initial_pid,
@@ -22721,12 +22740,16 @@ fn drive_supervisor_replacement_background(work: SupervisorReplacementWork) -> R
                 return Ok(());
             }
         }
-        SupervisorReplacementEscalation::EscalateColdStart => {}
+        SupervisorReplacementEscalation::EscalateColdStart => {
+            let _ = admission_sender.send(Ok(()));
+        }
         SupervisorReplacementEscalation::FailClosed => {
-            anyhow::bail!(
+            let message = format!(
                 "live supervisor rejected the replacement request for {} and no force/stale-host evidence authorizes a destructive cold start",
                 work.file.display()
             );
+            let _ = admission_sender.send(Err(message.clone()));
+            anyhow::bail!(message);
         }
     }
 

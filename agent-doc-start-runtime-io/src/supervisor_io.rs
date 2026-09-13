@@ -121,6 +121,10 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorSha
         *self.actor_state.lock() == Some(agent_doc_controller::actor::ActorState::WaitingInput)
     }
 
+    fn actor_ready(&self) -> bool {
+        *self.actor_state.lock() == Some(agent_doc_controller::actor::ActorState::Ready)
+    }
+
     fn transition_actor_busy(&self, caller: &str, reason: &str) {
         self.transition_actor_state(
             agent_doc_controller::actor::ActorState::Busy,
@@ -181,6 +185,31 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorSha
         match agent_doc_cycle_state_io::load_with_closeout_projection(&file) {
             Ok(state) => state.map(|state| state.is_open()).unwrap_or(false),
             Err(_) => true,
+        }
+    }
+
+    fn reclaim_ready_restart_preflight(
+        &self,
+    ) -> Result<agent_doc_supervisor_io::ipc::ReadyRestartPreflight, String> {
+        let Some(file) = self
+            .actor_runtime
+            .as_ref()
+            .map(|runtime| runtime.file.clone())
+        else {
+            return Ok(agent_doc_supervisor_io::ipc::ReadyRestartPreflight::NoOpenCycle);
+        };
+        match agent_doc_repair_command_io::cancel_preflight_cycle_after_run_cancel(&file)
+            .map_err(|err| format!("{}: {err:#}", file.display()))?
+        {
+            agent_doc_turn::repair::CancelOutcome::NoOpenCycle => {
+                Ok(agent_doc_supervisor_io::ipc::ReadyRestartPreflight::NoOpenCycle)
+            }
+            agent_doc_turn::repair::CancelOutcome::Abandoned => {
+                Ok(agent_doc_supervisor_io::ipc::ReadyRestartPreflight::Abandoned)
+            }
+            agent_doc_turn::repair::CancelOutcome::Protected => {
+                Ok(agent_doc_supervisor_io::ipc::ReadyRestartPreflight::Protected)
+            }
         }
     }
 

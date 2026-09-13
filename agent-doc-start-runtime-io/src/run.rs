@@ -1815,11 +1815,7 @@ pub fn run_with_reap_policy_resume_and_harness(
                         || route_owned_completion.load(Ordering::Relaxed))
                 {
                     kill_requested = true;
-                    if let Err(e) = sup.kill_child() {
-                        eprintln!(
-                            "[supervisor::in_process] kill on stop/restart request failed: {e}"
-                        );
-                    }
+                    shared.kill_child();
                 }
                 match sup.tick() {
                     TickOutcome::Running => std::thread::sleep(poll),

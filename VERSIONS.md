@@ -2,6 +2,26 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.376
+
+- **Restart Agent can reclaim an abandoned Ready-boundary preflight and replace
+  the complete harness process group.** An explicit restart no longer deadlocks
+  behind the empty durable cycle left when Claude returns to `Ready` after a
+  provider limit. Captured or busy cycles remain protected. The supervisor now
+  terminates the PTY foreground process group, so Claude's subagents do not
+  survive their parent, and the project-controller receipt waits for the first
+  authoritative lifecycle decision instead of reporting acceptance before an
+  immediate supervisor refusal.
+
+- **Cross-component CRDT repair relocates member insertions instead of leaving
+  them stranded (`#isolationrelocate`).** When a concurrent controller write
+  makes an editor line materialize in document framing, the relay restores the
+  proven-damaged framing and reinserts the lost line at its intended position in
+  the edited component. If that component was deleted, the closest surviving
+  component receives it with a deterministic preceding-component tie-break. The
+  existing member-loss post-condition still fails closed if relocation cannot
+  account for every inserted line.
+
 ## 0.35.375
 
 - **Compact no longer writes the durable context-reference block into the

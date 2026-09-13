@@ -275,6 +275,12 @@ pub trait SupervisorInjectDeliveryState {
 
 pub trait SupervisorIpcLifecycleState {
     fn actor_waiting_input(&self) -> bool;
+    /// True only after the live actor has surfaced a dispatch-ready harness
+    /// prompt. Unlike `WaitingInput`, this is a completed turn boundary rather
+    /// than a permission prompt inside an active turn.
+    fn actor_ready(&self) -> bool {
+        false
+    }
     fn transition_actor_busy(&self, caller: &str, reason: &str);
     fn transition_actor_waiting_input(&self, caller: &str, reason: &str);
     fn set_restart_mode(&self, mode: String);
@@ -293,9 +299,22 @@ pub trait SupervisorIpcLifecycleState {
     /// `#haivendupsession`: the restart path needs the same fact the recycle
     /// path gates on, so both refuse to replace a child that still owns a turn.
     fn agent_doc_cycle_open(&self) -> bool;
+    /// Reclaim an empty preflight after an explicit Restart Agent request has
+    /// proven the old harness run is already at `Ready`. The default stays
+    /// fail-closed for lifecycle implementations that cannot perform repair.
+    fn reclaim_ready_restart_preflight(&self) -> Result<ReadyRestartPreflight, String> {
+        Ok(ReadyRestartPreflight::Protected)
+    }
     /// True when the current harness child process is still running. A restart
     /// after the child is gone has nothing to double up and must still spawn.
     fn child_alive(&self) -> bool;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadyRestartPreflight {
+    NoOpenCycle,
+    Abandoned,
+    Protected,
 }
 
 pub fn mark_supervisor_inject_dispatched<S>(state: &S)
@@ -355,6 +374,20 @@ where
     // path instead.
     let preserve_live_child =
         !restart_agent && mode.trim().eq_ignore_ascii_case("continue") && child_alive;
+    let mut cycle_open = state.agent_doc_cycle_open();
+    // `#weeklylimitrestart`: Claude can return to its dispatch-ready prompt
+    // after a weekly-limit failure without producing a response, leaving the
+    // preflight_started projection open. At that proven live boundary, an
+    // explicit Restart Agent is the run-cancel authority and may reclaim ONLY
+    // the empty preflight. Captured/advanced cycles remain protected.
+    if restart_agent && child_alive && cycle_open && state.actor_ready() {
+        cycle_open = match state.reclaim_ready_restart_preflight().map_err(|err| {
+            format!("supervisor restart could not reclaim the ready harness preflight: {err}")
+        })? {
+            ReadyRestartPreflight::NoOpenCycle | ReadyRestartPreflight::Abandoned => false,
+            ReadyRestartPreflight::Protected => true,
+        };
+    }
     // `#haivendupsession`: refuse to spawn a replacement while the current child
     // still owns an open cycle. The recycle path has always deferred here; the
     // restart path did not, and with a keep-alive reap policy the un-reaped old
@@ -362,10 +395,8 @@ where
     // one. Fail loudly rather than silently dropping the operator's request —
     // a silent no-op is the failure mode this whole area keeps reproducing.
     if !preserve_live_child
-        && agent_doc_supervisor::lifecycle::supervisor_restart_admission(
-            state.agent_doc_cycle_open(),
-            child_alive,
-        ) == agent_doc_supervisor::lifecycle::SupervisorRestartAdmission::DeferCycleOpen
+        && agent_doc_supervisor::lifecycle::supervisor_restart_admission(cycle_open, child_alive)
+            == agent_doc_supervisor::lifecycle::SupervisorRestartAdmission::DeferCycleOpen
     {
         return Err(
             "supervisor restart deferred: a document cycle is open and the current harness \
@@ -1068,6 +1099,86 @@ mod tests {
             self.prompt_woken.store(true, Ordering::Relaxed);
             Ok(())
         }
+    }
+
+    struct ReadyRestartLifecycleState {
+        reclaim: ReadyRestartPreflight,
+        restart_requested: AtomicBool,
+        child_killed: AtomicBool,
+    }
+
+    impl SupervisorIpcLifecycleState for ReadyRestartLifecycleState {
+        fn actor_waiting_input(&self) -> bool {
+            false
+        }
+
+        fn actor_ready(&self) -> bool {
+            true
+        }
+
+        fn agent_doc_cycle_open(&self) -> bool {
+            true
+        }
+
+        fn reclaim_ready_restart_preflight(&self) -> Result<ReadyRestartPreflight, String> {
+            Ok(self.reclaim)
+        }
+
+        fn child_alive(&self) -> bool {
+            true
+        }
+
+        fn transition_actor_busy(&self, _caller: &str, _reason: &str) {}
+        fn transition_actor_waiting_input(&self, _caller: &str, _reason: &str) {}
+        fn set_restart_mode(&self, _mode: String) {}
+        fn set_restart_requested(&self, requested: bool) {
+            self.restart_requested.store(requested, Ordering::Relaxed);
+        }
+        fn binary_stale(&self) -> bool {
+            false
+        }
+        fn set_restart_reexec(&self, _reexec: bool) {}
+        fn set_stop_requested(&self, _requested: bool) {}
+        fn set_stop_agent_requested(&self, _requested: bool) {}
+        fn kill_child_for_ipc(&self) {
+            self.child_killed.store(true, Ordering::Relaxed);
+        }
+        fn wake_restart_prompt(&self) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    /// `#weeklylimitrestart`: a provider limit can end the harness run at its
+    /// ready prompt before any response is captured. Restart Agent must reclaim
+    /// that empty preflight and replace the whole old harness process tree.
+    #[test]
+    fn restart_agent_reclaims_empty_preflight_at_ready_boundary() {
+        let state = ReadyRestartLifecycleState {
+            reclaim: ReadyRestartPreflight::Abandoned,
+            restart_requested: AtomicBool::new(false),
+            child_killed: AtomicBool::new(false),
+        };
+
+        request_supervisor_restart(&state, "agent:continue".to_string())
+            .expect("ready empty preflight should be reclaimable");
+
+        assert!(state.restart_requested.load(Ordering::Relaxed));
+        assert!(state.child_killed.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn restart_agent_at_ready_boundary_still_protects_captured_cycle() {
+        let state = ReadyRestartLifecycleState {
+            reclaim: ReadyRestartPreflight::Protected,
+            restart_requested: AtomicBool::new(false),
+            child_killed: AtomicBool::new(false),
+        };
+
+        let result = request_supervisor_restart(&state, "agent:continue".to_string());
+
+        assert!(result.is_err());
+        assert!(!state.restart_requested.load(Ordering::Relaxed));
+        assert!(!state.child_killed.load(Ordering::Relaxed));
     }
 
     #[test]

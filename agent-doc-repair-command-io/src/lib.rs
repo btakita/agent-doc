@@ -81,6 +81,18 @@ pub fn repair(file: &Path) -> Result<RepairOutcome> {
     )
 }
 
+/// Reclaim the empty preflight owned by a harness run that has already reached
+/// a live actor boundary. Callers must establish that boundary before granting
+/// the run-cancel authority used here.
+pub fn cancel_preflight_cycle_after_run_cancel(
+    file: &Path,
+) -> Result<agent_doc_turn::repair::CancelOutcome> {
+    agent_doc_repair_io::cancel_preflight_cycle_after_run_cancel(
+        &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+        file,
+    )
+}
+
 /// Return the stable operation key only when the durable cycle contains a
 /// non-empty captured response that is eligible for binary-owned closeout.
 pub fn captured_finalize_resume_key(file: &Path) -> Result<Option<CapturedFinalizeResumeKey>> {

@@ -52,8 +52,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use agent_doc_element::element::{self, Component};
-use agent_doc_merge::document_cell::{ThreadSafeDocumentCellTree, project_document};
 use agent_doc_merge::crdt_sync::{ReplicaState, commit_barrier_ready, flush_to_commit_barrier};
+use agent_doc_merge::document_cell::{ThreadSafeDocumentCellTree, project_document};
 
 use crate::crdt_authority::CrdtAuthority;
 
@@ -289,7 +289,8 @@ fn minimal_char_span_edits(current: &str, content: &str) -> Result<Vec<(u32, u32
     let mut tail = 0usize;
     while tail < current_lines.len() - head
         && tail < content_lines.len() - head
-        && current_lines[current_lines.len() - 1 - tail] == content_lines[content_lines.len() - 1 - tail]
+        && current_lines[current_lines.len() - 1 - tail]
+            == content_lines[content_lines.len() - 1 - tail]
     {
         tail += 1;
     }
@@ -309,7 +310,9 @@ fn minimal_char_span_edits(current: &str, content: &str) -> Result<Vec<(u32, u32
             op.new_range().start + head..op.new_range().end + head,
         );
         match hunks.last_mut() {
-            Some((prev_old, prev_new)) if prev_old.end == old.start && prev_new.end == new.start => {
+            Some((prev_old, prev_new))
+                if prev_old.end == old.start && prev_new.end == new.start =>
+            {
                 prev_old.end = old.end;
                 prev_new.end = new.end;
             }
@@ -451,7 +454,6 @@ fn split_lines_inclusive(text: &str) -> Vec<&str> {
     }
     lines
 }
-
 
 /// Delivery/ACK state for one registered editor replica.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -954,7 +956,194 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
     out
 }
 
-    impl RelayHub {
+/// Restore member-authored lines that a component-isolation repair would
+/// otherwise remove (`#isolationrelocate`).
+///
+/// The source component is identified from the member's own before/after
+/// projection, where its intent is unambiguous. If that component still exists
+/// in the repaired canonical, the insertion is placed at the corresponding line
+/// boundary. If a concurrent CP write deleted it, the closest surviving
+/// component in document order receives the insertion; ties prefer the preceding
+/// component so prose is not accidentally promoted into a following queue.
+fn relocate_lost_member_insertions(
+    intent_before: &str,
+    intent_after: &str,
+    repaired: &str,
+) -> Option<String> {
+    #[derive(Debug)]
+    struct Insertion {
+        source_key: String,
+        source_component_index: usize,
+        old_line_index: usize,
+        text: String,
+    }
+
+    fn line_counts(text: &str) -> BTreeMap<String, usize> {
+        let mut counts = BTreeMap::new();
+        for line in text.lines() {
+            *counts.entry(line.trim().to_string()).or_default() += 1;
+        }
+        counts
+    }
+
+    fn component_regions(doc: &str) -> Option<Vec<DocumentRegion>> {
+        Some(
+            document_regions(doc)?
+                .into_iter()
+                .filter(|region| region.key.starts_with("component:"))
+                .collect(),
+        )
+    }
+
+    fn line_boundary(body: &str, old_body: &str, old_line_index: usize) -> usize {
+        let body_lines = split_lines_inclusive(body);
+        let old_lines = split_lines_inclusive(old_body);
+        let starts = |lines: &[&str]| {
+            let mut offsets = Vec::with_capacity(lines.len() + 1);
+            let mut offset = 0;
+            offsets.push(offset);
+            for line in lines {
+                offset += line.len();
+                offsets.push(offset);
+            }
+            offsets
+        };
+        let body_starts = starts(&body_lines);
+
+        if let Some(next) = old_lines.get(old_line_index)
+            && let Some(index) = body_lines.iter().position(|line| line == next)
+        {
+            return body_starts[index];
+        }
+        if old_line_index > 0
+            && let Some(previous) = old_lines.get(old_line_index - 1)
+            && let Some(index) = body_lines.iter().rposition(|line| line == previous)
+        {
+            return body_starts[index + 1];
+        }
+        body_starts[old_line_index.min(body_lines.len())]
+    }
+
+    let before_regions = component_regions(intent_before)?;
+    let after_regions = component_regions(intent_after)?;
+    let repaired_regions = component_regions(repaired)?;
+    let before_by_key: BTreeMap<&str, &DocumentRegion> = before_regions
+        .iter()
+        .map(|region| (region.key.as_str(), region))
+        .collect();
+    let repaired_by_key: BTreeMap<&str, &DocumentRegion> = repaired_regions
+        .iter()
+        .map(|region| (region.key.as_str(), region))
+        .collect();
+
+    let before_counts = line_counts(intent_before);
+    let after_counts = line_counts(intent_after);
+    let repaired_counts = line_counts(repaired);
+    let mut deficits: BTreeMap<String, usize> = after_counts
+        .into_iter()
+        .filter_map(|(line, after_count)| {
+            let inserted =
+                after_count.saturating_sub(before_counts.get(&line).copied().unwrap_or(0));
+            let missing =
+                after_count.saturating_sub(repaired_counts.get(&line).copied().unwrap_or(0));
+            let relocate = inserted.min(missing);
+            (relocate > 0).then_some((line, relocate))
+        })
+        .collect();
+    if deficits.is_empty() {
+        return Some(repaired.to_string());
+    }
+
+    let mut insertions = Vec::new();
+    for (source_component_index, after_region) in after_regions.iter().enumerate() {
+        let after_body = &intent_after[after_region.start..after_region.end];
+        let before_body = before_by_key
+            .get(after_region.key.as_str())
+            .map(|region| &intent_before[region.start..region.end])
+            .unwrap_or("");
+        let before_lines = split_lines_inclusive(before_body);
+        let after_lines = split_lines_inclusive(after_body);
+        for op in capture_diff_slices(Algorithm::Myers, &before_lines, &after_lines) {
+            if op.tag() != DiffTag::Insert {
+                continue;
+            }
+            for line in &after_lines[op.new_range()] {
+                let key = line.trim().to_string();
+                let Some(remaining) = deficits.get_mut(&key) else {
+                    continue;
+                };
+                if *remaining == 0 {
+                    continue;
+                }
+                *remaining -= 1;
+                insertions.push(Insertion {
+                    source_key: after_region.key.clone(),
+                    source_component_index,
+                    old_line_index: op.old_range().start,
+                    text: (*line).to_string(),
+                });
+            }
+        }
+    }
+    if deficits.values().any(|remaining| *remaining > 0) {
+        return None;
+    }
+
+    let after_positions: BTreeMap<&str, usize> = after_regions
+        .iter()
+        .enumerate()
+        .map(|(index, region)| (region.key.as_str(), index))
+        .collect();
+    let mut at_offset: BTreeMap<usize, String> = BTreeMap::new();
+    for insertion in insertions {
+        let (target, offset) =
+            if let Some(target) = repaired_by_key.get(insertion.source_key.as_str()) {
+                let body = &repaired[target.start..target.end];
+                let old_body = before_by_key
+                    .get(insertion.source_key.as_str())
+                    .map(|region| &intent_before[region.start..region.end])
+                    .unwrap_or("");
+                (
+                    *target,
+                    target.start + line_boundary(body, old_body, insertion.old_line_index),
+                )
+            } else {
+                let target = repaired_regions.iter().min_by_key(|candidate| {
+                    let candidate_index = after_positions
+                        .get(candidate.key.as_str())
+                        .copied()
+                        .unwrap_or(usize::MAX / 2);
+                    (
+                        candidate_index.abs_diff(insertion.source_component_index),
+                        candidate_index > insertion.source_component_index,
+                    )
+                })?;
+                let target_index = after_positions
+                    .get(target.key.as_str())
+                    .copied()
+                    .unwrap_or(insertion.source_component_index);
+                let offset = if target_index <= insertion.source_component_index {
+                    target.end
+                } else {
+                    target.start
+                };
+                (target, offset)
+            };
+        debug_assert!(target.start <= offset && offset <= target.end);
+        at_offset
+            .entry(offset)
+            .or_default()
+            .push_str(&insertion.text);
+    }
+
+    let mut relocated = repaired.to_string();
+    for (offset, text) in at_offset.into_iter().rev() {
+        relocated.insert_str(offset, &text);
+    }
+    Some(relocated)
+}
+
+impl RelayHub {
     fn mint_lineage() -> String {
         uuid::Uuid::new_v4().to_string()
     }
@@ -1557,7 +1746,7 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
         Ok(packet)
     }
 
-/// Apply a raw encoded lazily `TextCrdt` delta from member `client_id` to that
+    /// Apply a raw encoded lazily `TextCrdt` delta from member `client_id` to that
     /// member's hub-side mirror, integrate the new op(s) into the canonical
     /// replica, and capture the fan-out packet of those op(s) for every OTHER
     /// live member **without delivering it** (the caller controls delivery — the
@@ -1649,23 +1838,41 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
                             intent_after_text,
                             &prospective,
                         );
-                        if lost.is_empty() {
-                            for (start, end, text) in &edits {
-                                let offset = after_text[..*start].chars().count() as u32;
-                                let delete_len =
-                                    after_text[*start..*end].chars().count() as u32;
-                                self.canonical.apply_local_edit(offset, delete_len, text);
+                        let repaired = if lost.is_empty() {
+                            Some(prospective)
+                        } else {
+                            relocate_lost_member_insertions(
+                                intent_before_text,
+                                intent_after_text,
+                                &prospective,
+                            )
+                            .filter(|relocated| {
+                                member_insertions_lost_by(
+                                    intent_before_text,
+                                    intent_after_text,
+                                    relocated,
+                                )
+                                .is_empty()
+                            })
+                        };
+                        if let Some(repaired) = repaired {
+                            for (offset, delete_len, text) in
+                                minimal_char_span_edits(&after_text, &repaired)?
+                            {
+                                self.canonical.apply_local_edit(offset, delete_len, &text);
                             }
                             component_isolation_reconciled = true;
                             eprintln!(
-                                "[crdt] component_isolation_regions_restored client_id={client_id} regions={damaged:?}"
+                                "[crdt] component_isolation_regions_restored client_id={client_id} regions={damaged:?} relocated_lines={}",
+                                lost.len(),
                             );
                         } else {
                             component_isolation_refused_lossy = true;
                             eprintln!(
                                 "[crdt] component_isolation_restore_refused reason=member_insertion_would_be_lost client_id={client_id} regions={damaged:?} lost_lines={} first={:?}",
                                 lost.len(),
-                                lost.first().map(|line| line.chars().take(120).collect::<String>()),
+                                lost.first()
+                                    .map(|line| line.chars().take(120).collect::<String>()),
                             );
                         }
                     }
@@ -1698,9 +1905,7 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
             .members
             .keys()
             .copied()
-            .filter(|id| {
-                (component_isolation_reconciled || *id != client_id) && self.is_live(*id)
-            })
+            .filter(|id| (component_isolation_reconciled || *id != client_id) && self.is_live(*id))
             .collect();
         let packet = BroadcastPacket {
             origin: client_id,
@@ -2051,7 +2256,9 @@ fn apply_region_restore(union_after: &str, edits: &[(usize, usize, String)]) -> 
         let live_holders: Vec<u64> = self
             .members
             .iter()
-            .filter(|(id, member)| self.is_live(**id) && Self::member_holds_delivery_barrier(member))
+            .filter(|(id, member)| {
+                self.is_live(**id) && Self::member_holds_delivery_barrier(member)
+            })
             .map(|(id, _)| *id)
             .collect();
         let mut released = Vec::new();
@@ -2890,13 +3097,8 @@ mod tests {
         );
         let union_after = canonical_before.replace("idle\n", "busy\n");
         assert!(
-            cross_component_union_damage(
-                canonical_before,
-                &union_after,
-                REGION_DOC,
-                REGION_DOC
-            )
-            .is_empty(),
+            cross_component_union_damage(canonical_before, &union_after, REGION_DOC, REGION_DOC)
+                .is_empty(),
             "`component:status:0` has no counterpart in the member projection"
         );
         assert!(
@@ -2956,8 +3158,12 @@ mod tests {
             "edits must be ordered by descending offset, got {two:?}"
         );
         assert!(
-            component_scoped_region_restore(union_after, REGION_DOC, &["component:absent:0".into()])
-                .is_some_and(|edits| edits.is_empty()),
+            component_scoped_region_restore(
+                union_after,
+                REGION_DOC,
+                &["component:absent:0".into()]
+            )
+            .is_some_and(|edits| edits.is_empty()),
             "an unknown region names nothing to restore"
         );
     }
@@ -3176,7 +3382,7 @@ mod tests {
     }
 
     #[test]
-    fn a_member_insertion_that_lands_outside_every_component_is_flagged_not_deleted() {
+    fn a_member_insertion_that_lands_outside_every_component_is_relocated_not_deleted() {
         // End-to-end cover for the detector's positive path. The controller removes
         // the `notes` component while the operator is typing inside it, so every
         // character around the operator's caret is tombstoned and the insertion
@@ -3184,11 +3390,11 @@ mod tests {
         // member character on the far side of a component marker, which is the
         // damage the firewall exists to see.
         //
-        // The narrow repair is then correctly REFUSED: restoring that framing run
-        // would delete the operator's line, and no other replica has seen it yet,
-        // so nothing can legitimately have deleted it. Publishing the raw union
-        // leaves the text misplaced but present and visible, which the operator can
-        // fix; deleting it is unrecoverable.
+        // `#isolationrelocate`: the narrow repair restores that framing run and
+        // relocates the member's line into the nearest surviving component. The
+        // deleted `notes` component sat between `exchange` and `queue`; a tie
+        // deliberately chooses the preceding component so prose cannot become a
+        // queue directive.
         const BASE: &str = concat!(
             "<!-- agent:exchange -->\n",
             "Prompt.\n",
@@ -3216,35 +3422,66 @@ mod tests {
         let frontier = editor.state_vector();
         let caret = BASE.find("alpha\n").unwrap();
         editor.apply_local_edit(BASE[..caret].chars().count() as u32, 0, "typed\n");
-        let intent_after = editor.text();
         let update = editor.diff(&frontier).unwrap();
 
         hub.apply_canonical_replace(BASE, NOTES_REMOVED).unwrap();
-        let before_text = hub.canonical_text();
         let packet = hub.relay_update(2, &update).unwrap();
         let after_text = hub.canonical_text();
 
-        assert_eq!(
-            cross_component_union_damage(&before_text, &after_text, BASE, &intent_after),
-            vec!["frame:component:exchange:0".to_string()],
-            "the operator's characters materialized outside every component; canonical was:\n{after_text}"
-        );
         assert!(
             after_text.contains("typed"),
             "the operator's just-typed line must survive; canonical was:\n{after_text}"
         );
         assert!(
-            packet.component_isolation_refused_lossy,
-            "the repair must refuse rather than delete operator-authored bytes"
+            packet.component_isolation_reconciled,
+            "the framing repair and insertion relocation must be published together"
         );
-        assert!(
-            !packet.component_isolation_reconciled,
-            "a refused repair is not a repair"
+        assert!(!packet.component_isolation_refused_lossy);
+        let regions = region_texts(&after_text).unwrap();
+        assert_eq!(
+            regions["component:exchange:0"], "Prompt.\ntyped\n",
+            "the deleted component's member text moves inside the nearest surviving component"
+        );
+        assert_eq!(
+            regions["frame:component:exchange:0"],
+            "<!-- /agent:exchange -->\n<!-- agent:queue -->\n",
+            "the framing run itself is restored"
         );
         assert!(
             hub.pending_rebootstrap_members().is_empty(),
             "and no replica is reset to publish a raw union"
         );
+    }
+
+    #[test]
+    fn lost_member_insertion_keeps_its_position_in_a_surviving_component() {
+        const BEFORE: &str = concat!(
+            "<!-- agent:notes -->\n",
+            "alpha\n",
+            "omega\n",
+            "<!-- /agent:notes -->\n",
+        );
+        const AFTER: &str = concat!(
+            "<!-- agent:notes -->\n",
+            "alpha\n",
+            "typed\n",
+            "omega\n",
+            "<!-- /agent:notes -->\n",
+        );
+        const REPAIRED: &str = concat!(
+            "<!-- agent:notes -->\n",
+            "cp-prefix\n",
+            "alpha\n",
+            "omega\n",
+            "<!-- /agent:notes -->\n",
+        );
+
+        let relocated = relocate_lost_member_insertions(BEFORE, AFTER, REPAIRED).unwrap();
+        assert_eq!(
+            region_texts(&relocated).unwrap()["component:notes:0"],
+            "cp-prefix\nalpha\ntyped\nomega\n"
+        );
+        assert!(member_insertions_lost_by(BEFORE, AFTER, &relocated).is_empty());
     }
 
     /// `#cpwritecomponentscoped` fixture: three components, so a scope can name
@@ -3333,9 +3570,10 @@ mod tests {
             "<!-- agent:review -->\n<!-- /agent:review -->\n<!-- agent:queue -->\n",
         );
         let mut hub = RelayHub::from_text(1, SCOPED_BASE);
-        let scope = agent_doc_element::ComponentWriteScope::new([
-            agent_doc_element::ScopedComponent::new("review", 0),
-        ]);
+        let scope =
+            agent_doc_element::ComponentWriteScope::new([agent_doc_element::ScopedComponent::new(
+                "review", 0,
+            )]);
 
         let packet = hub
             .apply_canonical_replace_scoped(SCOPED_BASE, &target, Some(&scope))
@@ -3560,9 +3798,7 @@ mod tests {
         );
         // A line the CANONICAL already held independently only makes the check
         // more permissive — it must never be reported as a member loss.
-        assert!(
-            member_insertions_lost_by("", "- shared\n", "- shared\n- shared\n").is_empty(),
-        );
+        assert!(member_insertions_lost_by("", "- shared\n", "- shared\n- shared\n").is_empty(),);
         // `#reconcilesyntheticbase`: two holes the net used to fall through.
         // Comparing survivors against the inserted DELTA rather than the
         // member's post-edit count read `1 < 1` for a duplicate of a line the
@@ -3700,7 +3936,9 @@ mod tests {
         for component in ["status", "exchange", "backlog", "queue"] {
             base.push_str(&format!("<!-- agent:{component} -->\n"));
             for line in 0..200 {
-                base.push_str(&format!("{component} line {line} with some realistic prose\n"));
+                base.push_str(&format!(
+                    "{component} line {line} with some realistic prose\n"
+                ));
             }
             base.push_str(&format!("<!-- /agent:{component} -->\n"));
         }
@@ -3713,7 +3951,10 @@ mod tests {
         let elapsed = started.elapsed();
 
         assert_eq!(edits.len(), 2, "got {edits:?}");
-        let touched: usize = edits.iter().map(|(_, delete_len, _)| *delete_len as usize).sum();
+        let touched: usize = edits
+            .iter()
+            .map(|(_, delete_len, _)| *delete_len as usize)
+            .sum();
         assert!(
             touched < 60,
             "a two-word change in a {}-char document must touch a handful of characters, not {touched}",

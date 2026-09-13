@@ -328,6 +328,27 @@ The release-profile binary and native library are installed at `0.35.376`; VS Co
 GitHub Release run `34737823202` was still externally queued across all six platform jobs after five minutes, so I recorded `#release035376verify` rather than claiming the release assets already exist.
 
 Exchange is over 287 lines, but the queue remains active, so I am continuing it rather than pausing for compaction.
+
+### Re: `#clearunobservedrecycle` — gpt-5 · 2026-09-13T00:53-04:00
+
+Fixed and released as agent-doc 0.35.377.
+
+The earlier `#handoffrefusalretry` change covered project-controller client retries, but the `operator_command` handler itself still accepted Clear while its controller generation was `Preparing`. That acceptance let the caller proceed to supervisor IPC during recycle; the retiring supervisor could acknowledge the write while its actor pane never rendered `/clear`, leaving the later verifier with `submission_unobserved`.
+
+The controller now refuses every operator-command authorization from a non-stable generation before actor lookup or receipt insertion. The existing bounded client retry reconnects until the promoted generation answers, so Clear cannot contact tmux or the supervisor until controller authority is stable. The regression simulates two retiring generations followed by promotion and proves that only the stable generation creates the single durable acceptance receipt.
+
+Changed paths are the controller RPC implementation and regression, the session/tmux command specification, the 0.35.377 changelog/parity entry, and generated version manifests/skill projections. Pre-existing unrelated worktree edits remain unstaged.
+
+Verification and delivery:
+
+- The regression failed before the guard (`attempts: 1`, expected `3`) and passes after it.
+- `cargo test -p agent-doc-controller-io clear_authorization_waits_out_a_non_authoritative_controller_generation` passes.
+- `make check` passes in full.
+- Commit `533a7a5cd` (`fix: defer clear across controller handoff`) is pushed to `origin/main`; tag `v0.35.377` is pushed.
+- The clean release build installed `agent-doc 0.35.377` and `libagent_doc-0.35.377.so`; VS Code remains 0.2.70 and the intentionally newer local JetBrains development package was restored at 0.2.382.
+- GitHub CI run `34738628529` is in progress; per the project workflow this is non-blocking after the green local full gate.
+
+Confidence: high. No escalation is required.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -338,9 +359,9 @@ t## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
 - ~~📌 do [#cargotokenwire]~~
-- ⏭️ 📌 do [#jbplugin382restart]
+- 📌 do [#jbplugin382restart]
 - ~~📌 do [#isolationrelocate]~~
-- 📌 do [#clearunobservedrecycle]
+- ~~📌 do [#clearunobservedrecycle]~~
 - 📌 do [#clearsubmitpanesettle]
 - 📌 do [#queuegorevokedonfreetext]
 - 📌 do [#layoutbindstale]
@@ -368,7 +389,6 @@ t## Pending / Not Built
 </dynamic_context_ref>
 ```
 - [ ] [#jbplugin382restart] [operator-verify] [P2] Restart IntelliJ to load JetBrains plugin 0.2.382. `make install` at 19:43 (binary 0.35.367) staged `~/.local/share/JetBrains/IntelliJIdea2026.1/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.382.jar`; the live IDE is still on 0.2.379, which is what preflight's standing `stale_plugin` warning reports. Same shape as the closed `#restartideaplugin` — it re-broke the plugin floor for `#tmuxfocussyncverify`, `#activateinstalledjetbrai`, and `#harnessswitchverify`, and for the `#jbfocusdocroute` half already shipped in 0.2.381.
-- [ ] [#clearunobservedrecycle] [P2] `/clear` reported `submission_unobserved` on two haiven-dev panes (%16 docs.md, %15 dev.md) at 2026-09-11T20:24:15Z / 20:25:01Z, both `command_visible=false`, `elapsed_ms≈908`, `capture_len=2146`/`1138`. Evidence: `src/haiven-dev/.agent-doc/logs/ops.log` shows the same window churning controller generations 1176→1178 (`controller_active_non_stable_deferred ... handoff_state=Preparing`), so the panes were mid-restart and held no dispatch-ready prompt line — which is why `context_clear_history_proves_cleared_state` (#clearsubmitunobserved) could not resolve the idempotent case and the guard fell through to blocked. The guard itself is correct (fail-closed, exact unblocker). What is missing is the preceding step: the clear was attempted against a controller that had already refused as non-authoritative. Check whether the client-side #handoffrefusalretry landed in e13404d9c now defers the clear until the generation promotes; if it does not cover the supervisor_ipc_command_repair_acceptance path, extend it there. Repro: run `make install` against live route-owned supervisors, then issue Clear Session Context within ~30s.
 - [ ] [#clearsubmitpanesettle] [P3] [recommended] `context_clear_history_proves_cleared_state` requires a dispatch-ready prompt line, so a pane that is restarting reads identically to a pane that swallowed the clear. Consider a distinct `PaneRestarting` status (harness banner present, no prompt yet) whose unblocker is "wait for the harness to finish starting" rather than "verify pane state then retry" — the operator currently cannot tell those two apart from the message.
 - [ ] [#queuegorevokedonfreetext] [P2] After #queuelineclobber, an operator who writes a free-text `re [#id]: <question>` queue line and flips `queue: go` keeps their text but still gets the activation revoked (`[preflight] queue: stripped activation token (drained)` then `queue: set queue: stop`) — that path is separate from the now-gated need_clear_drained_body. Defensible as-is (a `re` line is not a drainable head, and the inactive_queue_residue warning routes it to the next cycle's prompt), so this is a design question, not a proven defect: decide whether an operator activation should survive a body that holds only non-drainable operator text, or whether the revoke plus the residue warning is the intended answer. Decide before changing it — go-mode churn (#qchurn) is the failure mode on the other side.
 - [ ] [#layoutbindstale] [P2] `derive_layout_actor_bindings` (src/agent-doc/agent-doc-controller-io/src/project_controller.rs:746-784) builds `desired_windows` from the RECORDED `record.window_id`, then binds every other actor whose recorded window is in that set as a co-window sibling of the layout. The record is provably untrustworthy: `agent-doc session doctor src/haiven-dev/tasks/infra.md` reports actor+registry `window=@0` for pane %14 while tmux has %14 in @3 (@0=agent-doc visible, @3=stash). So a stashed pane can be joined into a layout it is not part of, and after a `session doctor --repair` (which rebinds the record to the LIVE window) every stashed pane would share the stash window id and be bound together. Decide whether this join should consume a window id at all, or key on the desired document set alone. NOTE from #stashfocuswindow: resolving live is NOT automatically the right answer — for a selection effect the live window is the stash, which is precisely what must not be used. Status: a reading of the join, not an observed symptom; needs a repro before changing it.

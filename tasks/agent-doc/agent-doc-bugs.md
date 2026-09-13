@@ -632,6 +632,39 @@ Verification and delivery:
 - Superproject release record commit: `745e80a31`; the document response commit follows this response.
 
 **Proof:** changed paths are `agent-doc-queue/src/queue_continuation.rs`, `agent-doc-preflight-command-io/src/run.rs`, release/version projections, and the parity ledger. Commands were the two focused tests, `rustfmt --check`, `make check`, `make install`, exact-path staging, commit/tag, and pushes. Confidence is high. Escalation: none.
+
+### Re: #ocreverselistsplice — gpt-5 · 2026-09-13T15:05-04:00
+
+Fixed and released as agent-doc 0.35.387.
+
+The provenance at `src/haiven-dev` commit `9b084e4` matches the constructed failure exactly: eight newly introduced list nodes were emitted in authored order, but every IPC insert named the same last-existing `after` anchor. Applying those patches sequentially inserted at one fixed boundary, so the run landed in exact reverse order. Repeated delivery explains the three identical copies; this was not the already-ruled-out document-cell merge, order weave, or region-restore path.
+
+Architecture closeout:
+
+- Owner: `agent_doc_ipc_protocol::build_ipc_node_patches_json` owns target-order encoding for node-patch batches.
+- Invariant: each consecutive new sibling anchors to its immediate predecessor in the target, including a sibling introduced earlier in the same batch.
+- Topology: patch builder → JSON parser → native markdown patch applier. Consumers remain literal and sequential; the producer now supplies an order-preserving dependency chain.
+
+Changed paths:
+
+- `agent-doc-ipc-protocol/src/lib.rs`: chain insert anchors through newly introduced siblings and add an eight-item builder-to-applier regression.
+- `VERSIONS.md`, `editors/release-parity.tsv`, workspace manifests/lockfile, package metadata, and generated skill projections: release 0.35.387 parity.
+
+Verification:
+
+- The constructed regression failed before the fix and passed afterward.
+- `cargo test -p agent-doc-ipc-protocol` passed.
+- `make check` passed.
+- `make install` passed; `agent-doc --version` reports `0.35.387`, the native reload intent delivered to the available editor endpoint, and safe idle recycling was scheduled.
+- Latest prior GitHub CI run `34775701722` was still in progress when checked; local verification is complete.
+
+Commits/releases:
+
+- agent-doc source: `532a2b3d8` (`fix: preserve consecutive node patch order`), pushed to `main`.
+- tag: `v0.35.387`, pushed.
+- agent-loop projection: `52df0b058`, pushed to `main`.
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -647,12 +680,11 @@ t## Pending / Not Built
 - ~~do [#reloadgateperprocess]~~
 - ~~do [#jbreloadreregconverge]~~
 - ~~do [#queuestartscopesilent]~~
-- do [#ocreverselistsplice]
+- ~~do [#ocreverselistsplice]~~
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#ocreverselistsplice] 2026-09-12 [P1] Three copies of an 8-line run spliced into the WRONG response block, list lines only, exact reverse order, prose dropped. Provenance pinned: src/haiven-dev commit 9b084e4 (2026-09-11 13:28:19), 91s after 02d8cb7, during a queue:start->queue:go drain write; same cycle also appended two CORRECT new blocks. Source run = the list lines of the LATER '### Re: PR 20 - ADR 0012 review addressed' block. RULED OUT (checked, do not re-check): document_cell_merge on the mixed bullets/prose/ordered-list shape (test exchange_response_mixing_bullets_prose_and_ordered_list_keeps_authored_order, commit 54296e903, passes); order_union/weave_order (j=i-1 lookup always resolves); component_scoped_region_restore/apply_region_restore (descending offsets + replace_range). Signature points at a keyed-list re-emit inserting each item at a FIXED index against a base it does not belong to. haiven-dev ops.log no longer reaches 13:28 on 09-11; needs a constructed repro.
 ```
 <dynamic_context_ref contract="agent-doc-dynamic-context-manifest-v1" session="b69e5aeb-eab5-4a25-bc03-a9ddb69f84fc" cycle="cycle-1789167305907" fingerprint="42b6c436b2fdbaa2b9b0077601e304dc5ff8c7a4b05bac21fca356ec79350a4e" token_count="748" modes="expanded:6">
 <context_ref handle="tsift://tspack-7fd447e44bac/section-1-defbf5a0bc5b" hash="defbf5a0bc5bc203687c3fd33086227353c577f4d1550e756ce61e6015e4d73f" source="/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md" mode="expanded" expand="tsift --envelope source-read /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md --budget normal" />

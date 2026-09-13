@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a098b6-69b6-7801-9c97-72ad1659e5c9
+  codex: 01a09cf9-5423-7d11-adcb-ae33faba26d2
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -676,6 +676,32 @@ Confidence: high. Escalation: none.
 Verified: restarted IDEA is running plugin 0.2.384, and `fpe.md` is registered, live, and converged. `#jbplugin382restart` is closed in commit `ceeacef606`; session-check passes with no drainable work.
 
 Commit remains local because three unrelated commits precede it on the branch, so pushing would publish those too.
+
+### Re: #fixcausesleftover — gpt-5 · 2026-09-13T19:51:54-04:00
+
+> **Queue prompt:**
+>
+> do [#fixcausesleftover]
+
+
+Fixed and released the two agent-doc causes of the backlog cruft.
+
+The original contamination came from the retained-transition recovery path: direct CP writes already carried component scope, but a deferred retained projection called the unscoped whole-document relay API. Release 0.35.388 now derives scope from the actual visible base and rebased target and preserves independent exchange/backlog CRDT mutations; only genuine component-structure changes retain the unscoped materialization fallback.
+
+The supported cleanup path had a second gap: backlog backfill recognized orphan response fragments but treated a fenced `<dynamic_context_ref>` prelude as canonical. Release 0.35.389 recognizes the complete manifest span, removes its opening/closing fences and child refs, reports every dropped segment, and preserves neighboring items and legitimate section headings. Running the fixed command removed the historical manifest; the authoritative backlog is now clean.
+
+Verification and release:
+
+- focused retained-transition and backfill regressions pass;
+- full `make check` passes for both releases (9,450 workspace/editor tests in the prevention release, followed by the complete cleanup-release suite);
+- privacy denylist and `git diff --check` pass;
+- `make install` passes and `agent-doc --version` reports `0.35.389`; native reload intent delivered to the available editor endpoint;
+- latest prior GitHub CI run `34776592421` is green;
+- source commits `93b1374d5` and `9e3766889`, tags `v0.35.388` and `v0.35.389`, and superproject projections `11fc19505` and `31e573933` are pushed to `main`.
+
+The exchange is large; I did not compact it because this cycle had no compact opt-in.
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -689,16 +715,6 @@ t## Pending / Not Built
 
 
 <!-- agent:backlog priority -->
-```
-<dynamic_context_ref contract="agent-doc-dynamic-context-manifest-v1" session="b69e5aeb-eab5-4a25-bc03-a9ddb69f84fc" cycle="cycle-1789167305907" fingerprint="42b6c436b2fdbaa2b9b0077601e304dc5ff8c7a4b05bac21fca356ec79350a4e" token_count="748" modes="expanded:6">
-<context_ref handle="tsift://tspack-7fd447e44bac/section-1-defbf5a0bc5b" hash="defbf5a0bc5bc203687c3fd33086227353c577f4d1550e756ce61e6015e4d73f" source="/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md" mode="expanded" expand="tsift --envelope source-read /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md --budget normal" />
-<context_ref handle="tsift://tspack-7fd447e44bac/xwin-117226c52f-fd80b9845d9a" hash="fd80b9845d9a79d2d59c780edaa872b75931b609edd74f9afb89f5cca235f4ec" source=".agent/runbooks/code-navigation.md" mode="expanded" expand="tsift --envelope source-read .agent/runbooks/code-navigation.md --start 1 --lines 96 --budget normal" />
-<context_ref handle="tsift://tspack-7fd447e44bac/xwin-2490f05410-a61440a42505" hash="a61440a425051514bd6f149a83565d8974c0af83a2d4d95e40c42486089a07de" source="AGENTS.md" mode="expanded" expand="tsift --envelope source-read AGENTS.md --start 1 --lines 96 --budget normal" />
-<context_ref handle="tsift://tspack-7fd447e44bac/xwin-3871b1fc98-ed54281eb37b" hash="ed54281eb37b047872472713efd5d011f8e32bd2ae73bcb9741ba850b66b5eea" source=".gitmodules" mode="expanded" expand="tsift --envelope source-read .gitmodules --start 1 --lines 96 --budget normal" />
-<context_ref handle="tsift://tspack-7fd447e44bac/xwin-56e927068a-9edbb9f168ef" hash="9edbb9f168ef86b73318e3fed431db6a1499d4cf935ff88258920c5280bfdb10" source=".gitignore" mode="expanded" expand="tsift --envelope source-read .gitignore --start 1 --lines 96 --budget normal" />
-<context_ref handle="tsift://tspack-7fd447e44bac/xwrk-66eb936119-217282636f1b" hash="217282636f1b0ab83d4b4ce18436bbc86656805b3b92981b1459de789f74758e" source="tasks/fpe.md" mode="expanded" expand="tsift --envelope source-read tasks/fpe.md --budget normal" />
-</dynamic_context_ref>
-```
 <!-- /agent:backlog -->
 
 ## Review

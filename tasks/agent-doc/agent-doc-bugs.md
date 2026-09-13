@@ -512,6 +512,37 @@ Commands: `tsift status`; Python bootstrap unit tests; `uv build --wheel`; Pytho
 Verification: 5 Python tests passed; the produced wheel is `py3-none-any`, contains no native library or executable, and is 35,392 bytes; real archive verification extracted the expected native executable and sibling FFI library; clean installation invoked `agent-doc --version`; targeted Cargo coverage passed; full `make check` passed (`tart-cb9b428980`); installed CLI and FFI library both report 0.35.383; the release worktree is clean. CI run 34770263766, Release run 34770575670, and PyPI run 34770575683 were still in progress at closeout with no early failure, so local verification—not an unstarted remote runner—is the completion proof.
 
 Confidence: high for the slim-package implementation, release workflow, local install, preserved dirty checkout, and `fpe.md` convergence. Escalation: PyPI deletion requires the operator to authenticate in Chromium; the live `lazily.md` harness replacement remains tracked under `#restartlazilyverify` and should not be force-cleared while its pane may still be active.
+
+### Re: #restartlazilyverify — gpt-5 · 2026-09-13 13:34 EDT
+
+Completed the live Claude-to-Codex replacement and verified the lifecycle beyond admission. The original failure was receipt 661 reaching `operator_ready` while the old Claude child still owned an empty preflight cycle; the supervisor then deferred the restart. Installed `agent-doc 0.35.383` already contains the narrow ready-boundary reclaim in `agent-doc-supervisor-io/src/ipc.rs`: it abandons only an empty `preflight_started` cycle and continues to protect captured/advanced work.
+
+For the live repro, I restored `tasks/software/lazily.md` to `agent: codex` through its authoritative IntelliJ buffer and requested a normal, non-force restart. Receipt 665 completed the replacement: old Claude PID 1732363 exited, the existing healthy supervisor stayed PID 1732141, and live child PID 3139518 is `/home/brian/.npm-global/bin/codex -s danger-full-access`. Final status is `harness: codex`, actor `ready`, pane `alive-idle`, `prompt_ready=true`, `restart_count=1`, and no failed controller stage.
+
+The separately reported IntelliJ `src/haiven-dev/tasks/fpe.md` tab was reconciled without editing its document. `agent-doc session-check` reports its retained cycle committed with `ui_outcome=no_drainable_work`; reopening/focusing the existing tab now shows `agent-doc: idle`, and session status confirms a healthy supervisor plus ready/alive-idle Codex pane.
+
+Changed paths:
+- `tasks/software/lazily.md`: frontmatter selector `agent: restart` -> `agent: codex` through the live editor buffer.
+- No `src/agent-doc` source files were changed in this cycle; all 27 existing dirty paths were preserved.
+- No `src/haiven-dev/tasks/fpe.md` content change.
+
+Commands:
+- `cargo test -p agent-doc-supervisor-io restart_agent_reclaims_empty_preflight_at_ready_boundary`
+- `cargo test -p agent-doc-supervisor-io restart_agent_at_ready_boundary_still_protects_captured_cycle`
+- `agent-doc session restart-agent tasks/software/lazily.md`
+- `agent-doc session status tasks/software/lazily.md`
+- `ps -p 1732363,3139518 -o pid=,ppid=,stat=,args=`
+- `agent-doc session-check src/haiven-dev/tasks/fpe.md`
+- `gh run list --workflow CI --limit 1`
+
+Verification:
+- Both targeted supervisor regression tests passed (1/1 each).
+- Receipt 665 has `accepted_stage=operator_ready`, `failed_stage=none`; the old Claude PID is absent and the new Codex PID is live under the same supervisor.
+- Latest CI run 34770263766 completed successfully.
+- `fpe.md` session-check is OK and its IntelliJ status is idle.
+- The transient malformed keystroke text introduced while restoring the live buffer was fully repaired; exact queue/backlog text was rechecked and `rg` found no remaining `keyReturn`, `keyHome`, `clearmodifiers`, `0Di`, or `Backlogsting` fragments.
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -522,8 +553,8 @@ t## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
 - 📌 do [#jbplugin382restart]
-- 📌 How can we make the pypi package slim? Can we make it download & extract the tarballs from github instead of sending the entire binary into PYPI? When we do the release, please aggresively delete old releases.
-- do [#restartlazilyverify]
+- ~~📌 How can we make the pypi package slim? Can we make it download & extract the tarballs from github instead of sending the entire binary into PYPI? When we do the release, please aggresively delete old releases.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do [#restartlazilyverify]~~
 - do [#reloadgateperprocess]
 - do [#jbreloadreregconverge]
 - do [#queuestartscopesilent]
@@ -532,7 +563,6 @@ t## Pending / Not Built
 
 
 <!-- agent:backlog priority -->
-- [ ] [#restartlazilyverify] [P1] Restart Agent must complete a requested Claude-to-Codex continue replacement while a Claude session has two subagents and has hit its weekly limit. Live repro 2026-09-13: replacement was accepted, but tasks/software/lazily.md remains agent: restart with the old Claude child alive; cycle cycle-1789251560731 is abandoned, the supervisor is healthy, and actor state says ready while the pane probe says busy. Fix the controller/IDE lifecycle receipt completion without force-clearing a potentially active pane, then prove agent: codex and a live Codex child.
 - [ ] [#reloadgateperprocess] [P1] The #installstrandsreplica mid-cycle reload gate does not fire on the real path; supersedes that closed item. Measured 2026-09-12 18:25 and 18:42 on this repo with tasks/agent-doc/agent-doc-bugs.md holding open cycle-1789236397866 in state.db: `lib-install` reported `0 deferred mid-cycle` BOTH times, and after 0.35.373 NEITHER new diagnostic (`reload_library_deferred_cycle_open`, `reload_library_no_document_candidates`) appeared in this project's ops.log — so `reload_library_for_project` never reached its endpoint loop for agent-loop, while the IDE demonstrably reloaded (`crdt_replica_deregister` 18:26:01). Two things to settle. (1) Why the agent-loop leg bails: either the project is absent from `controller_project_roots(std::process::id())` or `reliable_sync_status` fails for it (`failed: 3` with only 3 endpoints is consistent with one status-read failure); `agent-doc admin list` answers for this project, so the controller itself is reachable. Both bail paths are silent — add a named log line before fixing. (2) The structural half: one cdylib serves a whole editor process and IDE pid 2238596 is registered across several of the nine projects, so a reload delivered through ANY project's endpoint retires the generation holding every replica in that process. A per-project gate can never see that; the gate has to be process-scoped. But a naive process-wide defer freezes the cdylib — in this workspace something is almost always mid-cycle — so it needs per-(editor pid, document) attribution that survives an empty registration record, which is the same blind spot 0.35.373 worked around for the candidate set. 0.35.371's refusal reasoning (agent-doc-supervisor::lifecycle::native_reload_admission, the three-gate agreement test) and the pending-marker/idle-watch re-arm are correct and tested; only the reach is wrong. Related: [#jbreloadreregconverge] is the plugin-side half.
 - [ ] [#jbreloadreregconverge] [P2] The JetBrains native-generation handoff re-registers every open .md tab (`NativeReloadCoordinator.requestReload` -> `CrdtReplicaManager.restartAfterNativeReload` -> `forceRefreshOpenDocumentReplicas`, `ensureOpenDocumentReplica(await = false, forceRefresh = true)`) and that re-registration does NOT converge for a document that was mid-cycle when the reload ran — the residue of #installstrandsreplica, which fixed the trap in the binary by deferring the reload but left the plugin-side non-convergence latent. Evidence 2026-09-11 23:36: the IDE had both libagent_doc-1789182099748.so and libagent_doc-1789184163251.so mapped, tasks/agent-doc/agent-doc-bugs.md stayed in editor_attached_model_missing across admin reload-lib (1/3 endpoints, no clear) and cleared only on an operator tab re-attach, while a sibling document resolved normally throughout. Suspects, in order: `quiesceAllForNativeReload` captures `captureResumeState()` into `nativeReloadResumeStates` ONLY when every worker terminated within NATIVE_RELOAD_WORKER_TIMEOUT_MS — a busy document lane (exactly what an open cycle produces) misses the capture, and `managers.forEach { dispose() }` then drops the replica either way; and `forceRefreshOpenDocumentReplicas` is fire-and-forget (`await = false`) with no per-document proof that the new generation actually holds the replica. Fix direction: carry each open document's encoded state into the replacement generation before the old one is dropped, and have the handoff assert per-document re-registration instead of firing and forgetting. Needs a plugin version bump, build, and an IDE restart to verify — #jbplugin382restart already owes a restart.
 - [ ] [#queuestartscopesilent] [P2] A supervisor-scoped queue reports zero drainable heads with NO reason, through the same silent branch a genuinely drained queue uses. `active_queue` (agent-doc-queue/src/queue_continuation.rs:637) calls `active_queue_for_supervisor_start(content, false)`, so `explicit_start` is hard-wired off for DrainScope::InSessionLoop and the `if !explicit_go && !explicit_start { return None }` gate short-circuits `drainable_head_count` to 0 BEFORE looking at any item. That is correct design (`start` = supervisor drain, `go` = in-session loop too), but preflight then emits `queue_active: true` + `queue_drainable_head_count: 0` + `queue_continuation_required: false` + `queue_continuation_guidance: null` + no `ui_outcome`, which is indistinguishable from a drained queue. Observed 2026-09-12 on tasks/agent-doc/agent-doc-bugs.md with SEVENTEEN live heads; the cause was recoverable only by reading the source. Same failure mode as #queueblockquoteintent, which already fixed the exchange-preemption branch on the premise that "a stop with heads remaining must name its reason" — `effective_continuation_output_with_preemption` (queue_continuation.rs:114) still returns silence whenever `raw_required` is false, on the comment "genuinely nothing to drain stays silent - there is no reason to give", and that premise does not hold for the scope case. FIX: add `supervisor_scoped_activation_guidance(content)` in agent-doc-queue/src/queue_continuation.rs returning Some(reason) when `active_queue(content).is_none()` AND `active_queue_for_supervisor_start(content, true).is_some()` AND that activation has >0 prompts; thread it into the guidance at the single production caller, agent-doc-preflight-command-io/src/run.rs:1867. Guidance must say the heads are supervisor-owned and NOT stalled, and that `queue: go` hands the drain to the in-session loop. Extend the `a_preempted_drain_names_its_reason_instead_of_going_silent` test with the scope case.

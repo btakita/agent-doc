@@ -208,6 +208,12 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         notification.isImportant = true
         notification.addAction(
             NotificationAction.createSimple("Focus Agent Terminal") {
+                // The notification is document-scoped, so publish that document through the
+                // existing editor-focus command plane before activating the shared terminal tab.
+                // The controller then selects the pane/window that owns this session document.
+                if (!EditorFocusSyncListener.routeDocumentFocus(project, filePath)) {
+                    LOG.warn("[turn-state] unable to route terminal focus for $filePath")
+                }
                 // `#jbfocusnoop`: this used to call a Unit-returning focus that
                 // `return`ed on every miss, so a click with no live agent-doc tab
                 // navigated nowhere and told the operator nothing. Report the miss.

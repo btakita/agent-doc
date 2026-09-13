@@ -12,6 +12,7 @@ import com.intellij.openapi.editor.ex.FocusChangeListener
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.vfs.LocalFileSystem
 import java.awt.event.FocusEvent
 import java.util.concurrent.ConcurrentHashMap
 
@@ -85,6 +86,18 @@ class EditorFocusSyncListener private constructor(
 
         fun install(project: Project, tabSync: EditorTabSyncListener) {
             instances.computeIfAbsent(project) { EditorFocusSyncListener(project, tabSync) }
+        }
+
+        /**
+         * Route an explicit document-scoped focus request through the same command-plane lane as
+         * an editor activation. Notification actions know the owning document even when a generic
+         * IDE terminal tab is currently showing a different tmux pane (`#jbfocusdocroute`).
+         */
+        fun routeDocumentFocus(project: Project, documentPath: String): Boolean {
+            if (project.isDisposed) return false
+            val file = LocalFileSystem.getInstance().findFileByPath(documentPath) ?: return false
+            EditorTabSyncListener.install(project).onEditorFocusGained(project, file)
+            return true
         }
 
         fun disposeProject(project: Project) {

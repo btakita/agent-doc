@@ -2,6 +2,14 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.380
+
+- **JetBrains input-required notifications route to the pane that owns their
+  document (`#jbfocusdocroute`).** The notification action now publishes its
+  document path through the existing editor-focus command plane before opening
+  the shared IDE terminal tab. Multi-document tmux layouts therefore select the
+  owning pane/window instead of leaving whichever project-wide pane was active.
+
 ## 0.35.379
 
 - **Pane-layout actor bindings no longer absorb unrelated stash-window actors

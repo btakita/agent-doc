@@ -38,4 +38,23 @@ class EditorFocusSyncListenerTest {
         assertTrue("document lookup must happen inside the read action", documentLookup > readAction)
         assertTrue("document text must be read inside the read action", documentRead > readAction)
     }
+
+    @Test
+    fun `input-required notification routes its document through editor focus command plane`() {
+        val sourceRoot = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc"),
+        ).first { Files.exists(it) }
+        val notification = Files.readString(sourceRoot.resolve("TurnStateBannerRefresher.kt"))
+        val focusListener = Files.readString(sourceRoot.resolve("EditorFocusSyncListener.kt"))
+
+        assertTrue(
+            "notification action must retain the document identity when focusing the terminal",
+            notification.contains("EditorFocusSyncListener.routeDocumentFocus(project, filePath)"),
+        )
+        assertTrue(
+            "explicit notification focus must reuse the document-specific command-plane path",
+            focusListener.contains("onEditorFocusGained(project, file)"),
+        )
+    }
 }

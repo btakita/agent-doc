@@ -31,7 +31,7 @@ use agent_doc_editor_surface::{
     SurfaceIntent, SurfaceObservationReceipt, TmuxLayout,
 };
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
 
 const CONTROLLER_CRDT_CURRENT_TEXT_POLL_TIMEOUT: Duration = Duration::from_secs(1);
@@ -10185,6 +10185,20 @@ enum EditorNativeReloadPolicy {
     RestartRequired,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct EditorNativeReloadEndpoint {
+    project_root: PathBuf,
+    pid: u64,
+    editor_id: String,
+    capabilities: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+struct EditorNativeReloadProcess {
+    endpoints: BTreeSet<EditorNativeReloadEndpoint>,
+    documents: BTreeSet<PathBuf>,
+}
+
 fn editor_native_reload_policy(
     editor_id: &str,
     capabilities: &[String],
@@ -10201,144 +10215,224 @@ fn editor_native_reload_policy(
     }
 }
 
-/// Send one PID-scoped `reload_library` intent to every live editor process
-/// whose adapter is explicitly known to support safe native hot reload.
-///
-/// Registrations come from the reliable-sync Lazily projection. A process that
-/// has several open documents receives one intent per project, not one per
-/// document. VS Code and JetBrains are explicitly hot-reload capable; unknown
-/// adapters are counted as restart-required and fail closed.
-/// Failures are counted so install can remain best-effort without inventing a
-/// filesystem broadcast path.
-pub fn reload_library_all_projects(lib_version: &str) -> ReloadLibraryFanoutReport {
+/// Discover the complete native-reload scope without trusting controller process
+/// discovery as the only project index (`#reloadgateperprocess`).
+fn native_reload_scope(seed_project: Option<&Path>) -> (BTreeSet<PathBuf>, BTreeSet<PathBuf>) {
+    let controller_roots = crate::process::controller_project_roots(std::process::id());
+    let supervisor_documents = crate::process::open_supervisor_documents(std::process::id());
+    let mut project_roots = controller_roots.clone();
+    if let Some(project_root) = seed_project {
+        project_roots.insert(
+            agent_doc_controller::command_line::canonical_path_for_command_line_compare(
+                project_root,
+            ),
+        );
+    }
+    for file in &supervisor_documents {
+        let project_root = agent_doc_project_root_io::resolve_ipc_project_root(file);
+        if project_roots.insert(project_root.clone()) {
+            agent_doc_ops_log_io::log_op(
+                &project_root,
+                &format!(
+                    "reload_library_project_root_recovered project_root={} file={} \
+                     source=open_supervisor_process reason=controller_process_root_absent \
+                     (#reloadgateperprocess)",
+                    project_root.display(),
+                    file.display(),
+                ),
+            );
+        }
+    }
+    (project_roots, supervisor_documents)
+}
+
+/// Apply one native-generation decision per editor process across all of its
+/// project endpoints.
+fn reload_library_process_scope(
+    project_roots: BTreeSet<PathBuf>,
+    supervisor_documents: BTreeSet<PathBuf>,
+    lib_version: &str,
+) -> ReloadLibraryFanoutReport {
     let mut report = ReloadLibraryFanoutReport::default();
-    for project_root in crate::process::controller_project_roots(std::process::id()) {
+    let mut processes = BTreeMap::<u64, EditorNativeReloadProcess>::new();
+
+    for project_root in project_roots {
         if !project_root.join(".agent-doc").is_dir() {
             continue;
         }
-        let project = reload_library_for_project(&project_root, lib_version);
-        report.projects += project.projects;
-        report.endpoints += project.endpoints;
-        report.delivered += project.delivered;
-        report.restart_required += project.restart_required;
-        report.failed += project.failed;
-        report.deferred_cycle_open += project.deferred_cycle_open;
+        report.projects += 1;
+        let mut endpoints = BTreeSet::<EditorNativeReloadEndpoint>::new();
+        let mut registration_documents = Vec::<(u64, String)>::new();
+        match reliable_sync_status(&project_root) {
+            Ok(status) => {
+                for registration in status.registrations {
+                    registration_documents.push((registration.pid, registration.path.clone()));
+                    endpoints.insert(EditorNativeReloadEndpoint {
+                        project_root: project_root.clone(),
+                        pid: registration.pid,
+                        editor_id: registration.editor_id,
+                        capabilities: registration.capabilities,
+                    });
+                }
+            }
+            Err(error) => {
+                report.failed += 1;
+                agent_doc_ops_log_io::log_op(
+                    &project_root,
+                    &format!(
+                        "reload_library_status_failed project_root={} lib_version={lib_version} \
+                         error={error:?} fallback=pid_socket_and_supervisor_process \
+                         (#reloadgateperprocess)",
+                        project_root.display(),
+                    ),
+                );
+            }
+        }
+
+        // Reliable-sync registration can be empty while the editor's PID-scoped
+        // listener remains live. Preserve that endpoint and attribute otherwise
+        // unowned supervisor documents to it below.
+        for pid in agent_doc_ipc_io::discover_listening_editor_pids(&project_root) {
+            if !endpoints.iter().any(|endpoint| endpoint.pid == pid) {
+                endpoints.insert(EditorNativeReloadEndpoint {
+                    project_root: project_root.clone(),
+                    pid,
+                    editor_id: String::new(),
+                    capabilities: Vec::new(),
+                });
+            }
+        }
+
+        let documents = crate::project_controller::native_reload_process_documents(
+            registration_documents,
+            supervisor_documents.iter().cloned(),
+            endpoints.iter().map(|endpoint| endpoint.pid),
+            &project_root,
+        );
+        for endpoint in endpoints {
+            processes
+                .entry(endpoint.pid)
+                .or_default()
+                .endpoints
+                .insert(endpoint);
+        }
+        for (pid, documents) in documents {
+            processes
+                .entry(pid)
+                .or_default()
+                .documents
+                .extend(documents);
+        }
+    }
+
+    // `endpoints` deliberately counts native generations, not project sockets:
+    // the effect is PID-scoped and must be emitted at most once per process.
+    report.endpoints = processes.len();
+    for (pid, process) in processes {
+        let active_endpoints = process
+            .endpoints
+            .iter()
+            .filter(|endpoint| {
+                agent_doc_ipc_io::is_listener_active_for_pid(&endpoint.project_root, pid)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let Some(first_active) = active_endpoints.first() else {
+            report.failed += 1;
+            if let Some(endpoint) = process.endpoints.first() {
+                agent_doc_ops_log_io::log_op(
+                    &endpoint.project_root,
+                    &format!(
+                        "reload_library_process_endpoint_unavailable editor_pid={pid} \
+                         lib_version={lib_version} project_endpoints={} \
+                         (#reloadgateperprocess)",
+                        process.endpoints.len(),
+                    ),
+                );
+            }
+            continue;
+        };
+        let hot_reload_endpoint = active_endpoints.iter().find(|endpoint| {
+            editor_native_reload_policy(&endpoint.editor_id, &endpoint.capabilities)
+                == EditorNativeReloadPolicy::HotReload
+        });
+        let Some(endpoint) = hot_reload_endpoint else {
+            report.restart_required += 1;
+            continue;
+        };
+
+        match crate::project_controller::native_reload_process_admission(
+            process.documents.iter().cloned(),
+        ) {
+            crate::project_controller::NativeReloadProcessAdmission::Defer {
+                blocking_document,
+            } => {
+                report.deferred_cycle_open += 1;
+                let blocking_project =
+                    agent_doc_project_root_io::resolve_ipc_project_root(&blocking_document);
+                crate::project_controller::record_pending_native_reload(
+                    &blocking_project,
+                    lib_version,
+                );
+                agent_doc_ops_log_io::log_op(
+                    &blocking_document,
+                    &format!(
+                        "reload_library_deferred_cycle_open file={} editor_pid={pid} \
+                         lib_version={lib_version} reason=process_document_cycle_open \
+                         process_documents={} project_endpoints={} \
+                         rearm=supervisor_idle_boundary (#reloadgateperprocess)",
+                        blocking_document.display(),
+                        process.documents.len(),
+                        active_endpoints.len(),
+                    ),
+                );
+            }
+            crate::project_controller::NativeReloadProcessAdmission::Publish => {
+                if process.documents.is_empty() {
+                    agent_doc_ops_log_io::log_op(
+                        &first_active.project_root,
+                        &format!(
+                            "reload_library_no_document_candidates project_root={} \
+                             editor_pid={pid} lib_version={lib_version} project_endpoints={} \
+                             reason=no_attributed_or_supervised_document \
+                             (#reloadgateperprocess)",
+                            first_active.project_root.display(),
+                            active_endpoints.len(),
+                        ),
+                    );
+                }
+                match agent_doc_ipc_io::send_reload_library_to_editor(
+                    &endpoint.project_root,
+                    pid,
+                    &endpoint.editor_id,
+                    lib_version,
+                ) {
+                    Ok(true) => report.delivered += 1,
+                    Ok(false) | Err(_) => report.failed += 1,
+                }
+            }
+        }
     }
     report
 }
 
-/// One project's leg of [`reload_library_all_projects`].
+/// Send one PID-scoped `reload_library` intent to every live editor process
+/// whose adapter is explicitly known to support safe native hot reload.
+pub fn reload_library_all_projects(lib_version: &str) -> ReloadLibraryFanoutReport {
+    let (project_roots, supervisor_documents) = native_reload_scope(None);
+    reload_library_process_scope(project_roots, supervisor_documents, lib_version)
+}
+
+/// Trigger process-scoped reload discovery from a known project root.
 ///
-/// Split out so the deferred-reload re-arm can publish a single project without
-/// re-running process-scoped controller discovery (`#installstrandsreplica`).
+/// The seed closes the `/proc` discovery gap without returning to the unsafe old
+/// behavior where this function decided admission for only one project endpoint.
 pub fn reload_library_for_project(
     project_root: &Path,
     lib_version: &str,
 ) -> ReloadLibraryFanoutReport {
-    let mut report = ReloadLibraryFanoutReport {
-        projects: 1,
-        ..ReloadLibraryFanoutReport::default()
-    };
-    let Ok(status) = reliable_sync_status(project_root) else {
-        report.failed += 1;
-        return report;
-    };
-    // Documents a generation handoff on this project could strand. The editor
-    // registration record alone is NOT enough — it can be empty while the editor is
-    // alive (`#editorendpointzero-reloadgate`), which published the reload with
-    // nothing to check — so the live supervisor walk is unioned in as an independent
-    // source. Not narrowed per editor pid: one cdylib serves a whole editor process.
-    let at_risk_documents = crate::project_controller::native_reload_candidate_documents(
-        status
-            .registrations
-            .iter()
-            .map(|registration| registration.path.clone()),
-        crate::process::open_supervisor_documents(std::process::id()),
-        project_root,
-    );
-    let registration_count = status.registrations.len();
-    let mut endpoints = status
-        .registrations
-        .into_iter()
-        .map(|registration| {
-            (
-                registration.pid,
-                registration.editor_id,
-                registration.capabilities,
-            )
-        })
-        .collect::<std::collections::BTreeSet<_>>();
-    // `#editorendpointzero`: the registration record can be empty while the
-    // editor is alive and listening on its PID-scoped socket — the state that
-    // made this fan-out report `0/0` and leave the document permanently
-    // wedged. Fall back to socket+liveness discovery so a live editor is
-    // always reachable, whatever the record says. `editor_id` is only a
-    // payload field, so an unknown one does not block delivery.
-    for pid in agent_doc_ipc_io::discover_listening_editor_pids(project_root) {
-        if !endpoints.iter().any(|(known, _, _)| *known == pid) {
-            endpoints.insert((pid, String::new(), Vec::new()));
-        }
-    }
-    report.endpoints += endpoints.len();
-    for (pid, editor_id, capabilities) in endpoints {
-        if !agent_doc_ipc_io::is_listener_active_for_pid(project_root, pid) {
-            report.failed += 1;
-            continue;
-        }
-        if editor_native_reload_policy(&editor_id, &capabilities)
-            == EditorNativeReloadPolicy::RestartRequired
-        {
-            report.restart_required += 1;
-            continue;
-        }
-        // `#installstrandsreplica`: retiring this endpoint's native generation
-        // discards the Lazily replicas it owns. Re-registration does not
-        // converge for a document that is attached and mid-cycle, so the reload
-        // waits for the same open-cycle boundary the recycle and restart gates
-        // wait for.
-        if at_risk_documents.is_empty() {
-            // Publishing here is correct — a project with nothing open has nothing to
-            // strand — but it is also the shape a silently-defeated gate takes, so name
-            // it once rather than leaving the next occurrence undiagnosable.
-            agent_doc_ops_log_io::log_op(
-                project_root,
-                &format!(
-                    "reload_library_no_document_candidates project_root={} editor_pid={pid} \
-                     lib_version={lib_version} registrations={} \
-                     reason=no_attached_or_supervised_document (#editorendpointzero-reloadgate)",
-                    project_root.display(),
-                    registration_count,
-                ),
-            );
-        }
-        let blocking = at_risk_documents
-            .iter()
-            .find(|file| crate::project_controller::document_cycle_blocks_native_reload(file));
-        if let Some(file) = blocking {
-            report.deferred_cycle_open += 1;
-            crate::project_controller::record_pending_native_reload(project_root, lib_version);
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "reload_library_deferred_cycle_open file={} editor_pid={pid} \
-                     lib_version={lib_version} reason=agent_doc_cycle_open \
-                     rearm=supervisor_idle_boundary (#installstrandsreplica)",
-                    file.display(),
-                ),
-            );
-            continue;
-        }
-        match agent_doc_ipc_io::send_reload_library_to_editor(
-            project_root,
-            pid,
-            &editor_id,
-            lib_version,
-        ) {
-            Ok(true) => report.delivered += 1,
-            Ok(false) | Err(_) => report.failed += 1,
-        }
-    }
-    report
+    let (project_roots, supervisor_documents) = native_reload_scope(Some(project_root));
+    reload_library_process_scope(project_roots, supervisor_documents, lib_version)
 }
 
 /// Publish a reload that [`reload_library_for_project`] deferred, now that
@@ -10351,9 +10445,12 @@ pub fn reload_library_for_project(
 pub fn publish_pending_native_reload(file: &Path) -> Option<ReloadLibraryFanoutReport> {
     let project_root = agent_doc_project_root_io::resolve_ipc_project_root(file);
     let lib_version = crate::project_controller::read_pending_native_reload(&project_root)?;
+    // Consume this trigger before the global re-evaluation. If this process (or a
+    // different one) is still blocked, the process-scoped planner records a fresh
+    // marker on the project that owns the actual blocking document.
+    crate::project_controller::clear_pending_native_reload(&project_root);
     let report = reload_library_for_project(&project_root, &lib_version);
     if report.deferred_cycle_open == 0 {
-        crate::project_controller::clear_pending_native_reload(&project_root);
         agent_doc_ops_log_io::log_op(
             file,
             &format!(

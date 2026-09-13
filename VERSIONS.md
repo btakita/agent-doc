@@ -2,6 +2,20 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.384
+
+- **Native-library reload admission is now scoped to the editor process rather
+  than each project endpoint (`#reloadgateperprocess`).** Controller, socket,
+  and live-supervisor observations are joined into per-PID document sets before
+  one reload effect is emitted. An open cycle in any project served by that PID
+  therefore defers the shared generation, while independently registered editor
+  processes remain unblocked. Empty registration projections inherit otherwise
+  unattributed supervisor documents; supervisor discovery recovers project roots
+  missing from the controller scan; and status-read or endpoint failures now emit
+  named diagnostics. The idle-boundary publisher re-runs the same global
+  process-scoped decision and transfers the pending marker to whichever document
+  still blocks.
+
 ## 0.35.383
 
 - **PyPI now ships one 35 KiB universal bootstrap instead of roughly 68 MiB of

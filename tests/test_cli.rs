@@ -14995,8 +14995,8 @@ fn test_editor_hot_path_has_no_filesystem_sidecar_or_reload_broadcast_transport(
     // before retiring a native generation, and a deferral must re-arm at the
     // supervisor idle boundary rather than waiting for an operator `reload-lib`.
     assert!(
-        controller.contains("document_cycle_blocks_native_reload(file)")
-            && controller.contains("record_pending_native_reload(project_root, lib_version)")
+        controller.contains("native_reload_process_admission(")
+            && controller.contains("record_pending_native_reload(")
             && controller.contains("reload_library_deferred_cycle_open"),
         "the reload fan-out must defer, and record, an endpoint whose attached document is mid-cycle"
     );
@@ -15005,14 +15005,18 @@ fn test_editor_hot_path_has_no_filesystem_sidecar_or_reload_broadcast_transport(
             && idle_watch.contains("publish_pending_native_reload("),
         "a deferred native reload must be published by the owning supervisor's idle watch"
     );
-    // `#editorendpointzero-reloadgate`: the editor registration record can be empty
-    // while the editor is alive, so the gate's candidate documents must also come from
-    // a source that does not consult that record.
+    // `#reloadgateperprocess`: the editor registration record can be empty while
+    // the editor is alive, and one native generation can span several project
+    // endpoints. Discovery must therefore merge supervisor-backed document
+    // candidates by pid before it makes one process-scoped admission decision.
     assert!(
-        controller.contains("native_reload_candidate_documents(")
+        controller.contains("native_reload_process_documents(")
             && controller.contains("crate::process::open_supervisor_documents(std::process::id())")
-            && !controller.contains("attached_by_pid"),
-        "the reload gate's document candidates must not come from the editor registration record alone"
+            && controller.contains("BTreeMap::<u64, EditorNativeReloadProcess>::new()")
+            && controller.contains("report.endpoints = processes.len()")
+            && controller.contains("reload_library_project_root_recovered")
+            && controller.contains("reload_library_status_failed"),
+        "native reload admission must be attributed and emitted once per editor process across project endpoints"
     );
     assert!(
         idle_watch.contains("enum QueueHeadObservation")

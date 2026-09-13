@@ -16,6 +16,14 @@ target/
 .bin/
 .cargo/
 
+# Python packaging
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
 # Lean / Lake build artifacts (formal/ proof projects)
 .lake/
 *.olean

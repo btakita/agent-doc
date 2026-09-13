@@ -1,10 +1,10 @@
 [build-system]
-requires = ["maturin>=1.9,<2.0"]
-build-backend = "maturin"
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-doc"
-version = "0.35.382"
+version = "0.35.383"
 description = "Interactive document sessions with AI agents"
 readme = "README.md"
 license = "MIT"
@@ -15,10 +15,16 @@ classifiers = [
     "Topic :: Software Development :: Documentation",
 ]
 
+[project.scripts]
+agent-doc = "agent_doc_bootstrap.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/btakita/agent-doc"
 Documentation = "https://btakita.github.io/agent-doc"
 
-[tool.maturin]
-bindings = "bin"
-strip = true
+[tool.setuptools]
+package-dir = {"" = "python"}
+
+[tool.setuptools.packages.find]
+where = ["python"]
+include = ["agent_doc_bootstrap*"]

@@ -14107,7 +14107,7 @@ fn test_release_install_paths_fail_closed_for_issue_47() {
 /// cross image: the archive step must name the platform library, and the job
 /// must refuse rather than publish an asset without it.
 #[test]
-fn test_release_artifacts_ship_the_ffi_library_for_issue_52() {
+fn test_release_artifacts_and_pypi_bootstrap_preserve_ffi_for_issue_52() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let release = fs::read_to_string(manifest_dir.join(".github/workflows/release.yml")).unwrap();
     for required in [
@@ -14134,23 +14134,26 @@ fn test_release_artifacts_ship_the_ffi_library_for_issue_52() {
             && release.contains("--lib --target-dir target-ffi"),
         "the musl library must be built with a dynamic CRT, separately from the static binary"
     );
+    assert!(
+        release.contains("sha256sum agent-doc-*") && release.contains("artifacts/SHA256SUMS"),
+        "the GitHub Release must publish checksums for the PyPI bootstrap"
+    );
 
     let pypi = fs::read_to_string(manifest_dir.join(".github/workflows/pypi.yml")).unwrap();
     assert!(
-        pypi.contains("data = \"wheel-data\""),
-        "the wheel must declare a data directory so the cdylib installs into the same bin/ as the binary"
+        pypi.contains("tags: [\"v*\"]"),
+        "the small universal bootstrap must publish with every GitHub release"
     );
     assert!(
-        pypi.contains("does not ship {lib} beside the binary (GH #52)"),
-        "the wheel build must prove the cdylib is present before the upload"
+        pypi.contains("py3-none-any.whl")
+            && pypi.contains("contains no native payload")
+            && pypi.contains("256 * 1024"),
+        "the PyPI job must fail closed unless it built one small native-free universal wheel"
     );
-
-    // `#pypicadence`: per-tag publishing burned ~5 GiB/month against a 10 GiB
-    // project quota, so uploads started failing with `400 Project size too
-    // large` and PyPI silently fell 20 versions behind the newest tag.
     assert!(
-        pypi.contains("tags: [\"v[0-9]+.[0-9]+.0\"]"),
-        "PyPI publishing must be gated to milestone tags, not every tag"
+        pypi.contains("Wait for the matching GitHub Release checksums")
+            && pypi.contains("gh release download \"$tag\" --pattern SHA256SUMS"),
+        "PyPI publishing must wait until the native release and its checksum manifest exist"
     );
     assert!(
         pypi.contains("workflow_dispatch"),
@@ -14160,6 +14163,11 @@ fn test_release_artifacts_ship_the_ffi_library_for_issue_52() {
         pypi.contains("is not on PyPI after a successful publish job"),
         "a publish that does not land on PyPI must fail loudly instead of drifting silently"
     );
+    assert!(
+        pypi.contains("Verify a clean PyPI install fetches the pinned native release")
+            && pypi.contains("agent-doc --version"),
+        "the publish verification must exercise the bootstrap-to-native handoff"
+    );
 
     let release_tags = release
         .split_once("tags:")
@@ -14167,7 +14175,7 @@ fn test_release_artifacts_ship_the_ffi_library_for_issue_52() {
         .1;
     assert!(
         release_tags.trim_start().starts_with("[\"v*\"]"),
-        "every tag must still produce a GitHub Release even though PyPI is cadence-gated"
+        "every tag must produce the GitHub Release consumed by the PyPI bootstrap"
     );
 }
 

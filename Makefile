@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-version audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check precommit timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
+.PHONY: build build-release release release-version audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check precommit timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -178,7 +178,7 @@ lean:
 # the release process runs `make check`, so leaving the installed-surface audit
 # out of it let 0.35.224 ship with harness runbooks several versions behind the
 # binary while every version marker matched.
-check: clippy test sim-medium version-sync audit-docs editor-parity lean tla
+check: clippy test sim-medium version-sync audit-docs editor-parity python-bootstrap-test lean tla
 
 # Audit generated instruction surfaces (skill, runbooks, OKF) against the binary.
 audit-docs:
@@ -272,7 +272,7 @@ clean:
 	cargo clean
 	rm -f .bin/agent-doc
 
-# Set up Python venv with maturin
+# Set up a Python venv for building and publishing the bootstrap wheel.
 init-python: PY_VERSION = $(shell [ -f .python-version ] && \
 	cat .python-version || echo "3.14")
 init-python:
@@ -281,16 +281,20 @@ init-python:
 		mise install; \
 	fi
 	uv venv .venv --python "$(PY_VERSION)" --no-project --clear --seed $(VENV_ARGS)
-	uv pip install maturin
-	@echo "Venv ready. Use 'make wheel' to build, or '.venv/bin/maturin develop --release' to install into venv."
+	uv pip install build twine
+	@echo "Venv ready. Use 'make wheel' to build the universal bootstrap wheel."
 
-# Build wheel and install into venv for testing
-wheel:
-	.venv/bin/maturin develop --release
+python-bootstrap-test:
+	@python3 -m unittest discover -s python/tests -v
+
+# Build the native-free universal bootstrap wheel.
+wheel: python-bootstrap-test
+	rm -rf dist
+	.venv/bin/python -m build --wheel
 
 # Publish to PyPI
 publish-pypi:
-	.venv/bin/maturin publish --skip-existing --no-sdist --zig --compatibility manylinux_2_17
+	.venv/bin/python -m twine upload --skip-existing dist/*
 
 # agent-doc's Rust workspace is private; release binaries through GitHub and PyPI.
 publish: publish-pypi

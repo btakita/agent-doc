@@ -36,6 +36,11 @@ cargo install --path src/agent-doc --force
 cargo install --path . --force
 ```
 
+The PyPI package is a small, platform-independent bootstrap. On its first run it
+downloads the executable and FFI library for that exact package version from the
+matching GitHub Release, verifies the release's `SHA256SUMS`, and caches the two
+files under the user cache directory. Later runs work from that versioned cache.
+
 The Rust workspace is an implementation detail: every agent-doc Cargo package is
 marked `publish = false`. New releases ship through GitHub Releases and PyPI;
 older crates.io uploads remain as immutable historical artifacts.

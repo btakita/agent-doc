@@ -1,18 +1,11 @@
 name: PyPI
 
-# `#pypicadence` + GH #52: cadence is the trigger of record, not "every tag".
-#
-# Until 0.35.363 this workflow fired on EVERY `v*` tag. Measured 2026-09-09:
-# 82 releases in 30 days at ~62 MiB of wheels each is ~5 GiB/month against a
-# 10 GiB project quota, so uploads started failing with
-# `400 Project size too large` and PyPI silently fell 20 versions behind the
-# newest tag (0.35.342 vs v0.35.362) — `pip install --upgrade agent-doc` became
-# a DOWNGRADE for anyone on a recent build. A quota increase alone only buys
-# ~3 months (pypi/support#12214 requests one and commits to this reduction).
-#
-# So: milestone tags (`vX.Y.0`) publish automatically, every other tag still
-# gets a GitHub Release from `release.yml`, and any single version can be
-# published on demand with `gh workflow run PyPI --ref <tag>`.
+# `#pypislim`: PyPI carries one platform-independent bootstrap wheel, not four
+# copies of the native executable and FFI library. The launcher downloads the
+# matching checksummed archive from this version's GitHub Release on first run.
+# The wheel is small enough to publish on every tag without consuming the
+# project's storage quota, and publish waits for SHA256SUMS so a newly visible
+# wheel never points at release assets that are still being assembled.
 #
 # `release: published` is kept for releases published by hand. Tag pushes stayed
 # the trigger of record because GitHub deliberately does not raise
@@ -22,7 +15,7 @@ name: PyPI
 # harmless.
 on:
   push:
-    tags: ["v[0-9]+.[0-9]+.0"]
+    tags: ["v*"]
   release:
     types: [published]
   workflow_dispatch:
@@ -33,99 +26,44 @@ permissions:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            lib: libagent_doc.so
-          - target: x86_64-apple-darwin
-            os: macos-14
-            lib: libagent_doc.dylib
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            lib: libagent_doc.dylib
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            lib: agent_doc.dll
-
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Check out tmux-router path dependency
-        run: git clone --depth 1 https://github.com/btakita/tmux-router ../tmux-router
-
-      - name: Check out lazily-rs path dependency
-        run: git clone --depth 1 https://github.com/btakita/lazily-rs ../lazily-rs
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      # GH #52: `bindings = "bin"` ships the executable alone, and `lib-path`
-      # resolves the cdylib as a SIBLING of the executable — so a
-      # `pip install agent-doc` had no library to find and every editor plugin
-      # ran in the degraded file-based-IPC mode. maturin's wheel `data`
-      # directory installs `scripts/` into the same `bin/` as the binary, which
-      # is exactly the layout the resolver needs. The key is written here rather
-      # than committed so a source checkout still builds without a data
-      # directory it cannot populate.
-      - name: Declare the wheel data directory
-        shell: bash
+      - name: Test and build the bootstrap wheel
         run: |
           set -euo pipefail
-          mkdir -p wheel-data/scripts
-          printf '\ndata = "wheel-data"\n' >> pyproject.toml
-          tail -5 pyproject.toml
+          python -m unittest discover -s python/tests -v
+          python -m pip install --disable-pip-version-check build
+          python -m build --wheel
 
-      - name: Build FFI library for the wheel
-        if: runner.os != 'Linux'
-        shell: bash
+      - name: Verify the wheel is universal and contains no native payload
         run: |
           set -euo pipefail
-          rustup target add ${{ matrix.target }}
-          cargo build --release --target ${{ matrix.target }} --lib
-          cp "target/${{ matrix.target }}/release/${{ matrix.lib }}" wheel-data/scripts/
+          python - <<'PY'
+          import glob, os, sys, zipfile
 
-      - name: Build wheel
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.target }}
-          args: --release --out dist
-          manylinux: auto
-          docker-options: -v ${{ github.workspace }}/..:${{ github.workspace }}/..
-          before-script-linux: |
-            set -euo pipefail
-            cargo build --release --target ${{ matrix.target }} --lib
-            cp "target/${{ matrix.target }}/release/${{ matrix.lib }}" wheel-data/scripts/
-
-      # An asset that cannot deliver FFI is the defect this job exists to
-      # prevent, so prove the library is in the wheel before it is uploaded.
-      - name: Verify the wheel ships the FFI library
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - "${{ matrix.lib }}" <<'PY'
-          import glob, sys, zipfile
-
-          lib = sys.argv[1]
           wheels = glob.glob("dist/*.whl")
-          if not wheels:
-              sys.exit("no wheel was built")
-          for wheel in wheels:
-              names = zipfile.ZipFile(wheel).namelist()
-              if not any(name.endswith(f".data/scripts/{lib}") for name in names):
-                  print("\n".join(names))
-                  sys.exit(f"{wheel} does not ship {lib} beside the binary (GH #52)")
-              print(f"{wheel}: {lib} present")
+          if len(wheels) != 1:
+              sys.exit(f"expected one wheel, found {wheels}")
+          wheel = wheels[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          native_suffixes = (".so", ".dylib", ".dll", ".exe")
+          if not wheel.endswith("py3-none-any.whl") or any(name.endswith(native_suffixes) for name in names):
+              sys.exit(f"wheel is not a native-free py3-none-any bootstrap: {wheel}\n" + "\n".join(names))
+          if os.path.getsize(wheel) > 256 * 1024:
+              sys.exit(f"bootstrap wheel unexpectedly exceeds 256 KiB: {wheel}")
+          print(f"{wheel}: {os.path.getsize(wheel)} bytes, native-free")
           PY
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wheel-${{ matrix.target }}
+          name: wheel-bootstrap
           path: dist
 
   publish:
@@ -134,6 +72,23 @@ jobs:
     environment: pypi
 
     steps:
+      - name: Wait for the matching GitHub Release checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          for attempt in $(seq 1 90); do
+            if gh release download "$tag" --pattern SHA256SUMS --dir /tmp/agent-doc-release-ready >/dev/null 2>&1; then
+              echo "GitHub Release $tag is ready"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::GitHub Release $tag did not publish SHA256SUMS within 30 minutes"
+          exit 1
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -170,3 +125,16 @@ jobs:
           done
           echo "::error::agent-doc ${version} is not on PyPI after a successful publish job — check the project size quota (pypi/support#12214) and the upload logs"
           exit 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify a clean PyPI install fetches the pinned native release
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          python -m venv /tmp/agent-doc-pypi-verify
+          /tmp/agent-doc-pypi-verify/bin/pip install --disable-pip-version-check --no-cache-dir "agent-doc==${version}"
+          installed=$(/tmp/agent-doc-pypi-verify/bin/agent-doc --version)
+          test "$installed" = "agent-doc ${version}"

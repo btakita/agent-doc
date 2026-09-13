@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.383
+
+- **PyPI now ships one 35 KiB universal bootstrap instead of roughly 68 MiB of
+  duplicated native wheels (`#pypislim`).** The standard-library launcher maps
+  the host to one of the six GitHub Release targets, downloads that exact
+  version on first use, verifies its SHA-256 manifest, safely extracts only the
+  executable and sibling FFI library, and atomically caches them. GitHub
+  Releases now publish `SHA256SUMS`; PyPI publication waits for it, publishes on
+  every tag, rejects native/oversized wheel contents, and proves a clean PyPI
+  install can fetch and execute the pinned binary. Python bootstrap tests cover
+  all target mappings, cache reuse, malformed manifests, and checksum failure.
+
 ## 0.35.382
 
 - **Retained-resume tests now wait from the exact pre-trigger state-plane cursor

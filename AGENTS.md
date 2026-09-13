@@ -349,16 +349,16 @@ editors/
    `gh release create`. Every agent-doc Cargo package has `publish = false`, so
    there is no crates.io step.
 
-   **PyPI is cadence-gated (`#pypicadence`), not per-tag.**
-   `.github/workflows/pypi.yml` fires automatically only on milestone tags
-   (`vX.Y.0`). Per-tag publishing ran ~5 GiB/month against a 10 GiB project
-   quota, so uploads started failing with `400 Project size too large` and PyPI
-   fell 20 versions behind the newest tag without surfacing. To publish an
-   ordinary tag, run `gh workflow run PyPI --ref v<version>` deliberately.
+   **PyPI carries a universal bootstrap, not native binaries (`#pypislim`).**
+   `.github/workflows/pypi.yml` publishes every tag as one small `py3-none-any`
+   wheel. Its launcher waits for the matching GitHub Release, downloads the
+   platform archive on first invocation, verifies `SHA256SUMS`, and keeps the
+   executable and cdylib together in a versioned user cache.
 9. Verify the release run went green (`gh run list --limit 5`) and that
-   `gh release view v<version>` lists six assets. When a PyPI publish was
-   requested, its `verify` job asserts the version is resolvable on PyPI; the
-   local fallback is `make publish-pypi`.
+   `gh release view v<version>` lists six platform archives plus `SHA256SUMS`.
+   The PyPI `verify` job asserts both that the version is resolvable and that a
+   clean install can fetch and execute the pinned native release; the local
+   fallback is `make publish-pypi`.
 
 ## Agent Backend Contract
 

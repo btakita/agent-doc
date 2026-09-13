@@ -973,7 +973,8 @@ fn exchange_lines_with_response_body_flags(content: &str) -> Vec<(String, bool)>
             || trimmed.starts_with("<!--")
             || {
                 let semantic = prompt_line_semantic_text(trimmed);
-                semantic.starts_with("**User prompt:**") || semantic.starts_with("**Queue prompt:**")
+                semantic.starts_with("**User prompt:**")
+                    || semantic.starts_with("**Queue prompt:**")
             };
         if closes_body {
             in_response_body = false;

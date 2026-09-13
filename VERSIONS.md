@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.388
+
+- **Retained transition retries preserve component boundaries (`#fixcausesleftover`).**
+  The controller now derives the changed exchange/backlog occurrences from the
+  actual visible base and rebased target, then passes that scope into the CRDT
+  relay. A deferred whole-document response write can no longer splice prompt
+  context into the backlog; structural component changes retain the existing
+  unscoped materialization fallback. A regression covers a fenced dynamic-context
+  prompt alongside simultaneous exchange and backlog edits.
+
 ## 0.35.387
 
 - **Consecutive node-patch inserts retain authored order (`#ocreverselistsplice`).**

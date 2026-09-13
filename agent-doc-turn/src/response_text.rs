@@ -105,11 +105,8 @@ pub fn response_heading_timestamp_is_wellformed(timestamp: &str) -> bool {
     if bytes.len() != 22 {
         return false;
     }
-    let digits_at = |positions: &[usize]| {
-        positions
-            .iter()
-            .all(|index| bytes[*index].is_ascii_digit())
-    };
+    let digits_at =
+        |positions: &[usize]| positions.iter().all(|index| bytes[*index].is_ascii_digit());
     digits_at(&[0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18, 20, 21])
         && bytes[4] == b'-'
         && bytes[7] == b'-'

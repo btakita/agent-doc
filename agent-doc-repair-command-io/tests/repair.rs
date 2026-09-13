@@ -1580,12 +1580,8 @@ mod tests {
         // `#mutprovenancepreresponse`: the intent is recorded before the
         // response write, which is what proves the divergence belongs to this
         // closeout rather than to a fresh operator edit.
-        agent_doc_cycle_state_io::record_requested_tracked_work(
-            &doc,
-            &[],
-            &["new1".to_string()],
-        )
-        .unwrap();
+        agent_doc_cycle_state_io::record_requested_tracked_work(&doc, &[], &["new1".to_string()])
+            .unwrap();
 
         // Only the response half materialized: `#fix1` is still an open backlog
         // item and `#new1` does not exist anywhere in the document.

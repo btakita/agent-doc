@@ -1628,10 +1628,10 @@ fn apply_pending_and_status_mutations_with_mode(
                                 // reported: session-check passed, and the next drain
                                 // re-served finished work.
                                 let still_live =
-                                agent_doc_queue::queue_consume::live_queue_prompt_done_ids(
-                                    &projected,
-                                    &options.pending_done,
-                                )?;
+                                    agent_doc_queue::queue_consume::live_queue_prompt_done_ids(
+                                        &projected,
+                                        &options.pending_done,
+                                    )?;
                                 anyhow::ensure!(
                                     still_live.is_empty(),
                                     "queue completion for completed tracked work did not apply: \
@@ -2175,9 +2175,7 @@ fn run_command_inner_within_pass(
         // explicitly-named adds. Record the plain fact that this cycle asked for
         // tracked-work mutations too, so a gate/ungate/edit/reorder/status-only
         // closeout has a witness at all.
-        if let Err(err) =
-            agent_doc_cycle_state_io::record_requested_tracked_work_mutations(file)
-        {
+        if let Err(err) = agent_doc_cycle_state_io::record_requested_tracked_work_mutations(file) {
             eprintln!(
                 "[write] warning: failed to record tracked-work mutation intent for {}: {err:#}",
                 file.display()

@@ -530,10 +530,7 @@ pub fn retained_write_ownership(
     // Ask about this process explicitly.
     let capture_resume_unowned = retained_capture
         && agent_doc_supervisor_io::process::supervisor_pid_for_doc(file).is_none()
-        && !agent_doc_supervisor_io::process::supervisor_pid_matches_doc(
-            std::process::id(),
-            file,
-        );
+        && !agent_doc_supervisor_io::process::supervisor_pid_matches_doc(std::process::id(), file);
     agent_doc_turn::write_ownership::RetainedWriteOwnership::new_with_phase(
         cycle_open,
         retained_capture,

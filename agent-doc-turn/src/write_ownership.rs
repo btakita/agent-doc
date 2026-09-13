@@ -326,8 +326,7 @@ pub const AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN: &str =
 /// reason the class carries one: a prose needle is a rule that holds only while
 /// every author remembers it, and the wedge this exists to prevent was caused by
 /// exactly that.
-pub const RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN: &str =
-    "retained=delivery_projection_pending";
+pub const RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN: &str = "retained=delivery_projection_pending";
 
 /// Whether a rendered error is a retained-write refusal.
 ///
@@ -353,7 +352,8 @@ pub fn is_retained_write_refusal(message: &str) -> bool {
 /// Requires both tokens, so the narrow case cannot drift out of the class it is
 /// a subset of.
 pub fn is_retained_delivery_projection_pending(message: &str) -> bool {
-    is_retained_write_refusal(message) && message.contains(RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN)
+    is_retained_write_refusal(message)
+        && message.contains(RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN)
 }
 
 /// The remedy every retained-projection refusal appends, derived from one owner.

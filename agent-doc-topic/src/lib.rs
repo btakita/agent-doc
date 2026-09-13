@@ -256,9 +256,7 @@ fn summarize_prior_compact_summary(preamble: &str) -> Option<String> {
 /// `*N earlier topic(s) archived to `path`*`, which is the same machine pointer and
 /// was being quoted back as if it were prior context.
 fn is_partial_compact_archive_pointer(line: &str) -> bool {
-    line.starts_with('*')
-        && line.contains(" earlier topic(s) archived to `")
-        && line.ends_with('*')
+    line.starts_with('*') && line.contains(" earlier topic(s) archived to `") && line.ends_with('*')
 }
 
 fn is_markdown_ordered_item(line: &str) -> bool {

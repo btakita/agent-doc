@@ -217,10 +217,7 @@ const SYNTHESIZED_SOURCE_SCHEME: &str = "agent-doc://";
 /// outright rather than carrying a command that returns something else.
 fn expansion_attribute(chunk: &DynamicContextChunkManifest) -> String {
     if chunk.is_expandable() {
-        return format!(
-            "expand=\"{}\"",
-            escape_attribute(&chunk.expansion_command)
-        );
+        return format!("expand=\"{}\"", escape_attribute(&chunk.expansion_command));
     }
     "expandable=\"false\"".to_string()
 }
@@ -1216,7 +1213,10 @@ mod tests {
         assert!(!reference.contains("<context_chunk"));
         // The synthesized `next_context` chunk inherits the report `target`, i.e. the
         // session document itself, so it is filtered out (`#fixcompactexchange`).
-        assert!(reference.contains("source=\"src/worker.rs\""), "{reference}");
+        assert!(
+            reference.contains("source=\"src/worker.rs\""),
+            "{reference}"
+        );
         assert!(!reference.contains("source=\"session.md\""), "{reference}");
     }
 
@@ -1287,7 +1287,10 @@ mod tests {
         let reference = durable_context_reference_for_document(&file, document)
             .unwrap()
             .unwrap();
-        assert!(reference.contains("chunk-real"), "real handle dropped: {reference}");
+        assert!(
+            reference.contains("chunk-real"),
+            "real handle dropped: {reference}"
+        );
         assert!(
             !reference.contains("chunk-self-abs"),
             "absolute self-handle survived: {reference}"

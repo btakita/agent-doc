@@ -2700,6 +2700,7 @@ struct RetainedTransitionProjection {
     file: PathBuf,
     base_content: Arc<str>,
     target_content: Arc<str>,
+    component_scope: Option<agent_doc_element::ComponentWriteScope>,
     intent_id: String,
     intent_expected_hash: String,
     intent_target_hash: String,
@@ -3103,11 +3104,12 @@ impl RetainedWriteSettleSink {
             return false;
         }
         let source = "retained_transition_projection_effect";
-        match agent_doc_crdt_relay_io::apply_cp_write_for_file(
+        match agent_doc_crdt_relay_io::apply_cp_write_for_file_scoped(
             &transition.file,
             transition.base_content.as_ref(),
             transition.target_content.as_ref(),
             source,
+            transition.component_scope.as_ref(),
         ) {
             Ok(Some(outcome)) => {
                 agent_doc_ops_log_io::log_op(
@@ -4585,6 +4587,10 @@ fn retained_transition_state(
             file: delivery.file.clone(),
             base_content: Arc::from(base_content),
             target_content: Arc::from(intent.target_content.as_str()),
+            component_scope: agent_doc_element::component_scope::changed_component_scope(
+                base_content,
+                &intent.target_content,
+            ),
             intent_id: intent.intent_id.clone(),
             intent_expected_hash: intent.expected_hash.clone(),
             intent_target_hash: intent.target_hash.clone(),
@@ -4673,6 +4679,10 @@ fn retained_transition_state(
     RetainedTransitionState::ApplyTarget(RetainedTransitionProjection {
         file: delivery.file.clone(),
         base_content: delivery.content.clone(),
+        component_scope: agent_doc_element::component_scope::changed_component_scope(
+            delivery.content.as_ref(),
+            &rebased,
+        ),
         target_content: Arc::from(rebased),
         intent_id: intent.intent_id.clone(),
         intent_expected_hash: intent.expected_hash.clone(),
@@ -12360,7 +12370,10 @@ agent:queue\n\
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(status, "running", "the promoted receipt records a live turn");
+        assert_eq!(
+            status, "running",
+            "the promoted receipt records a live turn"
+        );
 
         // Now the same `Ready` releases it, with no 120s wait.
         assert_eq!(
@@ -15252,6 +15265,89 @@ revised operator request
             !retained_transition_matches_intent(&transition, &superseded),
             "a newer durable target must fence the stale projected effect"
         );
+    }
+
+    #[test]
+    fn retained_transition_scopes_prompt_context_and_backlog_changes() {
+        let mut projection = retained_resume_projection("doc-retained-component-scope");
+        let base = "\
+---
+agent_doc_session: retained-component-scope
+---
+
+<!-- agent:exchange patch=append -->
+### do [#sample]
+
+```text
+<dynamic_context_ref source=\"project\">context</dynamic_context_ref>
+```
+<!-- /agent:exchange -->
+
+<!-- agent:backlog patch=append -->
+### [#existing] Existing item
+<!-- /agent:backlog -->
+";
+        let target = "\
+---
+agent_doc_session: retained-component-scope
+---
+
+<!-- agent:exchange patch=append -->
+### do [#sample]
+
+```text
+<dynamic_context_ref source=\"project\">context</dynamic_context_ref>
+```
+
+### Re: do [#sample]
+
+retained response body
+<!-- /agent:exchange -->
+
+<!-- agent:backlog patch=append -->
+### [#existing] Existing item
+
+### [#followup] Follow-up item
+<!-- /agent:backlog -->
+";
+        let intent = projection.document.pending_write.as_mut().unwrap();
+        intent.expected_content = Some(base.to_string());
+        intent.expected_hash = agent_doc_hash::content_hash(base);
+        intent.target_content = target.to_string();
+        intent.target_hash = agent_doc_hash::content_hash(target);
+        let delivery = RetainedDeliveryObservation {
+            file: PathBuf::from("/work/session.md"),
+            content: Arc::from(base),
+            content_hash: agent_doc_hash::content_hash(base),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: 4,
+        };
+
+        let transition =
+            retained_transition_projection(Some(&projection), Some(&delivery), 2).unwrap();
+
+        assert_eq!(
+            transition
+                .target_content
+                .matches("<dynamic_context_ref")
+                .count(),
+            1,
+            "retained rebase must not duplicate prompt context"
+        );
+        let backlog = transition
+            .target_content
+            .split_once("<!-- agent:backlog patch=append -->")
+            .unwrap()
+            .1;
+        assert!(
+            !backlog.contains("<dynamic_context_ref"),
+            "prompt context must remain isolated to the exchange component"
+        );
+        assert!(backlog.contains("### [#followup] Follow-up item"));
+        let scope = transition.component_scope.as_ref().unwrap();
+        assert!(scope.contains("exchange", 0));
+        assert!(scope.contains("backlog", 0));
     }
 
     #[test]

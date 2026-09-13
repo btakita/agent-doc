@@ -2173,8 +2173,8 @@ mod tests {
             "and must not send the operator after the residue guard: {rendered}"
         );
 
-        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
-            .unwrap_or_default();
+        let log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
             log.contains("route_document_scrub_failed"),
             "the failure must leave a reconstructable ops-log record, like every \

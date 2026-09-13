@@ -978,7 +978,10 @@ mod tests {
         assert_eq!(queued.as_str(), "harness_queued_input");
         assert_eq!(queued.issue(), Some("clear_queued_during_busy_turn"));
         assert_eq!(queued.unblocker(), "clear_queued_behind_busy_turn");
-        assert_eq!(queued.next_action(), "wait_for_turn_or_interrupt_then_retry");
+        assert_eq!(
+            queued.next_action(),
+            "wait_for_turn_or_interrupt_then_retry"
+        );
 
         // The unknown it replaces sent the operator to inspect the pane; this one
         // names what actually unblocks it, and must not read as the same thing.

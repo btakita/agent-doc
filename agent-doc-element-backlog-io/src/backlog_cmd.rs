@@ -1663,11 +1663,9 @@ mod tests {
         );
 
         fn scope(pairs: &[(&str, usize)]) -> Option<ComponentWriteScope> {
-            Some(ComponentWriteScope::from_pairs(
-                pairs
-                    .iter()
-                    .map(|(name, occurrence)| ((*name).to_string(), *occurrence)),
-            ))
+            Some(ComponentWriteScope::from_pairs(pairs.iter().map(
+                |(name, occurrence)| ((*name).to_string(), *occurrence),
+            )))
         }
 
         #[test]
@@ -1675,10 +1673,8 @@ mod tests {
             let after_backlog = DOC.replace("- [ ] [#a] one\n", "- [ ] [#a] one\n- [ ] [#b] two\n");
             let after_queue = after_backlog.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
 
-            let accumulated = merge_component_scope(
-                scope(&[]),
-                changed_component_scope(DOC, &after_backlog),
-            );
+            let accumulated =
+                merge_component_scope(scope(&[]), changed_component_scope(DOC, &after_backlog));
             let accumulated = merge_component_scope(
                 accumulated,
                 changed_component_scope(&after_backlog, &after_queue),
@@ -1696,8 +1692,10 @@ mod tests {
                 "<!-- agent:review -->\n<!-- /agent:review -->\n<!-- agent:queue -->\n",
             );
 
-            let accumulated =
-                merge_component_scope(scope(&[("backlog", 0)]), changed_component_scope(DOC, &with_review));
+            let accumulated = merge_component_scope(
+                scope(&[("backlog", 0)]),
+                changed_component_scope(DOC, &with_review),
+            );
 
             assert_eq!(accumulated, None);
         }

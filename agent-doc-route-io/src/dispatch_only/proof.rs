@@ -9,8 +9,7 @@ use agent_doc_controller::dispatch::{
     accepted_only_dispatch_start_refusal_message,
     dispatch_only_dispatch_start_proof_required as controller_dispatch_only_dispatch_start_proof_required,
     dispatch_only_recycle_inflight_message, dispatch_only_sent_console_message,
-    recycle_inflight_is_abandoned,
-    dispatch_only_sent_log_message, dispatch_proof_failed_event,
+    dispatch_only_sent_log_message, dispatch_proof_failed_event, recycle_inflight_is_abandoned,
     routed_dispatch_start_timeout_for_binary,
 };
 use agent_doc_harness::HarnessConfig;

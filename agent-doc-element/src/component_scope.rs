@@ -94,8 +94,7 @@ thread_local! {
 /// Run `f` with `scope` as the ambient CP write scope, restoring the previous
 /// scope afterwards (including on unwind, via the restoring guard).
 pub fn with_component_write_scope<T>(scope: ComponentWriteScope, f: impl FnOnce() -> T) -> T {
-    let previous =
-        ACTIVE_COMPONENT_WRITE_SCOPE.with(|slot| slot.borrow_mut().replace(scope));
+    let previous = ACTIVE_COMPONENT_WRITE_SCOPE.with(|slot| slot.borrow_mut().replace(scope));
     let _restore = RestoreComponentWriteScope { previous };
     f()
 }
@@ -187,7 +186,10 @@ pub fn changed_component_scope(before: &str, after: &str) -> Option<ComponentWri
         let before_body = before_component.open_end..before_component.close_start;
         let after_body = after_component.open_end..after_component.close_start;
         if before[before_body.clone()] != after[after_body.clone()] {
-            changed.push(ScopedComponent::new(before_component.name.clone(), occurrence));
+            changed.push(ScopedComponent::new(
+                before_component.name.clone(),
+                occurrence,
+            ));
         }
         before_bodies.push(before_body);
         after_bodies.push(after_body);
@@ -314,9 +316,6 @@ mod tests {
             ("exchange".to_string(), 0),
             ("backlog".to_string(), 2),
         ]);
-        assert_eq!(
-            ComponentWriteScope::from_pairs(scope.to_pairs()),
-            scope
-        );
+        assert_eq!(ComponentWriteScope::from_pairs(scope.to_pairs()), scope);
     }
 }

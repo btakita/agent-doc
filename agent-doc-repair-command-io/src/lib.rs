@@ -215,8 +215,9 @@ fn captured_closeout_for(
             && capture.capture_id == expected.capture_id
             && capture.response_sha256 == expected.response_sha256
     };
-    if let Some(capture) = agent_doc_cycle_state_io::load_projected_retained_captured_response(file)?
-        .filter(matches_expected)
+    if let Some(capture) =
+        agent_doc_cycle_state_io::load_projected_retained_captured_response(file)?
+            .filter(matches_expected)
     {
         return Ok(Some(capture));
     }

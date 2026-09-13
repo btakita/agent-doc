@@ -17468,9 +17468,9 @@ pub(crate) fn handle_mark_lifecycle(
     // holding the receipt until `DISPATCH_PRE_TURN_GRACE_SECS` elapses — a bounded
     // delay, never a wedge.
     if matches!(state, agent_doc_controller::actor::ActorState::Busy) && caller == "dispatch" {
-        match open_state_db(&bootstrap.project_root).and_then(|conn| {
-            state_store::mark_open_dispatches_turn_started(&conn, &document_id)
-        }) {
+        match open_state_db(&bootstrap.project_root)
+            .and_then(|conn| state_store::mark_open_dispatches_turn_started(&conn, &document_id))
+        {
             Ok(promoted) if promoted > 0 => agent_doc_ops_log_io::log_op(
                 &file,
                 &format!(
@@ -23657,7 +23657,11 @@ mod tests {
 
         assert_eq!(result.unwrap(), "published");
         assert_eq!(attempts, 3, "each retry re-issues the request");
-        assert_eq!(slept.len(), 2, "one wait per refusal, none after the answer");
+        assert_eq!(
+            slept.len(),
+            2,
+            "one wait per refusal, none after the answer"
+        );
     }
 
     #[test]
@@ -23697,7 +23701,9 @@ mod tests {
             |_| panic!("a real failure must not sleep"),
             || {
                 attempts += 1;
-                Err(anyhow::anyhow!("sync_tmux_layout refused: desired pane layout is empty"))
+                Err(anyhow::anyhow!(
+                    "sync_tmux_layout refused: desired pane layout is empty"
+                ))
             },
         );
 
@@ -25358,7 +25364,9 @@ mod tests {
             .find("controller_editor_route_layout_converged")
             .expect("layout convergence log")];
         assert_eq!(
-            route.matches("editor_route_layout_should_republish").count(),
+            route
+                .matches("editor_route_layout_should_republish")
+                .count(),
             1,
             "the supersede republish must be a single guarded retry, not a loop"
         );
@@ -29992,7 +30000,11 @@ mod tests {
             )
             .unwrap()
         };
-        assert_eq!(open_receipts(), 2, "the reopen opened a second live receipt");
+        assert_eq!(
+            open_receipts(),
+            2,
+            "the reopen opened a second live receipt"
+        );
 
         handle_mark_lifecycle(
             &bootstrap,

@@ -251,8 +251,7 @@ mod tests {
         let root = dir.path();
         let doc = root.join("tasks/agent-doc/agent-doc-bugs.md");
 
-        let candidates =
-            native_reload_candidate_documents(Vec::new(), vec![doc.clone()], root);
+        let candidates = native_reload_candidate_documents(Vec::new(), vec![doc.clone()], root);
         assert_eq!(
             candidates,
             vec![doc],

@@ -843,7 +843,9 @@ mod tests {
             "\n",
             "Worked in a scratch worktree (`src/.haiven-docs-pr20`, removed after push).\n",
         );
-        let baseline = doc(&format!("❯ Address all reviews in PR 20.\n\n{response_cell}"));
+        let baseline = doc(&format!(
+            "❯ Address all reviews in PR 20.\n\n{response_cell}"
+        ));
         let current = doc(&format!(
             "❯ Address all reviews in PR 20.\n\n{response_cell}\n{response_cell}"
         ));
@@ -865,7 +867,9 @@ mod tests {
             "\n",
             "Done. haiven-docs PR #20 head is now `283c17b`.\n",
         );
-        let baseline = doc(&format!("❯ Address all reviews in PR 20.\n\n{response_cell}"));
+        let baseline = doc(&format!(
+            "❯ Address all reviews in PR 20.\n\n{response_cell}"
+        ));
         let current = doc(&format!(
             "❯ Address all reviews in PR 20.\n\n{response_cell}\n{response_cell}\n\
              ❯ Since we will be migrating away from Cognito, use the backend-signed shape.\n"

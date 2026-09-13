@@ -1883,7 +1883,9 @@ pub fn elapsed_seconds_in_busy_cue(line: &str) -> Option<u64> {
                 let digits_start = j;
                 let mut value: u64 = 0;
                 while j < b.len() && b[j].is_ascii_digit() {
-                    value = value.saturating_mul(10).saturating_add((b[j] - b'0') as u64);
+                    value = value
+                        .saturating_mul(10)
+                        .saturating_add((b[j] - b'0') as u64);
                     j += 1;
                 }
                 if j == digits_start || j >= b.len() {
@@ -2749,7 +2751,10 @@ mod tests {
     /// including the real cue that went unreported for 1h51m.
     #[test]
     fn a_busy_cue_reports_how_long_its_turn_has_been_running() {
-        assert_eq!(elapsed_seconds_in_busy_cue("(14s · ↓ 200 tokens)"), Some(14));
+        assert_eq!(
+            elapsed_seconds_in_busy_cue("(14s · ↓ 200 tokens)"),
+            Some(14)
+        );
         assert_eq!(
             elapsed_seconds_in_busy_cue("• Working (6m 14s • esc to interrupt)"),
             Some(374)

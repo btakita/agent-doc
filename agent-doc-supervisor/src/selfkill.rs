@@ -66,10 +66,7 @@ pub fn start_route_owned_doc_from_args(args: &[String]) -> Option<PathBuf> {
     let start_idx = args.iter().position(|arg| arg == "start")?;
     args[start_idx + 1..]
         .iter()
-        .find(|arg| {
-            arg.trim_matches(|c| c == '"' || c == '\'')
-                .ends_with(".md")
-        })
+        .find(|arg| arg.trim_matches(|c| c == '"' || c == '\'').ends_with(".md"))
         .map(PathBuf::from)
 }
 

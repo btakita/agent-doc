@@ -1454,7 +1454,8 @@ pub(crate) fn repair_claude_preflight_hook_timeout(path: &Path) -> Result<Option
     if !path.exists() {
         return Ok(None);
     }
-    let content = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let content =
+        std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let Some(installed) = installed_preflight_hook_timeout_secs(&content) else {
         return Ok(None);
     };

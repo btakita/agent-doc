@@ -324,6 +324,10 @@ and backlog mutations apply at most once, operator text survives, and no new
 capture/finalize/force-disk operation is admitted. A bounded foreground retry may
 hand the unchanged intent to asynchronous supervisor recovery, but must never
 misreport the retained delivery as an instruction for the agent to retry it.
+The retained projection derives component scope from its actual visible base and
+rebased target and submits that scope to the relay. Stable exchange and backlog
+components therefore remain independent CRDT mutations during retry; only a
+structural component change may use the unscoped materialization fallback.
 
 Every Run Agent Doc preflight invokes retained-write recovery before it admits a
 new cycle. The state-backbone policy classifies the retained verdict: satisfied

@@ -32,8 +32,8 @@ use agent_doc_queue::{
     },
     queue_convergence::{
         inactive_queue_changed_vs_snapshot, queue_body_clear_is_lossless,
-        queue_entries_are_drained_residue,
-        queue_region_differs_from_snapshot, selected_queue_head_unchanged_in_snapshot,
+        queue_entries_are_drained_residue, queue_region_differs_from_snapshot,
+        selected_queue_head_unchanged_in_snapshot,
     },
     queue_response::{free_text_head_answered_by_response, queue_prompt_text_is_free_text},
 };
@@ -10248,8 +10248,7 @@ mod tests {
             )
             .unwrap();
 
-            let effects =
-                GuardFailingPreflightMaintenanceWriteEffects::with_converge_error(&error);
+            let effects = GuardFailingPreflightMaintenanceWriteEffects::with_converge_error(&error);
 
             run_pending_maintenance(&doc, &effects).unwrap_or_else(|err| {
                 panic!("deferred maintenance must not verify an unpersisted reap ({error}): {err}")

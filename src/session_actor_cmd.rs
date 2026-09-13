@@ -22,12 +22,11 @@ use agent_doc_turn_executor_tmux::context_clear::{
     ContextClearSubmitRetryProofFacts, ContextClearSubmitStatus, InterruptClearTimeoutFacts,
     busy_clear_already_deferred_message, busy_clear_deferred_message, busy_clear_refusal_message,
     context_clear_capture_shows_queued_input, context_clear_command_visible_in_active_input,
-    context_clear_history_proves_cleared_state,
-    context_clear_submit_blocked_line, context_clear_submit_blocked_message,
-    context_clear_submit_observation_line, context_clear_submit_resubmit_proof_line,
-    context_clear_submit_retry_action, interrupt_clear_timeout_message,
-    operator_interrupt_key_plan, operator_interrupt_step_delay, protected_clear_refusal_message,
-    terminal_editor_command,
+    context_clear_history_proves_cleared_state, context_clear_submit_blocked_line,
+    context_clear_submit_blocked_message, context_clear_submit_observation_line,
+    context_clear_submit_resubmit_proof_line, context_clear_submit_retry_action,
+    interrupt_clear_timeout_message, operator_interrupt_key_plan, operator_interrupt_step_delay,
+    protected_clear_refusal_message, terminal_editor_command,
 };
 use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, Tmux};
 

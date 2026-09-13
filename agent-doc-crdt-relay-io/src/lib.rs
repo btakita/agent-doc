@@ -2258,91 +2258,90 @@ pub fn relay_replica_update_for_file(
         isolation_refused_lossy,
         isolation_regions_restored,
     ) = with_hub_seeded_from_file(file, |hub| -> Result<_> {
-            let registered = hub.is_registered(client_id);
-            let decision = decide_cold_start_replica_update(
-                registered,
-                hub.controller_projection_established(),
-                hub.awaits_canonical_projection(client_id),
-            );
-            // #replica-structure-guard: capture the clean pre-update canonical so a
-            // connected editor pushing a stale/truncated buffer (one whose merged
-            // result would structurally corrupt the canonical — e.g. tombstoning a
-            // component close marker) can be rejected and the canonical restored
-            // before the corruption ever becomes authoritative.
-            let before_text = hub.canonical_text();
-            let (packet, reattached, canonical_projection_pending) = match decision {
-                ColdStartReplicaUpdateDecision::Relay => {
-                    (Some(hub.relay_update(client_id, update)?), false, false)
-                }
-                ColdStartReplicaUpdateDecision::ReprojectCanonical => {
-                    if !registered {
-                        hub.register(client_id)?;
-                    }
-                    hub.establish_controller_projection();
-                    hub.ensure_canonical_projection_receipt(client_id)?;
-                    (None, !registered, true)
-                }
-            };
-            let mut corruption_restored = None;
-            // `#reconcilesyntheticbase`: a region-scoped restore rides the normal
-            // delta in `packet.update` and names `origin` among its targets, so the
-            // editor that produced the update converges from that delta like any
-            // peer. It deliberately does NOT force a whole-document canonical
-            // projection: overwriting that editor's buffer is the same wholesale
-            // reset — for one member instead of all of them — that the narrow
-            // repair exists to avoid.
-            let isolation_regions_restored = packet
-                .as_ref()
-                .is_some_and(|packet| packet.component_isolation_reconciled);
-            // `#queuelineclobber`: the region-scoped repair refused to publish a
-            // result that would have dropped text this member just typed, so the
-            // raw union was published instead. Surface it: the member's characters
-            // landed outside the component it was editing and the only repair
-            // available would delete them, so this is the record that a real
-            // cross-component materialization happened (`#reconcilesyntheticbase`).
-            let isolation_refused_lossy = packet
-                .as_ref()
-                .is_some_and(|packet| packet.component_isolation_refused_lossy);
-            if packet.is_some() {
-                let after_text = hub.canonical_text();
-                // Narrow to component *parse* failures (unclosed / mismatched /
-                // unmatched markers) — the structural break a stale or truncated
-                // editor buffer introduces and that no later normalization can
-                // repair. Duplicate boundaries and duplicate singletons are
-                // deliberately excluded: those have dedicated repair paths
-                // (preflight boundary dedup, response-cell singleton repair) and
-                // can be a legitimate transient canonical state during closeout.
-                let introduced_parse_failure = matches!(
-                    agent_doc_element::element::structural_corruption_reason(&after_text),
-                    Some(reason) if reason.starts_with("parse_error:")
-                )
-                    && agent_doc_element::element::structural_corruption_reason(&before_text)
-                        .is_none();
-                if introduced_parse_failure
-                    && let Some(reason) =
-                        agent_doc_element::element::structural_corruption_reason(&after_text)
-                {
-                    // The merged update structurally corrupted the canonical.
-                    // Restore it to the clean pre-update text. `apply_canonical_replace`
-                    // generates proper CRDT ops and fans the restoration out to every
-                    // live member (including the corrupting editor), so hub-side
-                    // mirrors re-converge to the clean canonical. The corrupting
-                    // editor is also forced to re-project so a still-stale editor
-                    // buffer cannot immediately re-push the same corruption.
-                    hub.apply_canonical_replace(&after_text, &before_text)?;
-                    hub.require_canonical_projection(client_id);
-                    corruption_restored = Some(reason);
-                }
+        let registered = hub.is_registered(client_id);
+        let decision = decide_cold_start_replica_update(
+            registered,
+            hub.controller_projection_established(),
+            hub.awaits_canonical_projection(client_id),
+        );
+        // #replica-structure-guard: capture the clean pre-update canonical so a
+        // connected editor pushing a stale/truncated buffer (one whose merged
+        // result would structurally corrupt the canonical — e.g. tombstoning a
+        // component close marker) can be rejected and the canonical restored
+        // before the corruption ever becomes authoritative.
+        let before_text = hub.canonical_text();
+        let (packet, reattached, canonical_projection_pending) = match decision {
+            ColdStartReplicaUpdateDecision::Relay => {
+                (Some(hub.relay_update(client_id, update)?), false, false)
             }
-            Ok((
-                packet,
-                reattached,
-                canonical_projection_pending,
-                corruption_restored,
-                isolation_refused_lossy,
-                isolation_regions_restored,
-            ))
-        })??;
+            ColdStartReplicaUpdateDecision::ReprojectCanonical => {
+                if !registered {
+                    hub.register(client_id)?;
+                }
+                hub.establish_controller_projection();
+                hub.ensure_canonical_projection_receipt(client_id)?;
+                (None, !registered, true)
+            }
+        };
+        let mut corruption_restored = None;
+        // `#reconcilesyntheticbase`: a region-scoped restore rides the normal
+        // delta in `packet.update` and names `origin` among its targets, so the
+        // editor that produced the update converges from that delta like any
+        // peer. It deliberately does NOT force a whole-document canonical
+        // projection: overwriting that editor's buffer is the same wholesale
+        // reset — for one member instead of all of them — that the narrow
+        // repair exists to avoid.
+        let isolation_regions_restored = packet
+            .as_ref()
+            .is_some_and(|packet| packet.component_isolation_reconciled);
+        // `#queuelineclobber`: the region-scoped repair refused to publish a
+        // result that would have dropped text this member just typed, so the
+        // raw union was published instead. Surface it: the member's characters
+        // landed outside the component it was editing and the only repair
+        // available would delete them, so this is the record that a real
+        // cross-component materialization happened (`#reconcilesyntheticbase`).
+        let isolation_refused_lossy = packet
+            .as_ref()
+            .is_some_and(|packet| packet.component_isolation_refused_lossy);
+        if packet.is_some() {
+            let after_text = hub.canonical_text();
+            // Narrow to component *parse* failures (unclosed / mismatched /
+            // unmatched markers) — the structural break a stale or truncated
+            // editor buffer introduces and that no later normalization can
+            // repair. Duplicate boundaries and duplicate singletons are
+            // deliberately excluded: those have dedicated repair paths
+            // (preflight boundary dedup, response-cell singleton repair) and
+            // can be a legitimate transient canonical state during closeout.
+            let introduced_parse_failure = matches!(
+                agent_doc_element::element::structural_corruption_reason(&after_text),
+                Some(reason) if reason.starts_with("parse_error:")
+            )
+                && agent_doc_element::element::structural_corruption_reason(&before_text).is_none();
+            if introduced_parse_failure
+                && let Some(reason) =
+                    agent_doc_element::element::structural_corruption_reason(&after_text)
+            {
+                // The merged update structurally corrupted the canonical.
+                // Restore it to the clean pre-update text. `apply_canonical_replace`
+                // generates proper CRDT ops and fans the restoration out to every
+                // live member (including the corrupting editor), so hub-side
+                // mirrors re-converge to the clean canonical. The corrupting
+                // editor is also forced to re-project so a still-stale editor
+                // buffer cannot immediately re-push the same corruption.
+                hub.apply_canonical_replace(&after_text, &before_text)?;
+                hub.require_canonical_projection(client_id);
+                corruption_restored = Some(reason);
+            }
+        }
+        Ok((
+            packet,
+            reattached,
+            canonical_projection_pending,
+            corruption_restored,
+            isolation_refused_lossy,
+            isolation_regions_restored,
+        ))
+    })??;
     if isolation_regions_restored {
         agent_doc_ops_log_io::log_op(
             file,

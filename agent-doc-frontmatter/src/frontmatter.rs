@@ -3627,8 +3627,7 @@ mod tests {
         let content = "---\nagent_doc_session: 'old-id'\nagent: claude\n---\nBody\n";
         let updated = set_session_id(content, "new-id").unwrap();
         assert_eq!(
-            updated,
-            "---\nagent_doc_session: new-id\nagent: claude\n---\nBody\n",
+            updated, "---\nagent_doc_session: new-id\nagent: claude\n---\nBody\n",
             "the changed key is re-rendered in place; the rest is untouched"
         );
 
@@ -3656,7 +3655,8 @@ mod tests {
         // A multi-line flow collection starting at column 0 cannot be attributed to
         // a single key block byte-for-byte, so the write path falls back to
         // `write()` rather than guess which bytes belong to whom.
-        let content = "---\nrequired_ssh_targets: [\n  alpha,\n  beta,\n]\nagent: claude\n---\nBody\n";
+        let content =
+            "---\nrequired_ssh_targets: [\n  alpha,\n  beta,\n]\nagent: claude\n---\nBody\n";
         let updated = set_session_id(content, "id-1").unwrap();
         let (parsed, body) = parse(&updated).unwrap();
         assert_eq!(body, "Body\n");
@@ -3666,7 +3666,10 @@ mod tests {
 
         // And a document with no frontmatter at all still gets one created.
         let created = set_session_id("Body only\n", "id-2").unwrap();
-        assert!(created.starts_with("---\nagent_doc_session: id-2\n"), "{created}");
+        assert!(
+            created.starts_with("---\nagent_doc_session: id-2\n"),
+            "{created}"
+        );
         assert!(created.ends_with("Body only\n"), "{created}");
     }
 
@@ -3698,7 +3701,10 @@ mod tests {
         let content = "---\nprompt_presets:\n  '#deliberate': ''\n---\nBody\n";
         let (fm, body) = parse(content).unwrap();
 
-        assert_eq!(fm.prompt_presets.get("#deliberate").map(String::as_str), Some(""));
+        assert_eq!(
+            fm.prompt_presets.get("#deliberate").map(String::as_str),
+            Some("")
+        );
         assert!(fm.prompt_presets.unset_keys().next().is_none());
 
         let written = write(&fm, body).unwrap();
@@ -3709,13 +3715,23 @@ mod tests {
 
     #[test]
     fn an_unset_preset_key_does_not_hide_the_ones_around_it() {
-        let content = "---\nprompt_presets:\n  '#a': done\n  '#half':\n  '#b': also done\n---\nBody\n";
+        let content =
+            "---\nprompt_presets:\n  '#a': done\n  '#half':\n  '#b': also done\n---\nBody\n";
         let (fm, _) = parse(content).unwrap();
 
-        assert_eq!(fm.prompt_presets.get("#a").map(String::as_str), Some("done"));
-        assert_eq!(fm.prompt_presets.get("#b").map(String::as_str), Some("also done"));
+        assert_eq!(
+            fm.prompt_presets.get("#a").map(String::as_str),
+            Some("done")
+        );
+        assert_eq!(
+            fm.prompt_presets.get("#b").map(String::as_str),
+            Some("also done")
+        );
         assert_eq!(fm.prompt_presets.len(), 2, "only valued presets resolve");
-        assert_eq!(fm.prompt_presets.unset_keys().collect::<Vec<_>>(), vec!["#half"]);
+        assert_eq!(
+            fm.prompt_presets.unset_keys().collect::<Vec<_>>(),
+            vec!["#half"]
+        );
         assert!(
             !fm.prompt_presets.is_empty(),
             "a document holding only declared keys still has frontmatter to write"
@@ -3730,7 +3746,10 @@ mod tests {
         let (fm, body) = parse(content).unwrap();
 
         let written = write(&fm, body).unwrap();
-        assert!(written.contains("#half"), "operator line deleted: {written}");
+        assert!(
+            written.contains("#half"),
+            "operator line deleted: {written}"
+        );
     }
 
     #[test]
@@ -4336,4 +4355,3 @@ mod tests {
         assert_eq!(aliased.dogfood_mode, Some(false));
     }
 }
-

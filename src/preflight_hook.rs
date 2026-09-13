@@ -665,7 +665,6 @@ mod tests {
         );
     }
 
-
     /// `#hooktriggerunresolved`: a trigger whose document path does not resolve
     /// must FAIL LOUDLY, not read as an unrelated prompt.
     ///

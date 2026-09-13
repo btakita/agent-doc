@@ -27,9 +27,16 @@ rule remains: a cdylib belongs to an editor process, so every document served by
 that process must vote before its generation is retired. A *stalled* open cycle
 does not hold it; an unreadable cycle projection does.
 
-**The plugin-side half is also still latent: `#jbreloadreregconverge`.** The
-JetBrains handoff's re-registration does not converge for a document that was
-mid-cycle when the reload ran.
+**The plugin-side half is fixed in agent-doc 0.35.385 / JetBrains plugin
+0.2.384 (`#jbreloadreregconverge`).** The old coordinator captured resume state
+only after every manager worker terminated; one busy lane therefore suppressed
+checkpointing for every document, while disposal still dropped all replicas.
+It also released the application reload gate after scheduling a fire-and-forget
+open-tab sweep. The handoff now checkpoints every attached forwarder on its
+serialized document lane before shutdown or unload; any missing checkpoint
+retains the old generation and live managers. After a successful generation
+swap, the coordinator waits for every current Markdown tab to register and logs
+an exact converged or failed-path report before releasing the gate.
 
 Everything below is the original 2026-09-11 forensic record, and it remains the
 live recovery procedure.

@@ -349,6 +349,26 @@ Verification and delivery:
 - GitHub CI run `34738628529` is in progress; per the project workflow this is non-blocking after the green local full gate.
 
 Confidence: high. No escalation is required.
+
+### Re: `#clearsubmitpanesettle` — gpt-5 · 2026-09-13 01:18 EDT
+
+Implemented and released as agent-doc v0.35.378 (`2d5b7a47f`, tag `v0.35.378`, pushed to origin).
+
+The clear acceptance probe now distinguishes a harness that is visibly restarting from a swallowed submission. A Claude Code, Codex, or OpenCode startup banner without a dispatch-ready prompt produces the non-accepted `pane_restarting` status, with `wait_for_harness_to_finish_starting` as its explicit action. A ready prompt overrides an old banner in scrollback, and `pane_restarting` cannot authorize either a submit-key retry or a full `/clear` resend.
+
+Changed paths: `agent-doc-turn-executor-tmux/src/context_clear.rs`, `src/session_actor_cmd.rs`, `specs/07-session-tmux-commands.md`, `VERSIONS.md`, `editors/release-parity.tsv`, and the v0.35.378 manifest/skill projections. Pre-existing unrelated worktree changes were excluded from the commit.
+
+Verification:
+
+- Captured the intended pre-fix failure: the new startup-banner regression failed while the classifier stub returned false.
+- `cargo test -p agent-doc-turn-executor-tmux` passed (65 tests).
+- The explicit wait-only/no-resend regression passed after the final test addition.
+- `cargo test -p agent-doc --no-run` passed.
+- Full `make check` passed after all edits.
+- Installed and verified `agent-doc 0.35.378` and `libagent_doc-0.35.378.so` from a clean tagged worktree; VS Code is 0.2.70 and the intentionally newer local JetBrains build 0.2.382 was restored.
+- GitHub Actions CI run `34739714791` for this commit is in progress; local verification is complete.
+
+Confidence: high. Escalation: none.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -362,7 +382,7 @@ t## Pending / Not Built
 - 📌 do [#jbplugin382restart]
 - ~~📌 do [#isolationrelocate]~~
 - ~~📌 do [#clearunobservedrecycle]~~
-- 📌 do [#clearsubmitpanesettle]
+- ~~📌 do [#clearsubmitpanesettle]~~
 - 📌 do [#queuegorevokedonfreetext]
 - 📌 do [#layoutbindstale]
 - 📌 do [#jbfocusdocroute]
@@ -389,7 +409,6 @@ t## Pending / Not Built
 </dynamic_context_ref>
 ```
 - [ ] [#jbplugin382restart] [operator-verify] [P2] Restart IntelliJ to load JetBrains plugin 0.2.382. `make install` at 19:43 (binary 0.35.367) staged `~/.local/share/JetBrains/IntelliJIdea2026.1/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.382.jar`; the live IDE is still on 0.2.379, which is what preflight's standing `stale_plugin` warning reports. Same shape as the closed `#restartideaplugin` — it re-broke the plugin floor for `#tmuxfocussyncverify`, `#activateinstalledjetbrai`, and `#harnessswitchverify`, and for the `#jbfocusdocroute` half already shipped in 0.2.381.
-- [ ] [#clearsubmitpanesettle] [P3] [recommended] `context_clear_history_proves_cleared_state` requires a dispatch-ready prompt line, so a pane that is restarting reads identically to a pane that swallowed the clear. Consider a distinct `PaneRestarting` status (harness banner present, no prompt yet) whose unblocker is "wait for the harness to finish starting" rather than "verify pane state then retry" — the operator currently cannot tell those two apart from the message.
 - [ ] [#queuegorevokedonfreetext] [P2] After #queuelineclobber, an operator who writes a free-text `re [#id]: <question>` queue line and flips `queue: go` keeps their text but still gets the activation revoked (`[preflight] queue: stripped activation token (drained)` then `queue: set queue: stop`) — that path is separate from the now-gated need_clear_drained_body. Defensible as-is (a `re` line is not a drainable head, and the inactive_queue_residue warning routes it to the next cycle's prompt), so this is a design question, not a proven defect: decide whether an operator activation should survive a body that holds only non-drainable operator text, or whether the revoke plus the residue warning is the intended answer. Decide before changing it — go-mode churn (#qchurn) is the failure mode on the other side.
 - [ ] [#layoutbindstale] [P2] `derive_layout_actor_bindings` (src/agent-doc/agent-doc-controller-io/src/project_controller.rs:746-784) builds `desired_windows` from the RECORDED `record.window_id`, then binds every other actor whose recorded window is in that set as a co-window sibling of the layout. The record is provably untrustworthy: `agent-doc session doctor src/haiven-dev/tasks/infra.md` reports actor+registry `window=@0` for pane %14 while tmux has %14 in @3 (@0=agent-doc visible, @3=stash). So a stashed pane can be joined into a layout it is not part of, and after a `session doctor --repair` (which rebinds the record to the LIVE window) every stashed pane would share the stash window id and be bound together. Decide whether this join should consume a window id at all, or key on the desired document set alone. NOTE from #stashfocuswindow: resolving live is NOT automatically the right answer — for a selection effect the live window is the stash, which is precisely what must not be used. Status: a reading of the join, not an observed symptom; needs a repro before changing it.
 - [ ] [#jbfocusdocroute] [P2] The JB "Focus Agent Terminal" notification is per-document ("Agent input required for $fileName", TurnStateBannerRefresher.notifyInputRequired) but IdeTerminalHost.focusExisting(project) ignores the file and focuses a single project-wide terminal tab named "agent-doc". In a multi-document tmux layout the correct target is the pane that OWNS that document. The plugin already has the machinery (TmuxPaneFocusSync.recordEditorFocusIntent takes a documentPath, though it only records a lease — the actual routing goes through the command plane via EditorFocusSyncListener). Do this together with #stashfocuswindow: both are pane->window/document resolution, and solving it in two places separately is how three tmux focus reports became three separate reports. The silent-no-op half of this is already fixed in plugin 0.2.381 (commit 50bc06de5); what remains is routing to the right pane rather than merely always navigating somewhere.

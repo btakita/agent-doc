@@ -2,6 +2,14 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.379
+
+- **Pane-layout actor bindings no longer absorb unrelated stash-window actors
+  (`#layoutbindstale`).** The reactive binding join is now scoped to the desired
+  document IDs and matching structural receipts. Recorded window equality is no
+  longer treated as membership proof, preventing repaired records that share a
+  stash window from pulling unrelated panes into an editor layout.
+
 ## 0.35.378
 
 - **Clear reports a restarting harness pane separately from an unobserved

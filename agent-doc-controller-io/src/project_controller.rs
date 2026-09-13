@@ -743,12 +743,6 @@ fn derive_layout_actor_bindings(
         .map(str::trim)
         .filter(|document| !document.is_empty())
         .collect::<Vec<_>>();
-    let desired_windows = desired_documents
-        .iter()
-        .filter_map(|document| actors.get(*document))
-        .map(|record| record.window_id.as_str())
-        .filter(|window| !window.is_empty())
-        .collect::<BTreeSet<_>>();
     let desired_document_set = desired_documents.iter().copied().collect::<BTreeSet<_>>();
     let mut seen = BTreeSet::new();
     let mut bindings = Vec::new();
@@ -763,20 +757,6 @@ fn derive_layout_actor_bindings(
         seen.insert(document.to_string());
         bindings.push(ControllerTmuxActorBinding {
             document_path: document.to_string(),
-            session_id: record.session_id.clone(),
-            pane_id: record.pane_id.clone(),
-            generation: record.generation,
-        });
-    }
-    for record in actors.values() {
-        if desired_windows.is_empty()
-            || !desired_windows.contains(record.window_id.as_str())
-            || !seen.insert(record.document_id.clone())
-        {
-            continue;
-        }
-        bindings.push(ControllerTmuxActorBinding {
-            document_path: record.document_id.clone(),
             session_id: record.session_id.clone(),
             pane_id: record.pane_id.clone(),
             generation: record.generation,
@@ -8057,21 +8037,13 @@ mod tests {
         ]));
         assert_eq!(
             pane_graph.actor_bindings(),
-            vec![
-                ControllerTmuxActorBinding {
-                    document_path: document_id.clone(),
-                    session_id: "session-%41".to_string(),
-                    pane_id: "%41".to_string(),
-                    generation: 7,
-                },
-                ControllerTmuxActorBinding {
-                    document_path: dispatched_document_id,
-                    session_id: "session-%72".to_string(),
-                    pane_id: "%72".to_string(),
-                    generation: 7,
-                },
-            ],
-            "a live actor sharing the desired actor's window must participate in layout ownership",
+            vec![ControllerTmuxActorBinding {
+                document_path: document_id.clone(),
+                session_id: "session-%41".to_string(),
+                pane_id: "%41".to_string(),
+                generation: 7,
+            }],
+            "an unrelated actor must not expand the desired document set even when its recorded window matches",
         );
 
         let closed = actor_record_for_test(
@@ -8083,6 +8055,58 @@ mod tests {
         assert!(
             pane_graph.actor_bindings().is_empty(),
             "closing the actor Source must invalidate the pane-layout authority Computed"
+        );
+    }
+
+    #[test]
+    fn pane_layout_actor_bindings_exclude_unrequested_stash_window_siblings() {
+        // `#layoutbindstale`: after `session doctor --repair`, unrelated stashed
+        // actors legitimately share the stash window id. Window equality is
+        // therefore not document-layout membership evidence.
+        let root = tempfile::TempDir::new().unwrap();
+        let desired_document = root.path().join("tasks/infra.md").display().to_string();
+        let stashed_document = root.path().join("tasks/lazily.md").display().to_string();
+        let mut desired = actor_record_for_test(
+            &desired_document,
+            "%14",
+            agent_doc_controller::actor::ActorState::Ready,
+        );
+        desired.window_id = "@3".to_string();
+        let mut stashed = actor_record_for_test(
+            &stashed_document,
+            "%72",
+            agent_doc_controller::actor::ActorState::Ready,
+        );
+        stashed.window_id = "@3".to_string();
+
+        let bindings = derive_layout_actor_bindings(
+            Some(&PaneLayoutDesired {
+                generation: 9,
+                invocation: ControllerTmuxLayoutSyncInvocation {
+                    columns: vec![desired_document.clone()],
+                    window: Some("@1".to_string()),
+                    focus: Some(desired_document.clone()),
+                    no_autostart: true,
+                    exact_visible: true,
+                    caller_kind: "automatic".to_string(),
+                    actor_bindings: Vec::new(),
+                },
+                source_plane_version: None,
+            }),
+            &BTreeMap::from([
+                (desired_document.clone(), desired),
+                (stashed_document.clone(), stashed),
+            ]),
+            None,
+        );
+
+        assert_eq!(
+            bindings
+                .iter()
+                .map(|binding| binding.document_path.as_str())
+                .collect::<Vec<_>>(),
+            vec![desired_document.as_str()],
+            "a common recorded stash window must not pull unrelated documents into the layout"
         );
     }
 

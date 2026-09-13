@@ -1894,7 +1894,11 @@ pub fn run_with_options_to_writer(
             queue_state.queue_pause_reason.as_deref(),
         );
     let queue_continuation_required = effective_continuation.required;
-    let queue_continuation_guidance = effective_continuation.guidance;
+    let queue_continuation_guidance = effective_continuation.guidance.or_else(|| {
+        agent_doc_queue::queue_continuation::supervisor_scoped_activation_guidance(
+            &model_source_content,
+        )
+    });
     preflight_read_facts.queue.continuation_required = queue_continuation_required;
     preflight_read_facts.queue.continuation_guidance = queue_continuation_guidance.clone();
     preflight_reads.observe(preflight_read_facts.clone());
@@ -2945,6 +2949,53 @@ mod tests {
             state.prompt_targets
         );
     }
+
+    #[test]
+    fn preflight_names_a_supervisor_scoped_start_queue_instead_of_going_silent() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue start preset=\"#spec-test-build-install-commit-push\" -->\n",
+            "- do [#active]\n",
+            "<!-- /agent:queue -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#active] active work\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let mut output = Vec::new();
+        run_with_options_to_writer(&doc, PreflightOptions { probe: true }, &mut output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
+
+        assert_eq!(parsed["queue_drainable_head_count"], 0);
+        assert_eq!(parsed["queue_continuation_required"], false);
+        let guidance = parsed["queue_continuation_guidance"]
+            .as_str()
+            .expect("supervisor-scoped activation must emit guidance");
+        assert!(guidance.contains("supervisor idle-watch"));
+        assert!(guidance.contains("NOT a stalled or drained queue"));
+        assert!(guidance.contains("queue: go"));
+    }
+
     #[test]
     fn preflight_does_not_open_cycle_from_active_queue_slash_command() {
         let dir = setup_project();

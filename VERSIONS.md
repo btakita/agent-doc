@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.386
+
+- **Supervisor-scoped `queue: start` activation no longer looks silently
+  drained (`#queuestartscopesilent`).** When ready prompts remain but the
+  attended in-session loop correctly yields ownership to the supervisor,
+  preflight now emits explicit guidance naming the supervisor idle-watch,
+  stating that the queue is neither stalled nor drained, and explaining that
+  `queue: go` hands the drain to the in-session loop. Exchange-preemption and
+  recycle-yield guidance retain precedence.
+
 ## 0.35.385
 
 - **JetBrains native-generation handoffs now preserve and prove every open

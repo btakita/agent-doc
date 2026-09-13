@@ -145,6 +145,23 @@ pub fn effective_continuation_output_with_preemption(
 /// (`#queueblockquoteintent`).
 pub const EXCHANGE_PROMPT_PREEMPTION_GUIDANCE: &str = "queue continuation suppressed — drainable heads remain, but this cycle's diff carries a fresh exchange prompt that preempts the drain (`user_intent_prompt_changes` is non-empty). Answer that prompt this turn; the queue resumes on the next cycle. This is NOT a drained queue: if you cannot find an operator prompt in the exchange tail, inspect `user_intent_prompt_changes` — binary-authored bookkeeping misclassified as user intent is a defect, not a stop reason.";
 
+/// Named reason for an active `start` queue that belongs to the supervisor,
+/// rather than the attended in-session drain (`#queuestartscopesilent`).
+pub const SUPERVISOR_SCOPED_ACTIVATION_GUIDANCE: &str = "queue continuation is supervisor-scoped — ready queue heads remain under `queue: start`, so the supervisor idle-watch owns the drain. This is NOT a stalled or drained queue. Set `queue: go` to hand the drain to the attended in-session loop.";
+
+/// Explain the otherwise-silent state where in-session activation is absent,
+/// but supervisor activation is present and still contains prompt entries.
+pub fn supervisor_scoped_activation_guidance(content: &str) -> Option<String> {
+    if active_queue(content).is_some() {
+        return None;
+    }
+    let (_, activation) = active_queue_for_supervisor_start(content, true)?;
+    if document_queue::prompts(&activation.entries_after).is_empty() {
+        return None;
+    }
+    Some(SUPERVISOR_SCOPED_ACTIVATION_GUIDANCE.to_string())
+}
+
 /// A required queue continuation: the document closed cleanly, explicit `go`
 /// mode is active, and a ready queue head remains, so an in-session loop must
 /// continue draining instead of sending a final answer.
@@ -1240,6 +1257,18 @@ mod tests {
         let out = effective_continuation_output_with_preemption(false, false, false, None);
         assert!(!out.required);
         assert!(out.guidance.is_none());
+
+        // A start-only queue is intentionally silent to the in-session loop,
+        // but it is not drained: the supervisor owns its remaining prompt.
+        let supervisor_scoped = "---\nsession: sid\nqueue: start\n---\n\n\
+<!-- agent:queue start -->\n\
+- do [#next]\n\
+<!-- /agent:queue -->\n";
+        let guidance = supervisor_scoped_activation_guidance(supervisor_scoped)
+            .expect("a supervisor-scoped queue with prompts must name its owner");
+        assert!(guidance.contains("supervisor idle-watch"));
+        assert!(guidance.contains("NOT a stalled or drained queue"));
+        assert!(guidance.contains("queue: go"));
 
         // Recycle-yield still wins over preemption.
         let out = effective_continuation_output_with_preemption(true, true, true, None);

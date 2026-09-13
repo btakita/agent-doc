@@ -2,6 +2,14 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.387
+
+- **Consecutive node-patch inserts retain authored order (`#ocreverselistsplice`).**
+  The IPC patch builder now anchors each new item to its immediate predecessor
+  in the target document, including predecessors introduced earlier in the same
+  batch. Applying a list-only run therefore cannot reverse it by repeatedly
+  inserting every item after one stale baseline anchor.
+
 ## 0.35.386
 
 - **Supervisor-scoped `queue: start` activation no longer looks silently

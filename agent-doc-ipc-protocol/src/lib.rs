@@ -1047,9 +1047,13 @@ pub fn build_ipc_node_patches_json(
                 "op": "insert",
                 "content": ipc_node_source(after, node),
             });
-            if let Some(anchor) = previous_existing_node_key(&after_nodes[..index], &before_by_key)
-            {
-                patch["after"] = serde_json::Value::String(anchor);
+            // Inserts are applied in payload order. Anchor each new node to its
+            // immediate predecessor in the target, including a predecessor
+            // introduced by an earlier patch in this batch. Reusing only the
+            // last baseline node here makes every insert target one fixed byte
+            // offset, which reverses consecutive inserted runs.
+            if let Some(anchor) = after_nodes[..index].last() {
+                patch["after"] = serde_json::Value::String(anchor.node_key.clone());
             } else if let Some(anchor) =
                 next_existing_node_key(&after_nodes[index + 1..], &before_by_key)
             {
@@ -1131,17 +1135,6 @@ fn ipc_node_source(
         .get(node.item.start_byte..node.item.end_byte)
         .unwrap_or(&node.item.raw)
         .to_string()
-}
-
-fn previous_existing_node_key(
-    nodes: &[agent_doc_markdown_ast::mutations::MutationItemNode],
-    existing: &HashMap<&str, &agent_doc_markdown_ast::mutations::MutationItemNode>,
-) -> Option<String> {
-    nodes
-        .iter()
-        .rev()
-        .find(|node| existing.contains_key(node.node_key.as_str()))
-        .map(|node| node.node_key.clone())
 }
 
 fn next_existing_node_key(
@@ -1459,6 +1452,40 @@ mod tests {
                     .as_str()
                     .is_some_and(|anchor| anchor.contains("alpha"))
         }));
+    }
+
+    #[test]
+    fn build_ipc_node_patches_json_preserves_consecutive_insert_order() {
+        let before = "\
+<!-- agent:exchange -->
+- anchor response
+- following response
+<!-- /agent:exchange -->
+";
+        let after = "\
+<!-- agent:exchange -->
+- anchor response
+- Shape chosen
+- All nine findings
+- Handoff routes
+- Launch
+- Ripple
+- pending review question
+1. pending review
+2. Sanat
+- following response
+<!-- /agent:exchange -->
+";
+
+        let payload = serde_json::json!({
+            "node_patches": build_ipc_node_patches_json(Some(before), Some(after)),
+        });
+        let patches = agent_doc_markdown_ast::mutations::parse_node_patches_payload(&payload)
+            .expect("generated patches should parse");
+        let landed = agent_doc_markdown_ast::mutations::apply_node_patches(before, &patches)
+            .expect("generated patches should apply");
+
+        assert_eq!(landed, after);
     }
 
     #[test]

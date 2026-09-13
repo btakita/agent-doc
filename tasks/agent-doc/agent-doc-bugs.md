@@ -476,6 +476,20 @@ Commands and verification:
 Confidence: high.
 
 Escalation: none.
+
+### Re: `#cargotokenrevoke` — gpt-5 · 2026-09-13T03:00-04:00
+
+Closed. No revocation action remains: the exposed crates.io `publish-token` was verified on the live token-settings page as expired, and crates.io offered only regeneration rather than revocation. An expired token cannot authenticate, so the security objective of this item is already satisfied. A replacement token was separately minted and stored in `passage btak/CARGO_REGISTRY_TOKEN`; repository-secret rotation was tracked and handled under `#cargotokenwire`.
+
+Changed paths: none outside this binary-owned session-document closeout.
+
+Commands: `agent-doc plan`; scoped `tsift` reads of the backlog item and `memory/reference_cargo_publish_token_passage.md`.
+
+Verification: the backlog record and durable operator memory agree on the live crates.io observation, expiry state, replacement-token location, and separation of the wiring work. No secret value was read or printed during this cycle.
+
+Confidence: high.
+
+Escalation: none.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -495,7 +509,7 @@ t## Pending / Not Built
 - ~~📌 do [#jbfocusdocroute]~~
 - ~~📌 do [#compactackflake]~~
 - ~~📌 do [#retainedresumewakeflake]~~
-- 📌 do [#cargotokenrevoke]
+- ~~📌 do [#cargotokenrevoke]~~
 - 📌 How can we make the pypi package slim? Can we make it download & extract the tarballs from github instead of sending the entire binary into PYPI? When we do the release, please aggresively delete old releases.
 <!-- /agent:queue -->
 
@@ -517,7 +531,6 @@ t## Pending / Not Built
 </dynamic_context_ref>
 ```
 - [ ] [#jbplugin382restart] [operator-verify] [P2] Restart IntelliJ to load JetBrains plugin 0.2.382. `make install` at 19:43 (binary 0.35.367) staged `~/.local/share/JetBrains/IntelliJIdea2026.1/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.382.jar`; the live IDE is still on 0.2.379, which is what preflight's standing `stale_plugin` warning reports. Same shape as the closed `#restartideaplugin` — it re-broke the plugin floor for `#tmuxfocussyncverify`, `#activateinstalledjetbrai`, and `#harnessswitchverify`, and for the `#jbfocusdocroute` half already shipped in 0.2.381.
-- [ ] [#cargotokenrevoke] REVOCATION NO LONGER NEEDED — closed by expiry, verified 2026-09-11 23:0x on the live https://crates.io/settings/tokens page: the exposed `publish-token` (created 3 months ago, last used ~4h ago) shows **Expired about 4 hours ago** and crates.io offers it no Revoke action at all, only Regenerate. An expired token cannot authenticate, so the security goal of this item is met. Re-issue also happened: a replacement `publish-token` was minted and is in `passage btak/CARGO_REGISTRY_TOKEN`. What remains is not revocation but wiring — tracked as #cargotokenwire (nine repo secrets still hold the pre-rotation token), plus one operator decision because the new token's cleartext reached this session's output.
 <!-- /agent:backlog -->
 
 ## Review

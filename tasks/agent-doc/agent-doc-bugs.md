@@ -568,6 +568,46 @@ Verification passed:
 - `make install`: installed CLI/native library 0.35.384 and both editor packages. With admitted `cycle-1789322821240`, the live receipt was `delivered 0/1 ... 1 deferred mid-cycle`; ops recorded PID `2238596`, 19 attributed documents, three project endpoints, and this document as the blocker.
 
 Source commit `1bebad974` and tag `v0.35.384` are pushed. Superproject release pointer/memory commit: `401d33478`. CI, PyPI, and GitHub Release workflows are running. Confidence is high; no escalation is needed. The exchange is large (518 lines), but the active queue remains drainable, so compaction stays deferred by policy.
+
+### Re: #jbreloadreregconverge — gpt-5 · 2026-09-13T14:32:51-04:00
+
+Implemented, verified, installed, committed, tagged, and pushed as agent-doc **0.35.385** / JetBrains plugin **0.2.384**.
+
+The reload contract is now fail-closed at the document boundary:
+
+- **Invariant:** every attached pre-handoff replica must have a JVM-owned encoded checkpoint before its native generation can unload, and every current open Markdown tab must produce a replacement-registration result before the reload gate is released.
+- **Owner:** `CrdtReplicaManager` owns per-document checkpoint and restart proof; `NativeReloadCoordinator` owns application-wide ordering and refuses generation publication when capture/quiescence is incomplete.
+- **Topology:** typed `reload_library` intent → coordinator gate → per-document serialized lanes → JVM-owned checkpoints → old-worker quiescence → native generation swap → awaited current-tab registration → exact convergence report → gate release. The typed install/reload intent remains the sole trigger; polling and a second handoff path were not added.
+
+| Transition | Result |
+|---|---|
+| All attached lanes checkpoint | Workers may quiesce and the native generation may swap. |
+| Any checkpoint is missing or times out | Existing managers are re-enabled and the old generation remains active. |
+| Checkpoints exist but worker quiescence fails | No generation swap; captured state rebuilds the same generation in `finally`. |
+| Reload completes | Every current open Markdown document is synchronously re-registered with `await=true` and `forceRefresh=true`. |
+| A replacement does not attach | The report names the exact failed path; the existing retry path remains recovery rather than primary correctness. |
+| Tabs close/open during handoff | Restart targets the current open-tab set, so closed documents are not resurrected and newly open Markdown tabs are included. |
+
+Changed surfaces:
+
+- `CrdtReplicaManager.kt`: per-lane checkpoint-before-dispose, fail-closed handoff state, awaited replacement registration, and deterministic exact-path restart reports.
+- `NativeReloadCoordinator.kt`: typed handoff ownership, unload refusal on incomplete capture/quiescence, and convergence reporting before gate completion.
+- `NativeReloadCoordinatorTest.kt` plus the VS Code cross-editor source-boundary test: checkpoint ordering, awaited attachment, exact failure reporting, and typed-call parity.
+- Release metadata/projections: agent-doc 0.35.385, JetBrains 0.2.384, parity ledger, skill mirrors, and operator memory.
+
+Verification and delivery:
+
+- `./gradlew test --tests com.github.btakita.agentdoc.NativeReloadCoordinatorTest` — passed.
+- `./gradlew test` — passed.
+- `npm run compile && node --test out/reloadLibraryIntent.test.js` — 4/4 passed.
+- `make check` — passed: 9,448/9,448 Rust tests, 179/179 VS Code tests, JetBrains/native cross-editor integration, release parity, bootstrap tests, and all model checks.
+- `make install` — installed CLI/native 0.35.385, JetBrains package 0.2.384, and the VS Code package; the reload intent reached 1/1 available editor endpoint.
+- Source commit `f82c538b1` and tag `v0.35.385` pushed to `btakita/agent-doc`; Release, PyPI, CI, Book, and Pages workflows started.
+- Superproject release record commit `3e2cbe4a0`; the final document-response commit follows this response.
+
+The new JetBrains package is installed on disk, but the running IDE still needs a restart to activate plugin 0.2.384. That live activation/proof remains intentionally routed through the separate `#jbplugin382restart` item; no IDE process was terminated during this cycle.
+
+**Proof:** changed paths are the two JetBrains handoff owners, their focused test, the cross-editor reload-intent test, release metadata/version projections, and the focused reload memory. Confidence is high from the full green repository check and installed artifacts. Escalation: none; the only remaining operator-visible action is the already-tracked IDE restart verification.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

@@ -70,8 +70,10 @@ The core workflow (preflight, respond, persist the response) is identical across
 
 ## Response Header Attribution
 
-- Always attribute `### Re:` headings with the resolved model short name, for example `### Re: topic — gpt-5` or `### Re: topic — opus-4-6`.
-- Never use the harness label as the suffix. `### Re: topic — codex` and `### Re: topic — claude` are wrong.
+- Always attribute `### Re:` headings with the resolved model short name **and** the response timestamp, for example `### Re: topic — opus-5 · 2026-09-11T23:45-04:00` (`#timestampresponseheader`).
+- Never use the harness label as the model name. `### Re: topic — codex` and `### Re: topic — claude` are wrong.
+- The timestamp is local time with its UTC offset, `YYYY-MM-DDTHH:MM±HH:MM`, taken when you begin composing. With no resolvable clock, emit the model alone (`### Re: topic — opus-5`) rather than a dangling separator.
+- Keep **exactly one** spaced em dash in the heading: the model and timestamp are joined to each other by ` · `. Three heading parsers split on the FIRST em dash and `strip_re_heading_attribution` splits on the LAST, so a second em dash leaves the model name behind and reads as permanent post-commit heading drift. Format owned by `agent_doc_turn::response_text::response_heading`.
 
 ## Harness Detection
 

@@ -74,11 +74,28 @@ is mid-authoring.
 **not** bold (`**Re:**`). The `(HEAD)` boundary marker requires real headings. Use
 h4–h6 for sub-sections within a response.
 
-**Model attribution:** always append the resolved model short name with a spaced
-em dash: `### Re: topic — gpt-5` or `### Re: topic — opus-4-6`. Use
-`preflight.agent_model` if non-null (from frontmatter); otherwise use your own
-model identity. Never use the harness label (`codex`, `claude`) as the suffix, and
-never omit it.
+**Model attribution and timestamp (`#timestampresponseheader`):** always append the
+resolved model short name and the response timestamp after a spaced em dash,
+joined to each other by a spaced middle dot:
+`### Re: topic — opus-5 · 2026-09-11T23:45-04:00`. Use `preflight.agent_model` if
+non-null (from frontmatter); otherwise use your own model identity. Never use the
+harness label (`codex`, `claude`) as the model name, and never omit it. The
+timestamp is local time with its UTC offset, `YYYY-MM-DDTHH:MM±HH:MM`, taken when
+you begin composing the response; if you genuinely cannot resolve a clock, emit the
+model alone (`### Re: topic — opus-5`) rather than a dangling separator.
+
+**The heading must contain exactly ONE spaced em dash.** That is why the timestamp
+joins the model with ` · ` instead of a second ` — `. Four parsers read this
+heading and they do not agree on which dash bounds the attribution: three take the
+FIRST (`response_prompt_target_from_re_heading`,
+`queue_response::response_heading_topic`, `response_replay::normalize_replay_topic`)
+while `transient_markers::strip_re_heading_attribution` takes the LAST via
+`rfind(" — ")`. A second em dash leaves the model name behind on the strip path,
+and because that strip backs `normalize_post_commit_re_heading_drift` — the
+comparison that lets an attributed heading match an unattributed one — the residue
+reads as permanent heading drift on every committed response. The format is owned by
+`agent_doc_turn::response_text::response_heading`; the cross-parser property is
+pinned by `a_timestamped_heading_reads_the_same_through_every_parser`.
 
 **Response checkpoints and sealing:** stream incomplete progress only to the
 harness console. A standalone conclusion that remains useful before closeout may

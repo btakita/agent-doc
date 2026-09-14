@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0a113-68bf-7131-b405-9035a3ada6e7
+  codex: 01a0a205-4220-73b0-9d09-7d2b9699290e
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -82,6 +82,34 @@ Verification passed:
 - latest GitHub Actions `CI` run: success.
 
 The installed binary now diagnoses the live `lazily.md` mismatch as document-only drift. Its current `session-check` still requests the owning pane's commit, as designed; the next normal admission from that pane exercises the corrected preflight auto-recovery path rather than stalling on the marker as user content.
+
+### Re: rename-safe panes and route-layout supersession — Codex · 2026-09-14 19:06 EDT
+
+> **Queue prompt:**
+>
+> I renamed backend.md to api.md but agent-doc removed the tmux pane. Please fix agent-doc causes that prevent agent-doc from supporting file renames. Also, Run Agent Doc on this file is wedged or running somewhere else: editor route layout did not converge before dispatch: superseded_by_newer_layout_state
+
+Fixed both causes and released agent-doc 0.35.396.
+
+The pane loss came from an unreachable compatibility path: sync looked up the registry only by the new canonical path key, while the still-live pane remained keyed by `backend.md`. It therefore never reached its existing rename check. Exact-visible passive sync compounded that miss by suppressing ordinary ownership diagnostics, so it treated the pane as unresolved and let reconciliation remove it.
+
+Sync now resolves the new path first, then considers a same-session old-path candidate only when exactly one registry row matches. It resolves relative registry paths against the document's owning project, requires the old path to be absent, and independently requires either the authoritative actor binding or live pane ownership proof against that old path. Only then does the existing idempotent registration effect rekey the same pane to `api.md`. A live old path, duplicate session rows, a conflicting new-path row, or weakened ownership remains fail-closed.
+
+The route wedge was a separate generation race. `Run Agent Doc` published a layout, but passive editor observations could supersede it repeatedly. The RPC handler republished once and then failed if another observation arrived. Route readiness now belongs to the retained pane-layout graph: it follows newer generations while they still contain the routed document, waits through `NeedsEffect` / `Applying` / `RetryPending`, and accepts a covering `Converged` receipt. A newer layout that removes the document, an absent projection, or operator ownership still refuses dispatch. The RPC publishes exactly one intent.
+
+Reactive ownership is now explicit: editor/path/layout observations are Sources; registry matching and route readiness are pure derived decisions; tmux re-registration and reconciliation remain the existing idempotent Effects; registry/effect receipts plus physical layout observation prove convergence. The only compatibility fallback is the bounded, fail-closed recovery for a missed editor rename event.
+
+Regression coverage includes unique old-key rename recovery, live-old-path refusal, duplicate-session ambiguity refusal, covering newer route generations, non-covering supersession, operator-owned refusal, and the single-publication route handler. Specifications, README, release parity, and generated skill/version surfaces were updated.
+
+Verification passed:
+
+- focused `agent-doc-sync`, `agent-doc-sync-io`, and `agent-doc-controller-io` tests;
+- full `make check`;
+- live `make tmux-ci`;
+- `make install`, including native library and editor packages;
+- forced two-controller recycle; the root controller is stable on 0.35.396 with a matching installed inode.
+
+Implementation: `1d8fd3996` (`fix: preserve pane ownership across document renames`), pushed to `origin/main` and tagged `v0.35.396`. The new CI, Release, PyPI, Book, and Pages workflows were triggered and were queued/running at the required one-time external check.
 <!-- agent:boundary:44108b98:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -91,7 +119,6 @@ The installed binary now diagnoses the live `lazily.md` mismatch as document-onl
 t## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- I renamed backend.md to api.md but agent-doc removed the tmux pane. Please fix agent-doc causes that prevent agent-doc from supporting file renames. Also, Run Agent Doc on this file is wedged or running somewhere else: editor route layout did not converge before dispatch: superseded_by_newer_layout_state
 <!-- /agent:queue -->
 
 

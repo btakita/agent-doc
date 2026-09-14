@@ -3786,7 +3786,13 @@ mod tests {
             "<!-- /agent:exchange -->\n\n",
             "<!-- agent:status -->\n",
             "idle\n",
-            "<!-- /agent:status -->\n"
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#work]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#work] verify workflow\n",
+            "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, original).unwrap();
         agent_doc_snapshot_io::checkpoint_document_baseline(
@@ -3802,7 +3808,10 @@ mod tests {
         // response body is pending. The working file stays at HEAD, so this is
         // NOT the jb_cache_conflict_cancel shape (which requires
         // document == snapshot) and falls through to the bail this test covers.
-        let drifted = original.replace("idle\n", "draining\n");
+        let drifted = original.replace("idle\n", "draining\n").replace(
+            "- [ ] [#work] verify workflow",
+            "- [ ] 🚧 [#work] verify workflow",
+        );
         assert_ne!(drifted, original, "precondition: drift must be real");
         agent_doc_snapshot_io::checkpoint_document_baseline(
             &doc,

@@ -670,6 +670,54 @@ pub fn parse_items(body: &str) -> (String, Vec<PendingItem>, String) {
     (prelude, items, postlude)
 }
 
+/// Stable semantic signature for tracked-work content, excluding the ephemeral
+/// `in_progress` projection marker.
+///
+/// Recognized pending items are encoded field-by-field so task identity, state,
+/// text, continuations, list shape, and surrounding prose remain significant.
+/// Malformed item-looking lines remain raw text and therefore fail closed.
+pub fn content_signature_without_in_progress(body: &str) -> String {
+    fn push_field(signature: &mut String, value: &str) {
+        signature.push_str(&value.len().to_string());
+        signature.push(':');
+        signature.push_str(value);
+    }
+
+    let layout = PendingLayout::parse(body);
+    let mut signature = String::new();
+    for segment in &layout.segments {
+        match segment {
+            PendingSegment::Text(raw) => {
+                signature.push('T');
+                push_field(&mut signature, raw);
+            }
+            PendingSegment::Item { item, has_newline } => {
+                signature.push('I');
+                match item.marker {
+                    PendingListMarker::Bullet => signature.push('b'),
+                    PendingListMarker::Ordered(index) => {
+                        signature.push('o');
+                        push_field(&mut signature, &index.to_string());
+                    }
+                }
+                signature.push(item.state.box_char());
+                match &item.gate_type {
+                    Some(gate_type) => {
+                        signature.push('g');
+                        push_field(&mut signature, gate_type);
+                    }
+                    None => signature.push('-'),
+                }
+                signature.push(if *has_newline { 'n' } else { '-' });
+                push_field(&mut signature, &item.id);
+                push_field(&mut signature, &item.text);
+                push_field(&mut signature, &item.continuation);
+            }
+        }
+    }
+    signature
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrackedComponentItemDrop {
     pub component: String,
@@ -4490,6 +4538,36 @@ mod tests {
         assert!(items[1].in_progress);
         assert_eq!(active_item_ids(body), vec!["first"]);
         assert_eq!(render_items("", &items, ""), body);
+    }
+
+    #[test]
+    fn content_signature_ignores_only_in_progress_projection() {
+        let body = concat!(
+            "### Active\n",
+            "- [ ] [#first] one\n",
+            "  continuation\n",
+            "- [/] [#gated] blocked\n",
+        );
+        let marked = body
+            .replace("[ ] [#first]", "[ ] 🚧 [#first]")
+            .replace("[/] [#gated]", "[/] 🚧 [#gated]");
+
+        assert_eq!(
+            content_signature_without_in_progress(body),
+            content_signature_without_in_progress(&marked)
+        );
+        for changed in [
+            body.replace("[#first]", "[#other]"),
+            body.replace("[ ] [#first]", "[x] [#first]"),
+            body.replace("one", "renamed"),
+            body.replace("continuation", "different continuation"),
+        ] {
+            assert_ne!(
+                content_signature_without_in_progress(body),
+                content_signature_without_in_progress(&changed),
+                "real tracked-work content must remain significant"
+            );
+        }
     }
 
     #[test]

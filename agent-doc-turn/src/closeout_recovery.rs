@@ -592,7 +592,16 @@ pub fn closeout_content_component_signature(normalized_doc: &str) -> String {
         if is_content {
             sig.push_str(&component.name);
             sig.push('\u{0}');
-            sig.push_str(component.content(normalized_doc).trim());
+            let content = component.content(normalized_doc).trim();
+            if component.name == "exchange" {
+                sig.push_str(content);
+            } else {
+                sig.push_str(
+                    &agent_doc_element_backlog::backlog::content_signature_without_in_progress(
+                        content,
+                    ),
+                );
+            }
             sig.push('\n');
         }
     }
@@ -1449,7 +1458,8 @@ mod tests {
             "Please rerun the deploy check.\n",
             "### Re: deploy check - gpt-5 (HEAD)\n\nDone.\n",
             "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n- [ ] [#a] deploy check\n<!-- /agent:backlog -->\n",
         );
         let boundary_only = head.replace("Please rerun the", "❯ Please rerun the");
         assert_eq!(
@@ -1468,11 +1478,29 @@ mod tests {
             CloseoutRecoveryDrift::MetadataOnly
         );
 
+        let projected_metadata_only =
+            metadata_only.replace("- [ ] [#a] deploy check", "- [ ] 🚧 [#a] deploy check");
+        assert_eq!(
+            classify_snapshot_head_drift(&projected_metadata_only, head),
+            CloseoutRecoveryDrift::MetadataOnly
+        );
+
         let content = head.replace("Done.", "Different response.");
         assert_eq!(
             classify_snapshot_head_drift(&content, head),
             CloseoutRecoveryDrift::Content
         );
+        for tracked_content in [
+            head.replace("[#a] deploy check", "[#b] deploy check"),
+            head.replace("[ ] [#a] deploy check", "[x] [#a] deploy check"),
+            head.replace("[#a] deploy check", "[#a] deploy again"),
+        ] {
+            assert_eq!(
+                classify_snapshot_head_drift(&tracked_content, head),
+                CloseoutRecoveryDrift::Content,
+                "real tracked-work changes must remain fail-closed"
+            );
+        }
     }
 
     #[test]

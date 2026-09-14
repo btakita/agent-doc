@@ -1302,6 +1302,46 @@ Verification passed:
 Commits: lazily-cpp `96739b7` and parent pointer `1a1acf2bba`. The latest lazily-cpp CI run (`34907917277`) is green; it predates this not-yet-pushed commit. The latest parent run (`34909224988`) started zero jobs because GitHub rejected both at the billing/spending-limit gate, so it provides no test verdict. Confidence is high from the focused and full local suites.
 
 The separate wasm `^#` filter gap remains untouched for its own queued item. The exchange is large, but I did not compact it while the automatic queue is active.
+
+### Re: do [#lazilycppcheck] — gpt-5.6-sol · 2026-09-14T19:56-04:00
+
+> **Queue prompt:**
+>
+> do [#lazilycppcheck]
+
+
+Completed all three lazily-cpp wasm-tier guard fixes.
+
+Changed paths:
+
+- `scripts/check-wasm-tiers.sh`
+- `scripts/check-wasm-corpus-column.sh`
+- `scripts/test-wasm-tier-guard.sh` (new)
+
+The guard now:
+
+- excludes both `#` metadata/comment lines and `@` scenario-ledger lines from fixture counts;
+- distinguishes missing, unreadable, and genuinely empty/below-floor manifests, propagating reader failures into an explicit unreadable-evidence diagnostic rather than reporting `replayed 0`;
+- checks for `<build-dir>/tests` before `find`, so a configured-but-unbuilt tier reports exactly that condition instead of exiting 1 with empty stderr;
+- propagates a failed tests-directory enumeration with its own diagnostic;
+- exposes explicit positional regression seams rather than fail-open environment switches.
+
+The new toolchain-free regression runner simulates a deterministic manifest reader error, exercises a configured-but-unbuilt tier, and proves `#`/`@` filtering. `check-wasm-corpus-column.sh` runs it on the existing native `make check` and direct-CI path, so no CI-reach command surface changed.
+
+Verification passed:
+
+- bash syntax checks for all three scripts
+- `bash ./scripts/test-wasm-tier-guard.sh`
+- `./scripts/check-wasm-corpus-column.sh`
+- the real `./scripts/check-wasm-tiers.sh` audit against existing wasm manifests
+- `make ci-reach`
+- lazily-cpp full `make check`
+- agent-loop full `make check`
+- scoped `git diff --check`
+
+Commits: lazily-cpp `dd9325f` and parent pointer `371a8a6d15`. The latest pushed lazily-cpp CI run (`34910431670`) is green; it covers the preceding commit, while this commit has not yet been pushed. The latest parent run (`34910432564`) started zero jobs because GitHub rejected both at the billing/spending-limit gate, so it contains no test verdict. Confidence is high; no code escalation remains, with the parent CI account gate tracked externally.
+
+The exchange is large, but I did not compact it while the automatic queue is active.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1310,7 +1350,7 @@ The separate wasm `^#` filter gap remains untouched for its own queued item. The
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#subagentscannotcoin]~~
 - ~~do [#twopreexisting]~~
-- do [#lazilycppcheck]
+- ~~do [#lazilycppcheck]~~
 - do [#lazilycheckconformance]
 - do [#deadguardcode]
 - do [#lazilycpptwo]
@@ -1335,7 +1375,6 @@ The separate wasm `^#` filter gap remains untouched for its own queued item. The
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilycppcheck] lazily-cpp check-wasm-tiers.sh two holes found during #auditeveryguard but owned by the wasm channel: :99 folds an UNREADABLE tier manifest into the same 'replayed 0, below the floor' as an empty one (missing IS distinguished), and :149's `find $build_dir/tests` is ungated where `-d $build_dir` is gated, so a configured-but-unbuilt tier dies at exit 1 with ZERO stderr. Same function owns the ^# filter gap already filed.
 - [ ] [#lazilycheckconformance] lazily-go check-conformance-coverage.sh:369 -- jq's status is unchecked in BOTH process-substitution call sites feeding scenario_ids, so a malformed fixture reads as 'no scenarios' rather than as a parse error. go flagged it as reasoning-not-measurement and did not attack it; the 151/151 scenario equality probably catches the drop, which is what needs confirming. dart has the same shape and reached the same conclusion independently.
 - [ ] [#deadguardcode] Dead guard code found across bindings during #auditeveryguard, none removed: `collect_sources()` is defined-and-never-called in js (:93), py (:89-95), go (:266) and is the vestige of the static source scan the runtime manifest replaced; py also has a dead assignment at :250. Removing them touches files lazily-spec's check-corpus-floors.mjs greps, so it wants one deliberate pass rather than incidental edits.
 - [ ] [#lazilycpptwo] #lzwasmstampchannel: lazily-cpp's two wasm conformance manifests are deliberately unstamped, and `scripts/check-wasm-tiers.sh:99` filters `^@` but not `^#` -- stamping them would inflate both tier counts by 1 and slacken both floors by one. Belongs to the wasm channel's own change.

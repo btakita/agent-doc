@@ -13,7 +13,7 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -709,6 +709,19 @@ Confidence: high. Escalation: none.
 ❯ That path does not exist, so no cycle contract was created. I did not rerun preflight or backend `session-check`.
 
 ❯ Note: diagnostic code changes made before this interruption remain uncommitted in `src/agent-doc`.
+
+### Re: Response
+
+Fixed both session wedges and shipped agent-doc 0.35.394.
+
+- Closeout now distinguishes bounded admission release from strict visible editor projection, so an unacknowledged or silent replica cannot be treated as persistence proof.
+- A live editor registration now wakes retained response recovery even when the older relay intent was superseded, allowing capture-only write_applied cycles to replay and commit.
+- The real backend.md retained response replayed through JetBrains, reached commit_success, and its terminal session check passed.
+- The agent-doc-bugs.md recovery projection was rebuilt from the visible document while preserving the session.
+- Full local make check, focused relay/controller tests, formatting, release parity, and installation passed.
+- Implementation commit 3a0407d28 and workspace update 4d18d2d7a were pushed.
+
+There are no actionable follow-up items from this fix.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -717,8 +730,7 @@ Confidence: high. Escalation: none.
 
 t## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- 🚧 do [#fixrunbackend]
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

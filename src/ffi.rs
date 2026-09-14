@@ -88,6 +88,22 @@ static IPC_LISTENER_GENERATIONS: std::sync::LazyLock<
 /// quiesce boundary. A freshly loaded generation starts with this flag clear.
 static NATIVE_GENERATION_QUIESCING: AtomicBool = AtomicBool::new(false);
 
+/// Keep a Rust panic inside a void C-ABI callback from unwinding across JNA.
+///
+/// The root cdylib is loaded into the editor process. Any panic that reaches an
+/// `extern "C"` boundary is non-unwinding and aborts the whole IDE, so callback
+/// entrypoints must degrade to a logged no-op instead.
+fn catch_ffi_void(name: &str, body: impl FnOnce()) {
+    if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)) {
+        let message = payload
+            .downcast_ref::<&'static str>()
+            .copied()
+            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("<non-string panic>");
+        eprintln!("agent-doc FFI panic caught in {name} (degrading to no-op): {message}");
+    }
+}
+
 fn sync_lock_now_epoch_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -365,50 +381,52 @@ pub unsafe extern "C" fn agent_doc_lazily_current_observed_v1(
     _capabilities_csv: *const c_char,
     no_unsaved_operator_edits: i32,
 ) {
-    mark_embedded_editor_host();
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(path) => path,
-        Err(_) => return,
-    };
-    let text = match unsafe { CStr::from_ptr(content) }.to_str() {
-        Ok(text) => text,
-        Err(_) => return,
-    };
-    let editor_id = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
-        Ok(editor_id) => editor_id,
-        Err(_) => return,
-    };
-    let file = Path::new(path);
-    if agent_doc_frontmatter_io::session::is_agent_doc_document_for_file(text, file)
-        && let Some(project_root) = agent_doc_project_root_io::project_root_containing(file)
-    {
-        let disk_persisted =
-            std::fs::read(file).is_ok_and(|disk| disk.as_slice() == text.as_bytes());
-        if let Err(err) =
-            agent_doc_controller_io::project_controller::observe_editor_document_projection(
-                &project_root,
-                file,
-                editor_id,
-                &agent_doc_hash::content_hash(text),
-                disk_persisted,
-                "editor_document_state_projection",
-            )
+    catch_ffi_void("agent_doc_lazily_current_observed_v1", || {
+        mark_embedded_editor_host();
+        let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
+            Ok(path) => path,
+            Err(_) => return,
+        };
+        let text = match unsafe { CStr::from_ptr(content) }.to_str() {
+            Ok(text) => text,
+            Err(_) => return,
+        };
+        let editor_id = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+            Ok(editor_id) => editor_id,
+            Err(_) => return,
+        };
+        let file = Path::new(path);
+        if agent_doc_frontmatter_io::session::is_agent_doc_document_for_file(text, file)
+            && let Some(project_root) = agent_doc_project_root_io::project_root_containing(file)
         {
-            eprintln!("[ffi] could not publish editor document projection for {path}: {err:#}");
+            let disk_persisted =
+                std::fs::read(file).is_ok_and(|disk| disk.as_slice() == text.as_bytes());
+            if let Err(err) =
+                agent_doc_controller_io::project_controller::observe_editor_document_projection(
+                    &project_root,
+                    file,
+                    editor_id,
+                    &agent_doc_hash::content_hash(text),
+                    disk_persisted,
+                    "editor_document_state_projection",
+                )
+            {
+                eprintln!("[ffi] could not publish editor document projection for {path}: {err:#}");
+            }
+            if no_unsaved_operator_edits == 0
+                && let Err(err) = observe_editor_current_from_ffi(
+                    &project_root,
+                    file,
+                    text,
+                    "operator_editor_content_advanced",
+                )
+            {
+                eprintln!(
+                    "[deferred-write] could not reconcile operator editor authority for {path}: {err}"
+                );
+            }
         }
-        if no_unsaved_operator_edits == 0
-            && let Err(err) = observe_editor_current_from_ffi(
-                &project_root,
-                file,
-                text,
-                "operator_editor_content_advanced",
-            )
-        {
-            eprintln!(
-                "[deferred-write] could not reconcile operator editor authority for {path}: {err}"
-            );
-        }
-    }
+    });
 }
 
 /// Retire legacy buffer state and mirror a document-close hint. Durable
@@ -4867,6 +4885,20 @@ mod ack_content_tests {
         assert!(
             !tmp.path().join(".agent-doc/live-buffer").exists(),
             "the current edit hot path must not create legacy sidecars"
+        );
+    }
+
+    #[test]
+    fn lazily_current_observation_panic_stays_inside_the_ffi_boundary() {
+        let boundary = std::panic::catch_unwind(|| {
+            catch_ffi_void("agent_doc_lazily_current_observed_v1", || {
+                panic!("simulated editor observation panic")
+            });
+        });
+
+        assert!(
+            boundary.is_ok(),
+            "a native observation panic must degrade to a no-op, not unwind into the IDE"
         );
     }
 

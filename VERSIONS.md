@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.391
+
+- **A failed native current-document observation can no longer abort IntelliJ
+  (`#currentobserveffiguard`).** The JNA callback now contains Rust panics inside
+  the cdylib boundary, logs the panic payload, and degrades that observation to
+  a no-op. This closes the startup SIGABRT found while runtime-verifying the
+  held-key burst fix; a regression proves the callback guard returns normally
+  after an injected panic.
+
 ## 0.35.390
 
 - **JetBrains held-key bursts no longer wedge the IDE (`#crdtlocalburst`).**

@@ -1200,6 +1200,37 @@ The accepted cost is concrete: local closeout can become weaker while CI remains
 Changed paths: only this session document through agent-doc. I inspected the prior #closeremaininghalf decision, the Python live falsification/width test, and the Rust/C#/Go/JS/Godot guard documentation with tsift envelopes (falling back to scoped rg after two workspace FTS failures). No product code changed, so no new test run or binding commit was required; the immediately preceding cycle's full binding and superproject checks remain green. Confidence: high. Escalation: none.
 
 The exchange remains large with an active auto queue; I did not interrupt it for compaction.
+
+### Re: do [#sharedscratchpadlive] — gpt-5.6-sol · 2026-09-14T19:30:05-04:00
+
+> **Queue prompt:**
+>
+> do [#sharedscratchpadlive]
+
+
+Done. The live contamination evidence and working rule are now durable operator memory in memory/reference_parallel_subagents_share_one_scratchpad_dir.md, committed as 18b65e83a.
+
+The addition records the actual failures rather than a hypothetical warning:
+
+- lazily-cs restored a lazily-zig Makefile from a generic Makefile.orig;
+- Kotlin's same fixed backup was overwritten two minutes after its last restore;
+- Dart's repo subdirectory still held 64 files from an earlier agent, including a pre-fix guard only a filename transposition away and 409 bytes from a live file;
+- C++ observed 11,220 scratch files with ten bindings' guard copies clustered within 2 KB and four concurrent writes.
+
+It also records the dangerous consequence: contamination can invert a measurement instead of breaking it. A stale pre-fix guard can produce convincing post-fix “proof,” and green/positive-control rows pass vacuously when both baseline and mutation derive from the same contaminated tree.
+
+The enforced working rule is therefore:
+
+1. use a repo-private scratch subdirectory;
+2. use repo-prefixed filenames inside it;
+3. select owned artifacts by modification time, never by guessing a generic name;
+4. before every case, including expected-green rows, compare each restore input with the intended git blob and refuse to measure on mismatch.
+
+I audited the currently committed activation mutation harnesses while handling this item. The new cross-binding harnesses use process-private TemporaryDirectory trees; JavaScript uses a lazily-js-prefixed mkdtemp tree; Python uses pytest's per-test tmp_path scratch tree and asserts an unmutated green baseline before attacks. These committed harnesses do not restore from the contaminated shared scratchpad.
+
+Changed path: memory/reference_parallel_subagents_share_one_scratchpad_dir.md only. The index already linked that memory, so its unrelated dirty edits were not staged. Verification: scoped tsift diff digest plus current-vs-HEAD blob inspection; the superproject make check passed with this content present. The latest pre-existing agent-loop Actions run failed before executing any steps, consistent with the already-tracked #lzagentloopcibilling spending-limit gate; there is no test failure to fix in this item. Confidence: high. Escalation: none.
+
+The exchange remains large with an active auto queue; I did not interrupt it for compaction.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1209,7 +1240,7 @@ The exchange remains large with an active auto queue; I did not interrupt it for
 - ~~Resume multiple Claude code sessions that ended due to weekly token limit being reached.~~
 - ~~⏭️ do [#verifyworkflowactually]~~
 - ~~do [#closeacceptsame]~~
-- do [#sharedscratchpadlive]
+- ~~do [#sharedscratchpadlive]~~
 - do [#decidereachclosure]
 - do [#subagentscannotcoin]
 - do [#twopreexisting]
@@ -1238,7 +1269,6 @@ The exchange remains large with an active auto queue; I did not interrupt it for
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#sharedscratchpadlive] Shared scratchpad is a LIVE cross-repo hazard, not theoretical: cs had a lazily-zig Makefile restored into lazily-cs from a generically-named backup; dart found 64 files from an EARLIER dart agent including a pre-fix copy of the same guard one filename-transposition away and 409 bytes from its own working file; kt's $SP/Makefile.orig held zig content overwritten 2 minutes after its last restore from that name; cpp reports 11,220 files with ten bindings' copies of one guard inside 2KB, four written concurrently. A picked-up stale copy INVERTS measurements rather than breaking them. Working rule: repo-private subdirectory, repo-prefixed filenames, select by mtime, and verify every restore input against `git show` before each case INCLUDING rows that expect green -- dart showed green rows pass vacuously otherwise.
 - [ ] [#decidereachclosure] Decide where the ci-reach closure pin LIVES. rs measured the churn (32 commits touched the check: line, all before 2026-08-09) and argues the pin belongs ADJACENT to the root rule in the Makefile, beside check:, so a closure edit and its pin edit land in one hunk -- at ~3 edits/week the 'update the pin deliberately' remedy gets applied reflexively and no diagnostic wording prevents that. I placed it in the guard to match KNOWN_UNCOVERED's shape; rs followed the brief but advocates the other placement. Worth settling before the next growth phase.
 - [ ] [#subagentscannotcoin] Subagents cannot coin backlog ids: the agent-doc hook blocks an untracked id, and filing one would mean writing tasks/software/lazily.md from outside the agent's own repo. Hit by kt, dart, cs and gd across three cycles; each retags its commit to the queue head, so per-finding ids never exist and commit messages all carry the same id. Either give agents a way to file, or accept head-tagging and stop coining -- but the current state loses the mapping from commit to finding.
 - [ ] [#twopreexisting] Two pre-existing normalizer quirks cpp found while pinning the closure, neither touched: `command -v uvx >/dev/null` anchors as `command -v uvx null` because the normalizer basenames the redirection target; and check-conformance-coverage.sh's refusal text claims `make conformance-coverage` 'builds, runs ctest and audits in one invocation', which is false exactly when the conformance-coverage: test edge is dropped. Third quirk alongside the wasm ^# filter gap.

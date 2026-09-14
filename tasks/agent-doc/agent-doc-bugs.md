@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0a0a6-f7db-7163-a7f7-3d2672fc0da2
+  codex: 01a0a113-68bf-7131-b405-9035a3ada6e7
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -722,7 +722,20 @@ Fixed both session wedges and shipped agent-doc 0.35.394.
 - Implementation commit 3a0407d28 and workspace update 4d18d2d7a were pushed.
 
 There are no actionable follow-up items from this fix.
-<!-- agent:boundary:330692a0:agent-doc-bugs -->
+
+### Re: Fix agent-doc causes of File Cache Conflict on backend.md — gpt-5 · 2026-09-14 14:33 EDT
+
+> **Queue prompt:** Fix agent-doc causes of File Cache Conflict on backend.md
+
+Fixed and released agent-doc 0.35.395.
+
+- The root cause was replacement registration retiring the working JetBrains replica before live-buffer reconciliation. An ambiguous retained projection or a typing race then deregistered the candidate too, leaving an open editor with zero relay members and letting the backend fall back to disk authority.
+- Replacement registration is now two-phase: the candidate joins provisionally while the predecessor stays authoritative, then `replica_promote` retires the predecessor only after reconciliation commits against the candidate's exact accepted CRDT frontier. Promotion also returns the rotated lineage to the new forwarder.
+- Added relay coverage for candidate abort and promotion, JetBrains transport/forwarder coverage, protocol/spec updates, and the 0.35.395 editor-parity ledger entry.
+- Verification passed: focused Rust and JetBrains regressions, controller test compilation, and the complete `make check` suite including cross-editor simulation.
+- Release completed: installed CLI/native/editor packages, recycled the project controller, pushed source commit `3889d34f7` and workspace commit `586340b81`, and pushed tag `v0.35.395`. GitHub Release, PyPI, and CI workflows were observed running after the tag/push and were not awaited per policy.
+- `[operator-verify]` Restart IntelliJ to activate plugin 0.2.385, then exercise a retained-projection refresh on `backend.md` and confirm no File Cache Conflict appears.
+<!-- agent:boundary:44108b98:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -731,6 +744,7 @@ There are no actionable follow-up items from this fix.
 t## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+- ~~Fix agent-doc causes of File Cache Conflict on backend.md~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 
@@ -740,6 +754,7 @@ t## Pending / Not Built
 ## Review
 
 <!-- agent:review -->
+- [/] [#restartintellijload] [operator-verify] Restart IntelliJ to load plugin 0.2.385, then exercise a backend.md retained-projection refresh and confirm no File Cache Conflict appears.
 - [/] [#release035376verify] [release] Verify GitHub Release run 34737823202 completes green and v0.35.376 publishes all six platform assets; all matrix jobs were still externally queued at closeout.
 - [/] [#cargovodtrim] [operator-verify] [P2][security] Trim the credential exposure from the livestream VOD once the operator supplies the VOD URL or platform/start-time locator. Known exposed interval: 2026-09-12T02:57:27.170Z through approximately 02:58:14Z.
 - [/] [#fpecompactheal] [operator-verify] Confirm fpe.md's corrupted `<dynamic_context_ref>` block is gone after one compact on the FIXED binary (installed 0.35.367, ~/.cargo/bin/agent-doc at 23:01:39). Must be run FROM THE PANE THAT OWNS src/haiven-dev/tasks/fpe.md — that is a live session (b69e5aeb, `queue: go`) and this cycle deliberately did not hand-align its disk. Expected after `agent-doc compact src/haiven-dev/tasks/fpe.md`: exactly ONE block, with the two self-referential handles (absolute `.../src/haiven-dev/tasks/fpe.md` and relative `tasks/fpe.md`) gone, leaving at most the four instruction-file handles; and the `Prior summary/context:` line still summarising the prior compact list rather than quoting XML.

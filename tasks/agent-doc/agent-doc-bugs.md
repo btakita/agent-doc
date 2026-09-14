@@ -33,7 +33,7 @@ Editor-route layout supersede, controller bind-before-serve, the JB accept-leg b
 Compacted content:
 - Archived 33 response topic(s): #timestampresponseheader; #idledispatchstack; preflight stall fixed; docs.md reverse-order lists traced to one cycle; 30 more
 - Prior summary/context: prior compacted content: Archived 38 response topic(s): #actionable-review; #restartideaplugin restarted, do #pypiquo...
-❯ 🚧 Fix agent-doc causes to lazily.md stall:
+❯ Fix agent-doc causes to lazily.md stall:
 ```
 › agent-doc /home/brian/work/btakita/agent-loop/tasks/software/lazily.md
 
@@ -90,7 +90,8 @@ The installed binary now diagnoses the live `lazily.md` mismatch as document-onl
 
 t## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- I renamed backend.md to api.md but agent-doc removed the tmux pane. Please fix agent-doc causes that prevent agent-doc from supporting file renames. Also, Run Agent Doc on this file is wedged or running somewhere else: editor route layout did not converge before dispatch: superseded_by_newer_layout_state
 <!-- /agent:queue -->
 
 

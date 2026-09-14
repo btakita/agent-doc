@@ -8629,17 +8629,27 @@ fn retained_delivery_observation_for_file(
             agent_doc_crdt_relay_io::CurrentText::Current {
                 text,
                 live_editors,
-                delivery_converged,
+                delivery_converged: _,
                 delivery_version,
                 semantics: _,
-            } => Some(RetainedDeliveryObservation {
-                file: canonical.to_path_buf(),
-                content: Arc::from(text.as_str()),
-                content_hash: agent_doc_hash::content_hash(&text),
-                live_editors,
-                delivery_converged,
-                delivery_version,
-            }),
+            } => {
+                // Retained closeout is a durability boundary. The relay's
+                // ordinary convergence bit is intentionally availability-
+                // bounded so a broken editor cannot block admission forever;
+                // only the strict visible projection cut may authorize native
+                // save and commit here.
+                let delivery_converged =
+                    agent_doc_crdt_relay_io::visible_delivery_projected_for_file(canonical)?
+                        .unwrap_or(false);
+                Some(RetainedDeliveryObservation {
+                    file: canonical.to_path_buf(),
+                    content: Arc::from(text.as_str()),
+                    content_hash: agent_doc_hash::content_hash(&text),
+                    live_editors,
+                    delivery_converged,
+                    delivery_version,
+                })
+            }
             agent_doc_crdt_relay_io::CurrentText::Detached
             | agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
             | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => None,
@@ -9815,18 +9825,17 @@ fn controller_crdt_replica_data(
                         .context(
                             "registered replica is missing its retained canonical receipt queue",
                         )?;
-                        if resolved_editor_pid.is_some() {
-                            // `#retainededitorarrival`: a captured finalize may have
-                            // stopped while no editor projection could accept its exact
-                            // target. A successful live-editor registration is the
-                            // missing state edge; publish it so the keyed supervisor
-                            // worker clears `needs_operator` and retries the same capture.
-                            // Headless replicas cannot acknowledge editor delivery and
-                            // therefore must not manufacture this wake.
-                            publish_retained_capture_wake_after_editor_replica_registration(
-                                runtime, canonical,
-                            );
-                        }
+                    }
+                    if resolved_editor_pid.is_some() {
+                        // `#retainededitorarrival`: a captured finalize may have
+                        // stopped while no editor projection could accept its exact
+                        // target. Its deferred relay intent can legitimately retire
+                        // before the durable capture does, so the live registration
+                        // itself must publish the capture wake. Headless replicas
+                        // cannot acknowledge editor delivery and remain quiet.
+                        publish_captured_finalize_wake_after_editor_replica_registration(
+                            runtime, canonical,
+                        );
                     }
                     let canonical_projection_retained =
                         durable_projection_retained || registration.canonical_projection_retained;
@@ -9981,7 +9990,7 @@ fn controller_crdt_replica_data(
     }
 }
 
-fn publish_retained_capture_wake_after_editor_replica_registration(
+fn publish_captured_finalize_wake_after_editor_replica_registration(
     runtime: Option<&ControllerRuntime>,
     canonical: &Path,
 ) -> bool {
@@ -32410,6 +32419,18 @@ mod tests {
         let bootstrap = test_bootstrap(&dir);
         let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
         let editor_pid = std::process::id();
+        let payload = |editor_pid, state_vector_b64| ControllerCrdtReplicaPayload {
+            method: ControllerCrdtReplicaMethod::Register,
+            identity: None,
+            state_vector_b64,
+            expected_canonical_hash: None,
+            update_b64: None,
+            content_hash: None,
+            disk_persisted: false,
+            awareness_b64: None,
+            source: Some("retained-editor-arrival-test".into()),
+            editor_pid,
+        };
         let seed_identity = format!("jetbrains-{editor_pid}-retained-editor-arrival-seed");
         agent_doc_crdt_relay_io::register_editor_replica_for_file_incremental(
             &canonical,
@@ -32440,6 +32461,39 @@ mod tests {
             ),
         )
         .unwrap();
+        clear_captured_finalize_wake(&runtime, &document_hash);
+
+        let capture_only_identity = format!("jetbrains-{editor_pid}-capture-only-editor-arrival");
+        let capture_only_registration = controller_crdt_replica_data(
+            Some(&runtime),
+            &canonical,
+            ControllerCrdtReplicaMethod::Register,
+            &capture_only_identity,
+            &payload(Some(editor_pid), None),
+        )
+        .unwrap();
+        assert_eq!(
+            capture_only_registration["canonical_projection_retained"],
+            false
+        );
+        let capture_only_wake = runtime
+            .captured_finalize_wakes
+            .lock()
+            .get(&document_hash)
+            .cloned()
+            .expect("capture-only live registration must re-arm finalize recovery");
+        assert_eq!(capture_only_wake.cycle_id, "cycle-retained-editor-arrival");
+        assert_eq!(
+            capture_only_wake.capture_id,
+            "capture-retained-editor-arrival"
+        );
+        agent_doc_crdt_relay_io::deregister_editor_replica_for_file(
+            &canonical,
+            &capture_only_identity,
+            editor_pid,
+        )
+        .unwrap();
+
         append_apply_state_event(
             &bootstrap,
             &runtime,
@@ -32459,19 +32513,6 @@ mod tests {
         )
         .unwrap();
         clear_captured_finalize_wake(&runtime, &document_hash);
-
-        let payload = |editor_pid, state_vector_b64| ControllerCrdtReplicaPayload {
-            method: ControllerCrdtReplicaMethod::Register,
-            identity: None,
-            state_vector_b64,
-            expected_canonical_hash: None,
-            update_b64: None,
-            content_hash: None,
-            disk_persisted: false,
-            awareness_b64: None,
-            source: Some("retained-editor-arrival-test".into()),
-            editor_pid,
-        };
         let headless_registration = controller_crdt_replica_data(
             Some(&runtime),
             &canonical,

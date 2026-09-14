@@ -2491,6 +2491,21 @@ impl RelayHub {
             .all(|(_, member)| !Self::member_holds_delivery_barrier(member))
     }
 
+    /// True only when every currently-live editor has visibly projected every
+    /// queued canonical update.
+    ///
+    /// This is deliberately stricter than [`Self::delivery_converged`]. The
+    /// latter is an admission/liveness policy: after a bounded non-convergence
+    /// budget it stops one broken replica from blocking unrelated work. That
+    /// availability release is not a receipt and must never authorize a native
+    /// save or retained closeout.
+    pub fn visible_delivery_projected(&self) -> bool {
+        self.members
+            .iter()
+            .filter(|(id, _)| self.is_live(**id))
+            .all(|(_, member)| member.pending.is_empty())
+    }
+
     pub fn delivery_snapshot(&self) -> Vec<ReplicaDeliverySnapshot> {
         let mut snapshot = self
             .members
@@ -2744,7 +2759,7 @@ impl RelayHub {
     }
 
     fn settle_requested_epoch_compaction(&mut self) -> Result<bool> {
-        if !self.compact_epoch_requested || !self.delivery_converged() {
+        if !self.compact_epoch_requested || !self.visible_delivery_projected() {
             return Ok(false);
         }
         let text = self.canonical.text();
@@ -4517,6 +4532,10 @@ mod tests {
             hub.delivery_converged(),
             "past the redelivery budget a non-ACKing replica must stop wedging everyone else"
         );
+        assert!(
+            !hub.visible_delivery_projected(),
+            "an admission-barrier release is not visible-delivery proof"
+        );
         assert_eq!(
             hub.nonconverging_replicas(),
             vec![3],
@@ -4574,6 +4593,10 @@ mod tests {
         assert!(
             hub.delivery_converged(),
             "a replica that never answers must stop wedging everyone else"
+        );
+        assert!(
+            !hub.visible_delivery_projected(),
+            "a silent-replica release is not visible-delivery proof"
         );
         assert_eq!(hub.nonconverging_replicas(), vec![3]);
 

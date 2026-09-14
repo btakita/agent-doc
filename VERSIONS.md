@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.394
+
+- **A bounded replica-barrier release can no longer masquerade as editor
+  persistence (`#fixrunbackend`).** Admission still stops one nonresponsive live
+  replica from blocking unrelated work, but retained closeout now requires the
+  stricter all-live visible-projection cut before native save or commit. Crossing
+  the redelivery budget emits a typed replica re-registration request so the
+  still-queued canonical update can earn a real receipt. A live editor registration
+  also re-arms captured-finalize recovery even after its superseded relay intent has
+  retired. Regressions distinguish availability release from durability for both
+  pulling and silent replicas and cover capture-only editor arrival.
+
 ## 0.35.393
 
 - **Every root native-host diagnostic is closed-pipe safe

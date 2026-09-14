@@ -2965,6 +2965,39 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
             ),
         );
     }
+    if crossed_now {
+        // The bounded barrier release preserves admission, but it is not a
+        // visible-state receipt. Ask the live editor to rebuild its replica so
+        // the still-queued update can earn that receipt instead of letting a
+        // retained closeout mistake availability for durability.
+        match signal_crdt_replica_event_with_counts(
+            file,
+            CrdtReplicaEventReason::EditorReplicaReregister,
+            1,
+        ) {
+            Ok(outcome) => agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_nonconverging_replica_recovery file={} client_id={} redeliveries={} reregister={} found={} notified={}",
+                    file.display(),
+                    client_id,
+                    delivery.redeliveries_without_ack,
+                    outcome.diagnosis(),
+                    outcome.found,
+                    outcome.notified,
+                ),
+            ),
+            Err(error) => agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_nonconverging_replica_recovery_deferred file={} client_id={} redeliveries={} error={error:#}",
+                    file.display(),
+                    client_id,
+                    delivery.redeliveries_without_ack,
+                ),
+            ),
+        }
+    }
     Ok(Some(ReplicaPull {
         client_id,
         updates,
@@ -3288,21 +3321,21 @@ fn commit_barrier_for_file_with_authority_and_delivery(
             }
         }
         hub.commit_barrier_under_authority(authority)
-            .map(|ready| (ready, hub.delivery_converged(), hub.live_count()))
+            .map(|ready| (ready, hub.visible_delivery_projected(), hub.live_count()))
     }) {
-        Ok(Some(Ok((ready, delivery_converged, live_editors)))) => {
+        Ok(Some(Ok((ready, visible_delivery_projected, live_editors)))) => {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "crdt_commit_barrier file={} authority=multi_replica ready={} delivery_required={} delivery_converged={} live_editors={}",
+                    "crdt_commit_barrier file={} authority=multi_replica ready={} delivery_required={} visible_delivery_projected={} live_editors={}",
                     file.display(),
                     ready,
                     require_delivery_convergence,
-                    delivery_converged,
+                    visible_delivery_projected,
                     live_editors,
                 ),
             );
-            ready && (!require_delivery_convergence || delivery_converged)
+            ready && (!require_delivery_convergence || visible_delivery_projected)
         }
         Ok(Some(Err(e))) => {
             agent_doc_ops_log_io::log_op(
@@ -3819,6 +3852,16 @@ pub fn delivery_converged_for_file(file: &Path) -> Result<Option<bool>> {
     with_existing_hub(file, |hub| hub.delivery_converged())
 }
 
+/// Whether every live replica has supplied visible projection proof for every
+/// queued update, or `None` when this process hosts no hub for `file`.
+///
+/// Unlike [`delivery_converged_for_file`], this never treats a bounded
+/// non-convergence release as success. Persistence and retained-closeout code
+/// must use this strict witness; admission may use the bounded barrier.
+pub fn visible_delivery_projected_for_file(file: &Path) -> Result<Option<bool>> {
+    with_existing_hub(file, |hub| hub.visible_delivery_projected())
+}
+
 /// `#lazily-hot-path` Theme A — [`RelayHub::delivery_convergence_witness`] for `file`,
 /// or `None` when this process hosts no hub for it.
 ///
@@ -4292,6 +4335,36 @@ mod tests {
         assert!(
             after.converged,
             "the registration transition converges the empty queue"
+        );
+    }
+
+    #[test]
+    fn bounded_barrier_release_is_not_a_visible_projection_receipt() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("bounded-delivery.md");
+        std::fs::write(&file, "# baseline\n").unwrap();
+        with_hub_seeded_from_file(&file, |hub| {
+            hub.register(42).unwrap();
+            hub.apply_canonical_replace("# baseline\n", "# retained\n")
+                .unwrap();
+            for _ in 0..=agent_doc_document_realtime::crdt_relay::MAX_REDELIVERIES_WITHOUT_ACK {
+                assert_eq!(hub.pending_updates(42).unwrap().len(), 1);
+            }
+            assert!(
+                hub.delivery_converged(),
+                "the bounded admission barrier should be released"
+            );
+            assert!(
+                !hub.visible_delivery_projected(),
+                "queued content still lacks a visible editor receipt"
+            );
+        })
+        .unwrap();
+
+        assert_eq!(
+            visible_delivery_projected_for_file(&file).unwrap(),
+            Some(false),
+            "the process-local persistence witness must preserve the distinction"
         );
     }
 

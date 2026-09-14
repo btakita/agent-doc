@@ -250,6 +250,18 @@ race class instead of papering over each symptom.
   that re-arms bounded recovery, after which the same captured closeout continues
   through native editor persistence. Disk forcing, response recapture, and
   supervisor recycle are not substitutes for this editor-owned transition.
+- **Admission release is not persistence proof.** A live replica that exhausts
+  the bounded pull-without-ACK or silence budget may stop blocking new work, but
+  that availability decision does not prove its editor buffer contains the
+  canonical cut. Retained closeout, native save, and commit require every live
+  member's pending queue to be visibly projected. Crossing the admission budget
+  publishes one typed `editor_replica_reregister` recovery edge; only the
+  resulting registration/projection receipt can advance persistence.
+- **Capture recovery outlives its relay intent.** A captured response remains the
+  closeout authority after a superseded deferred-write projection is retired.
+  Therefore every successful live-editor registration publishes the pinned
+  captured-finalize wake when that document still owns a capture; the wake is not
+  conditional on a separate pending relay intent.
 - **Single filesystem watcher.** The controller owns one filesystem watcher per
   live document and feeds its events to the session actor. Editor plugins
   (JetBrains WatchService, VS Code file watcher) are demoted to **read-only

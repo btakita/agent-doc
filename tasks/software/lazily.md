@@ -1251,18 +1251,38 @@ The operational rule for the next growth phase is: edit check: first; let ci-rea
 Changed paths: only this session document through agent-doc. Evidence inspected: the prior #pinreachclosure/#closeremaininghalf decisions, the current placement in all ten bindings, the make-derived oracle reference, and Rust's supplied 32-edit measurement. No product code changed, so no new test or binding commit was needed; the immediately preceding full family and superproject checks remain green. Confidence: high. Escalation: none.
 
 The exchange remains large with an active auto queue; I did not interrupt it for compaction.
+
+### Re: do [#subagentscannotcoin] — gpt-5.6-sol · 2026-09-14T19:34:09-04:00
+
+> **Queue prompt:**
+>
+> do [#subagentscannotcoin]
+
+
+Resolved as an ownership rule; the coined-ID hook should remain strict.
+
+A subagent does not own the session document or its backlog namespace. It returns prose findings with evidence, affected paths, severity, and a suggested disposition, but no invented hash ID and no direct edit to tasks/software/lazily.md.
+
+The owner pane must perform consolidation:
+
+1. decide whether each finding is actionable or merely explanatory;
+2. deduplicate it against backlog, review, done, and other workers' reports;
+3. choose backlog versus gated review and placement;
+4. create the item through agent-doc mutation flags so the canonical ID is tracked atomically;
+5. if a worker continues and needs to cite the item, send the landed ID back through the collaboration channel.
+
+This preserves one writer for the session document, prevents duplicate or semantically conflicting IDs, and keeps prioritization with the agent that has the full queue context. Letting a worker coin an ID would either bypass the hook or require it to mutate a document owned by another repo/pane; both are worse than parent consolidation.
+
+No code change is needed: the hook's rejection is the enforcement mechanism, and the parent-owned workflow is the remedy. Changed path: only this session document through agent-doc. Verification: inspected the existing coined-ID session-check enforcement and the prior queue report that reproduced the hook block. No tests were required for a process decision; the hook already exercises the fail-closed path. Confidence: high. Escalation: none.
+
+The exchange remains large with an active auto queue; I did not interrupt it for compaction.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~Resume multiple Claude code sessions that ended due to weekly token limit being reached.~~
-- ~~⏭️ do [#verifyworkflowactually]~~
-- ~~do [#closeacceptsame]~~
-- ~~do [#sharedscratchpadlive]~~
-- ~~do [#decidereachclosure]~~
-- do [#subagentscannotcoin]
+- ~~do [#subagentscannotcoin]~~
 - do [#twopreexisting]
 - do [#lazilycppcheck]
 - do [#lazilycheckconformance]
@@ -1289,7 +1309,6 @@ The exchange remains large with an active auto queue; I did not interrupt it for
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#subagentscannotcoin] Subagents cannot coin backlog ids: the agent-doc hook blocks an untracked id, and filing one would mean writing tasks/software/lazily.md from outside the agent's own repo. Hit by kt, dart, cs and gd across three cycles; each retags its commit to the queue head, so per-finding ids never exist and commit messages all carry the same id. Either give agents a way to file, or accept head-tagging and stop coining -- but the current state loses the mapping from commit to finding.
 - [ ] [#twopreexisting] Two pre-existing normalizer quirks cpp found while pinning the closure, neither touched: `command -v uvx >/dev/null` anchors as `command -v uvx null` because the normalizer basenames the redirection target; and check-conformance-coverage.sh's refusal text claims `make conformance-coverage` 'builds, runs ctest and audits in one invocation', which is false exactly when the conformance-coverage: test edge is dropped. Third quirk alongside the wasm ^# filter gap.
 - [ ] [#lazilycppcheck] lazily-cpp check-wasm-tiers.sh two holes found during #auditeveryguard but owned by the wasm channel: :99 folds an UNREADABLE tier manifest into the same 'replayed 0, below the floor' as an empty one (missing IS distinguished), and :149's `find $build_dir/tests` is ungated where `-d $build_dir` is gated, so a configured-but-unbuilt tier dies at exit 1 with ZERO stderr. Same function owns the ^# filter gap already filed.
 - [ ] [#lazilycheckconformance] lazily-go check-conformance-coverage.sh:369 -- jq's status is unchecked in BOTH process-substitution call sites feeding scenario_ids, so a malformed fixture reads as 'no scenarios' rather than as a parse error. go flagged it as reasoning-not-measurement and did not attack it; the 151/151 scenario equality probably catches the drop, which is what needs confirming. dart has the same shape and reached the same conclusion independently.

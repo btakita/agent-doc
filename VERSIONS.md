@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.396
+
+- **Managed document renames preserve their live tmux pane.** Sync now finds a
+  unique same-session registry row when the new path key is absent, resolves
+  relative registry paths against the owning project, and rekeys only after the
+  missing old path and live pane ownership both prove a rename. Existing old
+  paths, duplicate session rows, and weakened ownership remain fail-closed.
+- **Editor routes no longer wedge behind repeated pane-layout supersession.**
+  Route readiness is now a semantic wait owned by the reactive layout graph: a
+  newer passive generation that still includes the routed document can converge
+  and satisfy dispatch without an RPC-layer republish race. Newer layouts that
+  remove the document and operator-owned layouts still refuse dispatch.
+
 ## 0.35.395
 
 - **A rejected JetBrains replica refresh can no longer detach an open editor

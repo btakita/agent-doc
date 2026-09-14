@@ -45,14 +45,66 @@ pub(crate) fn visible_registered_layout(tmux: &Tmux, window: Option<&str>) -> Ve
         .collect()
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct RegistryEntryMatch {
+    pub(crate) entry: tmux_router::RegistryEntry,
+    /// Absolute path the live pane still proves it owns. During a rename this
+    /// is the missing old path, not the newly observed document path.
+    pub(crate) registered_file: PathBuf,
+    pub(crate) renamed: bool,
+}
+
+fn resolve_registry_file(project_root: &Path, entry: &tmux_router::RegistryEntry) -> PathBuf {
+    let registered = Path::new(entry.file.trim());
+    if registered.is_absolute() {
+        registered.to_path_buf()
+    } else {
+        project_root.join(registered)
+    }
+}
+
+pub(crate) fn lookup_registry_match_for_file_session(
+    file: &Path,
+    session_id: &str,
+) -> Option<RegistryEntryMatch> {
+    let (canonical, project_root, registry_key) = registry_location_for_file(file)?;
+    let registry = agent_doc_session_registry_io::load_in(&project_root).ok()?;
+    if let Some(entry) = registry.get(&registry_key) {
+        return (entry.session_id == session_id).then(|| RegistryEntryMatch {
+            registered_file: resolve_registry_file(&project_root, entry),
+            entry: entry.clone(),
+            renamed: false,
+        });
+    }
+
+    // The registry is keyed by document path, so a rename cannot be found by
+    // looking up the new key. Fall back to session identity only when it is
+    // unique and the old path is gone. Ambiguous or still-existing entries fail
+    // closed: neither is sufficient evidence that this document replaced it.
+    let mut candidates = registry
+        .values()
+        .filter(|entry| entry.session_id == session_id && !entry.file.trim().is_empty());
+    let entry = candidates.next()?.clone();
+    if candidates.next().is_some() {
+        return None;
+    }
+    let registered_file = resolve_registry_file(&project_root, &entry);
+    let renamed = agent_doc_sync::is_file_rename(
+        registered_file.to_string_lossy().as_ref(),
+        canonical.to_string_lossy().as_ref(),
+    );
+    renamed.then_some(RegistryEntryMatch {
+        entry,
+        registered_file,
+        renamed,
+    })
+}
+
 pub(crate) fn lookup_registry_entry_for_file_session(
     file: &Path,
     session_id: &str,
 ) -> Option<tmux_router::RegistryEntry> {
-    let (_, project_root, registry_key) = registry_location_for_file(file)?;
-    let registry = agent_doc_session_registry_io::load_in(&project_root).ok()?;
-    let entry = registry.get(&registry_key)?.clone();
-    (entry.session_id == session_id).then_some(entry)
+    lookup_registry_match_for_file_session(file, session_id).map(|matched| matched.entry)
 }
 
 #[cfg(test)]
@@ -600,6 +652,78 @@ mod tests {
         .expect("cross-root registry entry should resolve through child project root");
         assert_eq!(entry.pane, "%44");
         assert_eq!(entry.file, "tasks/claudescore-3.md");
+    }
+
+    #[test]
+    fn registry_lookup_recovers_a_unique_same_session_rename_from_the_old_key() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        let new_doc = root.join("tasks/api.md");
+        std::fs::write(&new_doc, "---\nagent_doc_session: rename-session\n---\n").unwrap();
+
+        let mut registry = tmux_router::Registry::new();
+        let old_file = "tasks/backend.md";
+        let old_key = tmux_router::registry::canonical_registry_key_in(root, old_file);
+        registry.insert(
+            old_key,
+            tmux_router::RegistryEntry {
+                pane: "%44".to_string(),
+                pid: 2374580,
+                cwd: root.to_string_lossy().to_string(),
+                started: "2026-04-30T21:04:50Z".to_string(),
+                session_id: "rename-session".to_string(),
+                file: old_file.to_string(),
+                window: "@1".to_string(),
+                supervisor_instance_id: "instance-1".to_string(),
+            },
+        );
+        agent_doc_session_registry_io::save_in(root, &registry).unwrap();
+
+        let matched = lookup_registry_match_for_file_session(&new_doc, "rename-session")
+            .expect("unique missing old path should resolve as a rename");
+        assert!(matched.renamed);
+        assert_eq!(matched.entry.pane, "%44");
+        assert_eq!(matched.registered_file, root.join(old_file));
+    }
+
+    #[test]
+    fn registry_lookup_does_not_infer_rename_from_a_live_or_ambiguous_old_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        let new_doc = root.join("tasks/api.md");
+        let old_doc = root.join("tasks/backend.md");
+        std::fs::write(&new_doc, "new").unwrap();
+        std::fs::write(&old_doc, "old").unwrap();
+
+        let entry = |file: &str, pane: &str| tmux_router::RegistryEntry {
+            pane: pane.to_string(),
+            pid: 2374580,
+            cwd: root.to_string_lossy().to_string(),
+            started: "2026-04-30T21:04:50Z".to_string(),
+            session_id: "rename-session".to_string(),
+            file: file.to_string(),
+            window: "@1".to_string(),
+            supervisor_instance_id: "instance-1".to_string(),
+        };
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            tmux_router::registry::canonical_registry_key_in(root, "tasks/backend.md"),
+            entry("tasks/backend.md", "%44"),
+        );
+        agent_doc_session_registry_io::save_in(root, &registry).unwrap();
+        assert!(lookup_registry_match_for_file_session(&new_doc, "rename-session").is_none());
+
+        std::fs::remove_file(&old_doc).unwrap();
+        registry.insert(
+            tmux_router::registry::canonical_registry_key_in(root, "tasks/legacy.md"),
+            entry("tasks/legacy.md", "%45"),
+        );
+        agent_doc_session_registry_io::save_in(root, &registry).unwrap();
+        assert!(lookup_registry_match_for_file_session(&new_doc, "rename-session").is_none());
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]

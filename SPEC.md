@@ -18,6 +18,15 @@
 - Automatic layout ownership is a retained receipt/actor Computed separate from
   structural reuse: tab switches and geometry drift cannot erase outgoing
   ownership, while actor rebinding invalidates obsolete pane proof.
+- A same-session document rename preserves its pane through the path-transition
+  projection. Legacy sync may recover a missed editor transition only from one
+  unambiguous registry row whose old path is absent and whose pane proves that
+  old-path ownership; conflicting or still-live paths fail closed.
+- Editor-route readiness is semantic across pane-layout generations. A newer
+  generation that still contains the routed document remains awaitable and may
+  satisfy dispatch when it converges. Absence, operator ownership, or a newer
+  layout that removes the routed document remains a refusal; RPC must not
+  republish competing layout generations.
 
 - Retained-projection replica registration must preserve two independent facts:
   the bootstrap shape and causal frontier coverage. A durable canonical receipt

@@ -55,6 +55,11 @@ boundary or inherits the shorter ordinary-RPC deadline.
 - If unresolved prompt-bearing drift exists and the pane is busy, route may attempt one scoped `agent-doc fix <FILE>` pass and then one bounded fresh-restart recovery, but it must still fail closed if no clean dispatch path emerges.
 - For live same-document panes with no new prompt-bearing drift, route may focus the pane and return success without sending a duplicate reopen.
 - Editor `Run Agent Doc` submits the controller-owned route directly. It must not create, attach, select, focus, or reveal an IDE terminal tab as a precondition; the route/controller owns cold start and uses the live actor/session authority described below.
+- The route's layout wait is owned by the pane-layout graph. If a newer passive
+  editor generation still contains the routed document, route follows that
+  generation until convergence instead of republishing another layout intent.
+  A newer layout that omits the document, operator ownership, or a terminal
+  non-converged state still fails closed before dispatch.
 - Fresh auto-starts and live reroutes both require the Project Controller's reactive per-document admission projection after dispatch; accepted input alone is not sufficient.
 - Automatic editor-layout `Sync` generations are structural edges and must cross the tmux effect boundary even when the desired columns match a retained structural receipt. A first observation or controller-observed drift cannot be declared converged from an older pane assignment; focus-only changes use their separate effect.
 - When a project has no explicit tmux-session configuration, the layout observer must resolve the observed session from that generation's effect-owned pane assignment. A configured session remains authoritative; the observer must not reject an already-applied shared-session effect merely because the target project omitted redundant session configuration.
@@ -333,6 +338,12 @@ thread or in a detached periodic timer.
   projection. Editor actions capture and publish their complete current
   projection through the controller.
 - Files with session ids are managed even when their current registry entry was pruned; `claim` is the only command that creates a new session id.
+- A renamed managed file keeps its existing live pane. The normal editor
+  document-path transition rekeys the binding; compatibility sync may recover
+  a missed transition only by finding exactly one same-session registry entry,
+  confirming its old path is absent, and proving that its pane still owns the
+  old path. Existing old paths, duplicate session rows, and unproven panes fail
+  closed instead of being rebound or removed.
 - Sync must synthesize a per-run tmux-router registry from each visible file's own nearest `.agent-doc` root instead of forcing all files through the caller's current root.
 - When `.agent-doc/state.db` has a live authoritative actor row for a visible
 document, sync must treat that actor-owned pane as the owner-of-record and keep

@@ -10,10 +10,13 @@ move/focus panes. A fresh editor publication or explicit layout command must
 authorize the first layout generation, including when it requests the same saved
 columns. Actor hydration alone never authorizes a layout. This prevents an idle
 project controller from reclaiming a shared tmux window from a newer layout.
-Fresh editor routes still require convergence of their exact
-layout generation before dispatch. Await diagnostics distinguish an unstarted
-effect, an in-flight effect, a pending retry, absent state, and operator ownership;
-every phase from another generation is superseded, including a converged phase.
+Fresh editor routes require convergence of a layout generation that still
+contains the routed document before dispatch. The pane-layout graph owns this
+semantic wait across newer passive surface generations; a covering generation
+may remain pending or converge without forcing the route RPC to republish.
+Await diagnostics still distinguish an unstarted effect, an in-flight effect, a
+pending retry, absent state, and operator ownership. A newer generation that
+removes the routed document is supersession and fails closed.
 
 ## Registry
 
@@ -23,6 +26,13 @@ and lifecycle state. Registry mutations and actor transitions share one SQLite
 transaction; no registry JSON is emitted or read. Multiple documents can still
 map to the same pane, and the optional window binding supports window-scoped
 `claim` and `layout` routing.
+
+Document-path transitions rekey the same session and pane rather than closing
+the actor. If an editor transition event is missed, sync may use the legacy
+registry projection only when exactly one same-session entry exists, its old
+path is absent, and that pane independently proves old-path ownership. A live
+old path, duplicate session rows, or failed ownership proof is ambiguous and
+must not be rebound.
 
 The broader single-owner session-actor contract lives in
 [08a-session-actor-contract.md](08a-session-actor-contract.md), and the target

@@ -68,13 +68,13 @@
 //!   1-in/1-out transitions atomically via `swap-pane`, avoiding the 3-pane bounce
 //!   loop that occurs when sync rescues a stashed pane before reconcile (which then
 //!   stashes another pane, creating continuous churn on tab switches).
-//! - **File rename detection:** When a pane is alive but the registry's `file` field
-//!   points to a path that no longer exists AND the current sync target has a different
-//!   path, sync infers a rename occurred. It calls `sessions::register` with the new
-//!   path, reusing the existing pane (no kill/restart). Detection is via
-//!   `is_file_rename(registered_path, current_path)`. Editor plugins trigger this by
-//!   calling `agent-doc sync --focus <new_path>` on `FileRenameEvent` (JB) or
-//!   `onDidRenameFiles` (VS Code).
+//! - **File rename detection:** The editor path-transition projection is primary.
+//!   Compatibility sync can recover a missed event by locating exactly one registry
+//!   entry with the same session UUID after the new path-key lookup misses. It reuses
+//!   and re-registers that pane only when the old path is absent and the pane still
+//!   proves ownership against that old path. Live old paths, duplicate UUID rows, and
+//!   weakened ownership fail closed. Editor plugins trigger the primary transition on
+//!   `FileRenameEvent` (JB) or `onDidRenameFiles` (VS Code).
 //! - **Rename debounce (#qam7):** When `--rename` is passed, sync writes a debounce marker
 //!   (a typed `rename_debounce` state.db lease) for the focused file. Any sync within
 //!   5 seconds that finds the marker will skip auto-start for that file. This prevents
@@ -211,7 +211,7 @@ use agent_doc_sync::{
     SYNC_PRUNE_SUBPHASE_BUDGET, SYNC_ROUTER_BUDGET, SYNC_SAFE_PASSIVE_TOTAL_BUDGET,
     SYNC_WINDOW_RESOLUTION_BUDGET, WindowIndexNormalizationPlan, auto_started_panes_summary,
     destructive_repair_throttle_state_key, effective_sync_columns, epoch_millis_now,
-    is_file_rename, last_visible_excerpt, latency_budget_status, plan_window_index_normalization,
+    last_visible_excerpt, latency_budget_status, plan_window_index_normalization,
     planned_stash_window_indices, registry_relative_file_path, rename_debounce_expired,
     sanitize_excerpt, sync_latency_message,
 };
@@ -3614,8 +3614,10 @@ fn run_with_options_internal_at_root(
             }
             sa += seg_mark.elapsed();
             seg_mark = Instant::now();
-            let registered_entry = lookup_registry_entry_for_file_session(file_path, &session_id);
+            let registered_match = lookup_registry_match_for_file_session(file_path, &session_id);
+            let registered_entry = registered_match.as_ref().map(|matched| &matched.entry);
             let registered_pane = authoritative_actor_pane
+                .clone()
                 .or_else(|| registered_entry.as_ref().map(|entry| entry.pane.clone()));
 
             if is_cross_root {
@@ -3780,17 +3782,53 @@ fn run_with_options_internal_at_root(
                     file_path.display()
                 ));
             }
-            if !skip_autostart_diagnostics
+            let ownership_file = registered_match
+                .as_ref()
+                .map(|matched| matched.registered_file.as_path())
+                .unwrap_or(file_path);
+            let rename_candidate = registered_match
+                .as_ref()
+                .is_some_and(|matched| matched.renamed);
+            let registered_live_owner = (!skip_autostart_diagnostics || rename_candidate)
+                && registered_pane.as_ref().is_some_and(|pane| {
+                    authoritative_actor_pane.as_deref() == Some(pane.as_str())
+                        || registered_pane_proves_live_owner(
+                            tmux,
+                            ownership_file,
+                            &session_id,
+                            pane,
+                            &proof_cache,
+                        )
+                });
+            if rename_candidate
+                && registered_live_owner
+                && claimed_owner.is_none()
+                && let Some(pane) = registered_pane.as_ref()
+                && let Some(entry) = registered_entry
+            {
+                eprintln!(
+                    "[sync] file renamed: {} → {} — reusing pane {} (session {})",
+                    entry.file,
+                    file_path.display(),
+                    pane,
+                    session_id
+                );
+                sync_log(&format!(
+                    "file_rename_owner_reused old_file={} new_file={} pane={} session={}",
+                    ownership_file.display(),
+                    file_path.display(),
+                    pane,
+                    session_id
+                ));
+                if let Err(error) = reregister_recovered_owner(tmux, file_path, &session_id, pane) {
+                    eprintln!("[sync] warning: re-register failed: {}", error);
+                }
+            }
+            if (!skip_autostart_diagnostics || rename_candidate)
                 && matches!(auto_start_mode, AutoStartMode::SafePassive)
                 && let Some(pane_id) = registered_pane.as_ref()
                 && claimed_owner.is_none()
-                && registered_pane_proves_live_owner(
-                    tmux,
-                    file_path,
-                    &session_id,
-                    pane_id,
-                    &proof_cache,
-                )
+                && registered_live_owner
             {
                 eprintln!(
                     "[sync] safe passive sync reusing authoritative actor or supervisor-backed registered pane {} for {}",
@@ -3810,16 +3848,6 @@ fn run_with_options_internal_at_root(
             }
             sb += seg_mark.elapsed();
             seg_mark = Instant::now();
-            let registered_live_owner = !skip_autostart_diagnostics
-                && registered_pane.as_ref().is_some_and(|pane| {
-                    registered_pane_proves_live_owner(
-                        tmux,
-                        file_path,
-                        &session_id,
-                        pane,
-                        &proof_cache,
-                    )
-                });
             if let Some(pane) = registered_pane.as_ref()
                 && tmux.pane_alive(pane)
                 && !registered_live_owner
@@ -3976,28 +4004,6 @@ fn run_with_options_internal_at_root(
                     safe_passive_resolved_files
                         .borrow_mut()
                         .insert(file_path.to_path_buf());
-                }
-                // Pane is alive — check if the file was renamed (registered path
-                // no longer exists but the session ID matches). If so, update the
-                // registry to the new path and reuse the existing pane.
-                if let Some(ref pane) = registered_pane
-                    && let Some(ref entry) = registered_entry
-                {
-                    let current_file = file_path.to_string_lossy();
-                    if is_file_rename(&entry.file, &current_file) {
-                        eprintln!(
-                            "[sync] file renamed: {} → {} — reusing pane {} (session {})",
-                            entry.file,
-                            file_path.display(),
-                            pane,
-                            session_id
-                        );
-                        if let Err(e) =
-                            reregister_recovered_owner(tmux, file_path, &session_id, pane)
-                        {
-                            eprintln!("[sync] warning: re-register failed: {}", e);
-                        }
-                    }
                 }
                 continue;
             }
@@ -8940,7 +8946,7 @@ mod tests {
 
         // Verify detection
         assert!(
-            is_file_rename(old_file, new_file),
+            agent_doc_sync::is_file_rename(old_file, new_file),
             "old path doesn't exist on disk, paths differ → rename"
         );
 

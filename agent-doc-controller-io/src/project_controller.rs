@@ -477,6 +477,61 @@ pub(crate) enum PaneLayoutProjection {
     Converged(PaneLayoutDesired),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+pub(crate) enum PaneLayoutRouteReadiness {
+    Wait,
+    Ready,
+    Refused,
+}
+
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+pub(crate) fn pane_layout_projection_desired(
+    projection: &PaneLayoutProjection,
+) -> Option<&PaneLayoutDesired> {
+    match projection {
+        PaneLayoutProjection::Absent => None,
+        PaneLayoutProjection::NeedsEffect(desired)
+        | PaneLayoutProjection::Applying(desired)
+        | PaneLayoutProjection::RetryPending(desired)
+        | PaneLayoutProjection::OperatorOwned(desired)
+        | PaneLayoutProjection::Converged(desired) => Some(desired),
+    }
+}
+
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+fn pane_layout_contains_document(desired: &PaneLayoutDesired, document: &str) -> bool {
+    desired
+        .invocation
+        .columns
+        .iter()
+        .flat_map(|column| column.split(','))
+        .map(str::trim)
+        .any(|candidate| candidate == document)
+}
+
+#[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+pub(crate) fn pane_layout_route_readiness(
+    projection: &PaneLayoutProjection,
+    document: &str,
+) -> PaneLayoutRouteReadiness {
+    let Some(desired) = pane_layout_projection_desired(projection) else {
+        return PaneLayoutRouteReadiness::Refused;
+    };
+    if !pane_layout_contains_document(desired, document) {
+        return PaneLayoutRouteReadiness::Refused;
+    }
+    match projection {
+        PaneLayoutProjection::Converged(_) => PaneLayoutRouteReadiness::Ready,
+        PaneLayoutProjection::NeedsEffect(_)
+        | PaneLayoutProjection::Applying(_)
+        | PaneLayoutProjection::RetryPending(_) => PaneLayoutRouteReadiness::Wait,
+        PaneLayoutProjection::Absent | PaneLayoutProjection::OperatorOwned(_) => {
+            PaneLayoutRouteReadiness::Refused
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ControllerPaneLayoutPhase {
@@ -1218,6 +1273,28 @@ impl ControllerPaneLayoutGraph {
                 PaneLayoutProjection::Absent => true,
             };
             if terminal || Instant::now() >= deadline {
+                return projection;
+            }
+            self.waiters.wait_for(
+                &mut guard,
+                deadline.saturating_duration_since(Instant::now()),
+            );
+        }
+    }
+
+    /// Await semantic readiness for an editor route across layout generations.
+    /// Passive surface observations may supersede the route's publication while
+    /// retaining its document; those are newer inputs to the same projection,
+    /// not a reason for the caller to republish or fail early.
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    fn await_route_document(&self, document: &str, timeout: Duration) -> PaneLayoutProjection {
+        let deadline = Instant::now() + timeout;
+        let mut guard = self.wait_lock.lock();
+        loop {
+            let projection = self.projection();
+            if pane_layout_route_readiness(&projection, document) != PaneLayoutRouteReadiness::Wait
+                || Instant::now() >= deadline
+            {
                 return projection;
             }
             self.waiters.wait_for(
@@ -5216,6 +5293,16 @@ impl ControllerRuntime {
         timeout: Duration,
     ) -> PaneLayoutProjection {
         self.pane_layout_graph.await_generation(generation, timeout)
+    }
+
+    #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
+    fn await_pane_layout_route_document(
+        &self,
+        document: &str,
+        timeout: Duration,
+    ) -> PaneLayoutProjection {
+        self.pane_layout_graph
+            .await_route_document(document, timeout)
     }
 
     fn try_claim_coordination(&self, scopes: &[String], owner_token: &str, owner_pid: u32) -> bool {

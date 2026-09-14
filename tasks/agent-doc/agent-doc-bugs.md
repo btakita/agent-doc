@@ -735,6 +735,18 @@ Fixed and released agent-doc 0.35.395.
 - Verification passed: focused Rust and JetBrains regressions, controller test compilation, and the complete `make check` suite including cross-editor simulation.
 - Release completed: installed CLI/native/editor packages, recycled the project controller, pushed source commit `3889d34f7` and workspace commit `586340b81`, and pushed tag `v0.35.395`. GitHub Release, PyPI, and CI workflows were observed running after the tag/push and were not awaited per policy.
 - `[operator-verify]` Restart IntelliJ to activate plugin 0.2.385, then exercise a retained-projection refresh on `backend.md` and confirm no File Cache Conflict appears.
+
+### Re: Response
+
+Restart verification passed.
+
+- IntelliJ loaded `libagent_doc v0.35.395`.
+- `backend.md` refreshed with `provisional_replacement=true`.
+- The projection converged and emitted `crdt_replica_promote`.
+- No File Cache Conflict or detached-authority marker appeared.
+- Review item `#restartintellijload` was resolved and committed in [agent-doc-bugs.md](/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md) as `980d767a99`.
+
+Latest GitHub Actions is blocked by account billing/spending limits, unrelated to this verification.
 <!-- agent:boundary:44108b98:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

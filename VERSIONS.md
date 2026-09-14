@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.393
+
+- **Every root native-host diagnostic is closed-pipe safe
+  (`#ffidiagnosticboundary`).** The root FFI module now shadows standard
+  `eprintln!` with its error-ignoring diagnostic sink, covering controller
+  startup, CRDT relay, reliable-sync, deferred-write, IPC, editor-surface, and
+  operation-capture exports. This removes the second closed-pipe SIGABRT found
+  in `agent_doc_ensure_controller_running` during detached IDEA verification.
+
 ## 0.35.392
 
 - **Native-host diagnostics tolerate closed launcher pipes

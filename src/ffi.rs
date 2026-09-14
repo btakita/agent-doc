@@ -100,6 +100,15 @@ fn ffi_diagnostic(message: std::fmt::Arguments<'_>) {
     write_ffi_diagnostic(std::io::stderr(), message);
 }
 
+/// This module is the native-host ABI surface. Shadow the standard macro so
+/// every existing and future diagnostic here inherits the closed-pipe-safe
+/// writer; a single stray standard `eprintln!` can otherwise abort the IDE.
+macro_rules! eprintln {
+    ($($arguments:tt)*) => {
+        ffi_diagnostic(format_args!($($arguments)*))
+    };
+}
+
 /// Keep a Rust panic inside a void C-ABI callback from unwinding across JNA.
 ///
 /// The root cdylib is loaded into the editor process. Any panic that reaches an

@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a09bd3-269d-7182-a461-f9c16ef445ac
+  codex: 01a0a1c6-0e26-79b3-87e8-2d8416bcef83
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -1143,6 +1143,39 @@ Completed. I correlated the Claude transcript termination records with the live 
 I also checked the three plausible Haiven panes (`api`, `contracts`, and `fpe`). All are already-live Codex sessions with successful prior closeouts and no quota-stop record, so they were correctly left untouched. There is no live interactive Claude process remaining apart from Claude's browser native host.
 
 No code or tracked repository surface was changed for this operational queue item; the proof is the transcript `rate_limit` records plus live actor/process and pane state. The exchange is large (1,102 lines), but the active queue takes precedence over compaction.
+
+### Re: do [#verifyworkflowactually] — gpt-5.6-sol · 2026-09-14T19:23:34-04:00
+
+> **Queue prompt:**
+>
+> do [#verifyworkflowactually]
+
+
+Done across all ten current bindings (the backlog predates lazily-gd and says nine).
+
+The converged contract has two independent layers:
+
+1. Exact, non-empty pins for each counted workflow's trigger set and filters, each gate job's identity and activation values (if, needs, continue-on-error), and every activation-relevant matrix axis/leg. Discovery is workflow/job-aware and fails closed on unsupported YAML or reader skew.
+2. Absolute floors that a matching pin edit cannot launder: ordinary push/PR activation as appropriate to the binding, main coverage, no path filters on required triggers, no bare if:false or continue-on-error:true, and required blocking matrix legs where an advisory expression is legitimate. Python deliberately retains its documented push-to-every-branch policy; Zig retains its exact matrix-dependent advisory master expression.
+
+Mutation suites plant the measured attacks: dispatch-only workflows, narrowed branches, path filters, job-level false/advisory states, non-obvious job conditions, needs drift, job moves, unsupported flow YAML, pin laundering, and matrix-leg loss. JavaScript additionally verifies both direct and make-invoked gates remain in the pinned job. Go keeps its earlier Bash activation floor as defense-in-depth alongside the shared checker.
+
+| Binding | Commit | Full local check | GitHub Actions |
+|---|---|---:|---|
+| js | 935a729e4850 | 687 tests green | run 34907332999 success |
+| rs | aceefd10a3e5 | green | run 34908199604 active; signaling + Lean + format + Clippy green, Rust tests/benchmark still running |
+| py | cc8efe4679c7 | green | run 34907058575 success |
+| go | 81561e3c114f | green | run 34907917585 success |
+| cpp | d1baee5be422 | green | run 34907917277 success, including wasm and clang++/g++ |
+| cs | 693a69ab2c08 | green | run 34907917598 success |
+| kt | dff4aa83bbe8 | green | run 34907043239 success |
+| dart | f7b4cded77c9 | green | run 34907043970 success |
+| zig | bde075b1976d | green | run 34906963553 success |
+| gd | 4ff0834cb5ef | green | run 34907044175 success |
+
+All binding commits are pushed and each local HEAD equals origin/main. The superproject pins exactly those ten commits in 9e93eeaa8; its own make check passed. Unrelated dirty shared-worktree files were not staged. Branch-protection/required-check settings remain an external GitHub policy rather than something a repository script can prove.
+
+The exchange is large (1,118 lines), but the active auto queue remains drainable, so I did not interrupt it for compaction.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1150,7 +1183,7 @@ No code or tracked repository surface was changed for this operational queue ite
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~Resume multiple Claude code sessions that ended due to weekly token limit being reached.~~
-- ⏭️ do [#verifyworkflowactually]
+- ~~⏭️ do [#verifyworkflowactually]~~
 - 🚧 do [#closeacceptsame]
 - do [#sharedscratchpadlive]
 - do [#decidereachclosure]
@@ -1181,7 +1214,6 @@ No code or tracked repository surface was changed for this operational queue ite
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#verifyworkflowactually] Verify the workflow ACTUALLY RUNS -- the unverified claim under every ci-reach mechanism. js measured job-level `if: false`, job-level `continue-on-error: true`, and `on:` reduced to `workflow_dispatch`: all three leave the guard green, because the step map gave it a handle on the STEP and nothing has a handle on the job or the trigger. `ci-reach.conf` asserts 'runs on every push/PR' in a COMMENT. js closed the step-level halves (a step's own if:/continue-on-error). Needs one converged decision on what pins a job's and a workflow's activation, then one pass over nine repos.
 - [ ] 🚧 [#closeacceptsame] Close or accept the same-pinned-step residual: a recipe repointed at ANOTHER command inside its own pinned step, or weakened in place (dropping --self-check, -race, --binding), stays green -- anchors match as in-order subsequences and extra CI-side tokens are allowed by design. py measured it LIVE and 1 step wide (drop `uv run poe test` from test: and the guard prints reached while the suite and conformance rungs 2-4 run zero times); py declined to split the step because that closes one instance and reads as closing the class. Residual width = count of pinned steps carrying more than one anchor. Only a per-recipe-content pin closes it, whose churn is recipe-rate -- rejected in #closeremaininghalf for that reason, so this may be accept-and-document.
 - [ ] [#sharedscratchpadlive] Shared scratchpad is a LIVE cross-repo hazard, not theoretical: cs had a lazily-zig Makefile restored into lazily-cs from a generically-named backup; dart found 64 files from an EARLIER dart agent including a pre-fix copy of the same guard one filename-transposition away and 409 bytes from its own working file; kt's $SP/Makefile.orig held zig content overwritten 2 minutes after its last restore from that name; cpp reports 11,220 files with ten bindings' copies of one guard inside 2KB, four written concurrently. A picked-up stale copy INVERTS measurements rather than breaking them. Working rule: repo-private subdirectory, repo-prefixed filenames, select by mtime, and verify every restore input against `git show` before each case INCLUDING rows that expect green -- dart showed green rows pass vacuously otherwise.
 - [ ] [#decidereachclosure] Decide where the ci-reach closure pin LIVES. rs measured the churn (32 commits touched the check: line, all before 2026-08-09) and argues the pin belongs ADJACENT to the root rule in the Makefile, beside check:, so a closure edit and its pin edit land in one hunk -- at ~3 edits/week the 'update the pin deliberately' remedy gets applied reflexively and no diagnostic wording prevents that. I placed it in the guard to match KNOWN_UNCOVERED's shape; rs followed the brief but advocates the other placement. Worth settling before the next growth phase.

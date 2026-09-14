@@ -1231,6 +1231,26 @@ I audited the currently committed activation mutation harnesses while handling t
 Changed path: memory/reference_parallel_subagents_share_one_scratchpad_dir.md only. The index already linked that memory, so its unrelated dirty edits were not staged. Verification: scoped tsift diff digest plus current-vs-HEAD blob inspection; the superproject make check passed with this content present. The latest pre-existing agent-loop Actions run failed before executing any steps, consistent with the already-tracked #lzagentloopcibilling spending-limit gate; there is no test failure to fix in this item. Confidence: high. Escalation: none.
 
 The exchange remains large with an active auto queue; I did not interrupt it for compaction.
+
+### Re: do [#decidereachclosure] — gpt-5.6-sol · 2026-09-14T19:32:04-04:00
+
+Decision: the closure pin belongs to the CI-reach policy, outside the Makefile. Do not place it adjacent to check:.
+
+The pin's useful property is source independence. The Makefile is the observed state; EXPECTED_CLOSURE_TARGETS is remembered intent. A check: edit must make that remembered intent stale so the change is incomplete until a second policy edit names it. Putting both spellings in one hunk optimizes the reflexive coordinated edit that the pin exists to slow down.
+
+The 32 historical edits do establish a real maintenance cost, but they do not reverse the ownership rule:
+
+- all 32 occurred before 2026-08-09, during rapid closure construction rather than the stabilized period;
+- a legitimate closure change already requires coordinated CI and evidence changes, so a separate policy edit is honest work rather than incidental churn;
+- adjacency cannot make the pin prove correctness. It only makes a reflexive update easier and less visible.
+
+The normative owner is “CI-reach policy,” not a particular parser syntax. Nine bindings currently keep the exact non-empty set in scripts/check-ci-reach.sh beside the other EXPECTED sets. Godot keeps equivalent expected-closure-target rows in scripts/ci-reach.conf beside its counted workflows and excuses. Both satisfy the boundary because neither is the Makefile under measurement. Moving Godot into the guard, or migrating nine guards into conf, would be representation-only churn with no stronger invariant, so I am not doing it.
+
+The operational rule for the next growth phase is: edit check: first; let ci-reach name the stale members; then update the separate closure policy deliberately in the same commit with the CI/evidence change. “Same commit” is required; “same hunk” is intentionally not.
+
+Changed paths: only this session document through agent-doc. Evidence inspected: the prior #pinreachclosure/#closeremaininghalf decisions, the current placement in all ten bindings, the make-derived oracle reference, and Rust's supplied 32-edit measurement. No product code changed, so no new test or binding commit was needed; the immediately preceding full family and superproject checks remain green. Confidence: high. Escalation: none.
+
+The exchange remains large with an active auto queue; I did not interrupt it for compaction.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1241,7 +1261,7 @@ The exchange remains large with an active auto queue; I did not interrupt it for
 - ~~⏭️ do [#verifyworkflowactually]~~
 - ~~do [#closeacceptsame]~~
 - ~~do [#sharedscratchpadlive]~~
-- do [#decidereachclosure]
+- ~~do [#decidereachclosure]~~
 - do [#subagentscannotcoin]
 - do [#twopreexisting]
 - do [#lazilycppcheck]
@@ -1269,7 +1289,6 @@ The exchange remains large with an active auto queue; I did not interrupt it for
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#decidereachclosure] Decide where the ci-reach closure pin LIVES. rs measured the churn (32 commits touched the check: line, all before 2026-08-09) and argues the pin belongs ADJACENT to the root rule in the Makefile, beside check:, so a closure edit and its pin edit land in one hunk -- at ~3 edits/week the 'update the pin deliberately' remedy gets applied reflexively and no diagnostic wording prevents that. I placed it in the guard to match KNOWN_UNCOVERED's shape; rs followed the brief but advocates the other placement. Worth settling before the next growth phase.
 - [ ] [#subagentscannotcoin] Subagents cannot coin backlog ids: the agent-doc hook blocks an untracked id, and filing one would mean writing tasks/software/lazily.md from outside the agent's own repo. Hit by kt, dart, cs and gd across three cycles; each retags its commit to the queue head, so per-finding ids never exist and commit messages all carry the same id. Either give agents a way to file, or accept head-tagging and stop coining -- but the current state loses the mapping from commit to finding.
 - [ ] [#twopreexisting] Two pre-existing normalizer quirks cpp found while pinning the closure, neither touched: `command -v uvx >/dev/null` anchors as `command -v uvx null` because the normalizer basenames the redirection target; and check-conformance-coverage.sh's refusal text claims `make conformance-coverage` 'builds, runs ctest and audits in one invocation', which is false exactly when the conformance-coverage: test edge is dropped. Third quirk alongside the wasm ^# filter gap.
 - [ ] [#lazilycppcheck] lazily-cpp check-wasm-tiers.sh two holes found during #auditeveryguard but owned by the wasm channel: :99 folds an UNREADABLE tier manifest into the same 'replayed 0, below the floor' as an empty one (missing IS distinguished), and :149's `find $build_dir/tests` is ungated where `-d $build_dir` is gated, so a configured-but-unbuilt tier dies at exit 1 with ZERO stderr. Same function owns the ^# filter gap already filed.

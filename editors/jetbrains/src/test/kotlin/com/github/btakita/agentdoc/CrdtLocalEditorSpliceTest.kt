@@ -17,7 +17,7 @@ class CrdtLocalEditorSpliceTest {
         val reconstructed = reconstructLocalEditorBaseTextUtil(after, edit)
 
         assertEquals(before, reconstructed)
-        assertEquals(after, prepareLocalEditorEditsUtil(reconstructed!!, listOf(edit))!!.single().resultingText)
+        assertEquals(after, prepareLocalEditorEditsUtil(reconstructed!!, listOf(edit))!!.resultingText)
     }
 
     @Test
@@ -43,9 +43,9 @@ class CrdtLocalEditorSpliceTest {
         val prepared = prepareLocalEditorEditsUtil(before, edits)
 
         assertNotNull(prepared)
-        assertEquals(3, prepared!!.size)
-        assertEquals("Queue: Temporal", prepared.last().resultingText)
-        assertEquals(listOf("Temp", "or", "al"), prepared.map { it.insert })
+        assertEquals(3, prepared!!.edits.size)
+        assertEquals("Queue: Temporal", prepared.resultingText)
+        assertEquals(listOf("Temp", "or", "al"), prepared.edits.map { it.insert })
     }
 
     @Test
@@ -60,8 +60,8 @@ class CrdtLocalEditorSpliceTest {
         val prepared = prepareLocalEditorEditsUtil(before, edits)
 
         assertNotNull(prepared)
-        assertEquals(2, prepared!!.size)
-        assertEquals("one\ntwo", prepared.last().resultingText)
+        assertEquals(2, prepared!!.edits.size)
+        assertEquals("one\ntwo", prepared.resultingText)
     }
 
     @Test
@@ -83,8 +83,25 @@ class CrdtLocalEditorSpliceTest {
             )
 
         assertNotNull(prepared)
-        assertEquals(1, prepared!!.single().offsetCodePoints)
-        assertEquals(1, prepared.single().deleteCodePoints)
-        assertEquals("a😁z", prepared.single().resultingText)
+        assertEquals(1, prepared!!.edits.single().offsetCodePoints)
+        assertEquals(1, prepared.edits.single().deleteCodePoints)
+        assertEquals("a😁z", prepared.resultingText)
+    }
+
+    @Test
+    fun `held key burst retains one final projection`() {
+        val before = "x".repeat(84_000)
+        val insertionOffset = 81_000
+        val edits =
+            (0 until 3_000).map { index ->
+                CapturedLocalEditorEdit(insertionOffset + index, "", "?", 9)
+            }
+
+        val prepared = prepareLocalEditorEditsUtil(before, edits)
+
+        assertNotNull(prepared)
+        assertEquals(3_000, prepared!!.edits.size)
+        assertEquals(before.substring(0, insertionOffset) + "?".repeat(3_000) + before.substring(insertionOffset), prepared.resultingText)
+        assertEquals(insertionOffset + 2_999, prepared.edits.last().offsetCodePoints)
     }
 }

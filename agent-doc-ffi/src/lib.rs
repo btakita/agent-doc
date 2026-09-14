@@ -542,10 +542,10 @@ pub unsafe extern "C" fn agent_doc_rebase_captured_splices(
             let base = unsafe { CStr::from_ptr(base) }.to_str()?;
             let canonical = unsafe { CStr::from_ptr(canonical) }.to_str()?;
             let edits_json = unsafe { CStr::from_ptr(edits_json) }.to_str()?;
-            let edits: Vec<agent_doc_merge::captured_splice::CapturedSplice> =
+            let batch: agent_doc_merge::captured_splice::CapturedSpliceBatch =
                 serde_json::from_str(edits_json)?;
             Ok(serde_json::to_string(
-                &agent_doc_merge::captured_splice::rebase(base, canonical, &edits)?,
+                &agent_doc_merge::captured_splice::rebase(base, canonical, &batch)?,
             )?)
         })())
     )

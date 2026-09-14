@@ -26,7 +26,7 @@
 use anyhow::{Context, Result};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use lazily::{OpId, TextCrdt, TextOp, TextVersionVector};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 /// A durable per-replica CRDT state — one participant (an editor's FFI node, or
 /// the supervisor) in a multi-replica document session.
@@ -45,11 +45,66 @@ pub struct ReplicaState {
     /// graph.  Controller idle checks ask for the same projection repeatedly, so
     /// retain it until a real replica mutation invalidates it.
     cached_text: RefCell<Option<String>>,
+    /// Codepoint count paired with `cached_text`. Keeping it separately makes
+    /// repeated appends constant-time instead of rescanning the whole projection.
+    cached_text_chars: Cell<Option<usize>>,
+    /// A codepoint/byte boundary in the cached projection, normally the end of
+    /// the preceding edit. Repeated typing translates its next offset without
+    /// walking the document prefix again.
+    cached_edit_anchor: Cell<Option<(usize, usize)>>,
+    /// Exact local splices waiting for the next state-bearing operation. Editor
+    /// bursts call the FFI once per DocumentEvent, but publishing happens once per
+    /// burst; defer lazily's graph ordering to that existing publish boundary and
+    /// compose adjacent keystrokes before touching the CRDT.
+    pending_local_edits: RefCell<Vec<PendingLocalEdit>>,
     /// Editor reconnects can replay the exact retained snapshot on every pull.
     /// Keep one bounded payload so the common retry loop is rejected before
     /// `TextCrdt::apply_delta`, which otherwise materializes the graph twice even
     /// when every operation is already known.
     last_applied_update: RefCell<Option<Vec<u8>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingLocalEdit {
+    offset: usize,
+    delete_len: usize,
+    insert: String,
+    insert_chars: usize,
+}
+
+impl PendingLocalEdit {
+    /// Compose the common contiguous typing/deletion shapes without changing
+    /// their causal meaning. Offsets in `next` address the projection after
+    /// `self`, while the retained edit addresses the projection before it.
+    fn try_compose(&mut self, next: &Self) -> bool {
+        let next_end = next.offset.saturating_add(next.delete_len);
+        let inserted_end = self.offset.saturating_add(self.insert_chars);
+        if next.delete_len == 0 && next.offset == inserted_end {
+            self.insert.push_str(&next.insert);
+            self.insert_chars = self.insert_chars.saturating_add(next.insert_chars);
+            return true;
+        }
+        if self.offset <= next.offset && next_end <= inserted_end {
+            let relative_start = next.offset - self.offset;
+            let relative_end = relative_start + next.delete_len;
+            let start_byte = char_to_byte_index(&self.insert, relative_start);
+            let end_byte = char_to_byte_index(&self.insert, relative_end);
+            self.insert
+                .replace_range(start_byte..end_byte, &next.insert);
+            self.insert_chars = self.insert_chars - next.delete_len + next.insert_chars;
+            return true;
+        }
+        if next.insert.is_empty() && next.offset == inserted_end {
+            self.delete_len = self.delete_len.saturating_add(next.delete_len);
+            return true;
+        }
+        if next.insert.is_empty() && next_end == self.offset {
+            self.offset = next.offset;
+            self.delete_len = self.delete_len.saturating_add(next.delete_len);
+            return true;
+        }
+        false
+    }
 }
 
 const COMPACT_TEXT_OPS_MAGIC: &[u8] = b"ADCR1:";
@@ -345,15 +400,22 @@ impl ReplicaState {
         Self {
             text: RefCell::new(TextCrdt::new(client_id)),
             cached_text: RefCell::new(Some(String::new())),
+            cached_text_chars: Cell::new(Some(0)),
+            cached_edit_anchor: Cell::new(Some((0, 0))),
+            pending_local_edits: RefCell::new(Vec::new()),
             last_applied_update: RefCell::new(None),
         }
     }
 
     /// Create a replica seeded from plain text in linear time.
     pub fn from_text(client_id: u64, text: &str) -> Self {
+        let text_chars = text.chars().count();
         Self {
             text: RefCell::new(TextCrdt::from_str(client_id, text)),
             cached_text: RefCell::new(Some(text.to_owned())),
+            cached_text_chars: Cell::new(Some(text_chars)),
+            cached_edit_anchor: Cell::new(Some((text_chars, text.len()))),
+            pending_local_edits: RefCell::new(Vec::new()),
             last_applied_update: RefCell::new(None),
         }
     }
@@ -381,17 +443,61 @@ impl ReplicaState {
     ) -> Result<Self> {
         let replica = Self::from_encoded(client_id, state)?;
         *replica.cached_text.borrow_mut() = Some(cached_text.to_owned());
+        replica
+            .cached_text_chars
+            .set(Some(cached_text.chars().count()));
+        replica
+            .cached_edit_anchor
+            .set(Some((cached_text.chars().count(), cached_text.len())));
         Ok(replica)
+    }
+
+    fn ensure_cached_text(&self) {
+        if self.cached_text.borrow().is_some() {
+            return;
+        }
+        let projected = self.text.borrow().text();
+        let projected_chars = projected.chars().count();
+        self.cached_text_chars.set(Some(projected_chars));
+        self.cached_edit_anchor
+            .set(Some((projected_chars, projected.len())));
+        *self.cached_text.borrow_mut() = Some(projected);
+    }
+
+    fn flush_pending_local_edits(&self) {
+        let edits = std::mem::take(&mut *self.pending_local_edits.borrow_mut());
+        if edits.is_empty() {
+            return;
+        }
+        let mut text = self.text.borrow_mut();
+        for edit in edits {
+            if edit.delete_len > 0 {
+                text.delete_range(edit.offset, edit.delete_len);
+            }
+            if !edit.insert.is_empty() {
+                text.insert_str(edit.offset, &edit.insert);
+            }
+        }
+    }
+
+    fn queue_local_edit(&self, edit: PendingLocalEdit) {
+        let mut pending = self.pending_local_edits.borrow_mut();
+        if pending
+            .last_mut()
+            .is_some_and(|last| last.try_compose(&edit))
+        {
+            return;
+        }
+        pending.push(edit);
     }
 
     /// The current converged text.
     pub fn text(&self) -> String {
+        self.ensure_cached_text();
         if let Some(cached) = self.cached_text.borrow().as_ref() {
             return cached.clone();
         }
-        let projected = self.text.borrow().text();
-        *self.cached_text.borrow_mut() = Some(projected.clone());
-        projected
+        unreachable!("ensure_cached_text must materialize the projection")
     }
 
     /// Apply a local edit: delete `delete_len` chars at char `offset`, then insert
@@ -407,33 +513,58 @@ impl ReplicaState {
         if delete_len == 0 && insert.is_empty() {
             return;
         }
-        let cur = self.text();
-        let mut t = self.text.borrow_mut();
-        let total_chars = cur.chars().count();
-        // Whole-buffer replace fast path: offset 0 deleting everything (or an
-        // empty doc) is a linear `replace_all`, avoiding the quadratic per-char
-        // delete path. `delete_len` is in codepoints, so compare against the
-        // codepoint count (NOT the byte length).
-        if offset == 0 && (total_chars == 0 || delete_len as usize >= total_chars) {
-            t.replace_all(insert);
-            *self.cached_text.borrow_mut() = Some(insert.to_owned());
+        self.ensure_cached_text();
+        let total_chars = self
+            .cached_text_chars
+            .get()
+            .expect("cached projection must have a codepoint count");
+        let start_char = (offset as usize).min(total_chars);
+        let end_char = start_char
+            .saturating_add(delete_len as usize)
+            .min(total_chars);
+        let actual_delete = end_char - start_char;
+        let inserted_chars = insert.chars().count();
+        if actual_delete == 0 && insert.is_empty() {
             return;
         }
-        let start_char = (offset as usize).min(total_chars);
-        if delete_len > 0 {
-            let end_char = (start_char + delete_len as usize).min(total_chars);
-            t.delete_range(start_char, end_char - start_char);
+        {
+            let mut cached = self.cached_text.borrow_mut();
+            let current = cached
+                .as_mut()
+                .expect("cached projection must remain materialized");
+            if start_char == total_chars && actual_delete == 0 {
+                current.push_str(insert);
+                self.cached_edit_anchor
+                    .set(Some((start_char + inserted_chars, current.len())));
+            } else {
+                let anchor = self
+                    .cached_edit_anchor
+                    .get()
+                    .unwrap_or((total_chars, current.len()));
+                let start_byte = char_to_byte_index_near(current, start_char, anchor);
+                let end_byte = char_to_byte_index_near(current, end_char, anchor);
+                current.replace_range(start_byte..end_byte, insert);
+                self.cached_edit_anchor.set(Some((
+                    start_char + inserted_chars,
+                    start_byte + insert.len(),
+                )));
+            }
         }
-        if !insert.is_empty() {
-            t.insert_str(start_char, insert);
-        }
-        *self.cached_text.borrow_mut() = None;
+        self.cached_text_chars
+            .set(Some(total_chars - actual_delete + inserted_chars));
+        self.queue_local_edit(PendingLocalEdit {
+            offset: start_char,
+            delete_len: actual_delete,
+            insert: insert.to_owned(),
+            insert_chars: inserted_chars,
+        });
     }
 
     /// This replica's version vector, encoded (JSON) for the wire. The **compact
     /// per-peer frontier**, NOT the whole document: a peer replies with
     /// [`diff`](Self::diff) carrying only the ops this frontier is missing.
     pub fn state_vector(&self) -> Vec<u8> {
+        self.flush_pending_local_edits();
         serde_json::to_vec(&self.text.borrow().version_vector()).unwrap_or_default()
     }
 
@@ -444,6 +575,7 @@ impl ReplicaState {
     /// was rebuilt from a text projection. Incremental bootstrap is safe only when
     /// every retained counter is at or behind this replica's counter.
     pub fn covers_state_vector(&self, state_vector: &[u8]) -> Result<bool> {
+        self.flush_pending_local_edits();
         let retained: TextVersionVector =
             serde_json::from_slice(state_vector).context("decode version vector")?;
         let current = self.text.borrow().version_vector();
@@ -456,6 +588,7 @@ impl ReplicaState {
     /// (`delta_since(their_vv)`) — a delta, never a whole-document snapshot. This is
     /// the sync reply a replica sends a peer that announced `their_sv`.
     pub fn diff(&self, their_sv: &[u8]) -> Result<Vec<u8>> {
+        self.flush_pending_local_edits();
         let their_vv: TextVersionVector =
             serde_json::from_slice(their_sv).context("decode version vector")?;
         let delta = self.text.borrow().delta_since(&their_vv);
@@ -476,8 +609,11 @@ impl ReplicaState {
         {
             return Ok(());
         }
+        self.flush_pending_local_edits();
         if self.text.borrow_mut().apply_delta_unprojected(&ops) {
             *self.cached_text.borrow_mut() = None;
+            self.cached_text_chars.set(None);
+            self.cached_edit_anchor.set(None);
         }
         *self.last_applied_update.borrow_mut() = Some(update.to_vec());
         Ok(())
@@ -487,9 +623,31 @@ impl ReplicaState {
     /// snapshot a peer needs on first contact. It is `delta_since(∅)`: every op the
     /// replica holds, as a `TextOp` list.
     pub fn encode_state(&self) -> Vec<u8> {
+        self.flush_pending_local_edits();
         let snapshot = self.text.borrow().delta_since(&TextVersionVector::new());
         encode_update_ops(&snapshot).unwrap_or_default()
     }
+}
+
+fn char_to_byte_index(text: &str, char_index: usize) -> usize {
+    text.char_indices()
+        .nth(char_index)
+        .map_or(text.len(), |(byte, _)| byte)
+}
+
+fn char_to_byte_index_near(text: &str, char_index: usize, anchor: (usize, usize)) -> usize {
+    let (anchor_char, anchor_byte) = anchor;
+    if char_index >= anchor_char {
+        return text[anchor_byte..]
+            .char_indices()
+            .nth(char_index - anchor_char)
+            .map_or(text.len(), |(byte, _)| anchor_byte + byte);
+    }
+    text[..anchor_byte]
+        .char_indices()
+        .rev()
+        .nth(anchor_char - char_index - 1)
+        .map_or(0, |(byte, _)| byte)
 }
 
 /// One incremental sync round between two replicas: each announces its state
@@ -690,6 +848,37 @@ mod tests {
             .collect::<Vec<_>>();
 
         validate_text_ops(&ops).unwrap();
+    }
+
+    #[test]
+    fn held_key_burst_coalesces_before_ordering_the_crdt_graph() {
+        let base = "x".repeat(84_000);
+        let replica = ReplicaState::from_text(1, &base);
+        let insertion_offset = 81_000;
+
+        for index in 0..3_000 {
+            replica.apply_local_edit((insertion_offset + index) as u32, 0, "?");
+        }
+
+        assert_eq!(replica.pending_local_edits.borrow().len(), 1);
+        assert_eq!(
+            replica.text(),
+            base[..insertion_offset].to_owned() + &"?".repeat(3_000) + &base[insertion_offset..]
+        );
+        let _ = replica.state_vector();
+        assert!(replica.pending_local_edits.borrow().is_empty());
+    }
+
+    #[test]
+    fn deferred_local_edits_preserve_unicode_splices_and_sync() {
+        let a = ReplicaState::from_text(1, "a😀bc");
+        a.apply_local_edit(1, 1, "😁");
+        a.apply_local_edit(4, 0, "!");
+        assert_eq!(a.text(), "a😁bc!");
+
+        let b = ReplicaState::new(2);
+        sync(&a, &b).unwrap();
+        assert_eq!(b.text(), "a😁bc!");
     }
 
     #[test]

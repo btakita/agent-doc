@@ -2136,12 +2136,12 @@ object NativePatching {
     internal fun rebaseCapturedSplices(
         base: String,
         canonical: String,
-        edits: List<PreparedLocalEditorEdit>,
-    ): List<PreparedLocalEditorEdit>? {
+        batch: PreparedLocalEditorBatch,
+    ): PreparedLocalEditorBatch? {
         val lib = AgentDocLib.get() ?: return null
         val gson = com.google.gson.Gson()
         val result = try {
-            lib.agent_doc_rebase_captured_splices(base, canonical, gson.toJson(edits))
+            lib.agent_doc_rebase_captured_splices(base, canonical, gson.toJson(batch))
         } catch (error: UnsatisfiedLinkError) {
             LOG.warn("[native] captured splice recovery requires the updated native library; edits retained", error)
             return null
@@ -2152,7 +2152,7 @@ object NativePatching {
                 return null
             }
             val json = result.text?.getString(0) ?: return null
-            return gson.fromJson(json, Array<PreparedLocalEditorEdit>::class.java).toList()
+            return gson.fromJson(json, PreparedLocalEditorBatch::class.java)
         } finally {
             lib.agent_doc_free_string(result.error)
             lib.agent_doc_free_string(result.text)

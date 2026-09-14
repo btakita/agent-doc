@@ -258,9 +258,13 @@ class CrdtReplicaForwarder(
      * incremental CRDT update. Each changed range remains structurally bounded;
      * batching only amortizes the controller transport round trip.
      */
-    internal fun forwardLocalEdits(edits: List<PreparedLocalEditorEdit>): Boolean {
+    internal fun forwardLocalEdits(batch: PreparedLocalEditorBatch): Boolean {
         if (!attached) return false
-        if (edits.isEmpty()) return true
+        val edits = batch.edits
+        if (edits.isEmpty()) {
+            knownReplicaText = batch.resultingText
+            return true
+        }
         val started = System.nanoTime()
         for (edit in edits) {
             val applyStarted = System.nanoTime()
@@ -272,9 +276,12 @@ class CrdtReplicaForwarder(
                     edit.insert,
                 )
             ) {
+                // Some preceding splices may already be retained by the native
+                // replica. Force the recovery path to read that exact projection
+                // instead of trusting the pre-batch cache on retry.
+                knownReplicaText = null
                 return false
             }
-            knownReplicaText = edit.resultingText
             logSlow(
                 "native.applyLocal",
                 applyStarted,
@@ -283,6 +290,7 @@ class CrdtReplicaForwarder(
                         "insert_chars=${edit.insert.length}",
             )
         }
+        knownReplicaText = batch.resultingText
         val publish = publishIncremental("local-splice-batch")
         logSlow(
             "forwardLocalEdits",

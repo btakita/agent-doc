@@ -28,14 +28,14 @@ fn native_captured_splice_recovery_preserves_both_cuts_and_refuses_overlap() {
     let free: Symbol<FreeString> = unsafe { library.get(b"agent_doc_free_string\0") }.unwrap();
     let base = CString::new("answer\nfix bug\n").unwrap();
     let canonical = CString::new("new answer\nanswer\nfix bug\n").unwrap();
-    let edits = CString::new(r#"[{"offsetCodePoints":11,"deleteCodePoints":3,"insert":"queue","resultingText":"answer\nfix queue\n"}]"#).unwrap();
+    let edits = CString::new(r#"{"edits":[{"offsetCodePoints":11,"deleteCodePoints":3,"insert":"queue"}],"resultingText":"answer\nfix queue\n"}"#).unwrap();
     let result = unsafe { rebase(base.as_ptr(), canonical.as_ptr(), edits.as_ptr()) };
     assert!(result.error.is_null());
     let json: serde_json::Value =
         serde_json::from_str(unsafe { CStr::from_ptr(result.text) }.to_str().unwrap()).unwrap();
     unsafe { free(result.text) };
-    assert_eq!(json[0]["resultingText"], "new answer\nanswer\nfix queue\n");
-    assert_eq!(json[0]["offsetCodePoints"], 22);
+    assert_eq!(json["resultingText"], "new answer\nanswer\nfix queue\n");
+    assert_eq!(json["edits"][0]["offsetCodePoints"], 22);
     let conflicting = CString::new("answer\nfix problem\n").unwrap();
     let refused = unsafe { rebase(base.as_ptr(), conflicting.as_ptr(), edits.as_ptr()) };
     assert!(

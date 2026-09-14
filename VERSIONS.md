@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.390
+
+- **JetBrains held-key bursts no longer wedge the IDE (`#crdtlocalburst`).**
+  The editor adapter now validates a causal splice burst with one mutable
+  projection and retains only its final text, while the shared replica defers
+  Lazily graph ordering to the existing publish boundary and composes adjacent
+  typing/deletion splices. Codepoint-to-byte translation follows the prior edit
+  anchor, so typing inside an 84K document does not rescan its prefix for every
+  character. Captured-splice recovery likewise carries one final projection per
+  batch. Stress regressions cover 3,000 repeated characters near offset 81,000,
+  Unicode splices, synchronization, and the native recovery boundary. This ships
+  in JetBrains plugin 0.2.385.
+
 ## 0.35.389
 
 - **Backlog backfill removes spliced dynamic-context manifests

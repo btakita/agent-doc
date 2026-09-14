@@ -392,6 +392,10 @@ internal data class PreparedLocalEditorEdit(
     val offsetCodePoints: Int,
     val deleteCodePoints: Int,
     val insert: String,
+)
+
+internal data class PreparedLocalEditorBatch(
+    val edits: List<PreparedLocalEditorEdit>,
     val resultingText: String,
 )
 
@@ -409,27 +413,36 @@ private enum class LocalEditorForwardResult {
 internal fun prepareLocalEditorEditsUtil(
     before: String,
     edits: List<CapturedLocalEditorEdit>,
-): List<PreparedLocalEditorEdit>? {
-    var current = before
+): PreparedLocalEditorBatch? {
+    val current = StringBuilder(before)
+    var anchorUtf16 = before.length
+    var anchorCodePoints = before.codePointCount(0, before.length)
     val prepared = ArrayList<PreparedLocalEditorEdit>(edits.size)
     for (edit in edits) {
         val start = edit.offsetUtf16
         val end = start + edit.oldFragment.length
         if (start < 0 || start > current.length || end > current.length) return null
         if (current.substring(start, end) != edit.oldFragment) return null
-        val resultingText =
-            current.substring(0, start) + edit.newFragment + current.substring(end)
+        val deleteCodePoints = edit.oldFragment.codePointCount(0, edit.oldFragment.length)
+        val insertCodePoints = edit.newFragment.codePointCount(0, edit.newFragment.length)
+        val offsetCodePoints =
+            if (start >= anchorUtf16) {
+                anchorCodePoints + Character.codePointCount(current, anchorUtf16, start)
+            } else {
+                anchorCodePoints - Character.codePointCount(current, start, anchorUtf16)
+            }
         prepared.add(
             PreparedLocalEditorEdit(
-                offsetCodePoints = current.codePointCount(0, start),
-                deleteCodePoints = edit.oldFragment.codePointCount(0, edit.oldFragment.length),
+                offsetCodePoints = offsetCodePoints,
+                deleteCodePoints = deleteCodePoints,
                 insert = edit.newFragment,
-                resultingText = resultingText,
             ),
         )
-        current = resultingText
+        current.replace(start, end, edit.newFragment)
+        anchorUtf16 = start + edit.newFragment.length
+        anchorCodePoints = offsetCodePoints + insertCodePoints
     }
-    return prepared
+    return PreparedLocalEditorBatch(prepared, current.toString())
 }
 
 internal fun pullDeliveryRequestsReplicaRefreshUtil(delivery: ReplicaPullDelivery): Boolean =
@@ -1180,7 +1193,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return LocalEditorForwardResult.Fenced
         }
         val beforeText = shadows[filePath] ?: return LocalEditorForwardResult.Retry
-        val edits =
+        val batch =
             prepareLocalEditorEditsUtil(beforeText, currentEdits)
                 ?: run {
                     log.debug(
@@ -1193,7 +1206,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             requestRemoteDrain(filePath, "stale-operator-event-fenced")
             return LocalEditorForwardResult.Fenced
         }
-        val editorText = edits.lastOrNull()?.resultingText ?: beforeText
+        val editorText = batch.resultingText
         val forwarder =
             forwarderFor(
                 filePath = filePath,
@@ -1209,7 +1222,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             when (localReplicaBaselineDecisionUtil(replicaText, beforeText)) {
                 LocalReplicaBaselineDecision.ForwardLocal -> {
                     currentEpoch == nonOperatorMutationEpoch(filePath) &&
-                        forwarder.forwardLocalEdits(edits)
+                        forwarder.forwardLocalEdits(batch)
                 }
                 LocalReplicaBaselineDecision.RebootstrapCanonicalThenForward ->
                     rebootstrapCanonicalAndForwardCapturedLocalEdit(
@@ -1217,7 +1230,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         capturedBaseText = beforeText,
                         visibleEditorText = editorText,
                         staleForwarder = forwarder,
-                        edits = edits,
+                        batch = batch,
                     )
             }
         if (!forwarded) {
@@ -1250,7 +1263,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             filePath,
             started,
             details =
-                "splices=${edits.size} before_chars=${beforeText.length} after_chars=${editorText.length}",
+                "splices=${batch.edits.size} before_chars=${beforeText.length} after_chars=${editorText.length}",
         )
         return LocalEditorForwardResult.Applied
     }
@@ -1260,12 +1273,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         capturedBaseText: String,
         visibleEditorText: String,
         staleForwarder: CrdtReplicaForwarder,
-        edits: List<PreparedLocalEditorEdit>,
+        batch: PreparedLocalEditorBatch,
     ): Boolean {
         if (forwarders[filePath] !== staleForwarder) return false
         val root = resolveProjectRoot(filePath) ?: return false
         val canonical = CpSocketReplicaTransport(root).currentCanonicalText(filePath) ?: return false
-        val rebased = NativePatching.rebaseCapturedSplices(capturedBaseText, canonical, edits) ?: return false
+        val rebased = NativePatching.rebaseCapturedSplices(capturedBaseText, canonical, batch) ?: return false
         val replacement =
             forwarderFor(
                 filePath = filePath,

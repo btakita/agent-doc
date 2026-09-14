@@ -305,10 +305,13 @@ class CrdtReplicaForwarderTest {
 
         assertTrue(
             fwd.forwardLocalEdits(
-                listOf(
-                    PreparedLocalEditorEdit(7, 0, "Temp", "Queue: Temp"),
-                    PreparedLocalEditorEdit(11, 0, "or", "Queue: Tempor"),
-                    PreparedLocalEditorEdit(13, 0, "al", "Queue: Temporal"),
+                PreparedLocalEditorBatch(
+                    listOf(
+                        PreparedLocalEditorEdit(7, 0, "Temp"),
+                        PreparedLocalEditorEdit(11, 0, "or"),
+                        PreparedLocalEditorEdit(13, 0, "al"),
+                    ),
+                    "Queue: Temporal",
                 ),
             ),
         )
@@ -329,7 +332,7 @@ class CrdtReplicaForwarderTest {
 
         assertFalse(
             fwd.forwardLocalEdits(
-                listOf(PreparedLocalEditorEdit(7, 0, "item", "Queue: item")),
+                PreparedLocalEditorBatch(listOf(PreparedLocalEditorEdit(7, 0, "item")), "Queue: item"),
             ),
         )
 
@@ -350,7 +353,7 @@ class CrdtReplicaForwarderTest {
 
         assertTrue(
             fwd.forwardLocalEdits(
-                listOf(PreparedLocalEditorEdit(7, 0, "item", "Queue: item")),
+                PreparedLocalEditorBatch(listOf(PreparedLocalEditorEdit(7, 0, "item")), "Queue: item"),
             ),
         )
 

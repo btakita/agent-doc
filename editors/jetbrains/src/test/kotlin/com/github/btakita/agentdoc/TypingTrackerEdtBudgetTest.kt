@@ -552,7 +552,7 @@ class TypingTrackerEdtBudgetTest {
         assertTrue(
             "a stale local baseline must retain its typed delta and rebootstrap from exact controller canonical",
             localDeltaBody.contains("prepareLocalEditorEditsUtil(beforeText, currentEdits)") &&
-                localDeltaBody.contains("forwarder.forwardLocalEdits(edits)") &&
+                localDeltaBody.contains("forwarder.forwardLocalEdits(batch)") &&
                 localDeltaBody.contains("localReplicaBaselineDecisionUtil(replicaText, beforeText)") &&
                 localDeltaBody.contains("retainedCanonicalProjectionPaths.add(filePath)") &&
                 localDeltaBody.contains("expectedCanonicalTextAtSwap = canonical") &&
@@ -576,7 +576,7 @@ class TypingTrackerEdtBudgetTest {
         )
         assertTrue(
             "the serialized local delta must install its exact resulting shadow in the forwarder projection",
-            localDeltaBody.contains("forwarder.forwardLocalEdits(edits)") &&
+            localDeltaBody.contains("forwarder.forwardLocalEdits(batch)") &&
                 localDeltaBody.contains("shadows[filePath] = editorText"),
         )
         assertTrue(

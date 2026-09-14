@@ -620,7 +620,7 @@ class CrdtReplicaProjectionFrontierTest {
         )
         assertFalse(
             "a concurrent canonical advance after durable acceptance must not retain the same splice",
-            localEffect.contains("forwardLocalEdits(edits) &&"),
+            localEffect.contains("forwardLocalEdits(batch) &&"),
         )
     }
 

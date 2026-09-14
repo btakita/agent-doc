@@ -723,7 +723,6 @@ t## Pending / Not Built
 
 
 <!-- agent:backlog priority -->
-- [ ] 🚧 [#fixrunbackend] Fix Run Agent Doc on backend.md: authoritative actor generation 37 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md owns pane %3 but route could not drain the active closeout before dispatch: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: resume durable checkpoint cycle=cycle-1789400616770 phase=write_applied target="- PR 492 reverted a bunch of Dillon's changes. Please look at the review. I closed it for now. Should we re-open it without the reverts?\n- PR 492 reverted a bunch of Dillon's changes. Please look at the review. I closed it for now. Should we re-open it without the reverts?" capture_id=cycle-1789400616770; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md
 <!-- /agent:backlog -->
 
 ## Review

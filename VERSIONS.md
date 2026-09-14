@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.395
+
+- **A rejected JetBrains replica refresh can no longer detach an open editor
+  (`#backendfilecacheconflict`).** Replacement registration is now provisional:
+  the predecessor remains authoritative while retained-canonical, live-buffer,
+  and typing-race checks run. A frontier-fenced `replica_promote` transition
+  retires the predecessor only after editor reconciliation commits, and returns
+  the rotated lineage to the promoted forwarder. Ambiguous three-generation
+  holds and failed candidate finalization therefore preserve editor authority
+  instead of evicting the relay hub and provoking IntelliJ File Cache Conflict.
+
 ## 0.35.394
 
 - **A bounded replica-barrier release can no longer masquerade as editor

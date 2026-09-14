@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import io.github.lazily.ThreadSafeContext
 import java.nio.file.Files
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -26,7 +27,13 @@ class CrdtReplicaForwarderTest {
         var capturedHash: String? = null
         var legacyRegistrationCalled = false
         val transport = object : ReplicaTransport by CapturingTransport() {
-            override fun register(filePath: String, identity: String, stateVector: ByteArray?, expectedCanonicalHash: String?): ReplicaRegisterAck? {
+            override fun register(
+                filePath: String,
+                identity: String,
+                stateVector: ByteArray?,
+                expectedCanonicalHash: String?,
+                provisionalReplacement: Boolean,
+            ): ReplicaRegisterAck? {
                 capturedHash = expectedCanonicalHash
                 return null
             }
@@ -59,6 +66,55 @@ class CrdtReplicaForwarderTest {
         assertEquals("replica_register", payload.get("method").asString)
         assertEquals("jetbrains_plugin", payload.get("source").asString)
         assertEquals(4242L, payload.get("editor_pid").asLong)
+    }
+
+    @Test
+    fun `replacement registration stays provisional until editor reconciliation commits`() {
+        val frontier = byteArrayOf(1, 2, 3)
+        var registeredProvisionally = false
+        var promotedFrontier: ByteArray? = null
+        val transport = object : ReplicaTransport by CapturingTransport() {
+            override fun register(
+                filePath: String,
+                identity: String,
+                stateVector: ByteArray?,
+                expectedCanonicalHash: String?,
+                provisionalReplacement: Boolean,
+            ): ReplicaRegisterAck {
+                registeredProvisionally = provisionalReplacement
+                return ReplicaRegisterAck(
+                    clientId = 42L,
+                    bootstrap = "canonical".toByteArray(),
+                    lineage = "lineage-test",
+                    bootstrapKind = ReplicaBootstrapKind.Full,
+                    canonicalStateVector = frontier,
+                    canonicalProjectionRetained = true,
+                    canonicalCoversRetainedFrontier = true,
+                    canonicalContentHash = "canonical-hash",
+                )
+            }
+
+            override fun promoteReplacement(
+                filePath: String,
+                identity: String,
+                expectedCanonicalStateVector: ByteArray,
+            ): String {
+                promotedFrontier = expectedCanonicalStateVector
+                return "promoted-lineage"
+            }
+        }
+        val forwarder = CrdtReplicaForwarder(
+            filePath = "/tmp/sample-session.md",
+            identity = "jetbrains-4242:sample:refresh-1",
+            node = FakeNode(),
+            transport = transport,
+            provisionalReplacement = true,
+        )
+
+        assertTrue(forwarder.register())
+        assertTrue(registeredProvisionally)
+        assertTrue(forwarder.promoteReplacement())
+        assertArrayEquals("sv:canonical".toByteArray(), promotedFrontier)
     }
 
     /**

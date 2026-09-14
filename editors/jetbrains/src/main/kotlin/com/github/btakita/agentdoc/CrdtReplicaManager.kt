@@ -2674,6 +2674,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             ownershipContext = ownershipContext,
             resumeState = retainedResumeState,
             expectedCanonicalHash = expectedCanonicalTextAtSwap?.let(::contentHash),
+            // Registration is not commitment. Keep the prior relay membership
+            // alive until every live-buffer and retained-projection check below
+            // has accepted this candidate.
+            provisionalReplacement = replaceCached && cached != null,
         )
         if (!forwarder.register()) {
             recordRegisterFailure(filePath, forwarder.lastRegisterFailureReason ?: "controller-register")
@@ -2823,6 +2827,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 ) {
                     forwarders.replace(filePath, forwarder, cached)
                     forwarder.deregister()
+                    return cached
+                }
+                if (!forwarder.promoteReplacement()) {
+                    // The controller canonical moved after bootstrap, or the
+                    // provisional candidate disappeared. Restore the still-live
+                    // predecessor and retry from a fresh cut.
+                    forwarders.replace(filePath, forwarder, cached)
+                    forwarder.deregister()
+                    recordRegisterFailure(filePath, "replacement-promotion")
                     return cached
                 }
                 cached.deregister()

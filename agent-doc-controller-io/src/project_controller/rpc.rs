@@ -7818,6 +7818,8 @@ fn log_controller_current_text_result(
 pub(super) enum ControllerCrdtReplicaMethod {
     #[serde(rename = "replica_register")]
     Register,
+    #[serde(rename = "replica_promote")]
+    Promote,
     #[serde(rename = "replica_deregister")]
     Deregister,
     #[serde(rename = "replica_update")]
@@ -7834,6 +7836,7 @@ impl ControllerCrdtReplicaMethod {
     fn label(self) -> &'static str {
         match self {
             Self::Register => "replica_register",
+            Self::Promote => "replica_promote",
             Self::Deregister => "replica_deregister",
             Self::Update => "replica_update",
             Self::Projection => "replica_projection",
@@ -7860,6 +7863,9 @@ struct ControllerCrdtReplicaPayload {
     #[serde(default)]
     state_vector_b64: Option<String>,
     expected_canonical_hash: Option<String>,
+    #[serde(default)]
+    provisional_replacement: bool,
+    expected_canonical_state_vector_b64: Option<String>,
     update_b64: Option<String>,
     content_hash: Option<String>,
     /// The projected revision has completed the editor's native save and is
@@ -9807,13 +9813,14 @@ fn controller_crdt_replica_data(
                 .editor_pid
                 .or_else(|| agent_doc_crdt_relay_io::editor_process_id_from_identity(identity));
             let registration =
-                agent_doc_crdt_relay_io::register_replica_for_file_with_precondition(
+                agent_doc_crdt_relay_io::register_replica_for_file_with_precondition_and_replacement_mode(
                     canonical,
                     identity,
                     retained_state_vector.as_deref(),
                     resolved_editor_pid,
                     durable_projection_retained,
                     payload.expected_canonical_hash.as_deref(),
+                    payload.provisional_replacement,
                 )?;
             match registration {
                 Some(registration) => {
@@ -9855,6 +9862,25 @@ fn controller_crdt_replica_data(
                 }
                 None => Ok(crdt_replica_refused_data("detached_authority")),
             }
+        }
+        ControllerCrdtReplicaMethod::Promote => {
+            let expected_canonical_state_vector = payload
+                .expected_canonical_state_vector_b64
+                .as_deref()
+                .map(base64_standard_decode)
+                .transpose()
+                .context(
+                    "CRDT replica promote payload has invalid expected_canonical_state_vector_b64",
+                )?
+                .context(
+                    "CRDT replica promote payload is missing expected_canonical_state_vector_b64",
+                )?;
+            let lineage = agent_doc_crdt_relay_io::promote_replica_replacement_for_file(
+                canonical,
+                identity,
+                &expected_canonical_state_vector,
+            )?;
+            Ok(serde_json::json!({ "promoted": true, "lineage": lineage }))
         }
         ControllerCrdtReplicaMethod::Deregister => {
             // Same resolution on the way out, or an identity-resolved
@@ -21938,7 +21964,7 @@ mod pane_layout_projection_dispatch_tests {
     fn stashed_assignment_does_not_satisfy_a_layout_slot_or_focus() {
         let project_root = Path::new("/project");
         let window_panes = ["%75".to_string()];
-        let effect_file_panes = vec![
+        let effect_file_panes = [
             ("/project/left.md".to_string(), "%76".to_string()),
             ("/project/right.md".to_string(), "%75".to_string()),
         ];
@@ -23862,7 +23888,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let detached = dir.path().join("detached.md");
         std::fs::write(&detached, "---\nresume: conv-1\n---\n").unwrap();
-        let texts = agent_doc_crdt_relay_io::allocated_canonical_texts(&[detached.clone()]);
+        let texts =
+            agent_doc_crdt_relay_io::allocated_canonical_texts(std::slice::from_ref(&detached));
         assert_eq!(texts.len(), 1);
         assert_eq!(texts[0].0, detached);
         assert!(
@@ -32424,6 +32451,8 @@ mod tests {
             identity: None,
             state_vector_b64,
             expected_canonical_hash: None,
+            provisional_replacement: false,
+            expected_canonical_state_vector_b64: None,
             update_b64: None,
             content_hash: None,
             disk_persisted: false,
@@ -32610,6 +32639,8 @@ mod tests {
                 identity: Some("jetbrains:prior-controller".into()),
                 state_vector_b64: None,
                 expected_canonical_hash: None,
+                provisional_replacement: false,
+                expected_canonical_state_vector_b64: None,
                 update_b64: None,
                 content_hash: None,
                 disk_persisted: false,

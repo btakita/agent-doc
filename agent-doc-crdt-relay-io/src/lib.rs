@@ -1781,13 +1781,38 @@ pub fn register_replica_for_file_with_precondition(
     force_full_bootstrap: bool,
     expected_canonical_hash: Option<&str>,
 ) -> Result<Option<ReplicaRegistration>> {
+    register_replica_for_file_with_precondition_and_replacement_mode(
+        file,
+        identity,
+        retained_state_vector,
+        editor_pid,
+        force_full_bootstrap,
+        expected_canonical_hash,
+        false,
+    )
+}
+
+/// Register a candidate replacement without retiring its predecessor until the
+/// editor has reconciled the returned canonical bootstrap with its live buffer.
+pub fn register_replica_for_file_with_precondition_and_replacement_mode(
+    file: &Path,
+    identity: &str,
+    retained_state_vector: Option<&[u8]>,
+    editor_pid: Option<u32>,
+    force_full_bootstrap: bool,
+    expected_canonical_hash: Option<&str>,
+    provisional_replacement: bool,
+) -> Result<Option<ReplicaRegistration>> {
     let result = register_replica_for_file_incremental_with_liveness_and_precondition(
         file,
         identity,
         retained_state_vector,
         force_full_bootstrap,
         editor_pid,
-        expected_canonical_hash,
+        ReplicaRegistrationPrecondition {
+            expected_canonical_hash,
+            provisional_replacement,
+        },
         agent_doc_reliable_sync_io::process_pid_is_live,
     );
     // Failed admission is not an editor-close event. Publish the explicit PID
@@ -1834,9 +1859,15 @@ fn register_replica_for_file_incremental_with_liveness(
         retained_state_vector,
         force_full_bootstrap,
         registering_editor_pid,
-        None,
+        ReplicaRegistrationPrecondition::default(),
         is_pid_live,
     )
+}
+
+#[derive(Default)]
+struct ReplicaRegistrationPrecondition<'a> {
+    expected_canonical_hash: Option<&'a str>,
+    provisional_replacement: bool,
 }
 
 fn register_replica_for_file_incremental_with_liveness_and_precondition(
@@ -1845,9 +1876,13 @@ fn register_replica_for_file_incremental_with_liveness_and_precondition(
     retained_state_vector: Option<&[u8]>,
     force_full_bootstrap: bool,
     registering_editor_pid: Option<u32>,
-    expected_canonical_hash: Option<&str>,
+    precondition: ReplicaRegistrationPrecondition<'_>,
     is_pid_live: impl Fn(u32) -> bool,
 ) -> Result<Option<ReplicaRegistration>> {
+    let ReplicaRegistrationPrecondition {
+        expected_canonical_hash,
+        provisional_replacement,
+    } = precondition;
     let authority = authority_for_file(&file.display().to_string());
     // `replica_register` is itself a process-scoped proof that an editor has
     // this document open. Do not require the separately-pushed reliable-sync
@@ -1883,7 +1918,9 @@ fn register_replica_for_file_incremental_with_liveness_and_precondition(
     let superseded_client_ids =
         superseded_logical_replica_ids(&document_hash, identity, client_id)?;
     let mut retired_client_ids = dead_client_ids.clone();
-    retired_client_ids.extend(superseded_client_ids.iter().copied());
+    if !provisional_replacement {
+        retired_client_ids.extend(superseded_client_ids.iter().copied());
+    }
     retired_client_ids.sort_unstable();
     retired_client_ids.dedup();
     let (
@@ -1941,7 +1978,7 @@ fn register_replica_for_file_incremental_with_liveness_and_precondition(
         for retired_client_id in &retired_client_ids {
             hub.deregister(*retired_client_id);
         }
-        if !superseded_client_ids.is_empty() {
+        if !provisional_replacement && !superseded_client_ids.is_empty() {
             hub.fence_replica_generation();
         }
         if hub.is_registered(client_id) {
@@ -2022,15 +2059,20 @@ fn register_replica_for_file_incremental_with_liveness_and_precondition(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_replica_register file={} authority=multi_replica client_id={} bootstrap_bytes={} bootstrap_kind={} canonical_state_vector_bytes={} dead_members_pruned={} superseded_generations_pruned={} generation_fenced={}",
+            "crdt_replica_register file={} authority=multi_replica client_id={} bootstrap_bytes={} bootstrap_kind={} canonical_state_vector_bytes={} dead_members_pruned={} superseded_generations_pruned={} generation_fenced={} provisional_replacement={}",
             file.display(),
             client_id,
             bootstrap.len(),
             if incremental { "delta" } else { "full" },
             canonical_state_vector.len(),
             dead_client_ids.len(),
-            superseded_client_ids.len(),
-            !superseded_client_ids.is_empty(),
+            if provisional_replacement {
+                0
+            } else {
+                superseded_client_ids.len()
+            },
+            !provisional_replacement && !superseded_client_ids.is_empty(),
+            provisional_replacement,
         ),
     );
     Ok(Some(ReplicaRegistration {
@@ -2042,6 +2084,61 @@ fn register_replica_for_file_incremental_with_liveness_and_precondition(
         canonical_covers_retained_frontier,
         canonical_content_hash,
     }))
+}
+
+/// Commit a provisionally registered replacement after the editor accepts its
+/// canonical bootstrap. The exact candidate frontier precondition prevents an
+/// editor-side reconciliation decision from retiring the predecessor after an
+/// unobserved canonical move.
+pub fn promote_replica_replacement_for_file(
+    file: &Path,
+    identity: &str,
+    expected_canonical_state_vector: &[u8],
+) -> Result<String> {
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
+    let registration_lock = replica_registration_lock(&document_hash)?;
+    let _registration_guard = registration_lock.lock();
+    let client_id = mint_client_id(identity);
+    let superseded_client_ids =
+        superseded_logical_replica_ids(&document_hash, identity, client_id)?;
+    let candidate_recorded = replica_identity_registry()
+        .lock()
+        .get(&document_hash)
+        .and_then(|members| members.get(&client_id))
+        .is_some_and(|registered_identity| registered_identity == identity);
+    anyhow::ensure!(
+        candidate_recorded,
+        "replica_promote_precondition_failed: candidate registration unavailable; existing replica preserved"
+    );
+    with_hub(file, |hub| {
+        anyhow::ensure!(
+            hub.is_registered(client_id),
+            "replica_promote_precondition_failed: candidate membership unavailable; existing replica preserved"
+        );
+        anyhow::ensure!(
+            hub.canonical_state_vector() == expected_canonical_state_vector,
+            "replica_promote_precondition_failed: canonical frontier advanced; existing replica preserved"
+        );
+        for retired_client_id in &superseded_client_ids {
+            hub.deregister(*retired_client_id);
+        }
+        if !superseded_client_ids.is_empty() {
+            hub.fence_replica_generation();
+        }
+        Ok::<_, anyhow::Error>(())
+    })??;
+    record_replica_identity(&document_hash, client_id, identity, &superseded_client_ids)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_replica_promote file={} client_id={} superseded_generations_pruned={} generation_fenced={}",
+            file.display(),
+            client_id,
+            superseded_client_ids.len(),
+            !superseded_client_ids.is_empty(),
+        ),
+    );
+    current_lineage_for_file(file)?.context("promoted replica is missing its canonical lineage")
 }
 
 /// Queue an exact-hash canonical projection receipt for an already registered
@@ -5627,6 +5724,72 @@ mod tests {
             assert!(!hub.is_registered(original.client_id));
             assert!(hub.is_registered(replacement.client_id));
             assert_eq!(hub.canonical_text(), canonical);
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn provisional_replacement_preserves_predecessor_until_promoted() {
+        let (_dir, doc) = temp_doc("provisional-replacement.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let pid = std::process::id();
+        let base_identity = format!("jetbrains-{pid}-provisional:/tmp/provisional-replacement.md");
+        let original =
+            register_editor_replica_for_file_incremental(&doc, &base_identity, None, pid)
+                .unwrap()
+                .expect("initial replica should attach");
+        let replacement_identity = format!("{base_identity}:refresh-1");
+        let replacement = register_replica_for_file_with_precondition_and_replacement_mode(
+            &doc,
+            &replacement_identity,
+            Some(&original.canonical_state_vector),
+            Some(pid),
+            true,
+            None,
+            true,
+        )
+        .unwrap()
+        .expect("provisional replacement should attach");
+        let replacement_id = replacement.client_id;
+        with_hub(&doc, |hub| {
+            assert!(hub.is_registered(original.client_id));
+            assert!(hub.is_registered(replacement_id));
+            assert_eq!(hub.live_count(), 2);
+        })
+        .unwrap();
+
+        assert!(deregister_editor_replica_for_file(&doc, &replacement_identity, pid).unwrap());
+        with_hub(&doc, |hub| {
+            assert!(hub.is_registered(original.client_id));
+            assert!(!hub.is_registered(replacement_id));
+            assert_eq!(hub.live_count(), 1);
+        })
+        .unwrap();
+        assert_eq!(crdt_authority_for_file(&doc), CrdtAuthority::MultiReplica);
+
+        let replacement = register_replica_for_file_with_precondition_and_replacement_mode(
+            &doc,
+            &replacement_identity,
+            Some(&original.canonical_state_vector),
+            Some(pid),
+            true,
+            None,
+            true,
+        )
+        .unwrap()
+        .expect("replacement retry should attach provisionally");
+        let promoted_lineage = promote_replica_replacement_for_file(
+            &doc,
+            &replacement_identity,
+            &replacement.canonical_state_vector,
+        )
+        .unwrap();
+        assert!(!promoted_lineage.is_empty());
+        with_hub(&doc, |hub| {
+            assert!(!hub.is_registered(original.client_id));
+            assert!(hub.is_registered(replacement.client_id));
+            assert_eq!(hub.live_count(), 1);
         })
         .unwrap();
     }

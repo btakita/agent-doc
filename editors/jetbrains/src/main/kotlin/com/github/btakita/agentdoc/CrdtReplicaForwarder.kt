@@ -78,6 +78,7 @@ class CrdtReplicaForwarder(
     ownershipContext: ThreadSafeContext = ThreadSafeContext(),
     private val resumeState: ReplicaResumeState? = null,
     private val expectedCanonicalHash: String? = null,
+    private val provisionalReplacement: Boolean = false,
 ) {
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaForwarder::class.java)
     private var pushedVersion: ByteArray? = null
@@ -137,7 +138,13 @@ class CrdtReplicaForwarder(
         lastRegisterFailureReason = null
         try {
             val registerStarted = System.nanoTime()
-            val ack = transport.register(filePath, identity, resumeState?.stateVector, expectedCanonicalHash).also {
+            val ack = transport.register(
+                filePath,
+                identity,
+                resumeState?.stateVector,
+                expectedCanonicalHash,
+                provisionalReplacement,
+            ).also {
                 logSlow("transport.register", registerStarted, details = "ok=${it != null}")
             }
             if (ack == null) {
@@ -227,6 +234,18 @@ class CrdtReplicaForwarder(
         } finally {
             logSlow("register", started, warnMs = 100)
         }
+    }
+
+    /** Atomically retire the predecessor after all editor-side checks commit. */
+    fun promoteReplacement(): Boolean {
+        if (!provisionalReplacement) return true
+        // Finalization may have safely published the operator buffer through
+        // this candidate, so fence against its current frontier rather than the
+        // older bootstrap frontier.
+        val expectedFrontier = node.stateVector() ?: return false
+        val promotedLineage = transport.promoteReplacement(filePath, identity, expectedFrontier) ?: return false
+        lineage = promotedLineage
+        return true
     }
 
     /**
@@ -598,6 +617,27 @@ interface ReplicaTransport {
         if (expectedCanonicalHash == null) register(filePath, identity, stateVector) else null
 
     /**
+     * A provisional replacement joins the relay without retiring the prior
+     * logical generation. Older transports fail closed rather than turning a
+     * rejected candidate into a false document-close event.
+     */
+    fun register(
+        filePath: String,
+        identity: String,
+        stateVector: ByteArray?,
+        expectedCanonicalHash: String?,
+        provisionalReplacement: Boolean,
+    ): ReplicaRegisterAck? =
+        if (provisionalReplacement) null else register(filePath, identity, stateVector, expectedCanonicalHash)
+
+    /** Commit a provisional replacement against the exact registered frontier. */
+    fun promoteReplacement(
+        filePath: String,
+        identity: String,
+        expectedCanonicalStateVector: ByteArray,
+    ): String? = null
+
+    /**
      * Human-readable reason the most recent [register] returned null (socket
      * unavailable, `ok=false`, missing `client_id`, …), or null if unknown. Lets the
      * caller log WHY register failed instead of a bare "register failed" WARN.
@@ -684,6 +724,16 @@ class CpSocketReplicaTransport(
         stateVector: ByteArray?,
         expectedCanonicalHash: String?,
     ): ReplicaRegisterAck? {
+        return register(filePath, identity, stateVector, expectedCanonicalHash, false)
+    }
+
+    override fun register(
+        filePath: String,
+        identity: String,
+        stateVector: ByteArray?,
+        expectedCanonicalHash: String?,
+        provisionalReplacement: Boolean,
+    ): ReplicaRegisterAck? {
         val response = send(
             controllerRequest("replica_register", filePath, identity) {
                 expectedCanonicalHash?.let { expected ->
@@ -694,6 +744,9 @@ class CpSocketReplicaTransport(
                         "state_vector_b64",
                         Base64.getEncoder().encodeToString(stateVector),
                     )
+                }
+                if (provisionalReplacement) {
+                    it.addProperty("provisional_replacement", true)
                 }
             },
         )
@@ -743,6 +796,23 @@ class CpSocketReplicaTransport(
             canonicalCoversRetainedFrontier = canonicalCoversRetainedFrontier,
             canonicalContentHash = canonicalContentHash,
         )
+    }
+
+    override fun promoteReplacement(
+        filePath: String,
+        identity: String,
+        expectedCanonicalStateVector: ByteArray,
+    ): String? {
+        val response = send(
+            controllerRequest("replica_promote", filePath, identity) {
+                it.addProperty(
+                    "expected_canonical_state_vector_b64",
+                    Base64.getEncoder().encodeToString(expectedCanonicalStateVector),
+                )
+            },
+        ) ?: return null
+        if (!response.ok || response.data?.get("promoted")?.asBoolean != true) return null
+        return response.data.get("lineage")?.asString
     }
 
     override fun broadcastUpdate(filePath: String, identity: String, update: ByteArray) {

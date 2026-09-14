@@ -88,6 +88,18 @@ static IPC_LISTENER_GENERATIONS: std::sync::LazyLock<
 /// quiesce boundary. A freshly loaded generation starts with this flag clear.
 static NATIVE_GENERATION_QUIESCING: AtomicBool = AtomicBool::new(false);
 
+/// Write a native-host diagnostic without ever turning a closed stderr pipe
+/// into a second panic inside the IDE process.
+fn write_ffi_diagnostic(mut output: impl std::io::Write, message: std::fmt::Arguments<'_>) {
+    let _ = output.write_fmt(message);
+    let _ = output.write_all(b"\n");
+    let _ = output.flush();
+}
+
+fn ffi_diagnostic(message: std::fmt::Arguments<'_>) {
+    write_ffi_diagnostic(std::io::stderr(), message);
+}
+
 /// Keep a Rust panic inside a void C-ABI callback from unwinding across JNA.
 ///
 /// The root cdylib is loaded into the editor process. Any panic that reaches an
@@ -100,7 +112,9 @@ fn catch_ffi_void(name: &str, body: impl FnOnce()) {
             .copied()
             .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
             .unwrap_or("<non-string panic>");
-        eprintln!("agent-doc FFI panic caught in {name} (degrading to no-op): {message}");
+        ffi_diagnostic(format_args!(
+            "agent-doc FFI panic caught in {name} (degrading to no-op): {message}"
+        ));
     }
 }
 
@@ -411,7 +425,9 @@ pub unsafe extern "C" fn agent_doc_lazily_current_observed_v1(
                     "editor_document_state_projection",
                 )
             {
-                eprintln!("[ffi] could not publish editor document projection for {path}: {err:#}");
+                ffi_diagnostic(format_args!(
+                    "[ffi] could not publish editor document projection for {path}: {err:#}"
+                ));
             }
             if no_unsaved_operator_edits == 0
                 && let Err(err) = observe_editor_current_from_ffi(
@@ -421,9 +437,9 @@ pub unsafe extern "C" fn agent_doc_lazily_current_observed_v1(
                     "operator_editor_content_advanced",
                 )
             {
-                eprintln!(
+                ffi_diagnostic(format_args!(
                     "[deferred-write] could not reconcile operator editor authority for {path}: {err}"
-                );
+                ));
             }
         }
     });
@@ -4899,6 +4915,35 @@ mod ack_content_tests {
         assert!(
             boundary.is_ok(),
             "a native observation panic must degrade to a no-op, not unwind into the IDE"
+        );
+    }
+
+    #[test]
+    fn ffi_diagnostic_ignores_a_closed_host_pipe() {
+        struct ClosedPipe;
+
+        impl std::io::Write for ClosedPipe {
+            fn write(&mut self, _buffer: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "host launcher exited",
+                ))
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "host launcher exited",
+                ))
+            }
+        }
+
+        let boundary = std::panic::catch_unwind(|| {
+            write_ffi_diagnostic(ClosedPipe, format_args!("replica is not registered"));
+        });
+        assert!(
+            boundary.is_ok(),
+            "a closed IDEA launcher pipe must not make an FFI diagnostic panic"
         );
     }
 

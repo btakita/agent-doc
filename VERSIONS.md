@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.392
+
+- **Native-host diagnostics tolerate closed launcher pipes
+  (`#currentobserveclosedpipe`).** Current-document observation now writes both
+  ordinary controller-race diagnostics and caught-panic reports through an
+  error-ignoring sink. A detached IDEA launch whose stderr owner has exited can
+  no longer turn a benign “replica is not registered” report into a panic (or
+  turn that panic into a double-faulting SIGABRT). A broken-pipe regression
+  covers the exact failure mode.
+
 ## 0.35.391
 
 - **A failed native current-document observation can no longer abort IntelliJ

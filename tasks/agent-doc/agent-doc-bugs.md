@@ -13,7 +13,7 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -702,6 +702,13 @@ Verification and release:
 The exchange is large; I did not compact it because this cycle had no compact opt-in.
 
 Confidence: high. Escalation: none.
+❯ Stopped. The new invocation was not admitted because session tracking misparsed `session-check` as:
+
+❯ `/home/brian/work/btakita/agent-loop/session-check`
+
+❯ That path does not exist, so no cycle contract was created. I did not rerun preflight or backend `session-check`.
+
+❯ Note: diagnostic code changes made before this interruption remain uncommitted in `src/agent-doc`.
 <!-- agent:boundary:330692a0:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -711,10 +718,12 @@ Confidence: high. Escalation: none.
 t## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
+- 🚧 do [#fixrunbackend]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] 🚧 [#fixrunbackend] Fix Run Agent Doc on backend.md: authoritative actor generation 37 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md owns pane %3 but route could not drain the active closeout before dispatch: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: resume durable checkpoint cycle=cycle-1789400616770 phase=write_applied target="- PR 492 reverted a bunch of Dillon's changes. Please look at the review. I closed it for now. Should we re-open it without the reverts?\n- PR 492 reverted a bunch of Dillon's changes. Please look at the review. I closed it for now. Should we re-open it without the reverts?" capture_id=cycle-1789400616770; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/backend.md
 <!-- /agent:backlog -->
 
 ## Review

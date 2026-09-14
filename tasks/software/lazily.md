@@ -1276,6 +1276,32 @@ This preserves one writer for the session document, prevents duplicate or semant
 No code change is needed: the hook's rejection is the enforcement mechanism, and the parent-owned workflow is the remedy. Changed path: only this session document through agent-doc. Verification: inspected the existing coined-ID session-check enforcement and the prior queue report that reproduced the hook block. No tests were required for a process decision; the hook already exercises the fail-closed path. Confidence: high. Escalation: none.
 
 The exchange remains large with an active auto queue; I did not interrupt it for compaction.
+
+### Re: do [#twopreexisting] — gpt-5.6-sol · 2026-09-14T19:46-04:00
+
+> **Queue prompt:**
+>
+> do [#twopreexisting]
+
+
+Completed both pre-existing lazily-cpp quirks.
+
+- `scripts/check-ci-reach.sh` now recognizes attached output/input redirects (including fd-prefixed forms) before path basenaming, so `command -v uvx >/dev/null 2>&1` normalizes to `command -v uvx` rather than inventing a `null` argument.
+- `scripts/check-conformance-coverage.sh` no longer claims that `make conformance-coverage` unconditionally builds and runs ctest. Its stale-evidence guidance names the required `conformance-coverage: test` edge and tells the operator to restore that edge before rerunning.
+- Added `scripts/test-ci-reach-quirks.sh`. It exercises the production normalizer against attached redirect variants, rejects the old false diagnostic, and pins the guidance to the actual Makefile edge. The live CI-reach checker invokes these probes internally, preserving its existing Makefile/CI anchor shape.
+
+Verification passed:
+
+- `bash -n ./scripts/check-ci-reach.sh` and `bash -n ./scripts/test-ci-reach-quirks.sh`
+- `bash ./scripts/test-ci-reach-quirks.sh`
+- `make ci-reach`
+- lazily-cpp full `make check`
+- agent-loop full `make check`
+- `git diff --check` on the scoped lazily-cpp paths
+
+Commits: lazily-cpp `96739b7` and parent pointer `1a1acf2bba`. The latest lazily-cpp CI run (`34907917277`) is green; it predates this not-yet-pushed commit. The latest parent run (`34909224988`) started zero jobs because GitHub rejected both at the billing/spending-limit gate, so it provides no test verdict. Confidence is high from the focused and full local suites.
+
+The separate wasm `^#` filter gap remains untouched for its own queued item. The exchange is large, but I did not compact it while the automatic queue is active.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1283,7 +1309,7 @@ The exchange remains large with an active auto queue; I did not interrupt it for
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#subagentscannotcoin]~~
-- do [#twopreexisting]
+- ~~do [#twopreexisting]~~
 - do [#lazilycppcheck]
 - do [#lazilycheckconformance]
 - do [#deadguardcode]
@@ -1309,7 +1335,6 @@ The exchange remains large with an active auto queue; I did not interrupt it for
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#twopreexisting] Two pre-existing normalizer quirks cpp found while pinning the closure, neither touched: `command -v uvx >/dev/null` anchors as `command -v uvx null` because the normalizer basenames the redirection target; and check-conformance-coverage.sh's refusal text claims `make conformance-coverage` 'builds, runs ctest and audits in one invocation', which is false exactly when the conformance-coverage: test edge is dropped. Third quirk alongside the wasm ^# filter gap.
 - [ ] [#lazilycppcheck] lazily-cpp check-wasm-tiers.sh two holes found during #auditeveryguard but owned by the wasm channel: :99 folds an UNREADABLE tier manifest into the same 'replayed 0, below the floor' as an empty one (missing IS distinguished), and :149's `find $build_dir/tests` is ungated where `-d $build_dir` is gated, so a configured-but-unbuilt tier dies at exit 1 with ZERO stderr. Same function owns the ^# filter gap already filed.
 - [ ] [#lazilycheckconformance] lazily-go check-conformance-coverage.sh:369 -- jq's status is unchecked in BOTH process-substitution call sites feeding scenario_ids, so a malformed fixture reads as 'no scenarios' rather than as a parse error. go flagged it as reasoning-not-measurement and did not attack it; the 151/151 scenario equality probably catches the drop, which is what needs confirming. dart has the same shape and reached the same conclusion independently.
 - [ ] [#deadguardcode] Dead guard code found across bindings during #auditeveryguard, none removed: `collect_sources()` is defined-and-never-called in js (:93), py (:89-95), go (:266) and is the vestige of the static source scan the runtime manifest replaced; py also has a dead assignment at :250. Removing them touches files lazily-spec's check-corpus-floors.mjs greps, so it wants one deliberate pass rather than incidental edits.

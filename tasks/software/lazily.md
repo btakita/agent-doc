@@ -1176,6 +1176,30 @@ Mutation suites plant the measured attacks: dispatch-only workflows, narrowed br
 All binding commits are pushed and each local HEAD equals origin/main. The superproject pins exactly those ten commits in 9e93eeaa8; its own make check passed. Unrelated dirty shared-worktree files were not staged. Branch-protection/required-check settings remain an external GitHub policy rather than something a repository script can prove.
 
 The exchange is large (1,118 lines), but the active auto queue remains drainable, so I did not interrupt it for compaction.
+
+### Re: do [#closeacceptsame] — gpt-5.6-sol · 2026-09-14T19:27:57-04:00
+
+> **Queue prompt:**
+>
+> do [#closeacceptsame]
+
+
+Accepted and documented. I am not adding per-recipe-content pins.
+
+The ci-reach contract is intentionally one-way: every gate anchor reached by the local closure must occur in its pinned, active CI step. It is not recipe equality and does not prove that local make check still runs every command CI runs. Therefore two states remain accepted and visible:
+
+- a recipe can be weakened while its shorter anchors remain an in-order subsequence of the stronger CI command;
+- where one pinned step carries multiple commands, a recipe can be repointed at a sibling command in that same step.
+
+Python proves this is live and pins its present width: 1 of 8 pinned steps. Its Test (make test) step carries both the conformance-manifest and suite commands; removing uv run poe test from the recipe leaves ci-reach green while local suite/conformance execution disappears. JavaScript independently records the same width shape at 1 of 10. Godot is the broader make-invoked case: CI runs make check, so there is no independent CI-side spelling to compare and that limitation is already explicit in ci-reach.conf.
+
+Closing the class requires a second, exact spelling of every recipe. That was rejected in #closeremaininghalf because its churn is recipe-rate: every legitimate flag or argument edit changes the pin, encouraging reflexive updates and recreating a passes-when-stale ledger. Splitting Python's one multi-command step would close one instance but not recipe weakening or make-invoked gates, and would misleadingly look like a class-wide fix.
+
+The accepted cost is concrete: local closeout can become weaker while CI remains stronger. This does not allow an unchanged CI step to silently stop running the gate; the step pin, exact job/workflow activation pins, and independent activation floors cover that direction. Recipe review and the pinned residual-width tests cover the local direction without claiming equivalence.
+
+Changed paths: only this session document through agent-doc. I inspected the prior #closeremaininghalf decision, the Python live falsification/width test, and the Rust/C#/Go/JS/Godot guard documentation with tsift envelopes (falling back to scoped rg after two workspace FTS failures). No product code changed, so no new test run or binding commit was required; the immediately preceding cycle's full binding and superproject checks remain green. Confidence: high. Escalation: none.
+
+The exchange remains large with an active auto queue; I did not interrupt it for compaction.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1184,7 +1208,7 @@ The exchange is large (1,118 lines), but the active auto queue remains drainable
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~Resume multiple Claude code sessions that ended due to weekly token limit being reached.~~
 - ~~⏭️ do [#verifyworkflowactually]~~
-- 🚧 do [#closeacceptsame]
+- ~~do [#closeacceptsame]~~
 - do [#sharedscratchpadlive]
 - do [#decidereachclosure]
 - do [#subagentscannotcoin]
@@ -1214,7 +1238,6 @@ The exchange is large (1,118 lines), but the active auto queue remains drainable
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#closeacceptsame] Close or accept the same-pinned-step residual: a recipe repointed at ANOTHER command inside its own pinned step, or weakened in place (dropping --self-check, -race, --binding), stays green -- anchors match as in-order subsequences and extra CI-side tokens are allowed by design. py measured it LIVE and 1 step wide (drop `uv run poe test` from test: and the guard prints reached while the suite and conformance rungs 2-4 run zero times); py declined to split the step because that closes one instance and reads as closing the class. Residual width = count of pinned steps carrying more than one anchor. Only a per-recipe-content pin closes it, whose churn is recipe-rate -- rejected in #closeremaininghalf for that reason, so this may be accept-and-document.
 - [ ] [#sharedscratchpadlive] Shared scratchpad is a LIVE cross-repo hazard, not theoretical: cs had a lazily-zig Makefile restored into lazily-cs from a generically-named backup; dart found 64 files from an EARLIER dart agent including a pre-fix copy of the same guard one filename-transposition away and 409 bytes from its own working file; kt's $SP/Makefile.orig held zig content overwritten 2 minutes after its last restore from that name; cpp reports 11,220 files with ten bindings' copies of one guard inside 2KB, four written concurrently. A picked-up stale copy INVERTS measurements rather than breaking them. Working rule: repo-private subdirectory, repo-prefixed filenames, select by mtime, and verify every restore input against `git show` before each case INCLUDING rows that expect green -- dart showed green rows pass vacuously otherwise.
 - [ ] [#decidereachclosure] Decide where the ci-reach closure pin LIVES. rs measured the churn (32 commits touched the check: line, all before 2026-08-09) and argues the pin belongs ADJACENT to the root rule in the Makefile, beside check:, so a closure edit and its pin edit land in one hunk -- at ~3 edits/week the 'update the pin deliberately' remedy gets applied reflexively and no diagnostic wording prevents that. I placed it in the guard to match KNOWN_UNCOVERED's shape; rs followed the brief but advocates the other placement. Worth settling before the next growth phase.
 - [ ] [#subagentscannotcoin] Subagents cannot coin backlog ids: the agent-doc hook blocks an untracked id, and filing one would mean writing tasks/software/lazily.md from outside the agent's own repo. Hit by kt, dart, cs and gd across three cycles; each retags its commit to the queue head, so per-finding ids never exist and commit messages all carry the same id. Either give agents a way to file, or accept head-tagging and stop coining -- but the current state loses the mapping from commit to finding.

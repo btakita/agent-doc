@@ -2,7 +2,8 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-agent: claude
+  codex: 01a09bd3-269d-7182-a461-f9c16ef445ac
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -1126,13 +1127,29 @@ dart corrected my framing on the last cell: an excused member has **no mode**, b
 Magnitudes unchanged in all nine. Test counts moved only where tests were added: py 1098 → 1126.
 
 Exchange is at 1048 lines across 24 response sections; noting it, not compacting, with the queue active.
+
+### Re: Resume quota-stopped Claude sessions — gpt-5.6-sol · 2026-09-14T18:51-04:00
+
+> **Queue prompt:**
+>
+> Resume multiple Claude code sessions that ended due to weekly token limit being reached.
+
+Completed. I correlated the Claude transcript termination records with the live actor registry instead of restarting panes by appearance:
+
+- The Lazily Claude session ended with `error=rate_limit` on 2026-09-13. This pane is its live Codex document continuation, with the Claude and Codex resume IDs both preserved in `tasks/software/lazily.md`.
+- The agent-doc-bugs Claude session also ended with `error=rate_limit`. It now has a live Codex continuation on pane `%0`; that continuation is actively running the full `make check` suite, so I did not interrupt it.
+- The older Lazily Claude actor that recorded two stopped background agents was another incarnation of the same document workflow, not a third durable session to relaunch.
+
+I also checked the three plausible Haiven panes (`api`, `contracts`, and `fpe`). All are already-live Codex sessions with successful prior closeouts and no quota-stop record, so they were correctly left untouched. There is no live interactive Claude process remaining apart from Claude's browser native host.
+
+No code or tracked repository surface was changed for this operational queue item; the proof is the transcript `rate_limit` records plus live actor/process and pane state. The exchange is large (1,102 lines), but the active queue takes precedence over compaction.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 Resume multiple Claude code sessions that ended due to weekly token limit being reached.
+- ~~Resume multiple Claude code sessions that ended due to weekly token limit being reached.~~
 - do [#verifyworkflowactually]
 - do [#closeacceptsame]
 - do [#sharedscratchpadlive]
@@ -1164,7 +1181,7 @@ Exchange is at 1048 lines across 24 response sections; noting it, not compacting
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#verifyworkflowactually] Verify the workflow ACTUALLY RUNS -- the unverified claim under every ci-reach mechanism. js measured job-level `if: false`, job-level `continue-on-error: true`, and `on:` reduced to `workflow_dispatch`: all three leave the guard green, because the step map gave it a handle on the STEP and nothing has a handle on the job or the trigger. `ci-reach.conf` asserts 'runs on every push/PR' in a COMMENT. js closed the step-level halves (a step's own if:/continue-on-error). Needs one converged decision on what pins a job's and a workflow's activation, then one pass over nine repos.
+- [ ] [#verifyworkflowactually] Verify the workflow ACTUALLY RUNS -- the unverified claim under every ci-reach mechanism. js measured job-level `if: false`, job-level `continue-on-error: true`, and `on:` reduced to `workflow_dispatch`: all three leave the guard green, because the step map gave it a handle on the STEP and nothing has a handle on the job or the trigger. `ci-reach.conf` asserts 'runs on every push/PR' in a COMMENT. js closed the step-level halves (a step's own if:/continue-on-error). Needs one converged decision on what pins a job's and a workflow's activation, then one pass over nine repos.
 - [ ] [#closeacceptsame] Close or accept the same-pinned-step residual: a recipe repointed at ANOTHER command inside its own pinned step, or weakened in place (dropping --self-check, -race, --binding), stays green -- anchors match as in-order subsequences and extra CI-side tokens are allowed by design. py measured it LIVE and 1 step wide (drop `uv run poe test` from test: and the guard prints reached while the suite and conformance rungs 2-4 run zero times); py declined to split the step because that closes one instance and reads as closing the class. Residual width = count of pinned steps carrying more than one anchor. Only a per-recipe-content pin closes it, whose churn is recipe-rate -- rejected in #closeremaininghalf for that reason, so this may be accept-and-document.
 - [ ] [#sharedscratchpadlive] Shared scratchpad is a LIVE cross-repo hazard, not theoretical: cs had a lazily-zig Makefile restored into lazily-cs from a generically-named backup; dart found 64 files from an EARLIER dart agent including a pre-fix copy of the same guard one filename-transposition away and 409 bytes from its own working file; kt's $SP/Makefile.orig held zig content overwritten 2 minutes after its last restore from that name; cpp reports 11,220 files with ten bindings' copies of one guard inside 2KB, four written concurrently. A picked-up stale copy INVERTS measurements rather than breaking them. Working rule: repo-private subdirectory, repo-prefixed filenames, select by mtime, and verify every restore input against `git show` before each case INCLUDING rows that expect green -- dart showed green rows pass vacuously otherwise.
 - [ ] [#decidereachclosure] Decide where the ci-reach closure pin LIVES. rs measured the churn (32 commits touched the check: line, all before 2026-08-09) and argues the pin belongs ADJACENT to the root rule in the Makefile, beside check:, so a closure edit and its pin edit land in one hunk -- at ~3 edits/week the 'update the pin deliberately' remedy gets applied reflexively and no diagnostic wording prevents that. I placed it in the guard to match KNOWN_UNCOVERED's shape; rs followed the brief but advocates the other placement. Worth settling before the next growth phase.

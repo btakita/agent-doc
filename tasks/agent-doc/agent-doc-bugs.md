@@ -33,6 +33,55 @@ Editor-route layout supersede, controller bind-before-serve, the JB accept-leg b
 Compacted content:
 - Archived 33 response topic(s): #timestampresponseheader; #idledispatchstack; preflight stall fixed; docs.md reverse-order lists traced to one cycle; 30 more
 - Prior summary/context: prior compacted content: Archived 38 response topic(s): #actionable-review; #restartideaplugin restarted, do #pypiquo...
+❯ 🚧 Fix agent-doc causes to lazily.md stall:
+```
+› agent-doc /home/brian/work/btakita/agent-loop/tasks/software/lazily.md
+
+
+• Agent-doc admission still fails because the document snapshot differs from HEAD without a recoverable cycle.
+
+  From the session-owning pane, run:
+
+  agent-doc commit /home/brian/work/btakita/agent-loop/tasks/software/lazily.md
+  agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily.md
+
+  Then retry. Do not run agent-doc preflight or agent-doc claim.
+```
+
+### Re: #fixcauseslazily — gpt-5.6-sol · 2026-09-14 17:18 EDT
+
+> **Queue prompt:**
+>
+> do [#fixcauseslazily]
+
+
+Fixed the `lazily.md` admission stall in agent-doc and installed the corrected build.
+
+The root cause was the closeout drift classifier comparing tracked-work component bodies as raw text. When queue projection added the ephemeral `🚧` marker to an otherwise unchanged backlog item, the classifier labeled the snapshot/HEAD difference as user-content drift. That bypassed the existing safe preflight auto-commit path and produced the repeated manual `commit` / `session-check` instruction.
+
+The invariant is now explicit: a parsed `PendingItem.in_progress` difference is binary-owned projection metadata, while item id, checkbox state, task text, continuation, list shape, surrounding prose, and exchange content remain significant and fail closed. The policy owner remains `agent_doc_turn::closeout_recovery::classify_snapshot_head_drift`; it consumes the backlog crate's semantic signature instead of rebuilding tracked-work equality from raw strings.
+
+Transition policy:
+
+- boundary artifacts only → `BoundaryOnly`, recover;
+- queue/status/frontmatter drift plus backlog `🚧` projection only → `MetadataOnly`, recover through the existing preflight auto-commit effect;
+- exchange or real tracked-work content changes → `Content`, block;
+- missing snapshot/HEAD proof → remain fail-closed.
+
+Reactive topology is unchanged: baseline and HEAD are source facts, the shared pure classifier computes the recovery decision, preflight owns the auto-commit effect, and commit/snapshot receipts establish convergence. `session-check` consumes the same classification but remains diagnostic rather than silently committing a foreign live session. No polling, caches, or queue-state-machine redesign were added.
+
+Implementation commit: `5e2e18d22` (`fix: classify backlog progress markers as metadata`). It adds the semantic backlog signature, classifier and preflight regression coverage, and the closeout specification update.
+
+Verification passed:
+
+- focused backlog signature regression;
+- focused closeout classifier regression, including fail-closed id/state/text cases;
+- admission regression reproducing snapshot/HEAD metadata drift with a projected backlog `🚧`;
+- full `make check`;
+- `make install` (`agent-doc 0.35.395`);
+- latest GitHub Actions `CI` run: success.
+
+The installed binary now diagnoses the live `lazily.md` mismatch as document-only drift. Its current `session-check` still requests the owning pane's commit, as designed; the next normal admission from that pane exercises the corrected preflight auto-recovery path rather than stalling on the marker as user content.
 <!-- agent:boundary:44108b98:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -46,6 +95,14 @@ t## Pending / Not Built
 
 
 <!-- agent:backlog priority -->
+```
+› agent-doc /home/brian/work/btakita/agent-loop/tasks/software/lazily.md
+• Agent-doc admission still fails because the document snapshot differs from HEAD without a recoverable cycle.
+From the session-owning pane, run:
+agent-doc commit /home/brian/work/btakita/agent-loop/tasks/software/lazily.md
+agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily.md
+Then retry. Do not run agent-doc preflight or agent-doc claim.
+```
 <!-- /agent:backlog -->
 
 ## Review

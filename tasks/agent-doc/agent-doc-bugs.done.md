@@ -90,3 +90,4 @@
 - 2026-09-13 [#jbplugin382restart] [operator-verify] [P2] Restart IntelliJ to load JetBrains plugin 0.2.382. `make install` at 19:43 (binary 0.35.367) staged `~/.local/share/JetBrains/IntelliJIdea2026.1/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.382.jar`; the live IDE is still on 0.2.379, which is what preflight's standing `stale_plugin` warning reports. Same shape as the closed `#restartideaplugin` — it re-broke the plugin floor for `#tmuxfocussyncverify`, `#activateinstalledjetbrai`, and `#harnessswitchverify`, and for the `#jbfocusdocroute` half already shipped in 0.2.381.
 - 2026-09-13 [#fixcausesleftover] Fix the agent-doc causes of the leftover cruft in the backlog.
 - 2026-09-14 [#restartintellijload] [operator-verify] Restart IntelliJ to load plugin 0.2.385, then exercise a backend.md retained-projection refresh and confirm no File Cache Conflict appears.
+- 2026-09-14 [#fixcauseslazily] Fix agent-doc causes to lazily.md stall:

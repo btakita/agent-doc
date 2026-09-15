@@ -78,12 +78,16 @@ Evidence and closeout:
 - Public workflows were used only for cross-platform packaging/provenance transports; private heavy workflows remain disabled or manual-only.
 
 Marked `#lzstdlibmatrixrelease` complete.
+
+### Re: Is lazily-rs published — gpt-5 · 2026-09-15 09:37 EDT
+
+Yes. [`lazily` v0.58.0 is live on crates.io](https://crates.io/crates/lazily/0.58.0), and the [GitHub release](https://github.com/lazily-hub/lazily-rs/releases/tag/v0.58.0) is published. The complete stdlib release train and final verification evidence are recorded immediately above.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

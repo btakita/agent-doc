@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0a637-a27f-7cd1-a547-eab3401e5e38
+  codex: 01a0a6ea-ad68-7050-9fa4-fb00c2c4ddbd
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -13,7 +13,7 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -242,6 +242,35 @@ The Infra retained response was retried only through `session-check`, as require
 Regression coverage includes the initial delivery-CAS failure/retry, terminal late-strike recovery, committed-`HEAD` fencing, exact post-strike reap recovery, and rejection of an identical recurring prompt. Full `make check` passed after the final change. Source commits `bc18f121c`, `27b77801b`, `8b1e18117`, `d7e2eb1f6`, and `e94411dd8` are pushed to `main`; the corrected binary is installed and the relevant controllers were recycled.
 
 Per the weekly macOS release cadence, this was installed and pushed without creating another tag inside the one-week batch window. The session accretion warning remains informational; only an explicit operator clear resets it.
+
+### Re: FPE turn completion wedge — gpt-5 · 2026-09-15T17:40:55-04:00
+
+> **Queue prompt:**
+>
+> fpe.md turn did not complete. Fix agent-doc causes for the wedge.
+
+Fixed and pushed as `eb13e70dc` (`fix: classify compressed stash panes as unobservable`).
+
+The FPE turn had actually completed: `cycle-1789496338218` was committed with `commit_success`, its response was persisted, and its PR checks were green. The apparent wedge was an observation defect. Pane `%5` had been moved to the dense tmux `stash` window and compressed to one row; at that height Codex's composer was outside the captured viewport. `agent-doc session status` interpreted the absent prompt chrome as positive busy evidence and emitted `owned_pane_ready_busy_conflict`, even though the actor, supervisor, and controller lease all said `ready`.
+
+The pane-evidence policy now distinguishes three transitions:
+
+- a visible dispatch-ready composer is `alive-idle`;
+- an explicit draft or busy cue remains `alive-busy`;
+- a blank or sub-four-row viewport without positive busy evidence is `alive-unobservable`, with `prompt_ready=unknown`.
+
+This keeps completion authority with the committed document cycle and supervisor/controller lifecycle instead of deriving it from lossy tmux geometry. The new state is deliberately fail-closed for clear and restart operations, so the fix removes the false wedge signal without permitting input into a pane whose composer cannot be observed. Redesigning stash storage/layout was out of scope because stashing itself behaved correctly.
+
+Verification completed:
+
+- focused classification, draft-preservation, normal-busy, status-conflict, and clear fail-closed tests pass;
+- `make check` passes: 9,472 tests passed and 259 skipped;
+- the installed `v0.35.398` development build reports the real one-row FPE pane as `alive-unobservable`, actor/supervisor `ready`, with no ready/busy warning;
+- restoring the pane to eight rows reports its Codex composer normally, and `agent-doc session-check` still proves the FPE cycle committed with no drainable work;
+- GitHub Actions run `35026894043` passed;
+- the supervisor/controller recycle handoff was requested after installation.
+
+No release was cut because the latest tag was published today and the seven-day release cadence is still closed. Unrelated in-progress JetBrains and stale-window-remedy edits were left uncommitted.
 <!-- agent:boundary:44108b98:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -251,6 +280,7 @@ Per the weekly macOS release cadence, this was installed and pushed without crea
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 fpe.md turn did not complete. Fix agent-doc causes for the wedge.
 <!-- /agent:queue -->
 
 

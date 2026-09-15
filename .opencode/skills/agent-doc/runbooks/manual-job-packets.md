@@ -49,6 +49,10 @@ to accept, revise, or reject each packet result.
   preserved instead of blocking packet creation.
 - The parent reviews all worker results and runs required verification before
   finalizing the session document.
+- A packet that asks a worker to run tests names the target runner's native
+  failure-count signal. The worker preserves the command's exit status across
+  wrappers and pipes **and** reports that native count; a generic cross-runner
+  grep is not acceptable verification (`#lzfailedgrepvacuous`).
 
 ## Worker Result
 

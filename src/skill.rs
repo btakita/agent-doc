@@ -4086,6 +4086,16 @@ mod tests {
                 .unwrap();
         let codex =
             std::fs::read_to_string(dir.path().join(".codex/skills/agent-doc/SKILL.md")).unwrap();
+        let persist_closeout = BUNDLED_RUNBOOKS
+            .iter()
+            .find(|(name, _)| *name == "persist-closeout.md")
+            .unwrap()
+            .1;
+        let manual_job_packets = BUNDLED_RUNBOOKS
+            .iter()
+            .find(|(name, _)| *name == "manual-job-packets.md")
+            .unwrap()
+            .1;
 
         for content in [&claude, &codex, &opencode] {
             assert!(content.contains("agent-doc respond <FILE>"));
@@ -4096,9 +4106,17 @@ mod tests {
             assert!(content.contains("Imperative edits are executable directives"));
             assert!(content.contains("Never use the harness label (`codex`, `claude`)"));
             assert!(content.contains("Agent harnesses own full-suite verification"));
+            assert!(content.contains("Preserve the command's exit status explicitly"));
+            assert!(content.contains("runner-native failure count"));
+            assert!(content.contains("generic output grep copied from another runner"));
             assert!(content.contains("Do not waive red suites as \"unrelated\" or \"flaky\""));
             assert!(content.contains("Do not rely on a pre-commit hook"));
         }
+        assert!(persist_closeout.contains("Capture two independent proofs"));
+        assert!(persist_closeout.contains("deliberately failing run"));
+        assert!(manual_job_packets.contains("target runner's native"));
+        assert!(manual_job_packets.contains("generic cross-runner"));
+        assert!(manual_job_packets.contains("grep is not acceptable verification"));
         assert!(claude.contains("final document-mutation boundary for the cycle"));
         assert!(codex.contains("$CODEX_HOME/hooks.json"));
         assert!(codex.contains("fail-closed backstop"));

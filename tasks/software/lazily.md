@@ -1379,6 +1379,40 @@ Verification passed:
 Commits: lazily-go `932f1af` and parent pointer `15aba10051`. The latest pushed lazily-go CI run (`34907917585`) is green but predates this not-yet-pushed commit. The latest parent run (`34911113894`) started zero jobs because GitHub rejected both at the billing/spending-limit gate, so it contains no test verdict. Confidence is high; no code escalation remains, with the parent CI account gate tracked externally.
 
 The exchange is large, but I did not compact it while the automatic queue is active.
+
+### Re: do [#deadguardcode] — gpt-5.6-sol · 2026-09-14T20:16-04:00
+
+> **Queue prompt:**
+>
+> do [#deadguardcode]
+
+
+Completed the dead conformance-guard cleanup across lazily-js, lazily-py, and lazily-go.
+
+Changed path in each binding: `scripts/check-conformance-coverage.sh`.
+
+Removed:
+
+- the unused `TEST_DIRS` / `EXTS` arrays and defined-but-never-called `collect_sources()` function from all three guards—the runtime manifest replaced this static source-scan path;
+- the advertised unused Python `name="$(basename "$fixture")"` assignment;
+- the same demonstrably unused basename assignment found in the corresponding JS and Go loops during the deliberate pass.
+
+Lazily-spec’s `node scripts/check-corpus-floors.mjs` passed before and after the edits with the same captured artifact (`tart-8e6fe38e6a`), so removing these vestiges did not change its live ledger/floor extraction.
+
+Verification passed:
+
+- no `TEST_DIRS`, `EXTS`, `collect_sources`, `name=`, or `$name` references remain in the three guards
+- bash syntax checks for all three scripts
+- lazily-spec corpus-floor scanner, before and after
+- lazily-js full `make check`
+- lazily-py full `make check` (exit 0; the digest classifier mislabeled several passing test names containing “failure”/“exception,” while the captured log records them as `PASSED`)
+- lazily-go full `make check`
+- agent-loop full `make check`
+- scoped `git diff --check`
+
+Commits: JS `b9286fd`, Python `8f8ecda`, Go `1a40e16`, and parent pointers `80f9578f95`. The latest pushed binding CI runs are green (JS `34907332999`, Python/main `34907058575`, Go `34911856808`), though they predate these not-yet-pushed cleanup commits. The latest parent run (`34911858030`) started zero jobs because GitHub rejected both at the billing/spending-limit gate, so it contains no test verdict. Confidence is high; no code escalation remains, with the parent CI account gate tracked externally.
+
+The exchange is large, but I did not compact it while the automatic queue is active.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1389,7 +1423,7 @@ The exchange is large, but I did not compact it while the automatic queue is act
 - ~~do [#twopreexisting]~~
 - ~~do [#lazilycppcheck]~~
 - ~~do [#lazilycheckconformance]~~
-- do [#deadguardcode]
+- ~~do [#deadguardcode]~~
 - do [#lazilycpptwo]
 - do [#lazilyderivesreplayed]
 - do [#documentbindingsstamp]
@@ -1412,7 +1446,6 @@ The exchange is large, but I did not compact it while the automatic queue is act
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#deadguardcode] Dead guard code found across bindings during #auditeveryguard, none removed: `collect_sources()` is defined-and-never-called in js (:93), py (:89-95), go (:266) and is the vestige of the static source scan the runtime manifest replaced; py also has a dead assignment at :250. Removing them touches files lazily-spec's check-corpus-floors.mjs greps, so it wants one deliberate pass rather than incidental edits.
 - [ ] [#lazilycpptwo] #lzwasmstampchannel: lazily-cpp's two wasm conformance manifests are deliberately unstamped, and `scripts/check-wasm-tiers.sh:99` filters `^@` but not `^#` -- stamping them would inflate both tier counts by 1 and slacken both floors by one. Belongs to the wasm channel's own change.
 - [ ] [#lazilyderivesreplayed] #lzareaderivetestfile: lazily-js's `AREA_OF_FIXTURE` derives replayed areas from string literals across EVERY test source, so a realistic-looking fixture path inside a new test file registers as a replayed area and reddens the corpus check. Audit which other bindings derive coverage from source literals rather than from run evidence.
 - [ ] [#documentbindingsstamp] #lzstampsitedoc: document which bindings can stamp producer-side and which cannot, with the reason -- cpp cannot (38 binaries append in ios::app, first-writer-stamps is a race), gd must not (append_line is append-only across gdUnit4 passes, so a producer-side stamp cannot clear a leftover file), rs/dart/zig write stamp+record in one locked call so a stamp-only file is unreachable. Recipe-side and producer-side are NOT equivalent and the correct choice is per binding.

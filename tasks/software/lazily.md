@@ -1569,6 +1569,36 @@ Regression and verification:
 - Latest agent-doc CI `34907156640` and lazily-spec CI `34914527050`: green. Root GitHub jobs remain externally blocked before steps start.
 
 Confidence: high. The rule is pinned in source, installed projections, worker briefing, a focused test, and the shared per-binding table. Escalation: none; no follow-up item is needed.
+
+### Re: do [#lzastscanundercount] — gpt-5.6-sol · 2026-09-14T21:20-04:00
+
+> **Queue prompt:**
+>
+> do [#lzastscanundercount]
+
+
+Done. The hygiene scanners now have executable coverage for the parser blind spots, and the cross-binding rule is recorded in lazily-spec.
+
+- Rust's flag-hygiene floor is pinned to the measured 101 sanctioned reads. Removing macro-token traversal now produces 39 and fails instead of reporting a clean partial scan. A synthetic regression proves both `Value::as_bool` function paths and method calls inside `assert_eq!` are found.
+- Rust's separate fixture-struct-field scanner now has a regression proving selector reads inside macro tokens are counted.
+- Kotlin's empty-default matcher accepts qualified constructors, nested/simple type arguments, and normalized whitespace. Built-in probes include the previously missed `?: emptyMap<String, Boolean>()` form.
+- The remaining AST users were audited: TypeScript, Go, and Python recursively traverse ordinary child nodes and have no macro-token container analogous to Rust; Dart and Kotlin use comment-aware lexical stripping. JavaScript's TypeScript parser also avoids the apostrophe-in-comment failure of the retired regex.
+- lazily-spec now documents the macro/token-container, function-path-versus-method, generic/whitespace, comment/literal, and real-population-floor acceptance rules.
+
+Commits:
+
+- lazily-rs `148811c`
+- lazily-kt `8e420d9`
+- lazily-spec `5ef4ab4`
+- superproject pointers `d463465eb`
+
+Verification:
+
+- lazily-rs `make check`: exit 0; targeted libtest regressions: 4 passed, 0 failed across the two modified harnesses; flag scan reports 101 sanctioned reads.
+- lazily-kt `make check`: exit 0; 154 JUnit failure/error attributes sum to 0.
+- lazily-spec `make check`: exit 0; pytest reports 301 passed.
+- superproject `make check`: exit 0.
+- Latest published lazily-rs, lazily-kt, and lazily-spec CI runs are green. The latest superproject Agent Doc run remains the known zero-step external CI-start failure; local verification is green.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1585,7 +1615,7 @@ Confidence: high. The rule is pinned in source, installed projections, worker br
 - ~~do [#documentbindingsstamp]~~
 - ~~do [#lzmakepfootgun]~~
 - ~~do [#lzfailedgrepvacuous]~~
-- do [#lzastscanundercount]
+- ~~do [#lzastscanundercount]~~
 - do [#lzplantprobemethod]
 - do [#lzcsreverserung]
 - do [#lzpyelementdescend]
@@ -1602,7 +1632,7 @@ Confidence: high. The rule is pinned in source, installed projections, worker br
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzastscanundercount] [lazily-rs, and any binding whose hygiene rung uses an AST parser] AN AST-ONLY SCAN SILENTLY UNDER-REPORTS, and lazily-rs measured the magnitude: a `syn`-based walk saw 39 of the 86 `as_bool()` sites in its test tree and reported the other 47 CLEAN, because `syn` DOES NOT DESCEND INTO MACRO TOKEN STREAMS and most fixture comparisons in that binding live inside `assert_eq!`. A rung that silently sees 45 percent of its target is worse than no rung, because it produces a green that reads as coverage. rs's rung now scans tokens as well as the AST. TWO MORE SPELLING TRAPS FROM THE SAME WORK, both of which an obvious implementation misses: `.and_then(Value::as_bool)` is a function PATH, not a method call, and that was the spelling of the one live site outside tests/; and lazily-kt's first pattern required a bare `()` so it missed `?: emptyMap<String, Boolean>()` with type arguments, caught only because it planted a deliberate near-miss. CHECK EVERY HYGIENE RUNG LANDED IN #lzsiblingrunnermasking against these three: does it see inside macros, does it match function paths as well as method calls, and does it tolerate type arguments and whitespace variation. lazily-js is likely safe (TypeScript parser, and it found that a REGEX mis-parses apostrophes in comments and then silently stops finding call sites — the same class one layer down). The general rule worth recording: a scan's floor must be pinned to the REAL population, which is what caught rs's undercount — its MIN_SANCTIONED_READS of 101 against an AST-only count of 39 would not have reconciled.
+- [x] [#lzastscanundercount] [lazily-rs, and any binding whose hygiene rung uses an AST parser] AN AST-ONLY SCAN SILENTLY UNDER-REPORTS, and lazily-rs measured the magnitude: a `syn`-based walk saw 39 of the 86 `as_bool()` sites in its test tree and reported the other 47 CLEAN, because `syn` DOES NOT DESCEND INTO MACRO TOKEN STREAMS and most fixture comparisons in that binding live inside `assert_eq!`. A rung that silently sees 45 percent of its target is worse than no rung, because it produces a green that reads as coverage. rs's rung now scans tokens as well as the AST. TWO MORE SPELLING TRAPS FROM THE SAME WORK, both of which an obvious implementation misses: `.and_then(Value::as_bool)` is a function PATH, not a method call, and that was the spelling of the one live site outside tests/; and lazily-kt's first pattern required a bare `()` so it missed `?: emptyMap<String, Boolean>()` with type arguments, caught only because it planted a deliberate near-miss. CHECK EVERY HYGIENE RUNG LANDED IN #lzsiblingrunnermasking against these three: does it see inside macros, does it match function paths as well as method calls, and does it tolerate type arguments and whitespace variation. lazily-js is likely safe (TypeScript parser, and it found that a REGEX mis-parses apostrophes in comments and then silently stops finding call sites — the same class one layer down). The general rule worth recording: a scan's floor must be pinned to the REAL population, which is what caught rs's undercount — its MIN_SANCTIONED_READS of 101 against an AST-only count of 39 would not have reconciled.
 - [ ] [#lzplantprobemethod] [lazily-spec, docs] Record the plant-probe method and its three failure modes, discovered the hard way across #lzarrayelementsites and #lzflagcoercion. A plant-probe asserts a defect by planting it in a byte-verified scratch corpus and requiring GREEN BEFORE and a NAMED FAILURE AFTER. Three ways it lies, each hit by a different agent tonight. (1) A VACUOUS PLANT — lazily-rs wrote a `redeliver` gate onto scenarios[2], which carries neither `redeliver` nor `redeliver_applied_count`; the green meant nothing and briefly looked like a 15th defect. A plant must land on a scenario carrying BOTH the gate and the thing it gates. (2) A PLANT THAT REDDENS BEFORE — lazily-cpp had 3 of 16 do this and refused to present them as probes; lazily-dart's `handle_stable` reddened pre-fix because no step in the corpus re-mints a handle, so the coerced branch had nothing to pass against. A probe that was already red proves the fix changed nothing. (3) A PLANT MASKED BY A SIBLING RUNNER — see #lzsiblingrunnermasking; the same corpus edit is green in isolation and red in a full run, so probe scope must be stated. ALSO RECORD THE TWO ENVIRONMENT TRAPS: `grep -c "result: FAILED"` is ALWAYS 0 in lazily-gd because gdUnit4 never emits that string, so the standard closeout check is vacuous there — use `Statistics: ... N failures` plus an explicit `$?`; and lazily-kt's Gradle `:test` can read UP-TO-DATE under RTK, so a skipped suite reads as a passing one and `cleanTest test` is required. This belongs in lazily-spec/docs/conformance.md beside the existing perturbation guidance, because every binding's agent re-derived it independently tonight.
 - [ ] [#lzcsreverserung] [lazily-cs] cs's block guard has NO REVERSE RUNG: a recorded bind whose digest no opened fixture declares fails nothing. 55 such digests exist today (runners binding sub-objects and similar), measured during #lzarrayelementsites. That is exactly why cs's 12 anti-spoof array elements could sit BOUND AND VERIFIED while being declared by nothing — the mirror image of every other binding's gap, invisible for as long as nobody counted. lazily-dart catches this because its ledger records PATHS, and lazily-rs catches it by classifying every bind the loader never declared (397 at the time, decomposing into 363 below an emitted block and 34 from its own self-tests) and REPORTING rather than failing, on the grounds that a hard equality there would be the MIN_BLOCKS defect in a new costume. Add the rung to cs in rs's shape: classify each undeclared bind as below-an-emitted-block, self-test-fabricated, or matching no corpus object at all, and report the decomposition. The third class is the one that should be zero and is the only one worth failing on. Do NOT add a bare count equality.
 - [ ] [#lzpyelementdescend] [lazily-py] py does NOT descend into an emitted array element, which diverges from the spec and from the other six bindings. lazily-spec's blockSites walk descends into a block as well as past it, and says so deliberately: "No block in the corpus nests another today, so this changes no count — it is here so that the first one to do so is pinned by the change that adds it rather than by the change that later notices." py's reasoning is a real implementation constraint, not laziness: `instrument` hands the runner a TrackedBlock at that point, so a tracked key nested inside one would be DECLARED AND UNBINDABLE. But the consequence is that the first corpus fixture to nest a block makes py's derived count disagree with the audit's pinned row, and py would then be fixing `instrument` under time pressure rather than deliberately. Verified unobservable today: no corpus fixture nests a tracked key inside a tracked array, confirmed independently by lazily-rs (ran its twin with the array rule off and on, 771/661 then 783/673, no site lost) and by lazily-zig (cross-checked `{"expect":[[{"expect":{...}}]]}` against both halves, both saying 1 site). Fix `instrument` so a nested block can bind, then descend — or if that is genuinely impossible in py's shape, say so in the walk's comment so the next reader does not read the divergence as an oversight.

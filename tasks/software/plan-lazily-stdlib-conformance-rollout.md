@@ -253,16 +253,22 @@ channel/codec feature cell.
 Gate: C# is green as both trigger sender and receiver for every applicable
 feature/channel cell, with no test-only DTO or alternate state machine.
 
-### Phase 5 — CI and release
+### Phase 5 — local verification and release
 
-- PR: spec/formal gates, all local corpus runners, and deterministic spanning
-  peer scenarios.
-- Merge: every eligible binding as feature-trigger sender and receiver at least
-  once per applicable channel/codec.
-- Nightly: all eligible pairs, both directions, all channels, deterministic
-  randomized schedules, and mutation artifacts.
+- Run spec/formal gates and every binding's full local corpus suite on the
+  release machine from clean worktrees pinned to the intended commits.
+- Run `make check` and `make network-suite-nightly` from `src/lazily-interop`.
+  The nightly target is the release gate: every eligible pair, both directions,
+  all channels, deterministic randomized schedules, and mutation artifacts.
+- Keep the private superproject's GitHub Actions workflows manual-only. Hosted
+  PR, push, and scheduled runs duplicate the local gate while consuming billed
+  minutes.
+- Public binding workflows may still build cross-platform artifacts or perform
+  provenance-preserving registry publication when this Linux host cannot
+  reproduce the platform matrix. They are packaging transports, not substitutes
+  for the local release gate.
 - Release bindings only after their coverage rows and peer capability manifests
-  match executable evidence.
+  match the locally captured executable evidence.
 
 ## Completion criteria
 
@@ -276,5 +282,5 @@ feature/channel cell, with no test-only DTO or alternate state machine.
   opens, zero assertions, or zero transported triggers.
 - Mutation tests prove the suite catches deadline, race-ordering, latching,
   lost-wakeup, and fake-runner defects.
-- Per-binding releases are published only after inside-out commits and pinned
-  superproject gitlinks are green.
+- Per-binding releases are published only after inside-out commits, pinned
+  superproject gitlinks, and the local release-machine gate are green.

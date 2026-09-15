@@ -1,18 +1,8 @@
 name: Lazily network suite
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - "src/lazily-*/**"
-      - ".github/workflows/lazily-network-suite.yml"
-  push:
-    branches: [main]
-    paths:
-      - "src/lazily-*/**"
-      - ".github/workflows/lazily-network-suite.yml"
-  schedule:
-    - cron: "17 5 * * *"
+  # The private superproject's hosted runner is billed. Release gates run on the
+  # local release machine; retain this only as an explicitly requested fallback.
   workflow_dispatch:
     inputs:
       tier:

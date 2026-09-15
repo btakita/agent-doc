@@ -1,13 +1,9 @@
 name: Agent Doc
 
 on:
-  pull_request:
-    branches:
-      - main
-  push:
-    branches:
-      - main
-      - "20*/**"
+  # This private superproject uses billed hosted-runner minutes. Keep the heavy
+  # integration suites opt-in; normal verification runs locally via `make check`
+  # and `make tmux-ci` on the release machine.
   workflow_dispatch:
 
 # `#loopsuperprojectjob`: the hosted runner disk is the binding constraint, not

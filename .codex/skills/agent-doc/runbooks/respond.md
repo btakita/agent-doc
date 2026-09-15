@@ -129,10 +129,21 @@ Completed/reaped items live under canonical `<!-- agent:done -->`; legacy
 `agent:backlog-done` and `agent:pending-done` tags require `agent-doc migrate`.
 
 **Backlog capture rule:** if the response creates concrete follow-up work, add it
-to `agent:backlog` in the same cycle. Put new items at the beginning of
-`agent:backlog`; if you are extending an ordered batch already in backlog, insert
-the new item adjacent to its predecessor. If the item is only a recommendation,
-include `[recommended]`.
+to `agent:backlog` in the same cycle. Before choosing placement, compare its
+urgency with the existing queue head (#lzfollowupqueueorder):
+
+- Plain `--backlog-add` deliberately prepends. Use that default when the new
+  follow-up is more urgent or more task-relevant than the work already queued.
+- During an active drain, a merely adjacent, equal-priority, or lower-priority
+  follow-up must not preempt the existing head. Keep the cheap add operation, but
+  pass `--backlog-queue-placement append` so the queue mirror puts it after the
+  work the operator already ordered.
+- When extending an ordered batch, use `--backlog-add-after <id>` or
+  `--backlog-add-before <id>`. Those explicit anchors determine both backlog and
+  queue-mirror order; `--backlog-queue-placement` applies only to an unanchored
+  plain add and does not override them.
+
+If the item is only a recommendation, include `[recommended]`.
 
 **Cross-document backlog rule:** if a prompt preset or user instruction names
 another backlog file, add the item to that target with `--backlog-add-to

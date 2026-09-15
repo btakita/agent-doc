@@ -136,6 +136,14 @@ New backlog items go at the **beginning** of the list. When adding multiple new
 items in one cycle, preserve the order you presented them in so the first
 recommended next step stays first.
 
+That default expresses priority, not mere recency (#lzfollowupqueueorder). During
+an active queue drain, first compare a discovered follow-up with the existing
+head. If it is genuinely more urgent or more relevant, the normal prepend is
+correct. If it is only adjacent, equal priority, or lower priority, use
+`--backlog-add ... --backlog-queue-placement append`: the backlog capture still
+happens in this cycle, while the queue mirror preserves the operator's existing
+next item instead of turning every discovery into a depth-first detour.
+
 Exception: if you are later adding a follow-on step from an ordered batch that
 is already partially represented in backlog, place the new item next to its
 predecessor rather than prepending it above earlier steps. `#ah0s` makes this
@@ -183,6 +191,14 @@ head; only an id with no already-queued predecessor -- every plain
 default). Before this, an anchored item was prepended, landing *before* the very
 id it was filed after -- inverting the pair exactly when the anchor was chosen
 because order matters.
+
+This is intentionally asymmetric. `--backlog-add-before` and
+`--backlog-add-after` already state the item's priority relative to a live
+anchor, so their queue mirror follows that anchor and ignores
+`--backlog-queue-placement`. Only an unanchored plain add needs the caller to
+choose `prepend` versus `append`. Do not use an anchored flag merely to evade
+that urgency decision: name an anchor only when adjacency itself is part of the
+intended order.
 
 To fix an order that is already in the queue, use `--backlog-reorder`: it
 cascades into the mirror, permuting only the named live heads among the slots

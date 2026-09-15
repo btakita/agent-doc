@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0a205-4220-73b0-9d09-7d2b9699290e
+  codex: 01a0a50f-a047-7f00-8ff3-33d3fdc3e63f
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -110,6 +110,23 @@ Verification passed:
 - forced two-controller recycle; the root controller is stable on 0.35.396 with a matching installed inode.
 
 Implementation: `1d8fd3996` (`fix: preserve pane ownership across document renames`), pushed to `origin/main` and tagged `v0.35.396`. The new CI, Release, PyPI, Book, and Pages workflows were triggered and were queued/running at the required one-time external check.
+
+### Re: #fixbackloglog — gpt-5.6-sol · 2026-09-15T09:28:18-04:00
+
+> **Queue prompt:**
+>
+> do [#fixbackloglog]
+
+
+Implemented and released both fixes in agent-doc 0.35.397 / JetBrains plugin 0.2.386.
+
+Backlog backfill now removes only complete top-level fenced terminal transcripts carrying the `› agent-doc ...` invocation signature. It preserves ordinary fenced prose, unmatched fences, indented continuation, headings, and real work items. The live transcript was removed through the supported backlog command, and a second pass proved the document already canonical.
+
+Split-editor activation now enters through IntelliJ's global editor event multicaster, is filtered to the owning project, and reuses the existing generation-guarded focus-only command-plane path. This avoids restored-editor attachment timing gaps without adding polling or tmux policy to the plugin.
+
+Verification passed: targeted Rust and JetBrains regressions, `make check`, `make tmux-ci`, plugin packaging, clean-tree local installation, and version checks. Source commit `ebe8d0a54`, superproject commit `e3a9fbcce`, and tag `v0.35.397` are pushed; release workflows were in progress at inspection.
+
+The installed IntelliJ package requires an IDE restart before the running process can load this listener generation, so the remaining human eyeball check is recorded as non-blocking `[operator-verify]` follow-up `#panefocussplitverify`.
 <!-- agent:boundary:44108b98:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -123,14 +140,7 @@ t## Pending / Not Built
 
 
 <!-- agent:backlog priority -->
-```
-› agent-doc /home/brian/work/btakita/agent-loop/tasks/software/lazily.md
-• Agent-doc admission still fails because the document snapshot differs from HEAD without a recoverable cycle.
-From the session-owning pane, run:
-agent-doc commit /home/brian/work/btakita/agent-loop/tasks/software/lazily.md
-agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/software/lazily.md
-Then retry. Do not run agent-doc preflight or agent-doc claim.
-```
+- [ ] [#panefocussplitverify] [operator-verify] Restart IntelliJ to activate agent-doc JetBrains plugin 0.2.386, then click both directions between co-visible agent-doc split editors and confirm the active tmux pane follows each document.
 <!-- /agent:backlog -->
 
 ## Review

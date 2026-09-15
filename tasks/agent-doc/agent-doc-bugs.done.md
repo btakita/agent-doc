@@ -91,3 +91,4 @@
 - 2026-09-13 [#fixcausesleftover] Fix the agent-doc causes of the leftover cruft in the backlog.
 - 2026-09-14 [#restartintellijload] [operator-verify] Restart IntelliJ to load plugin 0.2.385, then exercise a backend.md retained-projection refresh and confirm no File Cache Conflict appears.
 - 2026-09-14 [#fixcauseslazily] Fix agent-doc causes to lazily.md stall:
+- 2026-09-15 [#fixbackloglog] Fix the backlog log being cleaned up with a multi-line fenced code block. Also fix tmux pane auto-focus not working in the present session when switching to the opposite editor pane.

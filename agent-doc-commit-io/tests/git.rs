@@ -2538,13 +2538,19 @@ Duplicate replay should stay live.
         .unwrap();
 
         let struck = agent_doc_queue::queue_consume::project_answered_free_text_strike(
-            &committed,
-            response,
-            Some(&committed),
+            &committed, response, None,
         )
         .unwrap()
         .expect("fixture response must own its free-text queue head")
         .target_content;
+        let recurring = struck.replacen(
+            "<!-- /agent:queue -->",
+            "- finish the plan\n<!-- /agent:queue -->",
+            1,
+        );
+        fs::write(&doc, &recurring).unwrap();
+        commit(&doc).expect_err("a later recurring prompt must break the exact target proof");
+
         fs::write(&doc, &struck).unwrap();
 
         let did_commit = commit(&doc).expect("the exact late owned strike should commit forward");

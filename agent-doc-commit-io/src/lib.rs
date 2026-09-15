@@ -147,7 +147,10 @@ fn late_answered_free_text_strike_capture(
     let Some(projection) = agent_doc_queue::queue_consume::project_answered_free_text_strike(
         committed_content,
         &capture.response_body,
-        capture.baseline_content.as_deref(),
+        // Committed HEAD is the historical fence. Reusing the pre-response
+        // baseline can change queue node keys after the Exchange insertion and
+        // hide the exact late strike this recovery is proving.
+        None,
     )?
     else {
         return Ok(None);

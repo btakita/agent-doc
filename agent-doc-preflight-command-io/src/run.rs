@@ -64,6 +64,32 @@ pub struct PreflightOptions {
     /// diagnostic preflight is not dispatch/response-bound, so opening a cycle
     /// only leaves open state that later wedges `session-check`.
     pub probe: bool,
+    /// Admission transport that invoked preflight. Harness hooks carry explicit
+    /// provenance because their subprocess environment need not include the
+    /// model harness's ambient detection variables.
+    pub invocation: PreflightInvocation,
+}
+
+/// Provenance for a preflight invocation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PreflightInvocation {
+    /// Direct CLI invocation; ambient harness detection remains authoritative.
+    #[default]
+    Direct,
+    /// Claude Code `UserPromptSubmit` hook.
+    ClaudeCodeHook,
+    /// Codex `UserPromptSubmit` hook.
+    CodexHook,
+}
+
+impl PreflightInvocation {
+    fn explicit_harness(self) -> Option<&'static str> {
+        match self {
+            Self::Direct => None,
+            Self::ClaudeCodeHook => Some("claude-code"),
+            Self::CodexHook => Some("codex"),
+        }
+    }
 }
 
 pub(crate) fn response_contract_for_content(content: &str) -> Option<PreflightResponseContract> {
@@ -377,9 +403,15 @@ pub fn run_with_options_to_writer(
     // transport authority, so pane + harness must both match this process.
     // The cycle-state layer additionally requires a fresh PreflightStarted
     // phase with no captured response before it honors this mode.
-    let preserve_fresh_owned_pane_reentry = !options.probe
-        && entry_cycle_was_open
-        && agent_doc_run_io::authoritative_actor_owns_current_pane(file).unwrap_or(false);
+    let authoritative_actor_owns_current_pane = match options.invocation.explicit_harness() {
+        Some(harness) => {
+            agent_doc_run_io::authoritative_actor_owns_current_pane_for_harness(file, harness)
+        }
+        None => agent_doc_run_io::authoritative_actor_owns_current_pane(file),
+    }
+    .unwrap_or(false);
+    let preserve_fresh_owned_pane_reentry =
+        !options.probe && entry_cycle_was_open && authoritative_actor_owns_current_pane;
 
     // Repair is the first signal-gated effect. Everything through pending
     // maintenance belongs to this effect boundary; commit cannot start until
@@ -2171,6 +2203,21 @@ mod tests {
     use std::process::Command;
     use tempfile::TempDir;
 
+    /// `#hook-owned-cycle-reentry`: hook provenance must not depend on the
+    /// subprocess inheriting a model-specific ambient environment marker.
+    #[test]
+    fn hook_preflight_carries_explicit_harness_provenance() {
+        assert_eq!(
+            PreflightInvocation::CodexHook.explicit_harness(),
+            Some("codex")
+        );
+        assert_eq!(
+            PreflightInvocation::ClaudeCodeHook.explicit_harness(),
+            Some("claude-code")
+        );
+        assert_eq!(PreflightInvocation::Direct.explicit_harness(), None);
+    }
+
     #[test]
     fn active_prompt_marker_ack_delay_is_non_fatal_and_non_durable() {
         let authoritative =
@@ -2307,7 +2354,15 @@ mod tests {
         std::fs::write(&doc, &restored).unwrap();
 
         let mut output = Vec::new();
-        run_with_options_to_writer(&doc, PreflightOptions { probe: true }, &mut output).unwrap();
+        run_with_options_to_writer(
+            &doc,
+            PreflightOptions {
+                probe: true,
+                ..Default::default()
+            },
+            &mut output,
+        )
+        .unwrap();
         let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
 
         assert_eq!(
@@ -2983,7 +3038,15 @@ mod tests {
         .unwrap();
 
         let mut output = Vec::new();
-        run_with_options_to_writer(&doc, PreflightOptions { probe: true }, &mut output).unwrap();
+        run_with_options_to_writer(
+            &doc,
+            PreflightOptions {
+                probe: true,
+                ..Default::default()
+            },
+            &mut output,
+        )
+        .unwrap();
         let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
 
         assert_eq!(parsed["queue_drainable_head_count"], 0);
@@ -3082,7 +3145,14 @@ mod tests {
         let claims_log = dir.path().join(".agent-doc/claims.log");
         std::fs::write(&claims_log, "claim-one\n").unwrap();
 
-        run_with_options(&doc, PreflightOptions { probe: true }).unwrap();
+        run_with_options(
+            &doc,
+            PreflightOptions {
+                probe: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
         assert_eq!(
@@ -6378,8 +6448,14 @@ mod tests {
         );
         fs::write(&doc, malformed).unwrap();
 
-        let err = run_with_options(&doc, PreflightOptions { probe: true })
-            .expect_err("preflight must reject malformed component authority");
+        let err = run_with_options(
+            &doc,
+            PreflightOptions {
+                probe: true,
+                ..Default::default()
+            },
+        )
+        .expect_err("preflight must reject malformed component authority");
         assert!(err.to_string().contains("[integrity-gate] INTERRUPTED"));
         assert_eq!(fs::read_to_string(&doc).unwrap(), malformed);
         assert!(!dir.path().join(".agent-doc").exists());
@@ -6417,7 +6493,14 @@ mod tests {
             &duplicated,
         );
 
-        run_with_options(&doc, PreflightOptions { probe: true }).unwrap();
+        run_with_options(
+            &doc,
+            PreflightOptions {
+                probe: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         let current = resolve_current_preflight_document(&doc, "test_boundary_dedup").unwrap();
         assert_eq!(current.matches("agent:boundary:").count(), 1);
@@ -6459,7 +6542,14 @@ mod tests {
             &doubled,
         );
 
-        run_with_options(&doc, PreflightOptions { probe: true }).unwrap();
+        run_with_options(
+            &doc,
+            PreflightOptions {
+                probe: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         let current =
             resolve_current_preflight_document(&doc, "test_exact_doubled_retirement").unwrap();

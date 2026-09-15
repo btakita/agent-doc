@@ -208,6 +208,7 @@ fn run_preflight_for_prompt(
     prompt: &str,
     cwd: &Path,
     admitted_directive: Option<&str>,
+    preflight_invocation: agent_doc_preflight_command_io::PreflightInvocation,
 ) -> HookAdmission {
     let Some(invocation) = invoked_agent_doc(prompt) else {
         return HookAdmission::NotATrigger;
@@ -263,7 +264,7 @@ fn run_preflight_for_prompt(
         return HookAdmission::Failed;
     }
 
-    match run_preflight_within_budget(&file, budget) {
+    match run_preflight_within_budget(&file, budget, preflight_invocation) {
         Ok(contract) => {
             // The marker seals a successfully produced contract. It must not
             // appear on any error path because the skill treats its absence as
@@ -357,13 +358,20 @@ fn claim_loop_drain_owner(invocation: &AgentDocInvocation, file: &Path) -> anyho
 /// only after preflight returns, so a worker that finishes mid-report can emit a
 /// truncated contract but never the seal, and the agent's three-state read still
 /// lands on "admission failed".
-fn run_preflight_within_budget(file: &Path, budget: std::time::Duration) -> anyhow::Result<String> {
+fn run_preflight_within_budget(
+    file: &Path,
+    budget: std::time::Duration,
+    invocation: agent_doc_preflight_command_io::PreflightInvocation,
+) -> anyhow::Result<String> {
     let preflight_file = file.to_path_buf();
     run_within_budget(file, budget, move || {
         let mut output = Vec::new();
         agent_doc_preflight_command_io::run_with_options_to_writer(
             &preflight_file,
-            agent_doc_preflight_command_io::PreflightOptions { probe: false },
+            agent_doc_preflight_command_io::PreflightOptions {
+                probe: false,
+                invocation,
+            },
             &mut output,
         )?;
         String::from_utf8(output).map_err(anyhow::Error::from)
@@ -460,7 +468,12 @@ pub fn handle_user_prompt_submit() -> anyhow::Result<()> {
 
     // Every outcome is already reported to the agent and the operator inside
     // `run_preflight_for_prompt`, so a refusal never blocks an ordinary prompt.
-    run_preflight_for_prompt(&input.prompt, &cwd, None);
+    run_preflight_for_prompt(
+        &input.prompt,
+        &cwd,
+        None,
+        agent_doc_preflight_command_io::PreflightInvocation::ClaudeCodeHook,
+    );
     Ok(())
 }
 
@@ -507,6 +520,7 @@ pub fn handle_codex_user_prompt_submit() -> anyhow::Result<()> {
         &input.prompt,
         Path::new(&input.cwd),
         Some(CODEX_IN_PANE_ADMISSION_DIRECTIVE),
+        agent_doc_preflight_command_io::PreflightInvocation::CodexHook,
     );
     if admission == HookAdmission::Admitted {
         agent_doc_codex_hook_io::record_preflight_admission(&input, true)?;
@@ -678,7 +692,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // The prompt IS a trigger; only the path is wrong for this cwd.
         assert_eq!(
-            run_preflight_for_prompt("/loop agent-doc tasks/missing.md", dir.path(), None),
+            run_preflight_for_prompt(
+                "/loop agent-doc tasks/missing.md",
+                dir.path(),
+                None,
+                agent_doc_preflight_command_io::PreflightInvocation::ClaudeCodeHook,
+            ),
             HookAdmission::Failed,
             "an unresolvable trigger must be a named failure, never silence"
         );
@@ -686,11 +705,21 @@ mod tests {
         // A genuinely unrelated prompt is still a silent no-op — the hook must
         // not start shouting about every prompt in the session.
         assert_eq!(
-            run_preflight_for_prompt("what does this function do?", dir.path(), None),
+            run_preflight_for_prompt(
+                "what does this function do?",
+                dir.path(),
+                None,
+                agent_doc_preflight_command_io::PreflightInvocation::ClaudeCodeHook,
+            ),
             HookAdmission::NotATrigger,
         );
         assert_eq!(
-            run_preflight_for_prompt("/loop check the deploy", dir.path(), None),
+            run_preflight_for_prompt(
+                "/loop check the deploy",
+                dir.path(),
+                None,
+                agent_doc_preflight_command_io::PreflightInvocation::ClaudeCodeHook,
+            ),
             HookAdmission::NotATrigger,
         );
     }

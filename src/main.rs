@@ -5026,7 +5026,10 @@ fn try_main() -> anyhow::Result<()> {
         }
         Commands::Preflight { file, probe } => agent_doc_preflight_command_io::run_with_options(
             &file,
-            agent_doc_preflight_command_io::PreflightOptions { probe },
+            agent_doc_preflight_command_io::PreflightOptions {
+                probe,
+                ..Default::default()
+            },
         ),
         Commands::Admit { file } => {
             let output = agent_doc_cycle_state_io::admit_with_current_resolver(

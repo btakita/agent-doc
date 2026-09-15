@@ -1717,6 +1717,20 @@ fn actor_record_for_file(file: &Path) -> Result<Option<agent_doc_controller::act
 /// enough when a harness handoff is pending, so the persisted actor transport
 /// must also match the harness executing this process.
 pub fn authoritative_actor_owns_current_pane(file: &Path) -> Result<bool> {
+    authoritative_actor_owns_current_pane_for_harness(file, &agent_doc_model_tier::detect_harness())
+}
+
+/// Whether the authoritative actor owns the current pane for a harness named by
+/// the caller's admission transport.
+///
+/// Hook subprocesses do not necessarily inherit the model harness's ambient
+/// marker variables. The hook entry point already knows which transport invoked
+/// it, so lifecycle recovery must compare against that explicit provenance
+/// instead of accidentally treating the process as the `default` harness.
+pub fn authoritative_actor_owns_current_pane_for_harness(
+    file: &Path,
+    current_harness: &str,
+) -> Result<bool> {
     let Some(actor) = actor_record_for_file(file)? else {
         return Ok(false);
     };
@@ -1726,7 +1740,6 @@ pub fn authoritative_actor_owns_current_pane(file: &Path) -> Result<bool> {
     let tmux = agent_doc_tmux_io::configured_tmux();
     let current_pane = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux)
         .context("failed to query current tmux pane")?;
-    let current_harness = agent_doc_model_tier::detect_harness();
     Ok(actor.pane_id == current_pane && actor.harness == current_harness)
 }
 

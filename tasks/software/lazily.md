@@ -1429,6 +1429,47 @@ Verification:
 Changed paths this cycle: none. Confidence is high; the cited commit, behavioral regression, and exact pushed CI run all cover this queue item. No escalation remains.
 
 The exchange is large, but I did not compact it while the automatic queue is active.
+
+### Re: do [#lazilyderivesreplayed] — gpt-5.6-sol · 2026-09-14 20:30 EDT
+
+> **Queue prompt:**
+>
+> do [#lazilyderivesreplayed]
+
+
+Implemented and audited. The false replay signal existed only in lazily-js.
+
+Audit result:
+
+| Binding | Replay evidence | Source scanning, if present |
+|---|---|---|
+| lazily-js | Runtime fixture-open manifest audited by `scripts/check-conformance-coverage.sh` | Corpus-root / flag hygiene only after this fix |
+| lazily-cpp | Runtime manifest appended by `tests/test_spec_fixture.hpp` | Corpus-root / fixture-flag hygiene only |
+| lazily-rs | Runtime fixture-open manifest | Corpus-root hygiene only |
+| lazily-py | Runtime fixture-open manifest | No source-derived replay accounting |
+| lazily-go | Runtime fixture-open manifest | No source-derived replay accounting |
+| lazily-cs | Runtime fixture-open manifest | Corpus-root hygiene only |
+| lazily-kt | Runtime fixture-open manifest | Corpus-root hygiene only |
+| lazily-dart | Runtime fixture-open manifest | Corpus-root hygiene only |
+| lazily-zig | Runtime fixture-open manifest | No source-derived replay accounting |
+| lazily-gd | Runtime fixture-open manifest | Corpus-root hygiene only |
+
+Changes in lazily-js:
+
+- Removed `deriveReplayedAreas()`, `AREA_OF_FIXTURE`, and the three area assertions that inferred replay from string literals across test sources. Exact fixture/scenario replay coverage remains enforced by the post-test runtime-manifest guard.
+- Changed the evidence-run-id probe to the realistic but nonexistent path `not-a-corpus-area/stamp-prefix-probe.json`. It is intentionally only a generic evidence record; the old inference would falsely claim its area was replayed and fail the suite, so this permanently exercises the reported attack.
+- Re-derived the fixture-flag scan floors after deleting the dead test AST: boolean positions `1696 → 1672` and corpus-shaped reads `556 → 553`, exactly matching the guard's own red report.
+
+Verification:
+
+- lazily-js `make check`: pass.
+- lazily-spec `node scripts/check-corpus-floors.mjs`: pass (156 fixtures, 151 arrays, 795 assertion-block sites, 9 ledgers audited).
+- Root `make check`: pass.
+- lazily-js commit: `7ce08e7`.
+- Parent pointer commit: `fa98bb39e`.
+- Latest pre-change lazily-js CI run `34912560573`: green; the new commit will be pushed after this durable document write.
+
+Confidence: high. The audit separates runtime replay evidence from unrelated source-hygiene scans, and the realistic-path regression directly covers the original false-positive shape. No escalation or follow-up item is needed.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1441,7 +1482,7 @@ The exchange is large, but I did not compact it while the automatic queue is act
 - ~~do [#lazilycheckconformance]~~
 - ~~do [#deadguardcode]~~
 - ~~do [#lazilycpptwo]~~
-- do [#lazilyderivesreplayed]
+- ~~do [#lazilyderivesreplayed]~~
 - do [#documentbindingsstamp]
 - do [#lzmakepfootgun]
 - do [#lzfailedgrepvacuous]
@@ -1462,7 +1503,6 @@ The exchange is large, but I did not compact it while the automatic queue is act
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilyderivesreplayed] #lzareaderivetestfile: lazily-js's `AREA_OF_FIXTURE` derives replayed areas from string literals across EVERY test source, so a realistic-looking fixture path inside a new test file registers as a replayed area and reddens the corpus check. Audit which other bindings derive coverage from source literals rather than from run evidence.
 - [ ] [#documentbindingsstamp] #lzstampsitedoc: document which bindings can stamp producer-side and which cannot, with the reason -- cpp cannot (38 binaries append in ios::app, first-writer-stamps is a race), gd must not (append_line is append-only across gdUnit4 passes, so a producer-side stamp cannot clear a leftover file), rs/dart/zig write stamp+record in one locked call so a stamp-only file is unreachable. Recipe-side and producer-side are NOT equivalent and the correct choice is per binding.
 - [ ] [#lzmakepfootgun] [docs, all ten] `make -p` BUILDS THE DEFAULT GOAL, and piping it into a short-circuiting reader corrupts state. lazily-rs lost a probe to this: `make -p | grep -m1 ...` started `make check`, ran `conformance-manifest-reset`, and then SIGPIPE'd when grep exited — SILENTLY TRUNCATING every file under build/ mid-analysis. The analysis command destroyed the evidence it was analysing. Use `make -pn` (dry run) or `make --eval` instead, and never pipe `make -p` into `head`/`grep -m1`/anything that closes the pipe early. Record this in the conformance docs beside the plant-probe method (#lzplantprobemethod), because every binding's Makefile is now load-bearing for the run-id protocol and inspecting those Makefiles is now a routine step — this trap is reachable by anyone auditing them, and its symptom (empty build/, guards failing as missing evidence) looks exactly like the bug under investigation rather than like self-inflicted damage.
 - [ ] [#lzfailedgrepvacuous] [all ten, plus the agent-doc closeout instructions] `grep -c "result: FAILED"` IS VACUOUS IN AT LEAST FOUR BINDINGS, and I asked every agent in this session to use it as the closeout check. Proven, not suspected: lazily-dart deliberately failed a run (exit 1, tally `+14 -1`) and that string appeared ZERO times; lazily-gd's gdUnit4 never emits it; lazily-kt's Gradle/JUnit never emits it (0 on green AND would be 0 on red); lazily-js's `node --test` never emits it. So for those four the check has been reporting success by construction all night — it did not mask a real failure, because the exit codes were captured separately and were 0, but it contributed nothing and would not have caught anything. THE WORK: for each of the ten bindings, determine the real failure signal its runner emits and record it, then replace the generic grep with the per-binding signal. Known good substitutes: dart test's `+passed -failed` tally, gdUnit4's `Statistics: ... N failures`, JUnit XML failure/error counts for kt, `node --test`'s `ℹ fail N` for js, ctest's `N/M tests passed` for cpp. AND FIX THE INSTRUCTION SOURCE: the closeout guidance that propagates this lives in the agent-doc skill runbooks and in how I brief subagents — a check that is vacuous in 40 percent of targets should not be the standard one. The durable rule is the one every agent applied correctly anyway: capture $? explicitly and additionally assert the runner's own count, because an exit code can be masked by a pipe and a grep can be vacuous, but not both at once.

@@ -1470,6 +1470,27 @@ Verification:
 - Latest pre-change lazily-js CI run `34912560573`: green; the new commit will be pushed after this durable document write.
 
 Confidence: high. The audit separates runtime replay evidence from unrelated source-hygiene scans, and the realistic-path regression directly covers the original false-positive shape. No escalation or follow-up item is needed.
+
+### Re: do [#documentbindingsstamp] — gpt-5.6-sol · 2026-09-14 20:38 EDT
+
+> **Queue prompt:**
+>
+> do [#documentbindingsstamp]
+
+
+Documented the audited ten-binding split in `memory/reference_stamped_evidence_defeats_byte_emptiness_checks.md` (`#lzstampsitedoc`).
+
+- Recipe-side: js, cpp, py, gd. Their stamp dates the reset, not recorder participation, so the non-stamp record count is load-bearing. cpp has 38 `ios::app` flushers and cannot safely elect a first stamper; gd's append-only gdUnit4 passes cannot clear a leftover file; js centralizes the reset before Node workers; py centralizes it before pytest-xdist workers and explicitly treats its producer rewrite as an ordered-run fallback.
+- Producer-side: rs, go, cs, kt, dart, zig. Each producer returns without stamping when it has no evidence, then writes the stamp and triggering records as one payload, one flush, or one guarded append. A producer-created stamp-only file is therefore unreachable.
+- The reference also records the binding-specific concurrency mechanism and the invariant that every binding still counts records, even when its producer-side stamp already attests recorder participation.
+
+Changed path: `memory/reference_stamped_evidence_defeats_byte_emptiness_checks.md`.
+
+Commands/evidence: inspected each binding's Makefile plus its runtime evidence producer; `tsift diff-digest --pathspec memory/reference_stamped_evidence_defeats_byte_emptiness_checks.md`; `git diff --check`; root `make check`.
+
+Verification: root `make check` passed. Commit: `3d8e18bfa`. Latest GitHub run `34913570373` failed before executing any steps (both jobs have empty step lists), matching the repository's external CI activation/account limitation rather than a test failure.
+
+Confidence: high. The table is based on the live writer paths, not the guard comments alone. Escalation: none; no follow-up item is needed.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1483,7 +1504,7 @@ Confidence: high. The audit separates runtime replay evidence from unrelated sou
 - ~~do [#deadguardcode]~~
 - ~~do [#lazilycpptwo]~~
 - ~~do [#lazilyderivesreplayed]~~
-- do [#documentbindingsstamp]
+- ~~do [#documentbindingsstamp]~~
 - do [#lzmakepfootgun]
 - do [#lzfailedgrepvacuous]
 - do [#lzastscanundercount]
@@ -1503,7 +1524,6 @@ Confidence: high. The audit separates runtime replay evidence from unrelated sou
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#documentbindingsstamp] #lzstampsitedoc: document which bindings can stamp producer-side and which cannot, with the reason -- cpp cannot (38 binaries append in ios::app, first-writer-stamps is a race), gd must not (append_line is append-only across gdUnit4 passes, so a producer-side stamp cannot clear a leftover file), rs/dart/zig write stamp+record in one locked call so a stamp-only file is unreachable. Recipe-side and producer-side are NOT equivalent and the correct choice is per binding.
 - [ ] [#lzmakepfootgun] [docs, all ten] `make -p` BUILDS THE DEFAULT GOAL, and piping it into a short-circuiting reader corrupts state. lazily-rs lost a probe to this: `make -p | grep -m1 ...` started `make check`, ran `conformance-manifest-reset`, and then SIGPIPE'd when grep exited — SILENTLY TRUNCATING every file under build/ mid-analysis. The analysis command destroyed the evidence it was analysing. Use `make -pn` (dry run) or `make --eval` instead, and never pipe `make -p` into `head`/`grep -m1`/anything that closes the pipe early. Record this in the conformance docs beside the plant-probe method (#lzplantprobemethod), because every binding's Makefile is now load-bearing for the run-id protocol and inspecting those Makefiles is now a routine step — this trap is reachable by anyone auditing them, and its symptom (empty build/, guards failing as missing evidence) looks exactly like the bug under investigation rather than like self-inflicted damage.
 - [ ] [#lzfailedgrepvacuous] [all ten, plus the agent-doc closeout instructions] `grep -c "result: FAILED"` IS VACUOUS IN AT LEAST FOUR BINDINGS, and I asked every agent in this session to use it as the closeout check. Proven, not suspected: lazily-dart deliberately failed a run (exit 1, tally `+14 -1`) and that string appeared ZERO times; lazily-gd's gdUnit4 never emits it; lazily-kt's Gradle/JUnit never emits it (0 on green AND would be 0 on red); lazily-js's `node --test` never emits it. So for those four the check has been reporting success by construction all night — it did not mask a real failure, because the exit codes were captured separately and were 0, but it contributed nothing and would not have caught anything. THE WORK: for each of the ten bindings, determine the real failure signal its runner emits and record it, then replace the generic grep with the per-binding signal. Known good substitutes: dart test's `+passed -failed` tally, gdUnit4's `Statistics: ... N failures`, JUnit XML failure/error counts for kt, `node --test`'s `ℹ fail N` for js, ctest's `N/M tests passed` for cpp. AND FIX THE INSTRUCTION SOURCE: the closeout guidance that propagates this lives in the agent-doc skill runbooks and in how I brief subagents — a check that is vacuous in 40 percent of targets should not be the standard one. The durable rule is the one every agent applied correctly anyway: capture $? explicitly and additionally assert the runner's own count, because an exit code can be masked by a pipe and a grep can be vacuous, but not both at once.
 - [ ] [#lzastscanundercount] [lazily-rs, and any binding whose hygiene rung uses an AST parser] AN AST-ONLY SCAN SILENTLY UNDER-REPORTS, and lazily-rs measured the magnitude: a `syn`-based walk saw 39 of the 86 `as_bool()` sites in its test tree and reported the other 47 CLEAN, because `syn` DOES NOT DESCEND INTO MACRO TOKEN STREAMS and most fixture comparisons in that binding live inside `assert_eq!`. A rung that silently sees 45 percent of its target is worse than no rung, because it produces a green that reads as coverage. rs's rung now scans tokens as well as the AST. TWO MORE SPELLING TRAPS FROM THE SAME WORK, both of which an obvious implementation misses: `.and_then(Value::as_bool)` is a function PATH, not a method call, and that was the spelling of the one live site outside tests/; and lazily-kt's first pattern required a bare `()` so it missed `?: emptyMap<String, Boolean>()` with type arguments, caught only because it planted a deliberate near-miss. CHECK EVERY HYGIENE RUNG LANDED IN #lzsiblingrunnermasking against these three: does it see inside macros, does it match function paths as well as method calls, and does it tolerate type arguments and whitespace variation. lazily-js is likely safe (TypeScript parser, and it found that a REGEX mis-parses apostrophes in comments and then silently stops finding call sites — the same class one layer down). The general rule worth recording: a scan's floor must be pinned to the REAL population, which is what caught rs's undercount — its MIN_SANCTIONED_READS of 101 against an AST-only count of 39 would not have reconciled.

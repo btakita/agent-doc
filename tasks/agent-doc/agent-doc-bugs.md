@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0a543-e8e7-7c62-b234-4ebac41f210a
+  codex: 01a0a637-a27f-7cd1-a547-eab3401e5e38
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -13,7 +13,7 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -193,6 +193,37 @@ Current proof after the restart:
 - GitHub Actions CI run 34994060782 for `c68f2b92f` completed successfully.
 
 The restart therefore satisfies the remaining runtime/operator verification. There is no further migration or operator-verify work for this incident.
+
+### Re: Response
+
+> **Queue prompt:** Batch OSX releases to 1 week.
+
+Implemented weekly batching as one complete release train rather than publishing
+tags whose macOS assets arrive later.
+
+- Added `make release-cadence-check` and made `make release` depend on it. The
+  gate queries the latest published GitHub Release, computes the next eligible
+  instant at exactly seven days, and fails closed before tagging when GitHub
+  state is missing, invalid, or too recent.
+- Kept all six archives atomic: both Darwin targets remain in the same tag-driven
+  workflow as Linux and Windows. Normal fixes are still checked, installed,
+  committed, pushed, and recycled immediately; only version projection,
+  `VERSIONS.md`, the full install, tag, and publication are batched.
+- Documented `#weekly-release-batch` in the command spec and development release
+  procedure, and added a regression test for the Makefile gate, seven-day
+  constant, fail-closed GitHub query, and complete six-target matrix.
+
+Architecture: the latest GitHub `publishedAt` value is the external source,
+`next_release_at` is the pure derived state, and the Make target is the effect
+boundary that may tag only while the computed window is open.
+
+Verification passed: the focused Rust regression, the deterministic Python
+self-test, Python bytecode compilation, and the full `make check`. The live gate
+correctly refuses another tag after `v0.35.398` until
+`2026-09-22T16:41:52Z`. The local binary/library/skills and both editor packages
+were installed. Commit `5635590d9` (`release: batch complete releases weekly`)
+is pushed to `origin/main`; no tag was created, and GitHub registered no workflow
+run for this non-tag push.
 <!-- agent:boundary:44108b98:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -203,7 +234,7 @@ t## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~fpe.md agent:queue was not updated when the turn completed. Fix agent-doc causes.~~
-- Batch OSX releases to 1 week.
+- ~~Batch OSX releases to 1 week.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

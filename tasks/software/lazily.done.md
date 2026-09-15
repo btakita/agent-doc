@@ -319,3 +319,4 @@
 - 2026-09-15 [#featuresreleased] What features were released?
 - 2026-09-15 [#createbudget] Did you create the gh budget?
 - 2026-09-15 [#macminiinternal] I have a Mac Mini on my internal network. Can we move the OSX build there?
+- 2026-09-15 [#runbuildslocal] We can run the builds from the local machine. The mac mini is on my local environment. Or should I give github access to the mac mini?

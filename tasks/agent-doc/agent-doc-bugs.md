@@ -13,7 +13,7 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -152,6 +152,26 @@ A regression advances the editor buffer ahead of the projected authority and pro
 Verification passed: focused receipt and success regressions, the queue architecture guard, editor parity, cross-editor SimWorld, and the full `make check`. Source commit `c68f2b92f` is pushed to `origin/main` and tag `v0.35.398` is published. The clean release install completed for `agent-doc 0.35.398`, native library 0.35.398, JetBrains plugin 0.2.386, and VS Code extension 0.2.70; controllers and supervisors were scheduled for two-phase idle recycle. GitHub CI and PyPI workflows were in progress at the required one-time inspection.
 
 The IDEA restart is accepted as the operator completion for `#panefocussplitverify`, so that item is reaped in this closeout as requested.
+
+### Re: cheaper macOS release builds — gpt-5 · 2026-09-15T13:46-04:00
+
+> **Queue prompt:**
+>
+> The gh bill the OSX build are too high. Please propose a cheap alternative to the current build process.
+
+The first important finding is that this repository is not currently accruing paid macOS Actions time. `btakita/agent-doc` is public, both Darwin legs use standard hosted labels (`macos-14` and `macos-latest`), and the latest release run's timing API reports `MACOS.total_ms = 0` under `billable`. GitHub's current policy says standard hosted runners are free for public repositories; the listed private-repository rates are $0.062/minute for standard macOS and $0.006/minute for standard Linux. Sources: [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions), [runner pricing](https://docs.github.com/en/billing/reference/actions-runner-pricing), and [latest release usage](https://github.com/btakita/agent-doc/actions/runs/34994074751/usage).
+
+The gross compute is nevertheless high. There were 77 Release runs from September 1 through September 15. In the latest ten releases, the 20 Darwin jobs used 306.45 wall-clock minutes and 316 rounded runner minutes. At the published macOS rate that is a nominal $19.59, or about $1.96 per release, although this public repository received a full discount. The latest run also shows why: the two Cargo builds consume roughly 14.5 and 15.5 minutes; setup and packaging are negligible.
+
+My recommended cheap process is:
+
+1. Batch releases. Merge fixes continuously, but cut at most one tagged binary release per day (or on an explicit release cutoff) instead of publishing every individual fix. At the recent rate, 15 daily releases instead of 77 would remove about 80% of the Darwin build executions without changing toolchains or artifact trust. This requires deliberately replacing the current “release every shippable fix” project policy.
+2. If keeping every-tag releases is required, move the two Darwin compile-only legs into one Ubuntu job using a digest-pinned `cargo-zigbuild` container. Build `x86_64-apple-darwin` and `aarch64-apple-darwin` separately and retain the existing per-target archive names, executable-plus-cdylib packaging guards, and `SHA256SUMS` contract. `cargo-zigbuild` explicitly supports both targets and a universal2 mode: [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild).
+3. Keep one scheduled and manually dispatchable native macOS smoke workflow. It should download the newest two archives on a real Mac, run `agent-doc --version`, verify `lib-path` resolves the sibling `.dylib`, and exercise one FFI call. That preserves platform confidence without paying for two cold native compilations on every tag.
+
+If the repository later becomes private, the Linux cross-build reduces the runner rate by about 90.3% per minute. At the sampled workload and equal runtime, the nominal ten-release compute would fall from $19.59 to about $1.90, plus the small periodic native-smoke cost. I would prove both cross-built archives on Intel and Apple Silicon before removing the native release legs; confidence is high in the billing diagnosis and medium in cross-build compatibility until that spike passes.
+
+No release/build files were changed in this proposal-only cycle. The authenticated CLI can inspect repository run usage but lacks the account-level `user` scope, so it could not audit the overall personal billing report. Any nonzero macOS charge on the account should therefore be traced by repository in that report; it is not supported by this public repository's current run-level billable data.
 <!-- agent:boundary:44108b98:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -161,9 +181,6 @@ The IDEA restart is accepted as the operator completion for `#panefocussplitveri
 t## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~The queue item `- Fix the duplicated agent:queue item that occurred as I was typing in the queue item. The duplicate is "- Please continue the fpe query optimization. How can we reduce the number". Fix the race condition so it cannot occur again. Previous attempts have been made but this issue is still occurring.` in this document and `- Write the plan into a document. Can we make a ADR? The ADR belongs in the fpe repo since it is internal to the fpe. Use the decisions directory format that we use in haiven-docs.` in fpe.md was not removed once completed. Fix the agent-doc causes.~~
-- ~~do [#realtimequeuedupe]~~
-- ~~[#panefocussplitverify] done as I restarted Idea~~
 <!-- /agent:queue -->
 
 

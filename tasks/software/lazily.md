@@ -132,12 +132,36 @@ The current personal-account controls remain unchanged:
 - All AI credits: $0/month, stop usage enabled
 
 GitHub personal-account budgets are product-specific rather than one universal “all GitHub costs” budget. The intended next change is still tracked as `#lzgithubbudget20`: set the Actions budget to $20/month with Stop usage enabled while retaining the other $0 hard stops. It remains blocked until a valid payment method is added to the `btakita` personal account; after that, the budget edit can be retried without changing the other products.
+
+### Re: Move the macOS build to the Mac Mini — gpt-5 · 2026-09-15T12:22-04:00
+
+> **Queue prompt:**
+>
+> do [#macminiinternal]
+
+
+> **Queue prompt:** I have a Mac Mini on my internal network. Can we move the OSX build there?
+
+Yes. The only current macOS workload in the released bindings is the [`lazily-py` wheel workflow](../../src/lazily-py/.github/workflows/wheels.yml): its `macos-14` Apple-silicon runner cross-builds both `arm64` and `x86_64` wheels. We can replace that one hosted matrix cell with the Mac Mini while leaving Linux, Windows, sdist, and PyPI publication where they are.
+
+I do **not** currently have SSH access to the Mac Mini. The local SSH configuration has no Mac/Mini alias, and mDNS discovery found no advertised SSH service. I need its hostname or IP, SSH username, and whether it is Apple Silicon or Intel. Alternatively, you can perform the one-time runner registration locally on the Mac.
+
+Recommended shape:
+
+1. Register it as a repository-level runner for `lazily-hub/lazily-py`, install it as a macOS service, and give it a dedicated label such as `lazily-macos`. The runner initiates outbound HTTPS on port 443, so an internal-network machine needs no inbound internet port forwarding. [GitHub runner setup](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/add-runners) · [network requirements](https://docs.github.com/en/actions/reference/runners/self-hosted-runners)
+2. Split macOS out of the current matrix and target `[self-hosted, macOS, ARM64, lazily-macos]`. Preserve `CIBW_ARCHS_MACOS: "x86_64 arm64"` if the Mini is Apple Silicon.
+3. Run that job only for maintainer-controlled tag pushes and manual dispatches—never `pull_request`. This repository is public, and GitHub warns that untrusted PR code can persistently compromise a self-hosted runner. Use a dedicated, non-admin macOS account with no personal credentials and clean the work directory between jobs. [GitHub secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use)
+4. Validate both wheel architectures on the Mini before removing `macos-14`. If it is offline, release jobs will queue for up to 24 hours rather than falling back automatically.
+
+One important tradeoff: this does **not** save Actions runner charges for this repository. `lazily-py` is public, and standard GitHub-hosted runners—including `macos-14`—are already free and unlimited for public repositories. Self-hosting gives hardware control and avoids hosted-runner availability issues, but artifact storage and the Mac's maintenance remain. [GitHub Actions billing](https://docs.github.com/en/actions/concepts/billing-and-usage)
+
+No workflow was changed yet because GitHub currently reports zero self-hosted runners for `lazily-hub/lazily-py`, and routing the tag build before the machine is registered would block releases. The external setup/migration gate is tracked as `#lzmacosrunner`.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 <!-- /agent:queue -->
 
 ## Backlog
@@ -148,6 +172,7 @@ GitHub personal-account budgets are product-specific rather than one universal �
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzmacosrunner] [operator-action, lazily-py] Provide the Mac Mini hostname or IP, SSH username, and Apple Silicon versus Intel architecture; enable macOS Remote Login or register the GitHub Actions runner locally. Then migrate the trusted tag/manual macOS wheel job from macos-14 to a dedicated self-hosted macOS runner, exclude pull-request code, verify arm64 and x86_64 wheels, and keep artifact publication intact.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. Blocked until a valid payment method is added to the personal GitHub account.
 - [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Existing 3,304 nonexpired Actions artifacts total about 53.5 GB and continue accruing storage cost until expiry or deletion. New transient release/wheel artifacts now retain for one day in agent-doc 9fbda092c. NEXT: authorize deletion of old Actions artifacts after verifying durable GitHub Release and PyPI copies; destructive cleanup was not performed in this cycle.
 - [/] [#lzktbindpending] [lazily-kt] PHASE 2 of #lzktblockwalk, IN PROGRESS — 44 of 540 bind-pending sites migrated; bind-pending count moved 540 -> 496 and the whole-ledger equality is 521 (25 unreachable + 496 bind-pending). 496 remain across 12 areas. FIRST PASS (lazily-kt 93420ff) bound ipc/root 1, familysync 3, protobuf 6, membership 9, and message-passing 9. SECOND PASS (lazily-kt f87afda) bound lossless-tree 16 through AssertionKeys, including nested render_on descent and final key satisfaction; it exposed 0 higher-rung gaps and required 0 semantic fixes. Cumulative measured sample: 28 of 44 bound blocks exposed a higher-rung gap (63.6%), and 14 of 44 required a real fix (31.8%); keep re-measuring per area rather than forecasting. REMAINING AREAS: collections 132, reactive-graph 88, stdlib 54, ingress 42, rateshape 33, coordination 29, windowing 23, egress 22, resilience 21, service 20, temporal 16, presence 16. Take one or two areas per pass; delete exactly those ledger entries and re-pin the equality downward by exactly that count in the same commit; verify the guard fails on off-by-one in BOTH directions. Every higher-rung failure surfaced by migration must be fixed, never excused. reactive-graph remains BLOCKED on #lzktreactivemodelfailures. Gradle proof discipline applies: use JUnit XML timestamps, not task lines, and --rerun-tasks when evidence may be stale. Repo: src/lazily-kt

@@ -224,17 +224,33 @@ correctly refuses another tag after `v0.35.398` until
 were installed. Commit `5635590d9` (`release: batch complete releases weekly`)
 is pushed to `origin/main`; no tag was created, and GitHub registered no workflow
 run for this non-tag push.
+
+### Re: The last fpe.md turn did not commit. Fix agent-doc causes. — gpt-5 · 2026-09-15T16:56:53-04:00
+
+> **Queue prompt:** The last fpe.md turn did not commit. Fix agent-doc causes.
+
+Fixed the agent-doc causes and recovered the missing FPE commit.
+
+The failure had two linked causes. First, an answered free-text strike deferred on editor delivery was not reactive to the retained-delivery frontier, so delivery could converge without retrying the strike Effect or recording its application receipt. Second, older terminal cycles had no safe commit recovery when that delayed strike landed after the response commit—or when normal queue cleanup reaped the completed row before recovery ran.
+
+The controller now re-drives the same captured strike when retained delivery advances. Commit recovery is fenced to the terminal capture and committed `HEAD`: it accepts only the exact derived strike or the exact committed queue with those captured node keys removed. A later recurring prompt or any other queue edit still fails closed.
+
+The real `tasks/fpe.md` case is recovered and clean at commit `6b058f3`. Its direct session check reports cycle `cycle-1789496338218` committed with `commit_success` and no drainable work.
+
+The Infra retained response was retried only through `session-check`, as required. Delivery recovery advanced, then correctly stopped on the separate `#mergeorderremove` guard because runnable queue work was removed while its backlog item remains open. I did not resubmit the response or force disk.
+
+Regression coverage includes the initial delivery-CAS failure/retry, terminal late-strike recovery, committed-`HEAD` fencing, exact post-strike reap recovery, and rejection of an identical recurring prompt. Full `make check` passed after the final change. Source commits `bc18f121c`, `27b77801b`, `8b1e18117`, `d7e2eb1f6`, and `e94411dd8` are pushed to `main`; the corrected binary is installed and the relevant controllers were recycled.
+
+Per the weekly macOS release cadence, this was installed and pushed without creating another tag inside the one-week batch window. The session accretion warning remains informational; only an explicit operator clear resets it.
 <!-- agent:boundary:44108b98:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
-t## Pending / Not Built
+## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~fpe.md agent:queue was not updated when the turn completed. Fix agent-doc causes.~~
-- ~~Batch OSX releases to 1 week.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

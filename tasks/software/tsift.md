@@ -95,12 +95,40 @@ Existing repositories that already contain tsift's managed markers should remain
 `AGENTS.override.md` can remain an advanced, explicit Codex-only escape hatch, but tsift should never select it automatically. If offered at all, initialization should warn or fail when a same-directory `AGENTS.md` exists unless the operator explicitly accepts that it will be masked.
 
 The implementation should prove four invariants: personal/off modes create no tracked diffs; shared mode remains idempotent; migration removes only tsift-owned marker regions; and the personal skill/runbook works across supported harnesses. I recorded that implementation as recommended follow-up `#tsiftinstrpolicy`. No tsift source change was needed to complete this architecture decision.
+
+### Re: skill-first tsift instructions — gpt-5 · 2026-09-15T19:01-04:00
+
+Yes. A skill is the better default than modifying `AGENTS.*`.
+
+For Codex, tsift can install a user-scoped skill at `~/.agents/skills/tsift/` or a repository-scoped skill at `.agents/skills/tsift/`. Codex initially sees the skill name and description, then loads the full `SKILL.md` only when explicitly invoked or when the task matches its description. That gives us progressive disclosure without changing a team's tracked instruction files. The current [OpenAI skill documentation](https://learn.chatgpt.com/docs/build-skills) explicitly supports both user and repository skill locations and implicit invocation.
+
+The tradeoff is that a skill is conditional, whereas `AGENTS.md` is loaded before every task. Therefore the proposed modes should be:
+
+- `personal` (default): install a user-scoped tsift skill and bundled runbook; make its description broad enough to trigger for code search, source reading, diffs, logs, and test output. Do not modify the repository.
+- `shared`: install a checked-in repository skill for team-wide discovery. Add a minimal `AGENTS.md` router only if the team explicitly wants tsift to be mandatory and always-on.
+- `off`: install no instruction integration.
+
+We should not generate `AGENTS.override.md`: Codex selects only one instruction file per directory and prefers the override, so it can hide an existing team `AGENTS.md`, as documented in [OpenAI's `AGENTS.md` discovery rules](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
+
+For Claude Code and OpenCode, tsift can generate equivalent harness-native skill mirrors from the same bundled source. That keeps the policy skill-first across harnesses even though the discovery paths differ.
+
+This sharpens `#tsiftinstrpolicy`: implement the skill as the primary integration, and retain `AGENTS.md` only as an explicit shared enforcement option. No source change was requested in this question-only cycle.
+Yes—use a skill as the default integration:
+
+- `personal`: user-scoped skill, no repository mutation.
+- `shared`: checked-in repository skill; minimal `AGENTS.md` only for explicitly always-on enforcement.
+- `off`: no integration.
+
+Codex supports user/repository skills with implicit activation ([OpenAI skill docs](https://learn.chatgpt.com/docs/build-skills)). Avoid generated `AGENTS.override.md`, which can mask the team’s existing instructions ([discovery rules](https://learn.chatgpt.com/docs/agent-configuration/agents-md)).
+
+The answer is captured in the live document, but the editor-native save receipt remains pending, so it is not committed yet. The [agent-doc skill](/home/brian/work/btakita/agent-loop/.codex/skills/agent-doc/SKILL.md) requires leaving the editor authoritative while its controller retries; I did not force disk or duplicate the response.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+- [#tsiftinstrpolicy]: Can we use a skill instead of adding to AGENTS.*?
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

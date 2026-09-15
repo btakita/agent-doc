@@ -160,7 +160,7 @@ fn late_answered_free_text_strike_capture(
         false
     } else {
         agent_doc_queue::queue_consume::remove_queue_nodes_by_key(
-            &projection.target_content,
+            committed_content,
             &projection.node_keys,
         )? == current_content
     };

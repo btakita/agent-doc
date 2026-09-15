@@ -2557,7 +2557,7 @@ Duplicate replay should stay live.
         .unwrap()
         .expect("fixture response must own its free-text queue head");
         let reaped = agent_doc_queue::queue_consume::remove_queue_nodes_by_key(
-            &projection.target_content,
+            &committed,
             &projection.node_keys,
         )
         .unwrap();

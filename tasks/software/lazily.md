@@ -1839,6 +1839,41 @@ Verification:
 - lazily-spec's corpus audit now recognizes Python 151 and Kotlin 157; undeclared dimensions fell from 12 to 10. Godot's scenario dimension remains honestly undeclared.
 - `make check` passed in lazily-py, lazily-kt, and at the agent-loop root.
 - Latest Python and Kotlin GitHub Actions runs were green.
+
+### Re: do [#lzcireachsync] — gpt-5.6-sol · 2026-09-14T23:13:03-04:00
+
+> **Queue prompt:**
+>
+> do [#lzcireachsync]
+
+
+Ported and verified ancestor make-target reach across all nine sibling bindings.
+
+Commits:
+- lazily-rs `d08b60b`
+- lazily-py `3d86951`
+- lazily-js `ca59951`
+- lazily-kt `19c3367`
+- lazily-go `2abd9fe`
+- lazily-cpp `5b332f4`
+- lazily-cs `02c3206`
+- lazily-dart `039294b`
+- lazily-zig `3b69fb4`
+- root pointers `57db0e4ab`
+
+Each current guard now:
+- treats `make <ancestor>` as reaching a target when the target is in that ancestor's prerequisite closure;
+- computes that relation breadth-first through the same `prereqs_of` function used by the main closure;
+- applies ancestor credit to both normal reach classification and stale-excuse detection;
+- documents the ancestor form in its matching contract.
+
+The queued byte-copy instruction had become stale after the newer CI-activation work: the scripts now contain intentional repository-specific activation pins and floors. Copying Godot wholesale would have deleted those newer guards. I therefore ported only the two functions, call sites, and header semantics into each current file. I did not add an exact-copy guard because byte identity is no longer true or desirable. The local-copy architecture remains: moving the guard into lazily-spec would make standalone binding CI depend on a sibling checkout.
+
+Verification:
+- `bash -n scripts/check-ci-reach.sh` passed in all nine repositories.
+- `make ci-reach` passed in all nine; current output remains green, consistent with the already-completed no-op proof that none invokes an ancestor such as `make check`.
+- Full `make check` passed in all nine repositories and at the agent-loop root.
+- Zig's pre-existing activation-floor worktree edit was preserved and left unstaged; only the four ancestor-reach hunks were committed.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1864,7 +1899,7 @@ Verification:
 - ~~do [#lzorderinganchors]~~
 - ~~do [#lzktareapartition]~~
 - ~~do [#lzscenariofloormissing]~~
-- do [#lzcireachsync]
+- ~~do [#lzcireachsync]~~
 - do [#lzfollowupqueueorder]
 - do [#lzktbindpending]
 <!-- /agent:queue -->
@@ -1872,7 +1907,6 @@ Verification:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcireachsync] [lazily-rs, lazily-py, lazily-js, lazily-kt, lazily-go, lazily-cpp, lazily-cs, lazily-dart, lazily-zig] The ten copies of scripts/check-ci-reach.sh are no longer byte-identical. Before #lzgdcireach the nine all carried md5 da1444b38e93 / 570 lines — an invariant nothing enforces but which is plainly deliberate, since the script has no shared home (unlike check-assertion-ordering.py, which lives in lazily-spec and is invoked across the sibling boundary). lazily-gd 913edc8 added `make_invokes_ancestor`: a CI step running `make <ancestor>` reaches every target in that ancestor`s prerequisite closure, walked with the same `prereqs_of` the main closure uses. Without it a verbatim copy reported all six of gd`s gates unreachable, because gd`s CI is a single `make check` step. THE NO-OP PROOF IS ALREADY DONE, so this item is a port plus verification rather than a design question: the new script was run in each of the nine and produced output BYTE-IDENTICAL to the old one, exit 0 in all eighteen runs — because none of the nine invokes `make check` from a `run:` step (each runs the underlying commands per gate; the only real `run:` body in any of them containing the phrase "make check" is this guard`s own refusal text, which is the comment-vs-command trap its header warns about). So: copy gd`s version into the nine, re-run each binding`s `ci-reach` target and confirm output is unchanged, then `make check` per repo and CI. Worth deciding in the same pass whether nine-plus-one hand-synced copies should keep being hand-synced at all — the alternatives are a shared home in lazily-spec (which would make every binding`s own guard depend on the sibling checkout, a cost the current design deliberately avoids) or a guard that asserts the copies are identical. Note for whoever takes it: the file is 641 lines in gd now, and the ONLY behavioural difference is the two new functions plus one call site and the header sentence, so a diff against gd is the cheapest review. Repos: the nine above
 - [ ] [#lzfollowupqueueorder] [process] Follow-up items filed by a drain cycle keep preempting the queue they were filed from, because `--backlog-add` prepends by default and the queue mirror honours that. Three consecutive cycles filed an item that became the very next head — #lzblocksitepin, then #lzexpectedkeyorder, then #lzgdorderingguard, then #lzgdcireach — each pushing #lzcppblockwalk one place further back, so the drain went depth-first into gd tooling while the three walk-widening items (cpp/kt/rs) and the three older items (#lzorderinganchors, #lzktareapartition, #lzscenariofloormissing) sat untouched. Prepending is the right DEFAULT — a follow-up from the turn that just ran is usually the most task-relevant work, which is exactly why the flag exists — but it is the wrong choice for a follow-up that is merely ADJACENT rather than more urgent, and nothing currently prompts the agent to make that judgement. Concretely: prefer `--backlog-queue-placement append` for a follow-up that is not more urgent than the existing head, and consider whether the agent-doc skill should say so at the point where it tells the agent to capture follow-up work (runbooks/respond.md, the backlog-capture rule) rather than leaving the default to decide. Worth checking whether the same asymmetry applies to `--backlog-add-after`/`--backlog-add-before`, which the queue mirror also honours. This item deliberately uses append on itself. Repo: src/agent-doc (skill/runbook text), or file against tasks/agent-doc/ if it is treated as a product change
 - [ ] [#lzktbindpending] [lazily-kt] PHASE 2 of #lzktblockwalk, IN PROGRESS — 28 of 540 sites bound, pin re-pinned DOWNWARD 540 -> 512, 512 remaining across 13 areas. Migrate kt`s remaining bind-pending assertion-block sites onto AssertionKeys: the block is reached and the runner DOES assert its keys, but by direct indexing rather than through a tracker, so rung 0 cannot see the bind and every rung above it is scoped to blocks a tracker bound and therefore says nothing about these. They are enumerated per site in scripts/conformance-unbound-blocks.txt with reason class `bind-pending`, and the guard asserts that count as an EQUALITY failing in BOTH directions and derived from the RUN rather than the ledger, so a migration cannot land without moving the number in the same commit and cannot silently regress upward. FIRST PASS (lazily-kt 93420ff) bound 5 areas over 4 block shapes to prove the recipe generalises: ipc/root 1, familysync 3, protobuf 6, membership 9, message-passing 9. THE MEASURED GAP RATE IS THE REASON THIS ITEM IS BIGGER THAN ITS SITE COUNT: every one of those 28 blocks failed a higher rung once bound, and HALF needed a real fix rather than a routing change — 6 distinct defect classes, each a hole the narrow walk was hiding. `ordinary_snapshot_count` (6 blocks) compared against the LITERAL 0, so the key asserted the corpus against itself and a binding admitting a purposeless snapshot passed; `rpc.terminal_status` and `conflict` were PRESENT IN THE FIXTURE AND NEVER READ, the latter being the headline claim of terminal_conflict_fail_closed; `ignored_frame_indices` was asserted one way only; `target_epoch_bumped` was read but asserted only when TRUE, so a `false` upstream would have vanished the assertion; `*_after_frame_index` let the fixture`s own value steer which assertion to make instead of comparing against the run`s. Plus 7 object-valued keys consumed with no key-set check. If that rate holds the remaining 512 sites carry on the order of a hundred more real defects — but treat that as a measured rate from one sample, not a forecast: the easy classes may be exhausted first, so RE-MEASURE the per-area gap rate each pass and report it. REMAINING AREAS: collections 132, reactive-graph 88, stdlib 54, ingress 42, rateshape 33, coordination 29, windowing 23, egress 22, resilience 21, service 20, temporal 16, presence 16, lossless-tree 16. Take one or two per pass; delete exactly that area`s ledger entries and re-pin the equality down by exactly that count in the same commit; verify the guard fires on an off-by-one in BOTH directions. Every higher-rung failure a migration surfaces must be FIXED, never excused — a bound-but-failing block is a different state from an unbound one and must not be laundered back into the ledger. reactive-graph (88) is BLOCKED on #lzktreactivemodelfailures and should not be started until that is settled. Gradle proof discipline applies: JUnit XML timestamps, not task lines, and `--rerun-tasks` if a manifest may be stale. Repo: src/lazily-kt
 <!-- /agent:backlog -->

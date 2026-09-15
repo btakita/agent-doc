@@ -106,6 +106,32 @@ The train also shipped the assurance layer around those APIs:
 - deterministic cross-language/channel testing, including mutation checks that prove the suite detects boundary, cancellation-order, latching, lost-wakeup, and fake-runner defects.
 
 This is separate from the older reactive `TimeoutCell`; that existing primitive did not count as implementing the new caller-driven `Timeout<T>` contract. C# was tested but excluded from this release train, and Godot remains staged.
+
+### Re: GitHub budget status — gpt-5 · 2026-09-15T12:04-04:00
+
+> **Queue prompt:**
+>
+> I have a Mac Mini on my internal network. Can we move the OSX build there?
+
+
+> **Queue prompt:**
+>
+> do [#createbudget]
+
+
+> **Queue prompt:** Did you create the gh budget?
+
+No. GitHub rejected the attempted budget change with **“Payment method is missing”**, so no budget was created or modified.
+
+The current personal-account controls remain unchanged:
+
+- Actions: $0/month, stop usage enabled
+- Packages: $0/month, stop usage enabled
+- Codespaces: $0/month, stop usage enabled
+- Git LFS: $0/month, stop usage enabled
+- All AI credits: $0/month, stop usage enabled
+
+GitHub personal-account budgets are product-specific rather than one universal “all GitHub costs” budget. The intended next change is still tracked as `#lzgithubbudget20`: set the Actions budget to $20/month with Stop usage enabled while retaining the other $0 hard stops. It remains blocked until a valid payment method is added to the `btakita` personal account; after that, the budget edit can be retried without changing the other products.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 

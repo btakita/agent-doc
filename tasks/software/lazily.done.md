@@ -317,3 +317,4 @@
 - 2026-09-15 [#expensivereleasesmachine] $329.06 is expensive. Please do our releases from this machine instead. Disable the heavy CI work please. Also, why is the agent-loop repo costing $12/month?
 - 2026-09-15 [#lzstdlibmatrixrelease] [local-release] Complete Phase 5 via tasks/software/plan-lazily-stdlib-conformance-rollout.md on this machine. NEXT: derive or bump the stale interop hello versions in Python, Kotlin, JavaScript, Dart, Zig, Go, and C++; prepare clean worktrees and the intended version bumps; run every make check plus lazily-interop make check and network-suite-nightly locally; publish inside-out. Keep public/free cross-platform wheel and provenance workflows only as packaging transports where Linux cannot reproduce their artifact matrix. C# is a tested peer but excluded from this release; Godot remains staged.
 - 2026-09-15 [#featuresreleased] What features were released?
+- 2026-09-15 [#createbudget] Did you create the gh budget?

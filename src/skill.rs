@@ -3400,8 +3400,11 @@ mod tests {
     fn bundled_skill_contains_backlog_capture_rules() {
         assert!(SKILL_TEMPLATE.contains("Backlog capture rule"));
         assert!(SKILL_TEMPLATE.contains("[recommended]"));
-        assert!(SKILL_TEMPLATE.contains("beginning of `agent:backlog`"));
-        assert!(SKILL_TEMPLATE.contains("adjacent to its predecessor"));
+        assert!(SKILL_TEMPLATE.contains("--backlog-queue-placement append"));
+        assert!(SKILL_TEMPLATE.contains("must not preempt the existing head"));
+        assert!(SKILL_TEMPLATE.contains("--backlog-add-after <id>"));
+        assert!(SKILL_TEMPLATE.contains("--backlog-add-before <id>"));
+        assert!(SKILL_TEMPLATE.contains("does not override them"));
         assert!(SKILL_TEMPLATE.contains("multi-phase implementation work"));
         assert!(SKILL_TEMPLATE.contains("prefer one backlog ID per actionable phase"));
         assert!(SKILL_TEMPLATE.contains("`do #id` closeout rule"));

@@ -220,6 +220,7 @@ fn record_manual_clear_cooldown_projection(ctx: &SessionContext) -> Result<()> {
 enum LivePaneState {
     AliveIdle,
     AliveBusy,
+    AliveUnobservable,
     ClosedClean,
     ProjectionStale,
     Unknown,
@@ -230,6 +231,7 @@ impl LivePaneState {
         match self {
             Self::AliveIdle => "alive-idle",
             Self::AliveBusy => "alive-busy",
+            Self::AliveUnobservable => "alive-unobservable",
             Self::ClosedClean => "closed-clean",
             Self::ProjectionStale => "projection-stale",
             Self::Unknown => "unknown",
@@ -1278,6 +1280,7 @@ fn operator_clear_input_state_for_evidence(
         LivePaneState::ClosedClean | LivePaneState::ProjectionStale | LivePaneState::Unknown => {
             OperatorClearInputState::NoLivePane
         }
+        LivePaneState::AliveUnobservable => OperatorClearInputState::ProtectedInput,
         LivePaneState::AliveBusy if protected_input => OperatorClearInputState::ProtectedInput,
         LivePaneState::AliveBusy if clean_exit_prompt => OperatorClearInputState::CleanExit,
         LivePaneState::AliveBusy if busy_cue => OperatorClearInputState::Busy,
@@ -2721,7 +2724,10 @@ fn guard_destructive_operator_on_live_busy_pane(
     action: &str,
 ) -> Result<()> {
     let evidence = live_pane_evidence(ctx, tmux);
-    if evidence.state == LivePaneState::AliveBusy {
+    if matches!(
+        evidence.state,
+        LivePaneState::AliveBusy | LivePaneState::AliveUnobservable
+    ) {
         if action == "session_restart" && pane_shows_clean_exit_prompt(ctx, tmux, &evidence) {
             return Ok(());
         }
@@ -2744,10 +2750,11 @@ fn guard_destructive_operator_on_live_busy_pane(
             );
         }
         anyhow::bail!(
-            "{} refused for {} because pane {} is alive-busy (source={}, current_command={}, busy_proof={:?}, tail={:?}). Run `agent-doc session status {}` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.",
+            "{} refused for {} because pane {} is {} (source={}, current_command={}, busy_proof={:?}, tail={:?}). Run `agent-doc session status {}` and wait for an observable idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.",
             action,
             ctx.canonical_file.display(),
             pane,
+            evidence.state.as_str(),
             evidence.source,
             command,
             busy_proof.unwrap_or("none"),
@@ -3523,21 +3530,24 @@ fn live_pane_evidence_for_pane(
 
     let harness = agent_doc_harness::HarnessConfig::from_agent_name(&ctx.harness);
     let captured = agent_doc_tmux_io::capture_pane(tmux, &pane_id).unwrap_or_default();
-    let prompt_ready = live_pane_prompt_ready_at_cursor(
-        &harness,
-        &captured,
-        agent_doc_tmux_io::pane_cursor_y(tmux, &pane_id),
-    );
+    let cursor_y = agent_doc_tmux_io::pane_cursor_y(tmux, &pane_id);
+    let prompt_ready = live_pane_prompt_ready_at_cursor(&harness, &captured, cursor_y);
+    let pane_height = pane_display_value(tmux, &pane_id, "#{pane_height}")
+        .and_then(|height| height.parse::<usize>().ok());
+    let viewport_unobservable =
+        live_pane_viewport_unobservable(&harness, &captured, pane_height, prompt_ready);
     LivePaneEvidence {
         pane_id: Some(pane_id.clone()),
         source,
         state: if prompt_ready {
             LivePaneState::AliveIdle
+        } else if viewport_unobservable {
+            LivePaneState::AliveUnobservable
         } else {
             LivePaneState::AliveBusy
         },
         current_command: pane_display_value(tmux, &pane_id, "#{pane_current_command}"),
-        prompt_ready: Some(prompt_ready),
+        prompt_ready: (!viewport_unobservable).then_some(prompt_ready),
         tail: last_meaningful_pane_line(&captured),
     }
 }
@@ -3694,6 +3704,29 @@ fn live_pane_prompt_ready_at_cursor(
         return true;
     }
     false
+}
+
+const MIN_CLASSIFIABLE_PANE_HEIGHT: usize = 4;
+
+/// A hidden stash window may compress a live pane below the number of rows its
+/// harness needs to render the composer. Missing prompt chrome in that viewport
+/// is absence of evidence, not evidence that the harness is busy. Explicit busy
+/// cues and drafted input remain observable blockers even in a short pane.
+fn live_pane_viewport_unobservable(
+    harness: &agent_doc_harness::HarnessConfig,
+    captured: &str,
+    pane_height: Option<usize>,
+    prompt_ready: bool,
+) -> bool {
+    let explicit_draft = matches!(
+        agent_doc_harness::project_pane_composer_at_cursor(captured, harness, None),
+        agent_doc_harness::PaneComposerProjection::OperatorDraft { .. }
+    );
+    if prompt_ready || explicit_draft || harness.has_busy_cue(captured) {
+        return false;
+    }
+    captured.trim().is_empty()
+        || pane_height.is_some_and(|height| height < MIN_CLASSIFIABLE_PANE_HEIGHT)
 }
 
 fn agent_doc_restart_prompt_visible(captured: &str) -> bool {
@@ -4722,6 +4755,50 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
     }
 
     #[test]
+    fn short_blank_stash_viewport_is_unobservable_not_busy() {
+        let harness = agent_doc_harness::HarnessConfig::codex();
+
+        assert!(live_pane_viewport_unobservable(
+            &harness,
+            "\n",
+            Some(1),
+            false
+        ));
+    }
+
+    #[test]
+    fn short_stash_viewport_preserves_explicit_draft_blocker() {
+        let harness = agent_doc_harness::HarnessConfig::codex();
+        let captured = "\
+› investigate this issue
+gpt-5.5 high · ~/work/btakita/agent-loop · Context 69% used
+";
+
+        assert!(matches!(
+            agent_doc_harness::project_pane_composer_at_cursor(captured, &harness, None),
+            agent_doc_harness::PaneComposerProjection::OperatorDraft { .. }
+        ));
+        assert!(!live_pane_viewport_unobservable(
+            &harness,
+            captured,
+            Some(1),
+            false
+        ));
+    }
+
+    #[test]
+    fn normal_sized_non_prompt_viewport_remains_busy() {
+        let harness = agent_doc_harness::HarnessConfig::codex();
+
+        assert!(!live_pane_viewport_unobservable(
+            &harness,
+            "working\n",
+            Some(20),
+            false
+        ));
+    }
+
+    #[test]
     fn live_pane_prompt_ready_accepts_codex_default_placeholder() {
         let harness = agent_doc_harness::HarnessConfig::codex();
 
@@ -4927,6 +5004,26 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert_eq!(
             agent_doc_controller::operator_clear::clear_guard_outcome(state),
             OperatorClearGuardOutcome::Blocked
+        );
+    }
+
+    #[test]
+    fn operator_clear_blocks_unobservable_stash_viewport() {
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveUnobservable,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: None,
+            tail: None,
+        };
+
+        let state = operator_clear_input_state_for_evidence(&evidence, false, false, false);
+
+        assert_eq!(state, OperatorClearInputState::ProtectedInput);
+        assert_eq!(
+            agent_doc_controller::operator_clear::clear_guard_outcome(state),
+            OperatorClearGuardOutcome::FailedClosed
         );
     }
 
@@ -5480,6 +5577,26 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             current_command: Some("agent-doc".to_string()),
             prompt_ready: Some(false),
             tail: Some("working".to_string()),
+        };
+
+        assert!(!owned_pane_ready_busy_conflict(&ctx, &evidence));
+    }
+
+    #[test]
+    fn status_does_not_flag_unobservable_stash_viewport_as_ready_busy_conflict() {
+        let record = test_actor_record(ActorState::Ready);
+        let ctx = test_session_context(
+            record,
+            test_supervisor_runtime(Some(ActorState::Ready)),
+            Some("ready"),
+        );
+        let evidence = LivePaneEvidence {
+            pane_id: Some("%7".to_string()),
+            source: "authoritative_actor",
+            state: LivePaneState::AliveUnobservable,
+            current_command: Some("agent-doc".to_string()),
+            prompt_ready: None,
+            tail: None,
         };
 
         assert!(!owned_pane_ready_busy_conflict(&ctx, &evidence));

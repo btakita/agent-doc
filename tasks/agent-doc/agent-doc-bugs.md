@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0a6ea-ad68-7050-9fa4-fb00c2c4ddbd
+  codex: 01a0a748-635a-7321-a5e6-473693f67679
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -271,7 +271,39 @@ Verification completed:
 - the supervisor/controller recycle handoff was requested after installation.
 
 No release was cut because the latest tag was published today and the seven-day release cadence is still closed. Unrelated in-progress JetBrains and stale-window-remedy edits were left uncommitted.
-<!-- agent:boundary:44108b98:agent-doc-bugs -->
+
+### Re: $20 GitHub billing cap and operator-built macOS releases — gpt-5 · 2026-09-15T19:17:45-04:00
+
+> **Queue prompt:**
+>
+> I updated my payment info in Github. Please apply a budget of $20/month to all GH billing so I don't get another large bill. Also remove the build for OSX. I'll run the builds on my mac mini & upload periodically.
+
+Applied the safest account-wide equivalent of a $20 monthly GitHub metered-spend cap.
+
+GitHub budgets are product-scoped rather than one combined account-total budget. The personal account now has GitHub Actions set to a **$20/month hard budget**, with **Stop usage when budget limit is reached** and threshold alerts enabled. The other configured metered products—AI credits, Codespaces, Packages, and Git LFS—remain hard-limited to **$0**. That permits at most $20 of configured metered overage instead of raising five product budgets to $20 each. I did not loosen any organization budgets that were already hard-stopped at $0. GitHub's budget behavior and hard-stop option are documented in [Setting up budgets](https://docs.github.com/en/billing/how-tos/set-up-budgets).
+
+Removed hosted macOS release builds from `btakita/agent-doc`. The release matrix now contains only four GitHub-hosted targets: three Linux archives and one Windows archive. Neither `macos-14`, `macos-latest`, nor an Apple-Darwin target remains in the Actions workflow.
+
+Added the operator-side replacement:
+
+```bash
+make release-macos-assets TAG=v<version>
+```
+
+Run that on the Mac mini when Darwin artifacts should be refreshed. It builds both `x86_64-apple-darwin` and `aarch64-apple-darwin`, requires `agent-doc` plus `libagent_doc.dylib` in each archive, downloads the release's existing platform archives, regenerates `SHA256SUMS` across the complete asset set, and uploads both Darwin archives plus the refreshed manifest with clobber semantics. The release specification and maintainer instructions now make the hosted-vs-operator ownership explicit.
+
+Verification and delivery:
+
+- focused release-policy tests passed;
+- full `make check` passed: 9,472 tests passed, 0 failed, 259 skipped;
+- clean-worktree `make install` succeeded for the binary, native library, skills, JetBrains package, and VS Code package;
+- private-name denylist scan found no matches;
+- source commit `59896e4cf` (`ci: move macOS release builds off hosted runners`) is pushed to `origin/main`;
+- parent pointer commit `f74aead31` records the source update;
+- GitHub Actions CI run [35034937058](https://github.com/btakita/agent-doc/actions/runs/35034937058) was in progress at the required one-time inspection. Local verification is the closeout gate, so it was not polled.
+
+No release tag was created; the existing weekly release cadence remains in force.
+<!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -280,7 +312,6 @@ No release was cut because the latest tag was published today and the seven-day 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~fpe.md turn did not complete. Fix agent-doc causes for the wedge.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

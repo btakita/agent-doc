@@ -1491,6 +1491,38 @@ Commands/evidence: inspected each binding's Makefile plus its runtime evidence p
 Verification: root `make check` passed. Commit: `3d8e18bfa`. Latest GitHub run `34913570373` failed before executing any steps (both jobs have empty step lists), matching the repository's external CI activation/account limitation rather than a test failure.
 
 Confidence: high. The table is based on the live writer paths, not the guard comments alone. Escalation: none; no follow-up item is needed.
+
+### Re: do [#lzmakepfootgun] — gpt-5.6-sol · 2026-09-14 20:44 EDT
+
+> **Queue prompt:**
+>
+> do [#lzmakepfootgun]
+
+
+Documented the `make -p` state-corruption footgun in the shared conformance guide, immediately before the binding guidance.
+
+The new section records the measured lazily-rs sequence: bare `make -p` started the default `make check`, `conformance-manifest-reset` truncated the evidence files, and `grep -m1` then closed the pipe and killed Make with `SIGPIPE`. The resulting empty/missing-manifest failures impersonated the recorder defect under investigation.
+
+It now requires:
+
+- `make -pn` for a dry-run data-base dump.
+- An explicit diagnostic target via `make --eval` for one expanded value.
+- Direct Makefile reading when expansion is unnecessary.
+- Never piping bare `make -p` into `head`, `grep -m1`, or another short-circuiting reader—and notes that removing the pipe alone is insufficient because bare `make -p` still executes the default goal.
+
+Changed path: lazily-spec `docs/conformance.md`.
+
+Commands/verification:
+
+- Executed the documented `make --eval='print-name: ...' print-name NAME=sentinel` example: printed `sentinel` without entering the default goal.
+- `git diff --check -- docs/conformance.md`: pass.
+- lazily-spec `make check`: pass.
+- Root `make check`: pass.
+- lazily-spec commit: `12f0465`.
+- Parent pointer commit: `bb8385e9d`.
+- Latest lazily-spec CI run `34670094086`: green. The latest root run remains the known zero-step CI activation/account failure, not a test result.
+
+Confidence: high; the warning preserves the observed command, mutation point, termination mechanism, misleading symptom, and exercised safe replacement. Escalation: none. No new follow-up is needed because the already-queued `#lzplantprobemethod` owns the adjacent perturbation-method documentation.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1505,7 +1537,7 @@ Confidence: high. The table is based on the live writer paths, not the guard com
 - ~~do [#lazilycpptwo]~~
 - ~~do [#lazilyderivesreplayed]~~
 - ~~do [#documentbindingsstamp]~~
-- do [#lzmakepfootgun]
+- ~~do [#lzmakepfootgun]~~
 - do [#lzfailedgrepvacuous]
 - do [#lzastscanundercount]
 - do [#lzplantprobemethod]
@@ -1524,7 +1556,6 @@ Confidence: high. The table is based on the live writer paths, not the guard com
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzmakepfootgun] [docs, all ten] `make -p` BUILDS THE DEFAULT GOAL, and piping it into a short-circuiting reader corrupts state. lazily-rs lost a probe to this: `make -p | grep -m1 ...` started `make check`, ran `conformance-manifest-reset`, and then SIGPIPE'd when grep exited — SILENTLY TRUNCATING every file under build/ mid-analysis. The analysis command destroyed the evidence it was analysing. Use `make -pn` (dry run) or `make --eval` instead, and never pipe `make -p` into `head`/`grep -m1`/anything that closes the pipe early. Record this in the conformance docs beside the plant-probe method (#lzplantprobemethod), because every binding's Makefile is now load-bearing for the run-id protocol and inspecting those Makefiles is now a routine step — this trap is reachable by anyone auditing them, and its symptom (empty build/, guards failing as missing evidence) looks exactly like the bug under investigation rather than like self-inflicted damage.
 - [ ] [#lzfailedgrepvacuous] [all ten, plus the agent-doc closeout instructions] `grep -c "result: FAILED"` IS VACUOUS IN AT LEAST FOUR BINDINGS, and I asked every agent in this session to use it as the closeout check. Proven, not suspected: lazily-dart deliberately failed a run (exit 1, tally `+14 -1`) and that string appeared ZERO times; lazily-gd's gdUnit4 never emits it; lazily-kt's Gradle/JUnit never emits it (0 on green AND would be 0 on red); lazily-js's `node --test` never emits it. So for those four the check has been reporting success by construction all night — it did not mask a real failure, because the exit codes were captured separately and were 0, but it contributed nothing and would not have caught anything. THE WORK: for each of the ten bindings, determine the real failure signal its runner emits and record it, then replace the generic grep with the per-binding signal. Known good substitutes: dart test's `+passed -failed` tally, gdUnit4's `Statistics: ... N failures`, JUnit XML failure/error counts for kt, `node --test`'s `ℹ fail N` for js, ctest's `N/M tests passed` for cpp. AND FIX THE INSTRUCTION SOURCE: the closeout guidance that propagates this lives in the agent-doc skill runbooks and in how I brief subagents — a check that is vacuous in 40 percent of targets should not be the standard one. The durable rule is the one every agent applied correctly anyway: capture $? explicitly and additionally assert the runner's own count, because an exit code can be masked by a pipe and a grep can be vacuous, but not both at once.
 - [ ] [#lzastscanundercount] [lazily-rs, and any binding whose hygiene rung uses an AST parser] AN AST-ONLY SCAN SILENTLY UNDER-REPORTS, and lazily-rs measured the magnitude: a `syn`-based walk saw 39 of the 86 `as_bool()` sites in its test tree and reported the other 47 CLEAN, because `syn` DOES NOT DESCEND INTO MACRO TOKEN STREAMS and most fixture comparisons in that binding live inside `assert_eq!`. A rung that silently sees 45 percent of its target is worse than no rung, because it produces a green that reads as coverage. rs's rung now scans tokens as well as the AST. TWO MORE SPELLING TRAPS FROM THE SAME WORK, both of which an obvious implementation misses: `.and_then(Value::as_bool)` is a function PATH, not a method call, and that was the spelling of the one live site outside tests/; and lazily-kt's first pattern required a bare `()` so it missed `?: emptyMap<String, Boolean>()` with type arguments, caught only because it planted a deliberate near-miss. CHECK EVERY HYGIENE RUNG LANDED IN #lzsiblingrunnermasking against these three: does it see inside macros, does it match function paths as well as method calls, and does it tolerate type arguments and whitespace variation. lazily-js is likely safe (TypeScript parser, and it found that a REGEX mis-parses apostrophes in comments and then silently stops finding call sites — the same class one layer down). The general rule worth recording: a scan's floor must be pinned to the REAL population, which is what caught rs's undercount — its MIN_SANCTIONED_READS of 101 against an AST-only count of 39 would not have reconciled.
 - [ ] [#lzplantprobemethod] [lazily-spec, docs] Record the plant-probe method and its three failure modes, discovered the hard way across #lzarrayelementsites and #lzflagcoercion. A plant-probe asserts a defect by planting it in a byte-verified scratch corpus and requiring GREEN BEFORE and a NAMED FAILURE AFTER. Three ways it lies, each hit by a different agent tonight. (1) A VACUOUS PLANT — lazily-rs wrote a `redeliver` gate onto scenarios[2], which carries neither `redeliver` nor `redeliver_applied_count`; the green meant nothing and briefly looked like a 15th defect. A plant must land on a scenario carrying BOTH the gate and the thing it gates. (2) A PLANT THAT REDDENS BEFORE — lazily-cpp had 3 of 16 do this and refused to present them as probes; lazily-dart's `handle_stable` reddened pre-fix because no step in the corpus re-mints a handle, so the coerced branch had nothing to pass against. A probe that was already red proves the fix changed nothing. (3) A PLANT MASKED BY A SIBLING RUNNER — see #lzsiblingrunnermasking; the same corpus edit is green in isolation and red in a full run, so probe scope must be stated. ALSO RECORD THE TWO ENVIRONMENT TRAPS: `grep -c "result: FAILED"` is ALWAYS 0 in lazily-gd because gdUnit4 never emits that string, so the standard closeout check is vacuous there — use `Statistics: ... N failures` plus an explicit `$?`; and lazily-kt's Gradle `:test` can read UP-TO-DATE under RTK, so a skipped suite reads as a passing one and `cleanTest test` is required. This belongs in lazily-spec/docs/conformance.md beside the existing perturbation guidance, because every binding's agent re-derived it independently tonight.

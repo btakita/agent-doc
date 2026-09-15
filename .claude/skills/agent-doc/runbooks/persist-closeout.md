@@ -21,6 +21,21 @@ project verification suite explicitly after edits and before `finalize` /
 `write --commit`. Do not rely on a pre-commit hook. Do not waive red suites as
 "unrelated" or "flaky".
 
+Capture two independent proofs when the runner exposes a failure tally:
+
+1. Preserve the test command's exit status explicitly across pipes, tee, output
+   filters, and wrappers. Check the producer command's status, not merely the
+   last reader in a pipeline.
+2. Parse the target runner's own failure count and require zero. Name that
+   signal in worker/job briefs; do not prescribe one generic grep to unrelated
+   runners.
+
+An exit status can be masked by a pipe or wrapper. A copied grep can be vacuous
+when the runner never emits that string, matching zero times on both green and
+red runs. Neither proof replaces the other. Before trusting a new output parser,
+exercise it against a deliberately failing run and require both a nonzero
+preserved status and a nonzero native failure count (`#lzfailedgrepvacuous`).
+
 ## Minimal-blocker closeout
 
 Close the turn once the requested work is implemented, local verification is

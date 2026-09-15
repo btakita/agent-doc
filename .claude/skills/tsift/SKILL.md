@@ -69,7 +69,7 @@ Fall back to raw `cat`/`grep` only when a tsift result is genuinely insufficient
 
 ## Verification
 
-Run `make check` (clippy + full suite) from `src/tsift` before committing; capture the exit explicitly (an rtk wrapper can mask it — grep output for `result: FAILED`). After local changes, check CI with `gh run list --workflow CI --limit 1` and fix failures before calling work complete.
+Run `make check` (clippy + full suite) from `src/tsift` before committing. Preserve the command's exit status explicitly across wrappers and pipes; do not replace it with a generic output grep, because unrelated runners may never emit that string. When the runner exposes a failure tally, independently assert its runner-native count as a second proof. After local changes, check CI with `gh run list --workflow CI --limit 1` and fix failures before calling work complete.
 
 ## Runbooks
 

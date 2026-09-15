@@ -1670,6 +1670,30 @@ Verification:
 - Latest published lazily-cs CI is green at `693a69a`; the latest superproject Agent Doc job remains the known zero-step external CI-start failure.
 
 Changed paths: `scripts/check-conformance-coverage.sh`, `SpecCorpus.cs`, `FixtureAssertions.cs`, and `ComparisonSeamGuardTests.cs`. Confidence: high. Escalation: none.
+
+### Re: do [#lzpyelementdescend] — gpt-5.6-sol · 2026-09-14T21:54:36-04:00
+
+> **Queue prompt:**
+>
+> do [#lzpyelementdescend]
+
+
+Implemented and verified the Python parity fix.
+
+- `iter_declared_blocks` now descends into every emitted object block and tracked-array object element, matching lazily-spec's `blockSites` walk.
+- `instrument` recursively instruments a block before constructing its outer `TrackedBlock`, so a nested tracked key is independently bindable.
+- The outer binding digest still uses the original plain fixture mapping; nested tracker views cannot change declaration/binding identity.
+- Synthetic probes pin both object-valued nesting and nesting inside an emitted array element. A ledger regression proves the nested sites bind with their original fixture digests.
+
+Verification:
+- focused conformance assertion suite: 148 passed
+- lazily-py `make check`: exit 0 (the digest runner reported one false-positive “failure” from a passing test name containing `failure`)
+- latest lazily-py GitHub Actions run: success
+- superproject `make check`: exit 0
+
+Commits:
+- lazily-py: `c50e047`
+- superproject pointer: `ffb685274`
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1689,7 +1713,7 @@ Changed paths: `scripts/check-conformance-coverage.sh`, `SpecCorpus.cs`, `Fixtur
 - ~~do [#lzastscanundercount]~~
 - ~~do [#lzplantprobemethod]~~
 - ~~do [#lzcsreverserung]~~
-- do [#lzpyelementdescend]
+- ~~do [#lzpyelementdescend]~~
 - do [#lzsemtreesubset]
 - do [#lzarrayelementdocs]
 - do [#lzorderinganchors]
@@ -1703,7 +1727,6 @@ Changed paths: `scripts/check-conformance-coverage.sh`, `SpecCorpus.cs`, `Fixtur
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzpyelementdescend] [lazily-py] py does NOT descend into an emitted array element, which diverges from the spec and from the other six bindings. lazily-spec's blockSites walk descends into a block as well as past it, and says so deliberately: "No block in the corpus nests another today, so this changes no count — it is here so that the first one to do so is pinned by the change that adds it rather than by the change that later notices." py's reasoning is a real implementation constraint, not laziness: `instrument` hands the runner a TrackedBlock at that point, so a tracked key nested inside one would be DECLARED AND UNBINDABLE. But the consequence is that the first corpus fixture to nest a block makes py's derived count disagree with the audit's pinned row, and py would then be fixing `instrument` under time pressure rather than deliberately. Verified unobservable today: no corpus fixture nests a tracked key inside a tracked array, confirmed independently by lazily-rs (ran its twin with the array rule off and on, 771/661 then 783/673, no site lost) and by lazily-zig (cross-checked `{"expect":[[{"expect":{...}}]]}` against both halves, both saying 1 site). Fix `instrument` so a nested block can bind, then descend — or if that is genuinely impossible in py's shape, say so in the walk's comment so the next reader does not read the divergence as an oversight.
 - [ ] [#lzsemtreesubset] [lazily-spec, design] collections/semtree_incremental.json's `expect_initial`/`expect_after` blocks name a SUBSET of the tree's nodes by design — scenario 1's tree carries `root a b a1 a2 b1` while `expect_initial` names only `root a b` — so a both-directions key-set check against the node set is unavailable without changing the corpus. Hit independently by lazily-go and lazily-cs during #lzarrayelementsites, and neither weakened a fixture nor reached for a ledger entry to dodge it, which was right. THE QUESTION IS WHAT "BOTH DIRECTIONS" MEANS FOR A FIXTURE THAT ASSERTS A SUBSET DELIBERATELY. The fixture-to-run direction is fine: every key it names must be read and compared. The run-to-fixture direction is the open one — `a1/a2/b1` are compared by nothing directly, so a defect that corrupted only those nodes would survive. Options worth weighing: name every node and lose the ability to express a partial assertion; add an explicit `nodes_not_asserted` companion so the omission is declared rather than implied; or pin the node-set CARDINALITY beside the subset so a node appearing or vanishing is caught even when its value is not. This is a lazily-spec decision because it changes the corpus contract for all ten bindings, and #lzgothreenames is blocked behind it for the run-to-fixture half.
 - [ ] [#lzarrayelementdocs] [lazily-rs, lazily-kt] Two AGENTS.md/ledger-header surfaces still carry prose the #lzarrayelementsites work superseded, both deliberately left because the files belong to other panes. lazily-rs: AGENTS.md's #lzrsblockwalk paragraph still states the rule as "object-valued only, emitted and NOT descended into, with arrays descended" — which is now wrong in its second half — and quotes 771/661 in THREE places against a current 783/673. The undeclared-bind report also moved, 460 from 470 with below-an-emitted-block at 436 from 426, from the twelve new `Expect::sub("frame")` descents collapsing to ten distinct digests; the no-corpus-object half is unchanged at 34. lazily-kt: scripts/conformance-unbound-blocks.txt's header narrative says "outside a rung that saw 18 of the corpus's 737" against a current 749, and the kt agent correctly refused to touch that file at all because the instruction not to change it was unambiguous — so this needs a line-count-preserving comment fix in whichever commit next touches it. Use the hand-built-blob path (blob = HEAD + your hunk via hash-object -w plus update-index --cacheinfo, then a bare commit) rather than --only, and re-apply the hunk to the worktree copy afterwards so the owning pane's eventual wholesale commit does not revert it — lazily-kt and lazily-cs both did exactly that during this series and it is the only reason their doc changes survived.
 - [ ] [#lzorderinganchors] [lazily-spec] scripts/check-assertion-ordering.py ORDERED_CHECKS anchors its ordering contract on the EXACT floor literals the bindings are now removing - regexes like 'assert accepted == 6', 'assert replayed == 12', 'assert.equal(accepted, 10)' for py/js/cs. lazily-py could not delete three of its floors this cycle and shipped them as DEAD ANCHORS, kept only to satisfy this guard, with the live constant-free assertion sitting above them. That is debt the guard created. Re-anchor on something stable that is not a value - a named helper call, or a marker the runner declares - so removing a constant does not break an unrelated ordering contract. Note the anchor must also be UNIQUE in the file (py tripped 'anchors are not unique' by quoting the literal in an explanatory comment). Repo: src/lazily-spec, then src/lazily-py to drop the dead anchors.

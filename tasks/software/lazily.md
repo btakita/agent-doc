@@ -1413,6 +1413,22 @@ Verification passed:
 Commits: JS `b9286fd`, Python `8f8ecda`, Go `1a40e16`, and parent pointers `80f9578f95`. The latest pushed binding CI runs are green (JS `34907332999`, Python/main `34907058575`, Go `34911856808`), though they predate these not-yet-pushed cleanup commits. The latest parent run (`34911858030`) started zero jobs because GitHub rejected both at the billing/spending-limit gate, so it contains no test verdict. Confidence is high; no code escalation remains, with the parent CI account gate tracked externally.
 
 The exchange is large, but I did not compact it while the automatic queue is active.
+
+### Re: do [#lazilycpptwo] — gpt-5.6-sol · 2026-09-14T20:17-04:00
+
+Already completed by `#lazilycppcheck`; no additional code change was needed.
+
+The production `fixtures_of()` in lazily-cpp commit `dd9325f` now uses `grep -Ev '^[#@]'`, so both `#` stamp/metadata lines and `@` scenario-ledger lines are excluded before sorting and counting. `scripts/test-wasm-tier-guard.sh` includes a manifest carrying both control-line types and asserts that only the real fixture remains.
+
+Verification:
+
+- `bash ./scripts/test-wasm-tier-guard.sh` — passed
+- source inspection confirmed the live `^[#@]` filter
+- lazily-cpp CI run `34911115600` for `dd9325f` — passed
+
+Changed paths this cycle: none. Confidence is high; the cited commit, behavioral regression, and exact pushed CI run all cover this queue item. No escalation remains.
+
+The exchange is large, but I did not compact it while the automatic queue is active.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1424,7 +1440,7 @@ The exchange is large, but I did not compact it while the automatic queue is act
 - ~~do [#lazilycppcheck]~~
 - ~~do [#lazilycheckconformance]~~
 - ~~do [#deadguardcode]~~
-- do [#lazilycpptwo]
+- ~~do [#lazilycpptwo]~~
 - do [#lazilyderivesreplayed]
 - do [#documentbindingsstamp]
 - do [#lzmakepfootgun]
@@ -1446,7 +1462,6 @@ The exchange is large, but I did not compact it while the automatic queue is act
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilycpptwo] #lzwasmstampchannel: lazily-cpp's two wasm conformance manifests are deliberately unstamped, and `scripts/check-wasm-tiers.sh:99` filters `^@` but not `^#` -- stamping them would inflate both tier counts by 1 and slacken both floors by one. Belongs to the wasm channel's own change.
 - [ ] [#lazilyderivesreplayed] #lzareaderivetestfile: lazily-js's `AREA_OF_FIXTURE` derives replayed areas from string literals across EVERY test source, so a realistic-looking fixture path inside a new test file registers as a replayed area and reddens the corpus check. Audit which other bindings derive coverage from source literals rather than from run evidence.
 - [ ] [#documentbindingsstamp] #lzstampsitedoc: document which bindings can stamp producer-side and which cannot, with the reason -- cpp cannot (38 binaries append in ios::app, first-writer-stamps is a race), gd must not (append_line is append-only across gdUnit4 passes, so a producer-side stamp cannot clear a leftover file), rs/dart/zig write stamp+record in one locked call so a stamp-only file is unreachable. Recipe-side and producer-side are NOT equivalent and the correct choice is per binding.
 - [ ] [#lzmakepfootgun] [docs, all ten] `make -p` BUILDS THE DEFAULT GOAL, and piping it into a short-circuiting reader corrupts state. lazily-rs lost a probe to this: `make -p | grep -m1 ...` started `make check`, ran `conformance-manifest-reset`, and then SIGPIPE'd when grep exited — SILENTLY TRUNCATING every file under build/ mid-analysis. The analysis command destroyed the evidence it was analysing. Use `make -pn` (dry run) or `make --eval` instead, and never pipe `make -p` into `head`/`grep -m1`/anything that closes the pipe early. Record this in the conformance docs beside the plant-probe method (#lzplantprobemethod), because every binding's Makefile is now load-bearing for the run-id protocol and inspecting those Makefiles is now a routine step — this trap is reachable by anyone auditing them, and its symptom (empty build/, guards failing as missing evidence) looks exactly like the bug under investigation rather than like self-inflicted damage.

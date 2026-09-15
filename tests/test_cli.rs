@@ -14190,6 +14190,47 @@ fn test_release_artifacts_and_pypi_bootstrap_preserve_ffi_for_issue_52() {
 }
 
 #[test]
+fn test_release_cadence_batches_complete_releases_weekly() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let makefile = fs::read_to_string(manifest_dir.join("Makefile")).unwrap();
+    assert!(
+        makefile.contains("release: release-cadence-check check")
+            && makefile.contains("python3 scripts/agent-doc-dev verify-release-cadence"),
+        "the release target must pass the weekly cadence gate before tagging"
+    );
+
+    let harness = fs::read_to_string(manifest_dir.join("scripts/agent-doc-dev")).unwrap();
+    assert!(
+        harness.contains("RELEASE_CADENCE_DAYS = 7")
+            && harness.contains("[\"gh\", \"release\", \"view\"")
+            && harness.contains("refusing to tag"),
+        "the weekly gate must verify the published release timestamp and fail closed"
+    );
+
+    let release = fs::read_to_string(manifest_dir.join(".github/workflows/release.yml")).unwrap();
+    assert_eq!(
+        release.matches("- target:").count(),
+        6,
+        "a weekly tag must continue to build one complete six-platform release"
+    );
+    for darwin_target in ["x86_64-apple-darwin", "aarch64-apple-darwin"] {
+        assert!(
+            release.contains(darwin_target),
+            "the complete weekly release must include {darwin_target}"
+        );
+    }
+
+    let spec = fs::read_to_string(manifest_dir.join("specs/07-core-commands.md")).unwrap();
+    let spec_words = spec.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        spec.contains("#weekly-release-batch")
+            && spec_words.contains("at least seven days old")
+            && spec_words.contains("complete release"),
+        "the weekly complete-release policy must remain specified"
+    );
+}
+
+#[test]
 fn test_global_config_has_no_orchestration_facade() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();

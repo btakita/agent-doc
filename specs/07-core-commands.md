@@ -252,6 +252,16 @@ binary was installed: a Cargo build tree is told to `cargo build --release`, and
 a package install is pointed at a release asset or `agent-doc lib-install
 --source <dir>` rather than at a toolchain it does not have.
 
+Tagged releases are weekly batches (`#weekly-release-batch`). The release gate
+must refuse a new tag until the latest published GitHub Release is at least seven
+days old, and it must fail closed when that timestamp cannot be verified. Work
+continues to be checked, installed locally, committed, and pushed between release
+windows. Once the window opens, one tag publishes the accumulated changes as a
+complete release: both Darwin targets and the other four targets are built in the
+same workflow. Delaying Darwin assets behind an already-published tag is not an
+allowed batching strategy because the release and PyPI bootstrap consume one
+atomic archive set.
+
 `agent-doc upgrade` checks GitHub Releases for a newer version and upgrades through the prebuilt GitHub binary / `pip` cascade. The agent-doc Rust workspace is private and is not a crates.io upgrade source.
 
 PyPI publishing is cadence-gated (`#pypicadence`): milestone tags (`vX.Y.0`)

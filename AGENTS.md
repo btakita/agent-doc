@@ -20,7 +20,7 @@ Interactive document sessions with AI agents.
 - **NEVER swallow errors** — no `let _ =` on fallible operations. Always log at minimum a warning to stderr. Silent failures make bugs invisible and waste debugging cycles.
 - **Behavioral fixes are packagable, not per-user agent memory** — when an agent-doc *session* behaves wrong (the agent stalled the queue, asked the wrong thing, mishandled closeout), fix it in the **product** so every user benefits: a binary heuristic, a `SKILL.md`/runbook instruction surface, or these development instructions. Do **not** resolve agent-doc behavior problems by writing a per-user agent-memory note — agent-doc ships to other people, and a memory only helps one operator. Memory is for facts about *a specific environment*, never for correcting shipped agent-doc behavior.
 - **Diagnosis is not a deliverable (`#diagnose-then-fix`)** — when a session investigates a reported bug and lands on a root cause, the SAME session must fix it: implement, add regression coverage, run `make check`, build/install, and close the item. Handing back a well-written set of backlog items describing defects the session already understands is **not** closeout — it turns completed analysis back into unstarted work and forces the operator to ask for the fix again. "It spans several crates", "this deserves a focused cycle", and "I did not want to land a partial change" are stalls: land and verify what is proven, and leave only a genuinely blocked remainder. When one investigation surfaces several defects, fix them together and put any survivors at the TOP of `agent:backlog` so the queue takes them next. Only an operator-gated proof (a live editor/pane eyeball, an external approval) justifies leaving a diagnosed defect unfixed, and the item must state exactly what unblocks it.
-- **Do the agent-doable deploy/release work without asking (`#deploy-just-do-it`)** — when a session produces a shippable agent-doc change, execute *every* agent-doable release/deploy sub-step autonomously: version bump (`Cargo.toml` + `pyproject.toml`), `VERSIONS.md` entry, `make check`, commit, `make install` (see `#installfulloom` below — `make install` is the iteration install; `make install-full` is a pre-release parity step, not something to run on every fix), push, `agent-doc admin recycle`, tag, and publish. Do **NOT** defer these to the operator, and do **NOT** ask "should I deploy/release?" — operator approval is assumed for anything an agent can do. The **only** operator-gated step is the genuine live-session eyeball (a human watching a real editor/pane prove the behavior); record it as a non-blocking `[operator-verify]` follow-up. An `[operator-verify]` item never licenses skipping the build/install/push/recycle/publish — it means "do all the agent-doable sub-steps now, leave only the live human check." Asking permission for agent-doable deploy work is itself the bug.
+- **Do the agent-doable deploy/release work without asking (`#deploy-just-do-it`)** — when a session produces a shippable agent-doc change, execute the immediate agent-doable steps autonomously: `make check`, commit, `make install` (see `#installfulloom` below), push, and `agent-doc admin recycle`. Version projection, the `VERSIONS.md` entry, `make install-full`, tagging, and publishing are also agent-doable, but `#weekly-release-batch` groups them into one complete release no more than once every seven days. When the window is open, execute the release train without asking; when it is closed, leave the checked, installed, pushed change queued for the next batch instead of forcing a tag or publishing incomplete platform assets. The **only** operator-gated step is the genuine live-session eyeball (a human watching a real editor/pane prove the behavior); record it as a non-blocking `[operator-verify]` follow-up. A closed cadence window is a schedule, not an operator gate, and asking permission for agent-doable work is itself the bug.
 - **External CI is observed, never awaited (`#ci-no-closeout-wait`)** — local full-suite verification is the proof gate. After push, inspect the latest CI run once and report a queued, in-progress, failed, or successful status. Do not poll, watch, or keep the turn open for CI to finish unless the user explicitly asks you to wait. If an already-visible failure belongs to the change, fix it; otherwise close from local evidence and leave the external status explicit.
 - **Operator-visible document text is authoritative** — Preserve user edits through Lazily-owned semantic response checkpoints and binary-owned `agent-doc respond --stream` turn resolution (`finalize` is a compatibility alias). Checkpoint only complete `### Re:` sections; never publish incomplete token prefixes to the document, and never recover, patch, or hook-closeout by replacing operator text with `content_ours`, a snapshot, an incomplete token capture, or a lazily visible-write receipt. Snapshots and incomplete token captures are backup/audit state, not hot-path authority; fail closed or retry through the editor instead.
 - **Response closeout is atomic** — The complete final response, queue-head consumption, backlog/done mutations, snapshot, and commit succeed as one transaction or none becomes authoritative. `repair` is exceptional crash recovery, never part of a healthy response cycle.
@@ -329,18 +329,39 @@ editors/
 
 ## Release Process
 
+Between release windows, run `make check`, install with `make install`, commit,
+push, and recycle long-lived surfaces as usual. Do not create a version-only
+commit or tag for each fix.
+
+The tagged release train is a weekly batch (`#weekly-release-batch`): no more
+than one complete GitHub Release may be published in any seven-day window. Run
+`make release-cadence-check` before changing version surfaces. The gate reads the
+latest published GitHub Release timestamp and fails closed if it cannot prove
+the window is open. Do not work around the gate by delaying macOS artifacts;
+both Darwin targets and the other four targets belong to the same atomic tag.
+
+When the release window is open:
+
 1. Run `make release-version VERSION=<version>` to project the version across
    every workspace package, internal path constraint, `Cargo.lock`,
-   `pyproject.toml`, and both `SKILL.md` copies. Do not bump these surfaces
+   `pyproject.toml`, and the bundled `SKILL.md`. Do not bump these surfaces
    manually.
-2. Update `VERSIONS.md` with a new version entry summarizing the changes
-3. `make check` (clippy + test)
-4. `make install-full` — install a full release-profile local build and verify the changed behavior end-to-end (the agent runs `make check` + automated checks as the verification; do not wait on a human).
+2. Update `VERSIONS.md` with one entry summarizing all changes accumulated since
+   the previous release.
+3. Run `make check` (clippy + test).
+4. Run `make install-full` to install a full release-profile local build and
+   verify the changed behavior end-to-end; automated checks are the verification
+   and the agent does not wait on a human.
 
    **`#installfulloom`: run this ONCE, at release time — never as the per-fix install.** `[profile.release]` is `lto = "fat"` + `codegen-units = 1` over a 144-crate workspace, which fat-LTO collapses into a single enormous LLVM process; repeated runs can OOM the machine (observed 2026-07-18: a session that invoked it ~10 times while iterating was killed with SIGKILL/137, losing the live session). For the edit → install → recycle loop use **`make install`**, which builds `release-local` (`lto = off`, `codegen-units = 256`, incremental) and installs the same binary + cdylib + editor packages.
-5. **No operator gate on agent-doable steps (`#deploy-just-do-it`):** proceed straight through steps 6-9 without asking. The only operator-gated step is a live human eyeball of the changed behavior in a real editor/pane — record it as a non-blocking `[operator-verify]` follow-up; it never blocks the build/install/push/publish/recycle.
-6. Branch → PR → squash merge to main (or commit + push to main directly in this dogfooding repo)
-7. Tag: `git tag v<version> && git push origin v<version>`
+5. **No operator gate on agent-doable steps (`#deploy-just-do-it`):** proceed
+   straight through steps 6-9 without asking. The only operator-gated step is a
+   live human eyeball of the changed behavior in a real editor/pane; record it as
+   a non-blocking `[operator-verify]` follow-up.
+6. Branch → PR → squash merge to main (or commit + push to main directly in this
+   dogfooding repo).
+7. Run `make release`; its cadence dependency rechecks the window immediately
+   before the recipe tags `v<version>` and pushes main plus the tag.
 8. The tag push drives the GitHub Release: `.github/workflows/release.yml`
    builds the six target binaries, packages each one **with its platform cdylib
    beside it** (`libagent_doc.so` / `.dylib` / `agent_doc.dll` — GH #52: without

@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import json
 import re
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -56,10 +59,64 @@ MUTATION_CAPTURE_CALL = (
 AUTHORITY_RESOLUTION_CALL = (
     "None => resolve_document_content_for_write_mode("
 )
+RELEASE_CADENCE_DAYS = 7
 
 
 class HarnessError(RuntimeError):
     pass
+
+
+def parse_release_timestamp(value: object) -> dt.datetime:
+    if not isinstance(value, str) or not value:
+        raise HarnessError("latest GitHub Release has no publishedAt timestamp")
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HarnessError(f"invalid GitHub Release timestamp {value!r}") from exc
+    if parsed.tzinfo is None:
+        raise HarnessError(f"GitHub Release timestamp has no timezone: {value!r}")
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def next_release_at(latest_published_at: dt.datetime) -> dt.datetime:
+    return latest_published_at + dt.timedelta(days=RELEASE_CADENCE_DAYS)
+
+
+def verify_release_cadence(root: Path) -> tuple[str, dt.datetime, dt.datetime]:
+    try:
+        completed = subprocess.run(
+            ["gh", "release", "view", "--json", "tagName,publishedAt"],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        raise HarnessError(f"cannot query the latest GitHub Release with gh: {exc}") from exc
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip() or "unknown gh error"
+        raise HarnessError(
+            "cannot verify the seven-day release window; refusing to tag: " + detail
+        )
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise HarnessError("gh returned invalid JSON for the latest GitHub Release") from exc
+    if not isinstance(payload, dict):
+        raise HarnessError("gh returned a non-object latest GitHub Release")
+    tag = payload.get("tagName")
+    if not isinstance(tag, str) or not tag:
+        raise HarnessError("latest GitHub Release has no tagName")
+    published_at = parse_release_timestamp(payload.get("publishedAt"))
+    eligible_at = next_release_at(published_at)
+    now = dt.datetime.now(dt.timezone.utc)
+    if now < eligible_at:
+        raise HarnessError(
+            f"weekly release batch is closed: {tag} published at "
+            f"{published_at.isoformat()}; next complete release is eligible at "
+            f"{eligible_at.isoformat()}"
+        )
+    return tag, published_at, eligible_at
 
 
 def read_toml(path: Path) -> dict[str, Any]:
@@ -425,6 +482,13 @@ version = "1.2.3"
 
 
 def self_test() -> None:
+    latest = dt.datetime(2026, 9, 1, 12, 0, tzinfo=dt.timezone.utc)
+    if next_release_at(latest) != dt.datetime(
+        2026, 9, 8, 12, 0, tzinfo=dt.timezone.utc
+    ):
+        raise HarnessError("weekly release cadence did not advance by exactly seven days")
+    if parse_release_timestamp("2026-09-01T12:00:00Z") != latest:
+        raise HarnessError("GitHub Release timestamp parsing did not preserve UTC")
     with tempfile.TemporaryDirectory(prefix="agent-doc-dev-") as temp:
         root = Path(temp)
         write_fixture(root)
@@ -514,6 +578,12 @@ def parse_args() -> argparse.Namespace:
     )
     verify.add_argument("--root", type=Path)
 
+    cadence = subparsers.add_parser(
+        "verify-release-cadence",
+        help="fail closed unless the latest complete release is at least seven days old",
+    )
+    cadence.add_argument("--root", type=Path)
+
     subparsers.add_parser(
         "self-test", help="exercise projection and drift detection on a fixture"
     )
@@ -541,6 +611,12 @@ def main() -> int:
                 f"agent-doc {version} release projection is synchronized "
                 f"({manifests} manifests, {dependencies} internal constraints, "
                 f"{len(SKILL_FILES)} bundled skill source(s))"
+            )
+        elif args.command == "verify-release-cadence":
+            tag, published_at, eligible_at = verify_release_cadence(root)
+            print(
+                f"weekly release window is open: {tag} published at "
+                f"{published_at.isoformat()} (eligible since {eligible_at.isoformat()})"
             )
         elif args.command == "self-test":
             self_test()

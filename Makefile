@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-version audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check precommit timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
+.PHONY: build build-release release release-version release-cadence-check audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check precommit timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -26,13 +26,18 @@ build-release:
 	@agent-doc lib-install 2>/dev/null || true
 	@echo "Installed .bin/agent-doc -> target/release/agent-doc"
 
-# Release via CI: check, tag, push (CI builds + publishes), install locally
-release: check
+# Release via CI: weekly cadence gate, check, tag, push, then install locally.
+# Every accepted tag remains a complete six-platform release; macOS assets are
+# batched with the rest of the release rather than arriving after the tag.
+release: release-cadence-check check
 	@version=$$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
 	echo "Releasing v$$version..."; \
 	git tag "v$$version" && git push origin main "v$$version" && \
 	echo "Tag v$$version pushed. CI handles GitHub Release + PyPI."; \
 	$(MAKE) install-full
+
+release-cadence-check:
+	@python3 scripts/agent-doc-dev verify-release-cadence
 
 # Project one release version across packages, internal dependency constraints,
 # lockfile entries, Python metadata, and both shipped/development skill copies.

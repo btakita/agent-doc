@@ -1733,6 +1733,33 @@ Commits:
 - lazily-kt: `004af5e`
 - lazily-dart: `e1c618d`
 - superproject pointers: `6de3365cc`
+
+### Re: do [#lzarrayelementdocs] — gpt-5.6-sol · 2026-09-14T22:24:35-04:00
+
+> **Queue prompt:**
+>
+> do [#lzarrayelementdocs]
+
+
+Updated both stale documentation surfaces without capturing either pane's unrelated worktree edits.
+
+Rust now states the complete walk rule: object-valued blocks and each plain-object element of an array-valued block are sites, and traversal descends into emitted blocks. Its measured inventory is updated to 783 sites / 673 digests, 783/783 bound, 470 bound-but-not-declared digests split as 436 below emitted blocks plus the unchanged 34 self-test-only objects. The manifest independently confirms 167 recurring-shape sites.
+
+Kotlin's line-count-preserving ledger header now says the original narrow rung saw 18 of 749 corpus sites.
+
+Both commits used the required HEAD-blob / `hash-object -w` / `update-index --cacheinfo` path followed by a bare commit. The Rust hunk was then re-applied to the live dirty worktree copy; Kotlin's target file returned clean.
+
+Verification:
+
+- lazily-rs `make check`: exit 0
+- lazily-kt `make check`: exit 0
+- superproject `make check`: exit 0
+
+Commits:
+
+- lazily-rs: `97a4485`
+- lazily-kt: `6ff19bc`
+- superproject pointers: `3d74f8664`
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1754,7 +1781,7 @@ Commits:
 - ~~do [#lzcsreverserung]~~
 - ~~do [#lzpyelementdescend]~~
 - ~~do [#lzsemtreesubset]~~
-- do [#lzarrayelementdocs]
+- ~~do [#lzarrayelementdocs]~~
 - do [#lzorderinganchors]
 - do [#lzktareapartition]
 - do [#lzscenariofloormissing]
@@ -1766,7 +1793,6 @@ Commits:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzarrayelementdocs] [lazily-rs, lazily-kt] Two AGENTS.md/ledger-header surfaces still carry prose the #lzarrayelementsites work superseded, both deliberately left because the files belong to other panes. lazily-rs: AGENTS.md's #lzrsblockwalk paragraph still states the rule as "object-valued only, emitted and NOT descended into, with arrays descended" — which is now wrong in its second half — and quotes 771/661 in THREE places against a current 783/673. The undeclared-bind report also moved, 460 from 470 with below-an-emitted-block at 436 from 426, from the twelve new `Expect::sub("frame")` descents collapsing to ten distinct digests; the no-corpus-object half is unchanged at 34. lazily-kt: scripts/conformance-unbound-blocks.txt's header narrative says "outside a rung that saw 18 of the corpus's 737" against a current 749, and the kt agent correctly refused to touch that file at all because the instruction not to change it was unambiguous — so this needs a line-count-preserving comment fix in whichever commit next touches it. Use the hand-built-blob path (blob = HEAD + your hunk via hash-object -w plus update-index --cacheinfo, then a bare commit) rather than --only, and re-apply the hunk to the worktree copy afterwards so the owning pane's eventual wholesale commit does not revert it — lazily-kt and lazily-cs both did exactly that during this series and it is the only reason their doc changes survived.
 - [ ] [#lzorderinganchors] [lazily-spec] scripts/check-assertion-ordering.py ORDERED_CHECKS anchors its ordering contract on the EXACT floor literals the bindings are now removing - regexes like 'assert accepted == 6', 'assert replayed == 12', 'assert.equal(accepted, 10)' for py/js/cs. lazily-py could not delete three of its floors this cycle and shipped them as DEAD ANCHORS, kept only to satisfy this guard, with the live constant-free assertion sitting above them. That is debt the guard created. Re-anchor on something stable that is not a value - a named helper call, or a marker the runner declares - so removing a constant does not break an unrelated ordering contract. Note the anchor must also be UNIQUE in the file (py tripped 'anchors are not unique' by quoting the literal in an explanatory comment). Repo: src/lazily-spec, then src/lazily-py to drop the dead anchors.
 - [ ] [#lzktareapartition] [lazily-kt] check-conformance-coverage.sh declares REQUIRED_AREAS (27 areas) with no EXCUSED_AREAS complement, so the area list scopes the AUDIT and not the set the suite OPENS: kt opens 148 fixtures / replays 157 scenarios where deriving from the areas alone gives 147 / 151. lazily-spec's check-corpus-floors.mjs therefore declines to derive any floor for kt (it would otherwise have called an honest MIN_FIXTURES=148 unsatisfiable). lazily-cpp pairs the two arrays and its own guard enforces the exact complement, and there the derivation is exact. Add the EXCUSED_AREAS complement (or the equivalent partition assertion) so kt's floors become auditable from the corpus side. Repo: src/lazily-kt
 - [ ] [#lzscenariofloormissing] [lazily-py, lazily-kt, lazily-gd] No MIN_SCENARIOS floor is declared at all - lazily-spec's check-corpus-floors.mjs reports this rather than failing, because lazily-kt deliberately retired MIN_FIXTURES for an area-partition assertion and that is a stronger invariant. But a binding with NEITHER is relying on nothing: py replays 151 scenarios and kt 157 with no positive-evidence floor under either, so a run that silently stopped replaying scenarios would report green. Derive each floor from the gate's own output, add it, and prove it exact by failing at n+1. lazily-gd is staged and may legitimately have nothing to floor yet - check before adding. Repos: src/lazily-py, src/lazily-kt, src/lazily-gd

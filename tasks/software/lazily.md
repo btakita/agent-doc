@@ -1795,6 +1795,27 @@ Commits:
 - lazily-spec: `02c20e1`
 - lazily-py: `dbe8517`
 - superproject pointers: `1027a92f8`
+
+### Re: do [#lzktareapartition] — gpt-5.6-sol · 2026-09-14T22:44:39-04:00
+
+> **Queue prompt:**
+>
+> do [#lzktareapartition]
+
+
+Implemented and verified in lazily-kt commit `ca2b276` (root pointer `c1432ee7f`).
+
+- Added `protobuf` to `REQUIRED_AREAS`, matching the fixture Kotlin already opens.
+- Added an explicit empty `EXCUSED_AREAS` complement. Kotlin currently opens every canonical area, so empty is the honest value.
+- Added a fail-closed exact-partition guard: every canonical directory must be classified, every classified directory must still exist, and required/excused areas must be disjoint.
+- Updated the block-magnitude explanation now that lazily-spec can independently derive Kotlin's exact opened set.
+
+Verification:
+- lazily-spec's corpus audit now derives Kotlin at exactly 148 fixtures, 749 assertion-block sites, and 640 distinct digests; it no longer reports Kotlin as non-derivable.
+- A mutation removing `protobuf` from `REQUIRED_AREAS` failed with `conformance area 'protobuf' is in neither REQUIRED_AREAS nor EXCUSED_AREAS`.
+- Restored coverage guard: 148/156 fixtures opened, 157/157 scenarios replayed, 28/28 required areas opened.
+- `make check` passed in lazily-kt and at the agent-loop root.
+- Latest lazily-kt GitHub Actions run was green.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1818,7 +1839,7 @@ Commits:
 - ~~do [#lzsemtreesubset]~~
 - ~~do [#lzarrayelementdocs]~~
 - ~~do [#lzorderinganchors]~~
-- do [#lzktareapartition]
+- ~~do [#lzktareapartition]~~
 - do [#lzscenariofloormissing]
 - do [#lzcireachsync]
 - do [#lzfollowupqueueorder]
@@ -1828,7 +1849,6 @@ Commits:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzktareapartition] [lazily-kt] check-conformance-coverage.sh declares REQUIRED_AREAS (27 areas) with no EXCUSED_AREAS complement, so the area list scopes the AUDIT and not the set the suite OPENS: kt opens 148 fixtures / replays 157 scenarios where deriving from the areas alone gives 147 / 151. lazily-spec's check-corpus-floors.mjs therefore declines to derive any floor for kt (it would otherwise have called an honest MIN_FIXTURES=148 unsatisfiable). lazily-cpp pairs the two arrays and its own guard enforces the exact complement, and there the derivation is exact. Add the EXCUSED_AREAS complement (or the equivalent partition assertion) so kt's floors become auditable from the corpus side. Repo: src/lazily-kt
 - [ ] [#lzscenariofloormissing] [lazily-py, lazily-kt, lazily-gd] No MIN_SCENARIOS floor is declared at all - lazily-spec's check-corpus-floors.mjs reports this rather than failing, because lazily-kt deliberately retired MIN_FIXTURES for an area-partition assertion and that is a stronger invariant. But a binding with NEITHER is relying on nothing: py replays 151 scenarios and kt 157 with no positive-evidence floor under either, so a run that silently stopped replaying scenarios would report green. Derive each floor from the gate's own output, add it, and prove it exact by failing at n+1. lazily-gd is staged and may legitimately have nothing to floor yet - check before adding. Repos: src/lazily-py, src/lazily-kt, src/lazily-gd
 - [ ] [#lzcireachsync] [lazily-rs, lazily-py, lazily-js, lazily-kt, lazily-go, lazily-cpp, lazily-cs, lazily-dart, lazily-zig] The ten copies of scripts/check-ci-reach.sh are no longer byte-identical. Before #lzgdcireach the nine all carried md5 da1444b38e93 / 570 lines — an invariant nothing enforces but which is plainly deliberate, since the script has no shared home (unlike check-assertion-ordering.py, which lives in lazily-spec and is invoked across the sibling boundary). lazily-gd 913edc8 added `make_invokes_ancestor`: a CI step running `make <ancestor>` reaches every target in that ancestor`s prerequisite closure, walked with the same `prereqs_of` the main closure uses. Without it a verbatim copy reported all six of gd`s gates unreachable, because gd`s CI is a single `make check` step. THE NO-OP PROOF IS ALREADY DONE, so this item is a port plus verification rather than a design question: the new script was run in each of the nine and produced output BYTE-IDENTICAL to the old one, exit 0 in all eighteen runs — because none of the nine invokes `make check` from a `run:` step (each runs the underlying commands per gate; the only real `run:` body in any of them containing the phrase "make check" is this guard`s own refusal text, which is the comment-vs-command trap its header warns about). So: copy gd`s version into the nine, re-run each binding`s `ci-reach` target and confirm output is unchanged, then `make check` per repo and CI. Worth deciding in the same pass whether nine-plus-one hand-synced copies should keep being hand-synced at all — the alternatives are a shared home in lazily-spec (which would make every binding`s own guard depend on the sibling checkout, a cost the current design deliberately avoids) or a guard that asserts the copies are identical. Note for whoever takes it: the file is 641 lines in gd now, and the ONLY behavioural difference is the two new functions plus one call site and the header sentence, so a diff against gd is the cheapest review. Repos: the nine above
 - [ ] [#lzfollowupqueueorder] [process] Follow-up items filed by a drain cycle keep preempting the queue they were filed from, because `--backlog-add` prepends by default and the queue mirror honours that. Three consecutive cycles filed an item that became the very next head — #lzblocksitepin, then #lzexpectedkeyorder, then #lzgdorderingguard, then #lzgdcireach — each pushing #lzcppblockwalk one place further back, so the drain went depth-first into gd tooling while the three walk-widening items (cpp/kt/rs) and the three older items (#lzorderinganchors, #lzktareapartition, #lzscenariofloormissing) sat untouched. Prepending is the right DEFAULT — a follow-up from the turn that just ran is usually the most task-relevant work, which is exactly why the flag exists — but it is the wrong choice for a follow-up that is merely ADJACENT rather than more urgent, and nothing currently prompts the agent to make that judgement. Concretely: prefer `--backlog-queue-placement append` for a follow-up that is not more urgent than the existing head, and consider whether the agent-doc skill should say so at the point where it tells the agent to capture follow-up work (runbooks/respond.md, the backlog-capture rule) rather than leaving the default to decide. Worth checking whether the same asymmetry applies to `--backlog-add-after`/`--backlog-add-before`, which the queue mirror also honours. This item deliberately uses append on itself. Repo: src/agent-doc (skill/runbook text), or file against tasks/agent-doc/ if it is treated as a product change

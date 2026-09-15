@@ -1975,6 +1975,71 @@ The account page to inspect and fix it is:
 Log in as the owner of `btakita`, then check **Overview / Payment information** and **Budgets and alerts** for GitHub Actions. GitHub's current billing documentation confirms that personal-account billing is reached through that URL: https://docs.github.com/en/billing/get-started/introduction-to-billing
 
 `queue: stop` is preserved, so there is no follow-on queue drain. The exchange remains oversized; I did not compact it without explicit opt-in.
+
+### Re: local releases and the GitHub bill — gpt-5 · 2026-09-15T08:26-04:00
+
+> **Queue prompt:**
+>
+> do [#expensivereleasesmachine]
+
+
+> **Queue prompt:**
+>
+> $329.06 is expensive. Please do our releases from this machine instead. Disable the heavy CI work please. Also, why is the agent-loop repo costing $12/month?
+
+Done: the two private `btakita/agent-loop` workflows are disabled in GitHub, and their committed definitions are now manual-dispatch-only. They cannot resume automatic PR, push, or nightly spending if billing is repaired.
+
+The `$12` is almost entirely one workflow, and the arithmetic matches GitHub's meter:
+
+| private `agent-loop` work | rounded Linux minutes | gross cost at $0.006/min |
+|---|---:|---:|
+| Agent Doc `check` | 1,805 | $10.830 |
+| Agent Doc `tmux-ci` | 193 | $1.158 |
+| Lazily nightly matrix | 31 | $0.186 |
+| **total** | **2,029** | **$12.174** |
+
+The Agent Doc workflow ran on every push and launched both jobs; a typical successful run was about 57 minutes for `check` plus 5 minutes for `tmux-ci`. The repo's 55.5 MB cache and 12 KB of live artifacts are negligible. The stop just after 2,000 minutes strongly suggests the GitHub Free private-minute allowance was exhausted, although the run annotation is deliberately ambiguous between that and a failed payment.
+
+### `$329.06` is almost certainly gross usage, not the amount due
+
+I reconstructed **$329.005**, within five and a half cents of the displayed number:
+
+- $309.494: public `btakita/agent-doc` runner compute
+- $12.174: private `btakita/agent-loop` runner compute
+- $1.762: three other public repositories
+- approximately $5.575: accrued artifact storage
+
+GitHub's billing UI labels the top-line card as gross metered usage; billable/net is gross minus discounts. Standard hosted runners for public repositories are discounted, so roughly `$311.26` of that compute is visible gross usage but should be `$0` net. The main plausibly billable remainder is storage, not public CI compute. Confirm the **net/billable** column in Billing & Licensing before treating `$329.06` as an invoice:
+
+- https://github.com/settings/billing
+- https://docs.github.com/en/billing/how-tos/products/estimate-spending
+- https://docs.github.com/en/billing/reference/billing-reports
+- https://docs.github.com/en/billing/concepts/product-billing/github-actions
+
+The current `gh` token lacks Plan-read scope, so I could not retrieve the account's exact invoice, discounts, plan, or payment state through the API. I did not broaden its authorization.
+
+### What changed
+
+- Remote `Agent Doc` and `Lazily network suite` workflows: `disabled_manually`.
+- `.github/workflows/agent-doc.yml`: removed automatic PR/push triggers; retained dormant `workflow_dispatch`.
+- `.github/workflows/lazily-network-suite.yml`: removed automatic PR/push/nightly triggers; retained dormant tiered manual dispatch.
+- The stdlib rollout's Phase 5 now requires local `make check` plus `make network-suite-nightly` evidence on the release machine.
+- Public/free binding workflows remain only where they add something this Linux machine cannot reproduce cheaply: Python's macOS/Windows wheel matrix and provenance-preserving registry publication. Disabling those would save no runner bill and would weaken the release.
+- `btakita/agent-doc` now retains its transient release and PyPI handoff artifacts for one day instead of the default long retention (`9fbda092c`). This stops the current accumulation pattern while preserving durable GitHub Release/PyPI copies.
+
+I did **not** delete the existing 3,304 `agent-doc` artifacts (~53.5 GB); deletion is destructive. I recorded that cleanup as `#lzagentdocartifactpurge` for explicit approval.
+
+### Release status
+
+The release policy is now local-first, but I did not publish a dishonest train. The audit found stale release-facing interop versions in seven peers, and this Linux host cannot reproduce Python's macOS/Windows wheel matrix. `#lzstdlibmatrixrelease` is therefore no longer gated on paid CI: it is back in actionable backlog with the stale-version fix, clean-worktree preparation, full local nightly matrix, and inside-out publish sequence spelled out.
+
+Verification:
+
+- `agent-doc`: actionlint, private-name scan, and full `make check` passed; commit `9fbda092c` pushed.
+- superproject: `git diff --check` passed. The first full `make check` exposed one failing stop-IO test; the focused reproduction passed, and the second full suite passed cleanly. Nothing was waived.
+- superproject commit: `26dbcad98` (push follows this document closeout).
+
+The exchange remains oversized; I did not compact it without explicit opt-in.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1986,15 +2051,15 @@ Log in as the owner of `btakita`, then check **Overview / Payment information** 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzstdlibmatrixrelease] [local-release] Complete Phase 5 via tasks/software/plan-lazily-stdlib-conformance-rollout.md on this machine. NEXT: derive or bump the stale interop hello versions in Python, Kotlin, JavaScript, Dart, Zig, Go, and C++; prepare clean worktrees and the intended version bumps; run every make check plus lazily-interop make check and network-suite-nightly locally; publish inside-out. Keep public/free cross-platform wheel and provenance workflows only as packaging transports where Linux cannot reproduce their artifact matrix. C# is a tested peer but excluded from this release; Godot remains staged.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Existing 3,304 nonexpired Actions artifacts total about 53.5 GB and continue accruing storage cost until expiry or deletion. New transient release/wheel artifacts now retain for one day in agent-doc 9fbda092c. NEXT: authorize deletion of old Actions artifacts after verifying durable GitHub Release and PyPI copies; destructive cleanup was not performed in this cycle.
 - [/] [#lzktbindpending] [lazily-kt] PHASE 2 of #lzktblockwalk, IN PROGRESS — 44 of 540 bind-pending sites migrated; bind-pending count moved 540 -> 496 and the whole-ledger equality is 521 (25 unreachable + 496 bind-pending). 496 remain across 12 areas. FIRST PASS (lazily-kt 93420ff) bound ipc/root 1, familysync 3, protobuf 6, membership 9, and message-passing 9. SECOND PASS (lazily-kt f87afda) bound lossless-tree 16 through AssertionKeys, including nested render_on descent and final key satisfaction; it exposed 0 higher-rung gaps and required 0 semantic fixes. Cumulative measured sample: 28 of 44 bound blocks exposed a higher-rung gap (63.6%), and 14 of 44 required a real fix (31.8%); keep re-measuring per area rather than forecasting. REMAINING AREAS: collections 132, reactive-graph 88, stdlib 54, ingress 42, rateshape 33, coordination 29, windowing 23, egress 22, resilience 21, service 20, temporal 16, presence 16. Take one or two areas per pass; delete exactly those ledger entries and re-pin the equality downward by exactly that count in the same commit; verify the guard fails on off-by-one in BOTH directions. Every higher-rung failure surfaced by migration must be fixed, never excused. reactive-graph remains BLOCKED on #lzktreactivemodelfailures. Gradle proof discipline applies: use JUnit XML timestamps, not task lines, and --rerun-tasks when evidence may be stale. Repo: src/lazily-kt
 - [/] [#lzambienttokenresolve] [operator-decision, agent-loop superproject] agent-loop/.mise.toml has `[env] _.source = ".env"`, and .env holds $(passage ...) REFERENCES for every credential — correct hygiene, untracked and gitignored. But mise RESOLVES those substitutions at shell startup, so the resolved cleartext sits in the ambient environment of every process spawned from this tree. Verified by presence check on 2026-09-12, values never printed: CARGO_REGISTRY_TOKEN (35 chars) and NPM_TOKEN (40 chars) are live in the environment right now. That is not a leak by itself — nothing here was found printing them, and the lazily-zig build specifically does NOT (see #lzzigenvsecretleak, measured) — but it means every tool in the tree is one env-dumping code path away from disclosure, and there are many such paths in build systems, crash handlers and CI log collectors. THE FIX IS SUBSTITUTION AT THE POINT OF USE: keep the refs in .env for documentation, but let the publish commands resolve them (`CARGO_REGISTRY_TOKEN=$(passage ...) cargo publish`) rather than mise resolving them into every shell. WHY THIS IS YOURS AND NOT MINE: changing .mise.toml alters the environment of every session started from this tree, and thirty peer sessions were live when this was filed — several mid-build. A change like that wants a quiet moment and someone watching, not a queue drain. SEPARATELY AND MORE URGENTLY: rotate CARGO_REGISTRY_TOKEN, NPM_TOKEN and PYPI_PUBLISH_TOKEN. Not because a build printed them, but because the resolved values passed through a subagent's tool output while it was diagnosing the (non-)leak, which puts them in that transcript permanently. Log shredding does not reach a transcript. crates.io has no Revoke button, only Regenerate — see reference_cargo_publish_token_passage.md.
-- [/] [#lzagentloopcibilling] [operator-action] GitHub Actions is blocked on btakita/agent-loop by a spending limit, and has been since 2026-08-09. Every run of both workflows (Agent Doc, Lazily network suite) reports "The job was not started because recent account payments have failed or your spending limit needs to be increased" — no job starts, so there are no logs and nothing to debug in the workflow itself. Diagnosed precisely: btakita/agent-loop is PRIVATE, so it consumes paid Actions minutes; btakita/tsift, btakita/agent-doc and every lazily-hub/* binding are PUBLIC and run on free minutes, which is why binding CI has been green throughout while the superproject has been dark. Last successful run 31293624224 at 2026-08-09T04:00:25Z; first billing failure 31297858292 at 2026-08-09T05:58:50Z. COVERAGE LOST for that whole window: the `check` job (make check under tmux) and the `tmux-ci` job (make tmux-ci) in agent-doc.yml, plus the tiered `network-suite-*` targets in lazily-network-suite.yml — none of which is covered by the per-binding CI that has been green. OPERATOR ACTION, and nothing else unblocks this: open Billing & plans for the account that owns btakita/agent-loop, settle the failed payment or raise the Actions spending limit, then re-run one workflow and confirm a job actually starts. Until then treat superproject CI as ABSENT rather than passing, and do not read a green binding CI as coverage for it. Once jobs start again, re-run make check and make tmux-ci on HEAD before trusting the backlog of submodule-pointer commits pushed during the outage.
-- [/] [#lzstdlibmatrixrelease] [release-gated] Implement Phase 5 of tasks/software/plan-lazily-stdlib-conformance-rollout.md and publish only after executable evidence is green. Audit 2026-09-15 recommends spec v0.39.0, rs v0.58.0, py v0.41.0, kt v0.42.0, js v0.33.0, dart v0.31.0, zig v0.35.0, go v0.27.0, cpp v0.29.0; formal needs no new tag but lacks the v0.38.1 GitHub Release object. NEXT: (1) fix btakita/agent-loop Actions billing and prove the all-peer/all-channel network suite starts and passes; (2) register lazily-hub/lazily-rs as a crates.io trusted publisher and prove OIDC; (3) release from clean worktrees, bump every manifest before its immutable/tag-triggered publish, run full local gates, then publish inside-out. Current external blockers are billing and Rust trusted-publisher configuration.
 <!-- /agent:review -->
 
 ## Icebox

@@ -82,6 +82,30 @@ Marked `#lzstdlibmatrixrelease` complete.
 ### Re: Is lazily-rs published — gpt-5 · 2026-09-15 09:37 EDT
 
 Yes. [`lazily` v0.58.0 is live on crates.io](https://crates.io/crates/lazily/0.58.0), and the [GitHub release](https://github.com/lazily-hub/lazily-rs/releases/tag/v0.58.0) is published. The complete stdlib release train and final verification evidence are recorded immediately above.
+
+### Re: Features released — gpt-5 · 2026-09-15T10:11-04:00
+
+> **Queue prompt:**
+>
+> do [#featuresreleased]
+
+
+> **Queue prompt:** What features were released?
+
+The release adds three portable standard-library features across Rust, Python, Kotlin, JavaScript, Dart, Zig, Go, and C++:
+
+- **`Timer`** — a monotonic, single-shot deadline. It remains pending before the deadline, fires exactly at the boundary, latches its first result, handles zero duration immediately, and prevents duration overflow from silently wrapping.
+- **`Timeout<T>`** — a caller-driven timeout adapter with typed `Completed`, `TimedOut`, `Cancelled`, and `Unavailable` outcomes. It has deterministic boundary ordering, latches terminal results, and requires no hidden executor, async runtime, or worker thread.
+- **`RevisionBarrier`** — waits for both a minimum revision and a predicate. It closes the check-to-sleep lost-wakeup race and supports timeout, cancellation, disposal, and unavailable inputs with latched outcomes.
+
+The train also shipped the assurance layer around those APIs:
+
+- a language-neutral specification and canonical logical-time fixture corpus;
+- a Lean formal model covering deadline, terminality, ordering, idempotence, revision monotonicity, and lost-wakeup properties;
+- production-backed peer capabilities and `feature_reset`, `feature_step`, and `feature_observe` interop operations;
+- deterministic cross-language/channel testing, including mutation checks that prove the suite detects boundary, cancellation-order, latching, lost-wakeup, and fake-runner defects.
+
+This is separate from the older reactive `TimeoutCell`; that existing primitive did not count as implementing the new caller-driven `Timeout<T>` contract. C# was tested but excluded from this release train, and Godot remains staged.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 

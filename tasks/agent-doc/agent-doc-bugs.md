@@ -13,7 +13,7 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -280,7 +280,7 @@ No release was cut because the latest tag was published today and the seven-day 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 fpe.md turn did not complete. Fix agent-doc causes for the wedge.
+- ~~fpe.md turn did not complete. Fix agent-doc causes for the wedge.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

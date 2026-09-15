@@ -89,7 +89,6 @@ Marked `#lzstdlibmatrixrelease` complete.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] 🚧 [#lzstdlibmatrixrelease] [local-release] Complete Phase 5 via tasks/software/plan-lazily-stdlib-conformance-rollout.md on this machine. NEXT: derive or bump the stale interop hello versions in Python, Kotlin, JavaScript, Dart, Zig, Go, and C++; prepare clean worktrees and the intended version bumps; run every make check plus lazily-interop make check and network-suite-nightly locally; publish inside-out. Keep public/free cross-platform wheel and provenance workflows only as packaging transports where Linux cannot reproduce their artifact matrix. C# is a tested peer but excluded from this release; Godot remains staged.
 <!-- /agent:backlog -->
 
 ## Review

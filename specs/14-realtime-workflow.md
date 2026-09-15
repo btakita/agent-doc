@@ -102,6 +102,13 @@ queue-neutral normalization cannot substitute for that proof. If projection is
 deferred for editor delivery, the retained delivery frontier re-drives the same
 Effect and no second response/finalize payload is admitted.
 
+If an older binary nevertheless records terminal response proof before that
+strike reaches `HEAD`, recovery may commit forward only when replaying the
+terminal cycle's durable captured response against committed `HEAD` derives the
+current authority bytes exactly. Any additional queue edit, including a later
+recurrence of identical prompt text, breaks that equality and remains a new
+operator turn rather than being absorbed by `commit`.
+
 ## Prompt-to-response acknowledgement
 
 `agent-doc-diff` owns the policy that associates an operator prompt with an

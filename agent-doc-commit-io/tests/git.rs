@@ -2483,6 +2483,88 @@ Duplicate replay should stay live.
         );
     }
 
+    #[test]
+    fn commit_recovers_exact_late_free_text_strike_owned_by_terminal_capture() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+        commit_file(root, "README.md", "# test\n", "initial");
+
+        let doc = root.join("session.md");
+        let response = concat!(
+            "### Re: finish the plan — gpt-5\n\n",
+            "> **Queue prompt:** finish the plan\n\n",
+            "Finished and verified.\n",
+        );
+        let committed = format!(
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n{}",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue -->\n- finish the plan\n<!-- /agent:queue -->\n",
+            ),
+            response,
+        );
+        commit_file(
+            root,
+            "session.md",
+            &committed,
+            "response without late strike",
+        );
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&committed), Some(&committed))
+            .unwrap();
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            Some(&committed),
+            Some(&committed),
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&committed),
+            Some(&committed),
+        )
+        .unwrap();
+
+        let struck = agent_doc_queue::queue_consume::project_answered_free_text_strike(
+            &committed,
+            response,
+            Some(&committed),
+        )
+        .unwrap()
+        .expect("fixture response must own its free-text queue head")
+        .target_content;
+        fs::write(&doc, &struck).unwrap();
+
+        let did_commit = commit(&doc).expect("the exact late owned strike should commit forward");
+        assert!(did_commit);
+        let landed = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("committed document");
+        assert!(
+            landed.contains("- ~~finish the plan~~ — auto-struck: answered this cycle (#ftstrike)")
+                && landed.contains("Finished and verified."),
+            "normal commit cleanup may reposition boundaries, but must land the response and exact strike:\n{landed}"
+        );
+        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("commit_reconciled_late_answered_free_text_strike")
+                && log.contains(&capture.capture_id),
+            "recovery must record the capture-scoped exact proof:\n{log}"
+        );
+    }
+
     /// The verdict whose remedy DOES name this command must not deadlock the
     /// same way. At `write_applied` the binary's own response write has already
     /// landed, the drift is its own rather than a fresh operator prompt, and

@@ -113,6 +113,48 @@ fn retained_pending_commit_proof(
     }
 }
 
+/// Prove that a terminal cycle's only late typed-component delta is the exact
+/// answered-free-text strike its captured response owned while the cycle was
+/// open. This is deliberately reconstructed from committed HEAD, not from the
+/// current document: an operator edit or a recurring later prompt changes the
+/// exact target and therefore cannot satisfy the proof.
+fn late_answered_free_text_strike_capture(
+    file: &Path,
+    committed_content: &str,
+    current_content: &str,
+) -> Result<Option<String>> {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    if state.phase != agent_doc_turn::CyclePhase::Committed {
+        return Ok(None);
+    }
+    let Some(capture) = agent_doc_cycle_state_io::load_closeout_projection(file)?
+        .and_then(|projection| projection.captured_response)
+        .filter(|capture| capture.cycle_id == state.cycle_id)
+    else {
+        return Ok(None);
+    };
+    if !agent_doc_turn::response_replay::response_materialized_in_content(
+        &capture.response_body,
+        committed_content,
+    ) {
+        return Ok(None);
+    }
+    if agent_doc_queue::queue_heads::active_free_text_queue_heads(committed_content).is_empty() {
+        return Ok(None);
+    }
+    let Some(projection) = agent_doc_queue::queue_consume::project_answered_free_text_strike(
+        committed_content,
+        &capture.response_body,
+        capture.baseline_content.as_deref(),
+    )?
+    else {
+        return Ok(None);
+    };
+    Ok((projection.target_content == current_content).then_some(capture.capture_id))
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum OwnedComponentCommitRebase {
     Rebased {
@@ -1909,6 +1951,33 @@ where
     }
 
     let mut binary_owned_side_effects = binary_owned_commit_side_effects(file, &file_content)?;
+    if snapshot_matches_head
+        && binary_owned_side_effects.is_empty()
+        && let Some(head) = head_doc.as_deref()
+        && let Some(capture_id) = late_answered_free_text_strike_capture(file, head, &file_content)?
+    {
+        eprintln!(
+            "[commit] committing exact late answered free-text strike for {} (capture_id={capture_id})",
+            file.display()
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "commit_reconciled_late_answered_free_text_strike file={} capture_id={} basis=committed_head_exact_projection snap_len={} file_len={}",
+                file.display(),
+                capture_id,
+                snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0),
+                file_content.len(),
+            ),
+        );
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &file_content,
+            agent_doc_ops_log_io::log_op,
+        )?;
+        snapshot_content = Some(file_content.clone());
+        snapshot_matches_head = false;
+    }
     // `#strandedremedydeadlock`: refusing here is correct — a fresh operator
     // queue/backlog edit is the NEXT turn's prompt and committing it would
     // swallow that prompt — but the refusal used to end at "without an exact

@@ -127,6 +127,7 @@ jobs:
         with:
           name: agent-doc-${{ matrix.target }}
           path: agent-doc-${{ matrix.target }}.tar.gz
+          retention-days: 1
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
@@ -134,6 +135,7 @@ jobs:
         with:
           name: agent-doc-${{ matrix.target }}
           path: agent-doc-${{ matrix.target }}.zip
+          retention-days: 1
 
   release:
     needs: build

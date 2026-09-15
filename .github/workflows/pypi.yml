@@ -65,6 +65,7 @@ jobs:
         with:
           name: wheel-bootstrap
           path: dist
+          retention-days: 1
 
   publish:
     needs: [build]

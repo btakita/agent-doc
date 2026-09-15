@@ -1874,6 +1874,24 @@ Verification:
 - `make ci-reach` passed in all nine; current output remains green, consistent with the already-completed no-op proof that none invokes an ancestor such as `make check`.
 - Full `make check` passed in all nine repositories and at the agent-loop root.
 - Zig's pre-existing activation-floor worktree edit was preserved and left unstaged; only the four ancestor-reach hunks were committed.
+
+### Re: do [#lzfollowupqueueorder] — gpt-5.6-sol · 2026-09-14T23:32:20-04:00
+
+> **Queue prompt:**
+>
+> do [#lzfollowupqueueorder]
+
+
+Implemented and committed the follow-up queue-priority guidance.
+
+- Plain `--backlog-add` remains a priority prepend: use it only when the discovered follow-up is more urgent or more relevant than the current head.
+- During an active drain, adjacent/equal-or-lower-priority follow-ups now explicitly use `--backlog-queue-placement append`, so they do not preempt operator-ordered work.
+- `--backlog-add-before <id>` and `--backlog-add-after <id>` retain their explicit anchor semantics; queue placement does not override either anchor.
+- Updated the bundled skill, response and pending-ops runbooks, contract assertions, every generated harness mirror, and the superproject mirrors.
+
+Verification passed: focused Rust contract test, full `make check` in `src/agent-doc`, full root `make check`, and the latest agent-doc GitHub Actions run is successful.
+
+Commits: agent-doc `8b6202983`; superproject `fdbe7acfb`.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1900,14 +1918,13 @@ Verification:
 - ~~do [#lzktareapartition]~~
 - ~~do [#lzscenariofloormissing]~~
 - ~~do [#lzcireachsync]~~
-- do [#lzfollowupqueueorder]
+- ~~do [#lzfollowupqueueorder]~~
 - do [#lzktbindpending]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzfollowupqueueorder] [process] Follow-up items filed by a drain cycle keep preempting the queue they were filed from, because `--backlog-add` prepends by default and the queue mirror honours that. Three consecutive cycles filed an item that became the very next head — #lzblocksitepin, then #lzexpectedkeyorder, then #lzgdorderingguard, then #lzgdcireach — each pushing #lzcppblockwalk one place further back, so the drain went depth-first into gd tooling while the three walk-widening items (cpp/kt/rs) and the three older items (#lzorderinganchors, #lzktareapartition, #lzscenariofloormissing) sat untouched. Prepending is the right DEFAULT — a follow-up from the turn that just ran is usually the most task-relevant work, which is exactly why the flag exists — but it is the wrong choice for a follow-up that is merely ADJACENT rather than more urgent, and nothing currently prompts the agent to make that judgement. Concretely: prefer `--backlog-queue-placement append` for a follow-up that is not more urgent than the existing head, and consider whether the agent-doc skill should say so at the point where it tells the agent to capture follow-up work (runbooks/respond.md, the backlog-capture rule) rather than leaving the default to decide. Worth checking whether the same asymmetry applies to `--backlog-add-after`/`--backlog-add-before`, which the queue mirror also honours. This item deliberately uses append on itself. Repo: src/agent-doc (skill/runbook text), or file against tasks/agent-doc/ if it is treated as a product change
 - [ ] [#lzktbindpending] [lazily-kt] PHASE 2 of #lzktblockwalk, IN PROGRESS — 28 of 540 sites bound, pin re-pinned DOWNWARD 540 -> 512, 512 remaining across 13 areas. Migrate kt`s remaining bind-pending assertion-block sites onto AssertionKeys: the block is reached and the runner DOES assert its keys, but by direct indexing rather than through a tracker, so rung 0 cannot see the bind and every rung above it is scoped to blocks a tracker bound and therefore says nothing about these. They are enumerated per site in scripts/conformance-unbound-blocks.txt with reason class `bind-pending`, and the guard asserts that count as an EQUALITY failing in BOTH directions and derived from the RUN rather than the ledger, so a migration cannot land without moving the number in the same commit and cannot silently regress upward. FIRST PASS (lazily-kt 93420ff) bound 5 areas over 4 block shapes to prove the recipe generalises: ipc/root 1, familysync 3, protobuf 6, membership 9, message-passing 9. THE MEASURED GAP RATE IS THE REASON THIS ITEM IS BIGGER THAN ITS SITE COUNT: every one of those 28 blocks failed a higher rung once bound, and HALF needed a real fix rather than a routing change — 6 distinct defect classes, each a hole the narrow walk was hiding. `ordinary_snapshot_count` (6 blocks) compared against the LITERAL 0, so the key asserted the corpus against itself and a binding admitting a purposeless snapshot passed; `rpc.terminal_status` and `conflict` were PRESENT IN THE FIXTURE AND NEVER READ, the latter being the headline claim of terminal_conflict_fail_closed; `ignored_frame_indices` was asserted one way only; `target_epoch_bumped` was read but asserted only when TRUE, so a `false` upstream would have vanished the assertion; `*_after_frame_index` let the fixture`s own value steer which assertion to make instead of comparing against the run`s. Plus 7 object-valued keys consumed with no key-set check. If that rate holds the remaining 512 sites carry on the order of a hundred more real defects — but treat that as a measured rate from one sample, not a forecast: the easy classes may be exhausted first, so RE-MEASURE the per-area gap rate each pass and report it. REMAINING AREAS: collections 132, reactive-graph 88, stdlib 54, ingress 42, rateshape 33, coordination 29, windowing 23, egress 22, resilience 21, service 20, temporal 16, presence 16, lossless-tree 16. Take one or two per pass; delete exactly that area`s ledger entries and re-pin the equality down by exactly that count in the same commit; verify the guard fires on an off-by-one in BOTH directions. Every higher-rung failure a migration surfaces must be FIXED, never excused — a bound-but-failing block is a different state from an unbound one and must not be laundered back into the ledger. reactive-graph (88) is BLOCKED on #lzktreactivemodelfailures and should not be started until that is settled. Gradle proof discipline applies: JUnit XML timestamps, not task lines, and `--rerun-tasks` if a manifest may be stale. Repo: src/lazily-kt
 <!-- /agent:backlog -->
 

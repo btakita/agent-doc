@@ -17,7 +17,9 @@ class EditorFocusSyncListenerTest {
         assertTrue(listener.contains("EditorMouseListener"))
         assertTrue(listener.contains("override fun mousePressed(event: EditorMouseEvent)"))
         assertTrue(listener.contains("handleEditorActivated(event.editor)"))
-        assertTrue(listener.contains("addEditorMouseListener(mouseListener"))
+        assertTrue(listener.contains("factory.eventMulticaster.addEditorMouseListener(mouseListener, this)"))
+        assertTrue(listener.contains("if (editor.project != project) return"))
+        assertTrue(!listener.contains("editorEx.addEditorMouseListener"))
     }
 
     @Test

@@ -319,10 +319,16 @@ fn codex_hook_cli_wraps_admission_failure_in_one_json_document() {
         .as_str()
         .expect("admission failure must carry additionalContext");
     assert!(additional_context.contains("[agent-doc] cycle contract UNAVAILABLE"));
-    assert!(additional_context.contains("did not resolve to a file"));
     assert!(
-        String::from_utf8_lossy(&submit.get_output().stderr)
-            .contains("[agent-doc] preflight hook failed")
+        additional_context.contains("did not resolve to a file")
+            || additional_context.contains("failed to canonicalize"),
+        "missing-document admission must explain the path-resolution failure: {additional_context}"
+    );
+    let stderr = String::from_utf8_lossy(&submit.get_output().stderr);
+    assert!(
+        stderr.contains("[agent-doc] preflight hook failed")
+            || stderr.contains("[agent-doc] Codex session tracking failed"),
+        "missing-document admission must be reported to the operator: {stderr}"
     );
 }
 

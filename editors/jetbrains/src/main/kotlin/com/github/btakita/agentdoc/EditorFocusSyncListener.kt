@@ -28,8 +28,8 @@ import java.util.concurrent.ConcurrentHashMap
  * clicking into the other split never fired a reconcile, so the tmux active
  * pane did not follow the editor selection.
  *
- * This listener closes that gap: it attaches per-editor focus and mouse
- * listeners and routes editor activation back through the same debounced,
+ * This listener closes that gap: it attaches per-editor focus listeners and a
+ * process-wide editor-event mouse listener, then routes editor activation back through the same debounced,
  * generation-guarded reconcile in [EditorTabSyncListener].
  *
  * Thin-plugin contract: this only reports the focus event. All debounce / dedup
@@ -52,6 +52,11 @@ class EditorFocusSyncListener private constructor(
 
     init {
         val factory = EditorFactory.getInstance()
+        // The event multicaster observes every current and future editor. A
+        // per-editor mouse listener can miss a restored split when its editor
+        // was created during project/plugin startup before attachment completed
+        // (`#panefocussplit`). Project filtering remains in the event handler.
+        factory.eventMulticaster.addEditorMouseListener(mouseListener, this)
         factory.addEditorFactoryListener(
             object : EditorFactoryListener {
                 override fun editorCreated(event: EditorFactoryEvent) = attach(event.editor)
@@ -70,11 +75,11 @@ class EditorFocusSyncListener private constructor(
         if (owner != null && owner != project) return
         val editorEx = editor as? EditorEx ?: return
         editorEx.addFocusListener(focusListener, this)
-        editorEx.addEditorMouseListener(mouseListener, this)
     }
 
     private fun handleEditorActivated(editor: Editor) {
         if (project.isDisposed) return
+        if (editor.project != project) return
         val file = FileDocumentManager.getInstance().getFile(editor.document) ?: return
         tabSync.onEditorFocusGained(project, file)
     }

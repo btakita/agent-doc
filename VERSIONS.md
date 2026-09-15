@@ -2,6 +2,21 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.397
+
+- **Backlog backfill removes captured fenced agent-doc transcripts
+  (`#backlogfencedlogcleanup`).** Cleanup now recognizes only a complete
+  top-level fence carrying the `› agent-doc ...` invocation signature, reports
+  every removed segment, and remains idempotent. Ordinary fenced prose,
+  indented item continuation, unmatched fences, headings, and real work items
+  remain untouched.
+- **JetBrains split-editor clicks reliably project tmux focus
+  (`#panefocussplit`).** The thin plugin now observes mouse activation through
+  IntelliJ's editor event multicaster instead of relying on attachment timing
+  for each restored editor, filters the event back to its owning project, and
+  reuses the existing generation-guarded focus-only command-plane path. This
+  ships in JetBrains plugin 0.2.386.
+
 ## 0.35.396
 
 - **Managed document renames preserve their live tmux pane.** Sync now finds a

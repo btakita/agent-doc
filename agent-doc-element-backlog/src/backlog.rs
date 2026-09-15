@@ -443,14 +443,17 @@ impl PendingLayout {
     /// supported, tested feature, and a blanket rule would have deleted operator
     /// content. (`parse_pending_edit_payload` refuses non-item text in an *edit
     /// payload*, which is narrower than the stored-content contract — I had
-    /// over-read it.) So only three observed corruption shapes qualify:
+    /// over-read it.) So only four observed corruption shapes qualify:
     ///
     /// 1. an `### Re:` heading — that is the *exchange response* form and belongs
     ///    to `agent:exchange`; a legitimate section header is a topic label;
     /// 2. a line carrying `] [#id]` — the signature of an item whose leading
     ///    `- [ ` was eaten, i.e. a destroyed item boundary;
     /// 3. a fenced `<dynamic_context_ref>` manifest — prompt input that belongs
-    ///    to `agent:exchange`, never a tracked-work section.
+    ///    to `agent:exchange`, never a tracked-work section;
+    /// 4. a complete top-level fenced agent-doc transcript beginning with the
+    ///    `› agent-doc ...` invocation prompt — captured terminal output, not
+    ///    backlog prose. An unmatched fence is preserved fail-closed.
     ///
     /// Everything else survives: headers, prose, blank spacing, continuation.
     fn drop_spliced_non_item_text(&self) -> (Self, Vec<String>) {
@@ -458,7 +461,9 @@ impl PendingLayout {
         let mut dropped = Vec::new();
         let mut index = 0usize;
         while index < self.segments.len() {
-            if let Some(end) = dynamic_context_splice_end(&self.segments, index) {
+            if let Some(end) = dynamic_context_splice_end(&self.segments, index)
+                .or_else(|| fenced_agent_doc_log_splice_end(&self.segments, index))
+            {
                 for segment in &self.segments[index..end] {
                     if let PendingSegment::Text(raw) = segment {
                         dropped.push(raw.clone());
@@ -3333,6 +3338,43 @@ fn dynamic_context_splice_end(segments: &[PendingSegment], start: usize) -> Opti
     None
 }
 
+/// Return the exclusive end of a complete top-level fenced agent-doc terminal
+/// transcript (`#backlogfencedlogcleanup`).
+///
+/// Ordinary fenced prose remains valid operator content. The live corruption
+/// shape is distinguished by the invocation prompt inside the fence, and an
+/// unterminated fence fails closed so cleanup can never consume later items.
+fn fenced_agent_doc_log_splice_end(segments: &[PendingSegment], start: usize) -> Option<usize> {
+    let text_at = |index| match segments.get(index) {
+        Some(PendingSegment::Text(raw)) => Some(raw.as_str()),
+        _ => None,
+    };
+    let opening = text_at(start)?.trim_end_matches(['\r', '\n']);
+    let fence_char = opening.chars().next()?;
+    if !matches!(fence_char, '`' | '~') {
+        return None;
+    }
+    let fence_len = opening.chars().take_while(|ch| *ch == fence_char).count();
+    if fence_len < 3 {
+        return None;
+    }
+
+    let mut contains_agent_doc_prompt = false;
+    let mut index = start + 1;
+    while let Some(raw) = text_at(index) {
+        let line = raw.trim_end_matches(['\r', '\n']);
+        let closing_len = line.chars().take_while(|ch| *ch == fence_char).count();
+        let is_closing =
+            closing_len >= fence_len && line[closing_len..].chars().all(char::is_whitespace);
+        if is_closing {
+            return contains_agent_doc_prompt.then_some(index + 1);
+        }
+        contains_agent_doc_prompt |= line.trim_start().starts_with("› agent-doc ");
+        index += 1;
+    }
+    None
+}
+
 /// True when `text` is nothing but a `do [#id]` queue directive.
 ///
 /// `#adqueuelinephantomid`: this is the signature of an `agent:queue` line that
@@ -5266,6 +5308,55 @@ mod tests {
         );
         let (_, items, _) = parse_items(&new_body);
         assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn backfill_drops_complete_fenced_agent_doc_log_but_preserves_other_fences() {
+        // #backlogfencedlogcleanup: a captured multi-line terminal transcript
+        // is non-item splice debris, while ordinary fenced operator prose is
+        // still part of the supported stored-content contract.
+        let body = concat!(
+            "```text\n",
+            "› agent-doc tasks/software/lazily.md\n",
+            "• Agent-doc admission still fails because the actor is busy.\n",
+            "  I am leaving the session untouched.\n",
+            "```\n",
+            "```text\n",
+            "ordinary operator example\n",
+            "```\n",
+            "- [ ] [#keep] a real item\n",
+        );
+        let (new_body, changed, dropped) = backfill_reporting_dropped_text(body, DOC_ID, &ids());
+        assert!(changed);
+        assert!(!new_body.contains("› agent-doc"));
+        assert!(!new_body.contains("Agent-doc admission still fails"));
+        assert!(new_body.contains("ordinary operator example"));
+        assert!(new_body.contains("[#keep] a real item"));
+        assert_eq!(
+            dropped.len(),
+            5,
+            "the complete transcript fence is reported"
+        );
+
+        let (second_body, second_changed, second_dropped) =
+            backfill_reporting_dropped_text(&new_body, DOC_ID, &ids());
+        assert!(!second_changed, "cleanup must be idempotent");
+        assert!(second_dropped.is_empty());
+        assert_eq!(second_body, new_body);
+    }
+
+    #[test]
+    fn backfill_preserves_unterminated_fenced_agent_doc_log() {
+        let body = concat!(
+            "```\n",
+            "› agent-doc tasks/software/lazily.md\n",
+            "captured output without a closing fence\n",
+            "- [ ] [#keep] a real item\n",
+        );
+        let (new_body, changed, dropped) = backfill_reporting_dropped_text(body, DOC_ID, &ids());
+        assert!(!changed, "an unmatched fence must fail closed");
+        assert!(dropped.is_empty());
+        assert_eq!(new_body, body);
     }
 
     #[test]

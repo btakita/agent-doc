@@ -176,6 +176,54 @@ The practical recommendation is:
 - **Use a GitHub self-hosted runner only if the Mini is dedicated and isolated.** Self-hosted runners are persistent rather than clean per-job VMs, and GitHub warns against exposing them to public-repository pull-request code. If chosen, restrict it to trusted tag/manual jobs and never run PR checkouts on it. [GitHub secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use)
 
 So: no GitHub access is needed for the preferred local-build design. The missing prerequisite is SSH reachability. Please provide the Mac Mini's hostname/IP, SSH username, and whether it is Apple Silicon or Intel, with macOS Remote Login enabled. I updated `#lzmacosrunner` to track the SSH-driven option and the requirement to preserve all-artifacts-before-publish behavior.
+
+### Re: Why macOS shows about $337 — gpt-5 · 2026-09-15T12:34-04:00
+
+> **Queue prompt:**
+>
+> do [#githubbilllargely]
+
+
+> **Queue prompt:** But I have a $337 github bill. Largely due to the OSX builds. Why?
+
+The number is **gross metered usage, not the amount GitHub is billing you**. I verified the authenticated personal billing dashboard directly:
+
+| September usage | Units | Gross | Billed |
+|---|---:|---:|---:|
+| macOS 3-core Actions | 3,827 min | $237.27 | $0 |
+| Linux Actions | 10,476 min | $62.86 | $0 |
+| Windows Actions | 2,681 min | $26.81 | $0 |
+| Actions artifact storage | 16,321.77 GB-hr | $5.48 | $0 |
+| Git LFS storage | 486.01 GB-hr | $0.05 | $0 |
+| **Current total** | | **$332.47** | **$0** |
+
+The overview also shows **$332.63 of included-usage discounts**, “Next payment due” as `-`, and every daily billed amount as zero. The figure can move during the day, which explains seeing roughly $337 earlier.
+
+Why macOS dominates the gross counter:
+
+- GitHub displays the list-rate equivalent for macOS at **$0.062/minute**, versus $0.006 for Linux and $0.01 for Windows.
+- `btakita/agent-doc` has run **77 Release workflows during September 1–15**.
+- Each tagged release currently starts two macOS jobs: `x86_64-apple-darwin` on `macos-14` and `aarch64-apple-darwin` on `macos-latest`.
+- Therefore a smaller number of macOS minutes produces most of the displayed gross amount.
+
+Repository attribution confirms this is not mainly the Lazily Python wheel release:
+
+| Repository | Gross | Billed |
+|---|---:|---:|
+| `btakita/agent-doc` | $318.35 | $0 |
+| `btakita/agent-loop` | $12.00 | $0 |
+| `btakita/tsift` | $0.84 | $0 |
+| `btakita/chromium-bridge` | $0.65 | $0 |
+| `btakita/brookebrodack-dev` | $0.54 | $0 |
+| all others combined | $0.09 | $0 |
+
+`agent-doc`, `tsift`, `chromium-bridge`, `brookebrodack-dev`, and `lazily-py` are public. GitHub's rule is that standard hosted-runner usage in public repositories is free; the dashboard nevertheless displays its gross list-price equivalent. [GitHub Actions billing documentation](https://docs.github.com/en/actions/concepts/billing-and-usage)
+
+The only material private-repository entry is `agent-loop` at $12 gross, and its billed amount is also zero because included usage covers it. Its later workflow-start failures are consistent with the existing $0 hard-stop/payment-method state, not a $337 charge.
+
+Finally, authenticated Payment History contains **no $337 payment or 2026 invoice**. The most recent entries are old $4 subscription attempts from December 2025. If you have an actual credit-card charge or invoice for roughly $337—not the dashboard's “Current metered usage” card—send its date and invoice ID or a screenshot, because that would contradict the account data currently visible and should be escalated to GitHub Billing Support.
+
+I updated `#lzmacosrunner`: moving builds to the Mac Mini is optional for control or to suppress the gross counter, but it is not needed to avoid this charge because the verified billed amount is zero.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -192,7 +240,7 @@ So: no GitHub access is needed for the preferred local-build design. The missing
 ## Review
 
 <!-- agent:review -->
-- [/] [#lzmacosrunner] [operator-decision, lazily-py] Recommended default: retain the free ephemeral macos-14 runner for this public repository. If local control is still desired, use an SSH-driven Mac Mini build from the release machine instead of granting a general-purpose LAN Mac persistent GitHub runner access. Blocked until the operator provides hostname/IP, SSH username, Apple Silicon versus Intel architecture, and confirms a dedicated non-admin build account. Then add and verify clean-tag macOS arm64+x86_64 wheel build/copy/check orchestration before changing the existing all-artifacts-before-publish workflow.
+- [/] [#lzmacosrunner] [operator-decision, lazily-py/agent-doc] Billing audit found no cost-saving requirement: public standard macOS runner gross usage is fully discounted and billed zero. Keep hosted runners by default. If local control, gross-meter reduction, or runner availability is still desired, prefer SSH-driven builds; blocked until the operator provides the Mac hostname/IP, SSH username, architecture, and dedicated build-account confirmation, then preserve complete artifact assembly before publication.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. Blocked until a valid payment method is added to the personal GitHub account.
 - [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Existing 3,304 nonexpired Actions artifacts total about 53.5 GB and continue accruing storage cost until expiry or deletion. New transient release/wheel artifacts now retain for one day in agent-doc 9fbda092c. NEXT: authorize deletion of old Actions artifacts after verifying durable GitHub Release and PyPI copies; destructive cleanup was not performed in this cycle.
 - [/] [#lzktbindpending] [lazily-kt] PHASE 2 of #lzktblockwalk, IN PROGRESS — 44 of 540 bind-pending sites migrated; bind-pending count moved 540 -> 496 and the whole-ledger equality is 521 (25 unreachable + 496 bind-pending). 496 remain across 12 areas. FIRST PASS (lazily-kt 93420ff) bound ipc/root 1, familysync 3, protobuf 6, membership 9, and message-passing 9. SECOND PASS (lazily-kt f87afda) bound lossless-tree 16 through AssertionKeys, including nested render_on descent and final key satisfaction; it exposed 0 higher-rung gaps and required 0 semantic fixes. Cumulative measured sample: 28 of 44 bound blocks exposed a higher-rung gap (63.6%), and 14 of 44 required a real fix (31.8%); keep re-measuring per area rather than forecasting. REMAINING AREAS: collections 132, reactive-graph 88, stdlib 54, ingress 42, rateshape 33, coordination 29, windowing 23, egress 22, resilience 21, service 20, temporal 16, presence 16. Take one or two areas per pass; delete exactly those ledger entries and re-pin the equality downward by exactly that count in the same commit; verify the guard fails on off-by-one in BOTH directions. Every higher-rung failure surfaced by migration must be fixed, never excused. reactive-graph remains BLOCKED on #lzktreactivemodelfailures. Gradle proof discipline applies: use JUnit XML timestamps, not task lines, and --rerun-tasks when evidence may be stale. Repo: src/lazily-kt

@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0a50f-a047-7f00-8ff3-33d3fdc3e63f
+  codex: 01a0a543-e8e7-7c62-b234-4ebac41f210a
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -13,7 +13,7 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -127,6 +127,31 @@ Split-editor activation now enters through IntelliJ's global editor event multic
 Verification passed: targeted Rust and JetBrains regressions, `make check`, `make tmux-ci`, plugin packaging, clean-tree local installation, and version checks. Source commit `ebe8d0a54`, superproject commit `e3a9fbcce`, and tag `v0.35.397` are pushed; release workflows were in progress at inspection.
 
 The installed IntelliJ package requires an IDE restart before the running process can load this listener generation, so the remaining human eyeball check is recorded as non-blocking `[operator-verify]` follow-up `#panefocussplitverify`.
+
+### Re: #realtimequeuedupe and the FPE closeout race — gpt-5.6-sol · 2026-09-15T12:20-04:00
+
+> **Queue prompt:**
+>
+> The queue item `- Fix the duplicated agent:queue item that occurred as I was typing in the queue item. The duplicate is "- Please continue the fpe query optimization. How can we reduce the number". Fix the race condition so it cannot occur again. Previous attempts have been made but this issue is still occurring.` in this document and `- Write the plan into a document. Can we make a ADR? The ADR belongs in the fpe repo since it is internal to the fpe. Use the decisions directory format that we use in haiven-docs.` in fpe.md was not removed once completed. Fix the agent-doc causes.
+
+Fixed and released as agent-doc 0.35.398.
+
+Your correction identified the cross-document provenance: the FPE turn wrote `[#realtimequeuedupe]` into this document. Commit `d7b45df768` captured that new backlog item and its queue prompt. The FPE ADR prompt was a newer editor-buffer item, however, not work completed by the preceding query-optimization response; the FPE closeout remained interrupted by queue-projection divergence, with its editor buffer authoritative. That ADR item therefore correctly remains pending for the controller's next generation-fenced closeout rather than being falsely consumed.
+
+The agent-doc defect was at the commit boundary. In the FPE cycle, the controller logged `answered_free_text_strike_projected` before commit, but that receipt meant only that a detached document-actor job had been enqueued. The main closeout committed, then the actor applied the queue strike after the commit and reported that no cycle/capture owned the resulting visible edit. This stranded the strike outside HEAD and let the completed-looking queue item survive.
+
+The fix makes the invariant explicit:
+
+- the controller records an applied receipt only after the exact document-actor editor/CRDT projection completes;
+- closeout refuses to commit unless that receipt matches the current projection ID;
+- the projection no longer launches a detached second git commit;
+- after the queue strike advances the relay canonical, closeout repeats the generation-fenced native-save proof and then performs one git commit.
+
+A regression advances the editor buffer ahead of the projected authority and proves that closeout fails instead of treating admission as application. The existing success regression and architecture guard now require actor `submit`, the exact applied receipt, and no projection-owned commit.
+
+Verification passed: focused receipt and success regressions, the queue architecture guard, editor parity, cross-editor SimWorld, and the full `make check`. Source commit `c68f2b92f` is pushed to `origin/main` and tag `v0.35.398` is published. The clean release install completed for `agent-doc 0.35.398`, native library 0.35.398, JetBrains plugin 0.2.386, and VS Code extension 0.2.70; controllers and supervisors were scheduled for two-phase idle recycle. GitHub CI and PyPI workflows were in progress at the required one-time inspection.
+
+The IDEA restart is accepted as the operator completion for `#panefocussplitverify`, so that item is reaped in this closeout as requested.
 <!-- agent:boundary:44108b98:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -136,13 +161,13 @@ The installed IntelliJ package requires an IDE restart before the running proces
 t## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Fix the duplicated agent:queue item that occurred as I was typing in the queue item. The duplicate is "- Please continue the fpe query optimization. How can we reduce the number". Fix the race condition so it cannot occur again. Previous attempts have been made but this issue is still occurring.
+- ~~The queue item `- Fix the duplicated agent:queue item that occurred as I was typing in the queue item. The duplicate is "- Please continue the fpe query optimization. How can we reduce the number". Fix the race condition so it cannot occur again. Previous attempts have been made but this issue is still occurring.` in this document and `- Write the plan into a document. Can we make a ADR? The ADR belongs in the fpe repo since it is internal to the fpe. Use the decisions directory format that we use in haiven-docs.` in fpe.md was not removed once completed. Fix the agent-doc causes.~~
+- ~~do [#realtimequeuedupe]~~
+- ~~[#panefocussplitverify] done as I restarted Idea~~
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#realtimequeuedupe] [P1][correctness][realtime] Fix the queue-edit race that duplicated an agent:queue item while the user was typing. Exact reproduced duplicate: `- Please continue the fpe query optimization. How can we reduce the number`. Ensure every realtime editor edit arriving while a prior document-write effect owns a retained response is captured exactly once in the next admitted snapshot; preserve editor authority and never hide the edit or require resubmission. Regression: race the retained response projection with the realtime queue edit and assert no duplicate, no loss, exact queue text, no duplicate response, and successful commit/session-check convergence.
-- [ ] [#panefocussplitverify] [operator-verify] Restart IntelliJ to activate agent-doc JetBrains plugin 0.2.386, then click both directions between co-visible agent-doc split editors and confirm the active tmux pane follows each document.
 <!-- /agent:backlog -->
 
 ## Review

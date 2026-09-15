@@ -4822,14 +4822,24 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
     let session_actor =
         fs::read_to_string(manifest_dir.join("agent-doc-session-actor-io/src/lib.rs")).unwrap();
     let binary = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    let binary_strike = binary
+        .split_once("fn project_answered_free_text_strike(")
+        .unwrap()
+        .1
+        .split_once("\n    fn commit_document(")
+        .unwrap()
+        .0;
     let write_runtime =
         fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     assert!(
         controller.contains("fn current_answered_free_text_strike(")
             && controller.contains("fn ensure_answered_free_text_strike_effect(")
-            && session_actor.contains("pub fn enqueue_detached<")
+            && controller.contains("answered_free_text_strike_applied")
+            && controller.contains("answered free-text queue projection was not applied")
+            && session_actor.contains("pub fn submit<")
             && binary.contains("fn project_answered_free_text_strike(")
-            && binary.contains("actor.enqueue_detached(")
+            && binary_strike.contains("actor.submit(")
+            && !binary_strike.contains("commit_with_outcome")
             && !queue_io_consume.contains("strike_answered_free_text_heads_at_commit_seam")
             && !commit_io.contains("strike_answered_free_text_heads_at_commit_seam")
             && !write_runtime.contains("strike_answered_free_text_queue_heads"),

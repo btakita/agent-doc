@@ -377,7 +377,7 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             &project_root,
             file.to_string_lossy().as_ref(),
         );
-        actor.enqueue_detached(
+        actor.submit(
             agent_doc_document_realtime::session_ops::SessionOpKind::QueueHead,
             move |_ctx| {
                 let result = agent_doc_document_realtime_io::with_controller_document_mutation(
@@ -391,7 +391,7 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                         )
                     },
                 );
-                match result {
+                match &result {
                     Ok(()) => {
                         if let Ok(Some(snapshot)) =
                             agent_doc_snapshot_io::load_document_baseline(&file)
@@ -424,22 +424,6 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                                 file.display()
                             );
                         }
-                        if let Err(error) = agent_doc_commit_io::commit_with_outcome(&file) {
-                            eprintln!(
-                                "[queue] answered free-text projected commit deferred for {}: {error}",
-                                file.display()
-                            );
-                            agent_doc_ops_log_io::log_op(
-                                &file,
-                                &format!(
-                                    "answered_free_text_strike_commit_deferred file={} projection_id={} error={}",
-                                    file.display(),
-                                    invocation.projection_id,
-                                    agent_doc_secret_redact::redact(&error.to_string())
-                                        .replace(char::is_whitespace, "_"),
-                                ),
-                            );
-                        }
                         agent_doc_ops_log_io::log_op(
                             &file,
                             &format!(
@@ -470,8 +454,9 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                         );
                     }
                 }
+                result
             },
-        )
+        )?
     }
 
     fn commit_document(

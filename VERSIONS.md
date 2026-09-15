@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.398
+
+- **Answered free-text queue strikes are atomic with closeout
+  (`#realtimequeuedupe`).** The controller now records an application receipt
+  only after the document actor has completed the exact editor/CRDT projection;
+  closeout refuses to commit when that receipt is absent. The strike no longer
+  launches a detached second git commit, and the controller repeats its
+  generation-fenced native-save proof after the queue projection before the
+  single closeout commit. This fixes the FPE turn that wrote
+  `[#realtimequeuedupe]` into the agent-doc backlog while its own next ADR queue
+  item remained visible after the earlier commit boundary.
+
 ## 0.35.397
 
 - **Backlog backfill removes captured fenced agent-doc transcripts

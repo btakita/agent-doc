@@ -1754,11 +1754,10 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         pane_id: &str,
     ) -> Result<bool>;
 
-    /// Queue an exact answered-free-text target on the document's owner thread.
+    /// Apply an exact answered-free-text target on the document's owner thread.
     ///
-    /// This port must return after admission, not after editor/CRDT convergence:
-    /// the controller Effect thread only projects state and must remain
-    /// responsive while the per-document worker applies the target.
+    /// Success is the effect receipt consumed by closeout, so this port must not
+    /// return until editor/CRDT convergence has applied the exact target.
     fn project_answered_free_text_strike(
         &self,
         invocation: ControllerAnsweredFreeTextStrikeInvocation,
@@ -2452,9 +2451,10 @@ struct ControllerDocumentGraphs {
     /// callbacks which used to attempt the mutation once and discard failure.
     answered_free_text_strike:
         lazily::ThreadSafeComputedMap<String, AnsweredFreeTextQueueStrikeProjection>,
-    /// Controller-local admission receipt for the exact projected target. The
-    /// per-document actor owns the potentially slow convergence work.
-    answered_free_text_strike_submitted: lazily::ThreadSafeSourceMap<String, Option<String>>,
+    /// Controller-local application receipt for the exact projected target.
+    /// Closeout may commit only after this receipt matches the current
+    /// projection; enqueue/admission alone is not durable evidence.
+    answered_free_text_strike_applied: lazily::ThreadSafeSourceMap<String, Option<String>>,
     queue_completion: lazily::ThreadSafeComputedMap<String, QueueCompletionProjection>,
     /// `#preflightreactive`: per-document read observations and the shared
     /// Computed projection consumed by the short-lived preflight CLI process.
@@ -3403,7 +3403,7 @@ impl ControllerDocumentGraphs {
             compact_resume_applied: lazily::ThreadSafeSourceMap::new(&ctx),
             queue_authority: lazily::ThreadSafeSourceMap::new(&ctx),
             answered_free_text_strike: lazily::ThreadSafeComputedMap::new(&ctx),
-            answered_free_text_strike_submitted: lazily::ThreadSafeSourceMap::new(&ctx),
+            answered_free_text_strike_applied: lazily::ThreadSafeSourceMap::new(&ctx),
             queue_completion: lazily::ThreadSafeComputedMap::new(&ctx),
             preflight_facts: lazily::ThreadSafeSourceMap::new(&ctx),
             preflight_projection: lazily::ThreadSafeComputedMap::new(&ctx),
@@ -3905,6 +3905,20 @@ impl ControllerDocumentGraphs {
         if let Some(error) = strike.error {
             anyhow::bail!("{error}");
         }
+        if strike.has_target()
+            && self
+                .answered_free_text_strike_applied
+                .observe(&self.ctx, &document_hash.to_string())
+                .flatten()
+                .as_deref()
+                != Some(strike.projection_id.as_str())
+        {
+            anyhow::bail!(
+                "answered free-text queue projection was not applied for {} (projection_id={})",
+                file.display(),
+                strike.projection_id
+            );
+        }
         let projection = self.current_queue_completion(document_hash);
         if let Some(error) = projection.error {
             anyhow::bail!("{error}");
@@ -4205,7 +4219,7 @@ impl ControllerDocumentGraphs {
         }
         let key = document_hash.to_string();
         let projection_map = self.answered_free_text_strike.clone();
-        let submitted_map = self.answered_free_text_strike_submitted.clone();
+        let applied_map = self.answered_free_text_strike_applied.clone();
         let effect_key = key.clone();
         let effect = self.ctx.effect(move |ctx| {
             let Some(projection) = projection_map.observe(ctx, &effect_key) else {
@@ -4214,20 +4228,11 @@ impl ControllerDocumentGraphs {
             if !projection.has_target() {
                 return;
             }
-            if submitted_map.observe(ctx, &effect_key).flatten().as_deref()
+            if applied_map.observe(ctx, &effect_key).flatten().as_deref()
                 == Some(projection.projection_id.as_str())
             {
                 return;
             }
-            // Claim this exact target before admitting the slow document work.
-            // A state event unrelated to queue authority may invalidate the
-            // Computed while the worker is still converging; the receipt keeps
-            // that invalidation from enqueueing a duplicate write.
-            submitted_map.set(
-                ctx,
-                effect_key.clone(),
-                Some(projection.projection_id.clone()),
-            );
             let Some(file) = projection.file.clone() else {
                 return;
             };
@@ -4245,18 +4250,25 @@ impl ControllerDocumentGraphs {
             match runtime_effects()
                 .and_then(|effects| effects.project_answered_free_text_strike(invocation))
             {
-                Ok(()) => agent_doc_ops_log_io::log_op(
-                    &file,
-                    &format!(
-                        "answered_free_text_strike_projected file={} projection_id={} capture_id={} nodes={}",
-                        file.display(),
-                        projection.projection_id,
-                        projection.capture_id,
-                        projection.node_keys.len(),
-                    ),
-                ),
+                Ok(()) => {
+                    applied_map.set(
+                        ctx,
+                        effect_key.clone(),
+                        Some(projection.projection_id.clone()),
+                    );
+                    agent_doc_ops_log_io::log_op(
+                        &file,
+                        &format!(
+                            "answered_free_text_strike_applied_receipt file={} projection_id={} capture_id={} nodes={}",
+                            file.display(),
+                            projection.projection_id,
+                            projection.capture_id,
+                            projection.node_keys.len(),
+                        ),
+                    );
+                }
                 Err(error) => eprintln!(
-                    "[controller] answered free-text strike admission failed for {}: {error}",
+                    "[controller] answered free-text strike application failed for {}: {error}",
                     file.display()
                 ),
             }
@@ -16453,6 +16465,71 @@ revised operator request
             after_recurring.matches("- staging deploy\n").count(),
             1,
             "the later recurring command must remain pending"
+        );
+    }
+
+    #[test]
+    fn queue_authority_observation_requires_exact_strike_application_receipt() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let response = concat!(
+            "### Re: close the queue — gpt-5\n\n",
+            "> **Queue prompt:**\n>\n> close the queue\n\n",
+            "Closed.\n",
+        );
+        let projected_authority = format!(
+            concat!(
+                "---\nagent_doc_session: queue-receipt\nqueue_active: false\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n{}",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue -->\n- close the queue\n<!-- /agent:queue -->\n",
+            ),
+            response,
+        );
+        // The authority observation is ahead of the mutation plane. The runtime
+        // effect must fail its expected-content fence, and closeout must observe
+        // that failure rather than treating actor admission as application.
+        std::fs::write(&file, "operator advanced the editor buffer\n").unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+        runtime
+            .document_graphs
+            .install_settle_sink(dir.path().to_path_buf(), &runtime);
+        let captured = agent_doc_state_backbone::StateEvent::new(
+            "response-captured-receipt",
+            agent_doc_state_backbone::StateFact::ResponseCaptured {
+                document_hash: document_hash.clone(),
+                cycle_id: "cycle-receipt".to_string(),
+                capture_id: "capture-receipt".to_string(),
+                response_sha256: agent_doc_hash::content_hash(response),
+                response_body: Some(response.to_string()),
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: Some(projected_authority.clone()),
+            },
+        );
+        for event in [preflight_started_event(&document_hash), captured] {
+            append_state_event(dir.path(), &event).unwrap();
+            runtime.apply_state_event(&event).unwrap();
+        }
+
+        let error = runtime
+            .document_queue_authority_observe(&document_hash, &canonical, projected_authority)
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("answered free-text queue projection was not applied"),
+            "{error:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&canonical).unwrap(),
+            "operator advanced the editor buffer\n"
         );
     }
 

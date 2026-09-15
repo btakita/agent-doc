@@ -7479,8 +7479,9 @@ fn handle_commit_document_rpc(
     }
     // Publish the exact pre-commit authority frontier into the queue graph.
     // The captured response is already durable controller state, so an
-    // answered free-text strike is derived and admitted to its document actor
-    // without making commit execute a one-shot queue mutation callback.
+    // answered free-text strike is derived and applied by its document actor.
+    // The graph refuses this closeout unless the exact projection has an
+    // application receipt; enqueue/admission is not enough.
     let queue_authority = match agent_doc_crdt_relay_io::current_text_for_file(&canonical)? {
         agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => text,
         _ => std::fs::read_to_string(&canonical).with_context(|| {
@@ -7495,6 +7496,19 @@ fn handle_commit_document_rpc(
         &canonical,
         queue_authority,
     )?;
+    // The queue strike advances the relay canonical after the first save proof.
+    // Fence and save that new exact revision before git observes the document.
+    let strike_barrier_ready = commit_barrier_for_closeout(runtime, &canonical)?;
+    let strike_disk_projection_ready =
+        ensure_controller_commit_projection_saved(&canonical, strike_barrier_ready)?;
+    if !strike_barrier_ready || !strike_disk_projection_ready {
+        anyhow::bail!(
+            "answered free-text queue projection is not durable yet for {} (barrier_ready={} disk_projection_ready={})",
+            canonical.display(),
+            strike_barrier_ready,
+            strike_disk_projection_ready,
+        );
+    }
     runtime_effects()?.commit_document(&canonical, payload.authoritative_compaction)
 }
 

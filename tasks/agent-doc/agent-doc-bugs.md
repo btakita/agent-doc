@@ -13,7 +13,7 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -172,6 +172,27 @@ My recommended cheap process is:
 If the repository later becomes private, the Linux cross-build reduces the runner rate by about 90.3% per minute. At the sampled workload and equal runtime, the nominal ten-release compute would fall from $19.59 to about $1.90, plus the small periodic native-smoke cost. I would prove both cross-built archives on Intel and Apple Silicon before removing the native release legs; confidence is high in the billing diagnosis and medium in cross-build compatibility until that spike passes.
 
 No release/build files were changed in this proposal-only cycle. The authenticated CLI can inspect repository run usage but lacks the account-level `user` scope, so it could not audit the overall personal billing report. Any nonzero macOS charge on the account should therefore be traced by repository in that report; it is not supported by this public repository's current run-level billable data.
+
+### Re: FPE queue update after IDEA restart — gpt-5 · 2026-09-15T14:04-04:00
+
+> **Queue prompt:**
+>
+> fpe.md agent:queue was not updated when the turn completed. Fix agent-doc causes.
+
+The IDEA restart completed the runtime activation and the FPE queue is now converged. No additional source patch was needed in this cycle: the underlying defect was already fixed and released in agent-doc 0.35.398 by `c68f2b92f` (`fix: make queue strike closeout atomic`), while the originally observed turn was still attached to the pre-restart JetBrains/native runtime generation.
+
+The invariant is owned by the controller closeout gate: a turn may not commit until the exact queue projection has an applied receipt from the document actor. Admission/enqueue alone is not application. The covered transitions are: an enqueued projection without its matching applied receipt blocks commit; a matching receipt permits closeout; after a queue strike advances canonical authority, closeout repeats the generation-fenced native-save proof and performs one git commit; stale or mismatched receipts remain fail-closed.
+
+The reactive path is `queue projection intent Source → document-actor submit Effect → exact applied-receipt Source → closeout Computed gate → native-save proof Effect → commit receipt`. The fix removed the detached projection-owned commit, so there is one closeout owner and no polling or second commit path.
+
+Current proof after the restart:
+
+- `tasks/fpe.md` has an empty `agent:queue` on disk.
+- `agent-doc doctor tasks/fpe.md` reports supervisor freshness OK, editor/CRDT convergence OK, and closeout commit OK.
+- Installed CLI reports agent-doc 0.35.398; the agent-doc source HEAD is `c68f2b92f` and matches `origin/main`.
+- GitHub Actions CI run 34994060782 for `c68f2b92f` completed successfully.
+
+The restart therefore satisfies the remaining runtime/operator verification. There is no further migration or operator-verify work for this incident.
 <!-- agent:boundary:44108b98:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -181,6 +202,8 @@ No release/build files were changed in this proposal-only cycle. The authenticat
 t## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~fpe.md agent:queue was not updated when the turn completed. Fix agent-doc causes.~~
+- Batch OSX releases to 1 week.
 <!-- /agent:queue -->
 
 

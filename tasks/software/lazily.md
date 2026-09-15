@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -1949,13 +1949,38 @@ Every audited local HEAD matches `origin/main`, but all shared worktrees contain
 The JS review blockers were stale and are resolved in this closeout: npm `0.32.0` was successfully published by the OIDC workflow with provenance, so the old failed `0.30.1` rerun must not be revived. I updated `#lzstdlibmatrixrelease` with the current version matrix and exact unblock sequence instead.
 
 Verification this cycle was deliberately read-only: local/remote HEAD parity, tags, public registries/releases, release workflows, and exact-HEAD public CI were audited across the ten targets; no source changed, so no test suite was rerun. The exchange remains oversized, but the active queue took precedence over compaction as required.
+
+### Re: GitHub billing issue URLs — gpt-5 · 2026-09-15T07:58-04:00
+
+> **Queue prompt:**
+>
+> do [#urlshowsbilling]
+
+
+> **Queue prompt:**
+>
+> What url shows the billing issue(s)?
+
+These exact Actions runs show the billing failure in their **Annotations** sections:
+
+- Lazily network suite: https://github.com/btakita/agent-loop/actions/runs/34956144246
+- Agent Doc (`check` and `tmux-ci`): https://github.com/btakita/agent-loop/actions/runs/34926177536
+
+Both say that the jobs were not started because recent account payments failed or the spending limit must be increased.
+
+The account page to inspect and fix it is:
+
+- Billing & Licensing: https://github.com/settings/billing
+
+Log in as the owner of `btakita`, then check **Overview / Payment information** and **Budgets and alerts** for GitHub Actions. GitHub's current billing documentation confirms that personal-account billing is reached through that URL: https://docs.github.com/en/billing/get-started/introduction-to-billing
+
+`queue: stop` is preserved, so there is no follow-on queue drain. The exchange remains oversized; I did not compact it without explicit opt-in.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 release + publish
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

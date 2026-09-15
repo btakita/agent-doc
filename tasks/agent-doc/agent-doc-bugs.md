@@ -136,10 +136,12 @@ The installed IntelliJ package requires an IDE restart before the running proces
 t## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Fix the duplicated agent:queue item that occurred as I was typing in the queue item. The duplicate is "- Please continue the fpe query optimization. How can we reduce the number". Fix the race condition so it cannot occur again. Previous attempts have been made but this issue is still occurring.
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#realtimequeuedupe] [P1][correctness][realtime] Fix the queue-edit race that duplicated an agent:queue item while the user was typing. Exact reproduced duplicate: `- Please continue the fpe query optimization. How can we reduce the number`. Ensure every realtime editor edit arriving while a prior document-write effect owns a retained response is captured exactly once in the next admitted snapshot; preserve editor authority and never hide the edit or require resubmission. Regression: race the retained response projection with the realtime queue edit and assert no duplicate, no loss, exact queue text, no duplicate response, and successful commit/session-check convergence.
 - [ ] [#panefocussplitverify] [operator-verify] Restart IntelliJ to activate agent-doc JetBrains plugin 0.2.386, then click both directions between co-visible agent-doc split editors and confirm the active tmux pane follows each document.
 <!-- /agent:backlog -->
 

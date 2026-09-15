@@ -224,6 +224,30 @@ The only material private-repository entry is `agent-loop` at $12 gross, and its
 Finally, authenticated Payment History contains **no $337 payment or 2026 invoice**. The most recent entries are old $4 subscription attempts from December 2025. If you have an actual credit-card charge or invoice for roughly $337—not the dashboard's “Current metered usage” card—send its date and invoice ID or a screenshot, because that would contradict the account data currently visible and should be escalated to GitHub Billing Support.
 
 I updated `#lzmacosrunner`: moving builds to the Mac Mini is optional for control or to suppress the gross counter, but it is not needed to avoid this charge because the verified billed amount is zero.
+
+### Re: Removing macOS builds — gpt-5 · 2026-09-15T13:08-04:00
+
+> **Queue prompt:**
+>
+> do [#removeosxbuild]
+
+
+> **Queue prompt:** If we remove the OSX build, would OSX installs still work?
+
+**Existing installations would keep working, but future installs and upgrades would not be reliably supported if we stop publishing macOS artifacts.** We should change where the artifacts are built, not remove the artifacts.
+
+For `agent-doc`, the answer is effectively **no** for new releases. The installer and `agent-doc upgrade` detect Intel or Apple Silicon macOS and download an exact `agent-doc-x86_64-apple-darwin.tar.gz` or `agent-doc-aarch64-apple-darwin.tar.gz` asset. The current v0.35.398 release contains both. If a later release omits them:
+
+- already-installed binaries continue running;
+- old releases remain installable while their assets remain published;
+- fresh installs and binary upgrades to the new release fail to find the Darwin archive;
+- the upgrade command may attempt its `pip install` fallback, but that is not an equivalent or dependable replacement for the native release asset.
+
+For `lazily-py`, macOS installs should usually still succeed from the source distribution because `setup.py` explicitly falls back to pure Python when mypyc or C compilation is unavailable. However, deleting the macOS wheel builds removes the tested prebuilt wheels, loses the mypyc speedup, and makes installation slower and more dependent on pip/source-build behavior.
+
+Recommendation: retain both Intel and Apple Silicon deliverables. If we use the Mac Mini, have it reproduce and upload the same artifacts before removing the hosted macOS jobs. That preserves installs while changing only the execution venue.
+
+Evidence checked: `src/agent-doc/install.sh`, `src/agent-doc/src/upgrade.rs`, the v0.35.398 GitHub release assets, and `src/lazily-py/setup.py`. No product source was changed; this cycle only updates the session document and `#lzmacosrunner`. Confidence is high. No escalation is required. The exchange is large, but queue drain remains active, so I continued without compaction.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -240,7 +264,7 @@ I updated `#lzmacosrunner`: moving builds to the Mac Mini is optional for contro
 ## Review
 
 <!-- agent:review -->
-- [/] [#lzmacosrunner] [operator-decision, lazily-py/agent-doc] Billing audit found no cost-saving requirement: public standard macOS runner gross usage is fully discounted and billed zero. Keep hosted runners by default. If local control, gross-meter reduction, or runner availability is still desired, prefer SSH-driven builds; blocked until the operator provides the Mac hostname/IP, SSH username, architecture, and dedicated build-account confirmation, then preserve complete artifact assembly before publication.
+- [/] [#lzmacosrunner] [operator-decision, lazily-py/agent-doc] Billing audit found no cost-saving requirement: public standard macOS runner gross usage is fully discounted and billed zero. Keep hosted runners by default. Never remove the macOS deliverables: any local replacement must reproduce both agent-doc Darwin archives and the lazily-py macOS wheels before hosted macOS jobs are removed. If local control, gross-meter reduction, or runner availability is still desired, prefer SSH-driven builds; blocked until the operator provides the Mac hostname/IP, SSH username, architecture, and dedicated build-account confirmation.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. Blocked until a valid payment method is added to the personal GitHub account.
 - [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Existing 3,304 nonexpired Actions artifacts total about 53.5 GB and continue accruing storage cost until expiry or deletion. New transient release/wheel artifacts now retain for one day in agent-doc 9fbda092c. NEXT: authorize deletion of old Actions artifacts after verifying durable GitHub Release and PyPI copies; destructive cleanup was not performed in this cycle.
 - [/] [#lzktbindpending] [lazily-kt] PHASE 2 of #lzktblockwalk, IN PROGRESS — 44 of 540 bind-pending sites migrated; bind-pending count moved 540 -> 496 and the whole-ledger equality is 521 (25 unreachable + 496 bind-pending). 496 remain across 12 areas. FIRST PASS (lazily-kt 93420ff) bound ipc/root 1, familysync 3, protobuf 6, membership 9, and message-passing 9. SECOND PASS (lazily-kt f87afda) bound lossless-tree 16 through AssertionKeys, including nested render_on descent and final key satisfaction; it exposed 0 higher-rung gaps and required 0 semantic fixes. Cumulative measured sample: 28 of 44 bound blocks exposed a higher-rung gap (63.6%), and 14 of 44 required a real fix (31.8%); keep re-measuring per area rather than forecasting. REMAINING AREAS: collections 132, reactive-graph 88, stdlib 54, ingress 42, rateshape 33, coordination 29, windowing 23, egress 22, resilience 21, service 20, temporal 16, presence 16. Take one or two areas per pass; delete exactly those ledger entries and re-pin the equality downward by exactly that count in the same commit; verify the guard fails on off-by-one in BOTH directions. Every higher-rung failure surfaced by migration must be fixed, never excused. reactive-graph remains BLOCKED on #lzktreactivemodelfailures. Gradle proof discipline applies: use JUnit XML timestamps, not task lines, and --rerun-tasks when evidence may be stale. Repo: src/lazily-kt

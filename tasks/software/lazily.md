@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -1917,12 +1917,45 @@ Verification passed:
 Commits: lazily-kt `f87afda`; superproject `722475d83`.
 
 The phase remains gated and explicitly in progress, per its one-or-two-areas-per-pass contract; 496 bind-pending sites remain.
+
+### Re: release + publish — gpt-5 · 2026-09-15T07:22-04:00
+
+> **Queue prompt:**
+>
+> release + publish
+
+I stopped before creating any tags or publishing anything. The archived `#lzrenamerelease` train really did ship all ten intended targets, so the semantic-completion warning was grounded. But this is not merely a duplicate no-op: the current committed heads are now 2–44 commits beyond their latest tags and contain new public replay/conformance surface. A fresh train is warranted; it is not yet release-eligible.
+
+| target | published/latest tag | commits since | audited next release |
+|---|---:|---:|---:|
+| spec | 0.38.1 | 24 | 0.39.0 |
+| formal | 0.38.1 | 2, net README-only | no new tag; create the missing 0.38.1 GitHub Release object |
+| Rust | 0.57.1 | 44 | 0.58.0 |
+| Python | 0.40.0 | 31 | 0.41.0 |
+| Kotlin | 0.41.2 | 36 | 0.42.0 |
+| JavaScript | 0.32.0 | 24 | 0.33.0 |
+| Dart | 0.30.0 | 28 | 0.31.0, already prepared in the manifest/changelog |
+| Zig | 0.34.1 | 21 | 0.35.0 |
+| Go | 0.26.0 | 29 | 0.27.0 |
+| C++ | 0.28.0 | 34 | 0.29.0 |
+
+Two hard gates prevent an honest inside-out release today:
+
+1. The latest superproject Lazily network-suite run, `34956144246`, failed before a runner started because GitHub Actions billing/spending remains blocked. Phase 5 explicitly requires the all-peer/all-channel executable matrix before publication; individual binding CI is green, but it does not substitute for that evidence.
+2. `lazily-rs` tag publishing is not operational: recent release jobs report no crates.io Trusted Publishing configuration for `lazily-hub/lazily-rs`. Creating `v0.58.0` before fixing that would produce a release tag with a skipped crate publish.
+
+Every audited local HEAD matches `origin/main`, but all shared worktrees contain live agent-doc/tsift migration state; Zig also has a release-relevant dirty CI-reach script. Once the external gates clear, release from clean worktrees, bump every package manifest before its immutable or tag-triggered publish, run each full local gate plus the network matrix, and then publish inside-out. A partial train now would violate the documented release contract.
+
+The JS review blockers were stale and are resolved in this closeout: npm `0.32.0` was successfully published by the OIDC workflow with provenance, so the old failed `0.30.1` rerun must not be revived. I updated `#lzstdlibmatrixrelease` with the current version matrix and exact unblock sequence instead.
+
+Verification this cycle was deliberately read-only: local/remote HEAD parity, tags, public registries/releases, release workflows, and exact-HEAD public CI were audited across the ten targets; no source changed, so no test suite was rerun. The exchange remains oversized, but the active queue took precedence over compaction as required.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 ## Backlog
@@ -1936,9 +1969,7 @@ The phase remains gated and explicitly in progress, per its one-or-two-areas-per
 - [/] [#lzktbindpending] [lazily-kt] PHASE 2 of #lzktblockwalk, IN PROGRESS — 44 of 540 bind-pending sites migrated; bind-pending count moved 540 -> 496 and the whole-ledger equality is 521 (25 unreachable + 496 bind-pending). 496 remain across 12 areas. FIRST PASS (lazily-kt 93420ff) bound ipc/root 1, familysync 3, protobuf 6, membership 9, and message-passing 9. SECOND PASS (lazily-kt f87afda) bound lossless-tree 16 through AssertionKeys, including nested render_on descent and final key satisfaction; it exposed 0 higher-rung gaps and required 0 semantic fixes. Cumulative measured sample: 28 of 44 bound blocks exposed a higher-rung gap (63.6%), and 14 of 44 required a real fix (31.8%); keep re-measuring per area rather than forecasting. REMAINING AREAS: collections 132, reactive-graph 88, stdlib 54, ingress 42, rateshape 33, coordination 29, windowing 23, egress 22, resilience 21, service 20, temporal 16, presence 16. Take one or two areas per pass; delete exactly those ledger entries and re-pin the equality downward by exactly that count in the same commit; verify the guard fails on off-by-one in BOTH directions. Every higher-rung failure surfaced by migration must be fixed, never excused. reactive-graph remains BLOCKED on #lzktreactivemodelfailures. Gradle proof discipline applies: use JUnit XML timestamps, not task lines, and --rerun-tasks when evidence may be stale. Repo: src/lazily-kt
 - [/] [#lzambienttokenresolve] [operator-decision, agent-loop superproject] agent-loop/.mise.toml has `[env] _.source = ".env"`, and .env holds $(passage ...) REFERENCES for every credential — correct hygiene, untracked and gitignored. But mise RESOLVES those substitutions at shell startup, so the resolved cleartext sits in the ambient environment of every process spawned from this tree. Verified by presence check on 2026-09-12, values never printed: CARGO_REGISTRY_TOKEN (35 chars) and NPM_TOKEN (40 chars) are live in the environment right now. That is not a leak by itself — nothing here was found printing them, and the lazily-zig build specifically does NOT (see #lzzigenvsecretleak, measured) — but it means every tool in the tree is one env-dumping code path away from disclosure, and there are many such paths in build systems, crash handlers and CI log collectors. THE FIX IS SUBSTITUTION AT THE POINT OF USE: keep the refs in .env for documentation, but let the publish commands resolve them (`CARGO_REGISTRY_TOKEN=$(passage ...) cargo publish`) rather than mise resolving them into every shell. WHY THIS IS YOURS AND NOT MINE: changing .mise.toml alters the environment of every session started from this tree, and thirty peer sessions were live when this was filed — several mid-build. A change like that wants a quiet moment and someone watching, not a queue drain. SEPARATELY AND MORE URGENTLY: rotate CARGO_REGISTRY_TOKEN, NPM_TOKEN and PYPI_PUBLISH_TOKEN. Not because a build printed them, but because the resolved values passed through a subagent's tool output while it was diagnosing the (non-)leak, which puts them in that transcript permanently. Log shredding does not reach a transcript. crates.io has no Revoke button, only Regenerate — see reference_cargo_publish_token_passage.md.
 - [/] [#lzagentloopcibilling] [operator-action] GitHub Actions is blocked on btakita/agent-loop by a spending limit, and has been since 2026-08-09. Every run of both workflows (Agent Doc, Lazily network suite) reports "The job was not started because recent account payments have failed or your spending limit needs to be increased" — no job starts, so there are no logs and nothing to debug in the workflow itself. Diagnosed precisely: btakita/agent-loop is PRIVATE, so it consumes paid Actions minutes; btakita/tsift, btakita/agent-doc and every lazily-hub/* binding are PUBLIC and run on free minutes, which is why binding CI has been green throughout while the superproject has been dark. Last successful run 31293624224 at 2026-08-09T04:00:25Z; first billing failure 31297858292 at 2026-08-09T05:58:50Z. COVERAGE LOST for that whole window: the `check` job (make check under tmux) and the `tmux-ci` job (make tmux-ci) in agent-doc.yml, plus the tiered `network-suite-*` targets in lazily-network-suite.yml — none of which is covered by the per-binding CI that has been green. OPERATOR ACTION, and nothing else unblocks this: open Billing & plans for the account that owns btakita/agent-loop, settle the failed payment or raise the Actions spending limit, then re-run one workflow and confirm a job actually starts. Until then treat superproject CI as ABSENT rather than passing, and do not read a green binding CI as coverage for it. Once jobs start again, re-run make check and make tmux-ci on HEAD before trusting the backlog of submodule-pointer commits pushed during the outage.
-- [/] [#lzstdlibmatrixrelease] Implement Phase 5 of tasks/osoftware/plan-lazily-stdlib-conformance-rollout.md: run the capability-driven all-peer/all-channel matrix, enforce CI and mutation gates, publish coverage evidence, and release bindings inside-out only after every claimed cell is green.
-- [/] [#lzjsnpmtrustedpub] [operator-action] lazily-js repository workflow/OIDC/provenance is ready, but npm rejects publication until trusted-publisher setup is completed. NEXT: authenticate npm, register `@lazily-hub/lazily-js` for `lazily-hub/lazily-js` workflow `release.yml` with no environment and allowed action `npm publish`, verify with `npm trust list @lazily-hub/lazily-js`, then prove the next version tag.
-- [/] [#lzjspublish] After the operator completes npm security-key reauthentication in the Brave package-access tab, configure the GitHub Actions trusted publisher for lazily-hub/lazily-js using workflow release.yml with npm publish permission; rerun release job 30309980372 for v0.30.1 and verify the registry resolves 0.30.1.
+- [/] [#lzstdlibmatrixrelease] [release-gated] Implement Phase 5 of tasks/software/plan-lazily-stdlib-conformance-rollout.md and publish only after executable evidence is green. Audit 2026-09-15 recommends spec v0.39.0, rs v0.58.0, py v0.41.0, kt v0.42.0, js v0.33.0, dart v0.31.0, zig v0.35.0, go v0.27.0, cpp v0.29.0; formal needs no new tag but lacks the v0.38.1 GitHub Release object. NEXT: (1) fix btakita/agent-loop Actions billing and prove the all-peer/all-channel network suite starts and passes; (2) register lazily-hub/lazily-rs as a crates.io trusted publisher and prove OIDC; (3) release from clean worktrees, bump every manifest before its immutable/tag-triggered publish, run full local gates, then publish inside-out. Current external blockers are billing and Rust trusted-publisher configuration.
 <!-- /agent:review -->
 
 ## Icebox

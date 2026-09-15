@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a0a1c6-0e26-79b3-87e8-2d8416bcef83
+  codex: 01a0a4c5-54e2-7f91-9761-fc2750e1790b
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -2040,23 +2040,48 @@ Verification:
 - superproject commit: `26dbcad98` (push follows this document closeout).
 
 The exchange remains oversized; I did not compact it without explicit opt-in.
+
+### Re: $20/month GitHub budget — gpt-5 · 2026-09-15T08:43-04:00
+
+> **Queue prompt:** Please set a budget of $20/month for all Github costs.
+
+I reached the authenticated personal-account budget editor, but GitHub refused the adjustment with: **“Payment method is missing — Please set up a valid payment method before creating or adjusting your budget.”** I did not add or change payment credentials.
+
+The current controls are already strict:
+
+- Actions: $0/month, stop usage enabled
+- Packages: $0/month, stop usage enabled
+- Codespaces: $0/month, stop usage enabled
+- Git LFS: $0/month, stop usage enabled
+- All AI credits: $0/month, stop usage enabled
+- Included-usage alerts: enabled
+- GitHub Free and Copilot Free subscriptions: $0/month
+
+GitHub does not provide one universal budget spanning every product. Budgets cover one product, SKU, or bundled AI-credit category. The practical $20 total ceiling for this account is therefore **Actions = $20 with a hard stop**, while retaining the other four product budgets at $0. A product-level Actions budget covers all Actions SKUs, including runner overages and artifact storage. GitHub documents the personal-account flow and hard-stop behavior in [Setting up budgets](https://docs.github.com/en/billing/how-tos/set-up-budgets) and the product limitation in [Budgets and alerts](https://docs.github.com/en/billing/concepts/budgets-and-alerts).
+
+The billing page currently shows $329.11 gross metered usage and an equal $329.11 included-usage discount. A new budget only counts usage from its creation date, so the first billing cycle can exceed $20 when earlier usage exists.
+
+I left the browser on **Edit Actions**, where the **Add payment method** blocker is visible. After a valid payment method is added, the remaining operation is to change Actions from $0 to $20, keep **Stop usage when budget limit is reached** and threshold alerts enabled, and submit. I recorded `#lzgithubbudget20` as review-gated on that external prerequisite.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority -->
+<!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
+- 🚧 do [#lzstdlibmatrixrelease]
+- Please set a budget of $20/month for all Github costs.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzstdlibmatrixrelease] [local-release] Complete Phase 5 via tasks/software/plan-lazily-stdlib-conformance-rollout.md on this machine. NEXT: derive or bump the stale interop hello versions in Python, Kotlin, JavaScript, Dart, Zig, Go, and C++; prepare clean worktrees and the intended version bumps; run every make check plus lazily-interop make check and network-suite-nightly locally; publish inside-out. Keep public/free cross-platform wheel and provenance workflows only as packaging transports where Linux cannot reproduce their artifact matrix. C# is a tested peer but excluded from this release; Godot remains staged.
+- [ ] 🚧 [#lzstdlibmatrixrelease] [local-release] Complete Phase 5 via tasks/software/plan-lazily-stdlib-conformance-rollout.md on this machine. NEXT: derive or bump the stale interop hello versions in Python, Kotlin, JavaScript, Dart, Zig, Go, and C++; prepare clean worktrees and the intended version bumps; run every make check plus lazily-interop make check and network-suite-nightly locally; publish inside-out. Keep public/free cross-platform wheel and provenance workflows only as packaging transports where Linux cannot reproduce their artifact matrix. C# is a tested peer but excluded from this release; Godot remains staged.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. Blocked until a valid payment method is added to the personal GitHub account.
 - [/] [#lzagentdocartifactpurge] [operator-decision, btakita/agent-doc] Existing 3,304 nonexpired Actions artifacts total about 53.5 GB and continue accruing storage cost until expiry or deletion. New transient release/wheel artifacts now retain for one day in agent-doc 9fbda092c. NEXT: authorize deletion of old Actions artifacts after verifying durable GitHub Release and PyPI copies; destructive cleanup was not performed in this cycle.
 - [/] [#lzktbindpending] [lazily-kt] PHASE 2 of #lzktblockwalk, IN PROGRESS — 44 of 540 bind-pending sites migrated; bind-pending count moved 540 -> 496 and the whole-ledger equality is 521 (25 unreachable + 496 bind-pending). 496 remain across 12 areas. FIRST PASS (lazily-kt 93420ff) bound ipc/root 1, familysync 3, protobuf 6, membership 9, and message-passing 9. SECOND PASS (lazily-kt f87afda) bound lossless-tree 16 through AssertionKeys, including nested render_on descent and final key satisfaction; it exposed 0 higher-rung gaps and required 0 semantic fixes. Cumulative measured sample: 28 of 44 bound blocks exposed a higher-rung gap (63.6%), and 14 of 44 required a real fix (31.8%); keep re-measuring per area rather than forecasting. REMAINING AREAS: collections 132, reactive-graph 88, stdlib 54, ingress 42, rateshape 33, coordination 29, windowing 23, egress 22, resilience 21, service 20, temporal 16, presence 16. Take one or two areas per pass; delete exactly those ledger entries and re-pin the equality downward by exactly that count in the same commit; verify the guard fails on off-by-one in BOTH directions. Every higher-rung failure surfaced by migration must be fixed, never excused. reactive-graph remains BLOCKED on #lzktreactivemodelfailures. Gradle proof discipline applies: use JUnit XML timestamps, not task lines, and --rerun-tasks when evidence may be stale. Repo: src/lazily-kt
 - [/] [#lzambienttokenresolve] [operator-decision, agent-loop superproject] agent-loop/.mise.toml has `[env] _.source = ".env"`, and .env holds $(passage ...) REFERENCES for every credential — correct hygiene, untracked and gitignored. But mise RESOLVES those substitutions at shell startup, so the resolved cleartext sits in the ambient environment of every process spawned from this tree. Verified by presence check on 2026-09-12, values never printed: CARGO_REGISTRY_TOKEN (35 chars) and NPM_TOKEN (40 chars) are live in the environment right now. That is not a leak by itself — nothing here was found printing them, and the lazily-zig build specifically does NOT (see #lzzigenvsecretleak, measured) — but it means every tool in the tree is one env-dumping code path away from disclosure, and there are many such paths in build systems, crash handlers and CI log collectors. THE FIX IS SUBSTITUTION AT THE POINT OF USE: keep the refs in .env for documentation, but let the publish commands resolve them (`CARGO_REGISTRY_TOKEN=$(passage ...) cargo publish`) rather than mise resolving them into every shell. WHY THIS IS YOURS AND NOT MINE: changing .mise.toml alters the environment of every session started from this tree, and thirty peer sessions were live when this was filed — several mid-build. A change like that wants a quiet moment and someone watching, not a queue drain. SEPARATELY AND MORE URGENTLY: rotate CARGO_REGISTRY_TOKEN, NPM_TOKEN and PYPI_PUBLISH_TOKEN. Not because a build printed them, but because the resolved values passed through a subagent's tool output while it was diagnosing the (non-)leak, which puts them in that transcript permanently. Log shredding does not reach a transcript. crates.io has no Revoke button, only Regenerate — see reference_cargo_publish_token_passage.md.

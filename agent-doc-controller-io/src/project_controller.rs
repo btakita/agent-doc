@@ -4220,8 +4220,16 @@ impl ControllerDocumentGraphs {
         let key = document_hash.to_string();
         let projection_map = self.answered_free_text_strike.clone();
         let applied_map = self.answered_free_text_strike_applied.clone();
+        let retained_delivery = self.retained_delivery.clone();
         let effect_key = key.clone();
         let effect = self.ctx.effect(move |ctx| {
+            // A strike projection can be admitted while an attached editor still
+            // owes the exact target. The runtime effect then retains that write
+            // and returns an error. Subscribe to the delivery frontier so its
+            // later acknowledgement retries this same projection; observing only
+            // the projection and applied receipt made that failure one-shot.
+            let _delivery_present = retained_delivery.contains_key(ctx, &effect_key);
+            let _delivery = retained_delivery.observe(ctx, &effect_key);
             let Some(projection) = projection_map.observe(ctx, &effect_key) else {
                 return;
             };
@@ -16518,7 +16526,11 @@ revised operator request
         }
 
         let error = runtime
-            .document_queue_authority_observe(&document_hash, &canonical, projected_authority)
+            .document_queue_authority_observe(
+                &document_hash,
+                &canonical,
+                projected_authority.clone(),
+            )
             .unwrap_err();
 
         assert!(
@@ -16530,6 +16542,45 @@ revised operator request
         assert_eq!(
             std::fs::read_to_string(&canonical).unwrap(),
             "operator advanced the editor buffer\n"
+        );
+
+        // The failed projection is retained by the production runtime while the
+        // editor catches up. Recreate that exact expected cut, then publish the
+        // changed delivery Source. The strike Effect must retry without another
+        // queue-authority observation or closeout command.
+        std::fs::write(&canonical, &projected_authority).unwrap();
+        runtime
+            .document_graphs
+            .observe_retained_delivery_with_change(
+                &document_hash,
+                Some(RetainedDeliveryObservation {
+                    file: canonical.clone(),
+                    content: Arc::from(projected_authority.as_str()),
+                    content_hash: agent_doc_hash::content_hash(&projected_authority),
+                    live_editors: 1,
+                    delivery_converged: true,
+                    delivery_version: 2,
+                }),
+            );
+
+        let retried = std::fs::read_to_string(&canonical).unwrap();
+        assert!(
+            retried
+                .contains("- ~~close the queue~~ — auto-struck: answered this cycle (#ftstrike)"),
+            "a changed retained-delivery frontier must retry the owned strike: {retried}"
+        );
+        let projection = runtime
+            .document_graphs
+            .current_answered_free_text_strike(&document_hash);
+        assert_eq!(
+            runtime
+                .document_graphs
+                .answered_free_text_strike_applied
+                .observe(&runtime.document_graphs.ctx, &document_hash)
+                .flatten()
+                .as_deref(),
+            Some(projection.projection_id.as_str()),
+            "the retry must publish the exact application receipt required by closeout"
         );
     }
 

@@ -541,3 +541,4 @@
 - 2026-09-11 [#graftimpactcontext] [recommended] Extend existing tsift impact output with grouped production modules, changed-symbol evidence paths, and separate test signals; expose bounded context to post-edit integrations.
 - 2026-09-11 [#graftlspedges] [recommended] Prototype optional LSP call-edge enrichment using installed servers, preserving extractor fallback, provenance, confidence, coverage diagnostics, and tsift freshness contracts; validate Rust and TypeScript resolution precision.
 - 2026-09-12 [#changecommitpush] If you made a change to agent-doc, please commit and push it.
+- 2026-09-15 [#tsiftfriendlyteam] How can we make tsift more friendly in a team environment with multiple developers who don't use tsift? Should we have a configuration that defaults to moving the instructions into AGENTS.override.md with a skill + runbook?

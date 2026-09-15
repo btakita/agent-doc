@@ -72,6 +72,29 @@ No additional source changes were necessary in this cycle; all three fix-owned p
 I made no `agent-doc` source change, so there is no new change of mine to commit or push. The `fpe.md` fix is already committed as `b666a8d7` and present on `origin/main`.
 
 The three fix-owned paths remain clean. Local `agent-doc` `main` is currently one commit ahead at `8912cc44` with additional dirty editor files, but that commit and those edits were created concurrently by another session; I did not push or fold them into this task.
+
+### Re: team-friendly tsift instructions — gpt-5 · 2026-09-15T18:57-04:00
+
+> **Queue prompt:**
+>
+> do [#tsiftfriendlyteam]
+
+
+No—tsift should not default to `AGENTS.override.md`.
+
+Codex loads at most one instruction file per directory and prefers `AGENTS.override.md` over `AGENTS.md`. A generated root override would therefore hide the team's root instructions from Codex rather than augment them. It is also a Codex-specific mechanism, so it would make tsift's cross-harness behavior less consistent. This follows the [official Codex instruction-discovery contract](https://developers.openai.com/codex/guides/agents-md).
+
+The better configuration is an explicit instruction deployment policy:
+
+- `personal`: the team-friendly default for new installs when a repository already has its own instructions. Do not change tracked `AGENTS.md`, `CLAUDE.md`, or `.agent/` files. Install a user-scoped tsift skill with its bundled runbook and any user-local harness integration. `tsift status` may report this state but must not repair tracked instruction files.
+- `shared`: the current behavior, enabled by an explicit repository opt-in. Maintain the small managed block in `AGENTS.md` plus the tracked `.agent/runbooks/code-navigation.md`.
+- `off`: CLI-only operation with no instruction or hook installation.
+
+Existing repositories that already contain tsift's managed markers should remain in `shared` mode until explicitly migrated, avoiding a breaking upgrade. The existing `[overrides.<scope>] instructions = false` setting is useful for skipping individual workspace scopes, but it does not solve root-level deployment or provide the personal skill path.
+
+`AGENTS.override.md` can remain an advanced, explicit Codex-only escape hatch, but tsift should never select it automatically. If offered at all, initialization should warn or fail when a same-directory `AGENTS.md` exists unless the operator explicitly accepts that it will be masked.
+
+The implementation should prove four invariants: personal/off modes create no tracked diffs; shared mode remains idempotent; migration removes only tsift-owned marker regions; and the personal skill/runbook works across supported harnesses. I recorded that implementation as recommended follow-up `#tsiftinstrpolicy`. No tsift source change was needed to complete this architecture decision.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
@@ -86,6 +109,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tsiftinstrpolicy] [recommended] Implement team-safe instruction deployment modes from #tsiftfriendlyteam: personal (no tracked repo mutation; user-scoped skill plus bundled runbook), shared (explicit AGENTS.md plus tracked runbook), and off; preserve existing installs and never default to AGENTS.override.md.
 <!-- /agent:backlog -->
 
 ## Review

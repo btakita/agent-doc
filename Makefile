@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-version release-cadence-check audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check precommit timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
+.PHONY: build build-release release release-macos-assets release-version release-cadence-check audit-docs test sim-medium cross-editor-simworld editor-parity tmux-ci clippy check precommit timings install install-full install-editor-plugins cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin version-sync dev-harness-test lean tla
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -27,8 +27,8 @@ build-release:
 	@echo "Installed .bin/agent-doc -> target/release/agent-doc"
 
 # Release via CI: weekly cadence gate, check, tag, push, then install locally.
-# Every accepted tag remains a complete six-platform release; macOS assets are
-# batched with the rest of the release rather than arriving after the tag.
+# GitHub Actions publishes Linux and Windows assets. Darwin archives are built
+# on operator-owned Mac hardware and may be attached to the release later.
 release: release-cadence-check check
 	@version=$$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
 	echo "Releasing v$$version..."; \
@@ -38,6 +38,12 @@ release: release-cadence-check check
 
 release-cadence-check:
 	@python3 scripts/agent-doc-dev verify-release-cadence
+
+# Build both Darwin archives on a Mac and attach them to an existing release.
+# Usage: make release-macos-assets TAG=v0.35.398
+release-macos-assets:
+	@test -n "$(TAG)" || (echo "ERROR: TAG is required (for example, make release-macos-assets TAG=v0.35.398)" && exit 1)
+	@scripts/release-macos-assets "$(TAG)"
 
 # Project one release version across packages, internal dependency constraints,
 # lockfile entries, Python metadata, and both shipped/development skill copies.

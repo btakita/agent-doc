@@ -22,12 +22,6 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             use_cross: true
-          - target: x86_64-apple-darwin
-            os: macos-14
-            use_cross: false
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            use_cross: false
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             use_cross: false
@@ -95,10 +89,7 @@ jobs:
         run: |
           set -euo pipefail
           release_dir="target/${{ matrix.target }}/release"
-          case "${{ matrix.target }}" in
-            *-apple-darwin) lib="libagent_doc.dylib" ;;
-            *) lib="libagent_doc.so" ;;
-          esac
+          lib="libagent_doc.so"
           if [ ! -f "$release_dir/$lib" ]; then
             echo "::error::$release_dir/$lib is missing; the release tarball cannot deliver FFI without it"
             ls -la "$release_dir"

@@ -337,8 +337,8 @@ The tagged release train is a weekly batch (`#weekly-release-batch`): no more
 than one complete GitHub Release may be published in any seven-day window. Run
 `make release-cadence-check` before changing version surfaces. The gate reads the
 latest published GitHub Release timestamp and fails closed if it cannot prove
-the window is open. Do not work around the gate by delaying macOS artifacts;
-both Darwin targets and the other four targets belong to the same atomic tag.
+the window is open. GitHub Actions builds only Linux and Windows release assets;
+Darwin assets are built periodically on operator-owned Mac hardware.
 
 When the release window is open:
 
@@ -363,8 +363,8 @@ When the release window is open:
 7. Run `make release`; its cadence dependency rechecks the window immediately
    before the recipe tags `v<version>` and pushes main plus the tag.
 8. The tag push drives the GitHub Release: `.github/workflows/release.yml`
-   builds the six target binaries, packages each one **with its platform cdylib
-   beside it** (`libagent_doc.so` / `.dylib` / `agent_doc.dll` — GH #52: without
+   builds four Linux and Windows target binaries and packages each one **with its
+   platform cdylib beside it** (`libagent_doc.so` / `agent_doc.dll` — GH #52: without
    it `lib-path` cannot resolve the library and every package install runs the
    editor plugins in degraded file-based-IPC mode), and runs
    `gh release create`. Every agent-doc Cargo package has `publish = false`, so
@@ -376,7 +376,9 @@ When the release window is open:
    platform archive on first invocation, verifies `SHA256SUMS`, and keeps the
    executable and cdylib together in a versioned user cache.
 9. Verify the release run went green (`gh run list --limit 5`) and that
-   `gh release view v<version>` lists six platform archives plus `SHA256SUMS`.
+   `gh release view v<version>` lists four automated platform archives plus
+   `SHA256SUMS`. On a Mac, `make release-macos-assets TAG=v<version>` may later
+   add both Darwin archives and atomically refresh `SHA256SUMS` across all assets.
    The PyPI `verify` job asserts both that the version is resolvable and that a
    clean install can fetch and execute the pinned native release; the local
    fallback is `make publish-pypi`.

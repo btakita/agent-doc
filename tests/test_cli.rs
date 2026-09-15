@@ -14106,7 +14106,7 @@ fn test_release_install_paths_fail_closed_for_issue_47() {
 /// GH #52: release artifacts must be able to deliver FFI.
 ///
 /// `agent-doc-x86_64-unknown-linux-gnu.tar.gz` unpacked to exactly one file —
-/// the binary — for every one of the six targets, and `lib-path` resolves the
+/// the binary — for every automated target, and `lib-path` resolves the
 /// cdylib as a SIBLING of the executable. So `libagent_doc.so` shipped in no
 /// release asset at all, `make install` from a source checkout was the only way
 /// to obtain it, and every package-installed user ran the editor plugins in the
@@ -14121,7 +14121,6 @@ fn test_release_artifacts_and_pypi_bootstrap_preserve_ffi_for_issue_52() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let release = fs::read_to_string(manifest_dir.join(".github/workflows/release.yml")).unwrap();
     for required in [
-        "libagent_doc.dylib",
         "libagent_doc.so",
         "agent_doc.dll",
         "tar czf agent-doc-${{ matrix.target }}.tar.gz -C \"$release_dir\" agent-doc \"$lib\"",
@@ -14148,6 +14147,21 @@ fn test_release_artifacts_and_pypi_bootstrap_preserve_ffi_for_issue_52() {
         release.contains("sha256sum agent-doc-*") && release.contains("artifacts/SHA256SUMS"),
         "the GitHub Release must publish checksums for the PyPI bootstrap"
     );
+
+    let macos_release =
+        fs::read_to_string(manifest_dir.join("scripts/release-macos-assets")).unwrap();
+    for required in [
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+        "libagent_doc.dylib",
+        "shasum -a 256 agent-doc-*",
+        "gh release upload",
+    ] {
+        assert!(
+            macos_release.contains(required),
+            "the operator-side Darwin release path must preserve archive and checksum invariants: {required}"
+        );
+    }
 
     let pypi = fs::read_to_string(manifest_dir.join(".github/workflows/pypi.yml")).unwrap();
     assert!(
@@ -14210,23 +14224,22 @@ fn test_release_cadence_batches_complete_releases_weekly() {
     let release = fs::read_to_string(manifest_dir.join(".github/workflows/release.yml")).unwrap();
     assert_eq!(
         release.matches("- target:").count(),
-        6,
-        "a weekly tag must continue to build one complete six-platform release"
+        4,
+        "a weekly tag must build the four automated Linux and Windows targets"
     );
-    for darwin_target in ["x86_64-apple-darwin", "aarch64-apple-darwin"] {
-        assert!(
-            release.contains(darwin_target),
-            "the complete weekly release must include {darwin_target}"
-        );
-    }
+    assert!(
+        !release.contains("apple-darwin") && !release.contains("macos-"),
+        "GitHub Actions must not schedule paid macOS release builds"
+    );
 
     let spec = fs::read_to_string(manifest_dir.join("specs/07-core-commands.md")).unwrap();
     let spec_words = spec.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
         spec.contains("#weekly-release-batch")
             && spec_words.contains("at least seven days old")
-            && spec_words.contains("complete release"),
-        "the weekly complete-release policy must remain specified"
+            && spec_words.contains("four automated Linux and Windows targets")
+            && spec_words.contains("Operator-built Darwin artifacts"),
+        "the weekly hosted-release and operator-built Darwin policy must remain specified"
     );
 }
 

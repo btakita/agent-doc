@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+tag="${1:-}"
+if [[ -z "$tag" ]]; then
+  echo "usage: scripts/release-macos-assets <tag>" >&2
+  exit 2
+fi
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "error: Darwin release assets must be built on macOS" >&2
+  exit 1
+fi
+
+gh release view "$tag" >/dev/null
+
+asset_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-macos-assets.XXXXXX")"
+cleanup() {
+  rm -rf "$asset_dir"
+}
+trap cleanup EXIT
+
+# Start from the release's current platform archives so the replacement
+# checksum manifest continues to cover Linux, Windows, and any prior Darwin
+# uploads.
+gh release download "$tag" --pattern 'agent-doc-*' --dir "$asset_dir"
+
+targets=(x86_64-apple-darwin aarch64-apple-darwin)
+for target in "${targets[@]}"; do
+  rustup target add "$target"
+  cargo build --release --target "$target"
+
+  release_dir="target/$target/release"
+  binary="$release_dir/agent-doc"
+  library="$release_dir/libagent_doc.dylib"
+  if [[ ! -f "$binary" || ! -f "$library" ]]; then
+    echo "error: $target build did not produce agent-doc and libagent_doc.dylib" >&2
+    exit 1
+  fi
+  archive="$asset_dir/agent-doc-$target.tar.gz"
+  tar czf "$archive" -C "$release_dir" agent-doc libagent_doc.dylib
+  tar tzf "$archive"
+done
+
+# Recompute the manifest across every platform archive, then replace the two
+# Darwin archives and SHA256SUMS as one upload command.
+(
+  cd "$asset_dir"
+  shasum -a 256 agent-doc-* | LC_ALL=C sort -k2 > SHA256SUMS
+)
+
+gh release upload "$tag" \
+  "$asset_dir/agent-doc-x86_64-apple-darwin.tar.gz" \
+  "$asset_dir/agent-doc-aarch64-apple-darwin.tar.gz" \
+  "$asset_dir/SHA256SUMS" \
+  --clobber
+
+echo "Uploaded Darwin archives and refreshed SHA256SUMS for $tag"

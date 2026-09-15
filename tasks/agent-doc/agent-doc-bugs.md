@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0a748-635a-7321-a5e6-473693f67679
+  codex: 01a0a767-3bf6-7c23-ab95-5df73c4a916b
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -303,6 +303,51 @@ Verification and delivery:
 - GitHub Actions CI run [35034937058](https://github.com/btakita/agent-doc/actions/runs/35034937058) was in progress at the required one-time inspection. Local verification is the closeout gate, so it was not polled.
 
 No release tag was created; the existing weekly release cadence remains in force.
+❯ 🚧 Fix agent-doc causes for wedged fpe.md run:
+```
+› agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md
+
+
+• Agent-doc admission failed because the previous cycle is still preflight_started with the #lookslikemerge prompt
+  unresolved and no captured response.
+
+  Wait until that cycle becomes stale, or restart the harness pane and rerun:
+
+  agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md
+
+  Do not run agent-doc preflight manually.
+```
+
+### Re: fix causes of wedged agent-doc run — gpt-5
+
+> **Queue prompt:**
+>
+> do [#fixcauseswedged]
+
+
+Fixed the admission race that wedged the `fpe.md` queue run.
+
+The trace showed two preflights for the same dispatch. Queue admission opened `cycle-1789514467953` as `preflight_started`; the subsequent Codex `UserPromptSubmit` hook re-entered preflight about 30 seconds later. That hook subprocess did not expose a Codex ambient marker, so ownership detection resolved its harness as `default`, rejected the otherwise-correct owner-pane match, and treated the fresh cycle as an interrupted foreign cycle. With no captured response and the stale-cycle TTL not yet elapsed, recovery correctly failed closed—but the admission path had misclassified its own cycle.
+
+The policy boundary is now explicit:
+
+- preflight options carry a typed invocation origin: direct CLI, Claude hook, or Codex hook;
+- hook admission supplies its known harness provenance instead of relying on ambient subprocess variables;
+- recovery still requires both the authoritative actor pane and harness to match before preserving a fresh uncaptured cycle;
+- direct CLI behavior remains ambient, while foreign-pane and harness-handoff cases remain fail-closed.
+
+This is a one-shot admission-boundary correction; it adds no polling, timer, or parallel recovery path. I also documented the invariant as `#hook-owned-cycle-reentry` and added a regression assertion for explicit hook provenance.
+
+Verification passed:
+
+- focused provenance and Codex hook tests;
+- workspace compile across all targets;
+- full `make check`;
+- `make install`, including binary/library, skills, and editor artifacts.
+
+The installed generation emitted its normal auto-recycle/reload event; an explicit root-level recycle found no root controller to recycle. Source commit `28240ec14` is pushed to `agent-doc/main`; parent gitlink commit `414a7ccd7` is ready to push with this response closeout. The latest CI run visible at the required one-time check was green; the new push had not yet appeared in the listing.
+
+I left the large exchange intact because this document still has active queue work.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

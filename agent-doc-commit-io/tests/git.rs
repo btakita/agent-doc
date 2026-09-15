@@ -2484,7 +2484,7 @@ Duplicate replay should stay live.
     }
 
     #[test]
-    fn commit_recovers_exact_late_free_text_strike_owned_by_terminal_capture() {
+    fn commit_recovers_exact_late_free_text_strike_or_its_reaped_target() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
@@ -2551,17 +2551,27 @@ Duplicate replay should stay live.
         fs::write(&doc, &recurring).unwrap();
         commit(&doc).expect_err("a later recurring prompt must break the exact target proof");
 
-        fs::write(&doc, &struck).unwrap();
+        let projection = agent_doc_queue::queue_consume::project_answered_free_text_strike(
+            &committed, response, None,
+        )
+        .unwrap()
+        .expect("fixture response must own its free-text queue head");
+        let reaped = agent_doc_queue::queue_consume::remove_queue_nodes_by_key(
+            &projection.target_content,
+            &projection.node_keys,
+        )
+        .unwrap();
+        fs::write(&doc, &reaped).unwrap();
 
-        let did_commit = commit(&doc).expect("the exact late owned strike should commit forward");
+        let did_commit = commit(&doc).expect("the exact post-strike reap should commit forward");
         assert!(did_commit);
         let landed = agent_doc_git_io::revision::show_head(&doc)
             .unwrap()
             .expect("committed document");
         assert!(
-            landed.contains("- ~~finish the plan~~ — auto-struck: answered this cycle (#ftstrike)")
+            !landed.contains("finish the plan\n<!-- /agent:queue -->")
                 && landed.contains("Finished and verified."),
-            "normal commit cleanup may reposition boundaries, but must land the response and exact strike:\n{landed}"
+            "normal commit cleanup may reposition boundaries, but must land the response and exact reaped target:\n{landed}"
         );
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(

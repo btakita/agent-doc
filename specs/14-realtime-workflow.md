@@ -105,9 +105,10 @@ Effect and no second response/finalize payload is admitted.
 If an older binary nevertheless records terminal response proof before that
 strike reaches `HEAD`, recovery may commit forward only when replaying the
 terminal cycle's durable captured response against committed `HEAD` derives the
-current authority bytes exactly. Any additional queue edit, including a later
-recurrence of identical prompt text, breaks that equality and remains a new
-operator turn rather than being absorbed by `commit`.
+current authority bytes exactly, either as the struck target or as that target
+with only those exact struck node keys reaped by queue cleanup. Any additional
+queue edit, including a later recurrence of identical prompt text, breaks that
+equality and remains a new operator turn rather than being absorbed by `commit`.
 
 ## Prompt-to-response acknowledgement
 

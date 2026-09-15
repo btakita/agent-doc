@@ -1005,6 +1005,13 @@ pub fn consume_queue_nodes_by_key(content: &str, node_keys: &[String]) -> Result
     Ok(strip_in_progress_marker_from_struck_queue_items(&consumed))
 }
 
+/// Remove exact queue items by the durable node keys selected from one snapshot.
+pub fn remove_queue_nodes_by_key(content: &str, node_keys: &[String]) -> Result<String> {
+    let borrowed = node_keys.iter().map(String::as_str).collect::<Vec<_>>();
+    agent_doc_markdown_ast::mutations::remove_nodes(content, "queue", &borrowed)
+        .map_err(|err| anyhow::anyhow!("queue reap: failed to remove node-keyed items: {err}"))
+}
+
 /// Consume the selected queue prompts through the queue parser's exact source
 /// spans when a prompt has no Markdown-AST node key.
 ///
@@ -2052,6 +2059,26 @@ Old.
         assert!(updated.contains("- ~~do [#head]~~\n"), "{updated}");
         assert!(!updated.contains("~~🚧"), "{updated}");
         assert!(updated.contains("- do [#tail]\n"), "{updated}");
+    }
+
+    #[test]
+    fn remove_queue_nodes_by_key_reaps_only_the_selected_item() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#head]\n",
+            "- do [#tail]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let key = queue_prompt_node_keys_for_count(content, 1)
+            .unwrap()
+            .keys
+            .remove(0);
+        let struck = consume_queue_nodes_by_key(content, std::slice::from_ref(&key)).unwrap();
+
+        let reaped = remove_queue_nodes_by_key(&struck, &[key]).unwrap();
+
+        assert!(!reaped.contains("[#head]"), "{reaped}");
+        assert!(reaped.contains("- do [#tail]\n"), "{reaped}");
     }
 
     #[test]

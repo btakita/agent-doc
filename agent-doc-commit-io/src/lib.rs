@@ -155,7 +155,16 @@ fn late_answered_free_text_strike_capture(
     else {
         return Ok(None);
     };
-    Ok((projection.target_content == current_content).then_some(capture.capture_id))
+    let exact_struck_target = projection.target_content == current_content;
+    let exact_reaped_target = if exact_struck_target {
+        false
+    } else {
+        agent_doc_queue::queue_consume::remove_queue_nodes_by_key(
+            &projection.target_content,
+            &projection.node_keys,
+        )? == current_content
+    };
+    Ok((exact_struck_target || exact_reaped_target).then_some(capture.capture_id))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1960,13 +1969,13 @@ where
         && let Some(capture_id) = late_answered_free_text_strike_capture(file, head, &file_content)?
     {
         eprintln!(
-            "[commit] committing exact late answered free-text strike for {} (capture_id={capture_id})",
+            "[commit] committing exact late answered free-text strike or its reaped target for {} (capture_id={capture_id})",
             file.display()
         );
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "commit_reconciled_late_answered_free_text_strike file={} capture_id={} basis=committed_head_exact_projection snap_len={} file_len={}",
+                "commit_reconciled_late_answered_free_text_strike file={} capture_id={} basis=committed_head_exact_projection_or_reap snap_len={} file_len={}",
                 file.display(),
                 capture_id,
                 snapshot_content.as_ref().map(|s| s.len()).unwrap_or(0),

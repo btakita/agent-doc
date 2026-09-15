@@ -186,6 +186,24 @@ pub fn consume_nodes(source: &str, component: &str, node_keys: &[&str]) -> Mutat
     Ok(out)
 }
 
+/// Remove component items by durable node key from one immutable snapshot.
+pub fn remove_nodes(source: &str, component: &str, node_keys: &[&str]) -> MutationResult<String> {
+    let nodes = item_nodes(source, component)?;
+    let mut requested = HashSet::new();
+    let mut removals = Vec::new();
+    for node_key in node_keys {
+        if !requested.insert(*node_key) {
+            return Err(MutationError::DuplicateNodeKey {
+                component: component.to_string(),
+                node_key: (*node_key).to_string(),
+            });
+        }
+        let node = find_node(&nodes, component, node_key)?;
+        removals.push((node.item.start_byte, node.item.end_byte));
+    }
+    Ok(remove_ranges(source, removals))
+}
+
 fn render_multiline_item(marker: &str, text: &str) -> String {
     let mut rendered = format!("{marker}\n{text}");
     if !text.ends_with('\n') {
@@ -773,6 +791,19 @@ mod tests {
 
         assert!(updated.contains("- ~~:pushpin: do [#alpha]~~\n"));
         assert!(updated.contains("- do [#beta]\n- ~~do [#beta]~~\n"));
+    }
+
+    #[test]
+    fn remove_nodes_deletes_multiple_keys_from_initial_snapshot() {
+        let nodes = item_nodes(DOC, "queue").unwrap();
+        let alpha = nodes[0].node_key.as_str();
+        let second_beta = nodes[2].node_key.as_str();
+
+        let updated = remove_nodes(DOC, "queue", &[alpha, second_beta]).unwrap();
+
+        assert!(!updated.contains("- :pushpin: do [#alpha]\n"));
+        assert_eq!(updated.matches("- do [#beta]\n").count(), 1);
+        assert!(updated.contains("- duplicate prose\n"));
     }
 
     #[test]

@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -33,21 +33,63 @@ completed
 Compacted content:
 - Archived 56 response topic(s): do[#lzktreactivemodelfailures]; do[#lzrsblockwalk]; `#lzrsbindpending`; 53 more
 - Prior summary/context: prior compacted content: Archived 2 response topic(s): do[#lzktblockwalk]; do[#lzktbindpending]
+
+### Re: Lazily stdlib matrix release — gpt-5 · 2026-09-15 09:37 EDT
+
+> **Queue prompt:**
+>
+> Explain what went out in this release.
+
+
+> **Queue prompt:**
+>
+> Why was the Sep Github bill so expensive?
+
+
+> **Queue prompt:** do [#lzstdlibmatrixrelease]
+
+Yes. `lazily-rs` **v0.58.0 is published** on [crates.io](https://crates.io/crates/lazily/0.58.0), and its [GitHub release](https://github.com/lazily-hub/lazily-rs/releases/tag/v0.58.0) is live.
+
+The complete Phase 5 release train is now published:
+
+| Project | Version | Release |
+|---|---:|---|
+| lazily-spec | 0.39.0 | [GitHub](https://github.com/lazily-hub/lazily-spec/releases/tag/v0.39.0) |
+| lazily-formal | 0.38.1 | [GitHub](https://github.com/lazily-hub/lazily-formal/releases/tag/v0.38.1) |
+| lazily-rs | 0.58.0 | [crates.io](https://crates.io/crates/lazily/0.58.0) · [GitHub](https://github.com/lazily-hub/lazily-rs/releases/tag/v0.58.0) |
+| lazily-py | 0.41.0 | [PyPI](https://pypi.org/project/lazily/0.41.0/) · [GitHub](https://github.com/lazily-hub/lazily-py/releases/tag/v0.41.0) |
+| lazily-kt | 0.42.0 | [GitHub](https://github.com/lazily-hub/lazily-kt/releases/tag/v0.42.0) |
+| lazily-js | 0.33.0 | [npm](https://www.npmjs.com/package/@lazily-hub/lazily-js/v/0.33.0) · [GitHub](https://github.com/lazily-hub/lazily-js/releases/tag/v0.33.0) |
+| lazily-dart | 0.31.0 | [pub.dev](https://pub.dev/packages/lazily/versions/0.31.0) · [GitHub](https://github.com/lazily-hub/lazily-dart/releases/tag/v0.31.0) |
+| lazily-zig | 0.35.0 | [GitHub](https://github.com/lazily-hub/lazily-zig/releases/tag/v0.35.0) |
+| lazily-go | 0.27.0 | [GitHub](https://github.com/lazily-hub/lazily-go/releases/tag/v0.27.0) |
+| lazily-cpp | 0.29.0 | [GitHub](https://github.com/lazily-hub/lazily-cpp/releases/tag/v0.29.0) |
+
+Evidence and closeout:
+
+- Every released binding passed its full local `make check`.
+- The intended release heads passed `lazily-interop make check`: all 11 mutation checks passed.
+- `network-suite-nightly` passed seeds 17, 29, and 43 across all nine released peers, including channel, Timer, Timeout, and RevisionBarrier matrices.
+- Rust, Python, Kotlin, and JavaScript public release workflows completed successfully; package registries were checked after propagation.
+- The final superproject `make check` passed. Two earlier parallel-only localhost-port races were reproduced and cleared by the complete serialized run.
+- Root gitlinks were pinned and pushed in `a7d89f4809` (`release: pin lazily stdlib matrix train`).
+- The Rust publish recovered from a stale local Cargo credential using the configured secret-store token; no credential was exposed.
+- C# remained an explicitly excluded tested peer; Godot remains staged.
+- Public workflows were used only for cross-platform packaging/provenance transports; private heavy workflows remain disabled or manual-only.
+
+Marked `#lzstdlibmatrixrelease` complete.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lzstdlibmatrixrelease]
-- ~~Please set a budget of $20/month for all Github costs.~~ — auto-struck: answered this cycle (#ftstrike)
-- Why was the Sep Github bill so expensive?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzstdlibmatrixrelease] [local-release] Complete Phase 5 via tasks/software/plan-lazily-stdlib-conformance-rollout.md on this machine. NEXT: derive or bump the stale interop hello versions in Python, Kotlin, JavaScript, Dart, Zig, Go, and C++; prepare clean worktrees and the intended version bumps; run every make check plus lazily-interop make check and network-suite-nightly locally; publish inside-out. Keep public/free cross-platform wheel and provenance workflows only as packaging transports where Linux cannot reproduce their artifact matrix. C# is a tested peer but excluded from this release; Godot remains staged.
+- [x] 🚧 [#lzstdlibmatrixrelease] [local-release] Complete Phase 5 via tasks/software/plan-lazily-stdlib-conformance-rollout.md on this machine. NEXT: derive or bump the stale interop hello versions in Python, Kotlin, JavaScript, Dart, Zig, Go, and C++; prepare clean worktrees and the intended version bumps; run every make check plus lazily-interop make check and network-suite-nightly locally; publish inside-out. Keep public/free cross-platform wheel and provenance workflows only as packaging transports where Linux cannot reproduce their artifact matrix. C# is a tested peer but excluded from this release; Godot remains staged.
 <!-- /agent:backlog -->
 
 ## Review

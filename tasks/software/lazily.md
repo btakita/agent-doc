@@ -1342,6 +1342,43 @@ Verification passed:
 Commits: lazily-cpp `dd9325f` and parent pointer `371a8a6d15`. The latest pushed lazily-cpp CI run (`34910431670`) is green; it covers the preceding commit, while this commit has not yet been pushed. The latest parent run (`34910432564`) started zero jobs because GitHub rejected both at the billing/spending-limit gate, so it contains no test verdict. Confidence is high; no code escalation remains, with the parent CI account gate tracked externally.
 
 The exchange is large, but I did not compact it while the automatic queue is active.
+
+### Re: do [#lazilycheckconformance] — gpt-5.6-sol · 2026-09-14T20:06-04:00
+
+> **Queue prompt:**
+>
+> do [#lazilycheckconformance]
+
+
+Completed the lazily-go conformance parser fix. The proposed 151/151 safety net was not independent and did not catch the failure.
+
+Before the fix, a behavioral `jq` stub failed with exit 4 for the genuinely opened fixture `agent-doc/delta_agent_doc_state.json`. The guard printed that parse error twice, then still exited 0 with:
+
+- `conformance coverage OK: 147/156`
+- `scenario coverage OK: 151/151`
+
+Both the observed and derived scenario totals consumed the same unchecked `scenario_ids` output, so the fixture's scenarios disappeared from both sides together.
+
+Changed paths:
+
+- `scripts/check-conformance-coverage.sh`
+- `scripts/test-conformance-coverage-guard.sh` (new)
+
+The guard now parses each fixture once through a status-checking associative cache. All four consumers—the two process-substitution loops and the two later membership checks—load from that cache. A nonzero `jq` status records one fixture-specific error with the exit code, treats the result as unknown evidence rather than an empty scenario list, and prevents any scenario-success verdict. The ordinary guard runs the deterministic malformed-fixture attack after a successful audit; its internal `--probe-run` mode performs the full audit while suppressing only recursive re-entry into that attack.
+
+Verification passed:
+
+- bash syntax checks for both scripts
+- `bash ./scripts/test-conformance-coverage-guard.sh`
+- `make conformance-coverage`, including the embedded regression attack
+- `make ci-reach`
+- lazily-go full `make check`
+- agent-loop full `make check`
+- scoped `git diff --check`
+
+Commits: lazily-go `932f1af` and parent pointer `15aba10051`. The latest pushed lazily-go CI run (`34907917585`) is green but predates this not-yet-pushed commit. The latest parent run (`34911113894`) started zero jobs because GitHub rejected both at the billing/spending-limit gate, so it contains no test verdict. Confidence is high; no code escalation remains, with the parent CI account gate tracked externally.
+
+The exchange is large, but I did not compact it while the automatic queue is active.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1351,7 +1388,7 @@ The exchange is large, but I did not compact it while the automatic queue is act
 - ~~do [#subagentscannotcoin]~~
 - ~~do [#twopreexisting]~~
 - ~~do [#lazilycppcheck]~~
-- do [#lazilycheckconformance]
+- ~~do [#lazilycheckconformance]~~
 - do [#deadguardcode]
 - do [#lazilycpptwo]
 - do [#lazilyderivesreplayed]
@@ -1375,7 +1412,6 @@ The exchange is large, but I did not compact it while the automatic queue is act
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilycheckconformance] lazily-go check-conformance-coverage.sh:369 -- jq's status is unchecked in BOTH process-substitution call sites feeding scenario_ids, so a malformed fixture reads as 'no scenarios' rather than as a parse error. go flagged it as reasoning-not-measurement and did not attack it; the 151/151 scenario equality probably catches the drop, which is what needs confirming. dart has the same shape and reached the same conclusion independently.
 - [ ] [#deadguardcode] Dead guard code found across bindings during #auditeveryguard, none removed: `collect_sources()` is defined-and-never-called in js (:93), py (:89-95), go (:266) and is the vestige of the static source scan the runtime manifest replaced; py also has a dead assignment at :250. Removing them touches files lazily-spec's check-corpus-floors.mjs greps, so it wants one deliberate pass rather than incidental edits.
 - [ ] [#lazilycpptwo] #lzwasmstampchannel: lazily-cpp's two wasm conformance manifests are deliberately unstamped, and `scripts/check-wasm-tiers.sh:99` filters `^@` but not `^#` -- stamping them would inflate both tier counts by 1 and slacken both floors by one. Belongs to the wasm channel's own change.
 - [ ] [#lazilyderivesreplayed] #lzareaderivetestfile: lazily-js's `AREA_OF_FIXTURE` derives replayed areas from string literals across EVERY test source, so a realistic-looking fixture path inside a new test file registers as a replayed area and reddens the corpus check. Audit which other bindings derive coverage from source literals rather than from run evidence.

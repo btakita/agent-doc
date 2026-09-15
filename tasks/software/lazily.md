@@ -1635,6 +1635,41 @@ Verification:
 - Latest published lazily-spec CI is green at `5ef4ab4`. The latest superproject Agent Doc job remains the known zero-step external CI-start failure; local verification is green.
 
 Changed path: `src/lazily-spec/docs/conformance.md`. Confidence: high. Escalation: none.
+
+### Re: do [#lzcsreverserung] — gpt-5.6-sol · 2026-09-14T21:41-04:00
+
+> **Queue prompt:**
+>
+> do [#lzcsreverserung]
+
+
+Done. C# now enforces the reverse half of the assertion-block bind ledger without adding a bare population equality.
+
+The runtime evidence now distinguishes ordinary corpus binds from explicitly fabricated guard self-tests. The coverage guard partitions every bound digest absent from the loader's declared-site set into:
+
+- a real object carried somewhere in the opened corpus at a path the block walk deliberately does not emit;
+- a digest explicitly marked `blocks-self-test`;
+- a digest matching no corpus object at all.
+
+Only the third class fails. The successful run reports the derived decomposition: 55 undeclared bound digests = 45 corpus objects below the emitted-site vocabulary + 10 distinct self-test-fabricated digests + 0 matching no corpus object. Existing forward coverage remains 761/761 sites and 652 distinct declared digests.
+
+A deliberate falsification changed one synthetic test back to an ordinary bind. `make check` exited 2 and named digest `b022e0769bd984be` as matching no corpus object. After restoration, the full gate returned green.
+
+Commit:
+
+- lazily-cs `f9251f3`
+- superproject pointer `3f30e4c1b`
+
+Verification:
+
+- lazily-cs `make check`: exit 0.
+- Direct VSTest: 326 + 7 passed, 0 failed, 0 skipped.
+- Reverse guard: 45 below emitted, 10 self-test, 0 no-corpus.
+- Negative mutation: `make check` exit 2 with the intended named reverse-ledger failure.
+- superproject `make check`: exit 0.
+- Latest published lazily-cs CI is green at `693a69a`; the latest superproject Agent Doc job remains the known zero-step external CI-start failure.
+
+Changed paths: `scripts/check-conformance-coverage.sh`, `SpecCorpus.cs`, `FixtureAssertions.cs`, and `ComparisonSeamGuardTests.cs`. Confidence: high. Escalation: none.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 
@@ -1653,7 +1688,7 @@ Changed path: `src/lazily-spec/docs/conformance.md`. Confidence: high. Escalatio
 - ~~do [#lzfailedgrepvacuous]~~
 - ~~do [#lzastscanundercount]~~
 - ~~do [#lzplantprobemethod]~~
-- do [#lzcsreverserung]
+- ~~do [#lzcsreverserung]~~
 - do [#lzpyelementdescend]
 - do [#lzsemtreesubset]
 - do [#lzarrayelementdocs]
@@ -1668,7 +1703,7 @@ Changed path: `src/lazily-spec/docs/conformance.md`. Confidence: high. Escalatio
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcsreverserung] [lazily-cs] cs's block guard has NO REVERSE RUNG: a recorded bind whose digest no opened fixture declares fails nothing. 55 such digests exist today (runners binding sub-objects and similar), measured during #lzarrayelementsites. That is exactly why cs's 12 anti-spoof array elements could sit BOUND AND VERIFIED while being declared by nothing — the mirror image of every other binding's gap, invisible for as long as nobody counted. lazily-dart catches this because its ledger records PATHS, and lazily-rs catches it by classifying every bind the loader never declared (397 at the time, decomposing into 363 below an emitted block and 34 from its own self-tests) and REPORTING rather than failing, on the grounds that a hard equality there would be the MIN_BLOCKS defect in a new costume. Add the rung to cs in rs's shape: classify each undeclared bind as below-an-emitted-block, self-test-fabricated, or matching no corpus object at all, and report the decomposition. The third class is the one that should be zero and is the only one worth failing on. Do NOT add a bare count equality.
+- [x] [#lzcsreverserung] [lazily-cs] cs's block guard has NO REVERSE RUNG: a recorded bind whose digest no opened fixture declares fails nothing. 55 such digests exist today (runners binding sub-objects and similar), measured during #lzarrayelementsites. That is exactly why cs's 12 anti-spoof array elements could sit BOUND AND VERIFIED while being declared by nothing — the mirror image of every other binding's gap, invisible for as long as nobody counted. lazily-dart catches this because its ledger records PATHS, and lazily-rs catches it by classifying every bind the loader never declared (397 at the time, decomposing into 363 below an emitted block and 34 from its own self-tests) and REPORTING rather than failing, on the grounds that a hard equality there would be the MIN_BLOCKS defect in a new costume. Add the rung to cs in rs's shape: classify each undeclared bind as below-an-emitted-block, self-test-fabricated, or matching no corpus object at all, and report the decomposition. The third class is the one that should be zero and is the only one worth failing on. Do NOT add a bare count equality.
 - [ ] [#lzpyelementdescend] [lazily-py] py does NOT descend into an emitted array element, which diverges from the spec and from the other six bindings. lazily-spec's blockSites walk descends into a block as well as past it, and says so deliberately: "No block in the corpus nests another today, so this changes no count — it is here so that the first one to do so is pinned by the change that adds it rather than by the change that later notices." py's reasoning is a real implementation constraint, not laziness: `instrument` hands the runner a TrackedBlock at that point, so a tracked key nested inside one would be DECLARED AND UNBINDABLE. But the consequence is that the first corpus fixture to nest a block makes py's derived count disagree with the audit's pinned row, and py would then be fixing `instrument` under time pressure rather than deliberately. Verified unobservable today: no corpus fixture nests a tracked key inside a tracked array, confirmed independently by lazily-rs (ran its twin with the array rule off and on, 771/661 then 783/673, no site lost) and by lazily-zig (cross-checked `{"expect":[[{"expect":{...}}]]}` against both halves, both saying 1 site). Fix `instrument` so a nested block can bind, then descend — or if that is genuinely impossible in py's shape, say so in the walk's comment so the next reader does not read the divergence as an oversight.
 - [ ] [#lzsemtreesubset] [lazily-spec, design] collections/semtree_incremental.json's `expect_initial`/`expect_after` blocks name a SUBSET of the tree's nodes by design — scenario 1's tree carries `root a b a1 a2 b1` while `expect_initial` names only `root a b` — so a both-directions key-set check against the node set is unavailable without changing the corpus. Hit independently by lazily-go and lazily-cs during #lzarrayelementsites, and neither weakened a fixture nor reached for a ledger entry to dodge it, which was right. THE QUESTION IS WHAT "BOTH DIRECTIONS" MEANS FOR A FIXTURE THAT ASSERTS A SUBSET DELIBERATELY. The fixture-to-run direction is fine: every key it names must be read and compared. The run-to-fixture direction is the open one — `a1/a2/b1` are compared by nothing directly, so a defect that corrupted only those nodes would survive. Options worth weighing: name every node and lose the ability to express a partial assertion; add an explicit `nodes_not_asserted` companion so the omission is declared rather than implied; or pin the node-set CARDINALITY beside the subset so a node appearing or vanishing is caught even when its value is not. This is a lazily-spec decision because it changes the corpus contract for all ten bindings, and #lzgothreenames is blocked behind it for the run-to-fixture half.
 - [ ] [#lzarrayelementdocs] [lazily-rs, lazily-kt] Two AGENTS.md/ledger-header surfaces still carry prose the #lzarrayelementsites work superseded, both deliberately left because the files belong to other panes. lazily-rs: AGENTS.md's #lzrsblockwalk paragraph still states the rule as "object-valued only, emitted and NOT descended into, with arrays descended" — which is now wrong in its second half — and quotes 771/661 in THREE places against a current 783/673. The undeclared-bind report also moved, 460 from 470 with below-an-emitted-block at 436 from 426, from the twelve new `Expect::sub("frame")` descents collapsing to ten distinct digests; the no-corpus-object half is unchanged at 34. lazily-kt: scripts/conformance-unbound-blocks.txt's header narrative says "outside a rung that saw 18 of the corpus's 737" against a current 749, and the kt agent correctly refused to touch that file at all because the instruction not to change it was unambiguous — so this needs a line-count-preserving comment fix in whichever commit next touches it. Use the hand-built-blob path (blob = HEAD + your hunk via hash-object -w plus update-index --cacheinfo, then a bare commit) rather than --only, and re-apply the hunk to the worktree copy afterwards so the owning pane's eventual wholesale commit does not revert it — lazily-kt and lazily-cs both did exactly that during this series and it is the only reason their doc changes survived.

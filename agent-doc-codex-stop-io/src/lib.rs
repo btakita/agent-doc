@@ -1377,7 +1377,17 @@ fn reopen_terminal_cycle_before_stop_capture(
         );
     }
 
-    let reopened = agent_doc_cycle_state_io::start_preflight(file, Some(&head), Some(&head))?;
+    let current = current_document_content(file, "codex_stop_post_commit_cycle_baseline")?;
+    if agent_doc_turn::response_replay::response_materialized_in_content(
+        response.as_ref(),
+        &current,
+    ) {
+        anyhow::bail!(
+            "post-commit Stop payload is already materialized in current document authority; refusing to capture it under a fresh cycle"
+        );
+    }
+
+    let reopened = agent_doc_cycle_state_io::start_preflight(file, Some(&head), Some(&current))?;
     anyhow::ensure!(
         reopened.cycle_id != previous_cycle_id,
         "post-commit Stop closeout failed to mint a fresh cycle: terminal cycle {} was reused",
@@ -4165,6 +4175,44 @@ Reviewed the gated items.\n\
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert!(state.last_prompt.is_empty());
         assert!(state.last_turn_id.is_empty());
+    }
+
+    #[test]
+    fn post_commit_reopen_records_current_authority_not_head_as_file_baseline() {
+        let dir = setup_project();
+        let doc = write_template_doc(&dir);
+        init_git_repo(dir.path(), &doc);
+        let head = fs::read_to_string(&doc).unwrap();
+        let previous =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(&head), Some(&head)).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit",
+            Some(&head),
+            Some(&head),
+        )
+        .unwrap();
+
+        let current = head.replace("❯ Hello", "❯ Prompt from current authority");
+        fs::write(&doc, &current).unwrap();
+        let payload = agent_doc_template::replay_guard::classify_replay_payload(
+            "### Re: Prompt from current authority — gpt-5\n\nDone.\n",
+        );
+
+        reopen_terminal_cycle_before_stop_capture(&doc, &payload).unwrap();
+
+        let reopened = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_ne!(reopened.cycle_id, previous.cycle_id);
+        assert_eq!(
+            reopened.snapshot_hash.as_deref(),
+            Some(agent_doc_hash::content_hash(&head).as_str())
+        );
+        assert_eq!(
+            reopened.file_hash.as_deref(),
+            Some(agent_doc_hash::content_hash(&current).as_str())
+        );
+        assert_ne!(reopened.snapshot_hash, reopened.file_hash);
     }
 
     #[test]

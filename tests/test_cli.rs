@@ -3766,8 +3766,9 @@ fn test_agent_doc_repair_io_owns_repair_state_adapters() {
     for required in [
         "pub fn save_pending(",
         "pub fn clear_pending(",
-        "agent_doc_template_io::canonicalize_response_for_capture(",
-        "agent_doc_capture_io::capture_response_with_intent(",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(",
+        "agent_doc_template_io::canonicalize_response_for_capture_with_current_content(",
+        "agent_doc_capture_io::capture_response_with_current_content_and_intent_and_plan(",
         "agent_doc_snapshot_io::clear_undo_content(",
         "agent_doc_capture_io::mark_write_applied(",
     ] {

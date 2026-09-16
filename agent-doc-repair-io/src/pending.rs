@@ -17,11 +17,7 @@ pub(crate) enum PendingResponseState {
 /// Save a response to the pending store before attempting write-back.
 /// This makes the response durable across context compaction.
 pub fn save_pending(file: &Path, response: &str) -> Result<()> {
-    let canonical_response =
-        agent_doc_template_io::canonicalize_response_for_capture(file, response)?;
-    let capture =
-        agent_doc_capture_io::capture_response_with_intent(file, &canonical_response, response)?;
-    save_pending_after_capture(file, response, &capture)
+    save_pending_with_plan(file, response, None)
 }
 
 pub fn save_pending_with_plan(
@@ -29,15 +25,30 @@ pub fn save_pending_with_plan(
     response: &str,
     mutation_plan_json: Option<&str>,
 ) -> Result<()> {
-    let canonical_response =
-        agent_doc_template_io::canonicalize_response_for_capture(file, response)?;
-    let capture = agent_doc_capture_io::capture_response_with_intent_and_plan(
-        file,
-        &canonical_response,
-        response,
-        mutation_plan_json,
-    )?;
-    save_pending_after_capture(file, response, &capture)
+    save_pending_with_plan_and_resolver(file, response, mutation_plan_json, |file| {
+        agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "save_pending_capture_baseline",
+        )
+    })
+}
+
+fn save_pending_with_plan_and_resolver<F>(
+    file: &Path,
+    response: &str,
+    mutation_plan_json: Option<&str>,
+    resolve_current: F,
+) -> Result<()>
+where
+    F: FnOnce(&Path) -> Result<String>,
+{
+    // Capture is a compare-and-swap boundary. Disk is only a replica while an
+    // editor owns the document, so deriving the replay baseline from a raw file
+    // read can create a capture that conflicts with authority before recovery
+    // even starts. Resolve authority once and use those exact bytes for both
+    // response canonicalization and the durable capture baseline.
+    let current_content = resolve_current(file)?;
+    save_pending_with_current_content_and_plan(file, response, &current_content, mutation_plan_json)
 }
 
 pub fn save_pending_with_current_content(
@@ -171,6 +182,42 @@ fn load_state_event_ledger(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_capture_path_uses_resolved_authority_as_replay_baseline() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let file = dir.path().join("task.md");
+        let disk = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Original prompt\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let authority = disk.replace("Original prompt", "Unsaved editor prompt");
+        std::fs::write(&file, disk).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(disk), Some(authority.as_str()))
+                .unwrap();
+
+        save_pending_with_plan_and_resolver(
+            &file,
+            "### Re: Unsaved editor prompt — gpt-5\n\nDone.\n",
+            None,
+            |_| Ok(authority.clone()),
+        )
+        .unwrap();
+
+        let capture = agent_doc_capture_io::load_by_id(&file, &cycle.cycle_id)
+            .unwrap()
+            .expect("capture");
+        assert_eq!(
+            capture.baseline_content.as_deref(),
+            Some(authority.as_str())
+        );
+        assert_ne!(capture.baseline_content.as_deref(), Some(disk));
+    }
 
     #[test]
     fn saves_and_clears_pending_response_in_state_backbone() {

@@ -66,6 +66,23 @@ pub fn selected_free_text_heads_missing_response_evidence(
     content: &str,
     response: &str,
 ) -> anyhow::Result<Vec<String>> {
+    selected_free_text_heads_missing_response_evidence_for_closeout(
+        baseline, content, response, false,
+    )
+}
+
+/// Scope the selected-free-text evidence gate to the work this closeout can
+/// consume. An explicit id completion cannot consume an unrelated free-text
+/// head, so that head must remain queued without blocking the id closeout.
+pub fn selected_free_text_heads_missing_response_evidence_for_closeout(
+    baseline: Option<&str>,
+    content: &str,
+    response: &str,
+    has_explicit_id_completion: bool,
+) -> anyhow::Result<Vec<String>> {
+    if has_explicit_id_completion {
+        return Ok(Vec::new());
+    }
     if !element::parse(content)?
         .iter()
         .any(|component| component.name == "queue")
@@ -496,6 +513,32 @@ mod tests {
                 .is_empty()
             );
         }
+    }
+
+    #[test]
+    fn explicit_id_closeout_ignores_unrelated_selected_free_text() {
+        let measurement = "Please include before/after performance measurements for each task.";
+        let content = doc(
+            &format!("- 🚧 {measurement}\n- 🚧 do [#fpebatchchartobs]\n"),
+            "",
+        );
+        let response = "### Re: fpebatchchartobs\n\nBefore and after measurements recorded.";
+
+        assert_eq!(
+            selected_free_text_heads_missing_response_evidence(Some(&content), &content, response,)
+                .unwrap(),
+            vec![measurement],
+        );
+        assert!(
+            selected_free_text_heads_missing_response_evidence_for_closeout(
+                Some(&content),
+                &content,
+                response,
+                true,
+            )
+            .unwrap()
+            .is_empty(),
+        );
     }
 
     #[test]

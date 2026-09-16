@@ -38,9 +38,12 @@ fn enforce_selected_queue_response_contract(
     if !flags.strict_closeout {
         return Ok(());
     }
-    let missing =
-        agent_doc_queue::queue_closeout_guard::selected_free_text_heads_missing_response_evidence(
-            baseline, current, response,
+    let missing = agent_doc_queue::queue_closeout_guard::
+        selected_free_text_heads_missing_response_evidence_for_closeout(
+            baseline,
+            current,
+            response,
+            !flags.queue_completion_ids.is_empty(),
         )?;
     if !missing.is_empty() {
         anyhow::bail!(
@@ -3068,6 +3071,37 @@ mod tests {
                 .is_none()
         );
         assert_eq!(fs::read_to_string(&doc).unwrap(), selected);
+    }
+
+    #[test]
+    fn explicit_id_closeout_is_not_blocked_by_unrelated_selected_free_text() {
+        let current = concat!(
+            "<!-- agent:queue go -->\n",
+            "- 🚧 Please include before/after performance measurements for each task.\n",
+            "- 🚧 do [#fpebatchchartobs]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = "### Re: fpebatchchartobs\n\nBefore and after measurements recorded.";
+        let free_text_flags = WriteFlags {
+            strict_closeout: true,
+            ..Default::default()
+        };
+        assert!(
+            enforce_selected_queue_response_contract(
+                Some(current),
+                current,
+                response,
+                &free_text_flags,
+            )
+            .is_err(),
+        );
+
+        let id_flags = WriteFlags {
+            queue_completion_ids: vec!["fpebatchchartobs".to_string()],
+            ..free_text_flags
+        };
+        enforce_selected_queue_response_contract(Some(current), current, response, &id_flags)
+            .unwrap();
     }
 
     /// A free-text queue head that the operator removed this turn lives on in the

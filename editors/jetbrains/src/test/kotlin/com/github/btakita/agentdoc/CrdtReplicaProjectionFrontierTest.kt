@@ -626,6 +626,7 @@ class CrdtReplicaProjectionFrontierTest {
 
     @Test
     fun `retained local splice retries use bounded exponential backoff`() {
+        assertEquals(250L, LOCAL_EDITOR_FLUSH_QUIET_MS)
         assertEquals(250L, localEditorRetryDelayMsUtil(0))
         assertEquals(250L, localEditorRetryDelayMsUtil(1))
         assertEquals(500L, localEditorRetryDelayMsUtil(2))

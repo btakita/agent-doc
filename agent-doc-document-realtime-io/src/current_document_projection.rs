@@ -223,11 +223,10 @@ pub fn invalidate_current_document_projection(file: &Path) {
 ///
 /// - `Detached` — no editor is attached, so the disk bytes are the document.
 ///   Hashing them gives the key its identity back.
-/// - `EditorAttachedMissingReplica` — an editor is attached but the relay hub
-///   has no replica, so neither the canonical state vector nor the disk bytes
-///   are a trustworthy identity for what the reader will get. There is nothing
-///   to key on, so this returns `None` and the caller must bypass the pass
-///   entirely rather than memoize under a constant that never moves.
+/// - `EditorAttachedMissingReplica` — an editor is attached but this process's
+///   relay hub has no replica. `observed_revision` first asks the authoritative
+///   controller for its compact revision; if that is unavailable, there is
+///   nothing trustworthy to key on and this returns `None`.
 ///
 /// The third variant, `Current { state_vector, .. }`, moves on every CRDT
 /// mutation — agent-authored or operator — and needs no help.
@@ -242,9 +241,33 @@ fn projection_revision_for(
     }
 }
 
+fn prefer_controller_content_revision(
+    local: CurrentRevision,
+    controller: Option<CurrentRevision>,
+) -> CurrentRevision {
+    match (&local, controller) {
+        (
+            CurrentRevision::EditorAttachedMissingReplica,
+            Some(controller @ CurrentRevision::Current { .. }),
+        ) => controller,
+        _ => local,
+    }
+}
+
 fn observed_revision(file: &Path) -> Result<Option<ProjectionRevision>> {
+    let local = agent_doc_crdt_relay_io::current_revision_for_file(file)?;
+    let controller = if matches!(local, CurrentRevision::EditorAttachedMissingReplica) {
+        agent_doc_controller_io::project_controller::revision_via_controller_model_read_for_doc(
+            file,
+            "current_document_projection:revision",
+        )
+        .ok()
+        .flatten()
+    } else {
+        None
+    };
     projection_revision_for(
-        agent_doc_crdt_relay_io::current_revision_for_file(file)?,
+        prefer_controller_content_revision(local, controller),
         || {
             let content = std::fs::read_to_string(file)?;
             Ok(agent_doc_hash::content_hash(&content))
@@ -417,12 +440,9 @@ mod tests {
     /// moves is worse than no cache — it serves pre-mutation text.
     ///
     /// Two `CurrentRevision` variants are unit-like constants. `Detached` is
-    /// safe only because the disk hash is substituted for it. The other,
-    /// `EditorAttachedMissingReplica`, has no substitute available: neither the
-    /// canonical state vector (there is no replica) nor the disk bytes (an
-    /// editor owns the document) identify what a reader will get. Memoizing
-    /// under it would pin the first resolve for the whole pass, so it must
-    /// refuse to key at all.
+    /// safe only because the disk hash is substituted for it. A local
+    /// `EditorAttachedMissingReplica` may use a controller-owned `Current`
+    /// revision, but without that state vector it must still refuse to key.
     #[test]
     fn a_revision_that_cannot_move_never_becomes_a_cache_key() {
         let hash = || Ok("disk-hash".to_string());
@@ -449,6 +469,36 @@ mod tests {
             projection_revision_for(current.clone(), hash).unwrap(),
             Some(ProjectionRevision::Crdt(current)),
             "a state vector already carries content identity"
+        );
+    }
+
+    #[test]
+    fn controller_revision_supplies_missing_local_content_identity() {
+        let current = CurrentRevision::Current {
+            lineage: "controller-lineage".to_string(),
+            state_vector: vec![7, 8, 9],
+            live_editors: 1,
+            delivery_converged: true,
+        };
+        assert_eq!(
+            prefer_controller_content_revision(
+                CurrentRevision::EditorAttachedMissingReplica,
+                Some(current.clone()),
+            ),
+            current,
+        );
+        assert_eq!(
+            prefer_controller_content_revision(
+                CurrentRevision::EditorAttachedMissingReplica,
+                Some(CurrentRevision::Detached),
+            ),
+            CurrentRevision::EditorAttachedMissingReplica,
+            "only a moving controller state vector may identify attached content",
+        );
+        assert_eq!(
+            prefer_controller_content_revision(CurrentRevision::Detached, Some(current)),
+            CurrentRevision::Detached,
+            "the controller cannot override a locally detached document",
         );
     }
 

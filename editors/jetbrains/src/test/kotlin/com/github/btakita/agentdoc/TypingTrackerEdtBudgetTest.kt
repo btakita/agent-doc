@@ -508,6 +508,10 @@ class TypingTrackerEdtBudgetTest {
                     localFlushBody.contains("localEditorFlushTasks.put(filePath, scheduled)?.cancel(false)"),
         )
         assertTrue(
+            "typing bursts must use a human-scale quiet window before durable publication",
+            source.contains("internal const val LOCAL_EDITOR_FLUSH_QUIET_MS = 250L"),
+        )
+        assertTrue(
             "every non-operator editor projection must close the prior native op-capture epoch on a worker before EDT dispatch",
             prepareMutationBody.contains("check(!javax.swing.SwingUtilities.isEventDispatchThread())") &&
                 prepareMutationBody.contains("lib.agent_doc_clear_editor_op_epoch(filePath) == 1") &&

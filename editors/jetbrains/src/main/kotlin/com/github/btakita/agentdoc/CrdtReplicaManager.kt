@@ -74,7 +74,9 @@ private const val CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS = 2_000L
 private const val CRDT_AWAIT_PERSIST_CURRENT_TIMEOUT_MS = 5_000L
 private const val CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS = 1_000L
 private const val CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS = 30_000L
-private const val LOCAL_EDITOR_FLUSH_QUIET_MS = 16L
+// A human typing burst should become one ordered durable CRDT publication,
+// rather than paying push + broadcast + projection round trips per character.
+internal const val LOCAL_EDITOR_FLUSH_QUIET_MS = 250L
 private const val LOCAL_EDITOR_RETRY_BASE_MS = 250L
 private const val LOCAL_EDITOR_RETRY_MAX_MS = 30_000L
 private const val CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS = 100L

@@ -322,3 +322,4 @@
 - 2026-09-15 [#runbuildslocal] We can run the builds from the local machine. The mac mini is on my local environment. Or should I give github access to the mac mini?
 - 2026-09-15 [#githubbilllargely] But I have a $337 github bill. Largely due to the OSX builds. Why?
 - 2026-09-15 [#removeosxbuild] If we remove the OSX build, would OSX installs still work?
+- 2026-09-15 [#fixhttpsgithub] Fix https://github.com/lazily-hub/lazily-py/pull/5 + release + publish

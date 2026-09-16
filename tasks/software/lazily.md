@@ -248,6 +248,33 @@ For `lazily-py`, macOS installs should usually still succeed from the source dis
 Recommendation: retain both Intel and Apple Silicon deliverables. If we use the Mac Mini, have it reproduce and upload the same artifacts before removing the hosted macOS jobs. That preserves installs while changing only the execution venue.
 
 Evidence checked: `src/agent-doc/install.sh`, `src/agent-doc/src/upgrade.rs`, the v0.35.398 GitHub release assets, and `src/lazily-py/setup.py`. No product source was changed; this cycle only updates the session document and `#lzmacosrunner`. Confidence is high. No escalation is required. The exchange is large, but queue drain remains active, so I continued without compaction.
+
+### Re: Fix lazily-py PR #5 and publish 0.41.1 — gpt-5 · 2026-09-15T21:21-04:00
+
+> **Queue prompt:**
+>
+> do [#fixhttpsgithub]
+
+
+Completed the fix, merge, release, and publication.
+
+- [PR #5](https://github.com/lazily-hub/lazily-py/pull/5) is merged as `dfd8de7`. It removes the orphaned mode-160000 local-worktree gitlink and absolute local-worktree symlink that broke Git dependency initialization and safe source-archive extraction.
+- The PR now also ignores `/.claude/worktrees/` and includes a repository-hygiene regression test, preventing machine-local worktrees from being tracked and packaged again.
+- The corrective release commit is `75676d1` (`release: prepare 0.41.1`) on `main`; the annotated `v0.41.1` tag is pushed.
+- [lazily-py v0.41.1](https://github.com/lazily-hub/lazily-py/releases/tag/v0.41.1) is published as a non-draft GitHub release.
+- [`lazily` 0.41.1 is live on PyPI](https://pypi.org/project/lazily/0.41.1/) with 21 wheels plus one sdist; none are yanked.
+
+Verification:
+
+- Full local `make check`: exit 0, **1,151 passed**, 26 warnings.
+- Local package build and `twine check`: passed for the wheel and sdist.
+- The sdist contains no `.claude/worktrees` paths and installed successfully in a clean Python 3.12 environment.
+- Fresh PR CI passed on Python 3.12, 3.13, and 3.14 before merge.
+- Release-commit CI passed on Python 3.12, 3.13, and 3.14.
+- The tag workflow completed successfully across Linux x86_64, Linux ARM64, macOS x86_64/ARM64, Windows, sdist, and PyPI publication.
+- A fresh install from the public PyPI Simple index resolved `lazily==0.41.1` and imported version `0.41.1` successfully.
+
+Confidence is high. No escalation or follow-up is required. The exchange remains large, but the active queue item is now fully drained, so I completed it without interrupting for compaction.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 

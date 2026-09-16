@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
-  codex: 01a093e4-2a62-7d70-902a-b29046babb50
+  codex: 01a0a74b-cc3f-77d2-862c-8f4ff4dee348
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -122,13 +122,35 @@ Yes—use a skill as the default integration:
 Codex supports user/repository skills with implicit activation ([OpenAI skill docs](https://learn.chatgpt.com/docs/build-skills)). Avoid generated `AGENTS.override.md`, which can mask the team’s existing instructions ([discovery rules](https://learn.chatgpt.com/docs/agent-configuration/agents-md)).
 
 The answer is captured in the live document, but the editor-native save receipt remains pending, so it is not committed yet. The [agent-doc skill](/home/brian/work/btakita/agent-loop/.codex/skills/agent-doc/SKILL.md) requires leaving the editor authoritative while its controller retries; I did not force disk or duplicate the response.
+
+### Re: tsift repository skill released — gpt-5 · 2026-09-16T15:35-04:00
+
+> **Queue prompt:**
+>
+> Make tsift use a skill instead of an `AGENTS.md`/`AGENTS.override.md` entry. release + publish
+
+Released tsift 0.1.98.
+
+`tsift init` now installs a repository skill at `.agents/skills/tsift/SKILL.md` with the detailed workflow in `.agents/skills/tsift/references/code-navigation.md`. It no longer creates or appends tsift guidance in `AGENTS.md`, `AGENTS.override.md`, or `CLAUDE.md`; migration removes only tsift-owned legacy marker regions and preserves surrounding project instructions. Existing legacy runbooks move into the skill reference, and an unmanaged same-path skill fails closed instead of being overwritten. `tsift status --fix-instructions` and workspace-scope initialization use the same skill-first path.
+
+The generated skill follows progressive disclosure: its concise description and hot-path workflow trigger repository navigation, while detailed commands remain in the linked reference. This matches the repository skill location and implicit activation documented by [OpenAI's skill guide](https://learn.chatgpt.com/docs/build-skills).
+
+Release evidence:
+
+- Commit `1f8bbc0` is on `origin/main`; tag `v0.1.98` points at it.
+- Local `make check` passed after the final edits; `cargo install --path . --force --locked` installed `tsift 0.1.98`.
+- `tsift audit --skills-dir .agents/skills` reports 1 healthy skill and 0 broken; `tsift status --no-fix` reports instructions current at 0.1.98.
+- [CI run 35138325457](https://github.com/btakita/tsift/actions/runs/35138325457) passed both clippy/test and live Convex acceptance.
+- [Release run 35138334356](https://github.com/btakita/tsift/actions/runs/35138334356) completed successfully: all platform builds, GitHub release, crates.io workspace publication, and npm publication are green.
+- [GitHub release v0.1.98](https://github.com/btakita/tsift/releases/tag/v0.1.98), `tsift 0.1.98` on crates.io, and `opencode-tsift 0.1.98` on npm are public.
+
+I left `#tsiftinstrpolicy` open because it tracks the broader personal/shared/off deployment-mode design; this release completes the narrower skill-for-ambient-instructions request without claiming those additional modes.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-- [#tsiftinstrpolicy]: Can we use a skill instead of adding to AGENTS.*?
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

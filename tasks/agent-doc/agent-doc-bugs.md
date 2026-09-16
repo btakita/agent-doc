@@ -362,7 +362,6 @@ Yes—that explains both symptoms. This is effectively a zombie-owner lease, not
 Recovery takes so long because the system treats “process alive + renewed lease” as stronger evidence than “no forward progress.” Normal lease expiration never happens, and retries use backoff while waiting for a state transition that the detached writer cannot produce. The `no_live_registration` result means the requested editor re-registration also had nobody to notify.
 
 So the real defect is missing progress-sensitive lease revocation: a writer that has neither captured a response nor advanced its closeout phase should eventually lose ownership even if its process remains alive. Terminating that writer breaks the false ownership proof and lets the prepared closeout proceed safely.
-
 ### Re: Fix all underlying causes of agent-doc churn on fpe.md. — gpt-5 · 2026-09-15 23:35 EDT
 
 > **Queue prompt:** Fix all underlying causes of agent-doc churn on fpe.md.

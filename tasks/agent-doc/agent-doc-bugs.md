@@ -303,7 +303,7 @@ Verification and delivery:
 - GitHub Actions CI run [35034937058](https://github.com/btakita/agent-doc/actions/runs/35034937058) was in progress at the required one-time inspection. Local verification is the closeout gate, so it was not polled.
 
 No release tag was created; the existing weekly release cadence remains in force.
-❯ 🚧 Fix agent-doc causes for wedged fpe.md run:
+❯ Fix agent-doc causes for wedged fpe.md run:
 ```
 › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md
 
@@ -348,6 +348,20 @@ Verification passed:
 The installed generation emitted its normal auto-recycle/reload event; an explicit root-level recycle found no root controller to recycle. Source commit `28240ec14` is pushed to `agent-doc/main`; parent gitlink commit `414a7ccd7` is ready to push with this response closeout. The latest CI run visible at the required one-time check was green; the new push had not yet appeared in the listing.
 
 I left the large exchange intact because this document still has active queue work.
+
+### Re: Response
+
+Yes—that explains both symptoms. This is effectively a zombie-owner lease, not a genuine concurrent-write conflict:
+
+1. The original writer acquired ownership.
+2. Its PTY detached before response capture.
+3. The writer process remained alive and continued renewing the lease.
+4. New closeout attempts therefore could not expire or steal the lease.
+5. Meanwhile, the editor delivery registration disappeared, leaving CRDT state retained but no worker capable of applying it.
+
+Recovery takes so long because the system treats “process alive + renewed lease” as stronger evidence than “no forward progress.” Normal lease expiration never happens, and retries use backoff while waiting for a state transition that the detached writer cannot produce. The `no_live_registration` result means the requested editor re-registration also had nobody to notify.
+
+So the real defect is missing progress-sensitive lease revocation: a writer that has neither captured a response nor advanced its closeout phase should eventually lose ownership even if its process remains alive. Terminating that writer breaks the false ownership proof and lets the prepared closeout proceed safely.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -357,6 +371,7 @@ I left the large exchange intact because this document still has active queue wo
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Fix all underlying causes of agent-doc churn on fpe.md.
 <!-- /agent:queue -->
 
 

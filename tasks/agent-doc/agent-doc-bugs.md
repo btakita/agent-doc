@@ -378,6 +378,16 @@ Added regressions for an unsaved editor-authority baseline and for post-commit `
 Source commit `6b71bd5d7` and parent pointer commit `45ecb28ab` are pushed. The committed source was installed from an isolated worktree, and the root controller was marked for a two-phase recycle. Pages and Book CI passed; the main CI workflow was still running at the final observation.
 
 Session accretion remains at warning level; no compaction was performed while the queue is active.
+
+### Re: Fix Run Agent Doc wedge on fpe.md — gpt-5 · 2026-09-15 23:36 EDT
+
+> **Queue prompt:** Fix ?Run Agent Doc wedge on fpe.md: authoritative actor generation 16 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md owns pane %5 but route could not drain the active closeout before dispatch: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: resume durable checkpoint cycle=cycle-1789527700856 phase=response_captured capture_id=cycle-1789527700856; the response is already captured; retained write and commit recovery own the continuation; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md
+
+Resolved without resubmitting the captured response. I reset the stale baseline from current editor authority with session/capture preservation, then used `repair --resume-capture` on the existing durable capture. Agent-doc detected that the response was already present, retired the retained intent, and completed the commit boundary.
+
+The route is no longer blocked: `fpe.md` advanced from `response_captured` into a fresh preflight cycle on its existing generation-16 pane, and that pane resumed active work. The systemic authority/baseline defect was fixed, tested, pushed, and installed as described above; the supervisor recycle handoff is pending its safe idle boundary.
+
+Session accretion remains at warning level; the active queue was drained without pausing for compaction.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -388,7 +398,7 @@ Session accretion remains at warning level; no compaction was performed while th
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~Fix all underlying causes of agent-doc churn on fpe.md.~~
-- Fix ?Run Agent Doc wedge on fpe.md: authoritative actor generation 16 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md owns pane %5 but route could not drain the active closeout before dispatch: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: resume durable checkpoint cycle=cycle-1789527700856 phase=response_captured capture_id=cycle-1789527700856; the response is already captured; retained write and commit recovery own the continuation; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md
+- 🚧 Fix ?Run Agent Doc wedge on fpe.md: authoritative actor generation 16 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md owns pane %5 but route could not drain the active closeout before dispatch: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: resume durable checkpoint cycle=cycle-1789527700856 phase=response_captured capture_id=cycle-1789527700856; the response is already captured; retained write and commit recovery own the continuation; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md
 <!-- /agent:queue -->
 
 

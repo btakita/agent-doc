@@ -371,7 +371,7 @@ So the real defect is missing progress-sensitive lease revocation: a writer that
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Fix all underlying causes of agent-doc churn on fpe.md.
+- 🚧 Fix all underlying causes of agent-doc churn on fpe.md.
 - Fix Run Agent Doc wedge on fpe.md: authoritative actor generation 16 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md owns pane %5 but route could not drain the active closeout before dispatch: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: resume durable checkpoint cycle=cycle-1789527700856 phase=response_captured capture_id=cycle-1789527700856; the response is already captured; retained write and commit recovery own the continuation; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md
 <!-- /agent:queue -->
 

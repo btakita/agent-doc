@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a0a4c5-54e2-7f91-9761-fc2750e1790b
+  codex: 01a0a7b3-63da-7000-a503-b84846308666
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -275,6 +275,28 @@ Verification:
 - A fresh install from the public PyPI Simple index resolved `lazily==0.41.1` and imported version `0.41.1` successfully.
 
 Confidence is high. No escalation or follow-up is required. The exchange remains large, but the active queue item is now fully drained, so I completed it without interrupting for compaction.
+
+### Re: FPE pane stranded in stash — gpt-5 · 2026-09-16T17:18:50-04:00
+
+> **Queue prompt:**
+>
+> The fpe.md session is selected but the tmux pane is in the stash tmux window. Fix agent-doc causes for this.
+
+Fixed in agent-doc commit `3a73c09f0` (`fix: repair focus for stashed document panes`).
+
+The controller was checking the tmux session's active window before checking the selected document pane's own window. When the active window was `stash`, that ordering produced `outside_agent_doc_window`, which suppressed JetBrains' retained full-surface repair. The controller now classifies the pane first: a selected pane in `stash` produces `actor_pane_not_visible`, while a visible pane in `agent-doc` with some other operator window active remains protected by the outside-window guard. The existing exact-visible sync still owns the structural SWAP/reparent operation; this change adds no direct tmux move, polling loop, or retry path.
+
+Architecture closeout:
+
+- Invariant and owner: Project Controller classifies focus placement from the selected pane's actual window; exact-visible sync remains the sole owner of membership repair.
+- Decision-table coverage: active `agent-doc` + pane `agent-doc` selects normally; active `stash` + pane `stash` requests repair without selecting; active `stash` + pane `agent-doc` preserves the outside-window guard.
+- Reactive topology: surface, actor, and tmux observations feed controller classification; the result is either selection or a retained exact-visible intent, then the existing SWAP/reparent effect and receipt path.
+- Edited surfaces: controller RPC/classifier tests and the JetBrains retained-focus specification. `tsift init` also refreshed the repository's generated code-navigation instructions from 0.1.97 to 0.1.98 as required by the repository preflight.
+- Imperative boundary: tmux inspection and mutation remain in the existing effect adapter; the new placement decision is pure and unit-tested.
+
+The live FPE process and ownership were healthy when inspected, and the layout had already self-healed before any mutation, so I did not manually move its pane. Logs showed concurrent root and nested controller projections as contributing context, but did not preserve an exact snapshot proving which projection performed the intervening restash.
+
+Verification passed: targeted placement regression, controller desktop-focus suite, full `make check`, and `make install`. The installed CLI reports `0.35.398`. The four pre-existing user-owned JetBrains/session-actor edits were left untouched. No follow-up work is required for this queue item.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 

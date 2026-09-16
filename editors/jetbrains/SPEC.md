@@ -94,7 +94,11 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   generation-fences the receipt against the active project window and republishes
   the complete current editor surface with forced reconciliation. The full
   surface remains exact-layout authority; other focus failures do not trigger
-  layout repair.
+  layout repair. The controller classifies `actor_pane_not_visible` from the
+  selected pane's own window before applying the active-window guard: a stashed
+  selected pane therefore requests layout repair, while a pane already in the
+  `agent-doc` window still reports `outside_agent_doc_window` when the operator is
+  viewing another tmux window.
 - If a Project Controller-backed manual `Sync Tmux Layout` terminal outcome later reports that the current layout was preserved because a visible protected pane could not detach yet, the command projection/log must retain the protected pane id, open-cycle phase, and document path so the user can tell which pane is delaying sync. Current controller builds should attach/focus the requested document around the protected pane instead of emitting that deferred-sync marker.
 - Automatic layout sync completes at desired-state publication rather than waiting for that exact plane version to become observed. The controller owns a single latest-wins worker, interrupts obsolete retry waits when a newer generation arrives, and never reports a superseded automatic version as a user-visible failure. Manual sync keeps its terminal receipt boundary.
 - **Resync / Fix Sessions** first runs registry/liveness cleanup, which must not

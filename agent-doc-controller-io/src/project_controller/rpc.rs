@@ -20941,6 +20941,31 @@ enum FocusDocumentPaneEffect {
     PaneNotVisible,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FocusPanePlacementDecision {
+    Ready,
+    PaneNotVisible,
+    OutsideAgentDocWindow,
+}
+
+fn decide_focus_pane_placement(
+    active_window_id: Option<&str>,
+    active_window_name: Option<&str>,
+    agent_doc_window_id: Option<&str>,
+    pane_window_id: Option<&str>,
+) -> FocusPanePlacementDecision {
+    let Some(agent_doc_window_id) = agent_doc_window_id else {
+        return FocusPanePlacementDecision::OutsideAgentDocWindow;
+    };
+    if pane_window_id != Some(agent_doc_window_id) {
+        return FocusPanePlacementDecision::PaneNotVisible;
+    }
+    if active_window_name != Some("agent-doc") || active_window_id != Some(agent_doc_window_id) {
+        return FocusPanePlacementDecision::OutsideAgentDocWindow;
+    }
+    FocusPanePlacementDecision::Ready
+}
+
 /// Apply the tmux half of a selected-document focus intent.
 ///
 /// Selection-only editor focus leaves stashed panes to the structural layout
@@ -21171,21 +21196,48 @@ fn handle_focus_document_pane_with_policy(
     };
     let (window_id, window_name, _active_pane) =
         active_tmux_window_for_session(&tmux, &session_name_value);
-    if window_name.as_deref() != Some("agent-doc") {
-        return Ok(tmux_focus_receipt(
-            false,
-            "outside_agent_doc_window",
-            Some(document_id),
-            Some(pane_id),
-            Some(session_name_value),
-            window_id,
-            window_name,
-        ));
+    let agent_doc_window_id = if window_name.as_deref() == Some("agent-doc") {
+        window_id.clone()
+    } else {
+        resolve_agent_doc_window_id_for_session(&tmux, &session_name_value)
+    };
+    let pane_window_id = tmux.pane_window(&pane_id).ok();
+    match decide_focus_pane_placement(
+        window_id.as_deref(),
+        window_name.as_deref(),
+        agent_doc_window_id.as_deref(),
+        pane_window_id.as_deref(),
+    ) {
+        FocusPanePlacementDecision::PaneNotVisible
+            if missing_pane_policy != MissingFocusPanePolicy::ResumeLatest =>
+        {
+            return Ok(tmux_focus_receipt(
+                false,
+                "actor_pane_not_visible",
+                Some(document_id),
+                Some(pane_id),
+                Some(session_name_value),
+                window_id,
+                window_name,
+            ));
+        }
+        FocusPanePlacementDecision::OutsideAgentDocWindow => {
+            return Ok(tmux_focus_receipt(
+                false,
+                "outside_agent_doc_window",
+                Some(document_id),
+                Some(pane_id),
+                Some(session_name_value),
+                window_id,
+                window_name,
+            ));
+        }
+        FocusPanePlacementDecision::Ready | FocusPanePlacementDecision::PaneNotVisible => {}
     }
     let focus_effect = || {
         apply_focus_document_pane_effect(
             &pane_id,
-            window_id.as_deref(),
+            agent_doc_window_id.as_deref(),
             focus_fence.is_none() || desktop_editor_focus_state() != DesktopEditorFocusState::Other,
             missing_pane_policy == MissingFocusPanePolicy::ResumeLatest,
             |pane| tmux.pane_window(pane).ok(),
@@ -21346,6 +21398,37 @@ mod desktop_editor_focus_tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn focus_placement_classifies_stashed_selected_pane_before_active_window_guard() {
+        assert_eq!(
+            decide_focus_pane_placement(
+                Some("@stash"),
+                Some("stash"),
+                Some("@agent-doc"),
+                Some("@stash"),
+            ),
+            FocusPanePlacementDecision::PaneNotVisible,
+        );
+        assert_eq!(
+            decide_focus_pane_placement(
+                Some("@stash"),
+                Some("stash"),
+                Some("@agent-doc"),
+                Some("@agent-doc"),
+            ),
+            FocusPanePlacementDecision::OutsideAgentDocWindow,
+        );
+        assert_eq!(
+            decide_focus_pane_placement(
+                Some("@agent-doc"),
+                Some("agent-doc"),
+                Some("@agent-doc"),
+                Some("@agent-doc"),
+            ),
+            FocusPanePlacementDecision::Ready,
+        );
     }
 
     #[test]

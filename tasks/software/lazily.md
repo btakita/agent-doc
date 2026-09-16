@@ -297,6 +297,31 @@ Architecture closeout:
 The live FPE process and ownership were healthy when inspected, and the layout had already self-healed before any mutation, so I did not manually move its pane. Logs showed concurrent root and nested controller projections as contributing context, but did not preserve an exact snapshot proving which projection performed the intervening restash.
 
 Verification passed: targeted placement regression, controller desktop-focus suite, full `make check`, and `make install`. The installed CLI reports `0.35.398`. The four pre-existing user-owned JetBrains/session-actor edits were left untouched. No follow-up work is required for this queue item.
+
+### Re: agent-doc FPE closeout and editor latency — gpt-5
+
+> **Queue prompt:** do [#fixcausesfpe]
+
+> **Queue prompt:** Fix agent-doc causes of fpe.md session error. Also the editor performance is very laggy: • Agent-doc rejected the first write because the queue’s leading measurement instruction must also be quoted verbatim in the exchange, even though the response already contained the measurements. No session response or commit was captured. I’m retrying with that exact queue prompt included, as required by the document contract.
+
+Implemented, tested, installed, committed, and pushed as `afeb7e5be` (`fix: scope queue closeout and coalesce editor sync`).
+
+The failed `fpe.md` closeout was a selection-identity bug. The cycle explicitly selected `#fpebatchchartobs`, but the strict pre-write guard treated every current `🚧` free-text queue node as selected and demanded an exact quote for an unrelated measurement instruction. The guard now scopes free-text evidence to what the closeout can consume: an explicit ID closeout is not blocked by or allowed to consume unrelated free text, while a genuine free-text closeout still requires its exact quoted prompt.
+
+The latency audit found two independent amplification paths and fixed both without changing authority or durability:
+
+- Short-lived CLI processes saw `EditorAttachedMissingReplica` in their process-local hub even while the Project Controller held a healthy current model. The first failed write spent 5.4 s and performed at least 7 identical full-text controller reads; the follow-up `session-check` spent 7.939 s, including 4.187 s across 12 identical resolves. Pass-scoped readers now use the controller’s existing compact lineage/state-vector revision as the Lazily invalidation key, so unchanged passes materialize full markdown once. Controller errors still take the prior fail-closed uncached path.
+- IntelliJ telemetry showed character-scale batches of only 1–4 splices, with `forward-local-delta` / worker time of 310–764 ms, `broadcastUpdate` of 84–379 ms, and `projectState` of 88–282 ms. The trailing local-editor quiet window is now 250 ms instead of 16 ms (15.6×), coalescing ordinary typing bursts while preserving the same per-document ordering, durable push, broadcast, settled projection, retry fence, and no-network-on-EDT rule.
+
+Before/after measurements:
+
+- Closeout selection: before, the named-ID response was rejected after 5.4 s and captured no response or commit; after, both the pure guard regression and runtime adapter regression pass, and the runtime case completes in 0.00 s while the unrelated free-text prompt remains outside the ID completion scope.
+- Pass projection: before, one write pass performed at least 7 identical full-text reads and one session-check performed 12; after, the projection regression exercises 5 derived readers with one simulated 35 ms authority resolve, asserts exactly 1 resolve, and completes under 150 ms. Revision changes and explicit writes still invalidate the projection.
+- Editor batching: before, a 16 ms window emitted 1–4-splice publications whose worker path cost 310–764 ms; after, the 250 ms window is locked by direct and source-contract tests, reducing the maximum publication trigger rate during a continuous burst from 62.5/s to 4/s before retry/backpressure. Live post-install keystroke telemetry was not fabricated; the installed build is ready for that operator-side observation.
+
+Verification passed: focused queue/runtime/projection Rust tests; focused JetBrains `CrdtReplicaProjectionFrontierTest` and `TypingTrackerEdtBudgetTest`; two complete `make check` runs; `make install`. The pushed GitHub CI run `35163184272` was queued at closeout time.
+
+The exchange remains very large; a later explicit compact cycle would reduce session accretion, but I did not compact without an operator request.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
 

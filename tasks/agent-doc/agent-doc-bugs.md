@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0a767-3bf6-7c23-ab95-5df73c4a916b
+  codex: 01a0a82e-8aa5-7552-a870-f3c46e2c37a9
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -362,6 +362,23 @@ Yes—that explains both symptoms. This is effectively a zombie-owner lease, not
 Recovery takes so long because the system treats “process alive + renewed lease” as stronger evidence than “no forward progress.” Normal lease expiration never happens, and retries use backoff while waiting for a state transition that the detached writer cannot produce. The `no_live_registration` result means the requested editor re-registration also had nobody to notify.
 
 So the real defect is missing progress-sensitive lease revocation: a writer that has neither captured a response nor advanced its closeout phase should eventually lose ownership even if its process remains alive. Terminating that writer breaks the false ownership proof and lets the prepared closeout proceed safely.
+
+### Re: Fix all underlying causes of agent-doc churn on fpe.md. — gpt-5 · 2026-09-15 23:35 EDT
+
+> **Queue prompt:** Fix all underlying causes of agent-doc churn on fpe.md.
+
+Unwedged `fpe.md` first. I rebuilt its stale capture baseline from the current editor-authoritative document while preserving the session and capture history, then resumed the retained capture. The response was already present, so agent-doc retired the retained intent, committed the cycle, and routed the session into a new preflight cycle; its bound pane is active again.
+
+Fixed the underlying source defect at both affected boundaries:
+
+- Pending-response capture now resolves the current document authority once and uses those exact bytes for response canonicalization and the durable replay baseline. It no longer derives a capture baseline from the disk replica while an editor owns the document.
+- A fresh post-commit Stop cycle now records Git `HEAD` as its snapshot and current editor authority as its file baseline, and refuses a payload already materialized in current authority.
+
+Added regressions for an unsaved editor-authority baseline and for post-commit `HEAD`/current-authority divergence. Focused tests passed, the pre-existing post-commit closeout test passed, and the full `make check` passed.
+
+Source commit `6b71bd5d7` and parent pointer commit `45ecb28ab` are pushed. The committed source was installed from an isolated worktree, and the root controller was marked for a two-phase recycle. Pages and Book CI passed; the main CI workflow was still running at the final observation.
+
+Session accretion remains at warning level; no compaction was performed while the queue is active.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -371,8 +388,8 @@ So the real defect is missing progress-sensitive lease revocation: a writer that
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 Fix all underlying causes of agent-doc churn on fpe.md.
-- Fix Run Agent Doc wedge on fpe.md: authoritative actor generation 16 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md owns pane %5 but route could not drain the active closeout before dispatch: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: resume durable checkpoint cycle=cycle-1789527700856 phase=response_captured capture_id=cycle-1789527700856; the response is already captured; retained write and commit recovery own the continuation; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md
+- ~~Fix all underlying causes of agent-doc churn on fpe.md.~~
+- Fix ?Run Agent Doc wedge on fpe.md: authoritative actor generation 16 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md owns pane %5 but route could not drain the active closeout before dispatch: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: resume durable checkpoint cycle=cycle-1789527700856 phase=response_captured capture_id=cycle-1789527700856; the response is already captured; retained write and commit recovery own the continuation; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md
 <!-- /agent:queue -->
 
 

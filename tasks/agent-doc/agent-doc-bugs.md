@@ -14,7 +14,7 @@ prompt_presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -107,6 +107,11 @@ Restart the running JetBrains IDE once to activate plugin `0.2.387`. Until that 
 
 ### Re: Response
 
+> **Queue prompt:**
+>
+> sdk.md auto-queue stalled. #agent-doc-causes
+
+
 Verified. IntelliJ is running plugin `0.2.387` under new PID `1545434`, with generation fencing and editor-authority capabilities registered. All seven open documents—including `agent-doc-bugs.md` and `tsift.md`—are live and projection-complete.
 
 No further restart is needed.
@@ -119,7 +124,6 @@ No further restart is needed.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- sdk.md auto-queue stalled. #agent-doc-causes
 <!-- /agent:queue -->
 
 

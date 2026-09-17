@@ -50,6 +50,18 @@ The first closeout attempt exposed a separate atomic tracked-work defect: `--bac
 The architecture remains narrow. `tmux_server.rs` owns identity formatting/parsing; `plugin.rs` owns post-extraction verification/reporting; `backlog_cmd.rs` owns tracked-item component lookup. Tests cover printable and legacy identity forms, installed-JAR version reporting, and the gate-then-type transition. These are actorless one-shot boundaries with no long-lived derived-state relationship, so no reactive graph or imperative-state extraction applies.
 
 Release and publication cannot complete today because the enforced weekly cadence gate is closed. Version 0.35.398 was published at 2026-09-15T16:41:52Z; the next complete release is eligible at 2026-09-22T16:41:52Z. I did not bypass that invariant. No additional backlog follow-up is needed because `#fixhttpsgithub` itself now carries the exact typed release gate and the remaining publish/verify/close steps.
+
+### Re: macOS-only release cadence and editor-authoritative saves — Codex · 2026-09-17 14:57 EDT
+
+> **Queue prompt:** Only OSX should be on the cadance. Linux builds can happen on demand.
+
+Implemented and shipped the cadence correction: ordinary tags and the automated Linux/Windows assets are now on demand; only operator-built macOS assets retain the seven-day cadence. Release `v0.35.399` was tagged after the full gate passed. Its Release workflow is still running, so `#github5253release` remains correctly gated until the draft release is published and all expected assets can be verified.
+
+Also fixed the `fpe.md` editor/disk divergence class at its ownership boundary. The live editor is canonical and disk is only a persistence receipt. A generation-fenced native save may surface the host editor File Cache Conflict; agent-doc retains the authoritative response while the user resolves it, then settles from the later exact native-save event without another patch, finalize, commit, or session-check attempt. It never reloads or merges the third-party disk value into the editor.
+
+Plugin parity is enforced across JetBrains, VS Code, and Zed: JetBrains observes the post-conflict VFS write, VS Code observes `onDidSaveTextDocument`, and Zed accepts `didSave` only when editor shadow, replica, and disk bytes agree. A shared conformance test pins all three behaviors.
+
+Verification passed: full `make check`, 179 VS Code tests, targeted JetBrains compilation/tests, Rust Zed and cross-editor receipt regressions, private-name hygiene, and `make install`. The installed JetBrains and VS Code packages were rebuilt, and controllers/supervisors were scheduled for safe recycling. Core/plugin fix: `fef46e9fe`.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

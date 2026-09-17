@@ -11,6 +11,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
+  '#agent-doc-causes': Fix agent-doc causes
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue: go
@@ -86,6 +87,23 @@ Also fixed the aggressive tmux focus shift: the fast automatic tab-focus path ha
 Verification passed: 9,484 Rust tests, JetBrains and VS Code plugin suites, cross-editor native parity, bootstrap checks, Lean/TLA gates, private-name scan, install, and the latest prior GitHub Actions run. The commit is pushed to `main`.
 
 Restart/reload the running IDE host once to activate the bumped plugin package. Until then, the new controller fails closed on the old reported generation instead of sending another native-save request.
+
+### Re: Editor-authoritative closeout and busy-turn rerouting
+
+> **Queue prompt:**
+>
+> Fix agent-doc causes to `- 🚧 do [#sbxdeploymentkick]` remaining in fpe.md after the turn completed. Run Agent Doc seems wedged: `dispatch-only codex reopen refused to inject into pane %17 for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt`. There are also 3 tmux panes with 2 editor panes. I ran Sync Tmux Panes and the pane layout corrected itself. I ran agent-doc directly from the session.
+
+Fixed and pushed in two agent-doc commits:
+
+- `fd89a1d8e` fixes the editor/disk divergence class. The fpe history and ops log show that closeout had already removed `🚧 do [#sbxdeploymentkick]` from the editor-authoritative projection, but native save was sent to a dead/stale JetBrains endpoint and disk stayed behind. Native disk-writing effects are now generation-fenced to a live JetBrains or VS Code registration running the exact expected plugin generation. Versionless CRDT identity can no longer authorize `persist_current`, Zed remains on its didSave path, and the controller never falls back to overwriting the editor from disk. A third-party disk edit remains the IDE/user's File Cache Conflict to resolve.
+- `910008f08` fixes the false booting wait. Pane `%17` had accepted the first routed run and its authoritative actor was already busy, but a duplicate editor reroute let a historical startup probe win and waited about 119 seconds before returning `timed_out`. A healthy same-pane authoritative actor in `busy` state with an active-turn pane blocker now settles that stale startup probe immediately, then uses the existing queue-behind-active-turn path instead of reporting that the pane is still booting.
+- The earlier patch also fixes automatic tmux focus moving to the right-side pane: automatic focus now respects desktop-editor activity, while explicit/manual focus remains available. The three-pane/two-editor geometry itself had already converged when Sync Tmux Panes was run, so no destructive layout action was applied to the live fpe or tsift sessions.
+- Plugin parity is enforced across JetBrains, VS Code, and Zed by one shared expected-version authority and a normal `make check` gate. Installed versions are JetBrains `0.2.387`, VS Code/Codium `0.2.71`, and Zed `0.1.1`.
+
+Verification passed: the focused controller/route suites, the full `make check` repository gate, private-name denylist, plugin parity, and installation. The latest GitHub Actions run for the generation-fence commit is green. The new binary/library is installed, and 10 supervisors plus 3 controllers were scheduled to recycle at idle boundaries.
+
+Restart the running JetBrains IDE once to activate plugin `0.2.387`. Until that restart, the generation fence intentionally refuses native save requests from the stale `0.2.386` process rather than risking another editor/disk divergence. Neither `fpe.md` nor `tsift.md` was mutated during this diagnosis.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -96,7 +114,8 @@ Restart/reload the running IDE host once to activate the bumped plugin package. 
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~File Cache Conflict occurred, I in sdk.md or fpe.md. Fix this class of error.~~
-- Fix agent-doc causes to `- 🚧 do [#sbxdeploymentkick]` remaining in fpe.md after the turn completed. Run Agent Doc seems wedged: `dispatch-only codex reopen refused to inject into pane %17 for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt`. There are also 3 tmux panes with 2 editor panes. I ran Sync Tmux Panes and the pane layout corrected itself. I ran agent-doc directly from the session.
+- ~~⏭️ Fix agent-doc causes to `- 🚧 do [#sbxdeploymentkick]` remaining in fpe.md after the turn completed. Run Agent Doc seems wedged: `dispatch-only codex reopen refused to inject into pane %17 for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt`. There are also 3 tmux panes with 2 editor panes. I ran Sync Tmux Panes and the pane layout corrected itself. I ran agent-doc directly from the session.~~
+- sdk.md auto-queue stalled. #agent-doc-causes
 <!-- /agent:queue -->
 
 

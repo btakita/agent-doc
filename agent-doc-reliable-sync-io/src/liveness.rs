@@ -36,6 +36,29 @@ use std::collections::{BTreeMap, BTreeSet};
 /// OS process id of an editor.
 pub type Pid = u64;
 
+/// Package generation expected by this controller for an editor registration.
+///
+/// This is owned beside [`EditorRegistration`] because the registration is the
+/// only generation-bearing authority for native editor effects. Unknown kinds
+/// fail closed (`None`) instead of borrowing an unversioned replica identity.
+pub fn expected_editor_plugin_version(editor_kind: &str) -> Option<&'static str> {
+    match editor_kind.trim().to_ascii_lowercase().as_str() {
+        "jetbrains" | "intellij" | "idea" | "jb" => {
+            option_env!("AGENT_DOC_EXPECTED_JETBRAINS_PLUGIN_VERSION")
+        }
+        "vscode" | "vs-code" | "code" => {
+            option_env!("AGENT_DOC_EXPECTED_VSCODE_PLUGIN_VERSION")
+        }
+        "zed" | "zed-lsp" => option_env!("AGENT_DOC_EXPECTED_ZED_PLUGIN_VERSION"),
+        _ => None,
+    }
+}
+
+/// Exact generation fence for effects that can modify the user's disk.
+pub fn editor_plugin_generation_matches(editor_kind: &str, running: &str) -> bool {
+    expected_editor_plugin_version(editor_kind).is_some_and(|expected| running.trim() == expected)
+}
+
 /// Metadata for one editor replica. This travels on the same reliable Lazily
 /// channel as open/close state; it is not a filesystem projection of the live
 /// buffer. Registrations are scoped by document and pid, and only registrations

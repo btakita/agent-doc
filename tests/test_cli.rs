@@ -21853,8 +21853,11 @@ fn test_agent_doc_preflight_io_owns_stale_warning_graph() {
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     let preflight_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/Cargo.toml")).unwrap();
-    let preflight_build =
-        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/build.rs")).unwrap();
+    let reliable_sync_liveness =
+        fs::read_to_string(manifest_dir.join("agent-doc-reliable-sync-io/src/liveness.rs"))
+            .unwrap();
+    let reliable_sync_build =
+        fs::read_to_string(manifest_dir.join("agent-doc-reliable-sync-io/build.rs")).unwrap();
 
     assert!(
         preflight_io_lib.contains("pub mod warnings;")
@@ -21895,7 +21898,7 @@ fn test_agent_doc_preflight_io_owns_stale_warning_graph() {
         "agent_doc_supervisor::config::classify_stale_install_artifacts",
         "agent_doc_controller_io::project_controller::live_editor_registrations_for_file",
         "registration.editor_version",
-        "option_env!(\"AGENT_DOC_EXPECTED_JETBRAINS_PLUGIN_VERSION\")",
+        "agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version",
     ] {
         assert!(
             preflight_warnings.contains(required),
@@ -21903,14 +21906,29 @@ fn test_agent_doc_preflight_io_owns_stale_warning_graph() {
         );
     }
     for required in [
-        "cargo:rustc-env=AGENT_DOC_EXPECTED_JETBRAINS_PLUGIN_VERSION",
-        "cargo:rustc-env=AGENT_DOC_EXPECTED_VSCODE_PLUGIN_VERSION",
+        "cargo:rustc-env={name}={value}",
+        "AGENT_DOC_EXPECTED_JETBRAINS_PLUGIN_VERSION",
+        "AGENT_DOC_EXPECTED_VSCODE_PLUGIN_VERSION",
+        "AGENT_DOC_EXPECTED_ZED_PLUGIN_VERSION",
         "jetbrains/gradle.properties",
         "vscode/package.json",
+        "zed/extension.toml",
     ] {
         assert!(
-            preflight_build.contains(required),
-            "agent-doc-preflight-io build.rs should own plugin version baking: {required}"
+            reliable_sync_build.contains(required),
+            "agent-doc-reliable-sync-io build.rs should own plugin version baking: {required}"
+        );
+    }
+    for required in [
+        "pub fn expected_editor_plugin_version(",
+        "pub fn editor_plugin_generation_matches(",
+        "AGENT_DOC_EXPECTED_JETBRAINS_PLUGIN_VERSION",
+        "AGENT_DOC_EXPECTED_VSCODE_PLUGIN_VERSION",
+        "AGENT_DOC_EXPECTED_ZED_PLUGIN_VERSION",
+    ] {
+        assert!(
+            reliable_sync_liveness.contains(required),
+            "reliable-sync registration authority must own generation fencing: {required}"
         );
     }
 }

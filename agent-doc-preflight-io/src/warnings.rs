@@ -237,18 +237,10 @@ fn commits_since(repo: &Path, since: u64) -> Vec<String> {
         .collect()
 }
 
-/// `#stale-plugin-detect`: the expected editor-plugin version this binary ships
-/// with, baked at build time from `editors/{jetbrains/gradle.properties,
-/// vscode/package.json}` (see `agent-doc-preflight-io/build.rs`). `None` when
-/// the editor sources were absent at build time.
+/// `#stale-plugin-detect`: the package generation expected by the shared
+/// reliable-sync registration authority.
 pub fn expected_plugin_version(editor_kind: &str) -> Option<&'static str> {
-    match editor_kind.trim().to_ascii_lowercase().as_str() {
-        "jetbrains" | "intellij" | "idea" | "jb" => {
-            option_env!("AGENT_DOC_EXPECTED_JETBRAINS_PLUGIN_VERSION")
-        }
-        "vscode" | "vs-code" | "code" => option_env!("AGENT_DOC_EXPECTED_VSCODE_PLUGIN_VERSION"),
-        _ => None,
-    }
+    agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version(editor_kind)
 }
 
 /// Compare two dotted numeric version strings (e.g. `0.2.206`). Returns `true`
@@ -330,7 +322,10 @@ pub fn live_plugin_generation_statuses_from_registrations(
                 running: running.to_string(),
                 expected: expected.to_string(),
                 timestamp_ms: u128::from(registration.timestamp_ms),
-                stale: plugin_version_is_older(running, expected),
+                // Native effects require exact code-generation identity. A
+                // newer plugin paired with an older controller is just as
+                // incompatible as an older plugin paired with a newer one.
+                stale: running.trim() != expected,
             })
         })
         .collect::<Vec<_>>();
@@ -355,7 +350,7 @@ pub fn report_live_plugin_generation_refresh(file: &Path) {
     for status in live_plugin_generation_statuses(file) {
         if status.stale {
             eprintln!(
-                "[editor] live {} plugin {} is older than expected {}; install/update the editor plugin and restart/reload the IDE host. `agent-doc admin reload-lib` refreshes only libagent_doc and cannot change plugin code or its reported version.",
+                "[editor] live {} plugin {} does not match expected generation {}; install/update the editor plugin and restart/reload the IDE host. `agent-doc admin reload-lib` refreshes only libagent_doc and cannot change plugin code or its reported version.",
                 status.kind, status.running, status.expected,
             );
         } else {
@@ -380,8 +375,8 @@ pub fn report_live_plugin_generation_refresh(file: &Path) {
 }
 
 /// `#stale-plugin-detect`: detect any live editor plugin reporting a version
-/// older than the plugin build this binary ships with, and warn so the operator
-/// reinstalls it.
+/// different from the plugin build this binary ships with, and warn so the
+/// operator reloads one exact generation pair.
 pub fn stale_plugin_warnings(file: &Path) -> Vec<PreflightWarning> {
     let mut seen: HashSet<(String, String)> = HashSet::new();
     live_plugin_generation_statuses(file)
@@ -393,7 +388,7 @@ pub fn stale_plugin_warnings(file: &Path) -> Vec<PreflightWarning> {
             Some(PreflightWarning {
                 code: "stale_plugin".to_string(),
                 message: format!(
-                    "live {} editor plugin {} is older than the {} build shipped with this agent-doc binary; install/update the editor plugin and restart/reload the IDE host before relying on editor delivery ACKs.",
+                    "live {} editor plugin {} does not match the {} build shipped with this agent-doc binary; install/update the editor plugin and restart/reload the IDE host before relying on editor delivery ACKs.",
                     status.kind, status.running, status.expected
                 ),
                 document_agent: None,
@@ -510,7 +505,7 @@ mod tests {
         assert!(expected_plugin_version("emacs").is_none());
         assert_eq!(
             expected_plugin_version("jetbrains"),
-            option_env!("AGENT_DOC_EXPECTED_JETBRAINS_PLUGIN_VERSION")
+            agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version("jetbrains")
         );
         assert_eq!(
             expected_plugin_version("JetBrains"),
@@ -518,7 +513,11 @@ mod tests {
         );
         assert_eq!(
             expected_plugin_version("vscode"),
-            option_env!("AGENT_DOC_EXPECTED_VSCODE_PLUGIN_VERSION")
+            agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version("vscode")
+        );
+        assert_eq!(
+            expected_plugin_version("zed"),
+            agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version("zed")
         );
     }
 
@@ -594,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_plugin_warning_silent_for_current_or_unknown() {
+    fn stale_plugin_warning_requires_exact_generation_or_unknown() {
         let current = vec![registration_with_editor("jetbrains", "0.2.206")];
         assert!(
             stale_plugin_warnings_from_registrations(&current, |_| Some("0.2.206")).is_empty(),
@@ -602,8 +601,8 @@ mod tests {
         );
         let newer = vec![registration_with_editor("jetbrains", "0.2.207")];
         assert!(
-            stale_plugin_warnings_from_registrations(&newer, |_| Some("0.2.206")).is_empty(),
-            "a newer plugin must not warn"
+            !stale_plugin_warnings_from_registrations(&newer, |_| Some("0.2.206")).is_empty(),
+            "a newer plugin paired with an older controller must warn"
         );
         let no_expectation = vec![registration_with_editor("jetbrains", "0.2.100")];
         assert!(

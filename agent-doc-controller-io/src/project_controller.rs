@@ -3038,7 +3038,7 @@ impl RetainedWriteSettleSink {
                 agent_doc_ops_log_io::log_op(
                     &projection.file,
                     &format!(
-                        "retained_persistence_retryable document_hash={document_hash} generation={} epoch={} content_hash={} content_len={} routes_found={} routes_applied={} build_mismatches={} reason=no_exact_native_save_receipt",
+                        "retained_persistence_retryable document_hash={document_hash} generation={} epoch={} content_hash={} content_len={} routes_found={} routes_applied={} build_mismatches={} plugin_generation_mismatches={} reason=no_exact_native_save_receipt",
                         projection.controller_generation,
                         projection.delivery_version,
                         projection.content_hash,
@@ -3046,6 +3046,7 @@ impl RetainedWriteSettleSink {
                         outcome.found,
                         outcome.notified,
                         outcome.build_mismatches.len(),
+                        outcome.generation_mismatches,
                     ),
                 );
                 false

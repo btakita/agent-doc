@@ -5691,8 +5691,13 @@ mod tests {
                         pid: std::process::id().into(),
                         path: canonical.to_string_lossy().into_owned(),
                         editor_id: editor_id.to_string(),
-                        editor_kind: "test".to_string(),
-                        editor_version: "test".to_string(),
+                        // Exercise the real native-save generation fence. A
+                        // test-only unversioned kind must never acquire a
+                        // disk-writing effect.
+                        editor_kind: "vscode".to_string(),
+                        editor_version: agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version("vscode")
+                            .expect("workspace VS Code generation")
+                            .to_string(),
                         capabilities: vec![
                             agent_doc_document_realtime::editor_contract::OPERATOR_TEXT_AUTHORITY_CAPABILITY.to_string(),
                             agent_doc_document_realtime::editor_contract::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY.to_string(),

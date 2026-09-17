@@ -153,14 +153,11 @@ bump-plugin:
 	./gradlew buildPlugin signPlugin && \
 	ls -1 build/distributions/agent-doc-jetbrains-$$new*.zip
 
-# Check plugin version was bumped if .kt files changed
+# Check staged changes and committed history since each target's last package
+# generation. This catches a same-version plugin behavior commit even when the
+# normal check runs after that commit, while ignoring unrelated unstaged work.
 plugin-version-check:
-	@if git diff --cached --name-only 2>/dev/null | grep -q '\.kt$$'; then \
-		if ! git diff --cached --name-only 2>/dev/null | grep -q 'gradle.properties'; then \
-			echo "ERROR: .kt files changed but editors/jetbrains/gradle.properties pluginVersion not bumped"; \
-			exit 1; \
-		fi; \
-	fi
+	@python3 scripts/check_plugin_versions.py
 
 # Build + machine-check the Lean formal models under formal/ (including the
 # wait-machine bound and captured-response closeout safety/completeness proofs).
@@ -191,7 +188,7 @@ lean:
 # the release process runs `make check`, so leaving the installed-surface audit
 # out of it let 0.35.224 ship with harness runbooks several versions behind the
 # binary while every version marker matched.
-check: clippy test sim-medium version-sync audit-docs editor-parity python-bootstrap-test lean tla
+check: plugin-version-check clippy test sim-medium version-sync audit-docs editor-parity python-bootstrap-test lean tla
 
 # Audit generated instruction surfaces (skill, runbooks, OKF) against the binary.
 audit-docs:
@@ -202,7 +199,7 @@ tla:
 	@./scripts/run_tla.sh
 
 # Pre-commit: clippy + test + audit-docs + plugin version check
-precommit: check plugin-version-check
+precommit: check
 	cargo run --quiet -- audit-docs
 
 # Emit Cargo's build-timing report for local bottleneck analysis.

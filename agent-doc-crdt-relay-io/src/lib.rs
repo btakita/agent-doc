@@ -4089,14 +4089,76 @@ pub struct ReplicaSignalOutcome {
     /// Routes rejected specifically because sender and listener builds differ
     /// and the reload-only compatibility request also failed.
     pub build_mismatches: Vec<ReplicaSignalRoute>,
+    /// Live native-save registrations fenced before delivery because their
+    /// reported plugin generation did not exactly match this controller.
+    pub generation_mismatches: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NativeSaveGenerationMismatch {
+    route: ReplicaSignalRoute,
+    editor_kind: String,
+    running: String,
+    expected: String,
+}
+
+fn native_save_capable_editor_kind(editor_kind: &str) -> bool {
+    matches!(
+        editor_kind.trim().to_ascii_lowercase().as_str(),
+        "jetbrains" | "intellij" | "idea" | "jb" | "vscode" | "vs-code" | "code"
+    )
+}
+
+fn generation_fenced_native_save_routes(
+    registrations: Vec<agent_doc_reliable_sync_io::liveness::EditorRegistration>,
+) -> (Vec<ReplicaSignalRoute>, Vec<NativeSaveGenerationMismatch>) {
+    let mut routes = HashSet::new();
+    let mut mismatches = Vec::new();
+    for registration in registrations {
+        // Zed currently persists through LSP didSave and intentionally has no
+        // PID-scoped persist_current endpoint. Unknown/staged adapters cannot
+        // acquire a disk-writing effect merely by minting a replica identity.
+        if !native_save_capable_editor_kind(&registration.editor_kind) {
+            continue;
+        }
+        let route = ReplicaSignalRoute {
+            editor_id: registration.editor_id,
+            editor_pid: registration.pid,
+        };
+        let Some(expected) = agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version(
+            &registration.editor_kind,
+        ) else {
+            continue;
+        };
+        if agent_doc_reliable_sync_io::liveness::editor_plugin_generation_matches(
+            &registration.editor_kind,
+            &registration.editor_version,
+        ) {
+            routes.insert(route);
+        } else {
+            mismatches.push(NativeSaveGenerationMismatch {
+                route,
+                editor_kind: registration.editor_kind,
+                running: registration.editor_version,
+                expected: expected.to_string(),
+            });
+        }
+    }
+    let mut routes = routes.into_iter().collect::<Vec<_>>();
+    routes.sort_by(|left, right| {
+        (left.editor_pid, left.editor_id.as_str())
+            .cmp(&(right.editor_pid, right.editor_id.as_str()))
+    });
+    (routes, mismatches)
 }
 
 /// Ask one live replica endpoint to persist the exact visible editor revision.
 ///
-/// Routes are derived from the same liveness/replica union as CRDT delivery,
-/// then sorted so repeated evaluations choose the same endpoint. Delivery stops
-/// after the first terminal editor receipt: disk is a single projection and a
-/// save from every collaborative head would add no evidence.
+/// Routes come only from generation-bearing reliable-sync registrations. A
+/// replica identity is sufficient for CRDT notification, but never for a
+/// disk-writing effect. Delivery stops after the first terminal editor receipt:
+/// disk is a single projection and a save from every collaborative head would
+/// add no evidence.
 pub fn request_native_save_for_current_projection(
     file: &Path,
     expected_content_hash: &str,
@@ -4109,24 +4171,27 @@ pub fn request_native_save_for_current_projection(
         .lock()
         .projection()
         .live_registrations(&document_hash);
-    let mut routes = HashSet::new();
-    for registration in registrations {
-        routes.insert(ReplicaSignalRoute {
-            editor_id: registration.editor_id,
-            editor_pid: registration.pid,
-        });
-    }
-    routes.extend(live_replica_signal_routes(&document_hash));
-    let mut routes = routes.into_iter().collect::<Vec<_>>();
-    routes.sort_by(|left, right| {
-        (left.editor_pid, left.editor_id.as_str())
-            .cmp(&(right.editor_pid, right.editor_id.as_str()))
-    });
+    let (routes, generation_mismatches) = generation_fenced_native_save_routes(registrations);
 
-    let found = routes.len();
+    let found = routes.len() + generation_mismatches.len();
     let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
     let mut notified = 0usize;
     let mut build_mismatches = Vec::new();
+    for mismatch in &generation_mismatches {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "native_editor_save_request_generation_deferred file={} editor_pid={} editor_id={} editor_kind={} running={} expected={} content_hash={} reason=plugin_generation_mismatch",
+                canonical.display(),
+                mismatch.route.editor_pid,
+                mismatch.route.editor_id,
+                mismatch.editor_kind,
+                mismatch.running,
+                mismatch.expected,
+                expected_content_hash,
+            ),
+        );
+    }
     for route in routes {
         match agent_doc_ipc_io::send_persist_current_to_editor(
             &project_root,
@@ -4173,6 +4238,7 @@ pub fn request_native_save_for_current_projection(
         found,
         notified,
         build_mismatches,
+        generation_mismatches: generation_mismatches.len(),
     })
 }
 
@@ -4183,6 +4249,9 @@ impl ReplicaSignalOutcome {
     pub fn diagnosis(&self) -> String {
         match (self.found, self.notified) {
             (0, _) => "no_live_registration".to_string(),
+            (found, 0) if self.generation_mismatches == found => {
+                format!("plugin_generation_mismatch:{found}")
+            }
             (found, 0) => format!("delivery_failed_to_all:{found}"),
             (found, notified) if notified < found => {
                 format!("requested:{notified}/{found}")
@@ -4301,6 +4370,7 @@ fn signal_crdt_replica_event_counting_inner(
         found,
         notified,
         build_mismatches,
+        generation_mismatches: 0,
     })
 }
 
@@ -4511,6 +4581,7 @@ mod tests {
                 found: 0,
                 notified: 0,
                 build_mismatches: Vec::new(),
+                generation_mismatches: 0,
             }
             .diagnosis(),
             "no_live_registration",
@@ -4521,6 +4592,7 @@ mod tests {
                 found: 1,
                 notified: 0,
                 build_mismatches: Vec::new(),
+                generation_mismatches: 0,
             }
             .diagnosis(),
             "delivery_failed_to_all:1",
@@ -4531,6 +4603,7 @@ mod tests {
                 found: 3,
                 notified: 1,
                 build_mismatches: Vec::new(),
+                generation_mismatches: 0,
             }
             .diagnosis(),
             "requested:1/3",
@@ -4541,10 +4614,61 @@ mod tests {
                 found: 2,
                 notified: 2,
                 build_mismatches: Vec::new(),
+                generation_mismatches: 0,
             }
             .diagnosis(),
             "requested:2"
         );
+        assert_eq!(
+            ReplicaSignalOutcome {
+                found: 1,
+                notified: 0,
+                build_mismatches: Vec::new(),
+                generation_mismatches: 1,
+            }
+            .diagnosis(),
+            "plugin_generation_mismatch:1"
+        );
+    }
+
+    #[test]
+    fn native_save_routes_require_an_exact_supported_plugin_generation() {
+        let expected_jetbrains =
+            agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version("jetbrains")
+                .expect("JetBrains package generation baked by workspace build");
+        let expected_vscode =
+            agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version("vscode")
+                .expect("VS Code package generation baked by workspace build");
+        let registration = |pid, id: &str, kind: &str, version: &str| {
+            agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                document_hash: "doc".into(),
+                pid,
+                path: "/tmp/session.md".into(),
+                editor_id: id.into(),
+                editor_kind: kind.into(),
+                editor_version: version.into(),
+                capabilities: Vec::new(),
+                timestamp_ms: pid,
+            }
+        };
+        let (routes, mismatches) = generation_fenced_native_save_routes(vec![
+            registration(11, "jb-current", "jetbrains", expected_jetbrains),
+            registration(12, "jb-stale", "jetbrains", "0.0.0"),
+            registration(13, "code-current", "vscode", expected_vscode),
+            registration(14, "zed-staged", "zed", "0.0.0"),
+            registration(15, "unknown", "third-party", "1.0.0"),
+        ]);
+
+        assert_eq!(
+            routes
+                .iter()
+                .map(|route| route.editor_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["jb-current", "code-current"]
+        );
+        assert_eq!(mismatches.len(), 1);
+        assert_eq!(mismatches[0].route.editor_id, "jb-stale");
+        assert_eq!(mismatches[0].expected, expected_jetbrains);
     }
 
     #[test]

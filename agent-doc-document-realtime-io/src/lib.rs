@@ -1349,12 +1349,13 @@ fn canonical_editor_projection_is_persisted(
         agent_doc_ops_log_io::log_op(
             path,
             &format!(
-                "editor_projection_native_save_requested file={} source={} content_hash={} endpoints_found={} endpoints_notified={}",
+                "editor_projection_native_save_requested file={} source={} content_hash={} endpoints_found={} endpoints_notified={} plugin_generation_mismatches={}",
                 path.display(),
                 source,
                 agent_doc_hash::content_hash(canonical),
                 outcome.found,
                 outcome.notified,
+                outcome.generation_mismatches,
             ),
         );
         if outcome.notified > 0

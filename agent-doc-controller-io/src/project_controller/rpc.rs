@@ -9127,13 +9127,17 @@ fn suppress_inactive_automatic_layout_focus(
 ) -> bool {
     if invocation.caller_kind == "automatic"
         && invocation.focus.is_some()
-        && focus_state == DesktopEditorFocusState::Other
+        && !automatic_editor_focus_allowed(focus_state)
     {
         invocation.focus = None;
         true
     } else {
         false
     }
+}
+
+fn automatic_editor_focus_allowed(focus_state: DesktopEditorFocusState) -> bool {
+    focus_state != DesktopEditorFocusState::Other
 }
 
 fn admit_async_editor_focus_fence(
@@ -18664,9 +18668,9 @@ fn handle_editor_surface_observe(
         // so the editor socket request never round-trips through the controller
         // command socket. The eager intent effect is a no-op for both in
         // production (see the runtime constructor closure).
-        match &receipt.intent {
+        match receipt.intent.clone() {
             SurfaceIntent::Sync { columns, document } => {
-                let invocation = automatic_editor_surface_sync_invocation(columns, document);
+                let invocation = automatic_editor_surface_sync_invocation(&columns, &document);
                 let _ = publish_pane_layout_desired_invocation(
                     bootstrap,
                     runtime,
@@ -18678,34 +18682,56 @@ fn handle_editor_surface_observe(
             // A tab switch within the same layout resolves + `select-pane`s the
             // target pane directly — a single tmux command, no socket round-trip.
             SurfaceIntent::Focus { document } => {
-                let focus_request = ControllerRequest {
-                    command: "focus_document_pane".to_string(),
-                    file: Some(PathBuf::from(document)),
-                    session_id: None,
-                    pane_id: None,
-                    window_id: None,
-                    generation: None,
-                    state: None,
-                    caller: None,
-                    reason: None,
-                    supervisor_pid: None,
-                    supervisor_socket: None,
-                    command_kind: None,
-                    diagnostic_payload: None,
-                };
-                let focus_result = handle_focus_document_pane_with_policy(
-                    bootstrap,
-                    Some(runtime),
-                    focus_request,
-                    MissingFocusPanePolicy::ObserveOnly,
-                    None,
-                );
-                // The editor focus lane needs the real tmux receipt to prove
-                // exact pane selection (or to request structural repair). The
-                // graph's eager effect is intentionally a production no-op, so
-                // discarding this result left JetBrains with an accepted fact
-                // but no applied projection.
-                record_editor_surface_focus_outcome(&mut receipt, focus_result)?;
+                if !automatic_editor_focus_allowed(desktop_editor_focus_state()) {
+                    agent_doc_ops_log_io::log_op(
+                        &bootstrap.project_root,
+                        &format!(
+                            "controller_automatic_focus_suppressed document={} reason=desktop_editor_inactive",
+                            document
+                        ),
+                    );
+                    record_editor_surface_focus_outcome(
+                        &mut receipt,
+                        Ok(ControllerTmuxFocusReceipt {
+                            focused: false,
+                            reason: "desktop_editor_inactive".to_string(),
+                            document_id: Some(document.clone()),
+                            pane_id: None,
+                            session_name: None,
+                            window_id: None,
+                            window_name: None,
+                        }),
+                    )?;
+                } else {
+                    let focus_request = ControllerRequest {
+                        command: "focus_document_pane".to_string(),
+                        file: Some(PathBuf::from(&document)),
+                        session_id: None,
+                        pane_id: None,
+                        window_id: None,
+                        generation: None,
+                        state: None,
+                        caller: None,
+                        reason: None,
+                        supervisor_pid: None,
+                        supervisor_socket: None,
+                        command_kind: None,
+                        diagnostic_payload: None,
+                    };
+                    let focus_result = handle_focus_document_pane_with_policy(
+                        bootstrap,
+                        Some(runtime),
+                        focus_request,
+                        MissingFocusPanePolicy::ObserveOnly,
+                        None,
+                    );
+                    // The editor focus lane needs the real tmux receipt to prove
+                    // exact pane selection (or to request structural repair). The
+                    // graph's eager effect is intentionally a production no-op, so
+                    // discarding this result left JetBrains with an accepted fact
+                    // but no applied projection.
+                    record_editor_surface_focus_outcome(&mut receipt, focus_result)?;
+                }
             }
             SurfaceIntent::Idle => {}
         }
@@ -21344,6 +21370,15 @@ mod desktop_editor_focus_tests {
 
     #[test]
     fn inactive_desktop_strips_only_automatic_layout_focus() {
+        assert!(!automatic_editor_focus_allowed(
+            DesktopEditorFocusState::Other
+        ));
+        assert!(automatic_editor_focus_allowed(
+            DesktopEditorFocusState::Editor
+        ));
+        assert!(automatic_editor_focus_allowed(
+            DesktopEditorFocusState::Unknown
+        ));
         let mut automatic = ControllerTmuxLayoutSyncInvocation {
             columns: vec!["a.md,b.md".to_string()],
             window: None,

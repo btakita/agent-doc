@@ -45,7 +45,7 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 
 - VS Code must preserve the same no-replay safety boundary as JetBrains for stale visible editor state. Active-typing debounce timeouts may leave a file-watch patch queued for another idle attempt, but once an apply-proof check observes that the editor generation or text changed after patch planning, the extension must fail the payload back to binary retry accounting without scheduling a delayed replay of that same patch file.
 - Lazily current is observed from open/change/save/heartbeat events. No filesystem signal participates in current-document authority or recovery.
-- VS Code has no broad `save_document` or save-all command. The generation-fenced `persist_current` intent verifies the open buffer hash/byte length, calls that document's native `save()`, verifies the same bytes through the workspace filesystem, and publishes `disk_persisted` without applying an edit. A mismatch requests CRDT redelivery.
+- VS Code has no broad `save_document` or save-all command. The generation-fenced `persist_current` intent verifies the open buffer hash/byte length, calls that document's native `save()`, verifies the same bytes through the workspace filesystem, and publishes `disk_persisted` without applying an edit. If the save is deferred by VS Code's file-conflict UI, `onDidSaveTextDocument` publishes the receipt after the user-approved overwrite, provided disk, editor, and replica remain exact. A mismatch requests CRDT redelivery and never replaces the editor from disk.
 
 ## Project Controller Event Compatibility
 

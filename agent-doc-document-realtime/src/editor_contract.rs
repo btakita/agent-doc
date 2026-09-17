@@ -107,6 +107,7 @@ mod tests {
         include_str!("../../editors/vscode/src/ideTerminal.ts"),
     ];
     const ZED_SOURCES: &[&str] = &[include_str!("../../editors/zed/src/agent_doc.rs")];
+    const ZED_LSP_SOURCE: &str = include_str!("../../agent-doc-zed-lsp-io/src/lib.rs");
 
     #[derive(Debug)]
     struct FeatureParity<'a> {
@@ -231,6 +232,57 @@ mod tests {
                 && vscode_manager.contains("advanceNonOperatorProjectionEpoch(filePath)"),
             "VS Code must preserve bounded contentChanges and fence non-operator epochs",
         );
+    }
+
+    #[test]
+    fn native_save_receipts_preserve_editor_authority_across_targets() {
+        let jetbrains_manager = JETBRAINS_SOURCES
+            .iter()
+            .find(|source| source.contains("class CrdtReplicaManager"))
+            .expect("JetBrains CRDT manager source");
+        let vscode_extension = VSCODE_SOURCES
+            .iter()
+            .find(|source| source.contains("onDidSaveTextDocument"))
+            .expect("VS Code save-event source");
+        let jetbrains_receipt = jetbrains_manager
+            .split_once("private fun projectNativeSaveReceipt(")
+            .expect("JetBrains native-save receipt")
+            .1
+            .split_once("private fun reconcileRemotePersistence(")
+            .expect("JetBrains native-save receipt boundary")
+            .0;
+        let vscode_receipt = vscode_extension
+            .split_once("private async projectNativeSaveReceipt(")
+            .expect("VS Code native-save receipt")
+            .1
+            .split_once("private startSocketListener(")
+            .expect("VS Code native-save receipt boundary")
+            .0;
+
+        assert!(
+            jetbrains_manager.contains("VirtualFileManager.VFS_CHANGES")
+                && jetbrains_manager.contains("projectNativeSaveReceipt")
+                && jetbrains_manager.contains("readRawDiskText(filePath) != visibleText"),
+            "JetBrains must settle a deferred File Cache Conflict from the exact native-save event",
+        );
+        assert!(
+            vscode_extension.contains("onDidSaveTextDocument")
+                && vscode_extension.contains("projectNativeSaveReceipt")
+                && vscode_extension.contains("diskText !== visibleText"),
+            "VS Code must settle a deferred file conflict from the exact native-save event",
+        );
+        assert!(
+            ZED_LSP_SOURCE.contains("Some(\"textDocument/didSave\")")
+                && ZED_LSP_SOURCE.contains("document.replica.text() != document.shadow")
+                && ZED_LSP_SOURCE.contains("disk_text != document.shadow"),
+            "Zed must publish didSave only for exact editor, replica, and disk state",
+        );
+        for source in [jetbrains_receipt, vscode_receipt, ZED_LSP_SOURCE] {
+            assert!(
+                !source.contains("reloadFromDisk("),
+                "native-save settlement must never replace editor authority from disk",
+            );
+        }
     }
 
     #[test]

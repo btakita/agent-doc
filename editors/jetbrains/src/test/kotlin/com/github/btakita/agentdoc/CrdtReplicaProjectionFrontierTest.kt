@@ -132,6 +132,17 @@ class CrdtReplicaProjectionFrontierTest {
         assertTrue(commandBody.contains("reason=edt_cannot_wait_for_document_lane"))
         assertFalse(body.contains("applyMinimalDocumentEditUtil("))
         assertFalse(body.contains("reloadFromDisk("))
+        assertTrue(manager.contains("VirtualFileManager.VFS_CHANGES"))
+        assertTrue(manager.contains(".forEach(::projectNativeSaveReceipt)"))
+        val receiptBody = manager
+            .substringAfter("private fun projectNativeSaveReceipt(")
+            .substringBefore("private fun reconcileRemotePersistence(")
+        assertTrue(receiptBody.contains("forwarders[filePath] !== forwarder"))
+        assertTrue(receiptBody.contains("editorBufferText(filePath) != visibleText"))
+        assertTrue(receiptBody.contains("forwarder.replicaText() != visibleText"))
+        assertTrue(receiptBody.contains("readRawDiskText(filePath) != visibleText"))
+        assertTrue(receiptBody.contains("projectSettledVisibleState(filePath, forwarder, visibleText, true)"))
+        assertFalse(receiptBody.contains("reloadFromDisk("))
     }
 
     /**

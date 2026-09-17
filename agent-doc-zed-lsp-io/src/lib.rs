@@ -242,6 +242,15 @@ impl<W: Write> Server<W> {
         {
             return;
         }
+        if document.replica.text() != document.shadow {
+            return;
+        }
+        let Ok(disk_text) = std::fs::read_to_string(&document.file) else {
+            return;
+        };
+        if disk_text != document.shadow {
+            return;
+        }
         publish_replica_projection(document, true);
     }
 
@@ -675,6 +684,20 @@ mod tests {
     #[test]
     fn full_sync_projection_never_replaces_an_unchanged_buffer() {
         assert_eq!(minimal_text_delta("same\n", "same\n"), None);
+    }
+
+    #[test]
+    fn did_save_requires_replica_shadow_and_disk_exactness() {
+        let source = include_str!("lib.rs");
+        let body = source
+            .split("fn did_save(&mut self, params: &Value) {")
+            .nth(1)
+            .and_then(|tail| tail.split("fn reconcile_mode").next())
+            .expect("did_save body");
+        assert!(body.contains("document.replica.text() != document.shadow"));
+        assert!(body.contains("std::fs::read_to_string(&document.file)"));
+        assert!(body.contains("disk_text != document.shadow"));
+        assert!(body.contains("publish_replica_projection(document, true)"));
     }
 
     #[test]

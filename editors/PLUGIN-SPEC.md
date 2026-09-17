@@ -141,6 +141,14 @@ and publishes `disk_persisted`. A raced editor revision rejects the request and
 returns to ordinary CRDT delivery; disk, Git, and retained snapshots never become
 replacement authority.
 
+If the host defers that save behind its native file-cache conflict UI, the
+canonical response remains retained and the user resolves the conflict in the
+editor. The adapter must observe the eventual native-save event and publish
+`disk_persisted` only when the live editor, the same replica generation, and disk
+are still byte-identical. It must not overwrite the editor from disk, merge the
+third-party value, or require another patch, finalize, commit, or session-check
+attempt to discover the completed save.
+
 On reconnect, the editor republishes its current value and generation. The
 controller rebases pending intents from `state.db`; the plugin must not reread
 an old delivery or replay a full document. A zero-member state is not proof of

@@ -2440,6 +2440,7 @@ class PatchWatcher implements vscode.Disposable {
         // replica churn after a save/submit reconcile instead of staying wedged.
         this.saveListener = vscode.workspace.onDidSaveTextDocument((document) => {
             this.unsyncedLocalEditDocs.delete(document.uri.fsPath);
+            void this.projectNativeSaveReceipt(document);
         });
         this.closeListener = vscode.workspace.onDidCloseTextDocument((document) => {
             this.unsyncedLocalEditDocs.delete(document.uri.fsPath);
@@ -2465,6 +2466,21 @@ class PatchWatcher implements vscode.Disposable {
         }
 
         return roots[0].uri.fsPath;
+    }
+
+    /** Complete a deferred native save only from the editor's save event. */
+    private async projectNativeSaveReceipt(document: vscode.TextDocument): Promise<void> {
+        const visibleText = document.getText();
+        try {
+            const diskText = new TextDecoder('utf-8').decode(
+                await vscode.workspace.fs.readFile(document.uri),
+            );
+            if (document.getText() !== visibleText || diskText !== visibleText) return;
+            this.crdtReplicas?.projectPersistedVisibleRevision(document.uri.fsPath, visibleText);
+        } catch {
+            // The controller keeps the canonical response retained until a
+            // later exact native-save receipt arrives.
+        }
     }
 
     private startSocketListener(projectRoot: string): void {

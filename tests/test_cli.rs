@@ -14211,9 +14211,7 @@ fn test_release_cadence_applies_only_to_macos_assets() {
     assert!(
         makefile.contains("release: check")
             && !makefile.contains("release: release-macos-cadence-check")
-            && makefile.contains(
-                "python3 scripts/agent-doc-dev verify-macos-release-cadence"
-            ),
+            && makefile.contains("python3 scripts/agent-doc-dev verify-macos-release-cadence"),
         "normal tags must remain on demand while exposing a macOS-only cadence check"
     );
 
@@ -14249,7 +14247,9 @@ fn test_release_cadence_applies_only_to_macos_assets() {
     assert!(
         spec.contains("#weekly-macos-assets")
             && spec_words.contains("Darwin asset upload is at least seven days old")
-            && spec_words.contains("Tags and the four automated Linux and Windows targets are publishable on demand")
+            && spec_words.contains(
+                "Tags and the four automated Linux and Windows targets are publishable on demand"
+            )
             && spec_words.contains("four automated Linux and Windows targets")
             && spec_words.contains("Operator-built Darwin artifacts"),
         "the on-demand hosted-release and weekly Darwin policy must remain specified"

@@ -183,6 +183,16 @@ it('VS Code receives CRDT events and renders the controller-owned reactive turn 
         assert.ok(handler.includes('vscode.workspace.fs.readFile(document.uri)'));
         assert.ok(handler.includes('projectPersistedVisibleRevision('));
         assert.strictEqual(handler.includes('workspace.applyEdit'), false);
+        const saveListenerStart = source.indexOf('this.saveListener = vscode.workspace.onDidSaveTextDocument');
+        const saveListenerEnd = source.indexOf('this.closeListener =', saveListenerStart);
+        const saveListener = source.slice(saveListenerStart, saveListenerEnd);
+        assert.ok(saveListener.includes('this.projectNativeSaveReceipt(document)'));
+        const receiptStart = source.indexOf('private async projectNativeSaveReceipt');
+        const receiptEnd = source.indexOf('private startSocketListener', receiptStart);
+        const receipt = source.slice(receiptStart, receiptEnd);
+        assert.ok(receipt.includes('vscode.workspace.fs.readFile(document.uri)'));
+        assert.ok(receipt.includes('projectPersistedVisibleRevision('));
+        assert.strictEqual(receipt.includes('workspace.applyEdit'), false);
     });
 
     it('VS Code refreshes only the repository containing the requested file', () => {

@@ -15,6 +15,10 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.vfs.newvfs.BulkFileListener
+import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent
+import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import io.github.lazily.IngressOutcome
 import io.github.lazily.MergePolicy
 import io.github.lazily.ThreadSafeContext
@@ -575,6 +579,20 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
                 override fun fileContentReloaded(file: VirtualFile, document: Document) {
                     fileContentReloadingPaths.remove(file.path)
+                }
+            },
+        )
+        ApplicationManager.getApplication().messageBus.connect(this).subscribe(
+            VirtualFileManager.VFS_CHANGES,
+            object : BulkFileListener {
+                override fun after(events: List<VFileEvent>) {
+                    events
+                        .asSequence()
+                        .filterIsInstance<VFileContentChangeEvent>()
+                        .map { it.file.path }
+                        .filter { it.endsWith(".md") && managerForFilePath(it) === this@CrdtReplicaManager }
+                        .distinct()
+                        .forEach(::projectNativeSaveReceipt)
                 }
             },
         )
@@ -2221,6 +2239,38 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         } catch (failure: RuntimeException) {
             log.warn("[crdt-replica] native persist-current failed for $filePath", failure)
             false
+        }
+    }
+
+    /**
+     * A native save may return before IntelliJ's File Cache Conflict UI is
+     * resolved. Treat the later VFS write as the completion edge, but publish a
+     * persistence receipt only when disk, the live editor, and the same replica
+     * generation still contain identical bytes. The editor remains authority;
+     * an external disk value is never loaded or merged here.
+     */
+    private fun projectNativeSaveReceipt(filePath: String) {
+        val forwarder = forwarders[filePath] ?: return
+        if (!forwarder.attached) return
+        val visibleText = editorBufferText(filePath) ?: return
+        try {
+            documentWorkers.forDocument(filePath).execute {
+                if (
+                    disposed.get() ||
+                    forwarders[filePath] !== forwarder ||
+                    !forwarder.attached ||
+                    editorBufferText(filePath) != visibleText ||
+                    forwarder.replicaText() != visibleText ||
+                    readRawDiskText(filePath) != visibleText
+                ) {
+                    return@execute
+                }
+                if (!projectSettledVisibleState(filePath, forwarder, visibleText, true)) {
+                    requestRemoteDrain(filePath, "native-save-receipt-retry")
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            // Disposal owns the lane; no stale receipt may escape afterward.
         }
     }
 

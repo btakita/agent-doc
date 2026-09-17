@@ -12,7 +12,9 @@
 - In agent-doc mode, local changes publish CRDT deltas to the project
   controller. Controller deltas are applied through `workspace/applyEdit` and
   the resulting complete visible state is projected from `didChange`; `didSave`
-  projects the same revision as disk-persisted. Delivery is derived
+  projects the same revision as disk-persisted only after the live shadow,
+  replica, and disk bytes are exact. A third-party disk value remains in Zed's
+  native conflict flow and never replaces editor authority. Delivery is derived
   cumulatively from that state, with no per-update acknowledgement.
 - Registration always bootstraps from controller canonical state. A divergent
   opening buffer is projected downstream with `workspace/applyEdit`; it is

@@ -6,7 +6,8 @@
 
 use agent_doc_element::{
     ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
-    ElementRegistration, ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy,
+    ElementRegistration, ElementSchedulingRole, ElementShape, ElementSource, ElementTurnRole,
+    ElementWritePolicy,
 };
 
 pub const NOTES_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
@@ -17,6 +18,7 @@ pub const NOTES_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     authority: ElementAuthority::SharedOperatorAuthoritative,
     write_policy: ElementWritePolicy::MergeOnly,
     scheduling_role: ElementSchedulingRole::None,
+    turn_role: ElementTurnRole::Informational,
     realtime_model: ElementRealtimeModel::None,
     composition_role: ElementCompositionRole::LocalOnly,
     realtime: true,
@@ -63,7 +65,7 @@ mod tests {
     use super::*;
     use agent_doc_element::{
         ElementAuthority, ElementCompositionRole, ElementRealtimeModel, ElementSchedulingRole,
-        ElementWritePolicy,
+        ElementTurnRole, ElementWritePolicy,
     };
 
     #[test]
@@ -118,8 +120,21 @@ mod tests {
         );
         assert_eq!(notes.write_policy, ElementWritePolicy::MergeOnly);
         assert_eq!(notes.scheduling_role, ElementSchedulingRole::None);
+        assert_eq!(notes.turn_role, ElementTurnRole::Informational);
+        assert_eq!(
+            notes.turn_role,
+            agent_doc_element::turn_role_for_component_name("notes")
+        );
         assert_eq!(notes.realtime_model, ElementRealtimeModel::None);
         assert_eq!(notes.composition_role, ElementCompositionRole::LocalOnly);
+    }
+
+    #[test]
+    fn unknown_components_remain_turn_triggers() {
+        assert_eq!(
+            descriptor_for("operator-notes").turn_role,
+            ElementTurnRole::Trigger
+        );
     }
 
     #[test]

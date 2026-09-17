@@ -10,7 +10,7 @@
 
 use agent_doc_element::{
     ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
-    ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy,
+    ElementSchedulingRole, ElementShape, ElementSource, ElementTurnRole, ElementWritePolicy,
 };
 
 pub const UNKNOWN_FALLBACK_NAME: &str = "__unknown__";
@@ -23,6 +23,7 @@ pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     authority: ElementAuthority::SharedOperatorAuthoritative,
     write_policy: ElementWritePolicy::MergeOnly,
     scheduling_role: ElementSchedulingRole::None,
+    turn_role: ElementTurnRole::Trigger,
     realtime_model: ElementRealtimeModel::Unknown,
     composition_role: ElementCompositionRole::LocalOnly,
     realtime: true,

@@ -421,9 +421,9 @@ new operator intent; an unanswered quoted tail remains actionable.
 | # | File | Description |
 |---|------|-------------|
 | 1 | [Overview](specs/01-overview.md) | What agent-doc does and how sessions work |
-| 2 | [Document Format](specs/02-document-format.md) | Frontmatter fields, components, and template structure |
+| 2 | [Document Format](specs/02-document-format.md) | Frontmatter fields, components, turn roles, and template structure |
 | 3 | [Snapshot System](specs/03-snapshot-system.md) | Snapshot storage, lifecycle, and diff baseline |
-| 4 | [Diff Computation](specs/04-diff-computation.md) | Line-level unified diff and comment stripping |
+| 4 | [Diff Computation](specs/04-diff-computation.md) | Unified diff, comment stripping, and informational-component filtering |
 | 5 | [Agent Backend](specs/05-agent-backend.md) | Agent trait, resolution order, Claude backend |
 | 6 | [Config](specs/06-config.md) | Global/project config, IPC, document state model |
 | 7 | [Commands](specs/07-commands.md) | Command-spec index with split sibling specs for core, tmux/session, closeout, and orchestration behavior |

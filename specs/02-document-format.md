@@ -81,13 +81,17 @@ Marker format: `<!-- agent:{name} -->` (open) and `<!-- /agent:{name} -->` (clos
 | `pending` | replace | Task backlog — auto-cleaned each cycle |
 | `review` | replace | Code-complete tracked work awaiting human review; mutated through review/pending flags |
 | `icebox` | replace | Project icebox — items parked outside active backlog |
+| `notes` | merge/preserve | Operator-owned informational context — preserved for real turns but content-only edits never start a turn |
 | `output` | replace | Latest agent response only |
 | `input` | replace | User prompt area |
 | unregistered `agent:*` | merge/preserve | Unknown/pluginless components use the `agent-doc-element-unknown` fallback: preserve operator-visible content and do not perform semantic mutations until a descriptor is registered. |
 
 Per-component behavior is configured in `.agent-doc/components.toml` (see §7.21).
 Built-in element descriptors live in the `agent-doc-element-*` crate family;
-the built-in registry is `agent-doc-element-registry`.
+the built-in registry is `agent-doc-element-registry`. Each descriptor owns an
+explicit turn role. Unknown components remain turn triggers by default so an
+unregistered prompt cannot be silently ignored; `notes` is the built-in
+informational exception.
 
 Tracked backlog/review items may carry a machine-readable symptom de-duplication marker in their text: `[symptom-key invariant=<id> document=<doc-id> component=<component> content_hash=<hash>]`. `--backlog-add` (legacy `--pending-add`) and `--review-add` use this key to attach a repeated symptom as an indented `evidence:` continuation on the existing open/gated backlog or review item instead of inserting another tracked item. The key fields are field-safe tokens and intentionally match the binary outcome vocabulary: invariant id, document id, component, and content hash.
 

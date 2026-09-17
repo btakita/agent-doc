@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use agent_doc_element::element;
 use agent_doc_element::{
     ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
-    ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy,
+    ElementSchedulingRole, ElementShape, ElementSource, ElementTurnRole, ElementWritePolicy,
 };
 use agent_doc_element_backlog::backlog;
 use anyhow::{Context, Result};
@@ -18,6 +18,7 @@ pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     authority: ElementAuthority::GranularTrackedWork,
     write_policy: ElementWritePolicy::GranularOnly,
     scheduling_role: ElementSchedulingRole::ReviewGate,
+    turn_role: ElementTurnRole::Trigger,
     realtime_model: ElementRealtimeModel::TrackedItems,
     composition_role: ElementCompositionRole::LocalOnly,
     realtime: true,

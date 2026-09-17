@@ -2,7 +2,7 @@
 
 use agent_doc_element::{
     ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
-    ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy,
+    ElementSchedulingRole, ElementShape, ElementSource, ElementTurnRole, ElementWritePolicy,
 };
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
@@ -15,6 +15,7 @@ pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     authority: ElementAuthority::DerivedProjection,
     write_policy: ElementWritePolicy::ProjectionOnly,
     scheduling_role: ElementSchedulingRole::ActiveQueue,
+    turn_role: ElementTurnRole::Trigger,
     realtime_model: ElementRealtimeModel::Queue,
     composition_role: ElementCompositionRole::Consumer,
     realtime: true,

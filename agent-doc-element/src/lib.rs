@@ -77,6 +77,32 @@ pub enum ElementSchedulingRole {
     Signals,
 }
 
+/// Whether content changes in this element may start an agent turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElementTurnRole {
+    /// Content changes are actionable and may start a turn.
+    Trigger,
+    /// Content is context-only and cannot start a turn by itself.
+    Informational,
+}
+
+impl ElementTurnRole {
+    pub fn triggers_turn(self) -> bool {
+        matches!(self, Self::Trigger)
+    }
+}
+
+/// Built-in turn-role lookup used below the aggregate element registry.
+///
+/// Unknown names deliberately default to `Trigger`: a pluginless or malformed
+/// prompt must remain visible rather than being silently treated as metadata.
+pub fn turn_role_for_component_name(name: &str) -> ElementTurnRole {
+    match name {
+        "notes" => ElementTurnRole::Informational,
+        _ => ElementTurnRole::Trigger,
+    }
+}
+
 /// Local realtime model owned by an element crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ElementRealtimeModel {
@@ -126,6 +152,7 @@ pub struct ElementDescriptor {
     pub authority: ElementAuthority,
     pub write_policy: ElementWritePolicy,
     pub scheduling_role: ElementSchedulingRole,
+    pub turn_role: ElementTurnRole,
     pub realtime_model: ElementRealtimeModel,
     pub composition_role: ElementCompositionRole,
     /// True when realtime processing may update this element outside turn
@@ -155,6 +182,7 @@ impl ElementDescriptor {
             authority: self.authority,
             write_policy: self.write_policy,
             scheduling_role: self.scheduling_role,
+            turn_role: self.turn_role,
             realtime_model: self.realtime_model,
             composition_role: self.composition_role,
             realtime: self.realtime,
@@ -172,6 +200,7 @@ pub struct ElementRegistration {
     pub authority: ElementAuthority,
     pub write_policy: ElementWritePolicy,
     pub scheduling_role: ElementSchedulingRole,
+    pub turn_role: ElementTurnRole,
     pub realtime_model: ElementRealtimeModel,
     pub composition_role: ElementCompositionRole,
     pub realtime: bool,
@@ -201,6 +230,7 @@ mod tests {
         authority: ElementAuthority::GranularTrackedWork,
         write_policy: ElementWritePolicy::GranularOnly,
         scheduling_role: ElementSchedulingRole::RunnableWorkSource,
+        turn_role: ElementTurnRole::Trigger,
         realtime_model: ElementRealtimeModel::TrackedItems,
         composition_role: ElementCompositionRole::Producer,
         realtime: true,
@@ -219,7 +249,24 @@ mod tests {
         let registration = BACKLOG.as_registration();
         assert_eq!(registration.name, "backlog");
         assert_eq!(registration.aliases, vec!["pending"]);
+        assert_eq!(registration.turn_role, ElementTurnRole::Trigger);
         assert!(registration.matches_name("pending"));
+    }
+
+    #[test]
+    fn turn_role_lookup_is_informational_only_for_notes() {
+        assert_eq!(
+            turn_role_for_component_name("notes"),
+            ElementTurnRole::Informational
+        );
+        assert_eq!(
+            turn_role_for_component_name("exchange"),
+            ElementTurnRole::Trigger
+        );
+        assert_eq!(
+            turn_role_for_component_name("plugin-prompt"),
+            ElementTurnRole::Trigger
+        );
     }
 
     #[test]

@@ -41,7 +41,8 @@ pub trait LiveCurrentSource {
 /// Compute a unified diff between the snapshot and the current document, and
 /// return the exact snapshot/current content used to compute it.
 ///
-/// Both snapshot and current content are comment-stripped before comparison.
+/// Both snapshot and current content are comment-stripped and informational
+/// component bodies are neutralized before comparison.
 pub fn compute_with_current<S: DocumentBaselineStore + ?Sized>(
     snapshots: &S,
     doc: &Path,
@@ -321,6 +322,31 @@ mod tests {
 
         let result = compute(&TestBaselineStore, &doc).unwrap();
         assert!(result.is_none(), "identical content should return None");
+    }
+
+    #[test]
+    fn compute_returns_none_when_only_notes_content_changes() {
+        let snapshot = concat!(
+            "<!-- agent:exchange -->\n",
+            "## User\n\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:notes -->\n",
+            "Old context.\n",
+            "<!-- /agent:notes -->\n",
+        );
+        let document = concat!(
+            "<!-- agent:exchange -->\n",
+            "## User\n\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:notes -->\n",
+            "New context that must not start a turn.\n",
+            "<!-- /agent:notes -->\n",
+        );
+        let (_dir, doc) = setup_compute_env(document, snapshot);
+
+        let result = compute(&TestBaselineStore, &doc).unwrap();
+
+        assert!(result.is_none(), "notes-only edits must not start a turn");
     }
 
     #[test]

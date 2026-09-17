@@ -2,7 +2,7 @@
 
 use agent_doc_element::{
     ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
-    ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy,
+    ElementSchedulingRole, ElementShape, ElementSource, ElementTurnRole, ElementWritePolicy,
 };
 
 pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
@@ -13,6 +13,7 @@ pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     authority: ElementAuthority::Signals,
     write_policy: ElementWritePolicy::SignalReconcile,
     scheduling_role: ElementSchedulingRole::Signals,
+    turn_role: ElementTurnRole::Trigger,
     realtime_model: ElementRealtimeModel::Signals,
     composition_role: ElementCompositionRole::Observer,
     realtime: true,

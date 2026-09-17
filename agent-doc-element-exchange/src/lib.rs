@@ -9,7 +9,8 @@ use std::collections::{HashMap, HashSet};
 
 use agent_doc_element::{
     Component, ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
-    ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy, element,
+    ElementSchedulingRole, ElementShape, ElementSource, ElementTurnRole, ElementWritePolicy,
+    element,
 };
 use agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy;
 use agent_doc_prompt_lines::{
@@ -29,6 +30,7 @@ pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     authority: ElementAuthority::SharedOperatorAuthoritative,
     write_policy: ElementWritePolicy::MergeOnly,
     scheduling_role: ElementSchedulingRole::None,
+    turn_role: ElementTurnRole::Trigger,
     realtime_model: ElementRealtimeModel::Exchange,
     composition_role: ElementCompositionRole::LocalOnly,
     realtime: true,

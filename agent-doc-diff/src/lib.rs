@@ -5,6 +5,8 @@
 //!   `<!-- ... -->` HTML comments from document content, while preserving agent
 //!   range markers (`<!-- agent:* -->`). Comment patterns inside fenced code blocks
 //!   and inline backtick spans are not treated as comment syntax.
+//!   It also neutralizes content inside registry-declared informational components,
+//!   so context-only edits such as `agent:notes` do not start response cycles.
 //! - `post_exchange_ordinary_html_comments(content)` returns ordinary HTML comments
 //!   after the last `agent:exchange` close, excluding agent markers, component-owned
 //!   comments, and preserved user-note blocks.
@@ -43,7 +45,7 @@
 //!   file's mtime at read time against its mtime before recovery write — if an
 //!   external process modified the snapshot mid-diff, recovery is skipped.
 //! - `compute` returns `None` (no diff) if and only if there are no meaningful
-//!   content changes after comment stripping.
+//!   content changes after comment stripping and informational-component neutralization.
 //! - `wait_for_stable_content` always terminates: the `MAX_RECHECKS` bound guarantees
 //!   it returns within ~6 s regardless of file activity.
 //! - `looks_truncated` never returns `true` for empty strings, markdown headings,
@@ -63,6 +65,8 @@
 //! - `strip_preserves_comment_syntax_in_fenced_code_block`: `<!-- not a comment -->` inside triple-backtick fence → unchanged
 //! - `strip_preserves_comment_syntax_in_inline_backticks`: `` `<!--` `` in inline code → not treated as comment start
 //! - `strip_backtick_comment_before_agent_marker`: `` `<!--` `` text followed by `<!-- /agent:exchange -->` → agent marker not consumed
+//! - `notes_only_change_is_not_a_turn_trigger`: changing only `agent:notes` content → no unified diff
+//! - `notes_change_with_exchange_prompt_still_triggers`: notes plus exchange prompt → prompt remains in unified diff
 //! - `post_exchange_comment_scan_ignores_agent_components_and_user_notes`:
 //!   post-exchange scratch comments are returned, while comments inside agent components
 //!   and user-note blocks are ignored.
@@ -141,7 +145,7 @@
 use serde::{Deserialize, Serialize};
 use similar::{ChangeTag, TextDiff};
 
-use agent_doc_element::element;
+use agent_doc_element::{element, turn_role_for_component_name};
 use agent_doc_element_queue as element_queue;
 use agent_doc_prompt_lines::{
     APPROVAL_WORDS, line_looks_like_fresh_prompt_after_response,
@@ -215,7 +219,44 @@ pub fn strip_comments(content: &str) -> String {
     // edit. Both sides of every diff pass through this, so a pipeline-only delta
     // cancels to `no_changes`. Shared with the write-side splice so the strip and
     // the write agree byte-for-byte on the block boundary.
-    strip_pipeline_block_lines(&element::strip_comments(content))
+    let stripped = strip_pipeline_block_lines(&element::strip_comments(content));
+    neutralize_informational_component_content(&stripped)
+}
+
+/// Remove only the bodies of context-only components before comparing snapshots.
+///
+/// Marker and attribute changes remain visible. Parse failures deliberately fail
+/// open by returning the input unchanged, so malformed or unknown content can
+/// never be hidden from turn dispatch.
+fn neutralize_informational_component_content(content: &str) -> String {
+    let Ok(components) = element::parse(content) else {
+        return content.to_string();
+    };
+
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    for component in components {
+        if turn_role_for_component_name(&component.name).triggers_turn() {
+            continue;
+        }
+
+        if let Some((_, end)) = ranges.last_mut()
+            && component.open_end <= *end
+        {
+            *end = (*end).max(component.close_start);
+        } else {
+            ranges.push((component.open_end, component.close_start));
+        }
+    }
+
+    if ranges.is_empty() {
+        return content.to_string();
+    }
+
+    let mut normalized = content.to_string();
+    for (start, end) in ranges.into_iter().rev() {
+        normalized.replace_range(start..end, "");
+    }
+    normalized
 }
 
 /// Extract the last added non-empty line between already-stripped documents.
@@ -3593,6 +3634,57 @@ diff --git a/tests/render_test.rs b/tests/render_test.rs
     fn preserve_agent_markers() {
         let input = "<!-- agent:status -->\ncontent\n<!-- /agent:status -->\n";
         assert_eq!(strip_comments(input), input);
+    }
+
+    #[test]
+    fn notes_only_change_is_not_a_turn_trigger() {
+        let previous = concat!(
+            "<!-- agent:notes -->\n",
+            "Remember the old detail.\n",
+            "<!-- /agent:notes -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:notes -->\n",
+            "Remember the new detail.\n",
+            "<!-- /agent:notes -->\n",
+        );
+
+        assert_eq!(strip_comments(previous), strip_comments(current));
+        assert_eq!(unified_diff_from_contents(previous, current), None);
+    }
+
+    #[test]
+    fn notes_change_with_exchange_prompt_still_triggers() {
+        let previous = concat!(
+            "<!-- agent:exchange -->\n",
+            "## User\n\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:notes -->\n",
+            "Old context.\n",
+            "<!-- /agent:notes -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange -->\n",
+            "## User\n\n",
+            "Please run the focused test.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:notes -->\n",
+            "New context.\n",
+            "<!-- /agent:notes -->\n",
+        );
+
+        let diff = unified_diff_from_contents(previous, current).expect("exchange prompt diff");
+        assert!(diff.contains("+Please run the focused test."));
+        assert!(!diff.contains("Old context."));
+        assert!(!diff.contains("New context."));
+    }
+
+    #[test]
+    fn malformed_notes_fail_open() {
+        let previous = "<!-- agent:notes -->\nOld context.\n";
+        let current = "<!-- agent:notes -->\nNew context.\n";
+
+        assert!(unified_diff_from_contents(previous, current).is_some());
     }
 
     #[test]

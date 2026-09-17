@@ -2,7 +2,7 @@
 
 use agent_doc_element::{
     ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
-    ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy,
+    ElementSchedulingRole, ElementShape, ElementSource, ElementTurnRole, ElementWritePolicy,
     element::{self, Component},
 };
 use std::collections::HashSet;
@@ -15,6 +15,7 @@ pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     authority: ElementAuthority::Archive,
     write_policy: ElementWritePolicy::ArchiveOnly,
     scheduling_role: ElementSchedulingRole::CompletionArchive,
+    turn_role: ElementTurnRole::Trigger,
     realtime_model: ElementRealtimeModel::Archive,
     composition_role: ElementCompositionRole::ArchiveTarget,
     realtime: true,

@@ -4,7 +4,7 @@ pub mod boundary;
 
 use agent_doc_element::{
     ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
-    ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy,
+    ElementSchedulingRole, ElementShape, ElementSource, ElementTurnRole, ElementWritePolicy,
 };
 
 pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
@@ -15,6 +15,7 @@ pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     authority: ElementAuthority::DerivedProjection,
     write_policy: ElementWritePolicy::ProjectionOnly,
     scheduling_role: ElementSchedulingRole::None,
+    turn_role: ElementTurnRole::Trigger,
     realtime_model: ElementRealtimeModel::Boundary,
     composition_role: ElementCompositionRole::Consumer,
     realtime: true,

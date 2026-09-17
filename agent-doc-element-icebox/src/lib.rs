@@ -2,7 +2,7 @@
 
 use agent_doc_element::{
     ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
-    ElementSchedulingRole, ElementShape, ElementSource, ElementWritePolicy,
+    ElementSchedulingRole, ElementShape, ElementSource, ElementTurnRole, ElementWritePolicy,
 };
 
 pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
@@ -13,6 +13,7 @@ pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     authority: ElementAuthority::GranularTrackedWork,
     write_policy: ElementWritePolicy::GranularOnly,
     scheduling_role: ElementSchedulingRole::ParkedWorkSource,
+    turn_role: ElementTurnRole::Trigger,
     realtime_model: ElementRealtimeModel::TrackedItems,
     composition_role: ElementCompositionRole::LocalOnly,
     realtime: true,

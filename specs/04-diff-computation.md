@@ -4,6 +4,15 @@
 
 Line-level unified diff via `similar` crate. Returns `+`/`-`/` ` prefixed lines, or None if unchanged.
 
+Before comparison, the diff layer strips comments and neutralizes the bodies of
+components whose registry descriptor declares an informational turn role.
+Consequently, a content-only `agent:notes` edit produces no runnable diff and
+cannot start a turn. The full document remains available as context when another
+prompt-bearing change does start a turn. Marker or attribute changes, malformed
+components, and unknown components remain visible (fail open). A mixed notes and
+exchange edit must therefore emit the exchange change while omitting notes-body
+churn.
+
 Prompt-bearing diff triage is part of the diff contract, not just a prompt-builder convenience. The diff layer must classify ordered user-authored changes oldest-first as:
 
 - `prompt_target` — prompts that require a response

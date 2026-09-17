@@ -170,7 +170,7 @@ fn resubmit_stranded_dispatch_only_trigger(
     Ok(())
 }
 
-fn dispatch_only_starting_pane_ready_via_authoritative_actor(
+fn dispatch_only_starting_pane_settled_via_authoritative_actor(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
@@ -197,9 +197,6 @@ fn dispatch_only_starting_pane_ready_via_authoritative_actor(
             return false;
         }
     };
-    if !actor.prompt_dispatch_allowed() {
-        return false;
-    }
     let prompt_ready = current_generation_ready_prompt_proven(tmux, &actor, harness);
     // Escapes preserved: `dispatch_only_blocker_reason` reaches
     // `protected_prompt_input_reason`, which uses the dim/faint styling of the
@@ -317,7 +314,7 @@ pub fn dispatch_only_send_reopen(
             &harness.binary,
         );
     let authoritative_actor_settled = historical_probe_required
-        && dispatch_only_starting_pane_ready_via_authoritative_actor(
+        && dispatch_only_starting_pane_settled_via_authoritative_actor(
             tmux,
             file,
             session_id,
@@ -424,7 +421,7 @@ pub fn dispatch_only_send_reopen(
                     }
                 }
             }
-            if dispatch_only_starting_pane_ready_via_authoritative_actor(
+            if dispatch_only_starting_pane_settled_via_authoritative_actor(
                 tmux,
                 file,
                 session_id,
@@ -444,7 +441,7 @@ pub fn dispatch_only_send_reopen(
             if ready_outcome.is_ready() {
                 break;
             }
-            if dispatch_only_starting_pane_ready_via_authoritative_actor(
+            if dispatch_only_starting_pane_settled_via_authoritative_actor(
                 tmux,
                 file,
                 session_id,

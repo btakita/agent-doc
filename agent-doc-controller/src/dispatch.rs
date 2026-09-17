@@ -944,10 +944,11 @@ pub fn starting_actor_not_ready_log_line(facts: StartingActorLogFacts<'_>) -> St
     )
 }
 
-/// A startup record is also settled when the authoritative actor has reached
-/// `Ready` on the requested pane but the pane is now in a recognized busy or
-/// interactive substate.  That state is not safe for direct injection, but it
-/// must leave the startup wait so the normal blocker path can queue behind an
+/// A startup record is also settled when the current authoritative actor owns
+/// the requested pane and the pane exposes a recognized busy or interactive
+/// blocker. The actor may already have transitioned from `Ready` to `Busy`
+/// because a turn started. That state is not safe for direct injection, but it
+/// must leave the startup wait so the normal blocker path can queue behind the
 /// active turn or return its precise interactive-state recovery instruction.
 pub fn dispatch_only_starting_pane_actor_settled(
     facts: DispatchOnlyStartingPaneActorReadyFacts<'_>,
@@ -955,7 +956,10 @@ pub fn dispatch_only_starting_pane_actor_settled(
 ) -> bool {
     dispatch_only_starting_pane_actor_ready(facts)
         || (facts.ready_facts.pane_id == facts.requested_pane
-            && facts.ready_facts.actor_state == ActorDispatchState::Ready
+            && matches!(
+                facts.ready_facts.actor_state,
+                ActorDispatchState::Ready | ActorDispatchState::Busy
+            )
             && facts.dispatch_eligible
             && recognized_pane_blocker)
 }
@@ -5642,7 +5646,6 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 dispatch_eligible: true,
             }
         ));
-
         let mut missing_prompt = ready_facts.clone();
         missing_prompt.prompt_ready = false;
         assert!(!dispatch_only_starting_pane_actor_ready(
@@ -5677,6 +5680,22 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 ready_facts: &busy,
                 dispatch_eligible: true,
             }
+        ));
+        assert!(dispatch_only_starting_pane_actor_settled(
+            DispatchOnlyStartingPaneActorReadyFacts {
+                requested_pane: "%42",
+                ready_facts: &busy,
+                dispatch_eligible: true,
+            },
+            true,
+        ));
+        assert!(!dispatch_only_starting_pane_actor_settled(
+            DispatchOnlyStartingPaneActorReadyFacts {
+                requested_pane: "%42",
+                ready_facts: &busy,
+                dispatch_eligible: true,
+            },
+            false,
         ));
 
         assert!(!dispatch_only_starting_pane_actor_ready(

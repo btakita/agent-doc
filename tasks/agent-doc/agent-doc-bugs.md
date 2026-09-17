@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0b046-cac2-7f32-a18a-c61373d0f342
+  codex: 01a0b180-e3a6-77b1-a146-0756d3071cd9
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -14,7 +14,7 @@ prompt_presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -129,6 +129,21 @@ Implemented and deployed the queue-stall fix across the shared runtime.
 - Tmux focus: the stashed-document focus repair is already landed in commit 3a73c09f0, preventing the router from repeatedly pulling focus to the right-side pane.
 - Verification: focused queue/runtime tests passed; the complete make check suite passed; make install passed. Source commit ed6085856 is pushed to origin/main. GitHub CI and Book workflows were queued for that exact SHA at closeout.
 - Live SDK check: the SDK pane is actively working on #sdkauthunreal. The stale document projection still showed #sdkauthts, matching the completed-node reuse defect fixed here; the installed supervisor reports fresh generation 27.
+
+### Re: Notes edits should not start turns — gpt-5 @ 2026-09-17T18:54:00-04:00
+
+> I added content into agent:notes, but agent-doc ran a turn on the notes anyways. It should be informational but not cause a turn to occur.
+
+Implemented and shipped in `aa061cb76`.
+
+- **Invariant and owner:** `agent:notes` body changes are context-only and cannot create a runnable diff. The pure `agent-doc-element` turn-role policy owns that decision; `agent-doc-diff` consumes it before preflight dispatch.
+- **Transitions covered:** notes-only changes produce no diff/no turn; notes plus an exchange prompt preserve the prompt and run; malformed and unknown components fail open and remain turn triggers.
+- **Reactive topology:** editor/current document → comment and informational-component normalization → unified diff → existing preflight/dispatch decision. No new long-lived state, polling, or imperative effect path was added.
+- **Surfaces changed:** element descriptors and registry, pure diff and diff-I/O regression coverage, functional specs, and the required tsift navigation refresh. Existing unrelated JetBrains/session-actor work was left untouched.
+- **Verification:** focused descriptor/registry/diff/diff-I/O tests passed; full `make check` passed; the public-repo private-name denylist returned no matches; `make install` completed successfully.
+- **Delivery:** pushed `aa061cb76` to `origin/main`. GitHub Actions CI run `35284240619` was queued at inspection time.
+
+No blockers remain.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -138,6 +153,7 @@ Implemented and deployed the queue-stall fix across the shared runtime.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 I added content into agent:notes, but agent-doc ran a turn on the notes anyways. It should be informational but not cause a turn to occur.
 <!-- /agent:queue -->
 
 

@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
-  codex: 01a0ab82-e77c-7cd3-8b55-e2f23cc48f96
+  codex: 01a0b0cb-bfc4-7302-84b6-d33cf4e22e1c
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -165,13 +165,37 @@ If “GoLand + C#” literally means authoring C# inside GoLand, there is also a
 I added recommended follow-up `#csharpindex` to promote C# into the indexable tier with symbol/call queries, `.cs` graph indexing, symbol-resolved rename, and a real Haiven fixture. That is the missing work; a GoLand-specific integration is not.
 
 Evidence/closeout: no source files were changed. Read-only checks used installed `tsift 0.1.98`, `tsift ast-grep languages`, two C# structural searches, direct lexical search/source-read, workspace language-coverage status, and C# `explain`/graph probes. Confidence is high on the tsift capability boundary; no escalation is needed.
+
+### Re: Response
+
+> **Queue prompt:**
+>
+> do [#csharpindex]
+
+
+> I meant golang, not goland. Please make C# fully supported.
+
+Implemented `#csharpindex`: C# is now a fully indexed tsift language alongside Go. The root, graph, and search feature sets include `lang-csharp`; `.cs` files emit class, struct, interface, enum, record, delegate, method, local-function, property, and enum-member symbols plus direct/member/generic invocation call edges. C# is registered for indexed semantic edits, including identifier-aware `rename_symbol` that excludes comments, strings, same-named properties, and property reads when the selected symbol is callable.
+
+Coverage now includes graph extraction/call-edge tests, cross-language conformance, rename safety, semantic-executor contract fixtures, and an end-to-end CLI test that indexes, searches, graphs, and renames a C# source file. I also corrected method call-edge ownership generally so calls inside indexed methods resolve to the method rather than the enclosing class.
+
+Verification:
+- `make check` passed.
+- `cargo install --path .` passed and installed tsift 0.1.98.
+- The installed binary indexed the real Haiven C# SDK fixture and resolved ten callers of `ServerFrame.Parse` across the conformance app, Unity edit/play-mode tests, and WebGL smoke code.
+- Latest GitHub Actions run was green: `release: 0.1.98 -- repository skill integration`.
+
+Commits pushed:
+- tsift: `0e1d7e1 feat: add full C# indexing support` on `origin/feat/csharp-index`
+- agent-loop: `4cac2b5b7 chore: point tsift at C# indexing support` on `origin/main`
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Does tsift properly support goland + C#? Dillon (haiven coworker) reported that tsift saved him ~18% tokens yesterday.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do [#csharpindex]~~
+- ~~I meant golang, not goland. Please make C# fully supported.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -180,7 +204,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#csharpindex] [recommended] Promote C# from structural-only to the indexable navigation tier: add symbol/call queries and .cs graph indexing, enable symbol-resolved rename, and prove it against a real Haiven C# fixture.
 - [ ] [#tsiftinstrpolicy] [recommended] Implement team-safe instruction deployment modes from #tsiftfriendlyteam: personal (no tracked repo mutation; user-scoped skill plus bundled runbook), shared (explicit AGENTS.md plus tracked runbook), and off; preserve existing installs and never default to AGENTS.override.md.
 <!-- /agent:backlog -->
 

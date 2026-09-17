@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
-  codex: 01a0a74b-cc3f-77d2-862c-8f4ff4dee348
+  codex: 01a0ab82-e77c-7cd3-8b55-e2f23cc48f96
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -145,12 +145,33 @@ Release evidence:
 - [GitHub release v0.1.98](https://github.com/btakita/tsift/releases/tag/v0.1.98), `tsift 0.1.98` on crates.io, and `opencode-tsift 0.1.98` on npm are public.
 
 I left `#tsiftinstrpolicy` open because it tracks the broader personal/shared/off deployment-mode design; this release completes the narrower skill-for-ambient-instructions request without claiming those additional modes.
+
+### Re: GoLand and C# support — gpt-5 · 2026-09-17T15:19-04:00
+
+> **Queue prompt:** Does tsift properly support goland + C#? Dillon (haiven coworker) reported that tsift saved him ~18% tokens yesterday.
+
+Partially. The precise answer for `tsift 0.1.98` is:
+
+- **Go is fully supported** in the indexable + structural tier: lexical/AST-aware search, symbol extraction, `explain`/call graphs, structural matching and rewriting, and symbol-resolved rename.
+- **GoLand is not a special tsift target.** tsift is a CLI used by the agent, so it works from a GoLand terminal or agent harness as long as the repository skill/instructions load and the harness can execute `tsift`. There is no GoLand-specific tsift plugin or IDE-index bridge to validate.
+- **C# is supported only in the structural tier.** `csharp`, `cs`, and `c#` resolve correctly; `.cs` inference works; `ast-grep search`/`rewrite` and the guarded `structural_rewrite` edit intent are supported. I verified this against Haiven's real `StartupTests.cs`: both a class pattern and `client.GetAsync("/")` matched with the C# grammar.
+- **Direct lexical search and bounded source reads work on C# files.** `tsift search StartupTests` found the class and constructor, so Dillon can already get useful token savings on C# work.
+- **C# is not in the persistent symbol/call-graph index.** Workspace status reports `.cs` files as skipped (65 in `haiven-dev`, 63 in `haiven-sdk`), and `explain StartupTests` / `graph StartupTests --callers` returned no definitions or edges. Consequently C# lacks symbol-aware navigation, call graphs, symbol-resolved rename/refactors, and formatter integration. The repository spec explicitly calls this tier “structural-only.”
+
+So Dillon's reported ~18% saving is credible, but it is coming from bounded lexical/source retrieval and structural matching—not the full tsift navigation stack. I would not describe C# support as “proper/full” yet.
+
+If “GoLand + C#” literally means authoring C# inside GoLand, there is also an IDE distinction: tsift remains usable because it is editor-agnostic, but JetBrains positions [Rider as its C#/.NET IDE](https://www.jetbrains.com/help/rider/Languages_CSharp.html). GoLand will not supply Rider-equivalent C# project intelligence to the human or agent.
+
+I added recommended follow-up `#csharpindex` to promote C# into the indexable tier with symbol/call queries, `.cs` graph indexing, symbol-resolved rename, and a real Haiven fixture. That is the missing work; a GoLand-specific integration is not.
+
+Evidence/closeout: no source files were changed. Read-only checks used installed `tsift 0.1.98`, `tsift ast-grep languages`, two C# structural searches, direct lexical search/source-read, workspace language-coverage status, and C# `explain`/graph probes. Confidence is high on the tsift capability boundary; no escalation is needed.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~Does tsift properly support goland + C#? Dillon (haiven coworker) reported that tsift saved him ~18% tokens yesterday.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -159,6 +180,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#csharpindex] [recommended] Promote C# from structural-only to the indexable navigation tier: add symbol/call queries and .cs graph indexing, enable symbol-resolved rename, and prove it against a real Haiven C# fixture.
 - [ ] [#tsiftinstrpolicy] [recommended] Implement team-safe instruction deployment modes from #tsiftfriendlyteam: personal (no tracked repo mutation; user-scoped skill plus bundled runbook), shared (explicit AGENTS.md plus tracked runbook), and off; preserve existing installs and never default to AGENTS.override.md.
 <!-- /agent:backlog -->
 

@@ -3360,6 +3360,23 @@ impl QueueProjection {
     }
 
     fn apply_worklist(&mut self, queue_hash: &str, entries: &[QueueWorklistEntry], active: bool) {
+        if active {
+            for entry in entries {
+                let Some(node_key) = entry.node_key.as_deref() else {
+                    continue;
+                };
+                if self.completed_heads.remove(node_key) {
+                    self.heads.insert(
+                        node_key.to_string(),
+                        QueueHeadProjection::new(entry.backlog_id.as_deref()),
+                    );
+                    self.active_heads.remove(node_key);
+                    if self.active_head.as_deref() == Some(node_key) {
+                        self.active_head = None;
+                    }
+                }
+            }
+        }
         self.worklist_queue_hash = Some(queue_hash.to_string());
         self.worklist_active = active;
         self.worklist = if active { entries.to_vec() } else { Vec::new() };
@@ -9274,6 +9291,22 @@ mod tests {
         queue.apply_selected("node-1", None, None, true);
         assert_eq!(queue.active_head, None);
         assert_eq!(queue.heads["node-1"].phase, QueueHeadPhase::Completed);
+        queue.apply_worklist(
+            "queue-hash-reintroduced",
+            &[QueueWorklistEntry {
+                kind: QueueWorklistEntryKind::Prompt,
+                text: "do [#again]".into(),
+                node_key: Some("node-1".into()),
+                backlog_id: Some("again".into()),
+                drainable: true,
+            }],
+            true,
+        );
+        assert!(!queue.completed_heads.contains("node-1"));
+        assert_eq!(queue.heads["node-1"].phase, QueueHeadPhase::Pending);
+        queue.apply_selected("node-1", Some("again"), Some("do [#again]"), true);
+        assert_eq!(queue.active_head.as_deref(), Some("node-1"));
+        assert_eq!(queue.heads["node-1"].phase, QueueHeadPhase::Selected);
         let mut deferred_queue = QueueProjection::default();
         deferred_queue.apply_selected("node-2", Some("alpha"), Some("do [#alpha]"), true);
         deferred_queue.apply_deferred("node-2", "stop_fence");

@@ -14,7 +14,8 @@ use agent_doc_queue::queue::{
     clear_cooldown_resume_ready, drain_blocked_awaiting_clear_settle, drain_dispatch_dedup_skip,
     idle_queue_context_clear_in_flight_decision, idle_queue_context_clear_in_flight_settle_ticks,
     idle_queue_context_reset_decision_with_current_transition,
-    idle_queue_drain_decision_with_current_transition, stale_drain_recycle_yield_requested,
+    idle_queue_drain_decision_with_current_transition, rearm_queue_dispatch_dedup,
+    stale_drain_recycle_yield_requested,
 };
 #[cfg(test)]
 use agent_doc_queue::queue::{idle_queue_context_reset_decision, idle_queue_drain_decision};
@@ -2198,6 +2199,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     IdleQueueTransition::Unresolved
                 }
             };
+            last_dispatched =
+                rearm_queue_dispatch_dedup(last_dispatched, active_head.as_deref());
             queue_continuation_triggers.observe_head(
                 active_head.as_deref().map(agent_doc_hash::content_hash),
             );

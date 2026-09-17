@@ -168,6 +168,17 @@ pub fn queue_worklist_hash(entries: &[QueueEntry]) -> String {
     agent_doc_hash::content_hash(&document_queue::render(entries))
 }
 
+/// Hash only the live queue component so unrelated document edits do not
+/// manufacture a new queue lifecycle generation.
+pub fn queue_worklist_hash_for_document(content: &str) -> Option<String> {
+    let components = agent_doc_element::element::parse(content).ok()?;
+    let queue = components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    let entries = document_queue::parse(&content[queue.open_end..queue.close_start]).ok()?;
+    Some(queue_worklist_hash(&entries))
+}
+
 /// Deduplicate queue item node keys before queue maintenance projects state
 /// from the markdown AST.
 pub fn dedup_queue_nodes_by_key(content: &str) -> Result<Option<(String, usize)>> {
@@ -342,6 +353,29 @@ mod tests {
         assert_eq!(
             queue_worklist_hash(&entries),
             agent_doc_hash::content_hash(&document_queue::render(&entries))
+        );
+    }
+
+    #[test]
+    fn document_queue_hash_ignores_exchange_edits_but_tracks_queue_edits() {
+        let first = "\
+<!-- agent:queue -->
+- do [#alpha]
+<!-- /agent:queue -->
+<!-- agent:exchange -->
+first
+<!-- /agent:exchange -->
+";
+        let exchange_edit = first.replace("first", "second");
+        let queue_edit = first.replace("alpha", "beta");
+
+        assert_eq!(
+            queue_worklist_hash_for_document(first),
+            queue_worklist_hash_for_document(&exchange_edit)
+        );
+        assert_ne!(
+            queue_worklist_hash_for_document(first),
+            queue_worklist_hash_for_document(&queue_edit)
         );
     }
 

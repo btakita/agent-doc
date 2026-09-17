@@ -211,6 +211,9 @@ fn record_next_queue_head_selected_state<E: QueueConsumptionProofEffects + ?Size
     let head_text = selection.head_text;
     let stop_fence_at_head = selection.stop_fence_at_head;
     let content_hash = agent_doc_hash::content_hash(&head_text);
+    let queue_generation =
+        agent_doc_queue::queue_projection::queue_worklist_hash_for_document(content)
+            .unwrap_or_else(|| agent_doc_hash::content_hash(content));
     let drainable = !stop_fence_at_head
         && agent_doc_queue::queue_continuation::live_drainable_continuation_head(
             content,
@@ -218,7 +221,9 @@ fn record_next_queue_head_selected_state<E: QueueConsumptionProofEffects + ?Size
         )
         .is_some();
     let selected_event = agent_doc_state_backbone::StateEvent::new(
-        format!("queue-head-selected:{document_hash}:{node_key}:0:{content_hash}"),
+        format!(
+            "queue-head-selected:{document_hash}:{node_key}:0:{content_hash}:{queue_generation}"
+        ),
         agent_doc_state_backbone::StateFact::QueueHeadSelected {
             document_hash: document_hash.to_string(),
             node_key: node_key.clone(),
@@ -246,7 +251,7 @@ fn record_next_queue_head_selected_state<E: QueueConsumptionProofEffects + ?Size
         let reason_hash = agent_doc_hash::content_hash(reason);
         let deferred_event = agent_doc_state_backbone::StateEvent::new(
             format!(
-                "queue-head-deferred:{document_hash}:{node_key}:0:{reason_hash}:{content_hash}"
+                "queue-head-deferred:{document_hash}:{node_key}:0:{reason_hash}:{content_hash}:{queue_generation}"
             ),
             agent_doc_state_backbone::StateFact::QueueHeadDeferred {
                 document_hash: document_hash.to_string(),

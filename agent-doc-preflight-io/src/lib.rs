@@ -2308,8 +2308,13 @@ fn record_selected_queue_head_state(
     };
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let content_hash = agent_doc_hash::content_hash(head_text);
+    let queue_generation =
+        agent_doc_queue::queue_projection::queue_worklist_hash_for_document(content)
+            .unwrap_or_else(|| agent_doc_hash::content_hash(content));
     let event = agent_doc_state_backbone::StateEvent::new(
-        format!("queue-head-selected:{document_hash}:{node_key}:0:{content_hash}"),
+        format!(
+            "queue-head-selected:{document_hash}:{node_key}:0:{content_hash}:{queue_generation}"
+        ),
         agent_doc_state_backbone::StateFact::QueueHeadSelected {
             document_hash: document_hash.clone(),
             node_key: node_key.clone(),
@@ -2357,8 +2362,13 @@ fn record_deferred_queue_head_state(
     };
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let content_hash = agent_doc_hash::content_hash(head_text);
+    let queue_generation =
+        agent_doc_queue::queue_projection::queue_worklist_hash_for_document(content)
+            .unwrap_or_else(|| agent_doc_hash::content_hash(content));
     let selected_event = agent_doc_state_backbone::StateEvent::new(
-        format!("queue-head-deferred-selected:{document_hash}:{node_key}:0:{content_hash}"),
+        format!(
+            "queue-head-deferred-selected:{document_hash}:{node_key}:0:{content_hash}:{queue_generation}"
+        ),
         agent_doc_state_backbone::StateFact::QueueHeadSelected {
             document_hash: document_hash.clone(),
             node_key: node_key.clone(),
@@ -2371,7 +2381,9 @@ fn record_deferred_queue_head_state(
     let selected_inserted = publish_reactive_state_event(&project_root, &selected_event)?;
     let reason_hash = agent_doc_hash::content_hash(reason);
     let deferred_event = agent_doc_state_backbone::StateEvent::new(
-        format!("queue-head-deferred:{document_hash}:{node_key}:0:{reason_hash}:{content_hash}"),
+        format!(
+            "queue-head-deferred:{document_hash}:{node_key}:0:{reason_hash}:{content_hash}:{queue_generation}"
+        ),
         agent_doc_state_backbone::StateFact::QueueHeadDeferred {
             document_hash: document_hash.clone(),
             node_key: node_key.clone(),

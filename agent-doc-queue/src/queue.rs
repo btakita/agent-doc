@@ -154,6 +154,20 @@ pub fn idle_queue_drain_decision(
     }
 }
 
+/// Keep dispatch deduplication scoped to one contiguous observation of a head.
+///
+/// A different head proves the prior head's dispatch lifecycle has ended, even
+/// when that intervening head was consumed by an attended or manual path.
+pub fn rearm_queue_dispatch_dedup(
+    last_dispatched: Option<String>,
+    active_head: Option<&str>,
+) -> Option<String> {
+    match (last_dispatched, active_head) {
+        (Some(last), Some(active)) if last != active => None,
+        (last, _) => last,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IdleQueueDrainDecisionFacts<'a> {
     pub clear_cooldown_active: bool,
@@ -396,6 +410,18 @@ mod tests {
                 last_dispatched: None,
             }),
             IdleQueueDrainDecision::SkipCurrentTransition
+        );
+    }
+
+    #[test]
+    fn dispatch_dedup_rearms_after_an_intervening_head() {
+        assert_eq!(
+            rearm_queue_dispatch_dedup(Some("do [#a]".to_string()), Some("do [#a]")),
+            Some("do [#a]".to_string())
+        );
+        assert_eq!(
+            rearm_queue_dispatch_dedup(Some("do [#a]".to_string()), Some("do [#b]")),
+            None
         );
     }
 

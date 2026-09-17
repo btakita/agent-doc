@@ -2,6 +2,30 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.399
+
+- **Linux and Windows releases may ship on demand; only Darwin asset uploads
+  retain the weekly cadence (`#weekly-macos-assets`).** The ordinary release
+  target no longer checks the newest tag's age. The operator-owned macOS upload
+  path instead fails closed against the newest Darwin asset `created_at`
+  timestamp, so another platform release cannot reset or postpone its window.
+- **Prebuilt archives preserve the native FFI path, and installed surfaces
+  report their real identity (GH #52 / #53).** Linux, Windows, and Darwin
+  packages carry the platform cdylib beside the executable; tmux pane identity
+  discovery uses a printable delimiter while accepting legacy tab-delimited
+  output; and JetBrains install/update reports the extracted plugin JAR version
+  rather than the enclosing agent-doc tag.
+- **Queue closeout recovery is generation-fenced and composable.** Retained
+  free-text strikes retry through terminal races, late committed strikes recover
+  without consuming a newer head, reaped work is reconstructed from committed
+  queue evidence, and gate-type mutation composes atomically with review
+  transitions instead of losing the newly gated item.
+- **Editor authority remains live across capture, focus, and supervisor
+  transitions.** Response capture resolves through the authoritative editor,
+  compressed/stashed panes are classified and focused correctly, repeated
+  editor sync is coalesced, and owned hook preflight cycles survive process
+  handoff without exposing a stale closeout boundary.
+
 ## 0.35.398
 
 - **Answered free-text queue strikes are atomic with closeout

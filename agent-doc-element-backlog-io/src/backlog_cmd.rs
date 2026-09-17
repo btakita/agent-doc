@@ -1519,7 +1519,7 @@ pub fn resolve_gate(file: &Path, gate_type: &str) -> Result<()> {
 
 /// Set a typed gate on a gated item (e.g., `[/]` → `[/release]`).
 pub fn set_gate_type(file: &Path, id: &str, gate_type: &str) -> Result<()> {
-    let (full_content, comp) = find_pending_component(file)?;
+    let (full_content, comp) = find_component_containing_open_id(file, id)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let new_content = backlog::op_set_gate_type(existing, id, gate_type)?;
     let canonical = backlog::canonicalize_tracked_work_body(
@@ -2517,6 +2517,22 @@ mod tests {
         force_pending(|| set_gate_type(&doc, "a1b2", "release"));
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("[/release]"));
+    }
+
+    #[test]
+    fn set_gate_type_follows_same_transaction_gate_into_review() {
+        let (_tmp, doc) = doc_with_pending("- [ ] [#a1b2] Release v1.0");
+        force_pending(|| {
+            with_pending_write_transaction(&doc, || {
+                gate(&doc, "a1b2")?;
+                set_gate_type(&doc, "a1b2", "release")
+            })
+        });
+
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(content.contains("<!-- agent:review -->"));
+        assert!(content.contains("- [/release] [#a1b2] Release v1.0"));
+        assert_eq!(content.matches("[#a1b2]").count(), 1);
     }
 
     #[test]

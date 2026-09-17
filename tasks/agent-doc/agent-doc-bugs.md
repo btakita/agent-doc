@@ -63,6 +63,7 @@ Release and publication cannot complete today because the enforced weekly cadenc
 
 
 <!-- agent:backlog priority -->
+- [/release] [#github5253release] Publish the next weekly agent-doc batch no earlier than 2026-09-22T16:41:52Z; verify GitHub assets and PyPI, then close issue #53. Issue #52 is already closed; fixes are on main in c92d5d629 and a10a684b3.
 <!-- /agent:backlog -->
 
 ## Review

@@ -115,6 +115,20 @@ Restart the running JetBrains IDE once to activate plugin `0.2.387`. Until that 
 Verified. IntelliJ is running plugin `0.2.387` under new PID `1545434`, with generation fencing and editor-authority capabilities registered. All seven open documents—including `agent-doc-bugs.md` and `tsift.md`—are live and projection-complete.
 
 No further restart is needed.
+
+### Re: sdk.md queue stalled #agent-doc-causes — gpt-5.6-sol · 2026-09-17T16:51:43-04:00
+
+> **Queue prompt:** sdk.md queue stalled #agent-doc-causes
+
+Implemented and deployed the queue-stall fix across the shared runtime.
+
+- Root cause: the supervisor dedup latch remembered only the last prompt text. If another head was handled through an attended or manual path, the latch stayed armed; when the older text returned, the supervisor silently classified it as already dispatched. The durable projection compounded this because completed node identities were absorbing and selected/deferred event IDs could collide across queue generations.
+- Fix: dispatch dedup now re-arms on any intervening head; a live editor worklist reopens a previously completed node; selected/deferred state events are fenced by the queue-component generation. Exchange-only edits do not manufacture a new queue generation.
+- Editor authority: the previously landed native-save changes keep the IDE buffer authoritative and overwrite disk through a generation-fenced editor save. External file changes remain an editor File Cache Conflict for the user to resolve.
+- Parity: the behavior is in the shared Rust queue engine. The parity installer rebuilt and installed the CLI/library, JetBrains plugin 0.2.387, VS Code extension 0.2.71, and refreshed the Claude Code, Codex, Cursor, Grok, and OpenCode skills.
+- Tmux focus: the stashed-document focus repair is already landed in commit 3a73c09f0, preventing the router from repeatedly pulling focus to the right-side pane.
+- Verification: focused queue/runtime tests passed; the complete make check suite passed; make install passed. Source commit ed6085856 is pushed to origin/main. GitHub CI and Book workflows were queued for that exact SHA at closeout.
+- Live SDK check: the SDK pane is actively working on #sdkauthunreal. The stale document projection still showed #sdkauthts, matching the completed-node reuse defect fixed here; the installed supervisor reports fresh generation 27.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

@@ -253,16 +253,14 @@ binary was installed: a Cargo build tree is told to `cargo build --release`, and
 a package install is pointed at a release asset or `agent-doc lib-install
 --source <dir>` rather than at a toolchain it does not have.
 
-Tagged releases are weekly batches (`#weekly-release-batch`). The release gate
-must refuse a new tag until the latest published GitHub Release is at least seven
-days old, and it must fail closed when that timestamp cannot be verified. Work
-continues to be checked, installed locally, committed, and pushed between release
-windows. Once the window opens, one tag publishes the accumulated changes for the
-four automated Linux and Windows targets. GitHub Actions must not run macOS jobs.
-Operator-built Darwin artifacts may be uploaded periodically from a Mac with
-`make release-macos-assets TAG=v<version>`; that command builds both Darwin
-targets, requires the binary and `.dylib` in each archive, and refreshes the
-release's checksum manifest across every platform archive.
+Tags and the four automated Linux and Windows targets are publishable on demand.
+GitHub Actions must not run macOS jobs. Operator-built Darwin artifacts follow a
+weekly cadence (`#weekly-macos-assets`): `make release-macos-assets TAG=v<version>`
+must refuse to build or upload until the latest Darwin asset upload is at least
+seven days old, and it must fail closed when GitHub asset timestamps cannot be
+verified. The command builds both Darwin targets, requires the binary and `.dylib`
+in each archive, and refreshes the release's checksum manifest across every
+platform archive.
 
 `agent-doc upgrade` checks GitHub Releases for a newer version and upgrades through the prebuilt GitHub binary / `pip` cascade. The agent-doc Rust workspace is private and is not a crates.io upgrade source.
 

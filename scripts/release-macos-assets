@@ -11,6 +11,9 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+python3 "$script_dir/agent-doc-dev" verify-macos-release-cadence --root "$script_dir/.."
+
 gh release view "$tag" >/dev/null
 
 asset_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-macos-assets.XXXXXX")"

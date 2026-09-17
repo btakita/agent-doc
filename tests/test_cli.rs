@@ -14205,28 +14205,39 @@ fn test_release_artifacts_and_pypi_bootstrap_preserve_ffi_for_issue_52() {
 }
 
 #[test]
-fn test_release_cadence_batches_complete_releases_weekly() {
+fn test_release_cadence_applies_only_to_macos_assets() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let makefile = fs::read_to_string(manifest_dir.join("Makefile")).unwrap();
     assert!(
-        makefile.contains("release: release-cadence-check check")
-            && makefile.contains("python3 scripts/agent-doc-dev verify-release-cadence"),
-        "the release target must pass the weekly cadence gate before tagging"
+        makefile.contains("release: check")
+            && !makefile.contains("release: release-macos-cadence-check")
+            && makefile.contains(
+                "python3 scripts/agent-doc-dev verify-macos-release-cadence"
+            ),
+        "normal tags must remain on demand while exposing a macOS-only cadence check"
     );
 
     let harness = fs::read_to_string(manifest_dir.join("scripts/agent-doc-dev")).unwrap();
     assert!(
-        harness.contains("RELEASE_CADENCE_DAYS = 7")
-            && harness.contains("[\"gh\", \"release\", \"view\"")
-            && harness.contains("refusing to tag"),
-        "the weekly gate must verify the published release timestamp and fail closed"
+        harness.contains("MACOS_RELEASE_CADENCE_DAYS = 7")
+            && harness.contains("repos/{owner}/{repo}/releases?per_page=100")
+            && harness.contains("created_at")
+            && harness.contains("refusing to publish Darwin assets"),
+        "the macOS gate must verify Darwin asset upload timestamps and fail closed"
+    );
+
+    let macos_release =
+        fs::read_to_string(manifest_dir.join("scripts/release-macos-assets")).unwrap();
+    assert!(
+        macos_release.contains("verify-macos-release-cadence"),
+        "the direct Darwin upload script must enforce the macOS cadence"
     );
 
     let release = fs::read_to_string(manifest_dir.join(".github/workflows/release.yml")).unwrap();
     assert_eq!(
         release.matches("- target:").count(),
         4,
-        "a weekly tag must build the four automated Linux and Windows targets"
+        "each on-demand tag must build the four automated Linux and Windows targets"
     );
     assert!(
         !release.contains("apple-darwin") && !release.contains("macos-"),
@@ -14236,11 +14247,12 @@ fn test_release_cadence_batches_complete_releases_weekly() {
     let spec = fs::read_to_string(manifest_dir.join("specs/07-core-commands.md")).unwrap();
     let spec_words = spec.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        spec.contains("#weekly-release-batch")
-            && spec_words.contains("at least seven days old")
+        spec.contains("#weekly-macos-assets")
+            && spec_words.contains("Darwin asset upload is at least seven days old")
+            && spec_words.contains("Tags and the four automated Linux and Windows targets are publishable on demand")
             && spec_words.contains("four automated Linux and Windows targets")
             && spec_words.contains("Operator-built Darwin artifacts"),
-        "the weekly hosted-release and operator-built Darwin policy must remain specified"
+        "the on-demand hosted-release and weekly Darwin policy must remain specified"
     );
 }
 

@@ -59,7 +59,10 @@ MUTATION_CAPTURE_CALL = (
 AUTHORITY_RESOLUTION_CALL = (
     "None => resolve_document_content_for_write_mode("
 )
-RELEASE_CADENCE_DAYS = 7
+MACOS_RELEASE_CADENCE_DAYS = 7
+MACOS_RELEASE_ASSET_RE = re.compile(
+    r"^agent-doc-(?:x86_64|aarch64)-apple-darwin\.tar\.gz$"
+)
 
 
 class HarnessError(RuntimeError):
@@ -68,52 +71,87 @@ class HarnessError(RuntimeError):
 
 def parse_release_timestamp(value: object) -> dt.datetime:
     if not isinstance(value, str) or not value:
-        raise HarnessError("latest GitHub Release has no publishedAt timestamp")
+        raise HarnessError("GitHub release asset has no created_at timestamp")
     try:
         parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
-        raise HarnessError(f"invalid GitHub Release timestamp {value!r}") from exc
+        raise HarnessError(f"invalid GitHub release asset timestamp {value!r}") from exc
     if parsed.tzinfo is None:
-        raise HarnessError(f"GitHub Release timestamp has no timezone: {value!r}")
+        raise HarnessError(f"GitHub release asset timestamp has no timezone: {value!r}")
     return parsed.astimezone(dt.timezone.utc)
 
 
-def next_release_at(latest_published_at: dt.datetime) -> dt.datetime:
-    return latest_published_at + dt.timedelta(days=RELEASE_CADENCE_DAYS)
+def next_macos_release_at(latest_published_at: dt.datetime) -> dt.datetime:
+    return latest_published_at + dt.timedelta(days=MACOS_RELEASE_CADENCE_DAYS)
 
 
-def verify_release_cadence(root: Path) -> tuple[str, dt.datetime, dt.datetime]:
+def latest_macos_release_asset(payload: object) -> tuple[str, dt.datetime] | None:
+    if not isinstance(payload, list):
+        raise HarnessError("gh returned non-array paginated release data")
+    latest: tuple[str, dt.datetime] | None = None
+    for page in payload:
+        if not isinstance(page, list):
+            raise HarnessError("gh returned a non-array release page")
+        for release in page:
+            if not isinstance(release, dict):
+                raise HarnessError("gh returned a non-object release")
+            tag = release.get("tag_name")
+            assets = release.get("assets")
+            if not isinstance(tag, str) or not tag:
+                raise HarnessError("GitHub Release has no tag_name")
+            if not isinstance(assets, list):
+                raise HarnessError(f"GitHub Release {tag} has no asset list")
+            for asset in assets:
+                if not isinstance(asset, dict):
+                    raise HarnessError(f"GitHub Release {tag} has a non-object asset")
+                name = asset.get("name")
+                if not isinstance(name, str) or not MACOS_RELEASE_ASSET_RE.fullmatch(name):
+                    continue
+                created_at = parse_release_timestamp(asset.get("created_at"))
+                if latest is None or created_at > latest[1]:
+                    latest = (tag, created_at)
+    return latest
+
+
+def verify_macos_release_cadence(
+    root: Path,
+) -> tuple[str | None, dt.datetime | None, dt.datetime | None]:
     try:
         completed = subprocess.run(
-            ["gh", "release", "view", "--json", "tagName,publishedAt"],
+            [
+                "gh",
+                "api",
+                "--paginate",
+                "--slurp",
+                "repos/{owner}/{repo}/releases?per_page=100",
+            ],
             cwd=root,
             check=False,
             capture_output=True,
             text=True,
         )
     except OSError as exc:
-        raise HarnessError(f"cannot query the latest GitHub Release with gh: {exc}") from exc
+        raise HarnessError(f"cannot query GitHub release assets with gh: {exc}") from exc
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip() or "unknown gh error"
         raise HarnessError(
-            "cannot verify the seven-day release window; refusing to tag: " + detail
+            "cannot verify the seven-day macOS release window; "
+            "refusing to publish Darwin assets: " + detail
         )
     try:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
-        raise HarnessError("gh returned invalid JSON for the latest GitHub Release") from exc
-    if not isinstance(payload, dict):
-        raise HarnessError("gh returned a non-object latest GitHub Release")
-    tag = payload.get("tagName")
-    if not isinstance(tag, str) or not tag:
-        raise HarnessError("latest GitHub Release has no tagName")
-    published_at = parse_release_timestamp(payload.get("publishedAt"))
-    eligible_at = next_release_at(published_at)
+        raise HarnessError("gh returned invalid JSON for GitHub releases") from exc
+    latest = latest_macos_release_asset(payload)
+    if latest is None:
+        return None, None, None
+    tag, published_at = latest
+    eligible_at = next_macos_release_at(published_at)
     now = dt.datetime.now(dt.timezone.utc)
     if now < eligible_at:
         raise HarnessError(
-            f"weekly release batch is closed: {tag} published at "
-            f"{published_at.isoformat()}; next complete release is eligible at "
+            f"weekly macOS asset window is closed: {tag} uploaded Darwin assets at "
+            f"{published_at.isoformat()}; next Darwin upload is eligible at "
             f"{eligible_at.isoformat()}"
         )
     return tag, published_at, eligible_at
@@ -483,12 +521,40 @@ version = "1.2.3"
 
 def self_test() -> None:
     latest = dt.datetime(2026, 9, 1, 12, 0, tzinfo=dt.timezone.utc)
-    if next_release_at(latest) != dt.datetime(
+    if next_macos_release_at(latest) != dt.datetime(
         2026, 9, 8, 12, 0, tzinfo=dt.timezone.utc
     ):
-        raise HarnessError("weekly release cadence did not advance by exactly seven days")
+        raise HarnessError("weekly macOS cadence did not advance by exactly seven days")
     if parse_release_timestamp("2026-09-01T12:00:00Z") != latest:
-        raise HarnessError("GitHub Release timestamp parsing did not preserve UTC")
+        raise HarnessError("GitHub asset timestamp parsing did not preserve UTC")
+    selected = latest_macos_release_asset(
+        [[
+            {
+                "tag_name": "v1.2.2",
+                "assets": [
+                    {"name": "agent-doc-x86_64-unknown-linux-gnu.tar.gz"},
+                    {
+                        "name": "agent-doc-aarch64-apple-darwin.tar.gz",
+                        "created_at": "2026-09-01T12:00:00Z",
+                    },
+                ],
+            },
+            {
+                "tag_name": "v1.2.3",
+                "assets": [
+                    {
+                        "name": "agent-doc-x86_64-apple-darwin.tar.gz",
+                        "created_at": "2026-09-02T12:00:00Z",
+                    }
+                ],
+            },
+        ]]
+    )
+    if selected != (
+        "v1.2.3",
+        dt.datetime(2026, 9, 2, 12, 0, tzinfo=dt.timezone.utc),
+    ):
+        raise HarnessError("macOS cadence did not select the latest Darwin asset")
     with tempfile.TemporaryDirectory(prefix="agent-doc-dev-") as temp:
         root = Path(temp)
         write_fixture(root)
@@ -579,8 +645,8 @@ def parse_args() -> argparse.Namespace:
     verify.add_argument("--root", type=Path)
 
     cadence = subparsers.add_parser(
-        "verify-release-cadence",
-        help="fail closed unless the latest complete release is at least seven days old",
+        "verify-macos-release-cadence",
+        help="fail closed unless the latest Darwin asset is at least seven days old",
     )
     cadence.add_argument("--root", type=Path)
 
@@ -612,12 +678,16 @@ def main() -> int:
                 f"({manifests} manifests, {dependencies} internal constraints, "
                 f"{len(SKILL_FILES)} bundled skill source(s))"
             )
-        elif args.command == "verify-release-cadence":
-            tag, published_at, eligible_at = verify_release_cadence(root)
-            print(
-                f"weekly release window is open: {tag} published at "
-                f"{published_at.isoformat()} (eligible since {eligible_at.isoformat()})"
-            )
+        elif args.command == "verify-macos-release-cadence":
+            tag, published_at, eligible_at = verify_macos_release_cadence(root)
+            if tag is None:
+                print("weekly macOS asset window is open: no prior Darwin assets")
+            else:
+                assert published_at is not None and eligible_at is not None
+                print(
+                    f"weekly macOS asset window is open: {tag} uploaded Darwin assets at "
+                    f"{published_at.isoformat()} (eligible since {eligible_at.isoformat()})"
+                )
         elif args.command == "self-test":
             self_test()
             print("agent-doc-dev release projection self-test passed")

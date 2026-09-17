@@ -20,7 +20,7 @@ Interactive document sessions with AI agents.
 - **NEVER swallow errors** — no `let _ =` on fallible operations. Always log at minimum a warning to stderr. Silent failures make bugs invisible and waste debugging cycles.
 - **Behavioral fixes are packagable, not per-user agent memory** — when an agent-doc *session* behaves wrong (the agent stalled the queue, asked the wrong thing, mishandled closeout), fix it in the **product** so every user benefits: a binary heuristic, a `SKILL.md`/runbook instruction surface, or these development instructions. Do **not** resolve agent-doc behavior problems by writing a per-user agent-memory note — agent-doc ships to other people, and a memory only helps one operator. Memory is for facts about *a specific environment*, never for correcting shipped agent-doc behavior.
 - **Diagnosis is not a deliverable (`#diagnose-then-fix`)** — when a session investigates a reported bug and lands on a root cause, the SAME session must fix it: implement, add regression coverage, run `make check`, build/install, and close the item. Handing back a well-written set of backlog items describing defects the session already understands is **not** closeout — it turns completed analysis back into unstarted work and forces the operator to ask for the fix again. "It spans several crates", "this deserves a focused cycle", and "I did not want to land a partial change" are stalls: land and verify what is proven, and leave only a genuinely blocked remainder. When one investigation surfaces several defects, fix them together and put any survivors at the TOP of `agent:backlog` so the queue takes them next. Only an operator-gated proof (a live editor/pane eyeball, an external approval) justifies leaving a diagnosed defect unfixed, and the item must state exactly what unblocks it.
-- **Do the agent-doable deploy/release work without asking (`#deploy-just-do-it`)** — when a session produces a shippable agent-doc change, execute the immediate agent-doable steps autonomously: `make check`, commit, `make install` (see `#installfulloom` below), push, and `agent-doc admin recycle`. Version projection, the `VERSIONS.md` entry, `make install-full`, tagging, and publishing are also agent-doable, but `#weekly-release-batch` groups them into one complete release no more than once every seven days. When the window is open, execute the release train without asking; when it is closed, leave the checked, installed, pushed change queued for the next batch instead of forcing a tag or publishing incomplete platform assets. The **only** operator-gated step is the genuine live-session eyeball (a human watching a real editor/pane prove the behavior); record it as a non-blocking `[operator-verify]` follow-up. A closed cadence window is a schedule, not an operator gate, and asking permission for agent-doable work is itself the bug.
+- **Do the agent-doable deploy/release work without asking (`#deploy-just-do-it`)** — when a session produces a shippable agent-doc change, execute the immediate agent-doable steps autonomously: `make check`, commit, `make install` (see `#installfulloom` below), push, and `agent-doc admin recycle`. Version projection, the `VERSIONS.md` entry, `make install-full`, tagging, and publishing are also agent-doable; tags and their Linux/Windows assets may ship on demand. Only operator-built Darwin asset uploads follow the seven-day `#weekly-macos-assets` cadence. When that window is open, publish the macOS assets without asking; when it is closed, leave those assets for the next window without delaying other platforms. The **only** operator-gated step is the genuine live-session eyeball (a human watching a real editor/pane prove the behavior); record it as a non-blocking `[operator-verify]` follow-up. A closed macOS cadence window is a schedule, not an operator gate, and asking permission for agent-doable work is itself the bug.
 - **External CI is observed, never awaited (`#ci-no-closeout-wait`)** — local full-suite verification is the proof gate. After push, inspect the latest CI run once and report a queued, in-progress, failed, or successful status. Do not poll, watch, or keep the turn open for CI to finish unless the user explicitly asks you to wait. If an already-visible failure belongs to the change, fix it; otherwise close from local evidence and leave the external status explicit.
 - **Operator-visible document text is authoritative** — Preserve user edits through Lazily-owned semantic response checkpoints and binary-owned `agent-doc respond --stream` turn resolution (`finalize` is a compatibility alias). Checkpoint only complete `### Re:` sections; never publish incomplete token prefixes to the document, and never recover, patch, or hook-closeout by replacing operator text with `content_ours`, a snapshot, an incomplete token capture, or a lazily visible-write receipt. Snapshots and incomplete token captures are backup/audit state, not hot-path authority; fail closed or retry through the editor instead.
 - **Response closeout is atomic** — The complete final response, queue-head consumption, backlog/done mutations, snapshot, and commit succeed as one transaction or none becomes authoritative. `repair` is exceptional crash recovery, never part of a healthy response cycle.
@@ -329,18 +329,14 @@ editors/
 
 ## Release Process
 
-Between release windows, run `make check`, install with `make install`, commit,
-push, and recycle long-lived surfaces as usual. Do not create a version-only
-commit or tag for each fix.
+Run `make check`, install with `make install`, commit, push, and recycle
+long-lived surfaces as usual. Tags and their hosted Linux/Windows assets may be
+published on demand. Only Darwin asset uploads are weekly
+(`#weekly-macos-assets`): the upload path reads the latest matching GitHub asset
+`created_at` timestamp and fails closed unless it proves seven days have elapsed.
+An on-demand tag or Linux/Windows build does not reset that clock.
 
-The tagged release train is a weekly batch (`#weekly-release-batch`): no more
-than one complete GitHub Release may be published in any seven-day window. Run
-`make release-cadence-check` before changing version surfaces. The gate reads the
-latest published GitHub Release timestamp and fails closed if it cannot prove
-the window is open. GitHub Actions builds only Linux and Windows release assets;
-Darwin assets are built periodically on operator-owned Mac hardware.
-
-When the release window is open:
+When publishing a release:
 
 1. Run `make release-version VERSION=<version>` to project the version across
    every workspace package, internal path constraint, `Cargo.lock`,
@@ -360,8 +356,7 @@ When the release window is open:
    a non-blocking `[operator-verify]` follow-up.
 6. Branch → PR → squash merge to main (or commit + push to main directly in this
    dogfooding repo).
-7. Run `make release`; its cadence dependency rechecks the window immediately
-   before the recipe tags `v<version>` and pushes main plus the tag.
+7. Run `make release`; the recipe tags `v<version>` and pushes main plus the tag.
 8. The tag push drives the GitHub Release: `.github/workflows/release.yml`
    builds four Linux and Windows target binaries and packages each one **with its
    platform cdylib beside it** (`libagent_doc.so` / `agent_doc.dll` — GH #52: without
@@ -377,8 +372,10 @@ When the release window is open:
    executable and cdylib together in a versioned user cache.
 9. Verify the release run went green (`gh run list --limit 5`) and that
    `gh release view v<version>` lists four automated platform archives plus
-   `SHA256SUMS`. On a Mac, `make release-macos-assets TAG=v<version>` may later
-   add both Darwin archives and atomically refresh `SHA256SUMS` across all assets.
+   `SHA256SUMS`. On a Mac, `make release-macos-cadence-check` reports whether the
+   weekly Darwin window is open; `make release-macos-assets TAG=v<version>`
+   enforces that check itself before adding both Darwin archives and atomically
+   refreshing `SHA256SUMS` across all assets.
    The PyPI `verify` job asserts both that the version is resolvable and that a
    clean install can fetch and execute the pinned native release; the local
    fallback is `make publish-pypi`.

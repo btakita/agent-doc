@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 use tmux_router::{Registry, RegistryLock, Tmux};
 
 const TMUX_SERVER_IDENTITY_KEY: &str = "tmux_server_identity_v1";
+const TMUX_SERVER_IDENTITY_FORMAT: &str = "#{pid} #{start_time}";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TmuxServerReconcileOutcome {
@@ -37,7 +38,7 @@ fn observe_tmux_server_identity(tmux: &Tmux) -> Result<Option<TmuxServerIdentity
     // treatment of nonzero exits and empty stdout.
     let output = tmux
         .cmd()
-        .args(["display-message", "-p", "#{pid}\t#{start_time}"])
+        .args(["display-message", "-p", TMUX_SERVER_IDENTITY_FORMAT])
         .output()
         .context("query tmux server identity")?;
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -55,7 +56,7 @@ fn observe_tmux_server_identity(tmux: &Tmux) -> Result<Option<TmuxServerIdentity
 }
 
 fn parse_tmux_server_identity(output: &str) -> Result<TmuxServerIdentity> {
-    let mut fields = output.trim().split('\t');
+    let mut fields = output.split_whitespace();
     let pid = fields
         .next()
         .filter(|field| !field.is_empty())
@@ -145,6 +146,18 @@ mod tests {
 
     #[test]
     fn parser_accepts_tmux_display_message_identity() {
+        assert_eq!(
+            parse_tmux_server_identity("6535 1787525374\n").unwrap(),
+            TmuxServerIdentity {
+                pid: 6535,
+                start_time: 1_787_525_374,
+            }
+        );
+    }
+
+    #[test]
+    fn tmux_query_format_is_printable_and_parser_keeps_legacy_tab_compatibility() {
+        assert!(!TMUX_SERVER_IDENTITY_FORMAT.chars().any(char::is_control));
         assert_eq!(
             parse_tmux_server_identity("6535\t1787525374\n").unwrap(),
             TmuxServerIdentity {

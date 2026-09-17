@@ -26,6 +26,9 @@ boundary or inherits the shorter ordinary-RPC deadline.
   valid identity after creation performs the existing initialize/keep/replace
   transition, including clearing rows from a replaced server. Nonempty malformed
   replies, launch failures, and failed queries against a live server remain errors.
+  The tmux query uses a printable space between `#{pid}` and `#{start_time}`;
+  parsing accepts arbitrary ASCII whitespace so older tab-delimited durable values
+  remain readable even on tmux builds that rewrite control separators.
 - `AGENT_DOC_TMUX_SOCKET` scopes the shared configured tmux handle for the whole
   invocation, including claim, route, and supervisor descendants. A selected
   socket must never fall back to the operator's default server during provisioning.

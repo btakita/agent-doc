@@ -282,6 +282,9 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
 
 - Supports JetBrains and VS Code.
 - Pulls assets from GitHub Releases, preferring signed assets when available.
+- JetBrains install/update success reports the installed plugin package version
+  from the extracted plugin JAR, matching `plugin list`, rather than reporting the
+  enclosing agent-doc release tag.
 
 ## rename
 

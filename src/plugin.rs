@@ -303,10 +303,22 @@ fn install_jetbrains_into(release: &Value, target_dir: &Path) -> Result<()> {
         }
     }
 
-    let version = release_version(release);
-    eprintln!("Plugin installed ({version}) to {}", target_dir.display());
+    eprintln!("{}", jetbrains_install_success_message(target_dir)?);
     eprintln!("Restart your IDE to activate.");
     Ok(())
+}
+
+fn jetbrains_install_success_message(target_dir: &Path) -> Result<String> {
+    let version = installed_jetbrains_plugin_version(target_dir).with_context(|| {
+        format!(
+            "JetBrains package verification failed in {}: no agent-doc plugin jar found",
+            target_dir.display()
+        )
+    })?;
+    Ok(format!(
+        "Plugin installed (v{version}) to {}",
+        target_dir.display()
+    ))
 }
 
 fn install_jetbrains(release: &Value, plugins_dir: Option<&Path>) -> Result<()> {
@@ -725,8 +737,8 @@ mod tests {
         choose_plugins_dir_with_interactivity, existing_jetbrains_agent_doc_dirs, find_asset,
         find_best_local_zip, find_local_vscode_vsix, find_local_zip, has_asset,
         installed_jetbrains_plugin_version, is_jetbrains_ide_data_dir,
-        jetbrains_plugin_dirs_in_roots, local_jetbrains_zip_in, local_jetbrains_zip_version,
-        release_version,
+        jetbrains_install_success_message, jetbrains_plugin_dirs_in_roots, local_jetbrains_zip_in,
+        local_jetbrains_zip_version, release_version,
     };
     use serde_json::json;
     use std::fs;
@@ -922,6 +934,10 @@ mod tests {
         assert_eq!(
             installed_jetbrains_plugin_version(tmp.path()).as_deref(),
             Some("0.2.252")
+        );
+        assert_eq!(
+            jetbrains_install_success_message(tmp.path()).unwrap(),
+            format!("Plugin installed (v0.2.252) to {}", tmp.path().display())
         );
     }
 

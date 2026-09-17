@@ -13,7 +13,7 @@ prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -62,6 +62,30 @@ Also fixed the `fpe.md` editor/disk divergence class at its ownership boundary. 
 Plugin parity is enforced across JetBrains, VS Code, and Zed: JetBrains observes the post-conflict VFS write, VS Code observes `onDidSaveTextDocument`, and Zed accepts `didSave` only when editor shadow, replica, and disk bytes agree. A shared conformance test pins all three behaviors.
 
 Verification passed: full `make check`, 179 VS Code tests, targeted JetBrains compilation/tests, Rust Zed and cross-editor receipt regressions, private-name hygiene, and `make install`. The installed JetBrains and VS Code packages were rebuilt, and controllers/supervisors were scheduled for safe recycling. Core/plugin fix: `fef46e9fe`.
+
+### Re: Response
+
+> **Queue prompt:** File Cache Conflict occurred, I in sdk.md or fpe.md. Fix this class of error.
+
+Fixed and pushed as `fd89a1d8e`.
+
+The root cause was a same-version deployment gap: newly installed plugin code and an already-running stale plugin both reported the same package version, so the controller treated the stale endpoint as current and repeatedly requested a native save.
+
+The fix makes the editor authoritative and fences every disk-writing effect:
+
+- `persist_current` is sent only to a live JetBrains or VS Code registration whose reported plugin generation exactly matches the controller's baked package generation.
+- Unversioned replica identities can still receive CRDT notifications, but can no longer authorize a disk-writing effect.
+- Zed remains on its editor-native `didSave` path until it has a native endpoint.
+- A third-party disk edit is not merged or overwritten by the controller. The editor owns the File Cache Conflict and, once the user resolves it in the editor, the editor's native save overwrites disk and publishes the exact receipt.
+- Generation mismatch is a retryable, explicit diagnostic instead of another save/commit/session-check/finalize loop.
+- Package generations were bumped together: JetBrains `0.2.387`, VS Code `0.2.71`, Zed `0.1.1`.
+- The normal `make check` now rejects editor behavior changed after the last package-generation bump across JetBrains, VS Code, and Zed, including already-committed same-version drift.
+
+Also fixed the aggressive tmux focus shift: the fast automatic tab-focus path had bypassed the desktop-activity guard. Automatic focus-only and layout focus now both refuse to select the right-hand tmux pane while the operator is in a terminal or another application. Explicit focus and manual layout actions are unchanged.
+
+Verification passed: 9,484 Rust tests, JetBrains and VS Code plugin suites, cross-editor native parity, bootstrap checks, Lean/TLA gates, private-name scan, install, and the latest prior GitHub Actions run. The commit is pushed to `main`.
+
+Restart/reload the running IDE host once to activate the bumped plugin package. Until then, the new controller fails closed on the old reported generation instead of sending another native-save request.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -71,6 +95,8 @@ Verification passed: full `make check`, 179 VS Code tests, targeted JetBrains co
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~File Cache Conflict occurred, I in sdk.md or fpe.md. Fix this class of error.~~
+- Fix agent-doc causes to `- 🚧 do [#sbxdeploymentkick]` remaining in fpe.md after the turn completed. Run Agent Doc seems wedged: `dispatch-only codex reopen refused to inject into pane %17 for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt`. There are also 3 tmux panes with 2 editor panes. I ran Sync Tmux Panes and the pane layout corrected itself. I ran agent-doc directly from the session.
 <!-- /agent:queue -->
 
 

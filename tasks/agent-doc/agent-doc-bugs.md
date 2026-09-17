@@ -63,12 +63,12 @@ Release and publication cannot complete today because the enforced weekly cadenc
 
 
 <!-- agent:backlog priority -->
-- [/release] [#github5253release] Publish the next weekly agent-doc batch no earlier than 2026-09-22T16:41:52Z; verify GitHub assets and PyPI, then close issue #53. Issue #52 is already closed; fixes are on main in c92d5d629 and a10a684b3.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
+- [/] [#github5253release] Publish the next weekly agent-doc batch no earlier than 2026-09-22T16:41:52Z; verify GitHub assets and PyPI, then close issue #53. Issue #52 is already closed; fixes are on main in c92d5d629 and a10a684b3.
 - [/] [#release035376verify] [release] Verify GitHub Release run 34737823202 completes green and v0.35.376 publishes all six platform assets; all matrix jobs were still externally queued at closeout.
 - [/] [#cargovodtrim] [operator-verify] [P2][security] Trim the credential exposure from the livestream VOD once the operator supplies the VOD URL or platform/start-time locator. Known exposed interval: 2026-09-12T02:57:27.170Z through approximately 02:58:14Z.
 - [/] [#fpecompactheal] [operator-verify] Confirm fpe.md's corrupted `<dynamic_context_ref>` block is gone after one compact on the FIXED binary (installed 0.35.367, ~/.cargo/bin/agent-doc at 23:01:39). Must be run FROM THE PANE THAT OWNS src/haiven-dev/tasks/fpe.md — that is a live session (b69e5aeb, `queue: go`) and this cycle deliberately did not hand-align its disk. Expected after `agent-doc compact src/haiven-dev/tasks/fpe.md`: exactly ONE block, with the two self-referential handles (absolute `.../src/haiven-dev/tasks/fpe.md` and relative `tasks/fpe.md`) gone, leaving at most the four instruction-file handles; and the `Prior summary/context:` line still summarising the prior compact list rather than quoting XML.

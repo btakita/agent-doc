@@ -14,7 +14,7 @@ prompt_presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -153,7 +153,7 @@ No blockers remain.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 I added content into agent:notes, but agent-doc ran a turn on the notes anyways. It should be informational but not cause a turn to occur.
+- ~~I added content into agent:notes, but agent-doc ran a turn on the notes anyways. It should be informational but not cause a turn to occur.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

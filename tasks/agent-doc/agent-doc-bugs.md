@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0a82e-8aa5-7552-a870-f3c46e2c37a9
+  codex: 01a0b046-cac2-7f32-a18a-c61373d0f342
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -20,7 +20,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-Editor-route layout supersede, controller bind-before-serve, the JB accept-leg bound, and the queued-clear mislabel are fixed and pushed (5577cfeeb, b0e9530a6, 232c6c103); make check 9316 passed. #fixrunlazily is gated on one IDEA restart to load plugin 0.2.380. Open: #tmuxautosyncwedge, #cargotokenrevoke.
+GitHub #52 is closed after release-asset and PyPI verification. GitHub #53 is fixed and pushed on main at c92d5d629; atomic gate/type closeout composition is fixed at a10a684b3. Two full make check runs and both make install runs passed. The enforced weekly release gate defers tagging/publishing until 2026-09-22T16:41:52Z; CI runs 35250089483 and 35250915588 are in progress. Existing operator-verification gates remain open.
 <!-- /agent:status --> 
 
 ## Exchange
@@ -33,6 +33,23 @@ Editor-route layout supersede, controller bind-before-serve, the JB accept-leg b
 Compacted content:
 - Archived 15 response topic(s): #fixcauseslazily; rename-safe panes and route-layout supersession; #fixbackloglog; 12 more
 - Prior summary/context: prior compacted content: Archived 33 response topic(s): #timestampresponseheader; #idledispatchstack; preflight stall...
+
+### Re: GitHub issues #52 and #53 — gpt-5 · 2026-09-17T13:08-04:00
+
+> **Queue prompt:**
+>
+> do [#fixhttpsgithub]
+
+
+Issue #52 is fully resolved: release assets carry the native library, PyPI now matches the latest published version at 0.35.398, and the issue is closed.
+
+Issue #53 is fixed on `main` in `c92d5d629`. The tmux server-identity query now uses a printable space while its parser accepts arbitrary whitespace, preserving legacy tab-delimited state. JetBrains install/update now verifies the extracted plugin JAR and reports its plugin version, matching `plugin list`. Focused regressions passed, the full `make check` suite passed with zero failures, `make install` completed successfully, and the public-repo private-name scan is clean.
+
+The first closeout attempt exposed a separate atomic tracked-work defect: `--backlog-gate` moved the item into review before `--backlog-set-gate-type` looked only in backlog. That owner lookup now follows the open item into `agent:review`, with an exact same-transaction regression test, in `a10a684b3`. The full suite and local install passed again. Both commits are pushed; CI runs `35250089483` and `35250915588` are in progress.
+
+The architecture remains narrow. `tmux_server.rs` owns identity formatting/parsing; `plugin.rs` owns post-extraction verification/reporting; `backlog_cmd.rs` owns tracked-item component lookup. Tests cover printable and legacy identity forms, installed-JAR version reporting, and the gate-then-type transition. These are actorless one-shot boundaries with no long-lived derived-state relationship, so no reactive graph or imperative-state extraction applies.
+
+Release and publication cannot complete today because the enforced weekly cadence gate is closed. Version 0.35.398 was published at 2026-09-15T16:41:52Z; the next complete release is eligible at 2026-09-22T16:41:52Z. I did not bypass that invariant. No additional backlog follow-up is needed because `#fixhttpsgithub` itself now carries the exact typed release gate and the remaining publish/verify/close steps.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

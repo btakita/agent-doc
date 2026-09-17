@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -188,14 +188,30 @@ Verification:
 Commits pushed:
 - tsift: `0e1d7e1 feat: add full C# indexing support` on `origin/feat/csharp-index`
 - agent-loop: `4cac2b5b7 chore: point tsift at C# indexing support` on `origin/main`
+
+### Re: team-safe instruction deployment modes — gpt-5 · 2026-09-17T17:29:14-04:00
+
+> **Queue prompt:**
+>
+> do [#tsiftinstrpolicy]
+
+Implemented team-safe instruction deployment modes and pushed them in `b77b430` (`feat: add instruction deployment modes`) to `origin/feat/csharp-index`.
+
+- Added `tsift init --instructions auto|personal|shared|off` with persisted mode selection and compatibility detection for existing managed repository installs.
+- Personal mode installs the user-level tsift skill/runbook and avoids tracked repository instruction changes; shared mode writes an explicit `AGENTS.md` router plus repository skill/runbook; off removes only tsift-managed repository instruction surfaces.
+- Explicit Codex/OpenCode integration flags promote auto mode to shared and fail closed when combined with personal/off.
+- Status now distinguishes disabled instruction scope and does not mistake an ambient global skill for initialized project instructions.
+- Added CLI, index, status, and simulation coverage; updated README, specification, and unreleased notes.
+
+Verification: `make check` passed (digest artifact `tart-a8ef871921`), `cargo install --path . --force --locked` succeeded, `git diff --check` passed, and the pushed branch is clean. No branch-specific GitHub Actions run was present immediately after the push.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#csharpindex]~~
-- ~~I meant golang, not goland. Please make C# fully supported.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do [#tsiftinstrpolicy]~~
+- release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -204,7 +220,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tsiftinstrpolicy] [recommended] Implement team-safe instruction deployment modes from #tsiftfriendlyteam: personal (no tracked repo mutation; user-scoped skill plus bundled runbook), shared (explicit AGENTS.md plus tracked runbook), and off; preserve existing installs and never default to AGENTS.override.md.
 <!-- /agent:backlog -->
 
 ## Review

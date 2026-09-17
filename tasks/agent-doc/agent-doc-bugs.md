@@ -388,6 +388,26 @@ Resolved without resubmitting the captured response. I reset the stale baseline 
 The route is no longer blocked: `fpe.md` advanced from `response_captured` into a fresh preflight cycle on its existing generation-16 pane, and that pane resumed active work. The systemic authority/baseline defect was fixed, tested, pushed, and installed as described above; the supervisor recycle handoff is pending its safe idle boundary.
 
 Session accretion remains at warning level; the active queue was drained without pausing for compaction.
+
+### Re: JetBrains ZIP release — gpt-5 · 2026-09-17T12:20-04:00
+
+> **Queue prompt:** Is agent-doc-jetbrains*.zip being released? If not, release the latest version
+
+It was not being released: the latest GitHub release, `v0.35.398`, contained only the Rust binary archives and `SHA256SUMS`.
+
+Released JetBrains plugin `0.2.386` directly to the existing `v0.35.398` release:
+
+- `agent-doc-jetbrains-0.2.386-signed.zip`
+- `agent-doc-jetbrains-0.2.386.zip`
+- Updated `SHA256SUMS` with both assets.
+
+Built from the committed `v0.35.398` tag in an isolated worktree. `./gradlew test buildPlugin signPlugin` passed. I downloaded the published signed ZIP and verified SHA-256 `5d5b2ce276a88ba1044e480c33b5d83863e2e1fe648ec04d8172c646259c7249`, matching GitHub's asset digest.
+
+To keep GitHub costs low, I uploaded the assets directly and triggered no Actions workflow. The latest existing CI run is successful.
+
+Release: https://github.com/btakita/agent-doc/releases/tag/v0.35.398
+
+Session accretion remains at warning level; the active queue was drained without pausing for compaction.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -397,8 +417,6 @@ Session accretion remains at warning level; the active queue was drained without
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Fix all underlying causes of agent-doc churn on fpe.md.~~
-- ~~Fix ?Run Agent Doc wedge on fpe.md: authoritative actor generation 16 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md owns pane %5 but route could not drain the active closeout before dispatch: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: resume durable checkpoint cycle=cycle-1789527700856 phase=response_captured capture_id=cycle-1789527700856; the response is already captured; retained write and commit recovery own the continuation; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

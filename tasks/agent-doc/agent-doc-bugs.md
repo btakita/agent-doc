@@ -104,6 +104,12 @@ Fixed and pushed in two agent-doc commits:
 Verification passed: the focused controller/route suites, the full `make check` repository gate, private-name denylist, plugin parity, and installation. The latest GitHub Actions run for the generation-fence commit is green. The new binary/library is installed, and 10 supervisors plus 3 controllers were scheduled to recycle at idle boundaries.
 
 Restart the running JetBrains IDE once to activate plugin `0.2.387`. Until that restart, the generation fence intentionally refuses native save requests from the stale `0.2.386` process rather than risking another editor/disk divergence. Neither `fpe.md` nor `tsift.md` was mutated during this diagnosis.
+
+### Re: Response
+
+Verified. IntelliJ is running plugin `0.2.387` under new PID `1545434`, with generation fencing and editor-authority capabilities registered. All seven open documents—including `agent-doc-bugs.md` and `tsift.md`—are live and projection-complete.
+
+No further restart is needed.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -113,8 +119,6 @@ Restart the running JetBrains IDE once to activate plugin `0.2.387`. Until that 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~File Cache Conflict occurred, I in sdk.md or fpe.md. Fix this class of error.~~
-- ~~⏭️ Fix agent-doc causes to `- 🚧 do [#sbxdeploymentkick]` remaining in fpe.md after the turn completed. Run Agent Doc seems wedged: `dispatch-only codex reopen refused to inject into pane %17 for /home/brian/work/btakita/agent-loop/tasks/software/tsift.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt`. There are also 3 tmux panes with 2 editor panes. I ran Sync Tmux Panes and the pane layout corrected itself. I ran agent-doc directly from the session.~~
 - sdk.md auto-queue stalled. #agent-doc-causes
 <!-- /agent:queue -->
 

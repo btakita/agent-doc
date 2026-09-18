@@ -14,7 +14,7 @@ prompt_presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -193,6 +193,23 @@ Live proof: the retained FPE cycle recovered under controller ownership, reached
 There are no actionable follow-up items from this completed fix.
 
 This session document is accreted; compact it in a later dedicated cycle rather than stalling the current queue continuation.
+
+### Re: release + publish — gpt-5 · 2026-09-18T11:33:15-04:00
+
+> **Queue prompt:**
+> release + publish
+
+Released agent-doc v0.35.400.
+
+- Changed paths: projected 0.35.400 across all 144 Cargo manifests and internal constraints, Cargo.lock, pyproject.toml, the source and five installed skill mirrors, VERSIONS.md, and editors/release-parity.tsv. Release commit: `77c2c2b8b chore: release v0.35.400`.
+- Commands: `make release-version VERSION=0.35.400`, `make check`, `npm ci` for the clean clone's locked VS Code dependencies, and `make release`.
+- Publication: pushed `main` and tag `v0.35.400`. The tag-triggered Release, PyPI, and CI workflows are in progress; Book and Pages are green. The GitHub Release object is not created yet because its workflow is still running, which is recorded rather than awaited per the repository release contract.
+- Verification: the complete gate passed, including 9,498 Rust tests, 179 VS Code tests, JetBrains tests, cross-editor native parity, release projection/docs/editor parity audits, Python bootstrap tests, Lean, and TLA. The installed executable reports `agent-doc 0.35.400`; the release install also installed the matching native library, JetBrains 0.2.387, and VS Code 0.2.71.
+- Realtime steering: the fresh Monster Rodholders run recovered and committed the missed queue strike. Commit `cf05b94c` changed `- 🚧 do [#netcupinstancesavailable]` to the struck form, and `5bef6ce5` struck the following free-text head. No further Run Agent Doc is needed for that line. This recovery exercised the reused-queue-head rearm fix included in 0.35.400.
+- Confidence: high. Escalation: none.
+
+The semantic match to the older issue-46 completion was advisory only; this cycle performed a new release. Session accretion is elevated, but the active queue drained without a compaction stall.
+
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -202,6 +219,8 @@ This session document is accreted; compact it in a later dedicated cycle rather 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~release + publish~~
+- In fpe.md, the backlog item was not marked as complete `- [ ] [#caveatmeanapply] What does the "caveat" mean and when will it apply? When there is a timeout?` after it was completed.
 <!-- /agent:queue -->
 
 

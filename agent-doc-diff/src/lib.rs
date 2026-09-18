@@ -3680,6 +3680,33 @@ diff --git a/tests/render_test.rs b/tests/render_test.rs
     }
 
     #[test]
+    fn notes_change_with_queue_prompt_reports_only_the_queue_prompt() {
+        let previous = concat!(
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:notes -->\n",
+            "Old informational context.\n",
+            "<!-- /agent:notes -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:queue -->\n",
+            "- Fix the actual queue task.\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:notes -->\n",
+            "Can this incidental note be integrated?\n",
+            "<!-- /agent:notes -->\n",
+        );
+
+        let diff = unified_diff_from_contents(previous, current).expect("queue prompt diff");
+        assert!(diff.contains("+- Fix the actual queue task."), "{diff}");
+        assert!(!diff.contains("Old informational context."), "{diff}");
+        assert!(
+            !diff.contains("Can this incidental note be integrated?"),
+            "{diff}"
+        );
+    }
+
+    #[test]
     fn malformed_notes_fail_open() {
         let previous = "<!-- agent:notes -->\nOld context.\n";
         let current = "<!-- agent:notes -->\nNew context.\n";

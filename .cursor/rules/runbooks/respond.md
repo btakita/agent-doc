@@ -12,6 +12,13 @@ rule. This runbook carries the rest.
 - Reconcile the changed exchange tail oldest-first. Do not stop at the newest
   question; answer or group each unresolved prompt in that tail and each
   unresolved `prompt_target`; treat `content_edit` items as user corrections.
+- **Informational components stay informational (`#notes-not-a-prompt`).** Content
+  in `agent:notes` remains available as context when another exchange/queue
+  prompt starts the turn, but it is not itself a prompt or completion target.
+  Do not answer, strike, clear, or otherwise mutate a note merely because its
+  prose looks imperative or ends in a question. Modify notes only when an
+  explicit exchange/queue prompt asks for that notes edit. This keeps completed
+  queue lifecycle separate from persistent operator-owned context.
 - **Realtime steering (`#realtime-steering-verbatim`):** a document is realtime —
   the operator may add a prompt WHILE your turn is running. Every item the
   operator adds must be addressed and worked on, never committed-and-ignored. If

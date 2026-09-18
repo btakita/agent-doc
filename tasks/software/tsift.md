@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
-  codex: 01a0b12b-dbd0-72a1-a234-b66cad613b93
+  codex: 01a0b337-c18d-7770-8e52-af605f601504
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -221,6 +221,29 @@ Released and published tsift `v0.1.99`.
 - `origin/main`, `origin/feat/csharp-index`, and the clean worktree now point to `8987a4c`; tag `v0.1.99` remains correctly pinned to release commit `ffc677e`.
 
 Session note: the exchange is large, but the active queue is now drained without pausing for compaction.
+❯ 🚧 Fix discord.md issue:
+```
+❯ /home/brian/.cargo/bin/agent-doc start --route-owned --route-owned-reap-policy keep-alive --route-owned-start-purpose
+ layout-provision --resume -- tasks/discord.md
+Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/discord.md: controller actor generation compare-and-swap failed for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/discord.md: expected 2, found 3
+```
+
+### Re: Discord and monsterrodholders pane startup — gpt-5 · 2026-09-18T03:03-04:00
+
+> **Queue prompt:**
+>
+> do [#fixdiscordissue]
+
+
+Fixed, installed, and pushed as `e1ec2820e`.
+
+- Route-owned startup now retries a generation CAS only when the newer authoritative actor still belongs to the same document, session, pane, and window. A genuinely different owner still fails closed.
+- Cross-project editor reconciliation now falls back to the target project controller instead of requiring the currently executing controller request to own every nested project.
+- `make check` passed completely: 9,499 Rust tests, editor parity suites, documentation audits, bootstrap tests, and model checks.
+- The live install delivered the native reload to IDEA (`1/1` endpoint, `0 restart required`). No IDEA restart is needed for these fixes.
+- Live verification recovered `monsterrodholders.md` in pane `%21` with a healthy supervisor and recovered `discord.md` in pane `%22`, ready with generation 6. The later route refusals were capability-proof checks after pane recovery, not pane-loading or generation-CAS failures.
+
+The pre-existing unrelated JetBrains and session-actor worktree changes were left untouched.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
@@ -235,6 +258,11 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+```
+/home/brian/.cargo/bin/agent-doc start --route-owned --route-owned-reap-policy keep-alive --route-owned-start-purpose
+layout-provision --resume -- tasks/discord.md
+Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/discord.md: controller actor generation compare-and-swap failed for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/discord.md: expected 2, found 3
+```
 <!-- /agent:backlog -->
 
 ## Review

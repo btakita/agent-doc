@@ -1,7 +1,7 @@
 ---
 agent_doc_session: a94c7d23-e171-482f-93f4-530b7f2c436f
 resume:
-  codex: 01a0b5b1-58c1-7e30-8ba4-e39f959af0e2
+  codex: 01a0b5e7-d568-78e1-87b9-d90fe6ae6871
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -68,6 +68,27 @@ For the Monster Rod Holders truncation, the complete live queue item is intact n
 The defect was a compaction race: a delivery ACK could briefly look converged between operator typing bursts, allowing Compact Exchange to commit a partial queue cut. Compact Exchange now requires a continuous 10-second quiet window after the newest captured operator operation. The CLI waits outside the controller and retries, so every newer keystroke resets the window without blocking editor ingress. The fix is pushed to `btakita/agent-doc` as `2e1219b95` and installed into the live v0.35.400 binary/library; the project controller was marked for two-phase recycle.
 
 Verification for the agent-doc fix included the focused transition regression tests, 9,500 Rust tests, editor parity, 179 VS Code tests, the cross-editor native simulation, Python bootstrap tests, and all TLA+ models. The aggregate checkout check's installed-skill audit initially detected the expected v0.35.399/v0.35.400 skew; the fix was then rebased onto the exact v0.35.400 release before installation. The installed binary reports `agent-doc 0.35.400`. GitHub's Book workflow passed on the pushed fix; CI was still running at the single required observation.
+
+### Re: durable free-text queue closeout — gpt-5 · 2026-09-18T15:37:45-04:00
+
+> **Queue prompt:**
+>
+> monsterrodholders.md did not strike or clear the only queue item when the task was completed: `- Can we have a rolling migration from the production monsterrodholder.com website on Liquid web over to Netcup? We will do a hard cutover tonight. But it would be good to get the rolling migration started now.` is still in the queue.
+
+Fixed and shipped the closeout defect. The strict closeout guard had inferred a free-text queue selection only from the transient visible `🚧` marker. In the long-running recycle path that marker could disappear before closeout, allowing a completed response to commit while leaving its selected prompt unstruck.
+
+The selected free-text queue heads are now persisted in cycle state after preflight selection and supplied to the strict closeout guard. The guard remains a pure derivation over the current queue, response evidence, and durable cycle selection; marker-based selection delegates to the same implementation. Regression coverage exercises both preflight persistence and closeout after visible-marker loss. The behavior and closeout contract are documented in `SPEC.md` and `specs/07-closeout-commands.md`.
+
+Verification completed:
+
+- Focused queue, write-runtime, and preflight regression tests passed.
+- Full `make check` passed with zero parsed failures.
+- `git diff --check` and the private-name denylist scan passed.
+- `make install` installed the corrected CLI and supporting artifacts.
+- Commit `f02aef958` (`fix: persist free-text queue selection`) was pushed to the `agent-doc` `main` branch.
+- CI run `35386729040` was observed in progress; per the repository workflow, I did not poll it.
+
+I also used the supported queue operation to strike the already-stale entry in `monsterrodholders.md`. Its separate live editor now shows the item struck and reports no drainable work, but it refused a cross-pane commit because that session owns the authoritative buffer. I did not force-write or manually stage the live session document; its owning pane must commit that cleanup.
 <!-- agent:boundary:28f7ea75 -->
 <!-- /agent:exchange -->
 ###

@@ -1848,6 +1848,27 @@ pub fn run_with_options_to_writer(
             queue_state.queue_active == Some(true),
             &queue_state.queue_prompts,
         );
+    if !options.probe {
+        let selected_free_text_queue_heads = if exchange_prompt_preempts_queue {
+            Vec::new()
+        } else {
+            queue_state
+                .selected_queue_prompts
+                .iter()
+                .filter(|prompt| {
+                    agent_doc_queue::queue_response::queue_prompt_text_is_free_text(
+                        &diff_result_with_current.current,
+                        prompt,
+                    )
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        agent_doc_cycle_state_io::record_selected_free_text_queue_heads(
+            file,
+            &selected_free_text_queue_heads,
+        )?;
+    }
 
     // #codex-owned-pane-prompt-miss-followups: surface a structured owner-pane
     // self-invocation contract so Codex guidance can drive an in-pane response
@@ -2774,6 +2795,28 @@ mod tests {
             agent_doc_turn::CyclePhase::PreflightStarted,
             "active queue prompt should open a cycle even when the file matches the snapshot"
         );
+    }
+
+    #[test]
+    fn preflight_persists_selected_free_text_queue_head_in_cycle_state() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let head = "Migrate the sample storefront to the replacement host";
+        let content = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto go -->\n- {head}\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run(&doc).unwrap();
+
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(state.selected_free_text_queue_heads, vec![head]);
     }
 
     #[test]

@@ -30,6 +30,7 @@ use agent_doc_turn::op_log::OpsLogEvent;
 // remain available for diagnostics.
 
 fn enforce_selected_queue_response_contract(
+    file: Option<&Path>,
     baseline: Option<&str>,
     current: &str,
     response: &str,
@@ -38,13 +39,30 @@ fn enforce_selected_queue_response_contract(
     if !flags.strict_closeout {
         return Ok(());
     }
-    let missing = agent_doc_queue::queue_closeout_guard::
+    let mut missing = agent_doc_queue::queue_closeout_guard::
         selected_free_text_heads_missing_response_evidence_for_closeout(
             baseline,
             current,
             response,
             !flags.queue_completion_ids.is_empty(),
         )?;
+    if let Some(file) = file {
+        let selected = agent_doc_cycle_state_io::load(file)?
+            .map(|state| state.selected_free_text_queue_heads)
+            .unwrap_or_default();
+        missing.extend(
+            agent_doc_queue::queue_closeout_guard::
+                selected_free_text_prompts_missing_response_evidence_for_closeout(
+                    baseline,
+                    current,
+                    response,
+                    &selected,
+                    !flags.queue_completion_ids.is_empty(),
+                )?,
+        );
+        missing.sort();
+        missing.dedup();
+    }
     if !missing.is_empty() {
         anyhow::bail!(
             "[finalize] pre-write gate: selected free-text queue prompt lacks response evidence: {}. Include its exact `> **Queue prompt:**` quote and the completed result or concrete deferral before retrying. No response has been captured.",
@@ -550,7 +568,13 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
         &response,
         flags.has_metadata_only_mutation,
     )?;
-    enforce_selected_queue_response_contract(baseline, &current_content, &response, &flags)?;
+    enforce_selected_queue_response_contract(
+        Some(file),
+        baseline,
+        &current_content,
+        &response,
+        &flags,
+    )?;
 
     // Strip leading "## Assistant" heading if present — the write command adds its own
     let mut response = agent_doc_turn::response_text::strip_assistant_heading(&response);
@@ -779,7 +803,13 @@ pub(crate) fn run_template(
         &response,
         flags.has_metadata_only_mutation,
     )?;
-    enforce_selected_queue_response_contract(baseline, &current_content, &response, &flags)?;
+    enforce_selected_queue_response_contract(
+        Some(file),
+        baseline,
+        &current_content,
+        &response,
+        &flags,
+    )?;
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
     // Parse and validate patchback shape before any visible document mutation.
@@ -1183,7 +1213,13 @@ pub(crate) fn run_stream(
     // candidate before capture. Later selection changes cannot invalidate that
     // retained response or ask the harness to recapture it.
     if !flags.has_pending_mutation {
-        enforce_selected_queue_response_contract(baseline, &current_content, &response, &flags)?;
+        enforce_selected_queue_response_contract(
+            Some(file),
+            baseline,
+            &current_content,
+            &response,
+            &flags,
+        )?;
     }
     let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &current_content);
 
@@ -2063,6 +2099,7 @@ fn capture_validated_stream_closeout_before_authority_resolution(
         // the same surface preflight diffed, with the baseline as fallback.
         let queue_gate_witness = agent_doc_fs::read_optional_text(file).ok().flatten();
         enforce_selected_queue_response_contract(
+            Some(file),
             baseline,
             queue_gate_witness.as_deref().unwrap_or(pre_capture_content),
             response,
@@ -2161,7 +2198,13 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
         &response,
         flags.has_metadata_only_mutation,
     )?;
-    enforce_selected_queue_response_contract(baseline, &current_content, &response, &flags)?;
+    enforce_selected_queue_response_contract(
+        Some(file),
+        baseline,
+        &current_content,
+        &response,
+        &flags,
+    )?;
 
     // Parse and validate patchback shape before any visible document mutation.
     let parsed = agent_doc_template_io::parse_template_patchback(
@@ -3088,6 +3131,7 @@ mod tests {
         };
         assert!(
             enforce_selected_queue_response_contract(
+                None,
                 Some(current),
                 current,
                 response,
@@ -3100,8 +3144,40 @@ mod tests {
             queue_completion_ids: vec!["fpebatchchartobs".to_string()],
             ..free_text_flags
         };
-        enforce_selected_queue_response_contract(Some(current), current, response, &id_flags)
+        enforce_selected_queue_response_contract(None, Some(current), current, response, &id_flags)
             .unwrap();
+    }
+
+    #[test]
+    fn strict_closeout_uses_durable_free_text_selection_after_marker_loss() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("durable-free-text-selection.md");
+        let head = "Migrate the sample storefront to the replacement host";
+        let current = format!(
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue go -->\n- {head}\n<!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, &current).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&current), Some(&current)).unwrap();
+        agent_doc_cycle_state_io::record_selected_free_text_queue_heads(&doc, &[head.to_string()])
+            .unwrap();
+        let flags = WriteFlags {
+            strict_closeout: true,
+            ..Default::default()
+        };
+
+        let err = enforce_selected_queue_response_contract(
+            Some(&doc),
+            Some(&current),
+            &current,
+            "### Re: Response\n\nMigration completed and verified.",
+            &flags,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("selected free-text queue prompt lacks response evidence")
+        );
     }
 
     /// A free-text queue head that the operator removed this turn lives on in the

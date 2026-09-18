@@ -2,8 +2,11 @@
 
 # Closeout Commands
 
-Strict write entrypoints validate selected (`🚧`) free-text queue response
-evidence before capture, including early stream mutation-plan capture. A generic
+Strict write entrypoints validate free-text queue response evidence before
+capture, including early stream mutation-plan capture. Preflight records the
+exact selected free-text prompts in durable cycle state; the visible (`🚧`)
+marker is only transient UI, so marker loss during CRDT convergence or supervisor
+recycle cannot bypass the gate. A generic
 completion response with no exact prompt identification is rejected with the
 missing prompt and `> **Queue prompt:**` remedy. An exact answer or deferral
 quote passes to the existing terminal-completion policy; selection itself never

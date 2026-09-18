@@ -89,22 +89,68 @@ pub fn selected_free_text_heads_missing_response_evidence_for_closeout(
     {
         return Ok(Vec::new());
     }
-    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")?;
-    Ok(nodes
+    let selected = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")?
         .into_iter()
         .filter(|node| {
             !node.item.struck
                 && agent_doc_document::queue_projection::has_in_progress_marker(&node.item.text)
                 && queue_response::queue_prompt_text_is_free_text(content, &node.item.text)
-                && !crate::queue_consume::cycle_answered_foreign_exchange_prompt(
-                    baseline,
-                    content,
-                    &node.item.text,
-                )
-                && !queue_response::free_text_head_answered_by_response(response, &node.item.text)
         })
         .map(|node| strip_priority_markers(&node.item.text))
-        .collect())
+        .collect::<Vec<_>>();
+    selected_free_text_prompts_missing_response_evidence_for_closeout(
+        baseline,
+        content,
+        response,
+        &selected,
+        has_explicit_id_completion,
+    )
+}
+
+/// Validate durable preflight selection independently of the transient visible
+/// in-progress marker (`#qftdurableselection`). Only prompts still present in
+/// the live queue are gated: an operator removal remains authoritative.
+pub fn selected_free_text_prompts_missing_response_evidence_for_closeout(
+    baseline: Option<&str>,
+    content: &str,
+    response: &str,
+    selected: &[String],
+    has_explicit_id_completion: bool,
+) -> anyhow::Result<Vec<String>> {
+    if has_explicit_id_completion || selected.is_empty() {
+        return Ok(Vec::new());
+    }
+    if !element::parse(content)?
+        .iter()
+        .any(|component| component.name == "queue")
+    {
+        return Ok(Vec::new());
+    }
+    let current_heads = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")?
+        .into_iter()
+        .filter(|node| {
+            !node.item.struck
+                && queue_response::queue_prompt_text_is_free_text(content, &node.item.text)
+        })
+        .map(|node| strip_priority_markers(&node.item.text).trim().to_string())
+        .collect::<HashSet<_>>();
+    let mut missing = Vec::new();
+    for head in selected {
+        let head = strip_priority_markers(head).trim().to_string();
+        if head.is_empty()
+            || !current_heads.contains(&head)
+            || crate::queue_consume::cycle_answered_foreign_exchange_prompt(
+                baseline, content, &head,
+            )
+            || queue_response::free_text_head_answered_by_response(response, &head)
+        {
+            continue;
+        }
+        if !missing.contains(&head) {
+            missing.push(head);
+        }
+    }
+    Ok(missing)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -513,6 +559,54 @@ mod tests {
                 .is_empty()
             );
         }
+    }
+
+    #[test]
+    fn durable_free_text_selection_survives_visible_marker_loss() {
+        let head = "Migrate the sample storefront to the replacement host";
+        let current = doc(&format!("- {head}\n"), "");
+        let selected = vec![format!("🚧 {head}")];
+        let generic = "### Re: Response\n\nMigration completed and verified.";
+
+        assert_eq!(
+            selected_free_text_prompts_missing_response_evidence_for_closeout(
+                Some(&current),
+                &current,
+                generic,
+                &selected,
+                false,
+            )
+            .unwrap(),
+            vec![head],
+        );
+
+        let quoted = format!(
+            "### Re: migration — gpt-5\n\n> **Queue prompt:** {head}\n\nMigration completed."
+        );
+        assert!(
+            selected_free_text_prompts_missing_response_evidence_for_closeout(
+                Some(&current),
+                &current,
+                &quoted,
+                &selected,
+                false,
+            )
+            .unwrap()
+            .is_empty(),
+        );
+
+        let removed = doc("- later work\n", "");
+        assert!(
+            selected_free_text_prompts_missing_response_evidence_for_closeout(
+                Some(&current),
+                &removed,
+                generic,
+                &selected,
+                false,
+            )
+            .unwrap()
+            .is_empty(),
+        );
     }
 
     #[test]

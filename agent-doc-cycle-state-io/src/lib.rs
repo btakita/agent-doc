@@ -300,6 +300,13 @@ pub struct CycleState {
     /// for a committed response, binary consume, or explicit deferral proof.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_free_text_queue_heads: Vec<String>,
+    /// `#qftdurableselection`: free-text queue prompts selected for this exact
+    /// response cycle. The visible `🚧` marker is transient editor UI and may
+    /// disappear during CRDT convergence or supervisor recycle; strict closeout
+    /// uses this durable selection witness to keep requiring the explicit
+    /// `> **Queue prompt:**` response echo.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selected_free_text_queue_heads: Vec<String>,
     /// Reactive semantic-merge conflicts observed during this cycle.
     #[serde(
         default,
@@ -1278,6 +1285,7 @@ pub fn start_preflight_with_task(
         active_free_text_queue_heads: file_content
             .map(agent_doc_queue::queue_heads::active_free_text_queue_heads)
             .unwrap_or_default(),
+        selected_free_text_queue_heads: Vec::new(),
         semantic_merge_conflict_advisories: reentrant
             .as_ref()
             .map(|open| open.semantic_merge_conflict_advisories.clone())
@@ -1316,6 +1324,34 @@ pub fn record_active_queue_heads(file: &Path, heads: &[String]) -> Result<Option
         .collect();
     if state.active_queue_heads != normalized {
         state.active_queue_heads = normalized;
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// Persist the free-text queue work selected for this response cycle.
+///
+/// Selection is a durable cycle fact, unlike the transient visible `🚧` marker.
+/// Re-recording replaces the set because preflight owns the exact prompt cut for
+/// the cycle; callers pass an empty slice when exchange work preempts the queue.
+pub fn record_selected_free_text_queue_heads(
+    file: &Path,
+    heads: &[String],
+) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    let mut normalized = Vec::new();
+    for head in heads {
+        let head = agent_doc_document::queue_projection::strip_priority_markers(head);
+        let head = head.trim().to_string();
+        if !head.is_empty() && !normalized.contains(&head) {
+            normalized.push(head);
+        }
+    }
+    if state.selected_free_text_queue_heads != normalized {
+        state.selected_free_text_queue_heads = normalized;
         state.updated_at = now_secs();
         save(file, &state)?;
     }
@@ -3281,6 +3317,7 @@ fn synthetic_state_with_id(
         dropped_queue_prompts: Vec::new(),
         active_queue_heads: Vec::new(),
         active_free_text_queue_heads: Vec::new(),
+        selected_free_text_queue_heads: Vec::new(),
         semantic_merge_conflict_advisories: Vec::new(),
         blocked_closeout: None,
         skipped_queue_head_ids: Vec::new(),

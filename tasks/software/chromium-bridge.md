@@ -89,6 +89,27 @@ Verification completed:
 - CI run `35386729040` was observed in progress; per the repository workflow, I did not poll it.
 
 I also used the supported queue operation to strike the already-stale entry in `monsterrodholders.md`. Its separate live editor now shows the item struck and reports no drainable work, but it refused a cross-pane commit because that session owns the authoritative buffer. I did not force-write or manually stage the live session document; its owning pane must commit that cleanup.
+
+### Re: rapid editor-switch focus race — gpt-5 · 2026-09-18T16:04:32-04:00
+
+> **Queue prompt:**
+>
+> When quickly switching through editor documents, the auto-focused tmux pane is in the stash tmux window. Fix agent-doc causes.
+
+Fixed and shipped. The JetBrains plugin used separate focus and full-surface projection lanes. A focus RPC could return after a newer document selection, and its stale `actor_pane_not_visible` receipt could enqueue a forced layout repair that replaced the newer surface observation. That stale repair could leave the pane for the currently selected document parked in the stash window.
+
+Focus-derived observations now carry the immutable generation created for their exact editor selection. Admission is serialized with generation changes, and controller receipts are checked again after the round trip before they may install a reverse-focus lease or request structural repair. Both selection-event and component-focus paths use the same generation fence, so rapid switching is latest-selection-wins without adding polling or retry state.
+
+Verification and delivery completed:
+
+- Added regression coverage proving that a late stashed-pane receipt is superseded while the current receipt may repair layout.
+- Focused `EditorTabSyncListenerTest` passed: 46 tests.
+- Full `make check` passed with exit code 0 and zero parsed failures; artifact `tart-6e5a0d370a`.
+- `git diff --check` and the private-name scan passed.
+- `make install` completed successfully, including the JetBrains and VS Code plugin artifacts.
+- Commit `20796f2b3` (`fix: fence stale editor focus repairs`) was pushed to `agent-doc/main`.
+- CI run `35389414278` was observed in progress; local verification is complete, so it was not polled.
+- The project controller was marked for its safe two-phase recycle.
 <!-- agent:boundary:28f7ea75 -->
 <!-- /agent:exchange -->
 ###

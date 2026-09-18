@@ -2795,9 +2795,9 @@ pub fn publish_state_event(
     project_root: &Path,
     event: &agent_doc_state_backbone::StateEvent,
 ) -> Result<bool> {
-    if agent_doc_state_wire::in_controller_request() {
-        let runtime = local_controller_runtime_for_project(project_root)?
-            .context("controller-local state publication requires its project's live runtime")?;
+    if agent_doc_state_wire::in_controller_request()
+        && let Some(runtime) = local_controller_runtime_for_project(project_root)?
+    {
         let bootstrap = runtime.bootstrap_snapshot()?;
         return ingest_state_event(&bootstrap, &runtime, event.clone());
     }
@@ -26915,6 +26915,34 @@ mod tests {
                 "a local compact continuation must enter the live graph before its RPC returns"
             );
             assert!(!publish_state_event(dir.path(), &event).unwrap());
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn controller_request_does_not_claim_another_projects_local_runtime() {
+        // A spanning editor surface can reconcile a nested project while the
+        // outer project's controller request is active on this thread. The
+        // nested publication must use that project's controller IPC path.
+        std::thread::spawn(|| {
+            let outer = tempfile::TempDir::new().unwrap();
+            let nested = tempfile::TempDir::new().unwrap();
+            let runtime = ControllerRuntime::new_arc(test_bootstrap(&outer)).unwrap();
+            install_controller_request_thread_context(&runtime);
+
+            assert!(agent_doc_state_wire::in_controller_request());
+            assert!(
+                local_controller_runtime_for_project(outer.path())
+                    .unwrap()
+                    .is_some()
+            );
+            assert!(
+                local_controller_runtime_for_project(nested.path())
+                    .unwrap()
+                    .is_none(),
+                "a controller request is process-local, not authority for every project root"
+            );
         })
         .join()
         .unwrap();

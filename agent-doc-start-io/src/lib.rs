@@ -1923,7 +1923,7 @@ fn start_controller_session(
         project_root,
         LaunchMode::Lazy,
     )?;
-    let start_request = agent_doc_controller_io::project_controller::StartSessionRequest {
+    let mut start_request = agent_doc_controller_io::project_controller::StartSessionRequest {
         file: canonical.to_path_buf(),
         session_id: session_id.to_string(),
         pane_id: pane_id.to_string(),
@@ -1932,7 +1932,9 @@ fn start_controller_session(
         harness: Some(harness.to_string()),
     };
     let mut attempts_used = 0usize;
+    let mut generation_race_attempts_used = 0usize;
     const MAX_START_SESSION_RECYCLE_RETRIES: usize = 2;
+    const MAX_START_SESSION_GENERATION_RACE_RETRIES: usize = 2;
     loop {
         match agent_doc_controller_io::project_controller::start_session(
             project_root,
@@ -1940,6 +1942,50 @@ fn start_controller_session(
         ) {
             Ok(record) => break Ok(record),
             Err(err) => {
+                let current_actor = if start_session_generation_cas_failed(&err)
+                    && generation_race_attempts_used < MAX_START_SESSION_GENERATION_RACE_RETRIES
+                {
+                    agent_doc_controller_io::project_controller::authoritative_actor_binding(
+                        project_root,
+                        canonical,
+                    )
+                    .ok()
+                    .flatten()
+                } else {
+                    None
+                };
+                if let Some(retry_generation) = start_session_generation_race_retry_generation(
+                    &err,
+                    current_actor.as_ref(),
+                    &start_request,
+                ) {
+                    generation_race_attempts_used += 1;
+                    let observed_generation = current_actor
+                        .as_ref()
+                        .map(|record| record.generation)
+                        .unwrap_or_default();
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "start_session_generation_race_retry file={} pane={} session={} observed_generation={} retry_generation={} attempt={} err={}",
+                            file.display(),
+                            pane_id,
+                            session_id_short(session_id),
+                            observed_generation,
+                            retry_generation,
+                            generation_race_attempts_used,
+                            err
+                        ),
+                    );
+                    log_event(
+                        session_log,
+                        &format!(
+                            "start_session_generation_race_retry observed_generation={observed_generation} retry_generation={retry_generation} attempt={generation_race_attempts_used}"
+                        ),
+                    );
+                    start_request.generation = retry_generation;
+                    continue;
+                }
                 let recycle_status =
                     agent_doc_controller_io::project_controller::supervisor_recycle_status_for_file(
                         file,
@@ -1996,6 +2042,41 @@ fn start_controller_session(
     }
 }
 
+/// A route-owned launch may publish a provisional actor and then refresh the
+/// dispatch registry before the child reaches `start_session`. Recover only
+/// when the newer authoritative generation still names the exact logical
+/// owner the child was launched for; a different session, pane, or window is a
+/// genuine supersession and must retain the compare-and-swap failure.
+fn start_session_generation_race_retry_generation(
+    error: &anyhow::Error,
+    current: Option<&agent_doc_controller::actor::ActorRecord>,
+    request: &agent_doc_controller_io::project_controller::StartSessionRequest,
+) -> Option<u64> {
+    if !start_session_generation_cas_failed(error) {
+        return None;
+    }
+    let current = current?;
+    if current.session_id != request.session_id
+        || current.pane_id != request.pane_id
+        || current.window_id != request.window_id
+        || current.generation < request.generation
+        || matches!(
+            current.state,
+            agent_doc_controller::actor::ActorState::Closed
+        )
+    {
+        return None;
+    }
+    current.generation.checked_add(1)
+}
+
+fn start_session_generation_cas_failed(error: &anyhow::Error) -> bool {
+    const GENERATION_CAS_MARKER: &str = "generation compare-and-swap failed";
+    error
+        .chain()
+        .any(|cause| cause.to_string().contains(GENERATION_CAS_MARKER))
+}
+
 fn fire_session_start_hooks(
     file: &Path,
     session_id: &str,
@@ -2021,6 +2102,87 @@ fn fire_session_start_hooks(
 mod tests {
     use super::*;
     use std::io::Write;
+
+    fn generation_race_actor(
+        session_id: &str,
+        pane_id: &str,
+        window_id: &str,
+        generation: u64,
+    ) -> agent_doc_controller::actor::ActorRecord {
+        agent_doc_controller::actor::ActorRecord {
+            document_id: "document".to_string(),
+            session_id: session_id.to_string(),
+            generation,
+            pane_id: pane_id.to_string(),
+            window_id: window_id.to_string(),
+            harness: "codex".to_string(),
+            state: agent_doc_controller::actor::ActorState::Ready,
+            last_transition: agent_doc_controller::actor::ActorLastTransition {
+                caller: "route".to_string(),
+                reason: "dispatch_bind".to_string(),
+                timestamp: 1,
+                prior_generation: generation.saturating_sub(1),
+                new_generation: generation,
+            },
+        }
+    }
+
+    fn generation_race_request(
+        session_id: &str,
+        pane_id: &str,
+        window_id: &str,
+        generation: u64,
+    ) -> agent_doc_controller_io::project_controller::StartSessionRequest {
+        agent_doc_controller_io::project_controller::StartSessionRequest {
+            file: PathBuf::from("tasks/session.md"),
+            session_id: session_id.to_string(),
+            pane_id: pane_id.to_string(),
+            window_id: window_id.to_string(),
+            generation,
+            harness: Some("codex".to_string()),
+        }
+    }
+
+    #[test]
+    fn route_owned_start_retries_generation_cas_for_the_same_logical_owner() {
+        let request = generation_race_request("session", "%20", "@0", 3);
+        let current = generation_race_actor("session", "%20", "@0", 3);
+        let error = anyhow::anyhow!(
+            "controller actor generation compare-and-swap failed: expected 2, found 3"
+        );
+
+        assert_eq!(
+            start_session_generation_race_retry_generation(&error, Some(&current), &request),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn route_owned_start_never_retries_generation_cas_for_a_different_owner() {
+        let request = generation_race_request("session", "%20", "@0", 3);
+        let error = anyhow::anyhow!(
+            "controller actor generation compare-and-swap failed: expected 2, found 3"
+        );
+
+        for current in [
+            generation_race_actor("replacement", "%20", "@0", 3),
+            generation_race_actor("session", "%21", "@0", 3),
+            generation_race_actor("session", "%20", "@1", 3),
+        ] {
+            assert_eq!(
+                start_session_generation_race_retry_generation(&error, Some(&current), &request),
+                None
+            );
+        }
+        assert_eq!(
+            start_session_generation_race_retry_generation(
+                &anyhow::anyhow!("controller unavailable"),
+                Some(&generation_race_actor("session", "%20", "@0", 3)),
+                &request
+            ),
+            None
+        );
+    }
 
     #[test]
     fn queue_control_fences_new_route_owned_lifecycles_but_not_supervisor_reentry() {

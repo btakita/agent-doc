@@ -14,7 +14,7 @@ prompt_presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -210,6 +210,22 @@ Released agent-doc v0.35.400.
 
 The semantic match to the older issue-46 completion was advisory only; this cycle performed a new release. Session accretion is elevated, but the active queue drained without a compaction stall.
 
+### Re: complete the FPE caveat item — gpt-5 · 2026-09-18T11:36:03-04:00
+
+> **Queue prompt:**
+> In fpe.md, the backlog item was not marked as complete `- [ ] [#caveatmeanapply] What does the "caveat" mean and when will it apply? When there is a timeout?` after it was completed.
+
+Corrected the missing lifecycle transition.
+
+- Completion evidence: the compacted FPE archive contains both the substantive answer and an explicit closeout stating that the caveat investigation was completed after tracing the production API/FPE paths and live task definition.
+- Changed paths: `src/haiven-dev/tasks/fpe.md` and `src/haiven-dev/tasks/fpe.done.md`.
+- Command: `agent-doc write --commit src/haiven-dev/tasks/fpe.md --origin skill --backlog-only --done caveatmeanapply`.
+- Result: the item was atomically completed and reaped into `tasks/fpe.done.md`; commit `122c210 agent-doc(fpe): 2026-09-18 11:35:35`.
+- Verification: FPE `session-check` reports the cycle committed with `no_drainable_work`; the active file no longer contains the item, the done archive does, and both paths have no working-tree drift.
+- Confidence: high. Escalation: none.
+
+Exchange accretion remains elevated, but the active queue was drained without pausing for compaction.
+
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -219,8 +235,6 @@ The semantic match to the older issue-46 completion was advisory only; this cycl
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~release + publish~~
-- In fpe.md, the backlog item was not marked as complete `- [ ] [#caveatmeanapply] What does the "caveat" mean and when will it apply? When there is a timeout?` after it was completed.
 <!-- /agent:queue -->
 
 

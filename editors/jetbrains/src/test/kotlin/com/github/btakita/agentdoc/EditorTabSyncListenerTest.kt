@@ -62,14 +62,28 @@ class EditorTabSyncListenerTest {
 
     @Test
     fun `late stashed focus receipt cannot replace a newer document projection`() {
-        val stashedReceipt =
-            """{"idle":false,"outcome":"{\"focused\":false,\"reason\":\"actor_pane_not_visible\"}"}"""
+        val request =
+            FocusProjectionEffectRequest(
+                generation = 7,
+                projectRoot = "/repo",
+                filePath = "/repo/tasks/old.md",
+                surfaceJson = "{}",
+            )
+        val stashedResponse =
+            FocusProjectionEffectResponse(
+                request = request,
+                transport =
+                    CpEditorRouteResult(
+                        exitCode = 0,
+                        output =
+                            """{"idle":false,"outcome":"{\"focused\":false,\"reason\":\"actor_pane_not_visible\"}"}""",
+                    ),
+            )
 
         assertEquals(
             EditorTabSyncListener.FocusProjectionReceiptDecision.Superseded,
             EditorTabSyncListener.decideFocusProjectionReceipt(
-                receiptJson = stashedReceipt,
-                requestedGeneration = 7,
+                response = stashedResponse,
                 currentGeneration = 8,
                 projectWindowActive = true,
             ),
@@ -77,12 +91,59 @@ class EditorTabSyncListenerTest {
         assertEquals(
             EditorTabSyncListener.FocusProjectionReceiptDecision.RepairLayout,
             EditorTabSyncListener.decideFocusProjectionReceipt(
-                receiptJson = stashedReceipt,
-                requestedGeneration = 8,
-                currentGeneration = 8,
+                response = stashedResponse,
+                currentGeneration = 7,
                 projectWindowActive = true,
             ),
         )
+        assertEquals(
+            EditorTabSyncListener.FocusProjectionReceiptDecision.TransportUnavailable,
+            EditorTabSyncListener.decideFocusProjectionReceipt(
+                response =
+                    stashedResponse.copy(
+                        transport = CpEditorRouteResult(exitCode = 1, output = "timed out"),
+                    ),
+                currentGeneration = 7,
+                projectWindowActive = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `passive focus effect has a short transport deadline`() {
+        assertTrue(CpRouteClient.EDITOR_FOCUS_OBSERVE_TIMEOUT_MS in 1..2_000)
+        val source =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CpRouteClient.kt")
+                    .takeIf { Files.exists(it) }
+                    ?: Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CpRouteClient.kt",
+                    ),
+            )
+        val focusRequest =
+            source
+                .substringAfter("fun observeEditorFocus(")
+                .substringBefore("private fun observeEditorSurfaceWithClient(")
+        assertTrue(focusRequest.contains("timeoutMs = EDITOR_FOCUS_OBSERVE_TIMEOUT_MS"))
+    }
+
+    @Test
+    fun `surface admission owns focus effect invalidation`() {
+        val source =
+            Files.readString(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
+                    .takeIf { Files.exists(it) }
+                    ?: Paths.get(
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt",
+                    ),
+            )
+        val admission =
+            source
+                .substringAfter("private fun requestObservation(")
+                .substringBefore("private fun scheduleRetainedSurfaceRetry(")
+        assertTrue(admission.contains("if (requiredFocusGeneration == null)"))
+        assertTrue(admission.contains("invalidateFocusProjection()"))
+        assertTrue(source.contains("activeFocusProjection.getAndSet(null)?.cancel(true)"))
     }
 
     @Test

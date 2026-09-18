@@ -90,18 +90,20 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 - A `sync` projection is the product of columns and focused document. The controller first reconciles the passive layout, then applies the requested pane through a generation-fenced effect. Matching columns or a successful `select-pane` receipt alone cannot retire the projection: observation must show the focused document's actor pane active in the target window. A repeated foreground command republishes a physical observation even when its desired value is identical, reactivating the retained effect after focus or geometry drift. A newer surface generation cancels stale focus before it reaches tmux.
 - The retained focus projection may surface a proven live pane from stash inside
   the controller's latest-wins focus fence, then selects only after a live-window
-  recheck. If that still reports `actor_pane_not_visible`, the listener
-  generation-fences the receipt after the controller round trip against the active
-  project window and republishes the complete current editor surface with forced
-  reconciliation. Focus-derived surface observations carry that same generation
-  through admission, so a late stashed-pane receipt cannot supersede a newer
-  document selection during rapid switching. The full
-  surface remains exact-layout authority; other focus failures do not trigger
-  layout repair. The controller classifies `actor_pane_not_visible` from the
-  selected pane's own window before applying the active-window guard: a stashed
-  selected pane therefore requests layout repair, while a pane already in the
-  `agent-doc` window still reports `outside_agent_doc_window` when the operator is
-  viewing another tmux window.
+  recheck. The listener models that controller call as a bounded request/response
+  effect: the request carries the focus generation admitted with its spanning
+  surface observation, and the response is interpreted under the lifecycle lock.
+  Any newer admitted surface observation invalidates and interrupts the in-flight
+  request. The socket has a one-second deadline as a transport backstop, so a slow
+  controller cannot block newer focus work. Only a current successful response may
+  install a focus lease or, for `actor_pane_not_visible`, republish the complete
+  editor surface with forced reconciliation. Stale, timed-out, and failed responses
+  are inert. The full surface remains exact-layout authority; other focus failures
+  do not trigger layout repair. The controller classifies
+  `actor_pane_not_visible` from the selected pane's own window before applying the
+  active-window guard: a stashed selected pane therefore requests layout repair,
+  while a pane already in the `agent-doc` window still reports
+  `outside_agent_doc_window` when the operator is viewing another tmux window.
 - If a Project Controller-backed manual `Sync Tmux Layout` terminal outcome later reports that the current layout was preserved because a visible protected pane could not detach yet, the command projection/log must retain the protected pane id, open-cycle phase, and document path so the user can tell which pane is delaying sync. Current controller builds should attach/focus the requested document around the protected pane instead of emitting that deferred-sync marker.
 - Automatic layout sync completes at desired-state publication rather than waiting for that exact plane version to become observed. The controller owns a single latest-wins worker, interrupts obsolete retry waits when a newer generation arrives, and never reports a superseded automatic version as a user-visible failure. Manual sync keeps its terminal receipt boundary.
 - **Resync / Fix Sessions** first runs registry/liveness cleanup, which must not

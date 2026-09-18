@@ -143,6 +143,21 @@ internal enum class CommandProjectionStatus(val token: String) {
  */
 internal object CpRouteClient {
     private val log = Logger.getInstance(CpRouteClient::class.java)
+
+    /// `#jbsockdeadline`: hard ceiling on a single controller request.
+    ///
+    /// This is a HANG GUARD, not a latency control. It must stay comfortably above the longest
+    /// legitimate server-side wait, which is the 30s reactive turn-admission projection await.
+    /// Lowering it near the client's 15s hint would abort routes that are still running correctly.
+    private const val SOCKET_REQUEST_TIMEOUT_MS = 60_000L
+
+    /**
+     * Passive focus is a latest-wins editor effect, not an operator command. A slow receipt must
+     * not occupy its projection lane long enough to delay a newer selection. The listener also
+     * interrupts superseded requests; this deadline is the transport backstop when interruption
+     * cannot close the platform socket promptly.
+     */
+    internal const val EDITOR_FOCUS_OBSERVE_TIMEOUT_MS = 1_000L
     private const val PANE_LAYOUT_DESIRED_STATE_CHANNEL = "agent-doc/pane-layout/desired/v1"
     private const val PANE_LAYOUT_DESIRED_TYPE_TAG = "agent-doc.pane-layout.desired.v1"
     private val statePlaneProducerId = "jetbrains-" + java.util.UUID.randomUUID().toString()
@@ -191,6 +206,7 @@ internal object CpRouteClient {
             generation = editorFocusGeneration,
             sequence = editorFocusSequence.incrementAndGet(),
             logLabel = "focus-projection",
+            timeoutMs = EDITOR_FOCUS_OBSERVE_TIMEOUT_MS,
         )
 
     private fun observeEditorSurfaceWithClient(
@@ -200,6 +216,7 @@ internal object CpRouteClient {
         generation: Long,
         sequence: Long,
         logLabel: String,
+        timeoutMs: Long = SOCKET_REQUEST_TIMEOUT_MS,
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
         val request =
@@ -210,7 +227,7 @@ internal object CpRouteClient {
                 sequence = sequence,
             )
         return try {
-            val receipt = sendRequestDataToSocket(socket, request)
+            val receipt = sendRequestDataToSocketWithTimeout(socket, request, timeoutMs)
             CpEditorRouteResult(
                 exitCode = 0,
                 output = receipt.toString(),
@@ -1108,21 +1125,6 @@ internal fun resolveCommandSubmitTerminalData(data: JsonObject, commandId: Strin
     }
 
     internal fun cpcSocket(projectRoot: String): File = File(projectRoot, ".agent-doc/controller.sock")
-
-    /// `#jbsockdeadline`: hard ceiling on a single controller request.
-    ///
-    /// This is a HANG GUARD, not a latency control, and the distinction sets the
-    /// value. A wedged controller previously blocked the route thread forever
-    /// (a blocking `SocketChannel` has no read-timeout API, so `readLine()` never
-    /// returns), which also stranded the RUN_AGENT_DOC registry slot so every
-    /// later click deduped away — the likely mechanism behind "Run Agent Doc does
-    /// nothing".
-    ///
-    /// It must stay comfortably ABOVE the longest legitimate server-side wait,
-    /// which is the 30s reactive turn-admission projection await. Setting it
-    /// near the client's 15s deadline hint would abort routes that are still
-    /// running correctly — the exact failure recorded in #jbroutasync.
-private const val SOCKET_REQUEST_TIMEOUT_MS = 60_000L
 
 /// `#ctrlacceptleg`: the command-plane ACCEPT leg is a pure enqueue — the
 /// controller validates the payload, publishes `Accepted`, hands the work to a

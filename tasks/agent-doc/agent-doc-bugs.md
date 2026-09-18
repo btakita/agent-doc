@@ -174,6 +174,25 @@ Fixed and shipped in `16070edb4`.
 - Live FPE proof: retained cycle `cycle-1789700747711` converged with the editor, reached `Committed`, and generation 16 immediately admitted and began the next cycle (`cycle-1789702637186`). The subsequent session check reports that new cycle as `preflight_started`, which is expected active-turn state and proves new turns start again.
 
 This session document is heavily accreted and should be compacted after its active queue is drained.
+
+### Re: fpe.md retained-closeout recovery — gpt-5 · 2026-09-18 00:29 EDT
+> **Queue prompt:**
+> fpe.md is still wedged. fix agent-doc causes. Also build in a recovery mechanism. authoritative actor generation 16 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md owns pane %5 but route could not drain the active closeout before dispatch: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: resume durable checkpoint cycle=cycle-1789703140795 phase=write_applied target="- What is the full url in sbx + stg for /admin/chat-safety/status?" capture_id=cycle-1789703140795; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/fpe.md
+
+Fixed the agent-doc causes and verified recovery against the live wedged cycle without resubmitting its write/finalize or patching `fpe.md`.
+
+Two independent recovery gaps were involved:
+
+1. A silent registered editor could exhaust the bounded delivery wait and leave the barrier, but re-registration was only requested from a later replica pull. A replica that never pulled again therefore had no path back to projection. Commit `f9c12352c` (`fix: recover silent replica delivery`) makes the bounded-wait release claim the one-shot recovery latch and send `EditorReplicaReregister` itself; a later pull cannot duplicate the signal.
+2. A newer durable persistence epoch could arrive while an older native-save request was in flight. The table retained the newer epoch, but after the old attempt released the single-flight token the reactive output was unchanged, so no second Effect edge occurred. Commit `5af59b5c1` (`fix: hand off superseding retained persistence`) makes completion atomically claim and enqueue the retained successor. It deliberately does not reclaim the same failed epoch, preventing retry spin.
+
+Regression coverage includes silent-replica release without a pull, preservation of stalled-wait evidence, superseding persistence inheriting the released token, and same-epoch failure remaining quiescent. The relay/realtime suites passed 379 tests, the complete controller-IO suite passed, `cargo fmt --check` passed, and full `make check` passed with zero failures. Both commits are pushed to `origin/main`; `make install` installed agent-doc 0.35.399 and recycled the controller/supervisor onto the installed inode. GitHub Book is green; CI run 35306690901 was still executing its `make check` stage with no failures when this response was captured.
+
+Live proof: the retained FPE cycle recovered under controller ownership, reached `crdt_commit_barrier ... ready=true ... disk_projection_ready=true`, and logged `flow_event ... stage=commit outcome=completed` at 04:23:26Z. The supervisor then dispatched the next queue item; `fpe.md` is now busy in new cycle `cycle-1789705413812`. No operator save, force-disk path, manual document edit, finalize replay, or second diagnostic session-check was used.
+
+There are no actionable follow-up items from this completed fix.
+
+This session document is accreted; compact it in a later dedicated cycle rather than stalling the current queue continuation.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

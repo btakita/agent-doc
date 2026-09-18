@@ -126,10 +126,15 @@ struct Member {
     /// undelivered head without its ACK ever advancing. Reset by any ACK that
     /// moves `last_ack_generation`, and by a fresh enqueue.
     redeliveries_without_ack: u32,
-    /// `#silentreplicabarrier`: bounded delivery-convergence waits that expired
-    /// against this member's unacked head without the member saying anything at
-    /// all — not even a pull. Reset by any pull, ACK, or projection.
+    /// `#silentreplicabarrier` / `#pullthenstallbarrier`: bounded
+    /// delivery-convergence waits that expired against this member's unacked
+    /// head without convergence progress. Duplicate pulls preserve this evidence;
+    /// ACK/projection or a fresh obligation resets it.
     barrier_waits_without_progress: u32,
+    /// A released barrier still needs the editor to rebuild and visibly project
+    /// the queued revision. This latch makes that recovery signal one-shot even
+    /// when the replica keeps polling the same pending head.
+    nonconvergence_recovery_signaled: bool,
 }
 
 impl Member {
@@ -142,6 +147,7 @@ impl Member {
     fn clear_nonconvergence_streaks(&mut self) {
         self.redeliveries_without_ack = 0;
         self.barrier_waits_without_progress = 0;
+        self.nonconvergence_recovery_signaled = false;
     }
 }
 
@@ -178,8 +184,9 @@ pub const MAX_REDELIVERIES_WITHOUT_ACK: u32 = 50;
 /// moved: no ACK, no enqueue, no liveness transition. Preflight parks in 500ms
 /// slices for a ~3s budget, so a single preflight attempt charges ~6 and fails
 /// closed on a frontier it cannot yet distinguish from a slow one; a second
-/// attempt crosses this threshold and admits. A merely slow editor never accrues
-/// the streak at all, because a plain pull clears it.
+/// attempt crosses this threshold and admits. Pulling the same unacknowledged head
+/// is liveness, but it is not convergence progress and therefore does not erase
+/// this independent stalled-wait evidence.
 pub const MAX_BARRIER_WAITS_WITHOUT_PROGRESS: u32 = 12;
 
 /// A fan-out packet: an `update` (delta) originating from `origin` that must be
@@ -1566,6 +1573,7 @@ impl RelayHub {
                 pending: VecDeque::new(),
                 redeliveries_without_ack: 0,
                 barrier_waits_without_progress: 0,
+                nonconvergence_recovery_signaled: false,
             },
         );
         // Materialize this member's liveness cell (live-on-register) and bump the
@@ -2217,10 +2225,12 @@ impl RelayHub {
         // the same shape `#idlerevisionreactive` settled on.
         if !member.pending.is_empty() {
             member.redeliveries_without_ack = member.redeliveries_without_ack.saturating_add(1);
-            // `#silentreplicabarrier`: a pull is not ACK progress, but it does
-            // prove the member is still servicing delivery. Only total silence
-            // accrues the barrier-wait streak.
-            member.barrier_waits_without_progress = 0;
+            // `#pullthenstallbarrier`: serving the same bytes is process
+            // liveness, not delivery progress. Keep the independent expired-wait
+            // streak so a slow/backed-off pull loop cannot erase the evidence on
+            // every retry and hold closeout forever. ACK/projection and fresh
+            // obligations still clear both streaks through
+            // `clear_nonconvergence_streaks`.
         }
         Ok(member.pending.iter().cloned().collect())
     }
@@ -2295,6 +2305,27 @@ impl RelayHub {
             .collect();
         ids.sort_unstable();
         ids
+    }
+
+    /// Claim the one-shot recovery notification for a live replica whose
+    /// pending delivery no longer holds the convergence barrier.
+    ///
+    /// `#pullthenstallbarrier`: barrier release restores availability, but it is
+    /// not a visible-state receipt. The next pull must ask the editor to rebuild
+    /// so retained closeout can still earn projection and native-save proof.
+    pub fn claim_nonconverging_recovery(&mut self, client_id: u64) -> Result<bool> {
+        let live = self.is_live(client_id);
+        let member = self
+            .members
+            .get_mut(&client_id)
+            .ok_or_else(|| anyhow!("replica {client_id} is not registered"))?;
+        let recovery_required =
+            live && !member.pending.is_empty() && !Self::member_holds_delivery_barrier(member);
+        if !recovery_required || member.nonconvergence_recovery_signaled {
+            return Ok(false);
+        }
+        member.nonconvergence_recovery_signaled = true;
+        Ok(true)
     }
 
     /// ACK one delivered update. Returns `Ok(false)` when the ACK is stale or
@@ -4604,31 +4635,44 @@ mod tests {
         assert_eq!(hub.pending_updates(3).unwrap().len(), 1);
     }
 
-    /// `#silentreplicabarrier`: the silent-replica budget must not be reachable
-    /// by a replica that is actually servicing delivery.
+    /// `#pullthenstallbarrier`: duplicate pulls must not erase expired waits that
+    /// observed no delivery progress.
     ///
-    /// A pull is not ACK progress, so it deliberately does NOT clear
-    /// `#pullnoackdeadlock`'s streak. It does prove the member is still there,
-    /// which is the whole distinction this budget rests on — without the reset, a
-    /// healthy-but-slow editor would be released after a dozen waits instead of
-    /// the 50 redeliveries `#pullnoackdeadlock` sized for it.
+    /// Observed 2026-09-17 on `tasks/fpe.md`: JetBrains pulled the same generation
+    /// repeatedly without projecting or ACKing it. Each backed-off retry cleared
+    /// the expired-wait streak, while 50 redeliveries took longer than the
+    /// closeout/retry window. The retained write never reached disk and its open
+    /// `ResponseCaptured` cycle blocked every following turn. A repeated pull
+    /// proves process liveness, but only ACK/projection is convergence progress.
     #[test]
-    fn a_pulling_replica_never_accrues_the_silent_streak() {
+    fn repeated_pulls_do_not_erase_stalled_wait_evidence() {
         let mut hub = RelayHub::new(1);
         hub.register(2).unwrap();
         hub.register(3).unwrap();
         assert!(hub.ensure_canonical_projection_receipt(3).unwrap());
 
-        for _ in 0..(MAX_BARRIER_WAITS_WITHOUT_PROGRESS * 4) {
+        for _ in 0..MAX_BARRIER_WAITS_WITHOUT_PROGRESS {
             assert!(hub.charge_barrier_wait_without_progress().is_empty());
-            // One pull between waits is all it takes to prove liveness.
+            // Match the production wedge: one duplicate pull arrives between
+            // bounded waits, but never an ACK or projection.
             assert_eq!(hub.pending_updates(3).unwrap().len(), 1);
         }
 
+        assert_eq!(
+            hub.charge_barrier_wait_without_progress(),
+            vec![3],
+            "duplicate pulls are not convergence progress and must not wedge closeout"
+        );
+        assert!(hub.delivery_converged());
+        assert_eq!(hub.nonconverging_replicas(), vec![3]);
+        assert_eq!(hub.pending_updates(3).unwrap().len(), 1);
         assert!(
-            !hub.delivery_converged(),
-            "a replica that keeps pulling stays inside the redelivery budget, \
-             which is the bound sized for it"
+            hub.claim_nonconverging_recovery(3).unwrap(),
+            "the first pull after release must claim editor rebuild recovery"
+        );
+        assert!(
+            !hub.claim_nonconverging_recovery(3).unwrap(),
+            "repeated polls must not spam editor rebuild recovery"
         );
     }
 

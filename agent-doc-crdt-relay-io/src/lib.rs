@@ -3013,7 +3013,8 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
             .into_iter()
             .find(|entry| entry.client_id == client_id)
             .ok_or_else(|| anyhow::anyhow!("replica {client_id} is not registered"))?;
-        Ok::<_, anyhow::Error>((updates, delivery))
+        let recovery_now = hub.claim_nonconverging_recovery(client_id)?;
+        Ok::<_, anyhow::Error>((updates, delivery, recovery_now))
     })?
     else {
         // Passive polls carry no editor state with which to rebuild an evicted
@@ -3021,7 +3022,7 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
         // first; otherwise a stale poll recreates the phantom zero-member hub.
         return Ok(None);
     };
-    let (updates, delivery) = pull?;
+    let (updates, delivery, recovery_now) = pull?;
     // Only log a pull that actually delivers work or advances the ack frontier.
     // The editor replica forwarder polls this ~4×/second while attached; logging
     // every empty steady-state poll floods ops.log (observed growing it to
@@ -3033,16 +3034,15 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
     // `current_generation != last_ack_generation` true permanently, so every
     // pull logged and the flood came back anyway — 23372 lines on
     // `tasks/agent-doc/agent-doc-bugs2.md` for ONE undelivered generation. Once
-    // the replica has stopped holding the delivery barrier, log the transition
-    // and then stay quiet: repeating it per pull records nothing new.
-    const MAX_LOGGED_REDELIVERY_TRANSITION: u32 =
-        agent_doc_document_realtime::crdt_relay::MAX_REDELIVERIES_WITHOUT_ACK + 1;
+    // the replica has stopped holding the delivery barrier, log the one-shot
+    // recovery claim and then stay quiet: repeating it per pull records nothing
+    // new. `#pullthenstallbarrier` can release via expired waits before the
+    // redelivery count reaches 51, so the relay owns the latch instead of this
+    // adapter inferring the transition from one counter value.
     let wedged = !delivery.holds_delivery_barrier && !updates.is_empty();
-    let crossed_now =
-        wedged && delivery.redeliveries_without_ack == MAX_LOGGED_REDELIVERY_TRANSITION;
     if (!wedged
         && (!updates.is_empty() || delivery.current_generation != delivery.last_ack_generation))
-        || crossed_now
+        || recovery_now
     {
         agent_doc_ops_log_io::log_op(
             file,
@@ -3054,15 +3054,15 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
                 delivery.current_generation,
                 delivery.last_ack_generation,
                 delivery.redeliveries_without_ack,
-                if crossed_now {
-                    " barrier=released reason=pull_without_ack recovery=replica_still_queued_ack_rehabilitates"
+                if recovery_now {
+                    " barrier=released reason=delivery_without_progress recovery=replica_reregister_requested"
                 } else {
                     ""
                 },
             ),
         );
     }
-    if crossed_now {
+    if recovery_now {
         // The bounded barrier release preserves admission, but it is not a
         // visible-state receipt. Ask the live editor to rebuild its replica so
         // the still-queued update can earn that receipt instead of letting a

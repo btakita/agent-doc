@@ -189,6 +189,12 @@ pub enum ControllerCompactDocumentOutcome {
         continuation_id: String,
         commit: bool,
     },
+    /// The editor has published operator operations too recently to establish a
+    /// stable compaction cut. The command submitter waits outside the controller
+    /// and retries after this remaining quiet period.
+    DeferredActiveTyping {
+        retry_after_ms: u64,
+    },
 }
 
 pub const COMPACT_COMMIT_SCOPE_NOTE: &str = "[compact] note: --commit persists only the compacted document state now in HEAD; any later console explanation still needs its own `agent-doc finalize` or `agent-doc write --commit` cycle to land in `exchange`";
@@ -15931,7 +15937,7 @@ revised operator request
         projection.apply_fact(&deferred.fact);
 
         assert_eq!(
-            compact_document_admission(Some(&projection)),
+            compact_document_admission(Some(&projection), 20_000),
             CompactDocumentAdmission::Execute,
             "an unrelated retained response remains eligible for component composition",
         );
@@ -15949,7 +15955,7 @@ revised operator request
         );
 
         assert_eq!(
-            compact_document_admission(Some(&projection)),
+            compact_document_admission(Some(&projection), 20_000),
             CompactDocumentAdmission::AlreadyPending {
                 continuation_id: "compact-continuation".to_string(),
                 commit: true,
@@ -15965,7 +15971,7 @@ revised operator request
             },
         );
         assert_eq!(
-            compact_document_admission(Some(&projection)),
+            compact_document_admission(Some(&projection), 20_000),
             CompactDocumentAdmission::Execute,
             "a terminal same-component conflict must reopen compact admission",
         );
@@ -15974,14 +15980,43 @@ revised operator request
     #[test]
     fn compact_admission_executes_without_retained_state() {
         assert_eq!(
-            compact_document_admission(None),
+            compact_document_admission(None, 20_000),
             CompactDocumentAdmission::Execute
         );
         let projection =
             agent_doc_state_backbone::DocumentStateProjection::new("doc-compact-ready");
         assert_eq!(
-            compact_document_admission(Some(&projection)),
+            compact_document_admission(Some(&projection), 20_000),
             CompactDocumentAdmission::Execute
+        );
+    }
+
+    #[test]
+    fn compact_admission_waits_for_a_continuous_operator_quiet_window() {
+        let mut projection =
+            agent_doc_state_backbone::DocumentStateProjection::new("doc-compact-typing");
+        projection.apply_fact(
+            &agent_doc_state_backbone::StateFact::EditorOpCaptureCheckpointed {
+                document_hash: "doc-compact-typing".to_string(),
+                canonical_path: "/work/sample.md".to_string(),
+                epoch: 1,
+                base_hash: "base".to_string(),
+                ops_json: "[]".to_string(),
+                updated_ms: 15_000,
+            },
+        );
+
+        assert_eq!(
+            compact_document_admission(Some(&projection), 20_000),
+            CompactDocumentAdmission::DeferActiveTyping {
+                retry_after_ms: 5_000,
+            },
+            "an instantaneous delivery ACK must not admit compaction between typing bursts",
+        );
+        assert_eq!(
+            compact_document_admission(Some(&projection), 25_000),
+            CompactDocumentAdmission::Execute,
+            "the same operator cut becomes eligible after the full quiet window",
         );
     }
 
@@ -16000,6 +16035,11 @@ revised operator request
             &ControllerCompactDocumentOutcome::AlreadyPending {
                 continuation_id: "compact-continuation".to_string(),
                 commit: true,
+            }
+        ));
+        assert!(!compact_outcome_claims_head(
+            &ControllerCompactDocumentOutcome::DeferredActiveTyping {
+                retry_after_ms: 5_000,
             }
         ));
     }

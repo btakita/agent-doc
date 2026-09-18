@@ -7092,12 +7092,26 @@ pub fn compact_document_via_controller(
             CONTROLLER_COMPACT_DOCUMENT_TIMEOUT,
         )
     };
-    let outcome = match submit(request.clone()) {
-        Err(err) if err.to_string().contains("controller_binary_stale") => submit(request)?,
-        other => other?,
+    let mut typing_defer_reported = false;
+    let outcome = loop {
+        let outcome = match submit(request.clone()) {
+            Err(err) if err.to_string().contains("controller_binary_stale") => {
+                submit(request.clone())?
+            }
+            other => other?,
+        };
+        let outcome: ControllerCompactDocumentOutcome =
+            serde_json::from_value(outcome).context("failed to parse compact_document outcome")?;
+        let ControllerCompactDocumentOutcome::DeferredActiveTyping { retry_after_ms } = outcome
+        else {
+            break outcome;
+        };
+        if !typing_defer_reported {
+            eprintln!("[compact] waiting for a stable editor cut; operator typing is still active");
+            typing_defer_reported = true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(retry_after_ms.max(1)));
     };
-    let outcome: ControllerCompactDocumentOutcome =
-        serde_json::from_value(outcome).context("failed to parse compact_document outcome")?;
     if compact_outcome_claims_head(&outcome) {
         eprintln!("{COMPACT_COMMIT_SCOPE_NOTE}");
     }
@@ -7114,6 +7128,9 @@ pub fn compact_document_via_controller(
                 "{}",
                 compact_already_pending_note(continuation_id, *pending_commit)
             );
+        }
+        ControllerCompactDocumentOutcome::DeferredActiveTyping { .. } => {
+            unreachable!("active typing is retried before compact outcome handling")
         }
         ControllerCompactDocumentOutcome::NoChanges => {
             eprintln!(
@@ -7521,11 +7538,19 @@ fn handle_commit_document_rpc(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CompactDocumentAdmission {
     Execute,
+    DeferActiveTyping {
+        retry_after_ms: u64,
+    },
     AlreadyPending {
         continuation_id: String,
         commit: bool,
     },
 }
+
+/// Compact Exchange is destructive maintenance, not an ordinary response
+/// append. Require a deliberative quiet period after the newest operator op so
+/// an ACK between keystrokes cannot make a half-written queue item authoritative.
+const COMPACT_EDITOR_QUIESCENCE_MS: u64 = 10_000;
 
 pub(crate) fn compact_outcome_claims_head(outcome: &ControllerCompactDocumentOutcome) -> bool {
     matches!(outcome, ControllerCompactDocumentOutcome::Committed)
@@ -7533,6 +7558,7 @@ pub(crate) fn compact_outcome_claims_head(outcome: &ControllerCompactDocumentOut
 
 pub(crate) fn compact_document_admission(
     projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
+    now_ms: u64,
 ) -> CompactDocumentAdmission {
     let Some(projection) = projection else {
         return CompactDocumentAdmission::Execute;
@@ -7542,6 +7568,16 @@ pub(crate) fn compact_document_admission(
             continuation_id: continuation.continuation_id.clone(),
             commit: continuation.commit,
         };
+    }
+    if let Some(capture) = projection.document.editor_op_capture.as_ref()
+        && capture.updated_ms > 0
+    {
+        let quiet_for_ms = now_ms.saturating_sub(capture.updated_ms);
+        if quiet_for_ms < COMPACT_EDITOR_QUIESCENCE_MS {
+            return CompactDocumentAdmission::DeferActiveTyping {
+                retry_after_ms: COMPACT_EDITOR_QUIESCENCE_MS.saturating_sub(quiet_for_ms),
+            };
+        }
     }
     CompactDocumentAdmission::Execute
 }
@@ -7558,8 +7594,21 @@ fn handle_compact_document_rpc(
         serde_json::from_str(&payload_json).context("failed to parse compact_document payload")?;
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let projection = runtime.document_state_projection(&document_hash)?;
-    match compact_document_admission(projection.as_ref()) {
+    match compact_document_admission(projection.as_ref(), controller_now_ms()) {
         CompactDocumentAdmission::Execute => {}
+        CompactDocumentAdmission::DeferActiveTyping { retry_after_ms } => {
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "controller_compact_document_deferred file={} reason=active_typing retry_after_ms={retry_after_ms}",
+                    canonical.display(),
+                ),
+            );
+            return serde_json::to_value(ControllerCompactDocumentOutcome::DeferredActiveTyping {
+                retry_after_ms,
+            })
+            .context("failed to serialize active-typing compact outcome");
+        }
         CompactDocumentAdmission::AlreadyPending {
             continuation_id,
             commit,

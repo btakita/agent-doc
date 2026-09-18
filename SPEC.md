@@ -77,7 +77,11 @@
   durable editor-op cut before parsing the exchange. It retains the originally
   observed authority bytes as its compare-and-swap base, atomically lands operator
   deletes with the compact rewrite, and consumes the op epoch only after the
-  authoritative write and snapshot succeed (`#compactcachedeletetombstone`).
+  authoritative write and snapshot succeed (`#compactcachedeletetombstone`). A
+  transient delivery ACK between operator bursts is not a stable cut: compaction
+  waits outside the controller until the newest captured operator op has remained
+  unchanged for the complete compact quiescence window, and every newer op resets
+  that window.
 - Normal preflight publishes typed document observations to one
 controller-owned per-document `Computed`; short-lived preflight CLI processes
 consume that projection instead of independently rebuilding output state. It

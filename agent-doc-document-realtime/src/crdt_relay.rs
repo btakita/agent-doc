@@ -2311,8 +2311,10 @@ impl RelayHub {
     /// pending delivery no longer holds the convergence barrier.
     ///
     /// `#pullthenstallbarrier`: barrier release restores availability, but it is
-    /// not a visible-state receipt. The next pull must ask the editor to rebuild
-    /// so retained closeout can still earn projection and native-save proof.
+    /// not a visible-state receipt. Whichever observer proves non-convergence —
+    /// a repeated pull or an expired bounded wait — must ask the editor to
+    /// rebuild so retained closeout can still earn projection and native-save
+    /// proof.
     pub fn claim_nonconverging_recovery(&mut self, client_id: u64) -> Result<bool> {
         let live = self.is_live(client_id);
         let member = self

@@ -3063,43 +3063,62 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
         );
     }
     if recovery_now {
-        // The bounded barrier release preserves admission, but it is not a
-        // visible-state receipt. Ask the live editor to rebuild its replica so
-        // the still-queued update can earn that receipt instead of letting a
-        // retained closeout mistake availability for durability.
-        match signal_crdt_replica_event_with_counts(
+        signal_nonconverging_replica_recovery(
             file,
-            CrdtReplicaEventReason::EditorReplicaReregister,
-            1,
-        ) {
-            Ok(outcome) => agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "crdt_nonconverging_replica_recovery file={} client_id={} redeliveries={} reregister={} found={} notified={}",
-                    file.display(),
-                    client_id,
-                    delivery.redeliveries_without_ack,
-                    outcome.diagnosis(),
-                    outcome.found,
-                    outcome.notified,
-                ),
-            ),
-            Err(error) => agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "crdt_nonconverging_replica_recovery_deferred file={} client_id={} redeliveries={} error={error:#}",
-                    file.display(),
-                    client_id,
-                    delivery.redeliveries_without_ack,
-                ),
-            ),
-        }
+            client_id,
+            delivery.redeliveries_without_ack,
+            "replica_pull",
+        );
     }
     Ok(Some(ReplicaPull {
         client_id,
         updates,
         delivery,
     }))
+}
+
+/// Ask the editor host to discard and rebuild a replica that stopped making
+/// visible-delivery progress.
+///
+/// Barrier release restores availability, but it is not a visible-state
+/// receipt. This signal is deliberately callable by both the pull path and the
+/// bounded convergence waiter: a completely silent replica cannot pull the
+/// update that would otherwise trigger its own recovery.
+fn signal_nonconverging_replica_recovery(
+    file: &Path,
+    client_id: u64,
+    redeliveries_without_ack: u32,
+    source: &str,
+) {
+    match signal_crdt_replica_event_with_counts(
+        file,
+        CrdtReplicaEventReason::EditorReplicaReregister,
+        1,
+    ) {
+        Ok(outcome) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_nonconverging_replica_recovery file={} client_id={} redeliveries={} source={} reregister={} found={} notified={}",
+                file.display(),
+                client_id,
+                redeliveries_without_ack,
+                source,
+                outcome.diagnosis(),
+                outcome.found,
+                outcome.notified,
+            ),
+        ),
+        Err(error) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_nonconverging_replica_recovery_deferred file={} client_id={} redeliveries={} source={} error={error:#}",
+                file.display(),
+                client_id,
+                redeliveries_without_ack,
+                source,
+            ),
+        ),
+    }
 }
 
 /// D2 delivery: if the editor `identity` was flagged for a **replace-capable
@@ -4023,9 +4042,22 @@ pub fn await_delivery_convergence_for_file(
             // stopped answering entirely, so charge it against the live barrier
             // holders. A replica that merely pulls without ACKing clears this
             // streak and stays bounded by `MAX_REDELIVERIES_WITHOUT_ACK` instead.
-            let released = {
+            let (released, recoveries) = {
                 let mut hub = handle.lock();
-                hub.charge_barrier_wait_without_progress()
+                let released = hub.charge_barrier_wait_without_progress();
+                let delivery = hub.delivery_snapshot();
+                let mut recoveries = Vec::new();
+                for client_id in &released {
+                    if hub.claim_nonconverging_recovery(*client_id)? {
+                        let redeliveries_without_ack = delivery
+                            .iter()
+                            .find(|entry| entry.client_id == *client_id)
+                            .map(|entry| entry.redeliveries_without_ack)
+                            .unwrap_or_default();
+                        recoveries.push((*client_id, redeliveries_without_ack));
+                    }
+                }
+                (released, recoveries)
             };
             if !released.is_empty() {
                 agent_doc_ops_log_io::log_op(
@@ -4040,6 +4072,18 @@ pub fn await_delivery_convergence_for_file(
                             .join(","),
                         agent_doc_document_realtime::crdt_relay::MAX_BARRIER_WAITS_WITHOUT_PROGRESS,
                     ),
+                );
+            }
+            // `#silentreplicabarrier`: unlike a pull-then-stall replica, a
+            // completely silent member can never reach the pull-side recovery
+            // hook. The bounded waiter is the observer that proved the stall,
+            // so it must also send the one-shot rebuild request.
+            for (client_id, redeliveries_without_ack) in recoveries {
+                signal_nonconverging_replica_recovery(
+                    file,
+                    client_id,
+                    redeliveries_without_ack,
+                    "barrier_wait",
                 );
             }
             return delivery_convergence_witness_for_file(file);
@@ -4563,6 +4607,51 @@ mod tests {
 
         assert_eq!(after, before);
         assert!(started.elapsed() >= std::time::Duration::from_millis(35));
+    }
+
+    #[test]
+    fn silent_replica_release_claims_reregister_without_a_pull() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("silent-replica-recovery.md");
+        std::fs::write(&file, "# baseline\n").unwrap();
+        with_hub_seeded_from_file(&file, |hub| {
+            hub.register(44).unwrap();
+            hub.apply_canonical_replace("# baseline\n", "# retained\n")
+                .unwrap();
+        })
+        .unwrap();
+        let before = delivery_convergence_witness_for_file(&file)
+            .unwrap()
+            .expect("seeded hub");
+
+        let mut after = before;
+        for _ in 0..=agent_doc_document_realtime::crdt_relay::MAX_BARRIER_WAITS_WITHOUT_PROGRESS {
+            after = await_delivery_convergence_for_file(
+                &file,
+                Some(after.version),
+                std::time::Duration::from_millis(1),
+            )
+            .unwrap()
+            .expect("hub remains observed");
+        }
+
+        assert!(
+            after.converged,
+            "the silent member must release the barrier"
+        );
+        with_existing_hub(&file, |hub| {
+            assert_eq!(hub.nonconverging_replicas(), vec![44]);
+            assert!(
+                !hub.claim_nonconverging_recovery(44).unwrap(),
+                "the wait-side recovery must claim the one-shot latch before any pull"
+            );
+            assert_eq!(hub.pending_updates(44).unwrap().len(), 1);
+            assert!(
+                !hub.claim_nonconverging_recovery(44).unwrap(),
+                "the first later pull must not duplicate the rebuild request"
+            );
+        })
+        .unwrap();
     }
     use std::sync::Arc;
     use std::thread;

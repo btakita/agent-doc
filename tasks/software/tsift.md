@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
-  codex: 01a0b0cb-bfc4-7302-84b6-d33cf4e22e1c
+  codex: 01a0b12b-dbd0-72a1-a234-b66cad613b93
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -204,14 +204,29 @@ Implemented team-safe instruction deployment modes and pushed them in `b77b430` 
 - Added CLI, index, status, and simulation coverage; updated README, specification, and unreleased notes.
 
 Verification: `make check` passed (digest artifact `tart-a8ef871921`), `cargo install --path . --force --locked` succeeded, `git diff --check` passed, and the pushed branch is clean. No branch-specific GitHub Actions run was present immediately after the push.
+
+### Re: release + publish — gpt-5 · 2026-09-17T23:42:22-04:00
+
+> **Queue prompt:**
+>
+> release + publish
+
+Released and published tsift `v0.1.99`.
+
+- Release commit `ffc677e` contains full C# indexing support plus the team-safe `personal|shared|off` instruction deployment policy. It was pushed to `main` and tagged `v0.1.99`.
+- Local release verification passed: `make check` (artifact `tart-29d81f4703`), `cargo install --path . --force --locked`, `tsift 0.1.99`, current generated instructions, and clean diff checks.
+- The tag workflow passed release verification, built all three platform archives, published `opencode-tsift@0.1.99`, and published all 26 Rust crates at `0.1.99`.
+- GitHub Release creation encountered `Error creating asset temp dir` because `dist/*` also matched staging directories. I recovered the release from the workflow artifacts and published all six archives/checksums at https://github.com/btakita/tsift/releases/tag/v0.1.99; every archive checksum verifies.
+- Fixed that release regression in `8987a4c` by restricting uploads to archive/checksum globs and adding a regression assertion. The fix is pushed to `main` and `feat/csharp-index`; CI run `35303887336` passed both clippy/test and live Convex acceptance.
+- `origin/main`, `origin/feat/csharp-index`, and the clean worktree now point to `8987a4c`; tag `v0.1.99` remains correctly pinned to release commit `ffc677e`.
+
+Session note: the exchange is large, but the active queue is now drained without pausing for compaction.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#tsiftinstrpolicy]~~
-- release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

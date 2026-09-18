@@ -2741,6 +2741,34 @@ struct RetainedPersistenceCommand {
     envelope: lazily::LatestDurableEnvelope<String, RetainedPersistenceProjection>,
 }
 
+/// Claim the latest desired projection after an older in-flight attempt
+/// completes. A newer delivery can be accepted while the worker still owns the
+/// previous epoch; when that happens the reactive Effect has already emitted
+/// the newer `PersistLatest` value and an unchanged Computed output cannot wake
+/// it a second time. The completion edge is therefore responsible for handing
+/// the single-flight token directly to the coalesced successor.
+fn claim_superseding_retained_persistence(
+    persistence: &lazily::ThreadSafeLatestDurableProjection<String, RetainedPersistenceProjection>,
+    ctx: &lazily::ThreadSafeContext,
+    document_hash: &str,
+    completed_epoch: u64,
+) -> Option<RetainedPersistenceCommand> {
+    let key = document_hash.to_string();
+    let desired = persistence.state(&key)?.desired?;
+    if desired.epoch <= completed_epoch {
+        return None;
+    }
+    let generation = desired.value.controller_generation;
+    let lazily::LatestDurableClaim::Claimed(envelope) = persistence.claim(ctx, &key, generation)
+    else {
+        return None;
+    };
+    Some(RetainedPersistenceCommand {
+        document_hash: key,
+        envelope,
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RetainedResumeAction {
     ResumeSettledDelivery,
@@ -4331,6 +4359,7 @@ impl ControllerDocumentGraphs {
     fn complete_retained_persistence(&self, command: RetainedPersistenceCommand, applied: bool) {
         let key = command.document_hash;
         let envelope = command.envelope;
+        let mut superseding_command = None;
         self.ctx.batch(|ctx| {
             let outcome = if applied {
                 format!(
@@ -4359,16 +4388,26 @@ impl ControllerDocumentGraphs {
                 .and_then(|state| state.desired)
                 .is_some_and(|desired| desired.epoch > envelope.epoch);
             if applied || newer_pending {
-                // Advancing this process-local frontier schedules any newer
-                // candidate that arrived while the exact envelope was in
-                // flight. A failed current epoch stays retained and waits for
-                // a meaningful delivery/generation edge instead of spinning.
+                // Advancing this process-local frontier suppresses the
+                // completed candidate. The explicit claim below hands the
+                // single-flight token to a newer candidate that arrived while
+                // this envelope was in flight. A failed current epoch remains
+                // retained and waits for a meaningful delivery/generation edge
+                // instead of spinning.
                 self.retained_transition_published_frontier.set(
                     ctx,
                     key.clone(),
                     Some(RetainedTransitionEffect::PersistLatest(
                         envelope.value.clone(),
                     )),
+                );
+            }
+            if newer_pending {
+                superseding_command = claim_superseding_retained_persistence(
+                    &self.retained_persistence,
+                    ctx,
+                    &key,
+                    envelope.epoch,
                 );
             }
             agent_doc_ops_log_io::log_op(
@@ -4385,6 +4424,49 @@ impl ControllerDocumentGraphs {
                 ),
             );
         });
+        let Some(command) = superseding_command else {
+            return;
+        };
+        let Some(sender) = self.retained_persistence_sender.get() else {
+            self.ctx.batch(|ctx| {
+                let failure = self.retained_persistence.fail_retryable(
+                    ctx,
+                    &command.document_hash,
+                    command.envelope.generation,
+                    command.envelope.epoch,
+                );
+                agent_doc_ops_log_io::log_op(
+                    &command.envelope.value.file,
+                    &format!(
+                        "retained_persistence_retained document_hash={} generation={} epoch={} failure={failure:?} reason=superseding_egress_worker_unavailable",
+                        command.document_hash,
+                        command.envelope.generation,
+                        command.envelope.epoch,
+                    ),
+                );
+            });
+            return;
+        };
+        if let Err(error) = sender.send(command) {
+            let command = error.0;
+            self.ctx.batch(|ctx| {
+                let failure = self.retained_persistence.fail_retryable(
+                    ctx,
+                    &command.document_hash,
+                    command.envelope.generation,
+                    command.envelope.epoch,
+                );
+                agent_doc_ops_log_io::log_op(
+                    &command.envelope.value.file,
+                    &format!(
+                        "retained_persistence_retained document_hash={} generation={} epoch={} failure={failure:?} reason=superseding_egress_worker_disconnected",
+                        command.document_hash,
+                        command.envelope.generation,
+                        command.envelope.epoch,
+                    ),
+                );
+            });
+        }
     }
 
     /// Apply the sole effect-bearing projection of the retained-transition
@@ -7990,6 +8072,80 @@ mod tests {
             socket_path(dir.path()),
             dir.path().join(".agent-doc/controller.sock")
         );
+    }
+
+    #[test]
+    fn retained_persistence_completion_claims_superseding_delivery() {
+        let ctx = lazily::ThreadSafeContext::new();
+        let persistence = lazily::ThreadSafeLatestDurableProjection::new(&ctx, 1);
+        let document_hash = "document".to_string();
+        let projection = |delivery_version| RetainedPersistenceProjection {
+            file: PathBuf::from("tasks/session.md"),
+            content_hash: format!("hash-{delivery_version}"),
+            content_len: delivery_version as usize,
+            delivery_version,
+            controller_generation: 1,
+        };
+
+        assert_eq!(
+            persistence.upsert_desired(&ctx, document_hash.clone(), 3, projection(3)),
+            lazily::LatestDurableUpsert::Accepted
+        );
+        let first = match persistence.claim(&ctx, &document_hash, 1) {
+            lazily::LatestDurableClaim::Claimed(envelope) => envelope,
+            other => panic!("expected initial claim, got {other:?}"),
+        };
+        assert_eq!(
+            persistence.upsert_desired(&ctx, document_hash.clone(), 6, projection(6)),
+            lazily::LatestDurableUpsert::Accepted
+        );
+        assert_eq!(
+            persistence.fail_retryable(&ctx, &document_hash, first.generation, first.epoch),
+            lazily::LatestDurableFailure::Superseded
+        );
+
+        let successor =
+            claim_superseding_retained_persistence(&persistence, &ctx, &document_hash, first.epoch)
+                .expect("newer desired delivery must inherit the released single-flight token");
+        assert_eq!(successor.envelope.epoch, 6);
+        assert_eq!(successor.envelope.value.content_hash, "hash-6");
+        assert!(matches!(
+            persistence.claim(&ctx, &document_hash, 1),
+            lazily::LatestDurableClaim::Busy
+        ));
+    }
+
+    #[test]
+    fn retained_persistence_completion_does_not_spin_current_failure() {
+        let ctx = lazily::ThreadSafeContext::new();
+        let persistence = lazily::ThreadSafeLatestDurableProjection::new(&ctx, 1);
+        let document_hash = "document".to_string();
+        let projection = RetainedPersistenceProjection {
+            file: PathBuf::from("tasks/session.md"),
+            content_hash: "hash-3".to_string(),
+            content_len: 3,
+            delivery_version: 3,
+            controller_generation: 1,
+        };
+        assert_eq!(
+            persistence.upsert_desired(&ctx, document_hash.clone(), 3, projection),
+            lazily::LatestDurableUpsert::Accepted
+        );
+        let first = match persistence.claim(&ctx, &document_hash, 1) {
+            lazily::LatestDurableClaim::Claimed(envelope) => envelope,
+            other => panic!("expected initial claim, got {other:?}"),
+        };
+        assert_eq!(
+            persistence.fail_retryable(&ctx, &document_hash, first.generation, first.epoch),
+            lazily::LatestDurableFailure::Pending
+        );
+        assert!(claim_superseding_retained_persistence(
+            &persistence,
+            &ctx,
+            &document_hash,
+            first.epoch,
+        )
+        .is_none());
     }
 
     #[test]

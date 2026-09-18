@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0b1ef-18b7-7952-94b3-c9581cb81705
+  codex: 01a0b180-e3a6-77b1-a146-0756d3071cd9
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -226,6 +226,38 @@ Corrected the missing lifecycle transition.
 
 Exchange accretion remains elevated, but the active queue was drained without pausing for compaction.
 
+### Re: JetBrains focus effect fencing and FPE recovery — gpt-5 · 2026-09-18 16:39 EDT
+
+> **Queue prompt:**
+>
+> do [#fixchromiumbridge]
+
+
+Implemented and shipped the JetBrains focus-effect race fix, while preserving the newer lifecycle-locked generation fence already on `main`.
+
+The effect now has a typed request/response boundary. Its request carries the admitted focus generation and target document; its response is classified under the listener lifecycle lock as applied, structural repair, retained, superseded, or transport unavailable. Only a response whose generation is still owned by the admitted surface observation may install the reverse-focus lease or enqueue forced layout repair. A newer admitted observation invalidates and interrupts the in-flight effect, and rejected lower-authority observations cannot cancel valid focus work.
+
+The passive focus socket request has a dedicated 1-second deadline. Cancellation plus this deadline keeps a stale or wedged controller response from blocking newer selection work; stale, timed-out, and failed responses are inert. The controller/Rust surface protocol is unchanged.
+
+Changed paths:
+- `editors/jetbrains/SPEC.md`
+- `editors/jetbrains/gradle.properties` (plugin `0.2.388`)
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CpRouteClient.kt`
+- `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt`
+- `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/EditorTabSyncListenerTest.kt`
+
+Proof:
+- Focused JetBrains tests passed: `CpSocketDeadlineTest` and `EditorTabSyncListenerTest`.
+- `make bump-plugin` built `agent-doc-jetbrains-0.2.388.zip`.
+- Full `make check` passed with zero failures.
+- `make install` succeeded for CLI/skill `0.35.400`, JetBrains `0.2.388`, and the VS Code extension.
+- Commit `5bfe9bd3b` (`fix: bound JetBrains focus effect responses`) was pushed to `origin/main`.
+- GitHub Actions CI run 35392633692 is in progress for that exact commit.
+- Confidence: high. Escalation: none.
+
+Unblocked `src/haiven-dev/tasks/fpe.md` first. Controller status proved pane `%5` still owned an active empty `preflight_started` cycle; `agent-doc session cancel-turn` explicitly abandoned cycle `cycle-1789763038157`, preserved context, and restarted generation 16 on its queued work. No response, document write, or commit was resubmitted. Queued `#duplicatepreflightunblock` at the agent-doc queue tail to make this recovery bounded and automatic.
+
+Accretion: retained 199 exchange lines and 12 response sections without compaction.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -239,6 +271,7 @@ Exchange accretion remains elevated, but the active queue was drained without pa
 
 
 <!-- agent:backlog priority -->
+- [ ] [#duplicatepreflightunblock] Fix duplicate agent-doc invocation refusing indefinitely while a prior cycle remains preflight_started; provide bounded cancellation and stale-cycle recovery that unblocks the document without operator timing.
 <!-- /agent:backlog -->
 
 ## Review

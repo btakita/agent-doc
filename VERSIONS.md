@@ -2,6 +2,21 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.400
+
+- **Retained closeouts recover across stalled, silent, and superseding editor
+  deliveries.** Replica barrier ownership now hands continuation to the durable
+  persistence path, silent replicas are actively re-driven, and superseding
+  writes preserve the captured response rather than stranding an open cycle.
+- **Queue and prompt classification stay stable across repeated turns.** Reused
+  free-text heads are re-armed for a fresh lifecycle, while persistent notes
+  remain informational instead of becoming completion targets or fabricated
+  user changes.
+- **Live editor transitions are generation-fenced without blocking active work.**
+  Native saves retain editor authority, stale plugin effects cannot overwrite a
+  newer generation, and busy turns bypass obsolete startup waits while bounded
+  editor splices remain available to supported adapters.
+
 ## 0.35.399
 
 - **Linux and Windows releases may ship on demand; only Darwin asset uploads

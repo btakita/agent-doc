@@ -159,6 +159,21 @@ I added the regression `notes_change_with_queue_prompt_reports_only_the_queue_pr
 The historical FPE note was explicitly removed through agent-doc's authority-safe patch path and committed/pushed on `docs/fpe-service-topology-temporal-plan` as `8fda4aca5`. The product hardening is committed/pushed on agent-doc `main` as `f833a7b9b`.
 
 Verification: focused regression passed; full `make check` passed; `audit-docs` passed; the matching local binary and editor packages were installed; the live controller was recycled. The newly pushed GitHub Actions CI run is queued, and the preceding `main` CI run completed successfully.
+
+### Re: fpe.md closeout/admission recovery — gpt-5 · 2026-09-17T23:37:00-04:00
+
+> **Queue prompt:**
+> fpe.md is having issues completing and starting new turns. Fix agent-doc causes.
+
+Fixed and shipped in `16070edb4`.
+
+- Root cause: a JetBrains replica could repeatedly pull the same retained update without projecting or acknowledging it. Each duplicate pull erased the relay's independent stalled-wait evidence, so the closeout delivery barrier could remain active indefinitely and admission reported `delivery_pending`/`open_cycle`.
+- Fix: duplicate pulls no longer reset expired-wait evidence; bounded nonconvergence release has a one-shot recovery latch; relay I/O now re-registers the editor replica for every bounded nonconvergence release, not only the old exact redelivery-count case. Genuine progress and fresh obligations reset the latch.
+- Regression coverage proves repeated pulls cannot erase stalled-wait evidence, the barrier releases after bounded waits, and recovery signaling is one-shot. The focused regression, both affected crate suites, `cargo fmt --check`, and full `make check` passed.
+- Delivery: `16070edb4` is pushed to `origin/main`; the matching CLI/library, JetBrains plugin 0.2.387, and VS Code package were installed. GitHub Pages/book workflows passed; CI run `35303586580` was still in progress with no reported failure at final inspection.
+- Live FPE proof: retained cycle `cycle-1789700747711` converged with the editor, reached `Committed`, and generation 16 immediately admitted and began the next cycle (`cycle-1789702637186`). The subsequent session check reports that new cycle as `preflight_started`, which is expected active-turn state and proves new turns start again.
+
+This session document is heavily accreted and should be compacted after its active queue is drained.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

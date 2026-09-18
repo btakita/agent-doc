@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0b180-e3a6-77b1-a146-0756d3071cd9
+  codex: 01a0b1ef-18b7-7952-94b3-c9581cb81705
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -144,6 +144,21 @@ Implemented and shipped in `aa061cb76`.
 - **Delivery:** pushed `aa061cb76` to `origin/main`. GitHub Actions CI run `35284240619` was queued at inspection time.
 
 No blockers remain.
+
+### Re: notes/queue completion cleanup — gpt-5 · 2026-09-17T21:02:53-04:00
+
+> **Queue prompt:**
+> agent-doc did not not clear the queue item in this documnet when complete. agent-doc did not strike or clean `- Look at /home/brian/work/btakita/agent-loop/src/haiven-dev/tmp/HarmblockSDK_LINUX_M1L1_hAIven_Alpha + https://github.com/haiven-dev/haiven-api/pull/519. Can this be integrated into the fpe?` in fpe.md when complete. Please fix this class of errors.
+
+Fixed and cleaned up.
+
+The FPE text was stored in `agent:notes`, not `agent:queue`. Notes are persistent operator-owned context, so queue completion never had authority to strike or clear that line. The earlier defect was that note prose could nevertheless be interpreted as a runnable prompt. The current diff layer already neutralizes informational component bodies; this change locks down the mixed case where a real queue prompt and a notes edit arrive together, ensuring only the queue prompt is emitted as completion work.
+
+I added the regression `notes_change_with_queue_prompt_reports_only_the_queue_prompt`, documented the authorization boundary in the diff specification, and updated every generated harness runbook: notes remain context, but are not answered, struck, cleared, or otherwise mutated unless an explicit exchange/queue prompt asks to edit notes. That prevents future work from being “completed” out of notes while preserving legitimate persistent context.
+
+The historical FPE note was explicitly removed through agent-doc's authority-safe patch path and committed/pushed on `docs/fpe-service-topology-temporal-plan` as `8fda4aca5`. The product hardening is committed/pushed on agent-doc `main` as `f833a7b9b`.
+
+Verification: focused regression passed; full `make check` passed; `audit-docs` passed; the matching local binary and editor packages were installed; the live controller was recycled. The newly pushed GitHub Actions CI run is queued, and the preceding `main` CI run completed successfully.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -153,7 +168,6 @@ No blockers remain.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~I added content into agent:notes, but agent-doc ran a turn on the notes anyways. It should be informational but not cause a turn to occur.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

@@ -91,8 +91,11 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 - The retained focus projection may surface a proven live pane from stash inside
   the controller's latest-wins focus fence, then selects only after a live-window
   recheck. If that still reports `actor_pane_not_visible`, the listener
-  generation-fences the receipt against the active project window and republishes
-  the complete current editor surface with forced reconciliation. The full
+  generation-fences the receipt after the controller round trip against the active
+  project window and republishes the complete current editor surface with forced
+  reconciliation. Focus-derived surface observations carry that same generation
+  through admission, so a late stashed-pane receipt cannot supersede a newer
+  document selection during rapid switching. The full
   surface remains exact-layout authority; other focus failures do not trigger
   layout repair. The controller classifies `actor_pane_not_visible` from the
   selected pane's own window before applying the active-window guard: a stashed

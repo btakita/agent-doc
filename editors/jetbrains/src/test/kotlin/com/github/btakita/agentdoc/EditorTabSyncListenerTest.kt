@@ -61,6 +61,31 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `late stashed focus receipt cannot replace a newer document projection`() {
+        val stashedReceipt =
+            """{"idle":false,"outcome":"{\"focused\":false,\"reason\":\"actor_pane_not_visible\"}"}"""
+
+        assertEquals(
+            EditorTabSyncListener.FocusProjectionReceiptDecision.Superseded,
+            EditorTabSyncListener.decideFocusProjectionReceipt(
+                receiptJson = stashedReceipt,
+                requestedGeneration = 7,
+                currentGeneration = 8,
+                projectWindowActive = true,
+            ),
+        )
+        assertEquals(
+            EditorTabSyncListener.FocusProjectionReceiptDecision.RepairLayout,
+            EditorTabSyncListener.decideFocusProjectionReceipt(
+                receiptJson = stashedReceipt,
+                requestedGeneration = 8,
+                currentGeneration = 8,
+                projectWindowActive = true,
+            ),
+        )
+    }
+
+    @Test
     fun `focus projection installs a handoff lease only after exact pane selection`() {
         assertTrue(
             EditorTabSyncListener.focusProjectionApplied(
@@ -657,6 +682,7 @@ Files.readString(
 .substringBefore("fun onEditorFocusGained")
 assertTrue(selection.contains("requestObservation("))
 assertTrue(selection.contains("requestFocusProjection(project, file)"))
+assertTrue(selection.contains("requiredFocusGeneration = requestedFocusGeneration"))
 assertTrue(selection.contains("FileEditorManagerEx.getInstanceEx(project).currentWindow"))
 assertTrue(selection.contains("SelectionFocusAuthority.decide("))
 assertTrue(selection.contains("preferredFile = file.takeIf { selectionOwnsFocus }"))
@@ -683,16 +709,19 @@ assertFalse(selection.contains("collectVisibleMarkdownFiles"))
 
         val focusProjection =
             source
-                .substringAfter("private fun requestFocusProjection(project: Project, file: VirtualFile)")
+                .substringAfter(
+                    "private fun requestFocusProjection(project: Project, file: VirtualFile): Long?",
+                )
                 .substringBefore("private fun shutdown()")
         assertTrue(focusProjection.contains("TerminalUtil.resolveProject(project, file)"))
         assertTrue(focusProjection.contains("CpRouteClient.observeEditorFocus("))
         assertFalse(focusProjection.contains("submitFocusDocumentPane("))
         assertTrue(
-            focusProjection.indexOf("focusProjectionApplied(receipt.output)") <
+            focusProjection.indexOf("decideFocusProjectionReceipt(") <
                 focusProjection.indexOf("TmuxPaneFocusSync.recordEditorFocusIntent("),
         )
-        assertTrue(focusProjection.contains("focusProjectionRequiresLayoutRepair(receipt.output)"))
+        assertTrue(focusProjection.contains("FocusProjectionReceiptDecision.RepairLayout"))
+        assertTrue(focusProjection.contains("requiredFocusGeneration = requestedGeneration"))
         assertTrue(focusProjection.contains("forceReconcile = true"))
         assertTrue(focusProjection.contains("authority = ObservationAuthority.EditorFocus"))
     }

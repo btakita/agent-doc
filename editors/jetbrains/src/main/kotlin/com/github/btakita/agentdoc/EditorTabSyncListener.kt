@@ -74,6 +74,13 @@ class EditorTabSyncListener : FileEditorManagerListener {
         Thread(runnable, "agent-doc-editor-focus-projection").apply { isDaemon = true }
     }
 
+    internal enum class FocusProjectionReceiptDecision {
+        Applied,
+        RepairLayout,
+        Retained,
+        Superseded,
+    }
+
     companion object {
         private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
         private val GSON = com.google.gson.Gson()
@@ -91,12 +98,36 @@ class EditorTabSyncListener : FileEditorManagerListener {
             instances.remove(project)?.shutdown()
         }
 
-    internal fun shouldPublishFocusProjection(
-        requestedGeneration: Long,
-        currentGeneration: Long,
-        projectWindowActive: Boolean,
+        internal fun shouldPublishFocusProjection(
+            requestedGeneration: Long,
+            currentGeneration: Long,
+            projectWindowActive: Boolean,
         ): Boolean =
-        requestedGeneration == currentGeneration && projectWindowActive
+            requestedGeneration == currentGeneration && projectWindowActive
+
+        internal fun decideFocusProjectionReceipt(
+            receiptJson: String,
+            requestedGeneration: Long,
+            currentGeneration: Long,
+            projectWindowActive: Boolean,
+        ): FocusProjectionReceiptDecision {
+            if (
+                !shouldPublishFocusProjection(
+                    requestedGeneration = requestedGeneration,
+                    currentGeneration = currentGeneration,
+                    projectWindowActive = projectWindowActive,
+                )
+            ) {
+                return FocusProjectionReceiptDecision.Superseded
+            }
+            if (focusProjectionApplied(receiptJson)) {
+                return FocusProjectionReceiptDecision.Applied
+            }
+            if (focusProjectionRequiresLayoutRepair(receiptJson)) {
+                return FocusProjectionReceiptDecision.RepairLayout
+            }
+            return FocusProjectionReceiptDecision.Retained
+        }
 
     /**
      * Exact effect receipt for the retained focus-only surface. Admission is not success: install
@@ -521,25 +552,36 @@ private data class CapturedSurface(
 
     private fun requestObservation(
         observation: PendingSurfaceObservation,
+        requiredFocusGeneration: Long? = null,
     ) {
         synchronized(lifecycleLock) {
             if (closed) return
-        }
-        while (true) {
-            val current = latestSurfaceObservation.get()
             if (
-                !SurfaceObservationOrdering.shouldReplace(
-                    currentAuthority = current?.authority,
-                    incomingAuthority = observation.authority,
-                )
+                requiredFocusGeneration != null &&
+                    focusProjectionGeneration.get() != requiredFocusGeneration
             ) {
                 log(
-                    "observe: retained pending ${current?.authority} over " +
-                        "${observation.authority}",
+                    "observe: rejected superseded focus generation " +
+                        "required=$requiredFocusGeneration current=${focusProjectionGeneration.get()}",
                 )
                 return
             }
-            if (latestSurfaceObservation.compareAndSet(current, observation)) break
+            while (true) {
+                val current = latestSurfaceObservation.get()
+                if (
+                    !SurfaceObservationOrdering.shouldReplace(
+                        currentAuthority = current?.authority,
+                        incomingAuthority = observation.authority,
+                    )
+                ) {
+                    log(
+                        "observe: retained pending ${current?.authority} over " +
+                            "${observation.authority}",
+                    )
+                    return
+                }
+                if (latestSurfaceObservation.compareAndSet(current, observation)) break
+            }
         }
         val requested = generation.incrementAndGet()
         surfaceDeliveryRetryAttempt.set(0)
@@ -911,10 +953,10 @@ private data class CapturedSurface(
         )
     }
 
-    private fun requestFocusProjection(project: Project, file: VirtualFile) {
-        val requestedGeneration = focusProjectionGeneration.incrementAndGet()
+    private fun requestFocusProjection(project: Project, file: VirtualFile): Long? =
         synchronized(lifecycleLock) {
-            if (closed) return
+            if (closed) return@synchronized null
+            val requestedGeneration = focusProjectionGeneration.incrementAndGet()
             try {
                 focusProjectionExecutor.schedule(
                     focus@{
@@ -969,16 +1011,10 @@ private data class CapturedSurface(
                                 "[focus] retained focus projection unavailable for ${file.path}: " +
                                     receipt.output,
                             )
-                        } else if (focusProjectionApplied(receipt.output)) {
-                            // Reverse tmux→editor mirroring is suppressed only after the
-                            // controller proves that this exact retained projection selected
-                            // the pane. A missing actor must not install a 90-second stale lease.
-                            TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
-                            log("focus projection: applied file=${file.path}")
-                        } else {
-                            if (
-                                focusProjectionRequiresLayoutRepair(receipt.output) &&
-                                shouldPublishFocusProjection(
+                        } else synchronized(lifecycleLock) {
+                            when (
+                                decideFocusProjectionReceipt(
+                                    receiptJson = receipt.output,
                                     requestedGeneration = requestedGeneration,
                                     currentGeneration = focusProjectionGeneration.get(),
                                     projectWindowActive =
@@ -986,27 +1022,46 @@ private data class CapturedSurface(
                                             true,
                                 )
                             ) {
-                                // The narrow focus projection proved that the owner pane is alive
-                                // but stashed. Capture the editor's complete current split layout
-                                // and force one structural graph edge; never infer columns from the
-                                // one-document focus payload.
-                                requestObservation(
-                                    PendingSurfaceObservation(
-                                        project = project,
-                                        preferredFile = file,
-                                        forceReconcile = true,
-                                        authority = ObservationAuthority.EditorFocus,
-                                    ),
-                                )
-                                log(
-                                    "focus projection: stashed pane; forced spanning repair " +
-                                        "file=${file.path}",
-                                )
+                                FocusProjectionReceiptDecision.Applied -> {
+                                    // Reverse tmux→editor mirroring is suppressed only after the
+                                    // controller proves that this exact retained projection selected
+                                    // the pane. A missing actor must not install a stale lease.
+                                    TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
+                                    log("focus projection: applied file=${file.path}")
+                                }
+
+                                FocusProjectionReceiptDecision.RepairLayout -> {
+                                    // A late receipt must not replace a newer document's surface.
+                                    requestObservation(
+                                        PendingSurfaceObservation(
+                                            project = project,
+                                            preferredFile = file,
+                                            forceReconcile = true,
+                                            authority = ObservationAuthority.EditorFocus,
+                                        ),
+                                        requiredFocusGeneration = requestedGeneration,
+                                    )
+                                    log(
+                                        "focus projection: stashed pane; forced spanning repair " +
+                                            "file=${file.path}",
+                                    )
+                                }
+
+                                FocusProjectionReceiptDecision.Superseded -> {
+                                    log(
+                                        "focus projection: ignored superseded receipt " +
+                                            "file=${file.path} gen=$requestedGeneration",
+                                    )
+                                    return@focus
+                                }
+
+                                FocusProjectionReceiptDecision.Retained -> {
+                                    log(
+                                        "focus projection: retained without pane selection " +
+                                            "file=${file.path} receipt=${receipt.output}",
+                                    )
+                                }
                             }
-                            log(
-                                "focus projection: retained without pane selection " +
-                                    "file=${file.path} receipt=${receipt.output}",
-                            )
                         }
                     },
                     FOCUS_COALESCE_MS,
@@ -1020,8 +1075,8 @@ private data class CapturedSurface(
                     )
                 }
             }
+            requestedGeneration
         }
-    }
 
     private fun shutdown() {
         val roots =
@@ -1075,8 +1130,13 @@ previousSelectionPath = event.oldFile?.path,
 )
 val selectionOwnsFocus =
 selectionFocusAuthority == SelectionFocusAuthority.ActiveEditorSplit
+val requestedFocusGeneration =
 if (selectionOwnsFocus) {
 requestFocusProjection(project, file)
+} else {
+null
+}
+if (requestedFocusGeneration != null) {
 log("selectionChanged: active-split newFile=${file.name}; projection queued")
 } else {
 // IDEA emits selectionChanged for tabs in editor windows that do not own
@@ -1101,6 +1161,7 @@ ObservationAuthority.DocumentSelection
 ObservationAuthority.Layout
 },
 ),
+requiredFocusGeneration = requestedFocusGeneration,
 )
 }
 
@@ -1149,7 +1210,7 @@ ObservationAuthority.Layout
             log("focusGained: non-session file=${file.name}; spanning projection queued")
             return
         }
-        requestFocusProjection(project, file)
+        val requestedFocusGeneration = requestFocusProjection(project, file) ?: return
         requestObservation(
             PendingSurfaceObservation(
                 project = project,
@@ -1157,6 +1218,7 @@ ObservationAuthority.Layout
                 forceReconcile = false,
                 authority = ObservationAuthority.EditorFocus,
             ),
+            requiredFocusGeneration = requestedFocusGeneration,
         )
         log("focusGained: file=${file.name}; spanning projection queued")
     }

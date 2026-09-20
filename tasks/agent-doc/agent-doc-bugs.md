@@ -528,6 +528,27 @@ It records the **root**, not a bare flag, because the suppression has to stay sc
 `#ctrlbindbeforeserve` itself is holding: all 75 `controller_listener_serve_ready` rows in this project report `bind_to_accept_ms=0`, so hypothesis (3) in the item is closed structurally, not just measured.
 
 Not installed, same blocker as before: the shared tree still holds another session's uncommitted `src/session_actor_cmd.rs` and JetBrains plugin edits. CI run `35527154818` was still in progress at closeout; not waiting on it.
+
+### Re: #retainedprojexit1install — installed from a clean HEAD worktree — opus-5 · 2026-09-20T14:18-04:00
+
+> **Queue prompt:**
+>
+> do [#retainedprojexit1install]
+
+
+Installed and armed. Both halves of this item's recorded deferral turned out to be resolvable rather than blocking, but for different reasons.
+
+**The concurrent-WIP half was real, and a clean worktree is the way around it.** `src/agent-doc` still holds another session's uncommitted `src/session_actor_cmd.rs` plus two new JetBrains plugin files, and `make install` builds from the working tree — so installing from there would have shipped their in-flight work. Instead I built from a detached worktree at `78c36ccd3`, placed at `src/agent-doc-cleanfix` so the sibling `../tmux-router` path dependency resolves (an isolated `/tmp` worktree fails that). Their WIP is untouched and still uncommitted.
+
+**The `lib-install` half was stale.** The item deferred partly because a cdylib reload strands an attached document's Lazily replica — but that was fixed in 0.35.384 (`#reloadgateperprocess`) and plugin 0.2.384 (`#jbreloadreregconverge`), and the live plugin here is **0.2.388, running and not stale** (`live_plugin_generation_refresh ... running=0.2.388 expected=0.2.388 stale=false`, editor PID 306200). The install bore that out: `reload_library intent: delivered 1/1 editor endpoints across 9 projects (0 restart required, 0 deferred mid-cycle, 3 unavailable)`, then `crdt_replica_promote ... superseded_generations_pruned=1 generation_fenced=true` and a clean `replica_pull` for this document afterwards. No `missing_replica`.
+
+Worth noting separately: that same evidence also stales the premise of two `agent:review` items (`#activateinstalledjetbrai`, `#tmuxfocussyncverify`), which both say the staged 0.2.388 plugin is *not* activated against a live IDEA started before it. The live IDE is now PID 306200 running 0.2.388. I have not touched those items — they need their own pass.
+
+**What landed.** `binary-install` replaced `~/.cargo/bin/agent-doc` by atomic rename (live process inodes preserved); `lib-install` published `libagent_doc-0.35.400.so`. Proof the running binary is no longer behind: it contains `controller process root registry poisoned` and `set_controller_process_root` from `78c36ccd3`, and the `backlog-set-gate-type` drop descriptor from `8cb9aa16e` — and so does the cdylib.
+
+**Recycle is armed, not forced.** `lib-install` reported `auto-recycle: 16 open supervisor(s) marked to recycle at next idle boundary, 0 skipped` and `9 controller(s) marked after supervisor handoff`. That is the product-owned safe path — `#supselfheal` blue/green `execve` at an idle boundary. I deliberately did not force `agent-doc admin recycle` mid-cycle against this document's own supervisor: a forced recycle against a busy supervisor is the shape that times out *and* exits 0, leaving a wedged `preparing` controller that only `kill -TERM` clears. The marking achieves the same end without that risk.
+
+**One genuine failure, filed not swallowed.** `make install` exits 2 at `install-editor-plugins` because `vsce` is not on this machine (`sh: line 1: vsce: command not found`) — after the binary, cdylib, skills and the JetBrains plugin have all already installed successfully. So the install is complete but the command reports failure, which is exactly the kind of thing that gets read as "the install failed" next time. Filed as `#vsceoptionalinstall`.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -537,20 +558,16 @@ Not installed, same blocker as before: the shared tree still holds another sessi
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#resumereplaynotidempotent]~~
-- ~~do [#github5253release]~~
-- ~~This document's queue stalled. Fix agent-doc causes and fix this class of error.~~
-- ~~📌 do [#resumereplayauditrest]~~
-- ~~do [#fixrunlazily]~~
-- do [#retainedprojexit1install]
+- ~~do [#retainedprojexit1install]~~
+- do [#ctrlworkerliveproj]
 - do [#pluginzipeveryrelease]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#vsceoptionalinstall] `make install` exits 2 at install-editor-plugins when `vsce` is not installed, AFTER the binary, cdylib, skills and JetBrains plugin have all installed successfully (`sh: line 1: vsce: command not found`, Makefile:250 -> Makefile:221). A complete install therefore reports failure, which reads as 'the install failed' and is exactly the shape that gets a real install retried or abandoned. Make the VS Code packaging step skip with a warning when vsce is absent (or have the target check for it up front and say so), so the exit code tracks whether the install actually succeeded. Measured 2026-09-20 installing 78c36ccd3 from a clean worktree.
 - [ ] [#ctrlworkerliveproj] Give controller-owned worker threads the LIVE projection instead of the cold state.db path. #ctrlselfrpc (78c36ccd3) stopped those threads self-RPCing the controller socket, but LOCAL_DOCUMENT_PROJECTION_READER and the ops-log turn-attribution memo are still thread-local, so a worker that never called install_controller_request_thread_context now replays the durable ledger per log_op line instead. Bounded and local (a full fold measured 0.08s on this project) so it is no longer a wedge, but it is per line and unmemoized. Fix by threading the runtime into spawn_reliable_sync_recovery_effects / schedule_editor_replica_rebuild_after_promotion / the self-promote rebuild / start_orphan_drain_route_worker / spawn_editor_command_async_worker / the supervisor replacement worker and calling install_controller_request_thread_context plus begin_turn_attribution_scope as the first statements in each closure. The #ctrlbindbeforeserve source guard pins the exact spawn_reliable_sync_recovery_effects call text, so update that assertion with the signature.
 - [ ] [#pluginzipeveryrelease] Attach the JetBrains plugin zip (and the VS Code vsix) to EVERY release, not on its own cadence. #pluginassetpaging (a17cb20aa) made the asset search paginate at per_page=100 across 5 pages, which removes the immediate breakage, but it only buys headroom: measured 2026-09-20, exactly ONE release in the API window carries agent-doc-jetbrains-*.zip (v0.35.398, at index 2 of the default 30-item page). The underlying cause is that .github/workflows/release.yml builds four platform archives plus SHA256SUMS on every tag while the editor plugin zip is published separately, so the gap between plugin-bearing releases grows without bound and plugin install/update depends on how deep the search happens to walk. Reported by the issue #53 author, who measured the same thing independently. Fix at the publish step so the latest release always carries the plugin assets; then the 5-page bound is slack rather than load-bearing.
-- [ ] [#retainedprojexit1install] Install + recycle the agent-doc fixes landed 2026-09-20 (`b7043757b` retained-projection deferral, `ea57c13b6` empty-preflight reclaim authority, `8cb9aa16e` #qmultilinehead queue-preemption + #resumereplayauditrest replay witnesses + #qpausepathdouble admin path anchoring): `make install` in src/agent-doc from a tree with no concurrent-session uncommitted source, then `agent-doc admin recycle`. Still deferred 2026-09-20: the shared working tree holds another session's uncommitted `src/session_actor_cmd.rs` + JetBrains plugin edits (installing would ship their in-flight work) and `lib-install` strands this attached document's Lazily replica mid-session.
 <!-- /agent:backlog -->
 
 ## Review

@@ -315,6 +315,33 @@ Spec bullet added to `specs/07-closeout-commands.md` under the `write` invariant
 **On the push.** `origin/main` had moved 5 commits ahead and local `main` held a duplicate of one of them (`6eb81f3bd` ≡ origin's `2e1219b95`). Rebased with `--autostash` — none of the incoming commits touch the concurrent session's uncommitted files (`src/session_actor_cmd.rs`, `TurnStateBannerRefresher.kt`, two untracked JB files), and the autostash reapplied cleanly with their work intact.
 
 **Not installed this cycle, deliberately.** `make install` builds from the shared working tree, which currently holds another session's uncommitted `src/session_actor_cmd.rs` and JetBrains plugin edits — installing would ship their in-flight work as the live binary. Preflight's own `stale_install` advisory says the same thing: the owning development/release cycle installs and the supervisor performs the safe recycle. Separately, `make install`'s `lib-install` step reloads the cdylib, which strands this attached document's Lazily replica mid-session and needs an editor tab reopen to clear. Queued as `#retainedprojexit1install` at the backlog head so the next cycle with a clean tree picks it up.
+
+### Re: the empty-preflight reclaim had exactly one proof, and only an operator could carry it — opus-5 · 2026-09-20T01:03-04:00
+
+> **Queue prompt:**
+>
+> do [#duplicatepreflightunblock]
+
+
+Fixed `#duplicatepreflightunblock`. Commit `ea57c13b6`, pushed to `origin/main`.
+
+**Root cause — a structurally dead branch.** Reclaiming an empty `preflight_started` cycle is gated on a proof, and correctly so: that shape is *also* the normal state while a model generates its first response, so abandoning it aborts a live turn (the `#suprecyclespin-falseabandon` regression). But there was exactly **one** proof — `run_cancelled` — and it is reachable from exactly one place, `agent-doc session cancel-turn`, which a human has to type at the right moment.
+
+Every other caller passed "unproven" and got `Protected`. That includes the route closeout drain: `route_cancel_empty_preflight` bound to `cancel_preflight_cycle`, the *unproven* entry point, so `closeout_drain.rs`'s `if cycle.is_empty_preflight() && … && (effects.cancel_empty_preflight)(file)?` could **never** be true. The branch reads like automatic recovery and did nothing. A duplicate `agent-doc <FILE>` invocation therefore fell through to repair → `session-check` → a 30s projection await → `Blocked`, and every retry repeated it — indefinitely. Exactly the `fpe.md` wedge on pane `%5` (`cycle-1789763038157`).
+
+**Fix — a second proof, not a weaker gate.** `agent_doc_turn::repair::EmptyPreflightCancelAuthority` now owns the authority vocabulary: `Unproven`, `RunCancelled`, `OwnerReleased`. The drain reclaims on the `RecoverAfterOwnerRelease` branch, where a controller projection has proven the owning actor released the cycle — after a bounded 30s await, with no operator in the loop.
+
+**The first cut of that was wrong, and the existing suite caught it.** `plain_run_trigger_cannot_overtake_a_fresh_open_preflight` went red: the drain's projection await *also* returns `OwnerReleased` when there is no controller projection to release anything, which is indistinguishable from a brand-new cycle whose model has not started answering. Reclaiming on release alone abandoned a live turn. So `OwnerReleased` now additionally requires the cycle to be stalled past `STALLED_CYCLE_RESOLVE_SECS` — the deadline sized in `#suprecyclespin-falseabandon` for precisely this hazard, because a slow first response ticks nothing while it generates and so must not look stalled. `RunCancelled` needs no deadline: the caller stopped the run itself.
+
+The authority widens **who** may reclaim, never **what**. A cycle past `preflight_started` or owning a response capture is still protected, and an unproven caller still gets `Protected` with `reason=run_cancel_not_proven`. A release refused for want of the deadline logs `reason=owner_released_cycle_not_stalled`, so a wedge is distinguishable from a refusal in the ops log.
+
+**Coverage.** 3 unit tests (each authority's cancel authorization; only `OwnerReleased` requires the stall; proof tokens are distinct and stable for ops-log grep), 3 new integration tests in `agent-doc-repair-command-io` (a stalled empty preflight is reclaimed; a **fresh** one is protected; a capture survives a released owner), and a structural guard that the drain **calls** the owner-release reclaim *on the owner-release branch* and that the runtime effect binds to the owner-release entry point — a declared-but-uncalled effect is the exact shape that made the original branch invisible.
+
+I attacked the guards rather than reasoning about them. Three mutations, each reverted after: moving the reclaim off the owner-release branch (structural guard red), rebinding the effect to the unproven entry point — the original defect (structural guard red), and neutering `OwnerReleased` in `authorizes_cancel` (unit + integration red). While restoring one of them I reverted my own in-progress fix with `git checkout --` and had to reapply it; [[feedback_mutation_script_restore_must_not_use_git_checkout]] says exactly that and I did it anyway.
+
+**Verification.** `make check`: **9516 tests run, 9516 passed, 259 skipped** — including the route test that caught my wrong first cut. `audit-docs` still fails on the same pre-existing `.grok/skills/agent-doc/SKILL.md` version-stamp drift from the concurrent session's uncommitted work; my six files are `agent-doc-turn/src/repair.rs`, `agent-doc-repair-io/src/lib.rs`, `agent-doc-route-io/src/{closeout_drain,runtime_effects}.rs`, `agent-doc-repair-command-io/tests/repair.rs`, and `specs/07-core-commands.md`. CI `35490686334` is **queued** on `ea57c13b6`; the prior run `35489614892` on `b7043757b` is still in progress.
+
+Install remains deferred for the same concrete reason as last cycle — the shared tree still holds another session's uncommitted `src/session_actor_cmd.rs` and JetBrains plugin edits — and is already tracked as `#retainedprojexit1install`, which now covers both fixes. Exchange is at 289 lines / 15 response sections; the queue is active, so I am not stopping to compact.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -325,14 +352,13 @@ Spec bullet added to `specs/07-closeout-commands.md` under the `write` invariant
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#retainedprojexit1]~~
-- do [#duplicatepreflightunblock]
+- ~~do [#duplicatepreflightunblock]~~
 - do [#kqht]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#retainedprojexit1install] Install + recycle the `#retainedprojexit1` fix (commit b7043757b): `make install` in src/agent-doc from a tree with no concurrent-session uncommitted source, then `agent-doc admin recycle`. Deferred 2026-09-20 because the shared working tree held another session's uncommitted `src/session_actor_cmd.rs` + JetBrains plugin edits (installing would ship their in-flight work) and because `lib-install` strands this attached document's Lazily replica mid-session.
-- [ ] [#duplicatepreflightunblock] Fix duplicate agent-doc invocation refusing indefinitely while a prior cycle remains preflight_started; provide bounded cancellation and stale-cycle recovery that unblocks the document without operator timing.
+- [ ] [#retainedprojexit1install] Install + recycle the agent-doc fixes landed 2026-09-20 (`b7043757b` retained-projection deferral, `ea57c13b6` empty-preflight reclaim authority): `make install` in src/agent-doc from a tree with no concurrent-session uncommitted source, then `agent-doc admin recycle`. Deferred because the shared working tree held another session's uncommitted `src/session_actor_cmd.rs` + JetBrains plugin edits (installing would ship their in-flight work) and because `lib-install` strands this attached document's Lazily replica mid-session.
 - [ ] [#kqht] #actionable-review
 <!-- /agent:backlog -->
 

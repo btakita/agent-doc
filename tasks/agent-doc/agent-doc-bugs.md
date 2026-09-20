@@ -3,7 +3,7 @@ agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
   codex: 01a0b180-e3a6-77b1-a146-0756d3071cd9
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -258,6 +258,28 @@ Proof:
 Unblocked `src/haiven-dev/tasks/fpe.md` first. Controller status proved pane `%5` still owned an active empty `preflight_started` cycle; `agent-doc session cancel-turn` explicitly abandoned cycle `cycle-1789763038157`, preserved context, and restarted generation 16 on its queued work. No response, document write, or commit was resubmitted. Queued `#duplicatepreflightunblock` at the agent-doc queue tail to make this recovery bounded and automatic.
 
 Accretion: retained 199 exchange lines and 12 response sections without compaction.
+
+### Re: harness switch to Claude — opus-5 · 2026-09-20T00:21-04:00
+
+> **Queue prompt:** `agent: codex` → `agent: claude`
+
+Claude owns this session now. Nothing else in the document changed, so this cycle is a handoff plus verification of the two things the last Codex turn left open.
+
+**CI is green.** Run `35392633692` completed `success` for `5bfe9bd3b` (`fix: bound JetBrains focus effect responses`) — the run the prior turn reported as "in progress". The two runs behind it (`35389414278`, `35386729040`) are green as well.
+
+**`#release035376verify` is satisfied — closed.** `v0.35.376` is published (not a draft, `2026-09-13T05:05:15Z`) and carries all six platform assets: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`, `x86_64-pc-windows-msvc`. The gate was an external queue that has since drained, so this needed no operator proof. Review is now 10 items.
+
+**Not touching `src/agent-doc` this cycle.** Preflight's `stale_install` warning is accurate — the installed `0.35.400` predates `6eb81f3bd` (`fix: defer compaction while operator typing is active`) — but another session holds uncommitted work in that repo right now:
+
+- `M editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TurnStateBannerRefresher.kt`
+- `M src/session_actor_cmd.rs`
+- `?? editors/jetbrains/.../InputRequiredNotifications.kt` + its test
+
+Running `make install` against that tree would build and publish someone else's in-flight edits. This cycle does not own agent-doc development, so the owning cycle installs and the supervisor recycles.
+
+**Queue is stopped and empty.** The backlog head is `#duplicatepreflightunblock` (bounded cancellation / stale-cycle recovery for a duplicate invocation blocked behind a `preflight_started` cycle) — ready to drain on `do [#duplicatepreflightunblock]` or a `queue: go`.
+
+Exchange is at 232 lines across 13 response sections, just past the warn threshold. Say the word and I'll run `agent-doc compact tasks/agent-doc/agent-doc-bugs.md --commit`.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -266,19 +288,19 @@ Accretion: retained 199 exchange lines and 12 response sections without compacti
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
 - [ ] [#duplicatepreflightunblock] Fix duplicate agent-doc invocation refusing indefinitely while a prior cycle remains preflight_started; provide bounded cancellation and stale-cycle recovery that unblocks the document without operator timing.
+- #actionable-review
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
 - [/release] [#github5253release] Publish the next weekly agent-doc batch no earlier than 2026-09-22T16:41:52Z; verify GitHub assets and PyPI, then close issue #53. Issue #52 is already closed; fixes are on main in c92d5d629 and a10a684b3.
-- [/] [#release035376verify] [release] Verify GitHub Release run 34737823202 completes green and v0.35.376 publishes all six platform assets; all matrix jobs were still externally queued at closeout.
 - [/] [#cargovodtrim] [operator-verify] [P2][security] Trim the credential exposure from the livestream VOD once the operator supplies the VOD URL or platform/start-time locator. Known exposed interval: 2026-09-12T02:57:27.170Z through approximately 02:58:14Z.
 - [/] [#fpecompactheal] [operator-verify] Confirm fpe.md's corrupted `<dynamic_context_ref>` block is gone after one compact on the FIXED binary (installed 0.35.367, ~/.cargo/bin/agent-doc at 23:01:39). Must be run FROM THE PANE THAT OWNS src/haiven-dev/tasks/fpe.md — that is a live session (b69e5aeb, `queue: go`) and this cycle deliberately did not hand-align its disk. Expected after `agent-doc compact src/haiven-dev/tasks/fpe.md`: exactly ONE block, with the two self-referential handles (absolute `.../src/haiven-dev/tasks/fpe.md` and relative `tasks/fpe.md`) gone, leaving at most the four instruction-file handles; and the `Prior summary/context:` line still summarising the prior compact list rather than quoting XML.
 - [/] [#fixrunlazily] Run Agent Doc on lazily.md fails with `command-plane editor_route request failed via .agent-doc/controller.sock: Project Controller did not respond within 60000ms; the controller may be wedged`. NARROWED 2026-09-11, two hypotheses measured and DISPROVED — do not re-walk them. (1) The failure is the ACCEPT leg, not the work leg: the prefix `command-plane editor_route request failed` plus 60000ms is SOCKET_REQUEST_TIMEOUT_MS in sendAcceptedCommandSubmitToSocket; awaitCommandSubmitTerminal uses waitForReadySeconds*1000+grace instead. So the controller failed to ACKNOWLEDGE a command submit for 60s, and handle_editor_command_submit_async_rpc only enqueues. (2) NOT serialized accepts: rpc.rs:11185 listener.accept() spawns a thread per client. (3) NOT a slow pre-serve window: the socket binds at ListenerOptions::create_sync() (rpc.rs:11134) and the accept loop starts at 11184, so synchronous work between them leaves clients connected and hanging — the ss -lxp backlog signature — but the candidate, restore_reliable_sync_liveness, measures 0.08s for all 59,671 reliable_sync_liveness_journal rows / 6.5MB / 60,582 ops on this project, and its recovery effects are already spawned async. Live evidence at the failure window: ffi_ensure_controller_running_failed Connection refused (os error 111) x7 at 14:00:58-59, controller adopted 14:01:44, and a separate client still timing out at 14:02:23 (timed out after 5.0s waiting for project controller response) — unresponsive at least 40s after adoption. NEXT LEAD: what holds a lock across handle_request_locked (rpc.rs:12526) at runtime.bootstrap_snapshot() (12560) during a controller first seconds. Repro lever: kill the controller, then click Run Agent Doc while a replacement is launching.

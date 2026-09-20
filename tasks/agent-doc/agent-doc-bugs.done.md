@@ -96,3 +96,4 @@
 - 2026-09-15 [#panefocussplitverify] [operator-verify] Restart IntelliJ to activate agent-doc JetBrains plugin 0.2.386, then click both directions between co-visible agent-doc split editors and confirm the active tmux pane follows each document.
 - 2026-09-15 [#fixcauseswedged] Fix agent-doc causes for wedged fpe.md run:
 - 2026-09-18 [#fixchromiumbridge] Fix chromium-bridge.md issue: • The race is in the JetBrains projection lanes: a focus RPC can return after a newer document selection, and its stale
+- 2026-09-20 [#release035376verify] [release] Verify GitHub Release run 34737823202 completes green and v0.35.376 publishes all six platform assets; all matrix jobs were still externally queued at closeout.

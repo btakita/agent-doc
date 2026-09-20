@@ -3,7 +3,7 @@ agent_doc_session: tsift-v0.1
 resume:
   claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
   codex: 01a0b337-c18d-7770-8e52-af605f601504
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -221,7 +221,7 @@ Released and published tsift `v0.1.99`.
 - `origin/main`, `origin/feat/csharp-index`, and the clean worktree now point to `8987a4c`; tag `v0.1.99` remains correctly pinned to release commit `ffc677e`.
 
 Session note: the exchange is large, but the active queue is now drained without pausing for compaction.
-❯ 🚧 Fix discord.md issue:
+❯ Fix discord.md issue:
 ```
 ❯ /home/brian/.cargo/bin/agent-doc start --route-owned --route-owned-reap-policy keep-alive --route-owned-start-purpose
  layout-provision --resume -- tasks/discord.md

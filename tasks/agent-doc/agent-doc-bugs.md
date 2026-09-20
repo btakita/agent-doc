@@ -14,7 +14,7 @@ prompt_presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -572,6 +572,30 @@ So the six sites named in the item need no change, and threading `runtime` throu
 One test-infrastructure note worth keeping: these two controller-identity tests mutate **process**-global registries, and `cargo test` runs a crate's tests as threads in a single process (nextest gives each its own). Run together, one test's teardown cleared the registry the other was mid-assertion on — green in isolation, red in the suite. They are now serialized behind a mutex that recovers from poison, so a failure reports as that one test failing rather than as every later test panicking on a poisoned lock.
 
 CI run `35527154818` for `78c36ccd3` came back green; `c1088b2ce` starts a new run I am not waiting on.
+
+### Re: #pluginzipeveryrelease — editor packages now ship with every tag — opus-5 · 2026-09-20T14:41-04:00
+
+> **Queue prompt:**
+>
+> do [#pluginzipeveryrelease]
+
+
+Done, pushed as `c3d41f96c`. `make check`: **9566 tests run, 9566 passed**, exit 0.
+
+**The cause was exactly as filed.** `release.yml` built four platform archives plus `SHA256SUMS` on every tag and never touched the editor packages at all — they were published on a separate cadence, so the gap between plugin-bearing releases grew without bound. A `plugins` job now builds both on every tag, and `release` **hard-depends** on it: a tag that cannot produce editor packages fails loudly rather than quietly publishing the asset gap this item exists to close. With the packages always on the latest release, `#pluginassetpaging`'s 5-page bound becomes slack instead of load-bearing.
+
+**Two details that would otherwise have shipped the wrong thing silently.**
+
+- Both copies are pinned to the declared version rather than globbed. `build/distributions/` accumulates every version it has ever built plus `-signed` siblings — there are four zips in mine right now, including `0.2.387-signed.zip`. A glob is one cache restore away from attaching a stale or differently-signed artifact to a release and reporting success.
+- The packages download into their own directory. `SHA256SUMS` is generated over `artifacts/` and is consumed by the PyPI bootstrap launcher and by `make release-macos-assets`; the packages also match `agent-doc-*`, so sharing that directory would have silently rewritten the platform-archive manifest. That is the kind of breakage that only shows up at the next `pip install`.
+
+**Both build steps verified locally before making CI depend on them.** `gradlew buildPlugin` produces `agent-doc-jetbrains-0.2.388.zip`; `npm ci && npm run package` produces `agent-doc-0.2.71.vsix` — `@vscode/vsce` is already a devDependency, which also confirms `#vsceoptionalinstall` is purely a missing local `npm ci`, not a missing tool.
+
+**One pre-existing guard had to be tightened rather than worked around.** `test_release_cadence_applies_only_to_macos_assets` asserted `!release.contains("macos-")` over the whole file, so merely *naming* `make release-macos-assets` in a comment about `SHA256SUMS` failed it. I scoped it to non-comment lines instead of renaming my comment, because the guard's intent is "do not schedule a paid runner" and prose cannot do that. Proven still sharp by adding an `aarch64-apple-darwin` / `macos-latest` matrix entry — it reddens.
+
+The workflow itself cannot be exercised from a test, so the invariants are pinned the same way the issue-47 and issue-52 guards are: the dependency, both upload paths, the version-pinned copies, and the separate download directory. Dropping the `plugins` dependency reddens it.
+
+That empties the queue. Both CI runs were still in progress at closeout; not waiting on them.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -581,15 +605,11 @@ CI run `35527154818` for `78c36ccd3` came back green; `c1088b2ce` starts a new r
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#retainedprojexit1install]~~
-- ~~do [#ctrlworkerliveproj]~~
-- do [#pluginzipeveryrelease]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
 - [ ] [#vsceoptionalinstall] `make install` exits 2 at install-editor-plugins when `vsce` is not installed, AFTER the binary, cdylib, skills and JetBrains plugin have all installed successfully (`sh: line 1: vsce: command not found`, Makefile:250 -> Makefile:221). A complete install therefore reports failure, which reads as 'the install failed' and is exactly the shape that gets a real install retried or abandoned. Make the VS Code packaging step skip with a warning when vsce is absent (or have the target check for it up front and say so), so the exit code tracks whether the install actually succeeded. Measured 2026-09-20 installing 78c36ccd3 from a clean worktree.
-- [ ] [#pluginzipeveryrelease] Attach the JetBrains plugin zip (and the VS Code vsix) to EVERY release, not on its own cadence. #pluginassetpaging (a17cb20aa) made the asset search paginate at per_page=100 across 5 pages, which removes the immediate breakage, but it only buys headroom: measured 2026-09-20, exactly ONE release in the API window carries agent-doc-jetbrains-*.zip (v0.35.398, at index 2 of the default 30-item page). The underlying cause is that .github/workflows/release.yml builds four platform archives plus SHA256SUMS on every tag while the editor plugin zip is published separately, so the gap between plugin-bearing releases grows without bound and plugin install/update depends on how deep the search happens to walk. Reported by the issue #53 author, who measured the same thing independently. Fix at the publish step so the latest release always carries the plugin assets; then the 5-page bound is slack rather than load-bearing.
 <!-- /agent:backlog -->
 
 ## Review

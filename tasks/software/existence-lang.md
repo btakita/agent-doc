@@ -11,7 +11,7 @@ prompt_presets:
   '#actionable': 'Add actionable tasks into backlog + queue'
   '#actionable-review': 'Add actionable review items into backlog + queue'
   'rebase-conflicts': 'rebase + fix merge conflicts'
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -192,24 +192,40 @@ The item guessed the last two were a fetcher redirect-cap or User-Agent problem.
 Three `source_check.rs` fixes are now queued or filed. They belong in one `existence` release, after which `EXISTENCE_REV` needs bumping in both `.github/workflows/audit.yml` and `ci.yml` (both pinned at `v0.10.0`). I will carry all three when I take the next queued item.
 
 Verified: `existence --ontology . audit --structure` clean locally, and CI green on `95123df` (`Issue renderer` + `Structure audit`). I did not run a full `--sources` pass — it refetches every URL in the lockfile and Wayback is already refusing me after this hour's three audit runs — so the per-URL proof is the three direct fetches above, which is exactly what that pass does to these four.
+
+### Re: do [#quotemovedpin] — opus-5 · 2026-09-20T02:10-04:00
+
+> **Queue prompt:**
+>
+> do [#quotemovedpin]
+
+
+All three `source_check.rs` fixes shipped in **existence v0.11.0**, and the ontology is pinned to it. They turned out to be one omission wearing three faces: a pinned snapshot was not consulted where it could have settled the question.
+
+**`#quotemovedpin`** — a drifted quote now checks the pins beside the link first. One that carries the passage verbatim means the citation is anchored and there is nothing to report; otherwise the nearest snapshots are searched for one that does and it is offered, so `--fix` writes it. Only the nearest window is searched, and deliberately not through `find_pins`: that accepts a snapshot the quote has *also* drifted from, which would anchor a drifted quote to a drifted copy and leave the same warning next run.
+
+**`#unreachablepin`** — an unreachable host now gets the same archive lookup a 4xx dead link has always had, and a source whose pin still fetches is no longer worth reporting. Every source on the host is handled rather than only the first; the host itself is still fetched once. That was the whole asymmetry: a dead link pinned itself and cleared, a dead host warned forever with nothing to apply.
+
+**`#pinhostescalate`** — a pin whose own fetch failed is its own `pin_unreachable` warning instead of a `quote_missing` **error** claiming the passage is absent from a snapshot nobody read.
+
+**Verification.** Five new tests, and I checked each is load-bearing rather than decorative: reverting the exact line it covers kills it, four for four, each mutation confirmed to compile first so a compile error could not masquerade as a caught regression. `make check` clean — clippy `-D warnings` on both feature sets, 116 tests, fmt. Ontology CI **and** Pages green on `20b5659`, which proves `cargo install --git --tag v0.11.0` resolves and the new CLI runs `audit --structure` and `export` against the real ontology.
+
+**The release 403'd on crates.io and I fixed it in flight.** Second time in eight days: the repo's `CARGO_REGISTRY_TOKEN` had gone stale against `passage`, so `passage show | gh secret set` and a `workflow_dispatch` re-run published it. crates.io now serves **0.11.0**; the GitHub Release carries seven binaries. Worth knowing that this recurs — but `#pub403name` did its job, naming the credential and the exact two commands rather than leaving a bare `403 Forbidden`.
+
+**Two things to expect on Monday, neither verified in production.** I did not dispatch a live audit: the CDX index has recovered from my probing but the availability API is still returning 429, so an `unreachable_host` lookup would fail and the run would prove only half the change while committing a noisy report. Monday's scheduled run is the honest place for it. When it runs, (1) it will be slower — roughly 50 CDX queries plus up to six snapshot fetches each at the 1s rate, so perhaps six minutes on top of the current ten; and (2) the safe-fixes PR will be **large**, since up to 61 nodes gain an archive anchor in one batch. Both are the intended behaviour, but the size will be a surprise if nobody says so first.
+
+The exchange is at 171 lines across 7 sections; the queue is now drained.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- ~~do [#auditlockmain]~~
-- ~~do [#auditerrcount]~~
-- ~~do [#auditdeadsrc]~~
-- do [#quotemovedpin]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#unreachablepin] Let an unreachable host consult its archive pin in `existence`: `src/commands/source_check.rs:216-226` records the host in `client.unreachable` and emits the `unreachable_host` warning without ever calling `wayback_lookup`, while the 4xx arm at `:229-245` does look one up and pins it. So a source on a host that no longer resolves — `juneroca.com` in `src/redefine.md`, which now carries a verified 2014-11-06 snapshot — keeps warning every week even though a pinned copy sits beside it, and `--fix` can never resolve it. An unreachable source host says nothing about the archive host, so the lookup should still run, and a source whose pin fetches should resolve the way a pinned dead link does. Ship together with [#quotemovedpin] and [#pinhostescalate] in one `source_check.rs` release, then bump `EXISTENCE_REV` in `.github/workflows/audit.yml` and `.github/workflows/ci.yml` (both pinned at v0.10.0).
-- [ ] [#quotemovedpin] Give `quote_moved` a resolution path so it stops drowning the audit: 61 of the 65 warnings in issue #1 are `quote_moved`, and `src/commands/source_check.rs:350-362` emits them with `fix: None` and no `PinWrite`, unlike the `quote_missing` arm at `:303-320` which pins the archived copy and self-resolves. A quote that drifted but still matches is what a pin is for — pin the currently-verified snapshot beside the anchor (per-quote, per-era pins have been supported since existence 0.8.0) so the next run matches the pin and the warning clears, instead of requoting by hand. Decide explicitly whether pinning is automatic under `--fix` or opt-in behind a flag; either way the 4 actionable `unreachable_host` warnings stop being buried under 61 permanent ones.
-- [ ] [#pinhostescalate] Stop an unreachable archive host from escalating pins into `quote_missing` errors in `existence`: run 35490429476 reported `unreachable_host` for `web.archive.org` (Connection refused — Wayback rate-limiting two dispatches 17 minutes apart) and, in the same run, two new `quote_missing` errors (`existence`, `abstract-system`) whose messages read "found neither on <live> nor in its pinned copy https://web.archive.org/...". The pinned copy was never fetched, so the check reported the quote absent from a snapshot it could not read; `web.archive.org` answered 200 to a local `curl -L` minutes later. In `src/commands/source_check.rs`, a pin whose host was unreachable must degrade to the `unreachable_host` warning for that source rather than feed an absent-quote verdict into the error arm at `:321-349`. Regression coverage: a fixture where the archive host fetch fails must produce zero `quote_missing` findings.
 <!-- /agent:backlog -->
 
 ## Review

@@ -157,6 +157,7 @@ bump-plugin:
 # generation. This catches a same-version plugin behavior commit even when the
 # normal check runs after that commit, while ignoring unrelated unstaged work.
 plugin-version-check:
+	@python3 scripts/check_plugin_versions.py --self-test
 	@python3 scripts/check_plugin_versions.py
 
 # Build + machine-check the Lean formal models under formal/ (including the
@@ -243,10 +244,17 @@ install-full:
 	@$(MAKE) cleanup-build-artifacts
 
 # Keep every existing JetBrains and VS Code agent-doc package on the source generation.
+# `#jbversionbumpperbuild`: bump the JetBrains generation FIRST when its sources
+# differ from the last packaged one, so a rebuild cannot ship distinct bytes under
+# a version string that already shipped. Two 0.2.388 builds on 2026-09-20 did, and
+# the running IDE then mapped an unlinked jar whose version claimed to be current.
+# The bump is conditional, not per-invocation: an unchanged rebuild holds its
+# version, so this adds no churn to a no-op `make install`.
 # The native cdylib and editor package are separate install surfaces: updating
 # only the former leaves running turns reporting the older package generation.
 install-editor-plugins:
 	@if agent-doc plugin list 2>/dev/null | grep -q '^jetbrains'; then \
+		python3 scripts/check_plugin_versions.py --bump JetBrains || exit 1; \
 		( cd editors/jetbrains && ./gradlew buildPlugin ) || { \
 			echo "JetBrains plugin build failed. Use a JDK 21-compatible Gradle runtime (set JAVA_HOME to JDK 21). Refusing to install a stale package." >&2; \
 			exit 1; \

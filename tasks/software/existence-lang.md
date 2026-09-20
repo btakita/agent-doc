@@ -11,7 +11,7 @@ prompt_presets:
   '#actionable': 'Add actionable tasks into backlog + queue'
   '#actionable-review': 'Add actionable review items into backlog + queue'
   'rebase-conflicts': 'rebase + fix merge conflicts'
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -323,21 +323,46 @@ That is the whole argument for mutating rather than reading: a surviving mutant 
 **What I did not do.** I did not write the waiver for `#godsourcegone`. Building the mechanism was this item; choosing between "remove the line" and "accept the standing warning" is that item, and it is explicitly the author's. I rewrote the review entry to carry the exact four lines so saying yes is now a paste rather than a project.
 
 Queue: `#archoutage` remains. Exchange is at 264 lines across 10 sections.
+
+### Re: do #archoutage — opus-5 · 2026-09-20T17:04-04:00
+
+> **Queue prompt:**
+>
+> do [#archoutage]
+
+
+Done, released as `existence` **v0.13.0** with the renderer and pin pushed alongside.
+
+**The item described the scale problem. Underneath it was a correctness one.** `#pinhostescalate` had already added a guard so an unread pin could not be escalated into "the passage is absent from this snapshot" — but the guard only covered the *transport* door. `snapshot_page` recorded `pin_unreachable` for `Fetch::Unreachable` and let every other non-2xx fall through the `_ => None` arm, straight into the `quote_missing` **error** arm. And an outage arrives as a *response* far more often than as a dropped connection: archive.org answers its own downtime with a 503 and a domain exclusion with a 403. The shape that actually happens walked through the guard. That is why today's report carries `quote_missing` errors naming pins nobody read — I verified archive.org is serving exactly those statuses right now. Any non-2xx is now a snapshot that was not read.
+
+**Then the scale half.** One warning per citing term is right for a source host — that is that citation's problem. It is wrong for the archive: when the Wayback Machine is down, every dead link and every lost quote loses its fallback in the same moment, so most of the class ran without the thing that resolves it, and a reader counting five warnings in a sixty-warning report sees a normal week. `archive_unavailable` says it once, at the level it happened, and the issue renderer puts it in a `## Degraded this run` block above the fold — the same placement and the same reason as the Capabilities block. It is promoted, not moved: it stays in the warning counts, so the headline-equals-sections invariant is untouched. An `accepted` outage stays below the fold, since re-promoting a recorded decision every week is what `[[audit.waiver]]` was for.
+
+**Two distinctions I had to draw, and one I got wrong first.**
+
+An outage is *"later"*, not *"not here"* — transport failure, 429, 5xx, the same predicate as `retryable`, because the archive is unavailable exactly when it asks to be tried again. My first implementation said "any error status on an archive host", and `a_source_that_merely_lives_on_the_archive_host_is_not_an_outage` failed immediately — correctly. Probing for candidate snapshots collects 404s as a matter of course, so that rule reported the fallback as down on a perfectly healthy run: the same false reassurance, in the opposite direction. The test caught my own change, not a regression.
+
+The second distinction is that the trigger is the **purpose** of a fetch, not its host. This ontology cites a web.archive.org page as a source — `redefine.md` gained one three weeks ago — and a 404 on that citation is one dead link, not the fallback going down. Only a fetch the audit makes *in order to resolve something else* can say the archive is unavailable.
+
+**Verification.** 134/134 Rust with `make check` green, 28/28 Python. Nine mutations, each against the exact line it covers, green baseline asserted before and after every restore: letting an error-status snapshot fall through as read, counting every error status as an outage, dropping the run-level finding, believing a retryable status on the first answer, bypassing the archive-purpose wrapper, and on the renderer side dropping the section, placing it below the findings, re-promoting an accepted outage, and moving the outage out of the warning counts. All nine killed by the tests that should kill them.
+
+One test I had to fix rather than trust: the run-level test first asserted a specific unread-snapshot count. That was pinning the stub server's route table, not the behaviour — the fixture 503s every `/outage` snapshot including CDX candidates, so the number is an artifact. It now asserts the count is real.
+
+**Loose ends, stated plainly.** The v0.12.0 Release run completed successfully, so last cycle's unconfirmed crates.io publish is closed. The v0.13.0 CI and Release runs, and the ontology CI on the new pin, were still in flight at closeout; local evidence is the full suite plus a build against the committed `Cargo.lock`. I also filed `#pin404repin`: treating a 404 pin as unread is right, but it now warns forever with nothing to apply, which is the same treadmill shape this document keeps clearing — a permanently-gone pin should be re-pinned by `--fix`, while a 5xx one keeps waiting.
+
+Queue drained. Exchange is at 302 lines across 11 sections.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- ~~do [#prcaplies]~~
-- ~~do [#srcwaiver]~~
-- do [#archoutage]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#archoutage] Escalate an outage of the archive host itself from a per-term warning to a run-level degradation note. In the current `audit/report.json`, `web.archive.org` appears as one `unreachable_host` warning scoped to the term `abstraction` - but when that host is down, every archived-copy fallback and every pinned snapshot in the run skips silently, which is most of the sources class. The reader sees 5 warnings and a normal-looking report rather than "half this class did not run". Confirmed live on 2026-09-20: archive.org is serving its Temporarily Offline page, CDX returns that HTML and snapshot paths return 403/503. Retry before declaring the host dead, and report an archive-host outage the way AUDIT_SEMANTIC_STATE reports a class that could not run. Repos: `src/existence-lang/existence`, `src/existence-lang/ontology`.
+- [ ] [#pin404repin] A pin that returns 404 now warns forever with no resolution path. [#archoutage] made every non-2xx snapshot fetch "a snapshot that was not read", which is right — but it means a pinned snapshot that is permanently gone (404, not a transient 5xx) reports `pin_unreachable` every week instead of the `quote_missing` error it used to raise, and nothing re-pins it. That is the same treadmill shape this document has been clearing: a warning that recurs with no way to act on it. `--fix` should search for a replacement snapshot for a pin whose own fetch returned 404 the way `find_pins` already does for a lost quote, and rewrite the anchor; a pin that 404s is exactly the case where a new one is both needed and findable. Distinguish it from the 5xx/transport case, which must keep waiting rather than re-pinning against an archive that is merely down. Repo: `src/existence-lang/existence` (`source_check.rs`, `snapshot_page` / `apply_pin_fixes`).
+- [x] 🚧 [#archoutage] Escalate an outage of the archive host itself from a per-term warning to a run-level degradation note. In the current `audit/report.json`, `web.archive.org` appears as one `unreachable_host` warning scoped to the term `abstraction` - but when that host is down, every archived-copy fallback and every pinned snapshot in the run skips silently, which is most of the sources class. The reader sees 5 warnings and a normal-looking report rather than "half this class did not run". Confirmed live on 2026-09-20: archive.org is serving its Temporarily Offline page, CDX returns that HTML and snapshot paths return 403/503. Retry before declaring the host dead, and report an archive-host outage the way AUDIT_SEMANTIC_STATE reports a class that could not run. Repos: `src/existence-lang/existence`, `src/existence-lang/ontology`.
 <!-- /agent:backlog -->
 
 ## Review

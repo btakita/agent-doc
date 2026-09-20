@@ -67,6 +67,29 @@ impl LatestProjectionWorkerState {
 /// Strict tightening, mirroring the cross-repo owner guard: an unknown or empty
 /// value on either side is never drift. A pane we cannot locate must not be
 /// reported as misplaced, or a transient tmux read turns into a false repair.
+/// True when a pane currently lives in a stash window.
+///
+/// `#stashfocusleg`: the second, layout-window-independent refusal leg.
+/// [`pane_window_binding_drifted`] can only answer when the layout's target
+/// window is known, and `pane_layout_target_window_id` returns `None` whenever
+/// the invocation carries no `@`-prefixed window id AND the project has no
+/// resolvable configured session or no window named `agent-doc`. At that point
+/// the co-visibility guard was skipped entirely and focus was mirrored onto
+/// whatever pane the file→pane record named, stash window included. Reported
+/// 2026-09-20: navigating the editor to `monsterrodholders.md` pulled tmux over
+/// to the `stash` window.
+///
+/// The stash window is agent-doc's own parking area, so "this pane is stashed"
+/// is a sufficient refusal on its own and needs no layout window to compare
+/// against. Same strictness as the drift check: an unknown or empty name is
+/// never a refusal, so a transient tmux read cannot suppress legitimate focus.
+pub fn pane_is_stashed(live_window_name: Option<&str>) -> bool {
+    live_window_name
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .is_some_and(crate::dispatch::is_stash_window_name)
+}
+
 pub fn pane_window_binding_drifted(recorded_window: &str, live_window: Option<&str>) -> bool {
     let recorded = recorded_window.trim();
     if recorded.is_empty() {

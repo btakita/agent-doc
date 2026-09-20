@@ -19862,11 +19862,28 @@ fn pane_layout_projection_converged(
 /// Read the window a pane currently lives in. Best-effort: a tmux that cannot
 /// answer yields `None`, which `pane_window_binding_drifted` never treats as
 /// drift. Mirrors `session_actor_cmd::observe_live_pane_window`.
-fn observe_pane_window_id(tmux: &tmux_router::Tmux, pane_id: &str) -> Option<String> {
-    tmux.pane_window(pane_id)
+/// Live `(window_id, window_name)` for a pane, or `None` when tmux cannot say.
+///
+/// `#stashfocusleg`: the NAME half is what lets the focus guard refuse a stashed
+/// pane without first resolving the layout's target window.
+fn observe_pane_window_id(tmux: &tmux_router::Tmux, pane_id: &str) -> Option<(String, String)> {
+    observed_pane_window(tmux.pane_window_identity(pane_id))
+}
+
+/// Normalize a `pane_window_identity` read into the guard's observation.
+///
+/// `#stashfocusleg`: split out from the tmux call so the NAME half is covered.
+/// The stash refusal leg is only as good as this mapping — an adapter that
+/// quietly dropped the name would disable that leg in production while every
+/// test over the pure guard stayed green.
+///
+/// An unreadable pane or an empty window id is "tmux could not say", which both
+/// refusal legs treat as never-a-refusal.
+fn observed_pane_window(identity: Result<(String, String)>) -> Option<(String, String)> {
+    identity
         .ok()
-        .map(|window| window.trim().to_string())
-        .filter(|window| !window.is_empty())
+        .map(|(id, name)| (id.trim().to_string(), name.trim().to_string()))
+        .filter(|(id, _)| !id.is_empty())
 }
 
 fn pane_layout_target_window_id(
@@ -19887,8 +19904,10 @@ fn pane_layout_target_window_id(
 /// The co-visibility inputs of the pane-layout focus effect (`#panewindowdrift`):
 /// the window this layout generation is arranging its columns in, plus the live
 /// `#{window_id}` observation for a candidate pane.
-struct PaneLayoutFocusCoVisibility<'a, F: FnOnce(&str) -> Option<String>> {
+struct PaneLayoutFocusCoVisibility<'a, F: FnOnce(&str) -> Option<(String, String)>> {
     layout_window: Option<&'a str>,
+    /// Live `(window_id, window_name)` for a candidate pane, read in one query
+    /// so the two halves cannot disagree across a concurrent `move-window`.
     observe_pane_window: F,
 }
 
@@ -19916,7 +19935,7 @@ fn apply_pane_layout_focus_effect(
     focus: Option<&str>,
     focus_suppressed: bool,
     file_panes: &[(String, String)],
-    co_visibility: PaneLayoutFocusCoVisibility<'_, impl FnOnce(&str) -> Option<String>>,
+    co_visibility: PaneLayoutFocusCoVisibility<'_, impl FnOnce(&str) -> Option<(String, String)>>,
     select_pane: impl FnOnce(&str) -> Result<()>,
 ) -> PaneLayoutFocusEffectReceipt {
     let PaneLayoutFocusCoVisibility {
@@ -19947,21 +19966,41 @@ fn apply_pane_layout_focus_effect(
 
     // Observed outside the worker mutex: this is a tmux read, and an unknown
     // answer must never be treated as drift.
-    if let Some(layout_window) = layout_window.map(str::trim).filter(|w| !w.is_empty()) {
-        let live_window = observe_pane_window(pane);
-        if agent_doc_controller::pane_layout::pane_window_binding_drifted(
+    //
+    // ONE read, TWO independent refusals. The drift leg needs a known layout
+    // window; the stash leg (`#stashfocusleg`) does not, and it is the one that
+    // still answers when `pane_layout_target_window_id` resolves to `None` —
+    // which is exactly when this guard used to be skipped altogether and focus
+    // landed on a stashed pane.
+    let live = observe_pane_window(pane);
+    let (live_window, live_window_name) = match &live {
+        Some((id, name)) => (Some(id.as_str()), Some(name.as_str())),
+        None => (None, None),
+    };
+    if agent_doc_controller::pane_layout::pane_is_stashed(live_window_name) {
+        return PaneLayoutFocusEffectReceipt {
+            required: true,
+            applied: false,
+            reason: format!(
+                "focus_pane_stashed:{focus}:{pane}:live_window_name={}",
+                live_window_name.unwrap_or_default()
+            ),
+        };
+    }
+    if let Some(layout_window) = layout_window.map(str::trim).filter(|w| !w.is_empty())
+        && agent_doc_controller::pane_layout::pane_window_binding_drifted(
             layout_window,
-            live_window.as_deref(),
-        ) {
-            let live_window = live_window.unwrap_or_default();
-            return PaneLayoutFocusEffectReceipt {
-                required: true,
-                applied: false,
-                reason: format!(
-                    "focus_pane_not_co_visible:{focus}:{pane}:live_window={live_window}:layout_window={layout_window}"
-                ),
-            };
-        }
+            live_window,
+        )
+    {
+        return PaneLayoutFocusEffectReceipt {
+            required: true,
+            applied: false,
+            reason: format!(
+                "focus_pane_not_co_visible:{focus}:{pane}:live_window={}:layout_window={layout_window}",
+                live_window.unwrap_or_default()
+            ),
+        };
     }
 
     let state = worker_state.lock();
@@ -22012,7 +22051,7 @@ mod pane_layout_projection_dispatch_tests {
             &file_panes,
             PaneLayoutFocusCoVisibility {
                 layout_window: Some("@894"),
-                observe_pane_window: |_| Some("@894".to_string()),
+                observe_pane_window: |_| Some(("@894".to_string(), "agent-doc".to_string())),
             },
             |pane| {
                 selected = Some(pane.to_string());
@@ -22051,7 +22090,7 @@ mod pane_layout_projection_dispatch_tests {
                 layout_window: Some("@894"),
                 observe_pane_window: |pane| {
                     assert_eq!(pane, "%76");
-                    Some("@904".to_string())
+                    Some(("@904".to_string(), "agent-doc".to_string()))
                 },
             },
             |pane| {
@@ -22075,6 +22114,156 @@ mod pane_layout_projection_dispatch_tests {
         );
     }
 
+    /// `#stashfocusleg`: the stash leg is only as good as this mapping. An
+    /// adapter that dropped the window name would silently disable the refusal
+    /// while every test over the pure guard stayed green.
+    #[test]
+    fn the_pane_window_observation_preserves_the_window_name() {
+        assert_eq!(
+            observed_pane_window(Ok(("@904".to_string(), "stash".to_string()))),
+            Some(("@904".to_string(), "stash".to_string())),
+            "the window NAME must survive the observation adapter"
+        );
+        assert_eq!(
+            observed_pane_window(Ok(("  @904  ".to_string(), "  stash-3  ".to_string()))),
+            Some(("@904".to_string(), "stash-3".to_string()))
+        );
+        // "tmux could not say" — never a refusal for either leg.
+        assert_eq!(observed_pane_window(Err(anyhow::anyhow!("no server"))), None);
+        assert_eq!(
+            observed_pane_window(Ok((String::new(), "stash".to_string()))),
+            None
+        );
+        // A window with no name is readable but unnameable; the id still counts
+        // for the drift leg.
+        assert_eq!(
+            observed_pane_window(Ok(("@904".to_string(), String::new()))),
+            Some(("@904".to_string(), String::new()))
+        );
+    }
+
+    /// `#stashfocusleg`: the operator-reported shape, and the one the drift leg
+    /// could not see. `pane_layout_target_window_id` answered `None` — no
+    /// `@`-prefixed invocation window and no resolvable `agent-doc` window for
+    /// the project — so the whole co-visibility guard used to be skipped and
+    /// `select-pane` ran on a pane parked in `stash`, yanking tmux away from the
+    /// visible window. The stash leg needs no layout window to refuse.
+    #[test]
+    fn focus_is_refused_for_a_stashed_pane_even_with_no_layout_window() {
+        for window_name in ["stash", "stash-1", "stash-42"] {
+            let state = Mutex::new(
+                agent_doc_controller::pane_layout::LatestProjectionWorkerState::default(),
+            );
+            assert!(state.lock().schedule(7));
+            let file_panes = vec![("/tasks/monsterrodholders.md".to_string(), "%21".to_string())];
+            let mut selected = None;
+
+            let receipt = apply_pane_layout_focus_effect(
+                &state,
+                7,
+                Some("/tasks/monsterrodholders.md"),
+                false,
+                &file_panes,
+                PaneLayoutFocusCoVisibility {
+                    layout_window: None,
+                    observe_pane_window: |pane| {
+                        assert_eq!(pane, "%21");
+                        Some(("@904".to_string(), window_name.to_string()))
+                    },
+                },
+                |pane| {
+                    selected = Some(pane.to_string());
+                    Ok(())
+                },
+            );
+
+            assert!(
+                selected.is_none(),
+                "a stashed pane must never reach tmux select-pane ({window_name})"
+            );
+            assert!(receipt.required);
+            assert!(!receipt.applied, "a refused focus must not count as applied");
+            assert_eq!(
+                receipt.reason,
+                format!(
+                    "focus_pane_stashed:/tasks/monsterrodholders.md:%21:live_window_name={window_name}"
+                )
+            );
+        }
+    }
+
+    /// The stash leg must not swallow ordinary windows. `stashed` is not
+    /// `stash`, and a pane in the layout window is focused normally even when
+    /// the layout window is unknown.
+    #[test]
+    fn focus_is_applied_for_a_non_stash_window_with_no_layout_window() {
+        for window_name in ["agent-doc", "stashed", "claude", ""] {
+            let state = Mutex::new(
+                agent_doc_controller::pane_layout::LatestProjectionWorkerState::default(),
+            );
+            assert!(state.lock().schedule(7));
+            let file_panes = vec![("/tasks/monsterrodholders.md".to_string(), "%21".to_string())];
+            let mut selected = None;
+
+            let receipt = apply_pane_layout_focus_effect(
+                &state,
+                7,
+                Some("/tasks/monsterrodholders.md"),
+                false,
+                &file_panes,
+                PaneLayoutFocusCoVisibility {
+                    layout_window: None,
+                    observe_pane_window: |_| {
+                        Some(("@904".to_string(), window_name.to_string()))
+                    },
+                },
+                |pane| {
+                    selected = Some(pane.to_string());
+                    Ok(())
+                },
+            );
+
+            assert_eq!(
+                selected.as_deref(),
+                Some("%21"),
+                "window {window_name:?} must not be treated as stash"
+            );
+            assert!(receipt.applied);
+        }
+    }
+
+    /// Both legs read ONE observation, so they cannot disagree across a
+    /// concurrent `move-window`: a stashed pane is refused as stashed even when
+    /// its window id still matches the layout window.
+    #[test]
+    fn the_stash_leg_wins_over_a_matching_window_id() {
+        let state =
+            Mutex::new(agent_doc_controller::pane_layout::LatestProjectionWorkerState::default());
+        assert!(state.lock().schedule(7));
+        let file_panes = vec![("/tasks/left.md".to_string(), "%76".to_string())];
+        let mut selected = None;
+
+        let receipt = apply_pane_layout_focus_effect(
+            &state,
+            7,
+            Some("/tasks/left.md"),
+            false,
+            &file_panes,
+            PaneLayoutFocusCoVisibility {
+                layout_window: Some("@894"),
+                observe_pane_window: |_| Some(("@894".to_string(), "stash".to_string())),
+            },
+            |pane| {
+                selected = Some(pane.to_string());
+                Ok(())
+            },
+        );
+
+        assert!(selected.is_none());
+        assert!(!receipt.applied);
+        assert!(receipt.reason.starts_with("focus_pane_stashed:"), "{}", receipt.reason);
+    }
+
     /// Strict tightening, mirroring the pure predicate: a window we cannot
     /// resolve on either side is never drift, so a transient tmux read or an
     /// unconfigured session cannot turn into a refused focus.
@@ -22083,10 +22272,10 @@ mod pane_layout_projection_dispatch_tests {
         let file_panes = vec![("/tasks/left.md".to_string(), "%76".to_string())];
 
         for (layout_window, live_window) in [
-            (None, Some("@904".to_string())),
+            (None, Some(("@904".to_string(), "agent-doc".to_string()))),
             (Some("@894"), None),
-            (Some("  "), Some("@904".to_string())),
-            (Some("@894"), Some(String::new())),
+            (Some("  "), Some(("@904".to_string(), "agent-doc".to_string()))),
+            (Some("@894"), Some((String::new(), String::new()))),
         ] {
             let state = Mutex::new(
                 agent_doc_controller::pane_layout::LatestProjectionWorkerState::default(),
@@ -22210,7 +22399,7 @@ mod pane_layout_projection_dispatch_tests {
             &file_panes,
             PaneLayoutFocusCoVisibility {
                 layout_window: Some("@894"),
-                observe_pane_window: |_| Some("@894".to_string()),
+                observe_pane_window: |_| Some(("@894".to_string(), "agent-doc".to_string())),
             },
             |_| {
                 selected = true;

@@ -256,8 +256,12 @@ install-editor-plugins:
 		echo "No existing JetBrains agent-doc package; editor package sync skipped."; \
 	fi
 	@if agent-doc plugin list 2>/dev/null | grep -q '^vscode'; then \
-		( cd editors/vscode && npm run package ) || exit 1; \
-		agent-doc plugin install vscode --local; \
+		if [ -x editors/vscode/node_modules/.bin/vsce ] || command -v vsce >/dev/null 2>&1; then \
+			( cd editors/vscode && npm run package ) || exit 1; \
+			agent-doc plugin install vscode --local; \
+		else \
+			echo "WARNING: vsce is not installed; VS Code package sync skipped. The installed VS Code agent-doc package stays on its previous generation. Run \`npm install\` in editors/vscode (or install @vscode/vsce globally), then re-run \`make install-editor-plugins\` to refresh it." >&2; \
+		fi; \
 	else \
 		echo "No existing VS Code agent-doc package; editor package sync skipped."; \
 	fi

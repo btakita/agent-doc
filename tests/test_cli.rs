@@ -14104,6 +14104,61 @@ fn test_release_install_paths_fail_closed_for_issue_47() {
     );
 }
 
+/// `#vsceoptionalinstall`: a missing `vsce` must not fail an otherwise complete install.
+///
+/// `npm run package` resolves `vsce` from `editors/vscode/node_modules/.bin`, so a
+/// clean worktree that has never run `npm install` there dies with
+/// `sh: line 1: vsce: command not found` -- after the binary, cdylib, skills and the
+/// JetBrains plugin have all installed successfully. `make install` then exits 2,
+/// which reads as "the install failed" and is exactly the shape that gets a real,
+/// complete install retried or abandoned. Measured 2026-09-20 installing 78c36ccd3.
+#[test]
+fn test_missing_vsce_skips_vscode_packaging_instead_of_failing_the_install() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let makefile = fs::read_to_string(manifest_dir.join("Makefile")).unwrap();
+    let install_target = makefile
+        .split_once("install-editor-plugins:")
+        .expect("install-editor-plugins target")
+        .1
+        .split_once("cleanup-build-artifacts:")
+        .expect("cleanup-build-artifacts target")
+        .0;
+    let vscode_branch = &install_target[install_target
+        .find("grep -q '^vscode'")
+        .expect("VS Code package sync branch")..];
+
+    let guard = vscode_branch
+        .find("[ -x editors/vscode/node_modules/.bin/vsce ] || command -v vsce >/dev/null 2>&1")
+        .expect("the VS Code branch must check for vsce before packaging");
+    let package = vscode_branch
+        .find("npm run package")
+        .expect("VS Code packaging command");
+    assert!(
+        guard < package,
+        "the vsce availability check must gate `npm run package`, not trail it"
+    );
+
+    let skip = vscode_branch
+        .find("vsce is not installed; VS Code package sync skipped")
+        .expect("a missing vsce must be reported as a skip, not a build failure");
+    assert!(
+        package < skip,
+        "the skip warning belongs in the else branch of the vsce check"
+    );
+    // The warning names the remedy, because a silent skip leaves the installed
+    // VS Code package on its previous generation with nothing saying so.
+    assert!(
+        vscode_branch[skip..].contains("npm install")
+            && vscode_branch[skip..].contains("make install-editor-plugins"),
+        "the skip warning must name how to get the VS Code package refreshed"
+    );
+    assert!(
+        !vscode_branch[skip..].contains("exit 1"),
+        "skipping VS Code packaging must leave the install exit code green, or a \
+         complete install still reports failure"
+    );
+}
+
 /// `#pluginzipeveryrelease`: every tag must publish the editor packages.
 ///
 /// They used to be published on a cadence of their own, so the gap between

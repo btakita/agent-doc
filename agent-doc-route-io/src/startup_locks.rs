@@ -108,8 +108,12 @@ mod tests {
             matches!(acquired, StartupLockAcquire::Busy),
             "try-mode startup locks should report a busy lock instead of waiting"
         );
+        // `#citimingflake`: the property is that try-mode does not BLOCK on a held
+        // lock -- which `StartupLockAcquire::Busy` above already proves. This bound
+        // is the backstop against an internal retry loop, so seconds is the right
+        // order; 100ms was measuring the scheduler.
         assert!(
-            elapsed < std::time::Duration::from_millis(100),
+            elapsed < std::time::Duration::from_secs(5),
             "try-mode startup lock acquisition should be bounded, elapsed={elapsed:?}"
         );
     }

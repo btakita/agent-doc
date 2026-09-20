@@ -1206,9 +1206,16 @@ mod visible_write_content_snapshot_tests {
             elapsed >= std::time::Duration::from_millis(100),
             "should wait at least the timeout"
         );
+        // `#citimingflake`: this bound catches "the poll ignored the 100ms argument
+        // and used some multi-second default", not scheduler latency. It was 300ms
+        // -- 3x the timeout -- and CI run 35540520917 failed on it while the same
+        // commit was green locally: that runner took 1489s for a suite that takes
+        // ~170s here, so a 3x wall-clock bound cannot hold. Generous enough to
+        // survive a loaded runner, tight enough that a wrong timeout constant
+        // (seconds, not millis) still fails.
         assert!(
-            elapsed < std::time::Duration::from_millis(300),
-            "should not wait much longer than timeout"
+            elapsed < std::time::Duration::from_secs(5),
+            "should return on the requested timeout, not a much larger one: {elapsed:?}"
         );
     }
 

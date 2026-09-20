@@ -4008,8 +4008,13 @@ mod tests {
             "a two-word change in a {}-char document must touch a handful of characters, not {touched}",
             base.chars().count()
         );
+        // `#citimingflake`: the algorithmic property -- a two-word edit must not
+        // rewrite the document -- is already pinned by `touched < 60` above, which
+        // is machine-independent. This bound only needs to catch a pathological
+        // whole-document recompute, so it must not double as a speed benchmark on
+        // a shared runner.
         assert!(
-            elapsed < std::time::Duration::from_millis(250),
+            elapsed < std::time::Duration::from_secs(5),
             "whole-document span computation took {elapsed:?}"
         );
     }

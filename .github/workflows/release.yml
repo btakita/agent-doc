@@ -128,14 +128,105 @@ jobs:
           path: agent-doc-${{ matrix.target }}.zip
           retention-days: 1
 
-  release:
-    needs: build
+  # `#pluginzipeveryrelease`: the editor packages ship with EVERY tag, not on a
+  # cadence of their own. They used to be published separately, so the gap
+  # between plugin-bearing releases grew without bound — measured 2026-09-20,
+  # exactly ONE release in the API window carried `agent-doc-jetbrains-*.zip`.
+  # Plugin install/update then depended on how deep the asset search happened to
+  # walk, which is what `#pluginassetpaging` (per_page=100 across 5 pages) had to
+  # paper over. With the packages on the latest release, that page bound is slack
+  # instead of load-bearing.
+  #
+  # This job is a hard dependency of `release` on purpose: a tag that cannot
+  # produce editor packages must fail loudly rather than quietly publish the
+  # asset gap this item exists to close.
+  plugins:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      # The JetBrains plugin consumes lazily-kt as a Gradle composite build when
+      # the sibling checkout is present. Without it the build resolves
+      # `io.github.lazily:lazily` from mavenLocal / GitHub Packages, which is
+      # empty/unauthenticated on a runner. Same pair `ci.yml` clones.
+      - name: Check out lazily-spec composite dependency
+        run: git clone --depth 1 https://github.com/lazily-hub/lazily-spec ../lazily-spec
+
+      - name: Check out lazily-kt composite dependency
+        run: git clone --depth 1 https://github.com/lazily-hub/lazily-kt ../lazily-kt
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Both copies are pinned to the declared version rather than globbed.
+      # `build/distributions/` accumulates every version it has ever built plus
+      # `-signed` siblings (four zips locally), so a glob is one cache-restore
+      # away from attaching a stale or differently-signed artifact to a release
+      # and reporting success.
+      - name: Build JetBrains plugin zip
+        run: |
+          set -euo pipefail
+          ( cd editors/jetbrains && ./gradlew --no-daemon --console=plain buildPlugin )
+          mkdir -p editor-packages
+          version=$(sed -n 's/^pluginVersion *= *//p' editors/jetbrains/gradle.properties | tr -d '[:space:]')
+          test -n "$version"
+          cp "editors/jetbrains/build/distributions/agent-doc-jetbrains-$version.zip" editor-packages/
+          ls -la editor-packages
+
+      - name: Build VS Code extension vsix
+        run: |
+          set -euo pipefail
+          npm ci --prefix editors/vscode
+          npm run package --prefix editors/vscode
+          version=$(node -p "require('./editors/vscode/package.json').version")
+          test -n "$version"
+          cp "editors/vscode/agent-doc-$version.vsix" editor-packages/
+          ls -la editor-packages
+
+      # Prove both packages exist before the release job can depend on them, so
+      # a silently-skipped build cannot publish a release missing its plugins.
+      - name: Verify both editor packages were produced
+        run: |
+          set -euo pipefail
+          jetbrains=$(find editor-packages -name 'agent-doc-jetbrains-*.zip' | wc -l)
+          vsix=$(find editor-packages -name '*.vsix' | wc -l)
+          if [ "$jetbrains" -ne 1 ] || [ "$vsix" -ne 1 ]; then
+            echo "::error::expected 1 JetBrains zip and 1 vsix, got $jetbrains and $vsix"
+            ls -la editor-packages
+            exit 1
+          fi
+
+      - name: Upload editor packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-packages
+          path: editor-packages/*
+          retention-days: 1
+
+  release:
+    needs: [build, plugins]
+    runs-on: ubuntu-latest
+    steps:
+      # Platform archives only. `SHA256SUMS` below is generated over this
+      # directory and is consumed by the PyPI bootstrap launcher and by
+      # `make release-macos-assets`, so the editor packages must NOT land in it
+      # — they are release assets, not entries in the platform-archive manifest.
       - uses: actions/download-artifact@v4
         with:
+          pattern: agent-doc-*
           path: artifacts
           merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: editor-packages
+          path: editor-packages
 
       - name: Generate release checksums
         shell: bash
@@ -152,10 +243,10 @@ jobs:
           tag="${GITHUB_REF#refs/tags/}"
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "Release $tag already exists — uploading assets only"
-            gh release upload "$tag" artifacts/* --clobber
+            gh release upload "$tag" artifacts/* editor-packages/* --clobber
           else
             gh release create "$tag" \
               --title "agent-doc $tag" \
               --generate-notes \
-              artifacts/*
+              artifacts/* editor-packages/*
           fi

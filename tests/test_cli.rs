@@ -14104,6 +14104,73 @@ fn test_release_install_paths_fail_closed_for_issue_47() {
     );
 }
 
+/// `#pluginzipeveryrelease`: every tag must publish the editor packages.
+///
+/// They used to be published on a cadence of their own, so the gap between
+/// plugin-bearing releases grew without bound — measured 2026-09-20, exactly
+/// ONE release in the API window carried `agent-doc-jetbrains-*.zip`, at index 2
+/// of the default 30-item page. Plugin install/update therefore depended on how
+/// deep the asset search happened to walk, which is what `#pluginassetpaging`
+/// (per_page=100 across 5 pages) had to paper over. With the packages on the
+/// latest release that bound is slack instead of load-bearing.
+///
+/// A workflow cannot be exercised from a test, so pin the invariants the same
+/// way the issue-47 and issue-52 guards above do.
+#[test]
+fn test_every_release_publishes_the_editor_packages() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let release = fs::read_to_string(manifest_dir.join(".github/workflows/release.yml")).unwrap();
+
+    assert!(
+        release.contains("needs: [build, plugins]"),
+        "the release job must depend on the editor-package build, or a tag can \
+         publish platform archives with no plugin assets and still report success"
+    );
+    for required in [
+        "gh release upload \"$tag\" artifacts/* editor-packages/* --clobber",
+        "artifacts/* editor-packages/*",
+    ] {
+        assert!(
+            release.contains(required),
+            "both release paths must attach the editor packages: {required}"
+        );
+    }
+
+    let plugins = &release[release
+        .find("  plugins:")
+        .expect("editor-package build job")..];
+    for required in [
+        "./gradlew --no-daemon --console=plain buildPlugin",
+        "npm run package --prefix editors/vscode",
+        "expected 1 JetBrains zip and 1 vsix",
+    ] {
+        assert!(
+            plugins.contains(required),
+            "the editor-package job must build and verify both packages: {required}"
+        );
+    }
+    // `build/distributions/` accumulates every version it has built plus
+    // `-signed` siblings, so a glob is one cache restore away from attaching a
+    // stale artifact and reporting success.
+    assert!(
+        plugins.contains("agent-doc-jetbrains-$version.zip")
+            && plugins.contains("agent-doc-$version.vsix"),
+        "editor packages must be copied by declared version, never globbed"
+    );
+
+    // `SHA256SUMS` is generated over `artifacts/` and consumed by the PyPI
+    // bootstrap launcher and `make release-macos-assets`. The editor packages
+    // also match `agent-doc-*`, so downloading them into that directory would
+    // silently rewrite the platform-archive manifest.
+    let download = &release[release
+        .find("  release:")
+        .expect("release job")..];
+    assert!(
+        download.contains("pattern: agent-doc-*") && download.contains("path: editor-packages"),
+        "editor packages must download to their own directory so they stay out of SHA256SUMS"
+    );
+}
+
 /// GH #52: release artifacts must be able to deliver FFI.
 ///
 /// `agent-doc-x86_64-unknown-linux-gnu.tar.gz` unpacked to exactly one file —
@@ -14237,8 +14304,18 @@ fn test_release_cadence_applies_only_to_macos_assets() {
         4,
         "each on-demand tag must build the four automated Linux and Windows targets"
     );
+    // Scoped to CONFIGURATION lines. The substring check used to run over the
+    // whole file, so it also forbade *naming* the Darwin asset path in a
+    // comment — `make release-macos-assets` in a note about `SHA256SUMS`
+    // tripped it. Every real way to schedule a paid runner is still caught,
+    // because all of them are configuration, not prose.
+    let scheduling: String = release
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(
-        !release.contains("apple-darwin") && !release.contains("macos-"),
+        !scheduling.contains("apple-darwin") && !scheduling.contains("macos-"),
         "GitHub Actions must not schedule paid macOS release builds"
     );
 

@@ -59,10 +59,32 @@ fn fetch_latest_release() -> Result<Value> {
     Ok(body)
 }
 
-fn fetch_releases() -> Result<Vec<Value>> {
-    let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases");
+/// `#pluginassetpaging`: releases per page requested from GitHub.
+///
+/// The releases endpoint defaults to 30 per page and this call used to send no
+/// `per_page` and never paginate, so the asset search could only ever see the 30
+/// most recent releases. Editor-plugin assets ship on their own cadence — as of
+/// GH #53 exactly one release in the window carried
+/// `agent-doc-jetbrains-*.zip` — so at this repository's release rate that
+/// asset silently scrolls out of reach and `plugin install` / `plugin update`
+/// start failing with "No agent-doc-jetbrains*.zip asset found", on a release
+/// that is still published and still downloadable.
+const RELEASES_PER_PAGE: usize = 100;
+
+/// Bound on how far back the asset search walks. 5 × 100 is deep enough to
+/// outlast any plausible gap between plugin-bearing releases while keeping a
+/// missing asset a bounded failure rather than a walk of the entire history.
+const RELEASE_SEARCH_MAX_PAGES: usize = 5;
+
+fn releases_page_url(page: usize) -> String {
+    format!(
+        "https://api.github.com/repos/{GITHUB_REPO}/releases?per_page={RELEASES_PER_PAGE}&page={page}"
+    )
+}
+
+fn fetch_releases_page(page: usize) -> Result<Vec<Value>> {
     let resp = build_agent()
-        .get(&url)
+        .get(&releases_page_url(page))
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", "agent-doc")
         .call()
@@ -72,6 +94,36 @@ fn fetch_releases() -> Result<Vec<Value>> {
         .read_json()
         .context("Failed to parse releases JSON")?;
     Ok(body)
+}
+
+/// Walk release pages newest-first and return the first release carrying the
+/// asset. Stops at the first match, at a short (final) page, or at
+/// [`RELEASE_SEARCH_MAX_PAGES`], whichever comes first.
+///
+/// `fetch_page` is a parameter so the paging decisions are testable without a
+/// network.
+fn find_release_with_asset(
+    prefix: &str,
+    ext: &str,
+    mut fetch_page: impl FnMut(usize) -> Result<Vec<Value>>,
+) -> Result<Value> {
+    let mut scanned = 0usize;
+    for page in 1..=RELEASE_SEARCH_MAX_PAGES {
+        let releases = fetch_page(page)?;
+        // A page shorter than the requested size is the last one. Checked
+        // before the scan so a match on the final page still returns.
+        let is_final_page = releases.len() < RELEASES_PER_PAGE;
+        scanned += releases.len();
+        for release in releases {
+            if has_asset(&release, prefix, ext) {
+                return Ok(release);
+            }
+        }
+        if is_final_page {
+            break;
+        }
+    }
+    bail!("No {prefix}*.{ext} asset found in the {scanned} most recent GitHub releases")
 }
 
 fn find_asset<'a>(release: &'a Value, prefix: &str, ext: &str) -> Result<(&'a str, &'a str)> {
@@ -123,14 +175,7 @@ fn fetch_release_for_asset(prefix: &str, ext: &str) -> Result<Value> {
         "Latest release {latest_tag} has no {prefix}*.{ext} asset; checking older releases..."
     );
 
-    let releases = fetch_releases()?;
-    for release in releases {
-        if has_asset(&release, prefix, ext) {
-            return Ok(release);
-        }
-    }
-
-    bail!("No {prefix}*.{ext} asset found in latest release or any recent GitHub release");
+    find_release_with_asset(prefix, ext, fetch_releases_page)
 }
 
 fn download_to_temp(url: &str) -> Result<tempfile::NamedTempFile> {
@@ -734,16 +779,138 @@ pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Resu
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::{
-        choose_plugins_dir_with_interactivity, existing_jetbrains_agent_doc_dirs, find_asset,
-        find_best_local_zip, find_local_vscode_vsix, find_local_zip, has_asset,
-        installed_jetbrains_plugin_version, is_jetbrains_ide_data_dir,
-        jetbrains_install_success_message, jetbrains_plugin_dirs_in_roots, local_jetbrains_zip_in,
-        local_jetbrains_zip_version, release_version,
+        RELEASES_PER_PAGE, RELEASE_SEARCH_MAX_PAGES, choose_plugins_dir_with_interactivity,
+        existing_jetbrains_agent_doc_dirs, find_asset, find_best_local_zip, find_local_vscode_vsix,
+        find_local_zip, find_release_with_asset, has_asset, installed_jetbrains_plugin_version,
+        is_jetbrains_ide_data_dir, jetbrains_install_success_message,
+        jetbrains_plugin_dirs_in_roots, local_jetbrains_zip_in, local_jetbrains_zip_version,
+        release_version, releases_page_url,
     };
     use serde_json::json;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
+
+    /// `#pluginassetpaging`: a release with no assets at all.
+    fn bare_release(tag: &str) -> serde_json::Value {
+        json!({ "tag_name": tag, "assets": [] })
+    }
+
+    fn plugin_release(tag: &str) -> serde_json::Value {
+        json!({
+            "tag_name": tag,
+            "assets": [{
+                "name": format!("agent-doc-jetbrains-{tag}-signed.zip"),
+                "browser_download_url": format!("https://example.invalid/{tag}.zip"),
+            }],
+        })
+    }
+
+    /// Pages of `RELEASES_PER_PAGE` filler releases with the plugin-bearing one
+    /// at `asset_index` in the flattened, newest-first sequence.
+    fn paged_source(
+        total: usize,
+        asset_index: Option<usize>,
+    ) -> impl FnMut(usize) -> anyhow::Result<Vec<serde_json::Value>> {
+        move |page: usize| {
+            let start = (page - 1) * RELEASES_PER_PAGE;
+            Ok((start..total.min(start + RELEASES_PER_PAGE))
+                .map(|i| {
+                    if Some(i) == asset_index {
+                        plugin_release(&format!("v0.{i}.0"))
+                    } else {
+                        bare_release(&format!("v0.{i}.0"))
+                    }
+                })
+                .collect())
+        }
+    }
+
+    #[test]
+    fn releases_page_url_requests_a_full_page_and_the_asked_for_page() {
+        // The bug was a bare `/releases`: GitHub's 30-per-page default, one
+        // page only. Both parameters have to be on the wire.
+        let url = releases_page_url(3);
+        assert!(url.contains(&format!("per_page={RELEASES_PER_PAGE}")), "{url}");
+        assert!(url.contains("page=3"), "{url}");
+        assert!(url.contains("/repos/btakita/agent-doc/releases?"), "{url}");
+    }
+
+    #[test]
+    fn release_search_reaches_an_asset_beyond_the_first_page() {
+        // GH #53: exactly one release in the window carried the JetBrains zip.
+        // Under the old single-page scan anything past the first page was
+        // unreachable even though the release was still published.
+        let mut pages_fetched = Vec::new();
+        let mut source = paged_source(260, Some(150));
+        let found = find_release_with_asset("agent-doc-jetbrains", "zip", |page| {
+            pages_fetched.push(page);
+            source(page)
+        })
+        .unwrap();
+        assert_eq!(release_version(&found), "v0.150.0");
+        assert_eq!(pages_fetched, vec![1, 2]);
+    }
+
+    #[test]
+    fn release_search_stops_at_the_first_match() {
+        let mut pages_fetched = Vec::new();
+        let mut source = paged_source(500, Some(7));
+        let found = find_release_with_asset("agent-doc-jetbrains", "zip", |page| {
+            pages_fetched.push(page);
+            source(page)
+        })
+        .unwrap();
+        assert_eq!(release_version(&found), "v0.7.0");
+        assert_eq!(pages_fetched, vec![1], "a match on page 1 must not fetch page 2");
+    }
+
+    #[test]
+    fn release_search_stops_at_a_short_final_page() {
+        // A short page is the end of the history; walking past it would burn
+        // `RELEASE_SEARCH_MAX_PAGES` requests on empty responses.
+        let mut pages_fetched = Vec::new();
+        let mut source = paged_source(120, None);
+        let err = find_release_with_asset("agent-doc-jetbrains", "zip", |page| {
+            pages_fetched.push(page);
+            source(page)
+        })
+        .unwrap_err();
+        assert_eq!(pages_fetched, vec![1, 2]);
+        assert!(
+            err.to_string().contains("120 most recent GitHub releases"),
+            "the failure must say how deep the search actually went: {err}"
+        );
+    }
+
+    #[test]
+    fn release_search_finds_an_asset_on_a_short_final_page() {
+        let source = paged_source(120, Some(115));
+        let found = find_release_with_asset("agent-doc-jetbrains", "zip", source).unwrap();
+        assert_eq!(release_version(&found), "v0.115.0");
+    }
+
+    #[test]
+    fn release_search_is_bounded_by_max_pages() {
+        let mut pages_fetched = Vec::new();
+        let mut source = paged_source(10_000, None);
+        let err = find_release_with_asset("agent-doc-jetbrains", "zip", |page| {
+            pages_fetched.push(page);
+            source(page)
+        })
+        .unwrap_err();
+        assert_eq!(pages_fetched.len(), RELEASE_SEARCH_MAX_PAGES);
+        assert!(err.to_string().contains("No agent-doc-jetbrains*.zip"), "{err}");
+    }
+
+    #[test]
+    fn release_search_propagates_a_fetch_error_instead_of_reporting_no_asset() {
+        let err = find_release_with_asset("agent-doc-jetbrains", "zip", |_| {
+            anyhow::bail!("Failed to fetch releases from GitHub")
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("Failed to fetch releases"), "{err}");
+    }
 
     #[test]
     fn ambiguous_noninteractive_jetbrains_target_fails_with_rerun_guidance() {

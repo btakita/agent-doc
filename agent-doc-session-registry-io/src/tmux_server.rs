@@ -57,9 +57,12 @@ fn observe_tmux_server_identity(tmux: &Tmux) -> Result<Option<TmuxServerIdentity
 
 fn parse_tmux_server_identity(output: &str) -> Result<TmuxServerIdentity> {
     let mut fields = output.split_whitespace();
+    // No `.filter(|field| !field.is_empty())`: `split_whitespace` never yields
+    // an empty item, so empty input already errors on `next()` returning `None`.
+    // (GH #53 follow-up: the filter survived the switch from `split('\t')`,
+    // where it was load-bearing, and was unreachable from that point on.)
     let pid = fields
         .next()
-        .filter(|field| !field.is_empty())
         .context("tmux server identity omitted pid")?
         .parse::<u32>()
         .context("parse tmux server pid")?;

@@ -249,7 +249,7 @@ The pre-existing unrelated JetBrains and session-actor worktree changes were lef
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

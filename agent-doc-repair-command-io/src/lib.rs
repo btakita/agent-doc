@@ -230,6 +230,63 @@ fn captured_closeout_for(
     )
 }
 
+/// `#resumereplaynotidempotent`: drop the plan entries the document already
+/// shows, so a resume cannot replay a mutation that provably landed.
+///
+/// `recorded_tracked_work_is_unlanded` answers for the cycle as a whole, and its
+/// only id witnesses are `--done` ids, explicit add ids, and
+/// `requested_mutations && !mutations_applied`. `--review-resolve`,
+/// `--review-remove` and `--backlog-ungate` carry no id witness, and
+/// `mutations_applied` flips only after the pending-write *transaction* succeeds
+/// — so when the mutation content reached the document but its transaction was
+/// retained, the flag under-reports and the whole plan is replayed.
+///
+/// Those three commands are not idempotent: each fails when its target is gone.
+/// Observed live 2026-09-20 on `cycle-1789880782658` — the envelope had applied
+/// (ops.log showed `review-resolve: archived 1 entry for #fpecompactheal`), the
+/// write was retained, and every resume then refused with `review item not
+/// found: #fpecompact…`. That retry can never succeed: the id will never return
+/// to `agent:review`, so the cycle latched at `write_applied` until a manual
+/// `agent-doc commit` cleared it.
+///
+/// The fix is per-entry, witnessed against the already-resolved current content,
+/// and deliberately local to this function so the four guarded
+/// `recorded_tracked_work_is_unlanded` call sites are untouched. Both witnesses
+/// fail safe toward *keeping* a replay, because a dropped mutation is silent
+/// tracked-work loss while a kept one is caught by the write path.
+///
+/// Returns a `shape:#id` descriptor per dropped entry, for the ops log.
+pub fn drop_already_applied_mutations(
+    options: &mut agent_doc_write_command_io::CommandOptions,
+    current_content: &str,
+) -> Vec<String> {
+    let mut dropped = Vec::new();
+    let mut retain_witnessed = |shape: &str, ids: &mut Vec<String>, still_pending: &dyn Fn(&str) -> bool| {
+        ids.retain(|id| {
+            if still_pending(id) {
+                return true;
+            }
+            dropped.push(format!("{shape}:#{}", id.trim().trim_start_matches('#')));
+            false
+        });
+    };
+    // Resolve and remove both TAKE the item out of `agent:review`, so presence
+    // in that component is the exact "not yet applied" witness. Not
+    // `collect_gated_review_ids`: it matches only the untyped `- [/]` prefix, so
+    // a typed gate (`- [/release]`) would read as applied and be dropped.
+    let review_witness =
+        |id: &str| agent_doc_element_review::review_component_contains_id(current_content, id);
+    retain_witnessed("review-resolve", &mut options.review_resolve, &review_witness);
+    retain_witnessed("review-remove", &mut options.review_remove, &review_witness);
+    // Ungate resolves against `agent:review` first and falls back to the backlog
+    // component, so "absent from review" is the WRONG witness for it — an item
+    // gated in the backlog would read as already ungated.
+    retain_witnessed("backlog-ungate", &mut options.pending_ungate, &|id| {
+        agent_doc_element_review::id_is_gated_in_tracked_work(current_content, id)
+    });
+    dropped
+}
+
 /// `#deferredmutdrop`: replay this closeout's tracked-work half when only its
 /// response half materialized.
 ///
@@ -307,6 +364,19 @@ fn apply_unlanded_captured_mutation_plan(
     options.is_ipc = false;
     options.pending_only = true;
     options.origin = Some("captured_finalize_resume_tracked_work".to_string());
+    let dropped = drop_already_applied_mutations(&mut options, &current_content);
+    if !dropped.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "captured_finalize_resume_tracked_work_already_applied file={} cycle_id={} capture_id={} dropped={}",
+                file.display(),
+                expected.cycle_id,
+                expected.capture_id,
+                dropped.join(","),
+            ),
+        );
+    }
     if !options.has_pending_mutation() {
         return Ok(false);
     }

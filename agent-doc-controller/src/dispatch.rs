@@ -403,7 +403,19 @@ pub fn route_trigger_visible_in_current_draft(
         .take(16)
         .collect();
     let lines: Vec<&String> = recent_lines.iter().rev().collect();
-    for start in 0..lines.len() {
+    // `#runsubmitfirstmatch`: scan NEWEST-first. The question is only ever about
+    // the CURRENT draft, and the same trigger legitimately appears earlier in
+    // the window as consumed transcript. Returning on the oldest occurrence
+    // answered for that consumed copy instead: a prompt line follows it (the
+    // stranded draft itself is one), so the predicate said "not visible" and the
+    // pass-through repair logged `outcome=cleared enters_sent=0` over a composer
+    // that still held the trigger. Observed 2026-09-20 on pane %19 for
+    // `src/haiven-dev/tasks/contracts.md`, where an 11:59 consumed
+    // `agent-doc …/contracts.md` sat 12 non-empty lines above the 16:05 draft of
+    // the same trigger. Taking the newest occurrence keeps the
+    // `#autotriggerscrollbackecho` protection intact — a newest occurrence that
+    // really is consumed still has a later prompt line and still answers false.
+    for start in (0..lines.len()).rev() {
         if !line_contains_trigger(lines[start], trigger)
             && !line_contains_equivalent_agent_doc_path_trigger(lines[start], trigger)
             && !wrapped_trigger_starts_at_line(&lines, start, trigger)
@@ -6948,14 +6960,27 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         line.trim_start().starts_with('\u{203a}')
     }
 
-    /// Mirrors `HarnessConfig::claude().is_prompt_line` — including the
-    /// permission-mode footer clause, which is the part this test is about.
+    /// Mirrors `HarnessConfig::claude().is_prompt_line` — `prompt_patterns`
+    /// `["❯", "⏵"]` matched either exactly or as a prefix followed by
+    /// whitespace, plus the permission-mode footer clause.
+    ///
+    /// `#runsubmitfirstmatch`: the prefix-plus-whitespace clause is load-bearing
+    /// and was missing here. Without it a DRAFTED `❯ <text>` line is not a
+    /// prompt line in the mirror but is one in the product, so tests over this
+    /// predicate could not see the real "a later prompt line follows the older
+    /// occurrence" shape. Keep this faithful, including the U+00A0 Claude
+    /// renders between the glyph and the draft.
     fn claude_prompt_line(line: &str) -> bool {
-        let trimmed = strip_ansi(line);
-        let trimmed = trimmed.trim();
-        matches!(trimmed, "\u{276f}" | "\u{23f5}")
-            || (trimmed.starts_with("\u{23f5}\u{23f5} ")
-                && trimmed.contains("(shift+tab to cycle)"))
+        let stripped = strip_ansi(line);
+        let trimmed = stripped.trim();
+        ["\u{276f}", "\u{23f5}"].iter().any(|p| {
+            trimmed == *p
+                || trimmed
+                    .strip_prefix(*p)
+                    .and_then(|suffix| suffix.chars().next())
+                    .is_some_and(char::is_whitespace)
+        }) || (trimmed.starts_with("\u{23f5}\u{23f5} ")
+            && trimmed.contains("(shift+tab to cycle)"))
     }
 
     #[test]
@@ -7005,6 +7030,73 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert!(
             !route_trigger_visible_in_current_draft(consumed, trigger, claude_prompt_line),
             "an empty composer below the trigger means it was consumed, not stranded"
+        );
+    }
+
+    #[test]
+    fn route_trigger_visible_in_current_draft_answers_for_the_newest_occurrence() {
+        // `#runsubmitfirstmatch`: verbatim shape of pane %19 on 2026-09-20 after
+        // "Run Agent Doc" on `src/haiven-dev/tasks/contracts.md`. The 11:59
+        // consumed trigger and its answer sit inside the same 16-non-empty-line
+        // window as the 16:05 stranded draft of the SAME trigger. Answering for
+        // the oldest occurrence (a prompt line follows it — the stranded draft
+        // itself) reported the composer clear, so `repair_pass_through_stranded_draft`
+        // logged `outcome=cleared enters_sent=0` and the operator's prompt was
+        // never submitted.
+        let trigger =
+            "agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md";
+        let stranded_below_a_consumed_copy = "\
+\u{276f}\u{a0}/agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md
+
+\u{25cf} Nothing changed in tasks/contracts.md since the last committed cycle (no_changes: true, cycle
+  cycle-1789919766828 at committed), so there's no prompt to respond to and I made no edits.
+
+  State as of now: queue inactive, agent:review at 4 items, all gated.
+
+  Edit the document and re-invoke when you want the next cycle.
+
+\u{273b} Brewed for 4s \u{b7} done 11:59 AM
+
+────────────────────────────────────────────────────────
+\u{276f}\u{a0}/agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md
+
+────────────────────────────────────────────────────────
+  Opus 5 ctx:13% ~/…/src/haiven-dev docs/fpe-service-topology-temporal-plan brian@cachyos-x8664
+  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle)
+";
+        assert!(
+            route_trigger_visible_in_current_draft(
+                stranded_below_a_consumed_copy,
+                trigger,
+                claude_prompt_line
+            ),
+            "the newest occurrence is an unsubmitted draft, so the trigger IS visible"
+        );
+
+        // `#autotriggerscrollbackecho` must survive unchanged: when the NEWEST
+        // occurrence is itself consumed transcript, the answer is still false.
+        let both_consumed = "\
+\u{276f}\u{a0}/agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md
+
+\u{25cf} first answer
+
+\u{276f}\u{a0}/agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/contracts.md
+
+  \u{23ff}  preflight complete
+
+────────────────────────────────────────────────────────
+\u{276f}
+────────────────────────────────────────────────────────
+  Opus 5 ctx:13% ~/…/src/haiven-dev docs/fpe-service-topology-temporal-plan brian@cachyos-x8664
+  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle)
+";
+        assert!(
+            !route_trigger_visible_in_current_draft(
+                both_consumed,
+                trigger,
+                claude_prompt_line
+            ),
+            "an empty composer below the newest occurrence still means consumed scrollback"
         );
     }
 

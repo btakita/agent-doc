@@ -278,6 +278,74 @@ fn gated_review_id_from_line(line: &str) -> Option<String> {
     }
 }
 
+/// Whether any `agent:review` component still holds an item with this id.
+///
+/// `#resumereplaynotidempotent`: the replay witness for `--review-resolve` and
+/// `--review-remove`. Both commands *take* the item out of `agent:review`, so
+/// "still present" means the mutation has not landed and "absent" means it has.
+///
+/// Deliberately NOT [`collect_gated_review_ids`]: that set matches only the
+/// untyped `- [/]` prefix, so a TYPED gate (`- [/release]`) reads as absent and
+/// an unlanded mutation would be misclassified as already-applied — silently
+/// dropping tracked work. This asks the parsed component, which sees every
+/// state and every gate type.
+///
+/// A document whose components cannot be parsed answers `true`: keeping the
+/// replay is the safe direction, because the write path is idempotence-checked
+/// downstream while a dropped replay is unrecoverable.
+pub fn review_component_contains_id(content: &str, id: &str) -> bool {
+    let wanted = backlog::normalize_pending_id(id);
+    if wanted.is_empty() {
+        return true;
+    }
+    let Ok(components) = element::parse(content) else {
+        return true;
+    };
+    components
+        .iter()
+        .filter(|c| element::is_review_component(&c.name))
+        .any(|c| {
+            let (_, items, _) = backlog::parse_items(c.content(content));
+            items
+                .iter()
+                .any(|item| backlog::normalize_pending_id(&item.id) == wanted)
+        })
+}
+
+/// Whether an item with this id is still gated in `agent:review` *or* the
+/// backlog component.
+///
+/// `#resumereplaynotidempotent`: the replay witness for `--backlog-ungate`.
+/// Ungate resolves against `agent:review` first and falls back to the backlog
+/// component, so "absent from review" is the WRONG witness for it — an item
+/// gated in the backlog would read as already-ungated and its replay would be
+/// dropped. Gated-anywhere is the question ungate actually asks; typed gates
+/// count, because `- [/release]` is as gated as `- [/]`.
+///
+/// Parse failure answers `true` for the same fail-safe reason as
+/// [`review_component_contains_id`].
+pub fn id_is_gated_in_tracked_work(content: &str, id: &str) -> bool {
+    let wanted = backlog::normalize_pending_id(id);
+    if wanted.is_empty() {
+        return true;
+    }
+    let Ok(components) = element::parse(content) else {
+        return true;
+    };
+    components
+        .iter()
+        .filter(|c| {
+            element::is_review_component(&c.name) || element::is_backlog_component(&c.name)
+        })
+        .any(|c| {
+            let (_, items, _) = backlog::parse_items(c.content(content));
+            items.iter().any(|item| {
+                item.state == backlog::PendingState::Gated
+                    && backlog::normalize_pending_id(&item.id) == wanted
+            })
+        })
+}
+
 /// Token-efficient projection of gated `agent:review` items.
 ///
 /// Returns one [`ReviewItemView`] per gated item, with extracted hashtags and the
@@ -375,6 +443,71 @@ fn bounded(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#resumereplaynotidempotent`: a document with one gated review item, one
+    /// TYPED gated review item, one gated backlog item, and one open backlog item.
+    fn witness_doc() -> String {
+        concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#openwork] open backlog work\n",
+            "- [/] [#gatedbacklog] gated in the backlog, not in review\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#untypedgate] untyped gate\n",
+            "- [/release] [#typedgate] typed gate\n",
+            "<!-- /agent:review -->\n",
+        )
+        .to_string()
+    }
+
+    #[test]
+    fn review_contains_id_sees_typed_and_untyped_gates() {
+        let doc = witness_doc();
+        assert!(review_component_contains_id(&doc, "untypedgate"));
+        assert!(review_component_contains_id(&doc, "#untypedgate"));
+        // The bug this guards: `collect_gated_review_ids` matches only `- [/]`,
+        // so a typed gate reads as absent and its replay would be dropped.
+        assert!(!collect_gated_review_ids(&doc).contains("typedgate"));
+        assert!(review_component_contains_id(&doc, "typedgate"));
+    }
+
+    #[test]
+    fn review_contains_id_is_false_once_the_item_is_gone() {
+        let doc = witness_doc();
+        assert!(!review_component_contains_id(&doc, "gatedbacklog"));
+        assert!(!review_component_contains_id(&doc, "nosuchid"));
+    }
+
+    #[test]
+    fn gated_in_tracked_work_covers_backlog_gates_too() {
+        let doc = witness_doc();
+        // Ungate falls back to the backlog component, so "absent from review"
+        // is the wrong witness for it.
+        assert!(!review_component_contains_id(&doc, "gatedbacklog"));
+        assert!(id_is_gated_in_tracked_work(&doc, "gatedbacklog"));
+        assert!(id_is_gated_in_tracked_work(&doc, "untypedgate"));
+        assert!(id_is_gated_in_tracked_work(&doc, "typedgate"));
+    }
+
+    #[test]
+    fn gated_in_tracked_work_is_false_for_open_and_missing_items() {
+        let doc = witness_doc();
+        assert!(!id_is_gated_in_tracked_work(&doc, "openwork"));
+        assert!(!id_is_gated_in_tracked_work(&doc, "nosuchid"));
+    }
+
+    #[test]
+    fn witnesses_fail_safe_toward_keeping_the_replay() {
+        // Unparseable document: nothing can be *proven* applied, so both
+        // witnesses answer "still there" and the replay is preserved.
+        let unclosed = "<!-- agent:review -->\n- [/] [#untypedgate] gated\n";
+        assert!(element::parse(unclosed).is_err());
+        assert!(review_component_contains_id(unclosed, "untypedgate"));
+        assert!(id_is_gated_in_tracked_work(unclosed, "untypedgate"));
+        // An id that normalizes to nothing is unanswerable, so it keeps its replay.
+        assert!(review_component_contains_id(&witness_doc(), "  "));
+        assert!(id_is_gated_in_tracked_work(&witness_doc(), "#"));
+    }
 
     #[test]
     fn ensure_review_component_inserts_after_backlog() {

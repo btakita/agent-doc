@@ -1732,6 +1732,7 @@ dependencies = [
  "agent-doc-diff-io",
  "agent-doc-document-realtime-io",
  "agent-doc-element",
+ "agent-doc-element-review",
  "agent-doc-git-io",
  "agent-doc-hash",
  "agent-doc-ops-log-io",

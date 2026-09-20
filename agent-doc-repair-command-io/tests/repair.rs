@@ -132,6 +132,140 @@ mod tests {
         agent_doc_cycle_state_io::age_current_cycle_for_tests(file, age_secs).unwrap();
     }
 
+    /// `#resumereplaynotidempotent`: one gated review item, one TYPED gated
+    /// review item, one item gated in the backlog, one open backlog item.
+    fn tracked_work_doc() -> &'static str {
+        concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#openwork] open backlog work\n",
+            "- [/] [#gatedbacklog] gated in the backlog, not in review\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#untypedgate] untyped gate\n",
+            "- [/release] [#typedgate] typed gate\n",
+            "<!-- /agent:review -->\n",
+        )
+    }
+
+    fn replay_options() -> agent_doc_write_command_io::CommandOptions {
+        agent_doc_write_command_io::CommandOptions::recovery_from_captured_closeout_mutation_plan(
+            Path::new("/tmp/session.md"),
+            agent_doc_write_command_io::CapturedCloseoutMutationPlan::default(),
+        )
+    }
+
+    #[test]
+    fn resume_keeps_mutations_the_document_has_not_received() {
+        let mut options = replay_options();
+        options.review_resolve = vec!["untypedgate".to_string()];
+        options.review_remove = vec!["typedgate".to_string()];
+        options.pending_ungate = vec!["gatedbacklog".to_string()];
+
+        let dropped = agent_doc_repair_command_io::drop_already_applied_mutations(
+            &mut options,
+            tracked_work_doc(),
+        );
+
+        assert!(dropped.is_empty(), "{dropped:?}");
+        assert_eq!(options.review_resolve, vec!["untypedgate".to_string()]);
+        assert_eq!(options.review_remove, vec!["typedgate".to_string()]);
+        assert_eq!(options.pending_ungate, vec!["gatedbacklog".to_string()]);
+        assert!(options.has_pending_mutation());
+    }
+
+    #[test]
+    fn resume_drops_mutations_the_document_already_shows() {
+        // The applied shape: both review ids are gone from `agent:review`, and
+        // the ungated id is no longer gated anywhere.
+        let applied = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#openwork] open backlog work\n",
+            "- [ ] [#gatedbacklog] ungated into the backlog\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "<!-- /agent:review -->\n",
+        );
+        let mut options = replay_options();
+        options.review_resolve = vec!["untypedgate".to_string()];
+        options.review_remove = vec!["typedgate".to_string()];
+        options.pending_ungate = vec!["gatedbacklog".to_string()];
+
+        let dropped =
+            agent_doc_repair_command_io::drop_already_applied_mutations(&mut options, applied);
+
+        assert_eq!(
+            dropped,
+            vec![
+                "review-resolve:#untypedgate".to_string(),
+                "review-remove:#typedgate".to_string(),
+                "backlog-ungate:#gatedbacklog".to_string(),
+            ]
+        );
+        assert!(options.review_resolve.is_empty());
+        assert!(options.review_remove.is_empty());
+        assert!(options.pending_ungate.is_empty());
+        // Nothing left to replay, so the resume continues to commit instead of
+        // latching at `write_applied` on a retry that can never succeed.
+        assert!(!options.has_pending_mutation());
+    }
+
+    #[test]
+    fn resume_keeps_a_typed_gate_replay_the_gated_id_set_cannot_see() {
+        // `collect_gated_review_ids` matches only `- [/]`, so witnessing from it
+        // would classify this unlanded typed-gate replay as already applied.
+        assert!(
+            !agent_doc_element_review::collect_gated_review_ids(tracked_work_doc())
+                .contains("typedgate")
+        );
+        let mut options = replay_options();
+        options.review_resolve = vec!["#typedgate".to_string()];
+
+        let dropped = agent_doc_repair_command_io::drop_already_applied_mutations(
+            &mut options,
+            tracked_work_doc(),
+        );
+
+        assert!(dropped.is_empty(), "{dropped:?}");
+        assert_eq!(options.review_resolve, vec!["#typedgate".to_string()]);
+    }
+
+    #[test]
+    fn resume_keeps_an_ungate_replay_for_an_item_gated_only_in_the_backlog() {
+        // "absent from review" is the wrong witness for ungate: `#gatedbacklog`
+        // is not in `agent:review` at all, but its ungate has not landed.
+        assert!(!agent_doc_element_review::review_component_contains_id(
+            tracked_work_doc(),
+            "gatedbacklog"
+        ));
+        let mut options = replay_options();
+        options.pending_ungate = vec!["gatedbacklog".to_string()];
+
+        let dropped = agent_doc_repair_command_io::drop_already_applied_mutations(
+            &mut options,
+            tracked_work_doc(),
+        );
+
+        assert!(dropped.is_empty(), "{dropped:?}");
+        assert_eq!(options.pending_ungate, vec!["gatedbacklog".to_string()]);
+    }
+
+    #[test]
+    fn resume_drops_only_the_applied_half_of_a_mixed_plan() {
+        let mut options = replay_options();
+        options.review_resolve = vec!["untypedgate".to_string(), "alreadygone".to_string()];
+        options.pending_add = vec!["a brand new follow-up".to_string()];
+
+        let dropped = agent_doc_repair_command_io::drop_already_applied_mutations(
+            &mut options,
+            tracked_work_doc(),
+        );
+
+        assert_eq!(dropped, vec!["review-resolve:#alreadygone".to_string()]);
+        assert_eq!(options.review_resolve, vec!["untypedgate".to_string()]);
+        assert_eq!(options.pending_add.len(), 1);
+        assert!(options.has_pending_mutation());
+    }
+
     #[test]
     fn no_pending_returns_false() {
         let dir = setup_project();

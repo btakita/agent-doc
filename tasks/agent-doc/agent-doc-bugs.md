@@ -842,6 +842,40 @@ So the objection I raised when filing this is answered rather than overridden: t
 **One caveat worth stating.** The committed `pluginSourceDigest` covers the working tree at install time, which includes another session's in-flight plugin edits. A clean tree bumps once more on its next install and then holds. I committed only my three paths and left that session's files alone.
 
 CI runs `35539851558`, `35539350263`, `35538568288` were all still in progress at closeout; recording them pending rather than blocking. Exchange is at 778 lines across 31 sections.
+
+### Re: do [#preflightrefusalcontradiction] — opus-5 · 2026-09-20T18:32-04:00
+
+> **Queue prompt:**
+>
+> do [#preflightrefusalcontradiction]
+>
+> do [#commitsilentfirstrun]
+
+
+Two items close: `#preflightrefusalcontradiction` (`8733350bf`) and `#commitsilentfirstrun` (`dc23ccb5a`). A third commit, `14b3d1cdb`, fixes a CI failure the first one exposed.
+
+**The fixes proved themselves on arrival.** This turn's preflight carried *both* plugin warnings:
+
+```
+stale_plugin:             live plugin 0.2.388 != 0.2.389 shipped
+plugin_bytes_superseded:  pid 1023909 ... mapped but its inode was unlinked
+```
+
+Before this session neither could fire. `stale_plugin` was silent because both builds were called 0.2.388 — that is `#jbversionbumpperbuild` giving the new build a distinct version. `plugin_bytes_superseded` did not exist. And the refusal that opened this turn was coherent for the first time: one verdict, sentence boundary intact, no "the same intent resumes" fighting "STRANDED … waiting will not commit them".
+
+`#commitsilentfirstrun` measured cleanly before and after. The same recovery command on the same document: **run 1 was 0 bytes / exit 0**, now it is **1611 bytes / exit 1** — the real diagnostic, immediately. The cause was one line discarding the outcome with `.map(|_| ())`, in the command the wedge diagnostics name as the remedy.
+
+**CI caught something my local suite could not, and it was mine to fix.** Run `35540520917` failed on `8733350bf` while `make check` was green here. Not a false alarm: my local tree carries another session's uncommitted source, and my commit carried only my files.
+
+The failure was `test_poll_lazily_event_timeout`, asserting `elapsed < 300ms` for a 100ms timeout. That runner took **1489s for a suite that takes ~170s here** — a 3x wall-clock bound cannot survive a ~9x slower machine. It is genuinely unrelated to my change, but "unrelated" and "flaky" are not waivers, and the bound was simply wrong.
+
+Two things I did not do. I did not fix only the test that happened to fail: the same defect existed in three crates, and repairing one would have relocated the flake. And I did not simply widen the numbers — for two of the three, the property they claim to test is **already pinned by a machine-independent assertion on the line above** (`touched < 60`, and `StartupLockAcquire::Busy`), so the timing bound was redundant as well as fragile. Mutation-checked that the widened bound is still a guard: an 8s timeout where the test supplies 100ms still reddens.
+
+**Verification.** `make check` exit 0, 9587 tests run, 9587 passed, 259 skipped. All fixes mutation-checked. Earlier CI: `#pluginbyteidentity`, `#missingreplicanoise`, `#jbversionbumpperbuild` all green; `#commitsilentfirstrun` still running.
+
+**The item I owed, now filed.** `#reappersistloop` covers the closeout interruption I have been describing in prose for five consecutive cycles. It is structural, and it is worse than cosmetic: `session-check` calls it an INTERRUPT, `repair` calls the same document clean, and `commit` refuses while `repair` warns that running `commit` would commit unreviewed drift as metadata. Nothing is lost — a later preflight does land the reap — but a false interruption every cycle is, per the auto-loop skip list, a valid reason to stop draining. It is queued ahead of `#runsubmitautoproof` because it affects every closeout.
+
+Exchange is at 816 lines across 32 sections, accretion now `block`; noting it rather than stalling the queue.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -854,16 +888,17 @@ CI runs `35539851558`, `35539350263`, `35538568288` were all still in progress a
 - ~~do [#jbversionbumpperbuild]~~
 - ~~do [#pluginbyteidentity]~~
 - ~~do [#missingreplicanoise]~~
-- do [#preflightrefusalcontradiction]
-- do [#commitsilentfirstrun]
+- ~~do [#preflightrefusalcontradiction]~~
+- ~~do [#commitsilentfirstrun]~~
 - do [#runsubmitautoproof]
 - ~~#actionable-review~~
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority queue -->
-- [ ] [#preflightrefusalcontradiction] [P1] The preflight admission refusal emits two contradictory halves in one message and the operator cannot tell which to act on. Captured 2026-09-20T20:54Z on this document: it reported recovery=await_editor_replica_no_disk_write with "the same intent resumes when the controller derives settlement", and in the same breath "NO cycle is open and NO response capture is retained, so nothing owns this write and no state edge will fire, the visible edits are STRANDED not deferred, and waiting will not commit them". One half says wait, the other says waiting can never work. Dogfood watch already classified it: issue_class=projection_failure issue_key=1fa46fd1ad84a564d13d16b971df69ad0692de3e32c0c68a4c4507d67d3f8430. Derive one verdict from the ownership facts and emit only that remedy.
-- [ ] [#commitsilentfirstrun] [P2] agent-doc commit printed nothing at all on its first invocation and exited, then an immediately repeated identical invocation printed "[commit] repaired committed historical committed_capture drift into snapshot" followed by the real refusal. Captured 2026-09-20T20:55Z on this document while recovering from the preflight refusal above. A recovery command whose first run is silent reads as a hang or a no-op and invites the operator to escalate to force-disk, which is the one thing the same diagnostic forbids. Make the first run either print its repair and verdict, or exit non-zero with a reason.
+- [ ] [#reappersistloop] [P1] Every cycle ends with its completed items marked [x] in agent:backlog but never moved to the done archive, and the three commands disagree about it. session-check says "INTERRUPTED: document still contains completed tracked item(s) after closeout ... Re-run preflight/repair so the reap is persisted through the snapshot + commit boundary"; agent-doc repair --apply-recovery answers "is clean — no recovery needed" on the same document; and agent-doc commit refuses, with repair separately warning that running commit here would "commit unreviewed content drift as metadata". Observed on EVERY closeout this session (at least 5 consecutive: pluginbyteidentity, missingreplicanoise, jbversionbumpperbuild, preflightrefusalcontradiction, commitsilentfirstrun), so it is structural, not incidental. The reap does eventually land via a later preflight, so nothing is lost, but every cycle reports a false interruption that per the auto-loop skip list is a valid reason to stop the drain. Fix: either make the reap cross the snapshot+commit boundary in the same closeout, or stop classifying a pending archive move as an INTERRUPT. Whichever, the three commands must agree.
+- [x] 🚧 [#preflightrefusalcontradiction] [P1] The preflight admission refusal emits two contradictory halves in one message and the operator cannot tell which to act on. Captured 2026-09-20T20:54Z on this document: it reported recovery=await_editor_replica_no_disk_write with "the same intent resumes when the controller derives settlement", and in the same breath "NO cycle is open and NO response capture is retained, so nothing owns this write and no state edge will fire, the visible edits are STRANDED not deferred, and waiting will not commit them". One half says wait, the other says waiting can never work. Dogfood watch already classified it: issue_class=projection_failure issue_key=1fa46fd1ad84a564d13d16b971df69ad0692de3e32c0c68a4c4507d67d3f8430. Derive one verdict from the ownership facts and emit only that remedy.
+- [x] [#commitsilentfirstrun] [P2] agent-doc commit printed nothing at all on its first invocation and exited, then an immediately repeated identical invocation printed "[commit] repaired committed historical committed_capture drift into snapshot" followed by the real refusal. Captured 2026-09-20T20:55Z on this document while recovering from the preflight refusal above. A recovery command whose first run is silent reads as a hang or a no-op and invites the operator to escalate to force-disk, which is the one thing the same diagnostic forbids. Make the first run either print its repair and verdict, or exit non-zero with a reason.
 - [ ] [#runsubmitautoproof] [P2] Automate the started-turn proof that keeps #runsubmitfirstmatch gated on a human watcher. The claim to verify is that JetBrains Run Agent Doc submits the trigger rather than stranding it in the composer, fixed in 275ab868e. Dispatch-start proof is already recorded, since route diagnostics distinguish proof_scope=accepted_only from dispatch-start and the session log carries latest_start_pane plus committed_after_latest_run, so a predicate over those markers can resolve the gate without a person watching a pane. Wire it as a typed verify predicate via --backlog-set-gate-type verify=ops_log:<marker> so the gate auto-resolves.
 <!-- /agent:backlog -->
 

@@ -223,7 +223,14 @@ fn retained_write_remedy_for(file: &Path) -> String {
 /// Routing construction through one function makes the remedy structural instead
 /// of remembered.
 fn retained_refusal(file: &Path, message: String) -> anyhow::Error {
-    await_editor_replica_no_disk_write(format!("{message} {}", retained_write_remedy_for(file)))
+    // `#preflightrefusalcontradiction`: `message` is the observable FACT only.
+    // The verdict and the remedy come from the predicate, so the two halves can
+    // no longer disagree. Joined on a sentence boundary because a bare space ran
+    // "(content_hash=...)" straight into "NO cycle is open".
+    await_editor_replica_no_disk_write(format!(
+        "{message}. {}",
+        retained_write_remedy_for(file)
+    ))
 }
 
 #[derive(Debug)]
@@ -1148,7 +1155,7 @@ fn atomic_write_rebased_through_authority_body(
                 return Err(retained_refusal(
                     path,
                     format!(
-                        "serialized_atomic_write: binary-owned write for {} remains retained while its exact editor projection converges (content_hash={}); the same intent resumes when the controller derives settlement and closeout continuation from the live projection. Do not recapture or rerun finalize/write --commit, and do not force disk",
+                        "serialized_atomic_write: binary-owned write for {} remains retained while its exact editor projection converges (content_hash={})",
                         path.display(),
                         relay_write.content_hash,
                     ),
@@ -1162,7 +1169,7 @@ fn atomic_write_rebased_through_authority_body(
                     return Err(retained_refusal(
                         path,
                         format!(
-                            "serialized_atomic_write: binary-owned write for {} remains retained while the editor projection converges (content_hash={}); the same intent resumes when the controller derives settlement and closeout continuation from the live projection. Do not recapture or rerun finalize/write --commit, and do not force disk",
+                            "serialized_atomic_write: binary-owned write for {} remains retained while the editor projection converges (content_hash={})",
                             path.display(),
                             relay_write.content_hash,
                         ),
@@ -1186,7 +1193,7 @@ fn atomic_write_rebased_through_authority_body(
                         return Err(retained_refusal(
                             path,
                             format!(
-                                "serialized_atomic_write: editor acknowledged the canonical target for {} (content_hash={}) but its native save has not projected that exact editor version to disk; retained intent {} will resume without a behind-the-editor disk write",
+                                "serialized_atomic_write: editor acknowledged the canonical target for {} (content_hash={}) but its native save has not projected that exact editor version to disk (retained intent {})",
                                 path.display(),
                                 relay_write.content_hash,
                                 intent_id,
@@ -1266,7 +1273,7 @@ fn atomic_write_rebased_through_authority_body(
                     return Err(retained_refusal(
                         path,
                         format!(
-                            "serialized_atomic_write: editor authority for {} kept advancing after delivery proof; binary-owned intent {intent_id} remains retained and will merge the unsaved editor cut before commit. Do not recapture or rerun finalize/write --commit, and do not force disk; session-check/supervisor recovery resumes this same intent",
+                            "serialized_atomic_write: editor authority for {} kept advancing after delivery proof; binary-owned intent {intent_id} remains retained over an unsaved editor cut",
                             path.display(),
                         ),
                     ));
@@ -9847,13 +9854,43 @@ mod tests {
         let err = atomic_write_through_authority(&file, target).unwrap_err();
         let message = format!("{err:#}");
         assert!(message.contains("binary-owned write"), "{message}");
-        assert!(message.contains("same intent"), "{message}");
-        assert!(message.contains("Do not recapture"), "{message}");
-        assert!(message.contains("do not force disk"), "{message}");
+        // `#preflightrefusalcontradiction`: the verdict and the prohibition now
+        // come from the DERIVED remedy, not from caller-authored prose. This site
+        // used to assert both halves itself ("the same intent resumes", "Do not
+        // recapture ... do not force disk"), which is exactly how one message came
+        // to say both "the same intent resumes" and "STRANDED ... waiting will not
+        // commit them". The obligation is unchanged; its single author is not.
         assert!(
             !message.contains("retry through the document actor"),
             "{message}"
         );
+        // The regression. This harness has no open cycle and no retained capture,
+        // so the predicate derives `Stranded` and the remedy is `agent-doc commit`.
+        // The caller half used to assert a deferral on top of that -- "the same
+        // intent resumes ... Do not recapture ... do not force disk" -- and the
+        // ORIGINAL form of this test required those phrases, pinning the
+        // contradiction as correct. One message then told an operator both to wait
+        // and that waiting could never work, which is what it did on 2026-09-20.
+        //
+        // Exactly one verdict may appear, and it must be the derived one.
+        assert!(
+            message.contains("STRANDED, not deferred"),
+            "this scenario derives the stranded verdict: {message}"
+        );
+        assert!(
+            message.contains("agent-doc commit"),
+            "a stranded write must name its recovery command: {message}"
+        );
+        for deferral_claim in [
+            "the same intent resumes",
+            "deferral, not a lost response",
+            "Do not recapture",
+        ] {
+            assert!(
+                !message.contains(deferral_claim),
+                "a stranded verdict must not also claim a deferral ({deferral_claim}): {message}"
+            );
+        }
         assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
         let pending = pending_document_write(&file).expect("retained write intent");
         assert_eq!(pending.target_hash, agent_doc_hash::content_hash(target));

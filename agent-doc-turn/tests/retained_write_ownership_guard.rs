@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 
 /// Phrases that state a verdict. Each belongs to exactly one branch of
 /// `retained_write_remedy` and must not be authored anywhere else.
-const VERDICT_PHRASES: [&str; 4] = [
+const VERDICT_PHRASES: [&str; 7] = [
     "deferral, not a lost response",
     "STRANDED, not deferred",
     // `#ownershipverdictdiverges`: the third verdict. `write_applied` is neither
@@ -40,6 +40,25 @@ const VERDICT_PHRASES: [&str; 4] = [
     // exactly like a stranded write to an ownership check and takes the
     // opposite instruction, so its wording needs the same single owner.
     "UNANSWERED DOCUMENT EDIT",
+    // `#preflightrefusalcontradiction`: the four phrases above are the verdict
+    // *labels*. A site can contradict the derived verdict without using any of
+    // them, simply by ASSERTING the deferral in its own words — and four sites in
+    // `agent-doc-document-realtime-io` did, in the caller-supplied half that
+    // `retained_refusal` concatenates ahead of the derived remedy.
+    //
+    // Measured 2026-09-20 on this document: one message told the operator both
+    // "the same intent resumes when the controller derives settlement" AND "NO
+    // cycle is open and NO response capture is retained ... STRANDED, not
+    // deferred, and waiting will not commit them". One half says wait, the other
+    // says waiting can never work. The prose was redundant with the `Deferred`
+    // branch, which already says the intent self-completes and already forbids
+    // re-send/force-disk/recycle -- so it only ever added the ability to disagree.
+    //
+    // A caller supplies the observable FACT; the verdict and the remedy come from
+    // the predicate. These phrases are therefore authored nowhere, owner included.
+    "the same intent resumes",
+    "will resume without",
+    "Do not recapture or rerun",
 ];
 
 /// The file allowed to author them.

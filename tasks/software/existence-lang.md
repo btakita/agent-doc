@@ -140,6 +140,34 @@ Two things the runs surfaced that I did not cause but should say plainly.
 **Two new errors in run 2 are artifacts of my own back-to-back dispatching, and they expose a real defect.** Run 2 reported `web.archive.org` unreachable (`Connection refused` — Wayback rate-limiting two runs 17 minutes apart) and, in the same run, two new `quote_missing` errors reading "found neither on `<live>` nor in its pinned copy `web.archive.org/...`". The pinned copy was never fetched; the check called the quote absent from a snapshot it could not read. `web.archive.org` answered 200 to a local `curl -L` minutes later. Filed as `#pinhostescalate` at the bottom of the backlog — an unreachable pin host must degrade to `unreachable_host`, never contribute an absent-quote verdict. The weekly cadence will not trip it, so it does not block anything.
 
 One consequence worth knowing: the audit's pushes to `main` use `GITHUB_TOKEN`, so they do not trigger CI or a Pages rebuild. That is correct here — the commits touch only `audit/`, which is machine state and not published content.
+
+### Re: do [#auditerrcount] — opus-5 · 2026-09-20T01:28-04:00
+
+> **Queue prompt:**
+>
+> do [#auditerrcount]
+
+
+Fixed, with tests, and CI is green on both.
+
+The headline read its numbers off the CLI's `summary` block, which counts a finding this run *fixed* as an error, while the Errors section filters those out. Yesterday's run made it loud: `7 error(s)` above an Errors section of 1, because 6 of the 7 were the ones it had just fixed. The warnings list had the mirror-image hole — it never excluded `fixed`, so a fixed warning would have been rendered twice, once under Warnings and once under "Fixed by this run".
+
+`70fd01c` derives every count except "fixed this run" from the same lists the sections render, so the two can no longer disagree by construction. It also stops the line claiming "findings remain" when none do: a run that fixed everything says `all findings fixed this run` (not "clean" — the resolutions are sitting in an unmerged PR, so `main` still reads the old way), and a run with no findings at all says `clean`.
+
+Against the real `audit/report.json` from run 35489724006, where `summary` says `{errors: 7, warnings: 66, fixable: 6, fixed: 6}`:
+
+```
+**1 error(s), 66 warning(s), 0 fixable, 6 fixed this run** — findings remain.
+### Errors (1)      ### Warnings (66)      ### Fixed by this run (6)
+```
+
+Every number now equals its section. `fixable` went 6 → 0 because all six fixable findings were fixed; counting them as still-fixable in a "findings remain" line was the same category error.
+
+**Tests.** `render()` is split out of `main()` so it can be called with a report dict and an injected env, and `.github/scripts/test_audit_report.py` pins the invariant: headline counts equal section counts, a fixed error is not outstanding, a fixed warning is listed once, and a report whose `summary` disagrees with its own findings changes nothing that gets printed. Standard library only, so it runs as its own `Issue renderer` CI job with no toolchain to install. **I checked the tests are not vacuous: 7 of the 13 fail against the pre-fix renderer** (I reconstructed the old counting in a scratch copy and ran them against it).
+
+CI run 35491745526 — `Issue renderer` green (`Ran 13 tests ... OK`), `Structure audit` green. Also `d29c1a8`, ignoring the `__pycache__` my own test run leaves beside the script.
+
+I did **not** dispatch a fourth audit run to see the new headline in issue #1. Three runs already went out in the last hour, each one committing a report to `main` and force-pushing the PR, and the last one tripped Wayback rate-limiting. The renderer is a pure function of the report file, and I ran the production report through it above, so a live dispatch would add churn without adding evidence. Monday's scheduled run publishes it.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
@@ -147,7 +175,7 @@ One consequence worth knowing: the audit's pushes to `main` use `GITHUB_TOKEN`, 
 
 <!-- agent:queue priority go -->
 - ~~do [#auditlockmain]~~
-- do [#auditerrcount]
+- ~~do [#auditerrcount]~~
 - do [#auditdeadsrc]
 - do [#quotemovedpin]
 <!-- /agent:queue -->
@@ -155,7 +183,6 @@ One consequence worth knowing: the audit's pushes to `main` use `GITHUB_TOKEN`, 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#auditerrcount] Stop the weekly audit issue counting resolved findings as outstanding: `audit_report.py:132` prints `summary["errors"]` while `:124` builds the Errors section from `severity == error && !fixed`, so issue #1 on 2026-09-14 reads "2 error(s), 65 warning(s), 2 fixable, 2 fixed this run — findings remain" above no Errors section at all, because both errors were the two fixed that run. `:125` has the mirror-image hole: `warnings` does not exclude `fixed`, so a fixed warning would be listed in both Warnings and "Fixed by this run". Count from the same filtered lists the sections render, and add a fixture for a report whose only errors are fixed.
 - [ ] [#auditdeadsrc] Repair the 4 sources the weekly audit skips outright (`sources / unreachable_host` in issue #1) — their citations go unverified every run. `category-theory` cites `ncatlab.org:8080`, a stale port: the host answers on 443, so dropping `:8080` is the whole fix. `redefine` cites `juneroca.com`, now NXDOMAIN, which needs an archived copy pinned. `god` (`theunboundedspirit.com`) and `category-theory` (`www.cs.nott.ac.uk`) both return 200 to a local `curl -L` and fail only in CI ("too many redirects", "Connection reset by peer"), so check the fetcher redirect cap and User-Agent in `existence` before touching ontology text. Files: `src/category-theory.md`, `src/redefine.md`, `src/god.md`.
 - [ ] [#quotemovedpin] Give `quote_moved` a resolution path so it stops drowning the audit: 61 of the 65 warnings in issue #1 are `quote_moved`, and `src/commands/source_check.rs:350-362` emits them with `fix: None` and no `PinWrite`, unlike the `quote_missing` arm at `:303-320` which pins the archived copy and self-resolves. A quote that drifted but still matches is what a pin is for — pin the currently-verified snapshot beside the anchor (per-quote, per-era pins have been supported since existence 0.8.0) so the next run matches the pin and the warning clears, instead of requoting by hand. Decide explicitly whether pinning is automatic under `--fix` or opt-in behind a flag; either way the 4 actionable `unreachable_host` warnings stop being buried under 61 permanent ones.
 - [ ] [#pinhostescalate] Stop an unreachable archive host from escalating pins into `quote_missing` errors in `existence`: run 35490429476 reported `unreachable_host` for `web.archive.org` (Connection refused — Wayback rate-limiting two dispatches 17 minutes apart) and, in the same run, two new `quote_missing` errors (`existence`, `abstract-system`) whose messages read "found neither on <live> nor in its pinned copy https://web.archive.org/...". The pinned copy was never fetched, so the check reported the quote absent from a snapshot it could not read; `web.archive.org` answered 200 to a local `curl -L` minutes later. In `src/commands/source_check.rs`, a pin whose host was unreachable must degrade to the `unreachable_host` warning for that source rather than feed an absent-quote verdict into the error arm at `:321-349`. Regression coverage: a fixture where the archive host fetch fails must produce zero `quote_missing` findings.

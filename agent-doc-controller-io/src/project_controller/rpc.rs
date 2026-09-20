@@ -11370,6 +11370,25 @@ fn install_local_document_projection_reader(runtime: &Arc<ControllerRuntime>) {
     });
 }
 
+/// `#ctrlworkerliveproj`: publish the same live projection process-wide.
+///
+/// The thread-local reader above only reaches threads that ran through
+/// `install_controller_request_thread_context`. Every other worker the
+/// controller spawns replayed the durable ledger instead — inside the process
+/// that owns the authoritative in-memory projection. A `Weak` keeps this from
+/// pinning the runtime past shutdown.
+fn install_process_document_projection_reader(runtime: &Arc<ControllerRuntime>) {
+    let runtime = Arc::downgrade(runtime);
+    agent_doc_state_wire::set_process_document_projection_reader(move |document_hash| {
+        runtime.upgrade().and_then(|runtime| {
+            runtime
+                .document_state_projection(document_hash)
+                .ok()
+                .flatten()
+        })
+    });
+}
+
 /// Install the controller-local reactive projection context on the thread that
 /// will execute a controller request.
 ///
@@ -11591,6 +11610,7 @@ pub(crate) fn serve_with_options(
     let durable_project_root = bootstrap.project_root.clone();
     let runtime = ControllerRuntime::new_arc(bootstrap)?;
     install_local_document_projection_reader(&runtime);
+    install_process_document_projection_reader(&runtime);
     // `#ctrlbindbeforeserve`: fold the durable reliable-sync journal BEFORE the
     // socket becomes connectable. A bound socket with no accept loop behind it
     // is a silent black hole: the client connects, writes, and waits out its own

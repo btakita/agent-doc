@@ -35,6 +35,8 @@ use std::path::Path;
 use std::time::Duration;
 
 type LocalDocumentProjectionReader = Box<dyn Fn(&str) -> Option<DocumentStateProjection>>;
+type SharedDocumentProjectionReader =
+    Box<dyn Fn(&str) -> Option<DocumentStateProjection> + Send + Sync>;
 
 thread_local! {
     /// True while this thread is serving a project-controller request.
@@ -107,6 +109,43 @@ pub fn process_is_controller_for(root: &Path) -> bool {
     }
 }
 
+/// Process-wide live projection reader, installed by the controller.
+///
+/// `#ctrlworkerliveproj`: [`LOCAL_DOCUMENT_PROJECTION_READER`] is thread-local,
+/// so only threads that called `install_controller_request_thread_context` can
+/// see the controller's authoritative in-memory projection. Every other
+/// controller-owned worker falls through to replaying cold `state.db` — the
+/// exact inversion `#lazily-hot-path` forbids, since inside the controller the
+/// live projection IS the authority and the durable ledger is the actorless
+/// bootstrap path.
+///
+/// A process-wide reader removes the per-spawn install entirely: the closure
+/// holds a `Weak` to the runtime, so it is `Send + Sync` and every thread in
+/// the controller reads the same authority without anyone remembering to wire
+/// it up.
+static PROCESS_DOCUMENT_PROJECTION_READER: std::sync::RwLock<
+    Option<SharedDocumentProjectionReader>,
+> = std::sync::RwLock::new(None);
+
+/// Install the process-wide live projection reader.
+pub fn set_process_document_projection_reader(
+    reader: impl Fn(&str) -> Option<DocumentStateProjection> + Send + Sync + 'static,
+) {
+    match PROCESS_DOCUMENT_PROJECTION_READER.write() {
+        Ok(mut slot) => *slot = Some(Box::new(reader)),
+        Err(err) => eprintln!(
+            "[agent-doc] process projection reader registry poisoned ({err}) — controller-owned threads will replay cold state.db instead of reading the live projection"
+        ),
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+pub fn clear_process_document_projection_reader_for_tests() {
+    if let Ok(mut slot) = PROCESS_DOCUMENT_PROJECTION_READER.write() {
+        *slot = None;
+    }
+}
+
 #[cfg(any(test, feature = "test-support"))]
 pub fn clear_controller_process_root_for_tests() {
     if let Ok(mut slot) = CONTROLLER_PROCESS_ROOT.write() {
@@ -140,11 +179,29 @@ pub fn set_local_document_projection_reader(
     });
 }
 
-/// `None` means no controller-local reader is installed. `Some(None)` means
+/// `None` means no controller reader is installed at all. `Some(None)` means
 /// the live projection has no state for this document yet.
+///
+/// The thread-local reader wins when present — it is installed by the request
+/// path and is the narrowest scope. `#ctrlworkerliveproj`: the process-wide
+/// reader then answers for every other controller-owned thread, so a worker
+/// that never installed a thread context still reads the live authority
+/// instead of replaying the durable ledger.
 pub fn local_document_projection(document_hash: &str) -> Option<Option<DocumentStateProjection>> {
-    LOCAL_DOCUMENT_PROJECTION_READER
-        .with(|slot| slot.borrow().as_ref().map(|reader| reader(document_hash)))
+    if let Some(projection) =
+        LOCAL_DOCUMENT_PROJECTION_READER.with(|slot| slot.borrow().as_ref().map(|r| r(document_hash)))
+    {
+        return Some(projection);
+    }
+    match PROCESS_DOCUMENT_PROJECTION_READER.read() {
+        Ok(slot) => slot.as_ref().map(|reader| reader(document_hash)),
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] process projection reader registry poisoned ({err}) — falling back to the durable ledger"
+            );
+            None
+        }
+    }
 }
 
 #[derive(Debug)]

@@ -845,10 +845,22 @@ pub fn load_document_projection(
         }
     }
 
-    // Actorless fallback: replay cold `state.db`.
     let Some(document_hash) = cycle_document_hash(file)? else {
         return Ok(None);
     };
+    // `#ctrlworkerliveproj`: inside the controller, the live in-memory
+    // projection IS the authority and the durable ledger is the actorless
+    // bootstrap path (`#lazily-hot-path`) — so read the authority rather than
+    // replaying the ledger. Before this, a controller-owned worker took the
+    // cold path on EVERY read: `log_op` resolves a `turn=` id per line, so one
+    // worker logging about one document replayed that document's whole event
+    // ledger once per line, and only threads carrying the request context's
+    // memo escaped it.
+    if served_by_this_process
+        && let Some(projection) = agent_doc_state_wire::local_document_projection(&document_hash)
+    {
+        return Ok(projection);
+    }
     if !agent_doc_sqlite::state_store::state_db_path(&project_root).exists() {
         return Ok(None);
     }
@@ -4960,6 +4972,81 @@ mod project_root_symmetry_tests {
         );
     }
 
+    /// Both controller-identity tests mutate PROCESS-global registries, so they
+    /// must not interleave. `cargo test` runs a crate's tests as threads in one
+    /// process (nextest gives each its own), and without this one test's
+    /// teardown clears the registry the other is mid-assertion on.
+    ///
+    /// Poison is recovered rather than propagated: a failure in one test must
+    /// report as that test failing, not as every later test panicking on a
+    /// poisoned lock.
+    static CONTROLLER_PROCESS_REGISTRY_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn controller_process_registry_guard() -> std::sync::MutexGuard<'static, ()> {
+        CONTROLLER_PROCESS_REGISTRY_GUARD
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// `#ctrlworkerliveproj`: inside the controller, a read must come from the
+    /// live in-memory projection, not a replay of the durable ledger.
+    ///
+    /// `#lazily-hot-path` puts it the other way round from how this behaved:
+    /// the live projection is the authority and `state.db` is the actorless
+    /// bootstrap path. But the live reader was thread-local, so only threads
+    /// that ran `install_controller_request_thread_context` could see it, and
+    /// every other controller-owned worker replayed the ledger on every read —
+    /// once per `log_op` line, since `resolve_turn_id` resolves per line.
+    ///
+    /// The reader is installed from the main thread and read from a spawned
+    /// one, because that difference is the whole defect.
+    #[cfg(unix)]
+    #[test]
+    fn a_spawned_controller_thread_reads_the_live_projection_not_the_ledger() {
+        let _registry = controller_process_registry_guard();
+        let dir = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "# doc\n").unwrap();
+
+        agent_doc_state_wire::clear_process_document_projection_reader_for_tests();
+        agent_doc_state_wire::set_controller_process_root(dir.path());
+
+        // No state.db exists, so the durable path can only answer `None`. A
+        // non-`None` answer therefore proves the live projection was read.
+        assert!(
+            !agent_doc_sqlite::state_store::state_db_path(dir.path()).exists(),
+            "the ledger must be absent so it cannot supply the answer",
+        );
+        assert_eq!(
+            load_document_projection(&doc).unwrap(),
+            None,
+            "with no reader installed the durable path answers, and it is empty",
+        );
+
+        let expected_hash = cycle_document_hash(&doc).unwrap().expect("document hash");
+        let served = expected_hash.clone();
+        agent_doc_state_wire::set_process_document_projection_reader(move |document_hash| {
+            (document_hash == served)
+                .then(|| agent_doc_state_backbone::DocumentStateProjection::new("live-authority"))
+        });
+
+        let from_a_worker = std::thread::spawn(move || load_document_projection(&doc))
+            .join()
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            from_a_worker.map(|projection| projection.document_hash),
+            Some("live-authority".to_string()),
+            "a thread the controller spawned must read the live projection the \
+             controller installed, without installing anything itself",
+        );
+
+        agent_doc_state_wire::clear_process_document_projection_reader_for_tests();
+        agent_doc_state_wire::clear_controller_process_root_for_tests();
+    }
+
     /// `#ctrlselfrpc`: a projection read inside the controller process must not
     /// go back out through the controller's own socket.
     ///
@@ -4978,6 +5065,7 @@ mod project_root_symmetry_tests {
     #[cfg(unix)]
     #[test]
     fn a_controller_owned_thread_reads_projections_without_self_rpc() {
+        let _registry = controller_process_registry_guard();
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::UnixListener;
 
@@ -5016,6 +5104,9 @@ mod project_root_symmetry_tests {
         });
 
         agent_doc_state_wire::clear_controller_process_root_for_tests();
+        // No process reader either: this test's in-controller assertion is that
+        // the read stays LOCAL, and a stale live reader would answer it.
+        agent_doc_state_wire::clear_process_document_projection_reader_for_tests();
         let as_external_client = load_document_projection(&doc).unwrap();
         assert_eq!(
             as_external_client.map(|projection| projection.document_hash),

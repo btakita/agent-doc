@@ -14,7 +14,7 @@ prompt_presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -773,6 +773,37 @@ The running IDE is executing a **deleted inode** while disk holds different byte
 The remaining two items are defects this cycle produced first-hand: the preflight refusal that told me both to wait and that waiting could never work (`#preflightrefusalcontradiction`, already classified by dogfood watch as `projection_failure`), and the `agent-doc commit` first run that printed nothing at all (`#commitsilentfirstrun`).
 
 Exchange is at 720 lines across 29 response sections; noting it rather than stalling the queue.
+
+### Re: do [#pluginbyteidentity] — opus-5 · 2026-09-20T17:25-04:00
+
+> **Queue prompt:**
+>
+> do [#pluginbyteidentity]
+
+
+Landed in `b82b701ba`, pushed to `origin/main`.
+
+`stale_plugin_warnings` compares reported version strings, so it is structurally blind to the shape that actually happens: `make install` rewrites the jar at the same path under the same version number, and the running IDE keeps executing the replaced build while every version comparison reports it current. That is how two `agent:review` items sat gated on a premise derived from version and mtime arithmetic that was measurably wrong.
+
+The new probe reads what the process actually mapped. `plugin_byte_identity_warnings` walks the live editor registrations, and for each JVM-hosted editor pid resolves `/proc/<pid>/map_files`, emitting `plugin_bytes_superseded` when the mapped jar is unlinked or its inode no longer matches the jar on disk.
+
+**One thing the live system taught me that I had not designed for.** I originally reasoned about this as an inode comparison, with `(deleted)` as a convenience case. It is the other way round. After this cycle's own `make install`, the jar on disk came back as **inode 76585058, the same number the previous jar had** — the filesystem reused it. An inode-only comparison would have returned `Current` for a process demonstrably running unlinked bytes. The `(deleted)` suffix is checked first and short-circuits before any inode is consulted, and that ordering is now the load-bearing part rather than a nicety.
+
+The probe fails open to `Unknown` on non-Linux, an unreadable `map_files`, or an unstattable side, so it can never send an operator restarting a healthy IDE.
+
+**Verification.**
+
+- `make check` exit 0: **9585 tests run, 9585 passed**, 259 skipped (nextest's own count, not a grep over output).
+- Five new tests under `warnings::tests::`, confirmed executed by name rather than by a passing total.
+- Mutation-checked, restoring from a scratch copy and touching after each restore: dropping the `(deleted)` parse reddens, ignoring an inode mismatch reddens, removing the version-trap sentence from the message reddens.
+- **My first message assertion survived mutation.** `contains("version")` matched an unrelated occurrence of the word elsewhere in the same string, so it pinned nothing. Tightened to pin the actual sentence, then re-run to confirm it now reddens.
+- Live proof through the real code path, not a fixture: `probe_mapped_plugin_jar(1023909, "agent-doc-jetbrains-")` returns `Deleted { path: ".../agent-doc-jetbrains-0.2.388.jar" }` against the running IDE.
+
+**`make install` deferred correctly.** `lib-install` reported `1 deferred mid-cycle` and kept the previous native generation because this document has an open cycle. Worth recording, because it contradicts the assumption I carried into the previous cycle: the two `libagent_doc-*.so` mapped into this IDE today were not an ungated install stranding a replica. The `#installstrandsreplica` gate is working.
+
+**Not done, and deliberately so.** The item also proposed bumping the plugin version on every build. I did not, because this probe makes activation detection independent of the version string, and auto-bumping would churn the version on no-op rebuilds. Filed as `#jbversionbumpperbuild` `[recommended]` at the back of the queue so the call is yours rather than mine.
+
+CI run `35538568288` was still in progress at closeout; the prior run on `6da64a97c` was green. Recording it pending per the closeout rule rather than blocking on it. Exchange is at 747 lines across 30 sections.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -782,12 +813,18 @@ Exchange is at 720 lines across 29 response sections; noting it rather than stal
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~#actionable-review~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do [#pluginbyteidentity]~~
+- do [#missingreplicanoise]
+- do [#preflightrefusalcontradiction]
+- do [#commitsilentfirstrun]
+- do [#runsubmitautoproof]
+- ~~#actionable-review~~
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority queue -->
-- [ ] [#pluginbyteidentity] [P1] Replace version-string and mtime staleness checks for the JetBrains plugin with a byte-identity probe of what the live JVM actually mapped. Measured 2026-09-20T17:05-04:00: /proc/1023909/map_files resolves agent-doc-jetbrains-0.2.388.jar as (deleted) while disk holds inode 76585058 written 16:42:24, both carrying the SAME 0.2.388 version string, so every version-string check reports activated while the IDE runs superseded bytes. Probe: resolve the mapped jar for the live IDE pid and compare its inode against the on-disk jar, treating (deleted) as definitive non-activation. This machine-checks the activation half of #activateinstalledjetbrai and #tmuxfocussyncverify, which under the complete-over-gate rule should not need a human for a fact /proc already states. Also bump the plugin version on every build so two distinct builds never share 0.2.388.
+- [ ] [#jbversionbumpperbuild] [recommended] [P3] Auto-bump the JetBrains plugin version on every build so two distinct builds never share a version string. Filed as a decision for the operator rather than done as part of #pluginbyteidentity, because the byte-identity probe landed in b82b701ba makes activation detection independent of the version string, and auto-bumping on every build would churn the version on no-op rebuilds and on builds that ship no .kt change. The existing convention (bump per .kt edit) already covers the case where behaviour actually changed. Close this as declined if the probe is judged sufficient.
+- [x] 🚧 [#pluginbyteidentity] [P1] Replace version-string and mtime staleness checks for the JetBrains plugin with a byte-identity probe of what the live JVM actually mapped. Measured 2026-09-20T17:05-04:00: /proc/1023909/map_files resolves agent-doc-jetbrains-0.2.388.jar as (deleted) while disk holds inode 76585058 written 16:42:24, both carrying the SAME 0.2.388 version string, so every version-string check reports activated while the IDE runs superseded bytes. Probe: resolve the mapped jar for the live IDE pid and compare its inode against the on-disk jar, treating (deleted) as definitive non-activation. This machine-checks the activation half of #activateinstalledjetbrai and #tmuxfocussyncverify, which under the complete-over-gate rule should not need a human for a fact /proc already states. Also bump the plugin version on every build so two distinct builds never share 0.2.388.
 - [ ] [#missingreplicanoise] [P1] crdt_current_text_unavailable reason=missing_replica is benign transient churn logged identically to the terminal strand case, and it has repeatedly misdirected diagnosis including this cycle. Measured 2026-09-20: 988 occurrences across 7 documents (agent-doc-bugs, existence-lang, tsift, lazily, agent-loop, chromium-bridge, equityfundingsource) from 04:16Z through 21:05Z, including hours with no install at all, so it is NOT the #installstrandsreplica signature. Every sampled occurrence is immediately followed by a successful crdt_commit_barrier ready=true visible_delivery_projected=true and a full-length crdt_current_text, with 210 crdt_replica_pull events advancing generations normally. Demote the resolving case to debug, or stamp the terminal case with a distinct token so the needle stays greppable.
 - [ ] [#preflightrefusalcontradiction] [P1] The preflight admission refusal emits two contradictory halves in one message and the operator cannot tell which to act on. Captured 2026-09-20T20:54Z on this document: it reported recovery=await_editor_replica_no_disk_write with "the same intent resumes when the controller derives settlement", and in the same breath "NO cycle is open and NO response capture is retained, so nothing owns this write and no state edge will fire, the visible edits are STRANDED not deferred, and waiting will not commit them". One half says wait, the other says waiting can never work. Dogfood watch already classified it: issue_class=projection_failure issue_key=1fa46fd1ad84a564d13d16b971df69ad0692de3e32c0c68a4c4507d67d3f8430. Derive one verdict from the ownership facts and emit only that remedy.
 - [ ] [#commitsilentfirstrun] [P2] agent-doc commit printed nothing at all on its first invocation and exited, then an immediately repeated identical invocation printed "[commit] repaired committed historical committed_capture drift into snapshot" followed by the real refusal. Captured 2026-09-20T20:55Z on this document while recovering from the preflight refusal above. A recovery command whose first run is silent reads as a hang or a no-op and invites the operator to escalate to force-disk, which is the one thing the same diagnostic forbids. Make the first run either print its repair and verdict, or exit non-zero with a reason.

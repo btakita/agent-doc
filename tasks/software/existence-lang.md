@@ -11,7 +11,7 @@ prompt_presets:
   '#actionable': 'Add actionable tasks into backlog + queue'
   '#actionable-review': 'Add actionable review items into backlog + queue'
   'rebase-conflicts': 'rebase + fix merge conflicts'
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -113,13 +113,40 @@ And the 65 warnings that remain are 61 `quote_moved` + 4 `unreachable_host`. The
 4. `#quotemovedpin` — give `quote_moved` the resolution path `quote_missing` already has.
 
 All four are completable with no credential. `#auditlockmain` is the one that turns the weekly issue back into a signal.
+
+### Re: do [#auditlockmain] — opus-5 · 2026-09-20T01:21-04:00
+
+> **Queue prompt:**
+>
+> do [#auditlockmain]
+
+
+Done, and verified live across two dispatched runs. **The weekly diff renders for the first time.**
+
+Three commits on `existence-lang/ontology` `main`:
+
+- `7739a02` — the workflow change. A new `Record the audit state on main` step stages only `audit/`, commits it, and pushes to `main`, rebasing with `autoStash` if `main` moved between checkout and the push (the unstaged safe fixes ride across untouched) and warning rather than failing the run if it still cannot land. The PR step now stages `src terms.md` only, and the PR body, its commit message, and the workflow header no longer claim the PR carries the report or the lock.
+- `4106e68` — seeded `audit/report.json` + `audit/sources.lock.json` on `main` from the 2026-09-14 safe-fixes branch, so the very first run already had a predecessor. Only those two files; `src/resolution.md` and `src/attention-schema.md` on that branch are decisions and stay in PR #2.
+- `35ffe94` — the issue body still told readers the lock rides the PR. It doesn't any more.
+
+I tested the git logic in a scratch repo before pushing anything: remote `main` moved under the checkout, the push was rejected, `rebase --autostash` landed the commit, the unstaged safe fix survived intact, and the resulting commit contained only `audit/` files.
+
+**Run 35489724006** wrote `fd7c6a6 audit: record report and sources lock (2026-09-20)` to `main` and its issue rendered `## Since last run — 2 new, 0 resolved`. **Run 35490429476** then consumed that workflow-written predecessor and rendered `## Since last run — 3 new, 0 resolved`, writing `1228b70` in turn. The full loop is closed, not just my hand-seeded half of it. PR #2 now carries 9 `src/` files and no `audit/` JSON — the split is exactly content-decisions-in-PR, machine-state-on-main. CI is green on both of my `main` commits (`4106e68`, `35ffe94`); the two `audit/safe-fixes` CI runs sit at `action_required`, which is the pre-existing bot-branch approval gate, not my change.
+
+Two things the runs surfaced that I did not cause but should say plainly.
+
+**The headline miscount got much louder.** Run 2 reads `12 error(s) … 9 fixed this run` above an Errors section listing 3. It was 2-above-0 before; persisting the lock changed how many fixes apply per run, so the gap widened. That is `#auditerrcount`, next in the queue.
+
+**Two new errors in run 2 are artifacts of my own back-to-back dispatching, and they expose a real defect.** Run 2 reported `web.archive.org` unreachable (`Connection refused` — Wayback rate-limiting two runs 17 minutes apart) and, in the same run, two new `quote_missing` errors reading "found neither on `<live>` nor in its pinned copy `web.archive.org/...`". The pinned copy was never fetched; the check called the quote absent from a snapshot it could not read. `web.archive.org` answered 200 to a local `curl -L` minutes later. Filed as `#pinhostescalate` at the bottom of the backlog — an unreachable pin host must degrade to `unreachable_host`, never contribute an absent-quote verdict. The weekly cadence will not trip it, so it does not block anything.
+
+One consequence worth knowing: the audit's pushes to `main` use `GITHUB_TOKEN`, so they do not trigger CI or a Pages rebuild. That is correct here — the commits touch only `audit/`, which is machine state and not published content.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- do [#auditlockmain]
+- ~~do [#auditlockmain]~~
 - do [#auditerrcount]
 - do [#auditdeadsrc]
 - do [#quotemovedpin]
@@ -128,10 +155,10 @@ All four are completable with no credential. `#auditlockmain` is the one that tu
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#auditlockmain] Commit the audit machine state to `main` so each weekly run has a predecessor to diff against: `.github/workflows/audit.yml:63-66` copies `audit/report.json` to `/tmp/previous-report.json` before the run overwrites it, but that file has never existed on `main` (`git ls-tree -r origin/main --name-only | grep ^audit/` is empty) — both `audit/report.json` and `audit/sources.lock.json` live only on the force-rebuilt `audit/safe-fixes` branch. So `audit_report.py:120` loads `None` and the `## Since last run` section has never rendered in issue #1, despite the workflow header promising the diff from last week. Same root cause rebuilds the 3838-line `sources.lock.json` from zero every run and rediscovers the same two fixes (`src/resolution.md`, `src/attention-schema.md`) weekly, which is why "fixed this run" is permanently 2. Push `audit/report.json` + `audit/sources.lock.json` straight to `main` (machine state; `contents: write` is already granted) and leave only `src/` content edits on the PR, or restore the previous report from `origin/$FIX_BRANCH` before the rebuild. Verify by dispatching the audit twice and seeing a `## Since last run` block on the second run.
 - [ ] [#auditerrcount] Stop the weekly audit issue counting resolved findings as outstanding: `audit_report.py:132` prints `summary["errors"]` while `:124` builds the Errors section from `severity == error && !fixed`, so issue #1 on 2026-09-14 reads "2 error(s), 65 warning(s), 2 fixable, 2 fixed this run — findings remain" above no Errors section at all, because both errors were the two fixed that run. `:125` has the mirror-image hole: `warnings` does not exclude `fixed`, so a fixed warning would be listed in both Warnings and "Fixed by this run". Count from the same filtered lists the sections render, and add a fixture for a report whose only errors are fixed.
 - [ ] [#auditdeadsrc] Repair the 4 sources the weekly audit skips outright (`sources / unreachable_host` in issue #1) — their citations go unverified every run. `category-theory` cites `ncatlab.org:8080`, a stale port: the host answers on 443, so dropping `:8080` is the whole fix. `redefine` cites `juneroca.com`, now NXDOMAIN, which needs an archived copy pinned. `god` (`theunboundedspirit.com`) and `category-theory` (`www.cs.nott.ac.uk`) both return 200 to a local `curl -L` and fail only in CI ("too many redirects", "Connection reset by peer"), so check the fetcher redirect cap and User-Agent in `existence` before touching ontology text. Files: `src/category-theory.md`, `src/redefine.md`, `src/god.md`.
 - [ ] [#quotemovedpin] Give `quote_moved` a resolution path so it stops drowning the audit: 61 of the 65 warnings in issue #1 are `quote_moved`, and `src/commands/source_check.rs:350-362` emits them with `fix: None` and no `PinWrite`, unlike the `quote_missing` arm at `:303-320` which pins the archived copy and self-resolves. A quote that drifted but still matches is what a pin is for — pin the currently-verified snapshot beside the anchor (per-quote, per-era pins have been supported since existence 0.8.0) so the next run matches the pin and the warning clears, instead of requoting by hand. Decide explicitly whether pinning is automatic under `--fix` or opt-in behind a flag; either way the 4 actionable `unreachable_host` warnings stop being buried under 61 permanent ones.
+- [ ] [#pinhostescalate] Stop an unreachable archive host from escalating pins into `quote_missing` errors in `existence`: run 35490429476 reported `unreachable_host` for `web.archive.org` (Connection refused — Wayback rate-limiting two dispatches 17 minutes apart) and, in the same run, two new `quote_missing` errors (`existence`, `abstract-system`) whose messages read "found neither on <live> nor in its pinned copy https://web.archive.org/...". The pinned copy was never fetched, so the check reported the quote absent from a snapshot it could not read; `web.archive.org` answered 200 to a local `curl -L` minutes later. In `src/commands/source_check.rs`, a pin whose host was unreachable must degrade to the `unreachable_host` warning for that source rather than feed an absent-quote verdict into the error arm at `:321-349`. Regression coverage: a fixture where the archive host fetch fails must produce zero `quote_missing` findings.
 <!-- /agent:backlog -->
 
 ## Review
@@ -149,4 +176,6 @@ All four are completable with no credential. `#auditlockmain` is the one that tu
 ## Completed / Reaped
 
 <!-- agent:done archive="tasks/software/existence-lang.done.md" -->
+
+<!-- completed work archived in tasks/software/existence-lang.done.md -->
 <!-- /agent:done -->

@@ -1817,6 +1817,42 @@ fn record_pending_actionable_mutations(
     Ok(())
 }
 
+/// `#retainedprojexit1`: whether this cycle's own recorded tracked-work
+/// mutations are still missing from the document, right now.
+///
+/// `None` means the question could not be answered — no cycle state, or the
+/// document could not be resolved. Unprovable is not proof of landing, so the
+/// caller keeps the fail-closed half-applied classification in that case.
+///
+/// Reads the SAME predicate `commit`, `session-check` and the captured-closeout
+/// resume decide provenance from, so a message cannot claim "half-applied"
+/// while those three agree the mutations landed.
+fn recorded_tracked_work_unlanded_now(file: &Path, force_disk: bool) -> Option<bool> {
+    let state = agent_doc_cycle_state_io::load(file).ok().flatten()?;
+    let content = if force_disk {
+        resolve_force_disk_document(file, "tracked_work_landing_witness")
+            .ok()?
+            .into_content()
+    } else {
+        resolve_current_document(file, "tracked_work_landing_witness")
+            .ok()?
+            .into_content()
+    };
+    Some(
+        agent_doc_turn::write_ownership::recorded_tracked_work_is_unlanded(
+            agent_doc_turn::write_ownership::RecordedTrackedWork {
+                done_ids: &state.pending_done_ids,
+                added_ids: &state.pending_added_ids,
+                requested_done_ids: &state.requested_done_ids,
+                requested_added_ids: &state.requested_added_ids,
+                requested_mutations: state.requested_tracked_work_mutations,
+                mutations_applied: state.tracked_work_mutations_applied,
+            },
+            &content,
+        ),
+    )
+}
+
 fn write_outcome_retains_closeout_mutations(write_result: &Result<()>) -> bool {
     write_result.is_ok()
         || write_result
@@ -2384,36 +2420,53 @@ fn run_command_inner_within_pass(
         write_result.is_err() && write_outcome_retains_closeout_mutations(&write_result);
 
     let pending_mutation_outcome = if write_outcome_retains_closeout_mutations(&write_result) {
-        apply_pending_and_status_mutations(
+        match apply_pending_and_status_mutations(
             file,
             &options,
             &pending_kept_open_ids,
             has_pending_ops,
             write_result.is_ok() && commit_mode != CommitMode::None,
-        )
-        .with_context(|| {
-            if response_write_retained {
-                format!(
-                    "response target for {} is retained; failed to retain the same closeout's tracked-work mutations",
-                    file.display()
-                )
-            } else {
-                // `#prmergeguardpr`: the response half of this closeout is
-                // already applied to the document while its tracked-work half
-                // is not. Say so explicitly — "whole write pending" and
-                // "response landed, mutations pending" need different recovery,
-                // and the operator is currently reading a response that claims
-                // an item is resolved beside a backlog that still shows it
-                // open. Rejectable flag sets can no longer reach this state;
-                // what remains here is a delivery/projection failure.
-                format!(
-                    "response for {} is already applied but the same closeout's tracked-work mutations are not: the document is half-applied. Recover with `agent-doc commit {}` from the owning pane, or re-run the tracked-work half via `agent-doc write --commit {} --backlog-only ...`",
-                    file.display(),
-                    file.display(),
-                    file.display()
-                )
+        ) {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                // `#prmergeguardpr` used to render one message here for every
+                // failure that reached it. `#retainedprojexit1`: classify from
+                // the stamped refusal token and from whether this cycle's own
+                // recorded mutations are visible, so only a PROVEN half-apply
+                // carries half-applied framing and resubmit remedies.
+                let message = err.to_string();
+                let failure =
+                    agent_doc_turn::write_ownership::classify_tracked_work_mutation_failure(
+                        &message,
+                        response_write_retained,
+                        recorded_tracked_work_unlanded_now(file, options.force_disk),
+                    );
+                let rendered =
+                    agent_doc_turn::write_ownership::tracked_work_mutation_failure_message(
+                        failure,
+                        &file.display().to_string(),
+                    );
+                if failure.is_deferral() {
+                    // The mutation envelope is in the editor's CRDT authority
+                    // and its keyed worker converges on its own. Committing now
+                    // would publish a disk state the projection has not reached
+                    // yet, and erroring out sends recovery at a half-apply that
+                    // did not happen. Defer: report it, exit 0, and let the
+                    // await-and-observe path finish the cycle.
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "tracked_work_mutations_deferred_retained_delivery_projection file={} error={} recovery=await_editor_replica_no_disk_write",
+                            file.display(),
+                            message.replace('\n', " ")
+                        ),
+                    );
+                    eprintln!("[write] {rendered}");
+                    return Ok(());
+                }
+                return Err(err.context(rendered));
             }
-        })?
+        }
     } else {
         PendingStatusMutationOutcome::default()
     };

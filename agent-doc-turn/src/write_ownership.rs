@@ -514,9 +514,261 @@ pub fn recorded_tracked_work_is_unlanded(recorded: RecordedTrackedWork<'_>, disk
     // closeout asked for a mutation that is not visible yet".
 }
 
+/// How a closeout's tracked-work mutation phase failed, once the response half
+/// has already been written.
+///
+/// `#retainedprojexit1`: the mutation phase used to render exactly one message
+/// for every failure that reached it — "the document is half-applied", plus
+/// `agent-doc commit <FILE>` / `write --commit <FILE> --backlog-only` as the
+/// recovery. Observed 2026-09-20 on `cycle-1789878037902`, that message was
+/// doubly wrong. The failure was a retained refusal: the mutation envelope had
+/// reached the editor authority and the keyed worker converged seconds later,
+/// so disk already matched HEAD with BOTH halves present and a second
+/// `session-check` flipped `INTERRUPTED(write_applied)` to `ok(committed)`. The
+/// message asserted a half-apply that never happened, and its remedies would
+/// have DOUBLE-APPLIED the tracked-work half that had already landed.
+///
+/// Classify from facts the caller can actually prove — the refusal token, and
+/// whether this cycle's own recorded mutations are visible — rather than from
+/// "the mutation phase returned `Err`". Prose needles are what let the retained
+/// class stay unhandled in three crates at once (`#retainconv`,
+/// `#retaineddeferisnotafailure`), so this reads the stamped token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrackedWorkMutationFailure {
+    /// The response write was itself retained, and the tracked-work half could
+    /// not be retained alongside it. Both halves are unwritten.
+    RetainedWithResponse,
+    /// The mutation reached the editor authority and only its delivery
+    /// projection has not converged. A live replica resolves this on its own:
+    /// it is a deferral, never a half-apply, and it has no resubmit remedy.
+    DeferredDeliveryProjection,
+    /// The response half is applied and this cycle's own recorded mutations are
+    /// provably still missing from the document. This is the real half-apply.
+    HalfApplied,
+    /// The response half is applied, the recorded mutations are provably
+    /// visible, and the failure is in the projection tail after both halves
+    /// landed. Not a half-apply, so it must not carry a resubmit remedy.
+    ProjectionFailedAfterLanding,
+}
+
+impl TrackedWorkMutationFailure {
+    /// Whether the surrounding closeout may report success and let the keyed
+    /// worker converge, instead of escalating the failure.
+    pub fn is_deferral(self) -> bool {
+        matches!(self, Self::DeferredDeliveryProjection)
+    }
+}
+
+/// Classify a tracked-work mutation failure.
+///
+/// `tracked_work_unlanded` is `None` when the caller could not resolve the
+/// document or this cycle's recorded mutations. Unprovable means unproven, so
+/// the classification stays on the fail-closed [`TrackedWorkMutationFailure::HalfApplied`]
+/// branch rather than claiming both halves landed.
+pub fn classify_tracked_work_mutation_failure(
+    message: &str,
+    response_write_retained: bool,
+    tracked_work_unlanded: Option<bool>,
+) -> TrackedWorkMutationFailure {
+    if response_write_retained {
+        return TrackedWorkMutationFailure::RetainedWithResponse;
+    }
+    if is_retained_delivery_projection_pending(message) {
+        return TrackedWorkMutationFailure::DeferredDeliveryProjection;
+    }
+    match tracked_work_unlanded {
+        Some(false) => TrackedWorkMutationFailure::ProjectionFailedAfterLanding,
+        Some(true) | None => TrackedWorkMutationFailure::HalfApplied,
+    }
+}
+
+/// The message a tracked-work mutation failure renders, derived from one owner.
+///
+/// `file` is the document path as the caller displays it, interpolated into the
+/// commands so an agent can copy them verbatim. Only
+/// [`TrackedWorkMutationFailure::HalfApplied`] names a resubmit remedy, because
+/// it is the only variant whose tracked-work half is proven not to have landed.
+pub fn tracked_work_mutation_failure_message(
+    failure: TrackedWorkMutationFailure,
+    file: &str,
+) -> String {
+    match failure {
+        TrackedWorkMutationFailure::RetainedWithResponse => format!(
+            "response target for {file} is retained; failed to retain the same closeout's \
+             tracked-work mutations"
+        ),
+        TrackedWorkMutationFailure::DeferredDeliveryProjection => format!(
+            "tracked-work mutations for {file} reached the editor authority and are retained \
+             while their delivery projection converges — this is a deferral, not a lost or \
+             half-applied closeout. Run `agent-doc session-check {file}` once to observe the \
+             terminal state. Do NOT run `agent-doc commit {file}`, re-submit this closeout's \
+             tracked-work half, force disk, or `admin recycle`: the mutations are already \
+             retained, so resubmitting them double-applies and the rest disturbs the \
+             projection being awaited"
+        ),
+        TrackedWorkMutationFailure::HalfApplied => format!(
+            "response for {file} is already applied but the same closeout's tracked-work \
+             mutations are not: the document is half-applied. Recover with `agent-doc commit \
+             {file}` from the owning pane, or re-run the tracked-work half via `agent-doc write \
+             --commit {file} --backlog-only ...`"
+        ),
+        TrackedWorkMutationFailure::ProjectionFailedAfterLanding => format!(
+            "tracked-work mutations for {file} are already visible in the document; the failure \
+             is in the projection tail AFTER both halves landed, so the cycle is NOT \
+             half-applied. Run `agent-doc session-check {file}` to observe the terminal state; \
+             do NOT run `agent-doc commit {file}` or re-run the tracked-work half, which would \
+             double-apply mutations that already landed"
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#retainedprojexit1`: the closeout's mutation phase must never call a
+    /// retained delivery projection a half-apply.
+    ///
+    /// Observed 2026-09-20 on `cycle-1789878037902`: `respond` printed
+    /// `[pending] completed and reaped 1 item(s)` twice, then exited 1 with
+    /// "the document is half-applied" — while disk already matched HEAD at
+    /// `16d6ab2981` with the response section AND the done-archive move both
+    /// present, and a second `session-check` flipped
+    /// `INTERRUPTED(write_applied)` to `ok(committed, commit_success)`. Nothing
+    /// was half-applied, and both remedies the message named would have
+    /// double-applied the tracked-work half.
+    #[test]
+    fn a_retained_delivery_projection_is_a_deferral_not_a_half_apply() {
+        let retained = format!(
+            "document write retained: {AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN} \
+             {RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN}"
+        );
+
+        let failure = classify_tracked_work_mutation_failure(&retained, false, Some(true));
+
+        assert_eq!(
+            failure,
+            TrackedWorkMutationFailure::DeferredDeliveryProjection,
+            "a live replica converges on its own; the token says so"
+        );
+        assert!(
+            failure.is_deferral(),
+            "a deferral must let the closeout report success instead of exiting 1"
+        );
+    }
+
+    /// The remedy half of the same defect: a deferral must name only the
+    /// await-and-observe path.
+    #[test]
+    fn a_deferral_message_names_no_resubmit_remedy() {
+        let rendered = tracked_work_mutation_failure_message(
+            TrackedWorkMutationFailure::DeferredDeliveryProjection,
+            "plan.md",
+        );
+
+        assert!(
+            rendered.contains("agent-doc session-check plan.md"),
+            "the deferral must name the observe path: {rendered}"
+        );
+        assert!(
+            rendered.contains("deferral, not a lost or half-applied closeout"),
+            "the deferral must say plainly that nothing is half-applied: {rendered}"
+        );
+        for double_applying in [
+            "Recover with `agent-doc commit",
+            "re-run the tracked-work half via `agent-doc write --commit plan.md --backlog-only",
+        ] {
+            assert!(
+                !rendered.contains(double_applying),
+                "a deferral must not name `{double_applying}` — the tracked-work half \
+                 is already retained, so resubmitting it double-applies: {rendered}"
+            );
+        }
+    }
+
+    /// The other half of `#retainedprojexit1`: half-applied framing is reserved
+    /// for a cycle PROVEN half-applied, and unprovable stays fail-closed.
+    #[test]
+    fn half_applied_framing_requires_proof_that_the_mutations_are_unlanded() {
+        let generic = "pending/status write failed: disk projection rejected";
+
+        assert_eq!(
+            classify_tracked_work_mutation_failure(generic, false, Some(true)),
+            TrackedWorkMutationFailure::HalfApplied,
+            "recorded mutations still missing from the document IS the half-apply"
+        );
+        assert_eq!(
+            classify_tracked_work_mutation_failure(generic, false, None),
+            TrackedWorkMutationFailure::HalfApplied,
+            "unprovable is not proof of landing; stay on the fail-closed branch"
+        );
+        assert_eq!(
+            classify_tracked_work_mutation_failure(generic, false, Some(false)),
+            TrackedWorkMutationFailure::ProjectionFailedAfterLanding,
+            "mutations that are provably visible are not a half-apply"
+        );
+        assert_eq!(
+            classify_tracked_work_mutation_failure(generic, true, Some(true)),
+            TrackedWorkMutationFailure::RetainedWithResponse,
+            "a retained response write keeps its own framing"
+        );
+    }
+
+    /// Only the proven half-apply may print a resubmit remedy; every other
+    /// variant would double-apply a mutation that already landed.
+    #[test]
+    fn only_a_proven_half_apply_names_a_resubmit_remedy() {
+        for (failure, may_resubmit) in [
+            (TrackedWorkMutationFailure::HalfApplied, true),
+            (TrackedWorkMutationFailure::DeferredDeliveryProjection, false),
+            (
+                TrackedWorkMutationFailure::ProjectionFailedAfterLanding,
+                false,
+            ),
+            (TrackedWorkMutationFailure::RetainedWithResponse, false),
+        ] {
+            let rendered = tracked_work_mutation_failure_message(failure, "plan.md");
+            assert_eq!(
+                rendered.contains("--backlog-only"),
+                may_resubmit,
+                "{failure:?} rendered the wrong remedy class: {rendered}"
+            );
+        }
+    }
+
+    /// `#retainedprojexit1`: the classifier is only worth having if the
+    /// closeout that used to render one message for every failure consults it.
+    ///
+    /// The state that makes it fire — a retained refusal from the mutation
+    /// phase mid-closeout — is not reachable from a unit test, so guard the
+    /// wiring structurally, the same way `#retainedmutdrop` guards its
+    /// provenance sites below.
+    #[test]
+    fn the_closeout_mutation_phase_consults_the_shared_classifier() {
+        let source = include_str!("../../agent-doc-write-runtime-io/src/lib.rs");
+
+        assert!(
+            source.contains("classify_tracked_work_mutation_failure"),
+            "the closeout mutation phase must classify its failure through the \
+             shared classifier; deciding it locally is what let a retained \
+             deferral be reported as a half-apply"
+        );
+        assert!(
+            source.contains("tracked_work_mutation_failure_message"),
+            "the closeout mutation phase must render its message from the shared \
+             owner so a remedy cannot drift back onto a deferral"
+        );
+        assert!(
+            source.contains("recorded_tracked_work_unlanded_now"),
+            "the closeout mutation phase must prove whether the mutations landed \
+             before any message calls the document half-applied"
+        );
+        assert!(
+            !source.contains("the document is half-applied. Recover with"),
+            "the closeout mutation phase must not re-author the half-applied \
+             wording — that is how it stayed attached to every failure"
+        );
+    }
 
     /// `#retainedmutdrop`: the predicate is only worth having if both deciding
     /// sites actually consult it.

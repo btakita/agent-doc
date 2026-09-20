@@ -468,16 +468,75 @@ pub fn operator_answered_head_ids(content: &str) -> HashSet<String> {
         .collect()
 }
 
-/// Count active queue prompt heads whose backlog id is deferred in-session.
+/// Lowercased ids of GATED rows in `agent:review`.
+///
+/// `#qreviewdefer`: `deferred_backlog_ids_split` and
+/// `collect_backlog_execution_contexts` both scope themselves to
+/// `backlog | icebox | pending`, so an `[operator-verify]` tag on a review row —
+/// the normal home for a gated, externally-blocked item — is invisible to the
+/// deferral scan. A gated review row IS an external gate by construction, which
+/// is what `agent:review` means, so gatedness alone is the signal here and no
+/// tag scan is needed.
+///
+/// Derived from parsed items rather than a line prefix on purpose: a typed gate
+/// (`- [/release]`) is exactly as gated as `- [/]`, and a `strip_prefix("- [/]")`
+/// witness would miss it and put the head straight back into the silent-stall
+/// shape this exists to fix.
+pub fn gated_review_ids(content: &str) -> HashSet<String> {
+    let Ok(components) = element::parse(content) else {
+        return HashSet::new();
+    };
+    let mut ids = HashSet::new();
+    for comp in &components {
+        if !element::is_review_component(&comp.name) {
+            continue;
+        }
+        let (_, items, _) = backlog::parse_items(comp.content(content));
+        for item in items {
+            if item.state != backlog::PendingState::Gated {
+                continue;
+            }
+            let id = backlog::normalize_pending_id(&item.id);
+            if !id.is_empty() {
+                ids.insert(id);
+            }
+        }
+    }
+    ids
+}
+
+/// Count active queue prompt heads that are deferred in-session.
+///
+/// `#qreviewdefer`: a head is deferred when its id is a deferred backlog id OR a
+/// GATED `agent:review` row carrying no operator verdict. Without the second
+/// clause a queue whose only head waits on a review gate counted ZERO deferred
+/// heads, session-check fell through to `NoDrainableWork` — class `ok`,
+/// next_action `no_agent_action`, i.e. "fully drained, nothing to do" — and the
+/// operator was left staring at a visible queue item they were never told was
+/// theirs to clear. Observed 2026-09-20 on `src/haiven-dev/tasks/fpe.md`.
+///
+/// The gated-review clause lives HERE rather than in `deferred_backlog_ids`
+/// because that set also gates drain eligibility: widening it would defer a
+/// genuinely drainable backlog item that happens to share an id with a review
+/// row. This counter only reports.
+///
+/// An operator verdict on the head still satisfies the deferral
+/// (`#opverifyanswered`) — that head is the operator action, not a wait for one.
 pub fn deferred_head_count(content: &str) -> usize {
     let Some((_, entries)) = queue_component_entries(content) else {
         return 0;
     };
     let deferred_ids = deferred_backlog_ids(content);
+    let gated_review = gated_review_ids(content);
+    let operator_answered = operator_answered_head_ids(content);
     document_queue::prompts(&entries)
         .into_iter()
         .filter_map(|prompt| extract_head_id(&prompt.text))
-        .filter(|id| deferred_ids.contains(&id.to_ascii_lowercase()))
+        .map(|id| id.to_ascii_lowercase())
+        .filter(|id| {
+            deferred_ids.contains(id)
+                || (gated_review.contains(id) && !operator_answered.contains(id))
+        })
         .count()
 }
 
@@ -1230,6 +1289,141 @@ pub fn head_carries_operator_verdict(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// `#qreviewdefer`: the reported `fpe.md` shape, reduced. A `priority go`
+    /// queue whose only live head names an id that is a GATED `[operator-verify]`
+    /// row in `agent:review`.
+    fn review_gated_queue_doc(review_row: &str) -> String {
+        format!(
+            concat!(
+                "<!-- agent:queue preset=\"x\" priority go -->\n",
+                "- ~~do [#alreadydone]~~\n",
+                "- do [#fpeoptimizedprofileacceptance]\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#unrelated] unrelated open work\n",
+                "<!-- /agent:backlog -->\n\n",
+                "<!-- agent:review -->\n",
+                "{}\n",
+                "<!-- /agent:review -->\n",
+            ),
+            review_row
+        )
+    }
+
+    #[test]
+    fn a_head_gated_on_a_review_row_counts_as_deferred() {
+        // Before the fix this returned 0, so session-check reported
+        // `no_drainable_work` (class ok, next_action no_agent_action) over a
+        // queue the operator could plainly see still had an item in it.
+        let doc = review_gated_queue_doc(
+            "- [/] [#fpeoptimizedprofileacceptance] [operator-verify] repeat the matched inline workload",
+        );
+        assert_eq!(deferred_head_count(&doc), 1);
+    }
+
+    #[test]
+    fn a_typed_gate_on_the_review_row_defers_the_head_too() {
+        // A `strip_prefix("- [/]")` witness misses this and puts the head back
+        // into the silent-stall shape.
+        let doc = review_gated_queue_doc(
+            "- [/release] [#fpeoptimizedprofileacceptance] [operator-verify] repeat the workload",
+        );
+        assert_eq!(deferred_head_count(&doc), 1);
+        assert!(gated_review_ids(&doc).contains("fpeoptimizedprofileacceptance"));
+    }
+
+    #[test]
+    fn an_ungated_review_row_does_not_defer_the_head() {
+        // Only a GATED row is an external gate. An open row is ordinary work.
+        let doc = review_gated_queue_doc(
+            "- [ ] [#fpeoptimizedprofileacceptance] no longer gated",
+        );
+        assert_eq!(deferred_head_count(&doc), 0);
+        assert!(gated_review_ids(&doc).is_empty());
+    }
+
+    #[test]
+    fn a_struck_head_is_not_counted() {
+        // `#alreadydone` is struck, and nothing else references it.
+        let doc = review_gated_queue_doc("- [/] [#alreadydone] gated but struck in the queue");
+        assert_eq!(deferred_head_count(&doc), 0);
+    }
+
+    /// `#opverifyanswered`: a head carrying the operator's inline verdict IS the
+    /// operator action, not a wait for one, so it must not read as deferred.
+    #[test]
+    fn an_operator_answered_head_is_not_deferred() {
+        let doc = format!(
+            concat!(
+                "<!-- agent:queue preset=\"x\" priority go -->\n",
+                "- do [#fpeoptimizedprofileacceptance]: I lift the push hold\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#unrelated] unrelated open work\n",
+                "<!-- /agent:backlog -->\n\n",
+                "<!-- agent:review -->\n",
+                "- [/] [#fpeoptimizedprofileacceptance] [operator-verify] repeat the workload\n",
+                "<!-- /agent:review -->\n",
+            ),
+        );
+        let answered = operator_answered_head_ids(&doc);
+        assert!(
+            answered.contains("fpeoptimizedprofileacceptance"),
+            "fixture must actually carry an operator verdict: {answered:?}"
+        );
+        assert_eq!(deferred_head_count(&doc), 0);
+    }
+
+    /// The scan is scoped to `agent:review` specifically, not "any gated row".
+    /// A `- [/]` item still sitting in `agent:backlog` is code-complete work
+    /// awaiting review, not an external gate on the queue — counting it would
+    /// report `operator_proof_required` for a head the loop or supervisor can
+    /// still drain.
+    #[test]
+    fn a_gated_backlog_row_is_not_a_gated_review_row() {
+        let doc = concat!(
+            "<!-- agent:queue preset=\"x\" priority go -->\n",
+            "- do [#gatedinbacklog]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [/] [#gatedinbacklog] code-complete, awaiting review\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#somethingelse] [operator-verify] unrelated gate\n",
+            "<!-- /agent:review -->\n",
+        );
+        let ids = gated_review_ids(doc);
+        assert!(
+            ids.contains("somethingelse"),
+            "the review row must be seen: {ids:?}"
+        );
+        assert!(
+            !ids.contains("gatedinbacklog"),
+            "a gated BACKLOG row is not an external gate: {ids:?}"
+        );
+        assert_eq!(
+            deferred_head_count(doc),
+            0,
+            "the live head is gated in the backlog, not in review, so it is not operator-deferred"
+        );
+    }
+
+    /// The gated-review clause must not leak into drain eligibility: widening
+    /// `deferred_backlog_ids` would defer a genuinely drainable backlog item
+    /// that happens to share an id with a review row.
+    #[test]
+    fn gated_review_ids_do_not_enter_the_backlog_deferral_set() {
+        let doc = review_gated_queue_doc(
+            "- [/] [#fpeoptimizedprofileacceptance] [operator-verify] repeat the workload",
+        );
+        assert!(
+            !deferred_backlog_ids(&doc).contains("fpeoptimizedprofileacceptance"),
+            "drain eligibility must stay scoped to backlog/icebox/pending"
+        );
+    }
+
     /// `#queueblockquoteintent`: a stop with heads remaining must name why.
     ///
     /// The caller used to AND the preemption into `raw_required`, so this

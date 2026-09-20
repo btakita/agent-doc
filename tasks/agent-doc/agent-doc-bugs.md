@@ -14,7 +14,7 @@ prompt_presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -280,6 +280,41 @@ Running `make install` against that tree would build and publish someone else's 
 **Queue is stopped and empty.** The backlog head is `#duplicatepreflightunblock` (bounded cancellation / stale-cycle recovery for a duplicate invocation blocked behind a `preflight_started` cycle) — ready to drain on `do [#duplicatepreflightunblock]` or a `queue: go`.
 
 Exchange is at 232 lines across 13 response sections, just past the warn threshold. Say the word and I'll run `agent-doc compact tasks/agent-doc/agent-doc-bugs.md --commit`.
+
+### Re: retained delivery projection is a deferral, not a half-apply — opus-5 · 2026-09-20T00:43-04:00
+
+> **Queue prompt:**
+>
+> do [#retainedprojexit1]
+
+
+Fixed `#retainedprojexit1`. Commit `b7043757b`, pushed to `origin/main`.
+
+**Root cause.** The closeout's tracked-work mutation phase (`run_command_inner_within_pass`, `agent-doc-write-runtime-io/src/lib.rs`) wrapped *every* failure that reached it in one `with_context` message: "the document is half-applied", plus `agent-doc commit <FILE>` and a `write --commit --backlog-only` rerun as the remedies. Nothing classified the failure first. On `cycle-1789878037902` the failure was a retained refusal stamped `retained=delivery_projection_pending` — the mutation envelope had reached the editor authority and its keyed worker converged seconds later — so the message asserted a half-apply that never happened and named two remedies that would have double-applied the tracked-work half that had already landed.
+
+**Fix.** Classify before rendering, from facts that can be proven rather than from "the mutation phase returned `Err`":
+
+- **Retained delivery projection → deferral.** Recognised by the stamped `RETAINED_DELIVERY_PROJECTION_PENDING_TOKEN` (not prose — that needle is what let this class stay unhandled in three crates already: `#retainconv`, `#retaineddeferisnotafailure`). The command logs `tracked_work_mutations_deferred_retained_delivery_projection`, prints the deferral, and returns **exit 0 without committing**, naming only `agent-doc session-check <FILE>`. It does not commit, because the projection has not reached disk yet and committing there would publish the partial state the old message falsely claimed.
+- **Half-applied framing is now gated on proof.** It fires only when this cycle's own recorded mutations are still missing from the document per `recorded_tracked_work_is_unlanded` — the same predicate `commit`, `session-check`, and the captured-closeout resume decide provenance from. Unprovable (no cycle state, document unresolvable) stays on that fail-closed branch.
+- **Provably-landed mutations get a fourth verdict.** `ProjectionFailedAfterLanding` says the failure is in the projection tail after both halves landed and carries no resubmit remedy, because resubmitting a landed mutation double-applies it.
+
+Classification and wording live once, in `agent_doc_turn::write_ownership`: `classify_tracked_work_mutation_failure` + `tracked_work_mutation_failure_message`, alongside the existing `RetainedWriteOwnership` owner.
+
+**Coverage.** Five new tests in `write_ownership.rs`:
+
+- the retained token classifies as a deferral even when the landing witness says "unlanded";
+- a deferral message names `session-check` and no resubmit remedy;
+- half-applied requires proof, and `None` (unprovable) stays fail-closed;
+- only the proven half-apply renders `--backlog-only` (parameterised across all four verdicts);
+- a structural guard that the closeout mutation phase actually calls the classifier, the message owner, and the landing witness, and no longer re-authors the half-applied wording. Two of these tests caught the first draft reproducing the resubmit commands inside its own do-NOT list — the wording was rewritten so the flags are not copy-pasteable from a deferral.
+
+Spec bullet added to `specs/07-closeout-commands.md` under the `write` invariants.
+
+**Verification.** `make check`: **9508 tests run, 9508 passed, 259 skipped**. `audit-docs` fails, and it is not this change — `.grok/skills/agent-doc/SKILL.md` and `.codex/skills/agent-doc/SKILL.md` in the superproject carry an `agent-doc-version` stamp bump (`0.35.398` → `0.35.400`) from the concurrent session's uncommitted work; my three files are `agent-doc-turn/src/write_ownership.rs`, `agent-doc-write-runtime-io/src/lib.rs`, and `specs/07-closeout-commands.md`. CI run `35489614892` is **in progress** on `b7043757b`; the parent `5bfe9bd3b` was green.
+
+**On the push.** `origin/main` had moved 5 commits ahead and local `main` held a duplicate of one of them (`6eb81f3bd` ≡ origin's `2e1219b95`). Rebased with `--autostash` — none of the incoming commits touch the concurrent session's uncommitted files (`src/session_actor_cmd.rs`, `TurnStateBannerRefresher.kt`, two untracked JB files), and the autostash reapplied cleanly with their work intact.
+
+**Not installed this cycle, deliberately.** `make install` builds from the shared working tree, which currently holds another session's uncommitted `src/session_actor_cmd.rs` and JetBrains plugin edits — installing would ship their in-flight work as the live binary. Preflight's own `stale_install` advisory says the same thing: the owning development/release cycle installs and the supervisor performs the safe recycle. Separately, `make install`'s `lib-install` step reloads the cdylib, which strands this attached document's Lazily replica mid-session and needs an editor tab reopen to clear. Queued as `#retainedprojexit1install` at the backlog head so the next cycle with a clean tree picks it up.
 <!-- agent:boundary:93b90753:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -288,12 +323,15 @@ Exchange is at 232 lines across 13 response sections, just past the warn thresho
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#retainedprojexit1]~~
+- do [#duplicatepreflightunblock]
+- do [#kqht]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
-- [ ] [#retainedprojexit1] `agent-doc respond` exits 1 with a "half-applied" error on retained=delivery_projection_pending even when BOTH halves already landed and the keyed worker converges seconds later. Observed 2026-09-20 on cycle-1789878037902: respond printed `[pending] completed and reaped 1 item(s)` twice, then errored `response ... is already applied but the same closeout's tracked-work mutations are not`; disk already matched HEAD at commit 16d6ab2981 with the response section AND the done-archive move both present, and a second `session-check` flipped INTERRUPTED(write_applied) -> ok(committed, commit_success). The error text is doubly wrong: (1) it asserts a half-apply that did not occur, and (2) its recovery advice (`agent-doc commit <FILE>` or re-run `write --commit --backlog-only`) would DOUBLE-APPLY the tracked-work mutation, contradicting the same message's own do-not-resubmit guidance. Fix: when retained=delivery_projection_pending, report a deferral with exit 0 (or a distinct non-error status) and name only the await-and-observe path; never emit half-applied framing or resubmit remedies until the cycle is proven to actually be half-applied.
+- [ ] [#retainedprojexit1install] Install + recycle the `#retainedprojexit1` fix (commit b7043757b): `make install` in src/agent-doc from a tree with no concurrent-session uncommitted source, then `agent-doc admin recycle`. Deferred 2026-09-20 because the shared working tree held another session's uncommitted `src/session_actor_cmd.rs` + JetBrains plugin edits (installing would ship their in-flight work) and because `lib-install` strands this attached document's Lazily replica mid-session.
 - [ ] [#duplicatepreflightunblock] Fix duplicate agent-doc invocation refusing indefinitely while a prior cycle remains preflight_started; provide bounded cancellation and stale-cycle recovery that unblocks the document without operator timing.
 - [ ] [#kqht] #actionable-review
 <!-- /agent:backlog -->

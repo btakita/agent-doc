@@ -11,7 +11,7 @@ prompt_presets:
   '#actionable': 'Add actionable tasks into backlog + queue'
   '#actionable-review': 'Add actionable review items into backlog + queue'
   'rebase-conflicts': 'rebase + fix merge conflicts'
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -245,19 +245,60 @@ The org policy caps the repo-level override, so the repo path is not an unexplor
 One note on the current report state: 12 errors / 67 warnings, 9 fixed this run, and `audit/report.json` + `audit/sources.lock.json` are both on `main` now, so `#auditlockmain` is holding and the week-over-week diff has a predecessor. The last five audit runs are green.
 
 The exchange is at 194 lines across 8 sections. Queue was one head, now drained into three filed items.
+
+### Re: do #prcaplies — opus-5 · 2026-09-20T16:32-04:00
+
+> **Queue prompt:**
+>
+> do [#prcaplies]
+
+
+Done, pushed, CI green. `existence-lang/ontology@069aa46`.
+
+**The defect, stated precisely.** `AUDIT_PR_STATE` answered "was a pull request created?", and the issue body printed it as if it answered "can one be?". Those diverge on exactly one path, and it is the path this repo takes every week: PR #2 is open, so the upsert step hits `pull request already open` and returns before `gh pr create` is ever reached. No create, no failure, `pr_state=on`. The organization's restriction — which I proved live last cycle with a 409 — had never once reached the issue body, and by construction never would until the week PR #2 is merged or closed and the job has to recreate it. A capability reported itself as working for precisely as long as nobody needed to hear otherwise.
+
+**The fix is to read the policy instead of inferring it from what happened to be attempted.** A new `pr_policy` step queries `repos/{repo}/actions/permissions/workflow` — `can_approve_pull_request_reviews` is the REST name for the *Allow GitHub Actions to create and approve pull requests* toggle — and short-circuits to `on` when `AUDIT_TOKEN` is set, since a classic PAT opens the PR as its owner and the Actions policy does not apply to it. Every path in the upsert step that does not actually attempt a create now reports that policy rather than `on`. The `|| 'on'` fallback on the render step was itself the fail-open default; it now falls back to the policy, then to `unknown`.
+
+Two new renderer states beside `on`/`off`/`failed`:
+
+- **`restricted`** — the open PR is still being kept current, so this week looks fine, but Actions may not open a new one: the first run after it is merged or closed can only push the branch.
+- **`unknown`** — the policy endpoint needs admin, so a read failure is never a silent `on`.
+
+An unrecognised state prints verbatim rather than collapsing into `off` — a state the renderer has not been taught is a worse reason to stay silent than one it has. State and remedy also moved onto separate lines; a `restricted` description is a sentence and ran unreadably into the remedy after a colon.
+
+**Verification.** 19/19 in `test_audit_report.py`, six new. I did not trust them on inspection — each was mutation-checked against the exact line it covers, with a green baseline asserted before and after every restore:
+
+| mutation | result |
+|---|---|
+| drop the "merged or closed" clause | killed by `test_a_restricted_capability_is_reported_though_nothing_failed` |
+| restore the old fail-open label map | killed by 5 tests |
+| swallow an unrecognised state into `off` | killed by `test_an_unrecognised_state_surfaces_rather_than_vanishing` |
+| drop "unverified" from `unknown` | killed by `test_an_unreadable_policy_is_unknown_rather_than_assumed_on` |
+| treat `restricted` as `on` (the original bug, one level up) | killed by 2 tests |
+
+Five for five, each by the test that should kill it. The workflow YAML was parsed rather than eyeballed, both `run:` blocks passed `bash -n`, and I drove `pr_policy` through a stub `gh` across all five branches: policy `true` → `on`, `false` → `restricted`, endpoint 403 → `unknown`, empty output → `unknown`, `AUDIT_TOKEN` set → `on`. Ontology CI run `35535883145` is green on both jobs (Issue renderer, Structure audit).
+
+**What Monday's issue will now say.** Rendered against the real `audit/report.json`, the Capabilities block finally carries the line the reader has been missing for every week this workflow has existed:
+
+> **safe fixes arrive as a pull request** — restricted — the already-open pull request is still being kept current, so this week looks fine, but Actions may not open a new one: the first run after that pull request is merged or closed can only push the branch
+
+`#auditprtoken` now self-reports and no longer depends on this document for anyone to know it is blocked. I left the review item itself gated — the remedy is still operator-only — but its reporting half is closed.
+
+Queue: `#srcwaiver` and `#archoutage` remain. Exchange is at 224 lines across 9 sections.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- ~~# actionable-review~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do [#prcaplies]~~
+- do [#srcwaiver]
+- do [#archoutage]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#prcaplies] Make the audit Capabilities block report the PR restriction that is actually in force. AUDIT_PR_STATE is derived from whether a `gh pr create` was attempted, not from the policy: `audit.yml:189-192` sets `pr_state=on` on the pull-request-already-open path and `:178-180` on the no-safe-fixes path, and only the create-failed branch sets `off`. PR #2 (`audit/safe-fixes`) is open and the job keeps it current, so the create path is never taken and the org restriction is invisible every single week. Fix: derive the capability from the policy (`gh api repos/$GITHUB_REPOSITORY/actions/permissions/workflow --jq .can_approve_pull_request_reviews`, plus whether `secrets.AUDIT_TOKEN` is set), emit a third `restricted` state, and add a `test_audit_report.py` case for the already-open path. Repo: `src/existence-lang/ontology`. This is the slice that lets [#auditprtoken] self-report instead of living in this document.
 - [ ] [#srcwaiver] Give the sources class a way to record an author decision so a decided-unrecoverable citation stops re-reporting. `source_check.rs` has no waiver concept at all (no waiv/accepted/suppress match anywhere in the file), so `audit/report.json` still carries `unreachable_host` for `god` and will every week no matter what is decided. Add a waiver record (term, URL, reason, decided-on date; `audit/sources.waivers.json` or a sources-lock field) that the sources class reads and demotes to an informational line instead of a warning, with the reason rendered into the issue body. Repos: `src/existence-lang/existence` (check + schema), `src/existence-lang/ontology` (record + report). Converts [#godsourcegone] from gated-on-the-author-forever into accepted, recorded, closed.
 - [ ] [#archoutage] Escalate an outage of the archive host itself from a per-term warning to a run-level degradation note. In the current `audit/report.json`, `web.archive.org` appears as one `unreachable_host` warning scoped to the term `abstraction` - but when that host is down, every archived-copy fallback and every pinned snapshot in the run skips silently, which is most of the sources class. The reader sees 5 warnings and a normal-looking report rather than "half this class did not run". Confirmed live on 2026-09-20: archive.org is serving its Temporarily Offline page, CDX returns that HTML and snapshot paths return 403/503. Retry before declaring the host dead, and report an archive-host outage the way AUDIT_SEMANTIC_STATE reports a class that could not run. Repos: `src/existence-lang/existence`, `src/existence-lang/ontology`.
 <!-- /agent:backlog -->

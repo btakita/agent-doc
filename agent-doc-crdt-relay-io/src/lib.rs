@@ -4134,7 +4134,8 @@ pub fn await_delivery_convergence_for_file(
             continue;
         };
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-        if remaining.is_zero() || !subscription.wait_for_change(witness.version, remaining) {
+        let slice = barrier_wait_charge_slice(remaining);
+        if remaining.is_zero() || !subscription.wait_for_change(witness.version, slice) {
             // `#silentreplicabarrier`: the wait reached its deadline without the
             // delivery epoch moving, so nothing was delivered, ACKed, enqueued or
             // disconnected while we parked. That is the one observation that
@@ -4186,9 +4187,47 @@ pub fn await_delivery_convergence_for_file(
                     "barrier_wait",
                 );
             }
+            // `#silentbarrierneverreleases`: one expired wait used to charge once
+            // and return, so the 12-charge allowance needed TWELVE separate await
+            // calls. Preflight makes one (3.4s) and then defers, which made the
+            // release unreachable in practice —
+            // `crdt_replica_barrier_released_without_progress` had never once
+            // fired across 11.9 MB of ops history while a silent editor held
+            // closeout until the operator restarted the IDE. Measured 2026-09-20
+            // on `src/boost-client/tasks/monsterrodholders.md`: ZERO replica
+            // pulls between 19:41:00Z and 19:47:28Z, `delivery_version` frozen at
+            // 60 from 19:41:46Z to 19:44:45Z, cleared only by the IDE restart at
+            // 19:44:32Z.
+            //
+            // Each slice is still a real expired convergence wait that observed
+            // no delivery-epoch movement — the same observation, spent across the
+            // caller's whole budget instead of one call. A replica that is merely
+            // slow moves the epoch and exits the loop above; only total silence
+            // accumulates charges.
+            //
+            // Safe to make reachable only because the release is now firewalled
+            // from being read as an editor receipt: it flips `delivery_converged`
+            // (availability) but never `visible_delivery_projected`, and the
+            // serialized-atomic-write path gates its "editor acknowledged" branch
+            // on the latter.
+            if released.is_empty() && slice < remaining {
+                continue;
+            }
             return delivery_convergence_witness_for_file(file);
         }
     }
+}
+
+/// How long one charged sub-wait parks for (`#silentbarrierneverreleases`).
+///
+/// Sized so a caller spending its whole budget can exhaust
+/// [`MAX_BARRIER_WAITS_WITHOUT_PROGRESS`] charges inside a single await, with a
+/// floor so a tiny budget cannot spin.
+fn barrier_wait_charge_slice(remaining: std::time::Duration) -> std::time::Duration {
+    const MIN_SLICE: std::time::Duration = std::time::Duration::from_millis(50);
+    let slices =
+        agent_doc_document_realtime::crdt_relay::MAX_BARRIER_WAITS_WITHOUT_PROGRESS.max(1) + 1;
+    (remaining / slices).max(MIN_SLICE).min(remaining)
 }
 
 pub fn signal_crdt_replica_event(
@@ -5644,6 +5683,79 @@ mod tests {
         assert_eq!(
             logical_replica_identity("jetbrains-1234-a1b2:/tmp/doc.md:refresh-next"),
             "jetbrains-1234-a1b2:/tmp/doc.md:refresh-next",
+        );
+    }
+
+    #[test]
+    fn one_await_releases_a_totally_silent_replica_but_grants_no_editor_receipt() {
+        // `#silentbarrierneverreleases`. A replica that registers and then says
+        // nothing — no pull, no ACK, no projection — can never advance
+        // `redeliveries_without_ack` (that only moves inside `pending_updates`),
+        // so `#silentreplicabarrier`'s expired-wait budget is its only release.
+        // Charging once per await call made that budget need TWELVE separate
+        // calls; preflight makes one and defers, so the release had never fired
+        // once across 11.9 MB of ops history and closeout waited for a human to
+        // restart the IDE.
+        //
+        // Both halves are asserted together on purpose. Releasing the barrier
+        // restores AVAILABILITY, and it must NOT be readable as a receipt: the
+        // write path claims "editor acknowledged the canonical target" off an
+        // editor receipt, and a silent editor acknowledged nothing.
+        let (_dir, doc) = temp_doc("silent-barrier.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let identity = "intellij:silent-barrier";
+        register_replica_for_file(&doc, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        let baseline = match current_text_for_file(&doc).unwrap() {
+            CurrentText::Current { text, .. } => text,
+            other => panic!("expected relay current text, got {other:?}"),
+        };
+        let next =
+            format!("{baseline}\n### Re: silent\n\nQueued for an editor that never answers.\n");
+        apply_cp_write_for_file(&doc, &baseline, &next, "test_silent_barrier")
+            .unwrap()
+            .expect("canonical write should queue delivery");
+        with_hub(&doc, |hub| {
+            assert!(
+                !hub.delivery_converged(),
+                "the silent member holds the barrier before the await"
+            );
+        })
+        .unwrap();
+
+        let witness =
+            await_delivery_convergence_for_file(&doc, None, std::time::Duration::from_millis(900))
+                .unwrap()
+                .expect("the hub exists, so the await observes it");
+
+        assert!(
+            witness.converged,
+            "a single bounded await must exhaust the silent-replica allowance and \
+             release the barrier, not hand the stall back to the caller"
+        );
+        with_hub(&doc, |hub| {
+            assert!(
+                hub.delivery_converged(),
+                "the released member no longer blocks the consistent cut"
+            );
+            assert!(
+                !hub.visible_delivery_projected(),
+                "availability release is NOT a receipt — a silent editor projected nothing"
+            );
+            assert_eq!(
+                hub.nonconverging_replicas().len(),
+                1,
+                "the released member is still recorded as non-converging"
+            );
+        })
+        .unwrap();
+        assert_eq!(
+            visible_delivery_projected_for_file(&doc).unwrap(),
+            Some(false),
+            "the strict receipt the write path gates on must stay false"
         );
     }
 

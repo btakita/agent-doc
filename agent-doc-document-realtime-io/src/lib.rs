@@ -1119,6 +1119,22 @@ fn atomic_write_rebased_through_authority_body(
             } else {
                 await_serialized_atomic_write_projection(path, &relay_write.content_hash)?
             };
+            // `#silentbarrierneverreleases`: `delivery_converged` is an
+            // AVAILABILITY policy, not a receipt. It flips to true the moment a
+            // non-converging replica is RELEASED from the barrier
+            // (`#pullnoackdeadlock` / `#silentreplicabarrier`), which
+            // `RelayHub::visible_delivery_projected` documents as something that
+            // "must never authorize a native save or retained closeout". Reading
+            // it as an editor acknowledgement below made this path tell the
+            // operator "editor acknowledged the canonical target" for an editor
+            // that acknowledged nothing. Ask for the strict receipt instead.
+            //
+            // This is a strict tightening: `visible_delivery_projected` implies
+            // `delivery_converged`, so every case that already refused still
+            // refuses, with the same message.
+            let editor_receipt =
+                agent_doc_crdt_relay_io::visible_delivery_projected_for_file(path)?
+                    .unwrap_or(false);
             if !relay_write.delivery_converged
                 && !matches!(
                     &current,
@@ -1139,11 +1155,10 @@ fn atomic_write_rebased_through_authority_body(
                 ));
             }
             match current {
-                agent_doc_crdt_relay_io::CurrentText::Current {
-                    text,
-                    delivery_converged: false,
-                    ..
-                } if agent_doc_hash::content_hash(&text) == relay_write.content_hash => {
+                agent_doc_crdt_relay_io::CurrentText::Current { text, .. }
+                    if agent_doc_hash::content_hash(&text) == relay_write.content_hash
+                        && !editor_receipt =>
+                {
                     return Err(retained_refusal(
                         path,
                         format!(
@@ -1153,11 +1168,9 @@ fn atomic_write_rebased_through_authority_body(
                         ),
                     ));
                 }
-                agent_doc_crdt_relay_io::CurrentText::Current {
-                    text,
-                    delivery_converged: true,
-                    ..
-                } if agent_doc_hash::content_hash(&text) == relay_write.content_hash => {
+                agent_doc_crdt_relay_io::CurrentText::Current { text, .. }
+                    if agent_doc_hash::content_hash(&text) == relay_write.content_hash =>
+                {
                     if !await_canonical_editor_projection_persisted(
                         path,
                         &text,

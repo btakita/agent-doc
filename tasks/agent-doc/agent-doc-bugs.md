@@ -549,6 +549,29 @@ Worth noting separately: that same evidence also stales the premise of two `agen
 **Recycle is armed, not forced.** `lib-install` reported `auto-recycle: 16 open supervisor(s) marked to recycle at next idle boundary, 0 skipped` and `9 controller(s) marked after supervisor handoff`. That is the product-owned safe path — `#supselfheal` blue/green `execve` at an idle boundary. I deliberately did not force `agent-doc admin recycle` mid-cycle against this document's own supervisor: a forced recycle against a busy supervisor is the shape that times out *and* exits 0, leaving a wedged `preparing` controller that only `kill -TERM` clears. The marking achieves the same end without that risk.
 
 **One genuine failure, filed not swallowed.** `make install` exits 2 at `install-editor-plugins` because `vsce` is not on this machine (`sh: line 1: vsce: command not found`) — after the binary, cdylib, skills and the JetBrains plugin have all already installed successfully. So the install is complete but the command reports failure, which is exactly the kind of thing that gets read as "the install failed" next time. Filed as `#vsceoptionalinstall`.
+
+### Re: #ctrlworkerliveproj — the live projection is now process-wide — opus-5 · 2026-09-20T14:27-04:00
+
+> **Queue prompt:**
+>
+> do [#ctrlworkerliveproj]
+
+
+Done, pushed as `c1088b2ce`. `make check`: **9565 tests run, 9565 passed**, exit 0.
+
+**I had the fix wrong when I filed this item, and the code said so.** I wrote it as "thread the runtime into six spawn sites and call `install_controller_request_thread_context` in each". Tracing the actual read path first: `load_document_projection` never calls `local_document_projection` at all. So installing the thread context would have bought those workers nothing on the path that was costing them — it feeds `agent-doc-op-capture-io`, not the `log_op` turn resolution.
+
+**What was actually wrong is an inversion of `#lazily-hot-path`.** That rule says the controller's live in-memory projection is the authority and `state.db` is the actorless bootstrap path. Inside the controller it ran the other way: after `#ctrlselfrpc` stopped the self-RPC, a controller-owned worker fell straight through to replaying the durable event ledger — and since `log_op` resolves a `turn=` id per line, one worker logging about one document replayed that document's entire ledger **once per line**. Request threads escaped it only because `handle_request_locked` opens a turn-attribution memo.
+
+**Fix: publish the reader process-wide, not per thread.** The live reader was thread-local because it is a `Box<dyn Fn>`; capturing a `Weak<ControllerRuntime>` instead makes it `Send + Sync`, so the same closure can live in a process-wide slot. `local_document_projection` prefers the thread-local when present and falls back to the process one, and `load_document_projection` consults it — gated on the same `served_by_this_process` predicate `#ctrlselfrpc` introduced — before touching the ledger. No spawn site has to remember anything, which is precisely what let this class recur across a dozen `thread::spawn`s.
+
+So the six sites named in the item need no change, and threading `runtime` through their signatures would have been churn. The `#ctrlbindbeforeserve` source guard that pins the `spawn_reliable_sync_recovery_effects(...)` call text also stays intact for the same reason.
+
+**Coverage.** The reader is installed on the main thread and read from a spawned one, with no `state.db` on disk at all — so a non-`None` answer can only have come from the live projection. Dropping either half reddens it: removing the consult in `load_document_projection`, or making `local_document_projection` ignore the process slot. Both mutations verified.
+
+One test-infrastructure note worth keeping: these two controller-identity tests mutate **process**-global registries, and `cargo test` runs a crate's tests as threads in a single process (nextest gives each its own). Run together, one test's teardown cleared the registry the other was mid-assertion on — green in isolation, red in the suite. They are now serialized behind a mutex that recovers from poison, so a failure reports as that one test failing rather than as every later test panicking on a poisoned lock.
+
+CI run `35527154818` for `78c36ccd3` came back green; `c1088b2ce` starts a new run I am not waiting on.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -559,14 +582,13 @@ Worth noting separately: that same evidence also stales the premise of two `agen
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#retainedprojexit1install]~~
-- do [#ctrlworkerliveproj]
+- ~~do [#ctrlworkerliveproj]~~
 - do [#pluginzipeveryrelease]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
 - [ ] [#vsceoptionalinstall] `make install` exits 2 at install-editor-plugins when `vsce` is not installed, AFTER the binary, cdylib, skills and JetBrains plugin have all installed successfully (`sh: line 1: vsce: command not found`, Makefile:250 -> Makefile:221). A complete install therefore reports failure, which reads as 'the install failed' and is exactly the shape that gets a real install retried or abandoned. Make the VS Code packaging step skip with a warning when vsce is absent (or have the target check for it up front and say so), so the exit code tracks whether the install actually succeeded. Measured 2026-09-20 installing 78c36ccd3 from a clean worktree.
-- [ ] [#ctrlworkerliveproj] Give controller-owned worker threads the LIVE projection instead of the cold state.db path. #ctrlselfrpc (78c36ccd3) stopped those threads self-RPCing the controller socket, but LOCAL_DOCUMENT_PROJECTION_READER and the ops-log turn-attribution memo are still thread-local, so a worker that never called install_controller_request_thread_context now replays the durable ledger per log_op line instead. Bounded and local (a full fold measured 0.08s on this project) so it is no longer a wedge, but it is per line and unmemoized. Fix by threading the runtime into spawn_reliable_sync_recovery_effects / schedule_editor_replica_rebuild_after_promotion / the self-promote rebuild / start_orphan_drain_route_worker / spawn_editor_command_async_worker / the supervisor replacement worker and calling install_controller_request_thread_context plus begin_turn_attribution_scope as the first statements in each closure. The #ctrlbindbeforeserve source guard pins the exact spawn_reliable_sync_recovery_effects call text, so update that assertion with the signature.
 - [ ] [#pluginzipeveryrelease] Attach the JetBrains plugin zip (and the VS Code vsix) to EVERY release, not on its own cadence. #pluginassetpaging (a17cb20aa) made the asset search paginate at per_page=100 across 5 pages, which removes the immediate breakage, but it only buys headroom: measured 2026-09-20, exactly ONE release in the API window carries agent-doc-jetbrains-*.zip (v0.35.398, at index 2 of the default 30-item page). The underlying cause is that .github/workflows/release.yml builds four platform archives plus SHA256SUMS on every tag while the editor plugin zip is published separately, so the gap between plugin-bearing releases grows without bound and plugin install/update depends on how deep the search happens to walk. Reported by the issue #53 author, who measured the same thing independently. Fix at the publish step so the latest release always carries the plugin assets; then the 5-page bound is slack rather than load-bearing.
 <!-- /agent:backlog -->
 

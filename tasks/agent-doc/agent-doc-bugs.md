@@ -14,7 +14,7 @@ prompt_presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -782,7 +782,7 @@ Exchange is at 720 lines across 29 response sections; noting it rather than stal
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 #actionable-review
+- ~~#actionable-review~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

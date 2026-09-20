@@ -988,6 +988,24 @@ pub struct CurrentDocumentSemantics {
     /// Unresolved prompt lines in the first queue occurrence.
     pub queue_unresolved_prompts: usize,
 }
+/// `#missingreplicanoise`: which missing-replica miss this is.
+///
+/// `transient_probe` is the benign, dominant case: a process asked for a hub it
+/// has not attached yet and no recovery was even requested. Measured 2026-09-20
+/// on agent-loop, 988 of these landed across 7 documents in a single day and
+/// every sampled one resolved on the next attempt.
+///
+/// `recovery_exhausted` is the needle: projection recovery ran and the replica
+/// is still absent. Both used to print the same bytes, which is why the needle
+/// stayed buried.
+pub fn missing_replica_disposition(recovery_attempted: bool) -> &'static str {
+    if recovery_attempted {
+        "recovery_exhausted"
+    } else {
+        "transient_probe"
+    }
+}
+
 
 /// Live document text resolved from the CRDT relay authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1152,12 +1170,29 @@ fn current_text_for_file_with_authority_inner(
     // this block is what let one busy document time out every other document's
     // 5s authority resolve.
     let Some(handle) = handle else {
+        // `#missingreplicanoise`: this line is overwhelmingly benign. Measured
+        // 2026-09-20 on agent-loop: 988 emissions across 7 documents in one day,
+        // in hours with no install at all, and every sampled one was immediately
+        // followed by a successful `crdt_commit_barrier ready=true` and a
+        // full-length `crdt_current_text`. It is a probe miss against a hub this
+        // process has not attached yet, not the terminal strand.
+        //
+        // It was nevertheless logged identically to the terminal case, so the
+        // real needle — a replica that stays missing after recovery ran — was
+        // buried under three orders of magnitude of churn. That cost real
+        // diagnostic time more than once. `disposition` is the discriminator:
+        // grep `disposition=recovery_exhausted` for the case worth chasing, and
+        // `recovery_attempted` says whether the miss was even given a chance to
+        // resolve.
+        let disposition = missing_replica_disposition(recover_missing_from_projection);
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "{} file={} authority=multi_replica reason=missing_replica doc_hash={} process_pid={}",
+                "{} file={} authority=multi_replica reason=missing_replica disposition={} recovery_attempted={} doc_hash={} process_pid={}",
                 OpsLogEvent::CrdtCurrentTextUnavailable,
                 file.display(),
+                disposition,
+                recover_missing_from_projection,
                 hash,
                 std::process::id(),
             ),
@@ -4626,6 +4661,29 @@ pub fn route_disk_change_signal_with(
 
 #[cfg(test)]
 mod tests {
+    /// `#missingreplicanoise`: the defect was that a benign probe miss and a
+    /// genuinely exhausted recovery printed the SAME bytes, so the needle could
+    /// not be grepped out of ~988 benign lines a day. The property under test is
+    /// that the two are distinguishable at all — asserting either literal alone
+    /// would restate the implementation without pinning that.
+    #[test]
+    fn missing_replica_dispositions_are_distinguishable() {
+        let transient = super::missing_replica_disposition(false);
+        let exhausted = super::missing_replica_disposition(true);
+        assert_ne!(
+            transient, exhausted,
+            "a benign probe miss and an exhausted recovery must not log identically"
+        );
+        assert_eq!(
+            exhausted, "recovery_exhausted",
+            "the needle token is documented for operators to grep; renaming it silently breaks them"
+        );
+        assert!(
+            !transient.is_empty(),
+            "the benign case still needs a disposition so the field is always present to filter on"
+        );
+    }
+
     use super::*;
     use parking_lot::Mutex;
     use std::io::Write;

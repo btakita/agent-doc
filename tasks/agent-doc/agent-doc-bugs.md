@@ -14,7 +14,7 @@ prompt_presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -705,6 +705,47 @@ Everything above that survived is re-verified with `python3` reads of the raw lo
 Same mechanism, same moment. The old IDE held the replica and stopped answering; your queue lines lived in that buffer without a converged delivery. When it died at 19:44:32Z the replacement registration bootstrapped from the canonical, which did not have them. The nine `do [#...]` lines are on disk now. This is downstream of `#silentbarrierneverreleases` — a barrier that releases on a bounded budget would have forced the question minutes earlier, while the old buffer was still alive.
 
 Verification: `make check` green (9579 tests, clippy, sim-medium, version-sync, audit-docs, editor-parity, TLA+). `make install` done, supervisors recycled for both `agent-loop` and `boost-client`. Pushed `22d8bd33b`; CI run 35534811152 was still in progress at closeout, previous run green.
+
+### Re: #silentbarrierneverreleases — opus-5 · 2026-09-20T16:44-04:00
+
+> **Queue prompt:**
+>
+> do [#fixcausesbugs]
+>
+> do [#silentbarrierneverreleases]
+
+
+Fixed and pushed (`6da64a97c`). The wedge you hit on both documents is closed, and the ordering of the two halves turned out to be the whole problem.
+
+#### What was broken
+
+A replica that registers and then goes **completely silent** — no pull, no ACK, no projection — held the delivery barrier forever. Both escape hatches were unreachable for it:
+
+- `#pullnoackdeadlock` (budget 50) counts inside `pending_updates`, i.e. **on a pull**. A silent member sits at 0 forever.
+- `#silentreplicabarrier` (budget 12) is charged by `await_delivery_convergence_for_file`, which charged **once per call and returned**. Twelve charges needed twelve separate awaits; preflight makes one 3.4s await and then defers.
+
+The proof it was unreachable rather than merely slow: `crdt_replica_barrier_released_without_progress` had **never fired** — zero occurrences across 11.9 MB of `boost-client` ops history and the whole agent-loop log.
+
+#### Why the fix needed two halves, in order
+
+Making the charge reachable **alone** is wrong, and I confirmed that the hard way last cycle: slicing the await so it reaches 12 charges does release the barrier, and it immediately broke `serialized_atomic_write_retained_ack_timeout_forbids_agent_recapture` — correctly, because releasing a silent member flips `delivery_converged` to true and the write path then reported *"editor acknowledged the canonical target"* for an editor that acknowledged nothing.
+
+The split I thought I had to build already existed. `RelayHub::visible_delivery_projected` is the strict receipt and its own doc comment says the availability release "must never authorize a native save or retained closeout". The defect was simply that `agent-doc-document-realtime-io`'s serialized-atomic-write path branched on `delivery_converged` instead. So:
+
+1. **Firewall first** — that branch now gates on `visible_delivery_projected_for_file`. A strict tightening: the receipt implies convergence, so everything that already refused still refuses with the same message.
+2. **Then make the charge reachable** — the await parks in `remaining/13` slices and charges each expired slice. Every slice is still a genuine expired convergence wait that saw no delivery-epoch movement; a replica that is merely slow moves the epoch and exits the loop, so only total silence accumulates charges.
+
+Net effect on your wedge: a silent editor stops blocking the commit barrier within one bounded await instead of never, **and** closeout still refuses to claim an acknowledgement it does not have — it stays retained with "do not recapture, do not force disk", which is the honest state.
+
+Both halves are mutation-checked. Neuter the `continue` and the silent replica holds the barrier again; neuter the receipt gate and the write path emits the false acknowledgement.
+
+**Worth carrying forward:** anywhere else reading `delivery_converged` as proof the editor holds the bytes is this same bug. Availability answers "may unrelated work proceed"; `visible_delivery_projected` answers "did the editor actually take it".
+
+#### Verification
+
+`make check` green — **9580 tests** (up one, the new regression), clippy, sim-medium, version-sync, audit-docs, editor-parity, python-bootstrap, lean, TLA+. `make install` done and both supervisors recycled (`agent-loop`, `boost-client`). CI runs 35534811152 and 35536410465 were both still in progress at closeout; the last completed run was green. The built tree included another session's uncommitted JetBrains plugin edits (`TurnStateBannerRefresher.kt`, `InputRequiredNotifications*.kt`) and an in-flight `session_actor_cmd.rs` hunk — those were not committed; my `session_actor_cmd.rs` change went in last cycle as a hand-built blob so their work stayed untouched.
+
+Exchange is 679 lines over 28 sections — noting it, not stopping for it.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -714,16 +755,12 @@ Verification: `make check` green (9579 tests, clippy, sim-medium, version-sync, 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#fixcausesbugs]
-- ~~do [#orchestratepresetexpand]~~
-- ~~do [#archiveindexwal]~~
-- ~~do [#pluginactivationprobe]~~
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority queue -->
-- [ ] [#silentbarrierneverreleases] [P1] `#silentreplicabarrier`'s barrier release has NEVER fired — zero `crdt_replica_barrier_released_without_progress` across 11.9 MB of boost-client ops history and the whole agent-loop log. A totally silent editor replica (registered, then no pull / no ACK / no projection) cannot advance `redeliveries_without_ack` (that only moves inside `pending_updates`), so `#pullnoackdeadlock`'s budget of 50 is unreachable by construction, and the 12-charge expired-wait allowance is unreachable too because `await_delivery_convergence_for_file` (agent-doc-crdt-relay-io/src/lib.rs:4148) charges ONCE per call and returns — preflight makes one 3.4s await and then defers. Measured 2026-09-20 on src/boost-client/tasks/monsterrodholders.md: zero `crdt_replica_pull` 19:41:00Z-19:47:28Z, `delivery_converged=false` with `delivery_version` frozen at 60 from 19:41:46Z to 19:44:45Z, cleared only by the operator restarting IDEA at 19:44:32Z. DESIGN CONSTRAINT, learned by trying the obvious fix and reverting it: parking in `remaining/13` slices so one await reaches 12 charges does release the barrier (test green, mutation-checked) but then breaks `serialized_atomic_write_retained_ack_timeout_forbids_agent_recapture` — and breaks it correctly, because releasing a silent member flips `delivery_converged` to true and the write path reports "editor acknowledged the canonical target" for an editor that acknowledged nothing. `delivery_converged` carries two meanings (consistent cut for the commit barrier vs. the editor holds the bytes) and the release is sound only for the first. Split those two facts (e.g. a `barrier_released_non_converging` state distinct from `converged`), then make the charge a function of elapsed silence rather than call count.
-- [ ] 🚧 [#fixcausesbugs] Fix agent-doc causes or agent-doc-bugs.md + monsterrodholders.md turn being wedged on finish. Restarting Idea seemed to finish the turn, but this should never happen.
+- [x] 🚧 [#silentbarrierneverreleases] [P1] `#silentreplicabarrier`'s barrier release has NEVER fired — zero `crdt_replica_barrier_released_without_progress` across 11.9 MB of boost-client ops history and the whole agent-loop log. A totally silent editor replica (registered, then no pull / no ACK / no projection) cannot advance `redeliveries_without_ack` (that only moves inside `pending_updates`), so `#pullnoackdeadlock`'s budget of 50 is unreachable by construction, and the 12-charge expired-wait allowance is unreachable too because `await_delivery_convergence_for_file` (agent-doc-crdt-relay-io/src/lib.rs:4148) charges ONCE per call and returns — preflight makes one 3.4s await and then defers. Measured 2026-09-20 on src/boost-client/tasks/monsterrodholders.md: zero `crdt_replica_pull` 19:41:00Z-19:47:28Z, `delivery_converged=false` with `delivery_version` frozen at 60 from 19:41:46Z to 19:44:45Z, cleared only by the operator restarting IDEA at 19:44:32Z. DESIGN CONSTRAINT, learned by trying the obvious fix and reverting it: parking in `remaining/13` slices so one await reaches 12 charges does release the barrier (test green, mutation-checked) but then breaks `serialized_atomic_write_retained_ack_timeout_forbids_agent_recapture` — and breaks it correctly, because releasing a silent member flips `delivery_converged` to true and the write path reports "editor acknowledged the canonical target" for an editor that acknowledged nothing. `delivery_converged` carries two meanings (consistent cut for the commit barrier vs. the editor holds the bytes) and the release is sound only for the first. Split those two facts (e.g. a `barrier_released_non_converging` state distinct from `converged`), then make the charge a function of elapsed silence rather than call count.
+- [x] [#fixcausesbugs] Fix agent-doc causes or agent-doc-bugs.md + monsterrodholders.md turn being wedged on finish. Restarting Idea seemed to finish the turn, but this should never happen.
 <!-- /agent:backlog -->
 
 ## Review

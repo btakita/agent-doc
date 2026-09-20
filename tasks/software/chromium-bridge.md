@@ -42,7 +42,7 @@ Compacted content:
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Pending / Not Built

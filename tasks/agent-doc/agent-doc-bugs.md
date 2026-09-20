@@ -14,7 +14,7 @@ prompt_presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -665,6 +665,46 @@ What *is* actionable is the agent-doable work those items keep re-deriving by ha
 **`#archiveindexwal`** — that orchestrate call sat 4 minutes in state `D`, its only non-socket fds on a 115.6 MB `archive-index.db` plus a live `-journal`, wchan `jbd2_log_wait_commit`, 7s CPU across 4 minutes wall. `archive_index.rs:564` sets only `PRAGMA foreign_keys = ON`; `state_store.rs:657` sets `journal_mode = WAL` with a 30s busy_timeout and documents why. The archive index is the outlier.
 
 Exchange is at 608 lines / 26 sections — noting the size, not stalling the queue for it.
+
+### Re: queue drain — opus-5 · 2026-09-20T16:25-04:00
+
+> **Queue prompt:**
+>
+> Fix agent-doc causes or agent-doc-bugs.md + monsterrodholders.md turn being wedged on finish. Restarting Idea seemed to finish the turn, but this should never happen.
+
+Three of the four queue items are landed, tested, installed and pushed (`agent-doc 22d8bd33b`). The wedge itself I have a hard root cause for and **no landed fix** — I tried one, it made the binary lie about editor acknowledgement, and I reverted it. Details below, because the constraint is the interesting part.
+
+#### The wedge — root cause, measured, not inferred
+
+The editor went **completely silent**: zero `crdt_replica_pull` for `monsterrodholders.md` between **19:41:00Z and 19:47:28Z**. Across that silence `delivery_converged=false` with `delivery_version` frozen at **60** from 19:41:46Z to 19:44:45Z. It cleared at exactly 19:44:32Z — when you restarted IDEA.
+
+A silent replica can never advance `redeliveries_without_ack` (that only moves inside `pending_updates`, i.e. on a pull), so `#pullnoackdeadlock`'s budget of 50 is unreachable by construction. The intended escape is `#silentreplicabarrier`: `charge_barrier_wait_without_progress`, 12 expired convergence waits. **That release has never fired once** — zero `crdt_replica_barrier_released_without_progress` across 11.9 MB of `boost-client` ops history and the whole agent-loop log. The arithmetic says why: `await_delivery_convergence_for_file` charges **once per call and returns**, so 12 charges need 12 separate awaits; preflight makes one (`timeout_ms=3369`) and then defers (`preflight_visible_mutation_deferred_lazily_current state=delivery_pending`). The allowance is effectively infinite.
+
+**Why the obvious fix is wrong.** I implemented it — park in `remaining/13` slices so one await spends its budget and actually reaches 12 charges. It worked (new test green, mutation-checked: reverting the `continue` fails it). It also broke `serialized_atomic_write_retained_ack_timeout_forbids_agent_recapture`, and it broke it *correctly*: releasing the silent member from the barrier flips `delivery_converged` to true, and the write path then reports "editor acknowledged the canonical target" for an editor that acknowledged nothing. Fail-closed still, no disk write — but a false statement. `delivery_converged` currently carries two meanings (consistent cut for the commit barrier; the editor has the bytes) and the release mechanism is only sound for the first. Reverted; suite back to 9579/9579.
+
+So the fix needs those two meanings separated first. Filed at the top of the backlog as `#silentbarrierneverreleases` with the evidence and that constraint.
+
+#### What did land
+
+- **`#ghostrelaymember`** (not on the queue — found while chasing the above). `RelayHub` liveness is keyed by opaque CRDT client id, and the only production reap was *lazy*: `dead_editor_replica_ids` runs on the NEXT registration. `record_reliable_sync_editor_exit` updated the durable liveness plane and state-event retention and never touched the hub, so an editor that exits and does not come back holds `live_editors >= 1` forever. Now reaped eagerly on the OS exit fact. Mutation-checked: with the wiring disabled the controller test observes `live_editors` stuck at 1.
+- **`#archiveindexwal`** — `archive-index.db` now opens `journal_mode=WAL` + `busy_timeout=30000` + `foreign_keys=ON` through one helper (all 6 open sites), and each reindex is one transaction instead of an fsync per row.
+- **`#orchestratepresetexpand`** — preflight now emits `prompt_preset_expansions` (name + body) beside `prompt_presets_requested`; SKILL.md no longer routes expansion through `agent-doc orchestrate --from-exchange`, which never read `prompt_presets` frontmatter and abandoned the live `PreflightStarted` cycle.
+- **`#pluginactivationprobe`** — new `src/plugin_activation.rs`: compares the installed jar's mtime against each live IDE's `/proc` start time, surfaced in `agent-doc session doctor`. Registration-independent, so it also answers "no IDE is running at all" (dead premise) rather than staying silent like `stale_plugin`.
+
+#### Two corrections to my own work this turn
+
+I twice reached a wrong conclusion from filtered tool output, and both would have shipped as confident claims:
+
+1. `ps -eo pid,comm | grep -icE 'java|idea'` returned **0** while IDEA pid 1023909 was running. I concluded "no IDE exists" and built the whole ghost-editor theory on it. `live_editors=1` was correct the entire time.
+2. A recursive `grep` for `charge_barrier_wait_without_progress` showed only test hits, so I concluded the escape hatch had no production caller. It is wired, in `agent-doc-crdt-relay-io/src/lib.rs:4148` — the grep missed it.
+
+Everything above that survived is re-verified with `python3` reads of the raw log. The `#ghostrelaymember` fix stands on its own merits (mutation-checked), but it is **not** the cause of your wedge.
+
+#### Your rolled-back queue edits
+
+Same mechanism, same moment. The old IDE held the replica and stopped answering; your queue lines lived in that buffer without a converged delivery. When it died at 19:44:32Z the replacement registration bootstrapped from the canonical, which did not have them. The nine `do [#...]` lines are on disk now. This is downstream of `#silentbarrierneverreleases` — a barrier that releases on a bounded budget would have forced the question minutes earlier, while the old buffer was still alive.
+
+Verification: `make check` green (9579 tests, clippy, sim-medium, version-sync, audit-docs, editor-parity, TLA+). `make install` done, supervisors recycled for both `agent-loop` and `boost-client`. Pushed `22d8bd33b`; CI run 35534811152 was still in progress at closeout, previous run green.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -674,14 +714,16 @@ Exchange is at 608 lines / 26 sections — noting the size, not stalling the que
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do #actionable-review~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 do [#fixcausesbugs]
+- ~~do [#orchestratepresetexpand]~~
+- ~~do [#archiveindexwal]~~
+- ~~do [#pluginactivationprobe]~~
 <!-- /agent:queue -->
 
 
-<!-- agent:backlog priority -->
-- [ ] [#orchestratepresetexpand] SKILL.md routes preset expansion through `agent-doc orchestrate <FILE> --from-exchange` whenever preflight reports `prompt_presets_requested`, but that command does not expand the preset. Measured 2026-09-20 on `#actionable-review`: it printed `mode: sequential`, parsed the PREVIOUS response's four verification bullets as `tasks: 4`, then logged `closing preflight handoff cycle cycle-1789931555969 before task injection` — closing the live cycle the UserPromptSubmit hook had just sealed for this turn. It also ran 4+ minutes with zero output before reaching that point. The preset body lives in document frontmatter (`prompt_presets`) and was never read. Either teach orchestrate to expand `prompt_presets_requested` from frontmatter, or stop routing preset expansion through it in SKILL.md — and never close a live preflight handoff cycle from what the agent is told is an expansion step.
-- [ ] [#archiveindexwal] `.agent-doc/archive-index.db` (115.6 MB) opens with only `PRAGMA foreign_keys = ON` (agent-doc-sqlite/src/archive_index.rs:564) — no `journal_mode = WAL` and no `busy_timeout`, unlike agent-doc-sqlite/src/state_store.rs:657 which sets WAL plus a 30s busy_timeout and documents why. Measured 2026-09-20: `agent-doc orchestrate --from-exchange` sat 4 minutes in process state `D` with its only non-socket fds on `archive-index.db` and a live `archive-index.db-journal`, thread wchan `jbd2_log_wait_commit` / `folio_wait_bit_common`, burning 7s CPU across 4 minutes of wall clock. Give the archive index the same WAL + busy_timeout pragmas as the state store and batch its writes into transactions instead of one fsync-bound rollback-journal commit per row.
-- [ ] [#pluginactivationprobe] Three `agent:review` items (#tmuxfocussyncverify, #activateinstalledjetbrai, #harnessswitchverify) carry a hand-recorded (staged plugin version, live IDE PID, process start time) triple as their premise, and each has been refreshed by hand at least twice because that triple rots the moment IntelliJ restarts or exits. The 2026-09-20 refresh recorded IDEA PID 1645748; as of 15:20 today no IntelliJ or java process exists at all, so the premise is dead again. The `stale_plugin` preflight warning (agent-doc-preflight-io/src/warnings.rs:380) only fires from live editor registrations, so it stays silent when no editor is attached — exactly when the triple goes stale. Add a registration-independent activation probe that compares the installed plugin artifact mtime against each live IDE process start time, and surface it in `agent-doc session doctor`, so these premises are machine-refreshed instead of re-derived by the agent every cycle.
+<!-- agent:backlog priority queue -->
+- [ ] [#silentbarrierneverreleases] [P1] `#silentreplicabarrier`'s barrier release has NEVER fired — zero `crdt_replica_barrier_released_without_progress` across 11.9 MB of boost-client ops history and the whole agent-loop log. A totally silent editor replica (registered, then no pull / no ACK / no projection) cannot advance `redeliveries_without_ack` (that only moves inside `pending_updates`), so `#pullnoackdeadlock`'s budget of 50 is unreachable by construction, and the 12-charge expired-wait allowance is unreachable too because `await_delivery_convergence_for_file` (agent-doc-crdt-relay-io/src/lib.rs:4148) charges ONCE per call and returns — preflight makes one 3.4s await and then defers. Measured 2026-09-20 on src/boost-client/tasks/monsterrodholders.md: zero `crdt_replica_pull` 19:41:00Z-19:47:28Z, `delivery_converged=false` with `delivery_version` frozen at 60 from 19:41:46Z to 19:44:45Z, cleared only by the operator restarting IDEA at 19:44:32Z. DESIGN CONSTRAINT, learned by trying the obvious fix and reverting it: parking in `remaining/13` slices so one await reaches 12 charges does release the barrier (test green, mutation-checked) but then breaks `serialized_atomic_write_retained_ack_timeout_forbids_agent_recapture` — and breaks it correctly, because releasing a silent member flips `delivery_converged` to true and the write path reports "editor acknowledged the canonical target" for an editor that acknowledged nothing. `delivery_converged` carries two meanings (consistent cut for the commit barrier vs. the editor holds the bytes) and the release is sound only for the first. Split those two facts (e.g. a `barrier_released_non_converging` state distinct from `converged`), then make the charge a function of elapsed silence rather than call count.
+- [ ] 🚧 [#fixcausesbugs] Fix agent-doc causes or agent-doc-bugs.md + monsterrodholders.md turn being wedged on finish. Restarting Idea seemed to finish the turn, but this should never happen.
 <!-- /agent:backlog -->
 
 ## Review

@@ -278,6 +278,77 @@ fn gated_review_id_from_line(line: &str) -> Option<String> {
     }
 }
 
+/// Which tracked-work component a replay witness asks about.
+///
+/// `#resumereplaynotidempotent`: the id-targeting mutation commands each fail
+/// when their target is gone, and each searches a DIFFERENT component — so
+/// "is the id still somewhere in the document" is never the right question.
+/// `--backlog-edit` searches only `agent:backlog`, and an item this same cycle
+/// gated into `agent:review` is still plainly visible in the document while
+/// being unreachable to the edit. Observed live 2026-09-20 on
+/// `cycle-1789921516976`, where `#ads-delivery-blackout` moved to `agent:review`
+/// and the replayed edit refused forever with
+/// `pending edit: no item with id [#ads-delivery-blackout]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrackedWorkScope {
+    /// `agent:review` only — `--review-resolve`, `--review-remove`, `--review-edit`.
+    Review,
+    /// The backlog component only — `--backlog-edit`.
+    Backlog,
+    /// The icebox component only — `--icebox-edit`.
+    Icebox,
+    /// Gated in `agent:review` OR the backlog — `--backlog-ungate`, which
+    /// resolves against review first and falls back to the backlog component.
+    GatedAnywhere,
+}
+
+fn component_matches_scope(name: &str, scope: TrackedWorkScope) -> bool {
+    match scope {
+        TrackedWorkScope::Review => element::is_review_component(name),
+        TrackedWorkScope::Backlog => element::is_backlog_component(name),
+        TrackedWorkScope::Icebox => element::is_icebox_component(name),
+        TrackedWorkScope::GatedAnywhere => {
+            element::is_review_component(name) || element::is_backlog_component(name)
+        }
+    }
+}
+
+/// Whether the components in `scope` still hold an item with this id.
+///
+/// `#resumereplaynotidempotent`: the replay witness for every id-targeting
+/// mutation that errors when its target is missing. "Still present" means the
+/// mutation has not landed; "absent" means it has landed (or can never land),
+/// and replaying it would refuse forever.
+///
+/// Deliberately parses the components rather than matching line prefixes: a
+/// TYPED gate such as `- [/release]` must count exactly like `- [/]`, and a
+/// prefix witness that misses it would classify an unlanded mutation as
+/// already-applied and silently drop its replay.
+///
+/// Answers `true` — keep the replay — when the document cannot be parsed or the
+/// id normalizes to nothing. Keeping a replay is recoverable; dropping one is
+/// silent tracked-work loss.
+pub fn tracked_work_id_present(content: &str, id: &str, scope: TrackedWorkScope) -> bool {
+    let wanted = backlog::normalize_pending_id(id);
+    if wanted.is_empty() {
+        return true;
+    }
+    let Ok(components) = element::parse(content) else {
+        return true;
+    };
+    components
+        .iter()
+        .filter(|c| component_matches_scope(&c.name, scope))
+        .any(|c| {
+            let (_, items, _) = backlog::parse_items(c.content(content));
+            items.iter().any(|item| {
+                backlog::normalize_pending_id(&item.id) == wanted
+                    && (scope != TrackedWorkScope::GatedAnywhere
+                        || item.state == backlog::PendingState::Gated)
+            })
+        })
+}
+
 /// Whether any `agent:review` component still holds an item with this id.
 ///
 /// `#resumereplaynotidempotent`: the replay witness for `--review-resolve` and
@@ -294,22 +365,7 @@ fn gated_review_id_from_line(line: &str) -> Option<String> {
 /// replay is the safe direction, because the write path is idempotence-checked
 /// downstream while a dropped replay is unrecoverable.
 pub fn review_component_contains_id(content: &str, id: &str) -> bool {
-    let wanted = backlog::normalize_pending_id(id);
-    if wanted.is_empty() {
-        return true;
-    }
-    let Ok(components) = element::parse(content) else {
-        return true;
-    };
-    components
-        .iter()
-        .filter(|c| element::is_review_component(&c.name))
-        .any(|c| {
-            let (_, items, _) = backlog::parse_items(c.content(content));
-            items
-                .iter()
-                .any(|item| backlog::normalize_pending_id(&item.id) == wanted)
-        })
+    tracked_work_id_present(content, id, TrackedWorkScope::Review)
 }
 
 /// Whether an item with this id is still gated in `agent:review` *or* the
@@ -325,25 +381,7 @@ pub fn review_component_contains_id(content: &str, id: &str) -> bool {
 /// Parse failure answers `true` for the same fail-safe reason as
 /// [`review_component_contains_id`].
 pub fn id_is_gated_in_tracked_work(content: &str, id: &str) -> bool {
-    let wanted = backlog::normalize_pending_id(id);
-    if wanted.is_empty() {
-        return true;
-    }
-    let Ok(components) = element::parse(content) else {
-        return true;
-    };
-    components
-        .iter()
-        .filter(|c| {
-            element::is_review_component(&c.name) || element::is_backlog_component(&c.name)
-        })
-        .any(|c| {
-            let (_, items, _) = backlog::parse_items(c.content(content));
-            items.iter().any(|item| {
-                item.state == backlog::PendingState::Gated
-                    && backlog::normalize_pending_id(&item.id) == wanted
-            })
-        })
+    tracked_work_id_present(content, id, TrackedWorkScope::GatedAnywhere)
 }
 
 /// Token-efficient projection of gated `agent:review` items.

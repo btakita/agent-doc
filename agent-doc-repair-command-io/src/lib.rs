@@ -256,17 +256,28 @@ fn captured_closeout_for(
 /// tracked-work loss while a kept one is caught by the write path.
 ///
 /// Returns a `shape:#id` descriptor per dropped entry, for the ops log.
+/// The id an ops-log drop descriptor should name.
+///
+/// Bare-id flags carry the id itself; the `id=text` edit flags carry a pair, and
+/// logging the whole pair would put an arbitrary backlog body in the ops log.
+fn dropped_entry_id(entry: &str) -> &str {
+    let id = entry.split_once('=').map_or(entry, |(id, _)| id);
+    id.trim().trim_start_matches('#')
+}
+
 pub fn drop_already_applied_mutations(
     options: &mut agent_doc_write_command_io::CommandOptions,
     current_content: &str,
 ) -> Vec<String> {
     let mut dropped = Vec::new();
-    let mut retain_witnessed = |shape: &str, ids: &mut Vec<String>, still_pending: &dyn Fn(&str) -> bool| {
-        ids.retain(|id| {
-            if still_pending(id) {
+    let mut retain_witnessed = |shape: &str,
+                                entries: &mut Vec<String>,
+                                still_pending: &dyn Fn(&str) -> bool| {
+        entries.retain(|entry| {
+            if still_pending(entry) {
                 return true;
             }
-            dropped.push(format!("{shape}:#{}", id.trim().trim_start_matches('#')));
+            dropped.push(format!("{shape}:#{}", dropped_entry_id(entry)));
             false
         });
     };
@@ -284,6 +295,42 @@ pub fn drop_already_applied_mutations(
     retain_witnessed("backlog-ungate", &mut options.pending_ungate, &|id| {
         agent_doc_element_review::id_is_gated_in_tracked_work(current_content, id)
     });
+    // The `id=text` edit family. Each searches exactly ONE component and errors
+    // when the id is not in it, so each needs its own scope: an item this cycle
+    // gated out of `agent:backlog` into `agent:review` is still plainly present
+    // in the document while being unreachable to `--backlog-edit`. Observed live
+    // 2026-09-20 on `cycle-1789921516976`, where `#ads-delivery-blackout` moved
+    // to review and the replayed edit refused forever with `pending edit: no
+    // item with id [#ads-delivery-blackout]`.
+    //
+    // Re-applying an edit whose target IS still present is idempotent — it sets
+    // the text to the same value — so "present" safely keeps the replay.
+    for (shape, pairs, scope) in [
+        (
+            "backlog-edit",
+            &mut options.pending_edit,
+            agent_doc_element_review::TrackedWorkScope::Backlog,
+        ),
+        (
+            "icebox-edit",
+            &mut options.icebox_edit,
+            agent_doc_element_review::TrackedWorkScope::Icebox,
+        ),
+        (
+            "review-edit",
+            &mut options.review_edit,
+            agent_doc_element_review::TrackedWorkScope::Review,
+        ),
+    ] {
+        retain_witnessed(shape, pairs, &|pair| {
+            // A pair with no `=` is malformed; leave it for the write path to
+            // reject with its own message rather than silently swallowing it.
+            let Some((id, _)) = pair.split_once('=') else {
+                return true;
+            };
+            agent_doc_element_review::tracked_work_id_present(current_content, id, scope)
+        });
+    }
     dropped
 }
 

@@ -250,6 +250,100 @@ mod tests {
     }
 
     #[test]
+    fn resume_drops_a_backlog_edit_whose_item_this_cycle_gated_into_review() {
+        // `#resumereplaynotidempotent`, observed live on cycle-1789921516976:
+        // the closeout gated `#ads-delivery-blackout` out of `agent:backlog`
+        // into `agent:review` AND carried a `--backlog-edit` for it. The move
+        // landed, the write was retained, and every resume then refused with
+        // `pending edit: no item with id [#ads-delivery-blackout]` — forever,
+        // because `--backlog-edit` searches only the backlog component and the
+        // id will never return to it.
+        let gated_into_review = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#openwork] open backlog work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#ads-delivery-blackout] gated for operator proof\n",
+            "<!-- /agent:review -->\n",
+        );
+        let mut options = replay_options();
+        options.pending_edit = vec!["ads-delivery-blackout=narrowed next action".to_string()];
+
+        let dropped = agent_doc_repair_command_io::drop_already_applied_mutations(
+            &mut options,
+            gated_into_review,
+        );
+
+        assert_eq!(
+            dropped,
+            vec!["backlog-edit:#ads-delivery-blackout".to_string()],
+            "the descriptor must name the id, not the whole id=text pair"
+        );
+        assert!(options.pending_edit.is_empty());
+        assert!(!options.has_pending_mutation());
+    }
+
+    #[test]
+    fn resume_keeps_an_edit_whose_item_is_still_in_its_own_component() {
+        // Re-applying an edit whose target is still there is idempotent, so
+        // "present" must keep the replay — this is the direction that loses
+        // tracked work if the witness is too eager.
+        let mut options = replay_options();
+        options.pending_edit = vec!["openwork=narrowed next action".to_string()];
+        options.review_edit = vec!["untypedgate=still gated, retitled".to_string()];
+
+        let dropped = agent_doc_repair_command_io::drop_already_applied_mutations(
+            &mut options,
+            tracked_work_doc(),
+        );
+
+        assert!(dropped.is_empty(), "{dropped:?}");
+        assert_eq!(options.pending_edit.len(), 1);
+        assert_eq!(options.review_edit.len(), 1);
+    }
+
+    #[test]
+    fn resume_scopes_each_edit_shape_to_its_own_component() {
+        // Every edit flag searches exactly ONE component, so an id present in a
+        // DIFFERENT component must not keep the replay alive.
+        // `#gatedbacklog` is in the backlog, `#untypedgate` is in review.
+        let mut options = replay_options();
+        options.pending_edit = vec!["untypedgate=not in the backlog".to_string()];
+        options.review_edit = vec!["gatedbacklog=not in review".to_string()];
+        options.icebox_edit = vec!["openwork=not in the icebox".to_string()];
+
+        let dropped = agent_doc_repair_command_io::drop_already_applied_mutations(
+            &mut options,
+            tracked_work_doc(),
+        );
+
+        assert_eq!(
+            dropped,
+            vec![
+                "backlog-edit:#untypedgate".to_string(),
+                "icebox-edit:#openwork".to_string(),
+                "review-edit:#gatedbacklog".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn resume_leaves_a_malformed_edit_pair_for_the_write_path_to_reject() {
+        // No `=` is a malformed flag, not an already-applied mutation. Dropping
+        // it here would swallow the operator-visible error.
+        let mut options = replay_options();
+        options.pending_edit = vec!["no-equals-sign-at-all".to_string()];
+
+        let dropped = agent_doc_repair_command_io::drop_already_applied_mutations(
+            &mut options,
+            tracked_work_doc(),
+        );
+
+        assert!(dropped.is_empty(), "{dropped:?}");
+        assert_eq!(options.pending_edit.len(), 1);
+    }
+
+    #[test]
     fn resume_drops_only_the_applied_half_of_a_mixed_plan() {
         let mut options = replay_options();
         options.review_resolve = vec!["untypedgate".to_string(), "alreadygone".to_string()];

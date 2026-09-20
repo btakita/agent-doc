@@ -293,8 +293,9 @@ Exchange is at 232 lines across 13 response sections, just past the warn thresho
 
 
 <!-- agent:backlog priority -->
+- [ ] [#retainedprojexit1] `agent-doc respond` exits 1 with a "half-applied" error on retained=delivery_projection_pending even when BOTH halves already landed and the keyed worker converges seconds later. Observed 2026-09-20 on cycle-1789878037902: respond printed `[pending] completed and reaped 1 item(s)` twice, then errored `response ... is already applied but the same closeout's tracked-work mutations are not`; disk already matched HEAD at commit 16d6ab2981 with the response section AND the done-archive move both present, and a second `session-check` flipped INTERRUPTED(write_applied) -> ok(committed, commit_success). The error text is doubly wrong: (1) it asserts a half-apply that did not occur, and (2) its recovery advice (`agent-doc commit <FILE>` or re-run `write --commit --backlog-only`) would DOUBLE-APPLY the tracked-work mutation, contradicting the same message's own do-not-resubmit guidance. Fix: when retained=delivery_projection_pending, report a deferral with exit 0 (or a distinct non-error status) and name only the await-and-observe path; never emit half-applied framing or resubmit remedies until the cycle is proven to actually be half-applied.
 - [ ] [#duplicatepreflightunblock] Fix duplicate agent-doc invocation refusing indefinitely while a prior cycle remains preflight_started; provide bounded cancellation and stale-cycle recovery that unblocks the document without operator timing.
-- #actionable-review
+- [ ] [#kqht] #actionable-review
 <!-- /agent:backlog -->
 
 ## Review

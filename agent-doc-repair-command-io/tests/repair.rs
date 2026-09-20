@@ -343,6 +343,177 @@ mod tests {
         assert_eq!(options.pending_edit.len(), 1);
     }
 
+    /// `#resumereplayauditrest`: the backlog with one completed-but-unreaped
+    /// item, so the reorder witness can prove it accepts `[x]` while the
+    /// gate/set-gate-type/set-verify witness rejects it.
+    fn tracked_work_doc_with_done() -> &'static str {
+        concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#openwork] open backlog work\n",
+            "- [x] [#doneunreaped] finished but not reaped yet\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#untypedgate] untyped gate\n",
+            "<!-- /agent:review -->\n",
+        )
+    }
+
+    #[test]
+    fn resume_keeps_a_gate_replay_while_its_target_is_open_anywhere() {
+        // `--backlog-gate` refuses only when the id is open NOWHERE: an open
+        // backlog item gates normally, and an id already gated into
+        // `agent:review` is a `validate_transition` NoOp, so replaying either
+        // is safe. This is the direction that loses tracked work if the
+        // witness is too eager.
+        let mut options = replay_options();
+        options.pending_gate = vec!["openwork".to_string(), "#untypedgate".to_string()];
+
+        let dropped = agent_doc_repair_command_io::drop_already_applied_mutations(
+            &mut options,
+            tracked_work_doc(),
+        );
+
+        assert!(dropped.is_empty(), "{dropped:?}");
+        assert_eq!(options.pending_gate.len(), 2);
+        assert!(options.has_pending_mutation());
+    }
+
+    #[test]
+    fn resume_drops_a_gate_replay_whose_target_is_no_longer_open() {
+        // The latching shape: the id is reaped (gone entirely) or completed.
+        // `op_gate` fails with `pending gate: no item with id` on the first and
+        // `validate_transition` refuses the second, and neither can ever
+        // succeed again, so the cycle would sit at `write_applied` forever.
+        let mut options = replay_options();
+        options.pending_gate = vec!["reapedaway".to_string(), "doneunreaped".to_string()];
+
+        let dropped = agent_doc_repair_command_io::drop_already_applied_mutations(
+            &mut options,
+            tracked_work_doc_with_done(),
+        );
+
+        assert_eq!(
+            dropped,
+            vec![
+                "backlog-gate:#reapedaway".to_string(),
+                "backlog-gate:#doneunreaped".to_string(),
+            ]
+        );
+        assert!(options.pending_gate.is_empty());
+        assert!(!options.has_pending_mutation());
+    }
+
+    #[test]
+    fn resume_keeps_gate_type_and_verify_replays_for_an_id_open_in_review() {
+        // These two resolve through `find_open_tracked_work_component_in_content`,
+        // which searches EVERY tracked component — unlike `--backlog-edit`. An
+        // id this cycle gated into `agent:review` is still perfectly reachable,
+        // so the backlog-only edit witness would be wrong here.
+        let mut options = replay_options();
+        options.pending_set_gate_type = vec!["untypedgate=release".to_string()];
+        options.pending_set_verify = vec!["untypedgate=ops-log:released".to_string()];
+
+        let dropped = agent_doc_repair_command_io::drop_already_applied_mutations(
+            &mut options,
+            tracked_work_doc(),
+        );
+
+        assert!(dropped.is_empty(), "{dropped:?}");
+        assert_eq!(options.pending_set_gate_type.len(), 1);
+        assert_eq!(options.pending_set_verify.len(), 1);
+    }
+
+    #[test]
+    fn resume_drops_gate_type_and_verify_replays_once_the_id_is_gone() {
+        let mut options = replay_options();
+        options.pending_set_gate_type = vec!["reapedaway=release".to_string()];
+        options.pending_set_verify = vec!["doneunreaped=ops-log:released".to_string()];
+
+        let dropped = agent_doc_repair_command_io::drop_already_applied_mutations(
+            &mut options,
+            tracked_work_doc_with_done(),
+        );
+
+        assert_eq!(
+            dropped,
+            vec![
+                "backlog-set-gate-type:#reapedaway".to_string(),
+                "backlog-set-verify:#doneunreaped".to_string(),
+            ],
+            "the descriptor must name the id, not the whole id=value pair"
+        );
+        assert!(options.pending_set_gate_type.is_empty());
+        assert!(options.pending_set_verify.is_empty());
+        assert!(!options.has_pending_mutation());
+    }
+
+    #[test]
+    fn resume_keeps_a_reorder_replay_for_ids_the_backlog_still_lists() {
+        // `op_reorder` reads the parsed item list, which still holds `[x]`
+        // items until they are reaped — so a done-but-unreaped id reorders
+        // fine and "open" would be the wrong witness.
+        let mut options = replay_options();
+        options.pending_reorder = Some("doneunreaped,openwork".to_string());
+
+        let dropped = agent_doc_repair_command_io::drop_already_applied_mutations(
+            &mut options,
+            tracked_work_doc_with_done(),
+        );
+
+        assert!(dropped.is_empty(), "{dropped:?}");
+        assert_eq!(
+            options.pending_reorder.as_deref(),
+            Some("doneunreaped,openwork")
+        );
+    }
+
+    #[test]
+    fn resume_drops_only_the_vanished_ids_from_a_reorder_replay() {
+        // `op_reorder` validates EVERY id up front and bails on the first
+        // missing one, so one reaped id kills the whole reorder forever. The
+        // witness is per id: the survivors still reorder. A review-only id
+        // counts as vanished, because the reorder searches the backlog
+        // component alone.
+        let mut options = replay_options();
+        options.pending_reorder = Some("openwork, #reapedaway ,untypedgate".to_string());
+
+        let dropped = agent_doc_repair_command_io::drop_already_applied_mutations(
+            &mut options,
+            tracked_work_doc_with_done(),
+        );
+
+        assert_eq!(
+            dropped,
+            vec![
+                "backlog-reorder:#reapedaway".to_string(),
+                "backlog-reorder:#untypedgate".to_string(),
+            ]
+        );
+        assert_eq!(options.pending_reorder.as_deref(), Some("openwork"));
+        assert!(options.has_pending_mutation());
+    }
+
+    #[test]
+    fn resume_drops_a_reorder_replay_whose_ids_are_all_gone() {
+        let mut options = replay_options();
+        options.pending_reorder = Some("reapedaway,alsogone".to_string());
+
+        let dropped = agent_doc_repair_command_io::drop_already_applied_mutations(
+            &mut options,
+            tracked_work_doc_with_done(),
+        );
+
+        assert_eq!(
+            dropped,
+            vec![
+                "backlog-reorder:#reapedaway".to_string(),
+                "backlog-reorder:#alsogone".to_string(),
+            ]
+        );
+        assert!(options.pending_reorder.is_none());
+        assert!(!options.has_pending_mutation());
+    }
+
     #[test]
     fn resume_drops_only_the_applied_half_of_a_mixed_plan() {
         let mut options = replay_options();

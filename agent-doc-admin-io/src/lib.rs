@@ -248,6 +248,8 @@ pub fn inspect(
     pane: Option<&str>,
     json: bool,
 ) -> Result<()> {
+    let anchored = admin_document_anchored_to_cwd(document);
+    let document = anchored.as_deref().or(document);
     let root = agent_doc_project_root_io::project_root_for_target_or_cwd(project_root, document)?;
     let inspection = effects.inspect_actor(&root, document, session, pane)?;
     if json {
@@ -277,17 +279,42 @@ pub fn inspect(
     Ok(())
 }
 
+/// Anchor an admin document argument to the process working directory.
+///
+/// `#qpausepathdouble`: the controller resolves a relative `file` against the
+/// PROJECT ROOT, while an operator types the path relative to their shell's
+/// CWD. Running `agent-doc admin queue pause src/boost-client/tasks/x.md` from
+/// the superproject therefore wrote a control row scoped to
+/// `<root>/src/boost-client/src/boost-client/tasks/x.md` — a document that does
+/// not exist. The command reported `queue_paused accepted`, the real document's
+/// control state never changed, and the operator had no way to see the
+/// difference except by reading the receipt path character by character.
+///
+/// Every reader canonicalizes (`document_queue_controller_pause_reason` calls
+/// `file.canonicalize()`), so the writer must too or the scope ids cannot
+/// match. A path that does not resolve is left exactly as given: the controller
+/// owns that error message, and silently rewriting an unresolvable path would
+/// hide the operator's typo behind a different one.
+fn admin_document_anchored_to_cwd(document: Option<&Path>) -> Option<std::path::PathBuf> {
+    let document = document?;
+    Some(
+        document
+            .canonicalize()
+            .unwrap_or_else(|_| document.to_path_buf()),
+    )
+}
+
 pub fn queue_control(
     effects: &impl AdminControllerEffects,
     options: QueueControlOptions<'_>,
 ) -> Result<()> {
-    let root = agent_doc_project_root_io::project_root_for_target_or_cwd(
-        options.project_root,
-        options.document,
-    )?;
+    let document = admin_document_anchored_to_cwd(options.document);
+    let document = document.as_deref().or(options.document);
+    let root =
+        agent_doc_project_root_io::project_root_for_target_or_cwd(options.project_root, document)?;
     let receipt = effects.control_queue(
         &root,
-        options.document,
+        document,
         options.action,
         options.observed_generation,
         options.reason,
@@ -297,13 +324,13 @@ pub fn queue_control(
 }
 
 pub fn reap(effects: &impl AdminControllerEffects, options: ReapOptions<'_>) -> Result<()> {
-    let root = agent_doc_project_root_io::project_root_for_target_or_cwd(
-        options.project_root,
-        options.document,
-    )?;
+    let anchored = admin_document_anchored_to_cwd(options.document);
+    let document = anchored.as_deref().or(options.document);
+    let root =
+        agent_doc_project_root_io::project_root_for_target_or_cwd(options.project_root, document)?;
     let receipt = effects.admin_reap(
         &root,
-        options.document,
+        document,
         options.session,
         options.pane,
         options.observed_generation,
@@ -371,6 +398,8 @@ pub fn handoff(
     reason: &str,
     json: bool,
 ) -> Result<()> {
+    let anchored = admin_document_anchored_to_cwd(Some(document));
+    let document = anchored.as_deref().unwrap_or(document);
     let root =
         agent_doc_project_root_io::project_root_for_target_or_cwd(project_root, Some(document))?;
     let receipt = effects.admin_handoff(&root, document, to_pane, observed_generation, reason)?;
@@ -386,6 +415,8 @@ pub fn repair_projection(
     reason: Option<&str>,
     json: bool,
 ) -> Result<()> {
+    let anchored = admin_document_anchored_to_cwd(document);
+    let document = anchored.as_deref().or(document);
     let root = agent_doc_project_root_io::project_root_for_target_or_cwd(project_root, document)?;
     let receipt =
         effects.repair_projection(&root, document, projection, observed_generation, reason)?;
@@ -494,6 +525,43 @@ mod tests {
         ) -> Result<ControllerAdminReceiptView> {
             anyhow::bail!("unused")
         }
+    }
+
+    /// `#qpausepathdouble`: an operator types a document path relative to their
+    /// shell, but the controller resolves a relative `file` against the PROJECT
+    /// ROOT. Anchoring here is what keeps
+    /// `agent-doc admin queue pause src/boost-client/tasks/x.md` from writing a
+    /// control row for `<root>/src/boost-client/src/boost-client/tasks/x.md`
+    /// while reporting `queue_paused accepted`.
+    ///
+    /// A unit test runs with the crate directory as CWD, so `Cargo.toml` is a
+    /// real relative path with no CWD mutation and no cross-test race.
+    #[test]
+    fn an_admin_document_argument_is_anchored_to_the_cwd() {
+        let relative = Path::new("Cargo.toml");
+        assert!(relative.is_relative());
+
+        let anchored = admin_document_anchored_to_cwd(Some(relative)).expect("anchored path");
+
+        assert!(
+            anchored.is_absolute(),
+            "a relative admin document must not reach the controller: {}",
+            anchored.display()
+        );
+        assert_eq!(anchored, relative.canonicalize().unwrap());
+    }
+
+    /// Anchoring must not invent a path for an argument that does not resolve:
+    /// the controller owns that error, and rewriting it would hide the typo.
+    #[test]
+    fn an_unresolvable_admin_document_argument_is_passed_through_unchanged() {
+        let missing = Path::new("no/such/document-that-does-not-exist.md");
+
+        assert_eq!(
+            admin_document_anchored_to_cwd(Some(missing)).as_deref(),
+            Some(missing)
+        );
+        assert!(admin_document_anchored_to_cwd(None).is_none());
     }
 
     #[test]

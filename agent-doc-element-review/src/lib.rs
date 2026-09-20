@@ -300,16 +300,50 @@ pub enum TrackedWorkScope {
     /// Gated in `agent:review` OR the backlog — `--backlog-ungate`, which
     /// resolves against review first and falls back to the backlog component.
     GatedAnywhere,
+    /// Still OPEN (not `[x]`) in ANY tracked-work component — backlog, review,
+    /// or icebox. This is the witness for the three commands that resolve their
+    /// target through `find_open_tracked_work_component_in_content`
+    /// (`--backlog-set-gate-type`, `--backlog-set-verify`) and for
+    /// `--backlog-gate`, whose own fallback chain (backlog take → open review
+    /// item → `gate_in_place`) refuses only once the id is open nowhere.
+    ///
+    /// Note it is `OpenAnywhere`, not "present anywhere": a reaped or completed
+    /// id is exactly the shape that latches these commands, and an id still
+    /// present but `[x]` makes them fail for a genuine reason (you cannot gate
+    /// completed work) that the first attempt would hit too.
+    OpenAnywhere,
+    /// Present in the backlog component in ANY state — the witness for
+    /// `--backlog-reorder`. `op_reorder` bails per id before reordering
+    /// anything, and it reads `PendingLayout::items()`, which includes `[x]`
+    /// items that have not been reaped yet. So "open" is too strict here: a
+    /// done-but-unreaped id still reorders fine, and dropping it would silently
+    /// change the operator's requested order.
+    BacklogAnyState,
 }
 
 fn component_matches_scope(name: &str, scope: TrackedWorkScope) -> bool {
     match scope {
         TrackedWorkScope::Review => element::is_review_component(name),
-        TrackedWorkScope::Backlog => element::is_backlog_component(name),
+        TrackedWorkScope::Backlog | TrackedWorkScope::BacklogAnyState => {
+            element::is_backlog_component(name)
+        }
         TrackedWorkScope::Icebox => element::is_icebox_component(name),
         TrackedWorkScope::GatedAnywhere => {
             element::is_review_component(name) || element::is_backlog_component(name)
         }
+        TrackedWorkScope::OpenAnywhere => element::is_tracked_work_component(name),
+    }
+}
+
+/// Whether an item in `scope` counts as a witness in the state it is in.
+fn item_state_matches_scope(state: backlog::PendingState, scope: TrackedWorkScope) -> bool {
+    match scope {
+        TrackedWorkScope::GatedAnywhere => state == backlog::PendingState::Gated,
+        TrackedWorkScope::OpenAnywhere => state != backlog::PendingState::Done,
+        TrackedWorkScope::Review
+        | TrackedWorkScope::Backlog
+        | TrackedWorkScope::Icebox
+        | TrackedWorkScope::BacklogAnyState => true,
     }
 }
 
@@ -343,8 +377,7 @@ pub fn tracked_work_id_present(content: &str, id: &str, scope: TrackedWorkScope)
             let (_, items, _) = backlog::parse_items(c.content(content));
             items.iter().any(|item| {
                 backlog::normalize_pending_id(&item.id) == wanted
-                    && (scope != TrackedWorkScope::GatedAnywhere
-                        || item.state == backlog::PendingState::Gated)
+                    && item_state_matches_scope(item.state, scope)
             })
         })
 }
@@ -382,6 +415,33 @@ pub fn review_component_contains_id(content: &str, id: &str) -> bool {
 /// [`review_component_contains_id`].
 pub fn id_is_gated_in_tracked_work(content: &str, id: &str) -> bool {
     tracked_work_id_present(content, id, TrackedWorkScope::GatedAnywhere)
+}
+
+/// Whether an item with this id is still OPEN in any tracked-work component.
+///
+/// `#resumereplayauditrest`: the replay witness for `--backlog-gate`,
+/// `--backlog-set-gate-type` and `--backlog-set-verify`. The latter two resolve
+/// their target through `find_open_tracked_work_component_in_content`, which
+/// fails with `id not found in backlog/icebox` the moment the id is open
+/// nowhere. `--backlog-gate` has its own three-step chain — take from the
+/// backlog, else accept an already-open review item as a NoOp, else
+/// `gate_in_place` — and every step is satisfied while the id is open
+/// somewhere. Re-gating an already-gated item is a `validate_transition` NoOp,
+/// so a landed gate replays harmlessly; only a reaped id latches the replay.
+pub fn id_is_open_in_tracked_work(content: &str, id: &str) -> bool {
+    tracked_work_id_present(content, id, TrackedWorkScope::OpenAnywhere)
+}
+
+/// Whether the backlog component still lists this id in any state.
+///
+/// `#resumereplayauditrest`: the replay witness for `--backlog-reorder`.
+/// `op_reorder` validates EVERY requested id against the backlog component up
+/// front and bails on the first missing one, so one reaped id fails the whole
+/// reorder — which is why the reorder witness is per id and the surviving ids
+/// still reorder. Any state counts: `op_reorder` reads the parsed item list,
+/// which still holds `[x]` items until they are reaped.
+pub fn id_is_in_backlog_any_state(content: &str, id: &str) -> bool {
+    tracked_work_id_present(content, id, TrackedWorkScope::BacklogAnyState)
 }
 
 /// Token-efficient projection of gated `agent:review` items.

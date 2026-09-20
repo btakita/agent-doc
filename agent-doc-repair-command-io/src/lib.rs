@@ -331,6 +331,60 @@ pub fn drop_already_applied_mutations(
             agent_doc_element_review::tracked_work_id_present(current_content, id, scope)
         });
     }
+    // `#resumereplayauditrest`: the remaining error-on-missing shapes.
+    //
+    // `--backlog-gate` refuses only once the id is open NOWHERE: `gate` takes
+    // the item from the backlog, else accepts an already-open review item as a
+    // NoOp, else falls through to `gate_in_place`, whose `op_gate` is the only
+    // step that errors. Re-gating an item that IS still open is a
+    // `validate_transition` NoOp, so keeping that replay is free.
+    //
+    // `--backlog-set-gate-type` and `--backlog-set-verify` resolve through
+    // `find_open_tracked_work_component_in_content`, which fails with `id not
+    // found in backlog/icebox` on the same condition. Their `id=value` pairs
+    // reuse `dropped_entry_id` so the ops log names the id, not the payload.
+    let open_witness =
+        |id: &str| agent_doc_element_review::id_is_open_in_tracked_work(current_content, id);
+    retain_witnessed("backlog-gate", &mut options.pending_gate, &open_witness);
+    let open_pair_witness = |pair: &str| {
+        // Malformed pairs belong to the write path's own error message.
+        let Some((id, _)) = pair.split_once('=') else {
+            return true;
+        };
+        open_witness(id)
+    };
+    retain_witnessed(
+        "backlog-set-gate-type",
+        &mut options.pending_set_gate_type,
+        &open_pair_witness,
+    );
+    retain_witnessed(
+        "backlog-set-verify",
+        &mut options.pending_set_verify,
+        &open_pair_witness,
+    );
+    // `--backlog-reorder` is ONE comma-separated id list, but `op_reorder`
+    // validates every id against the backlog component before reordering
+    // anything and bails on the first missing one — so a single reaped id kills
+    // the whole reorder forever. The witness is therefore per id: drop the ids
+    // the backlog no longer lists, keep the reorder for the survivors, and drop
+    // the flag entirely when none survive. Any state counts, because
+    // `op_reorder` sees `[x]` items that have not been reaped yet.
+    if let Some(order) = options.pending_reorder.take() {
+        let mut kept: Vec<String> = Vec::new();
+        for id in order.split(',').map(str::trim).filter(|id| !id.is_empty()) {
+            if agent_doc_element_review::id_is_in_backlog_any_state(current_content, id) {
+                kept.push(id.to_string());
+            } else {
+                dropped.push(format!("backlog-reorder:#{}", dropped_entry_id(id)));
+            }
+        }
+        // A single surviving id is still a real permutation — `op_reorder`
+        // moves it to the head — so keep the flag whenever anything survives.
+        if !kept.is_empty() {
+            options.pending_reorder = Some(kept.join(","));
+        }
+    }
     dropped
 }
 

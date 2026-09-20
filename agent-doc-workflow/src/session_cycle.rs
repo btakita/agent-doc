@@ -136,6 +136,16 @@ fn normalized_queue_head_text(text: &str) -> String {
 /// text-shape-based and only recognizes `- do ...` heads, so every **free-text**
 /// queue head (`- /goal ...`, `- JB Run Agent Doc still stalls ...`) fell through
 /// as fresh exchange intent and silently halted go mode.
+///
+/// `#qmultilinehead`: the head match is **per line**, not per change. A diff
+/// hunk coalesces adjacent added lines into ONE `PromptBearingChange`, so an
+/// operator who appends two queue items in a single edit produces a change whose
+/// text is `- <head one>\n- <head two>`. Matching that whole blob against the
+/// single-line head set can never hit, so the `#qgoalstall` fix above silently
+/// stopped applying the moment more than one line was added at once, and the
+/// drain stalled with every head still queued. A change is queue continuation
+/// only when EVERY one of its non-empty lines is an active head; any line that
+/// is not is a prompt authored outside the queue and still preempts.
 pub fn prompt_changes_preempt_queue(
     user_intent_prompt_changes: &[agent_doc_diff::PromptBearingChange],
     queue_active: bool,
@@ -152,10 +162,29 @@ pub fn prompt_changes_preempt_queue(
         .map(|prompt| normalized_queue_head_text(prompt))
         .filter(|prompt| !prompt.is_empty())
         .collect();
-    user_intent_prompt_changes.iter().any(|change| {
-        let normalized = normalized_queue_head_text(&change.text);
-        normalized.is_empty() || !heads.contains(&normalized)
-    })
+    user_intent_prompt_changes
+        .iter()
+        .any(|change| !change_is_active_queue_heads_only(&change.text, &heads))
+}
+
+/// Whether every non-empty line of a prompt-bearing change is an active queue
+/// head. An empty change is never queue continuation.
+fn change_is_active_queue_heads_only(
+    text: &str,
+    heads: &std::collections::HashSet<String>,
+) -> bool {
+    let mut saw_line = false;
+    for line in text.lines() {
+        let normalized = normalized_queue_head_text(line);
+        if normalized.is_empty() {
+            continue;
+        }
+        saw_line = true;
+        if !heads.contains(&normalized) {
+            return false;
+        }
+    }
+    saw_line
 }
 
 /// Derive the turn-scope manifest for prompts answered by this cycle.
@@ -714,6 +743,79 @@ mod tests {
             &[]
         ));
         assert!(!prompt_changes_preempt_queue(&[], false, &[]));
+    }
+
+    /// `#qmultilinehead`: the live stall this fixes, measured on
+    /// `tasks/agent-doc/agent-doc-bugs.md` 2026-09-20. The operator appended TWO
+    /// queue lines in one edit, so the differ emitted a single
+    /// `PromptBearingChange` whose text held both. Matching that two-line blob
+    /// against the one-line head set missed, `exchange_prompt_preempts_queue`
+    /// went true, and preflight reported `queue_active: true` with five
+    /// drainable heads but `queue_continuation_required: false`.
+    #[test]
+    fn two_queue_heads_added_in_one_edit_do_not_preempt_the_drain() {
+        let queue_prompts = vec![
+            "This document's queue stalled. Fix agent-doc causes and fix this class of error."
+                .to_string(),
+            "📌 do [#resumereplayauditrest]".to_string(),
+            "do [#fixrunlazily]".to_string(),
+        ];
+        let changes = vec![prompt_change(
+            "- This document's queue stalled. Fix agent-doc causes and fix this class of error.\n- do [#resumereplayauditrest]",
+        )];
+
+        assert!(
+            !prompt_changes_preempt_queue(&changes, true, &queue_prompts),
+            "appending two queue heads in one edit must not stall the drain"
+        );
+    }
+
+    /// The other direction: a multi-line change is only continuation when EVERY
+    /// line is an active head. One queued head plus one line of operator prose
+    /// in the same hunk is steering and must still preempt.
+    #[test]
+    fn a_multiline_change_with_one_non_queue_line_still_preempts() {
+        let queue_prompts = vec!["do [#fixrunlazily]".to_string()];
+        let changes = vec![prompt_change(
+            "- do [#fixrunlazily]\n- actually hold off, explain the design first",
+        )];
+
+        assert!(
+            prompt_changes_preempt_queue(&changes, true, &queue_prompts),
+            "prose added alongside a queue head is real user intent"
+        );
+    }
+
+    /// Blank lines inside a multi-line hunk are layout, not intent: they must
+    /// neither preempt on their own nor make an all-heads change look empty.
+    #[test]
+    fn blank_lines_between_queue_heads_are_ignored() {
+        let queue_prompts = vec![
+            "do [#fixrunlazily]".to_string(),
+            "do [#pluginzipeveryrelease]".to_string(),
+        ];
+        let changes = vec![prompt_change(
+            "- do [#fixrunlazily]\n\n- do [#pluginzipeveryrelease]\n",
+        )];
+
+        assert!(!prompt_changes_preempt_queue(
+            &changes,
+            true,
+            &queue_prompts
+        ));
+    }
+
+    /// A change with no content at all is not queue continuation — it keeps the
+    /// pre-`#qmultilinehead` empty-text behaviour.
+    #[test]
+    fn an_empty_change_still_preempts() {
+        let queue_prompts = vec!["do [#fixrunlazily]".to_string()];
+
+        assert!(prompt_changes_preempt_queue(
+            &[prompt_change("   \n\n")],
+            true,
+            &queue_prompts
+        ));
     }
 
     /// A mixed cycle — one queued head plus one genuine exchange prompt — must

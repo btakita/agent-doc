@@ -804,6 +804,44 @@ The probe fails open to `Unknown` on non-Linux, an unreadable `map_files`, or an
 **Not done, and deliberately so.** The item also proposed bumping the plugin version on every build. I did not, because this probe makes activation detection independent of the version string, and auto-bumping would churn the version on no-op rebuilds. Filed as `#jbversionbumpperbuild` `[recommended]` at the back of the queue so the call is yours rather than mine.
 
 CI run `35538568288` was still in progress at closeout; the prior run on `6da64a97c` was green. Recording it pending per the closeout rule rather than blocking on it. Exchange is at 747 lines across 30 sections.
+
+### Re: do [#jbversionbumpperbuild] — opus-5 · 2026-09-20T17:50-04:00
+
+> **Queue prompt:**
+>
+> do [#jbversionbumpperbuild]
+>
+> do [#missingreplicanoise]
+
+
+Done in `f50298c69`, pushed. I filed this one `[recommended]` arguing against it; you queued `do`, so it is built. Two items close this cycle — `#missingreplicanoise` landed last turn in `f20d66aa6` but never got its closeout because that turn never obtained a cycle contract.
+
+**First, live proof that the previous item works.** This turn's preflight opened with my own warning:
+
+```
+plugin_bytes_superseded: live jetbrains editor pid 1023909 is running
+superseded plugin bytes ... mapped but its inode was unlinked
+```
+
+That is `#pluginbyteidentity` firing in production against the real IDE, not a fixture.
+
+**The gap.** `install-editor-plugins` ran `gradlew buildPlugin` with no bump, so every `make install` reinstalled under the same version string. That is precisely how two distinct 0.2.388 jars came to exist.
+
+**I got the predicate wrong first, and the measurement caught it.** My initial cut reused the existing fence logic — "sources changed since the version file was last committed" — because that predicate already existed and looked right. It is not: it stays true for as long as the tree is dirty, so it bumped on *every* invocation. Three bumps for zero distinct builds, observed directly rather than reasoned about. That is exactly the churn I had objected to when I filed the item, reintroduced by my own implementation.
+
+The correct basis is a content digest. `pluginSourceDigest` is recorded beside `pluginVersion`, and the bump fires only when the source bytes differ from the packaged generation. Verified across five runs: bump, hold, hold, bump-on-change, and on revert a *new* version rather than reuse of the old one.
+
+Tracked and untracked sources both count, because `gradlew` compiles whatever is on disk. An unstaged `.kt` edit is already in the artifact, and that is the specific gap the duplicate 0.2.388 pair came through — the pre-existing fence only ever looked at staged and committed files.
+
+So the objection I raised when filing this is answered rather than overridden: the invariant holds, and an unchanged rebuild still adds no churn.
+
+**Verification.** `make check` exit 0, 9586 tests run, 9586 passed, 259 skipped, with the new `--self-test` executing inside `plugin-version-check`. Mutation-checked: a digest that ignores file content, a bump that clobbers the file, and a `write_property` that always appends each redden. Live: `make install` bumped 0.2.388 → 0.2.389 and installed `agent-doc-jetbrains-0.2.389.jar`.
+
+**`#missingreplicanoise`, closed here.** `f20d66aa6` adds `disposition=transient_probe|recovery_exhausted` plus `recovery_attempted`, extracted as `missing_replica_disposition` so it is testable. `make check` was green at 9586 and the live log showed **37 emissions, 37 `transient_probe`, 0 `recovery_exhausted`** — confirming the benign diagnosis instead of assuming it, and leaving the needle at zero so a real strand will stand out.
+
+**One caveat worth stating.** The committed `pluginSourceDigest` covers the working tree at install time, which includes another session's in-flight plugin edits. A clean tree bumps once more on its next install and then holds. I committed only my three paths and left that session's files alone.
+
+CI runs `35539851558`, `35539350263`, `35538568288` were all still in progress at closeout; recording them pending rather than blocking. Exchange is at 778 lines across 31 sections.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -813,8 +851,9 @@ CI run `35538568288` was still in progress at closeout; the prior run on `6da64a
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#jbversionbumpperbuild]~~
 - ~~do [#pluginbyteidentity]~~
-- do [#missingreplicanoise]
+- ~~do [#missingreplicanoise]~~
 - do [#preflightrefusalcontradiction]
 - do [#commitsilentfirstrun]
 - do [#runsubmitautoproof]
@@ -823,8 +862,8 @@ CI run `35538568288` was still in progress at closeout; the prior run on `6da64a
 
 
 <!-- agent:backlog priority queue -->
-- [ ] [#jbversionbumpperbuild] [recommended] [P3] Auto-bump the JetBrains plugin version on every build so two distinct builds never share a version string. Filed as a decision for the operator rather than done as part of #pluginbyteidentity, because the byte-identity probe landed in b82b701ba makes activation detection independent of the version string, and auto-bumping on every build would churn the version on no-op rebuilds and on builds that ship no .kt change. The existing convention (bump per .kt edit) already covers the case where behaviour actually changed. Close this as declined if the probe is judged sufficient.
-- [ ] [#missingreplicanoise] [P1] crdt_current_text_unavailable reason=missing_replica is benign transient churn logged identically to the terminal strand case, and it has repeatedly misdirected diagnosis including this cycle. Measured 2026-09-20: 988 occurrences across 7 documents (agent-doc-bugs, existence-lang, tsift, lazily, agent-loop, chromium-bridge, equityfundingsource) from 04:16Z through 21:05Z, including hours with no install at all, so it is NOT the #installstrandsreplica signature. Every sampled occurrence is immediately followed by a successful crdt_commit_barrier ready=true visible_delivery_projected=true and a full-length crdt_current_text, with 210 crdt_replica_pull events advancing generations normally. Demote the resolving case to debug, or stamp the terminal case with a distinct token so the needle stays greppable.
+- [x] 🚧 [#jbversionbumpperbuild] [recommended] [P3] Auto-bump the JetBrains plugin version on every build so two distinct builds never share a version string. Filed as a decision for the operator rather than done as part of #pluginbyteidentity, because the byte-identity probe landed in b82b701ba makes activation detection independent of the version string, and auto-bumping on every build would churn the version on no-op rebuilds and on builds that ship no .kt change. The existing convention (bump per .kt edit) already covers the case where behaviour actually changed. Close this as declined if the probe is judged sufficient.
+- [x] [#missingreplicanoise] [P1] crdt_current_text_unavailable reason=missing_replica is benign transient churn logged identically to the terminal strand case, and it has repeatedly misdirected diagnosis including this cycle. Measured 2026-09-20: 988 occurrences across 7 documents (agent-doc-bugs, existence-lang, tsift, lazily, agent-loop, chromium-bridge, equityfundingsource) from 04:16Z through 21:05Z, including hours with no install at all, so it is NOT the #installstrandsreplica signature. Every sampled occurrence is immediately followed by a successful crdt_commit_barrier ready=true visible_delivery_projected=true and a full-length crdt_current_text, with 210 crdt_replica_pull events advancing generations normally. Demote the resolving case to debug, or stamp the terminal case with a distinct token so the needle stays greppable.
 - [ ] [#preflightrefusalcontradiction] [P1] The preflight admission refusal emits two contradictory halves in one message and the operator cannot tell which to act on. Captured 2026-09-20T20:54Z on this document: it reported recovery=await_editor_replica_no_disk_write with "the same intent resumes when the controller derives settlement", and in the same breath "NO cycle is open and NO response capture is retained, so nothing owns this write and no state edge will fire, the visible edits are STRANDED not deferred, and waiting will not commit them". One half says wait, the other says waiting can never work. Dogfood watch already classified it: issue_class=projection_failure issue_key=1fa46fd1ad84a564d13d16b971df69ad0692de3e32c0c68a4c4507d67d3f8430. Derive one verdict from the ownership facts and emit only that remedy.
 - [ ] [#commitsilentfirstrun] [P2] agent-doc commit printed nothing at all on its first invocation and exited, then an immediately repeated identical invocation printed "[commit] repaired committed historical committed_capture drift into snapshot" followed by the real refusal. Captured 2026-09-20T20:55Z on this document while recovering from the preflight refusal above. A recovery command whose first run is silent reads as a hang or a no-op and invites the operator to escalate to force-disk, which is the one thing the same diagnostic forbids. Make the first run either print its repair and verdict, or exit non-zero with a reason.
 - [ ] [#runsubmitautoproof] [P2] Automate the started-turn proof that keeps #runsubmitfirstmatch gated on a human watcher. The claim to verify is that JetBrains Run Agent Doc submits the trigger rather than stranding it in the composer, fixed in 275ab868e. Dispatch-start proof is already recorded, since route diagnostics distinguish proof_scope=accepted_only from dispatch-start and the session log carries latest_start_pane plus committed_after_latest_run, so a predicate over those markers can resolve the gate without a person watching a pane. Wire it as a typed verify predicate via --backlog-set-gate-type verify=ops_log:<marker> so the gate auto-resolves.

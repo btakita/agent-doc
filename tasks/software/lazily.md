@@ -2,8 +2,8 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a0a7b3-63da-7000-a503-b84846308666
-agent: codex
+  codex: 01a0aca3-5653-7a13-b2f1-b0ffed3e840f
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -13,7 +13,7 @@ agent_doc_model_tier: high
 prompt_presets:
   '#actionable': Add actionable tasks into backlog + queue
   '#actionable-review': Add actionable review items into backlog + queue
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -47,7 +47,7 @@ Actionable review is complete for this edit: the archive summary is a document-b
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~#actionable-review~~ — auto-struck: answered this cycle (#ftstrike)
+- #actionable-review
 <!-- /agent:queue -->
 
 ## Backlog

@@ -236,6 +236,125 @@ mod tests {
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Abandoned);
     }
 
+    /// `#duplicatepreflightunblock`: a released owner plus the pre-capture
+    /// stall deadline is the second reclaim proof, so a duplicate invocation
+    /// has a bounded exit that does not wait on an operator typing `session
+    /// cancel-turn`.
+    #[test]
+    fn cancel_preflight_cycle_after_owner_release_abandons_a_stalled_empty_preflight() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = "# Doc\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        age_cycle_state(
+            &doc,
+            agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS + 1,
+        );
+
+        // The same cycle, asked without proof, is still protected.
+        assert_eq!(
+            agent_doc_repair_io::cancel_preflight_cycle(
+                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+                &doc
+            )
+            .unwrap(),
+            CancelOutcome::Protected
+        );
+
+        assert_eq!(
+            agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(
+                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+                &doc
+            )
+            .unwrap(),
+            CancelOutcome::Abandoned
+        );
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Abandoned);
+    }
+
+    /// Release alone must NOT reclaim: the route drain's projection await also
+    /// reports `OwnerReleased` when there was no owner to release, and that is
+    /// indistinguishable from a fresh cycle whose model has not answered yet.
+    /// Reclaiming on release alone abandoned a brand-new preflight.
+    #[test]
+    fn cancel_preflight_cycle_after_owner_release_protects_a_fresh_empty_preflight() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = "# Doc\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        assert_eq!(
+            agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(
+                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+                &doc
+            )
+            .unwrap(),
+            CancelOutcome::Protected,
+            "a fresh cycle may still be generating its first response"
+        );
+        assert!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .is_open(),
+        );
+    }
+
+    /// An explicit run cancel needs no deadline: the caller stopped the run
+    /// itself, so there is nothing left to wait for.
+    #[test]
+    fn cancel_preflight_cycle_after_run_cancel_needs_no_stall_deadline() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = "# Doc\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        assert_eq!(
+            agent_doc_repair_io::cancel_preflight_cycle_after_run_cancel(
+                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+                &doc
+            )
+            .unwrap(),
+            CancelOutcome::Abandoned
+        );
+    }
+
+    /// The new proof widens WHO may reclaim, never WHAT may be reclaimed: a
+    /// cycle that owns a response capture still survives.
+    #[test]
+    fn cancel_preflight_cycle_after_owner_release_still_protects_a_capture() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = "# Doc\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_capture_io::capture_response(&doc, "### Re: do — opus-4-8\n\nDone.\n").unwrap();
+        age_cycle_state(
+            &doc,
+            agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS + 1,
+        );
+
+        assert_eq!(
+            agent_doc_repair_io::cancel_preflight_cycle_after_owner_release(
+                &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+                &doc
+            )
+            .unwrap(),
+            CancelOutcome::Protected
+        );
+        assert!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .is_open(),
+            "a released owner does not license discarding a captured response"
+        );
+    }
+
     #[test]
     fn cancel_preflight_cycle_protects_cycle_with_capture() {
         let dir = setup_project();

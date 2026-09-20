@@ -2432,7 +2432,11 @@ pub fn cancel_preflight_cycle(
     effects: &impl RepairIoEffects,
     file: &Path,
 ) -> Result<agent_doc_turn::repair::CancelOutcome> {
-    cancel_preflight_cycle_with_authority(effects, file, false)
+    cancel_preflight_cycle_with_authority(
+        effects,
+        file,
+        agent_doc_turn::repair::EmptyPreflightCancelAuthority::Unproven,
+    )
 }
 
 /// Reclaim the empty preflight left after the caller has already canceled the
@@ -2443,13 +2447,38 @@ pub fn cancel_preflight_cycle_after_run_cancel(
     effects: &impl RepairIoEffects,
     file: &Path,
 ) -> Result<agent_doc_turn::repair::CancelOutcome> {
-    cancel_preflight_cycle_with_authority(effects, file, true)
+    cancel_preflight_cycle_with_authority(
+        effects,
+        file,
+        agent_doc_turn::repair::EmptyPreflightCancelAuthority::RunCancelled,
+    )
+}
+
+/// Reclaim the empty preflight left behind by an owner the controller proved
+/// RELEASED the cycle.
+///
+/// `#duplicatepreflightunblock`: this is the second proof that makes the
+/// reclaim reachable without an operator. The route closeout drain awaits the
+/// controller's closeout projection for a bounded 30s; an `OwnerReleased`
+/// change means no run is generating into the cycle any more, which is the
+/// same fact run cancellation proves. Without it, the drain's own
+/// `cancel_empty_preflight` step could never succeed and a duplicate
+/// invocation refused indefinitely.
+pub fn cancel_preflight_cycle_after_owner_release(
+    effects: &impl RepairIoEffects,
+    file: &Path,
+) -> Result<agent_doc_turn::repair::CancelOutcome> {
+    cancel_preflight_cycle_with_authority(
+        effects,
+        file,
+        agent_doc_turn::repair::EmptyPreflightCancelAuthority::OwnerReleased,
+    )
 }
 
 fn cancel_preflight_cycle_with_authority(
     effects: &impl RepairIoEffects,
     file: &Path,
-    run_cancelled: bool,
+    authority: agent_doc_turn::repair::EmptyPreflightCancelAuthority,
 ) -> Result<agent_doc_turn::repair::CancelOutcome> {
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(agent_doc_turn::repair::CancelOutcome::NoOpenCycle);
@@ -2463,13 +2492,38 @@ fn cancel_preflight_cycle_with_authority(
     if cycle_has_captured_response_projection(file, &state)? {
         return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
     }
-    if !run_cancelled {
+    if !authority.authorizes_cancel() {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "cancel_preflight_cycle_protected file={} cycle_id={} reason=run_cancel_not_proven",
+                "cancel_preflight_cycle_protected file={} cycle_id={} reason={}",
                 file.display(),
                 state.cycle_id,
+                authority.proof(),
+            ),
+        );
+        return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
+    }
+    // `#duplicatepreflightunblock`: an owner-release projection also reports a
+    // release when there was no owner to release, which is indistinguishable
+    // from a fresh cycle whose model has not answered yet. Pair it with the
+    // pre-capture stall deadline — chosen in `#suprecyclespin-falseabandon` to
+    // clear normal first-response latency — so the reclaim stays bounded and
+    // operator-free without overtaking a live turn.
+    if authority.requires_stalled_cycle()
+        && !state.stalled_before_response_capture_cycle(
+            0,
+            now_secs(),
+            agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS,
+        )
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "cancel_preflight_cycle_protected file={} cycle_id={} reason={}_cycle_not_stalled",
+                file.display(),
+                state.cycle_id,
+                authority.proof(),
             ),
         );
         return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
@@ -2489,15 +2543,17 @@ fn cancel_preflight_cycle_with_authority(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "cancel_preflight_cycle_abandoned file={} cycle_id={}",
+            "cancel_preflight_cycle_abandoned file={} cycle_id={} proof={}",
             file.display(),
-            state.cycle_id
+            state.cycle_id,
+            authority.proof(),
         ),
     );
     eprintln!(
-        "[cancel] abandoned empty preflight_started cycle {} for {} on explicit run cancel; next dispatch starts fresh",
+        "[cancel] abandoned empty preflight_started cycle {} for {} on proven {}; next dispatch starts fresh",
         state.cycle_id,
-        file.display()
+        file.display(),
+        authority.proof(),
     );
     Ok(agent_doc_turn::repair::CancelOutcome::Abandoned)
 }

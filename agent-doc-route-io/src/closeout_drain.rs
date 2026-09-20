@@ -25,6 +25,12 @@ pub struct RouteCloseoutDrainEffects {
     pub force_disk_route_writes: fn() -> bool,
     pub run_pending_maintenance: fn(&Path, bool) -> Result<()>,
     pub cancel_empty_preflight: fn(&Path) -> Result<bool>,
+    /// `#duplicatepreflightunblock`: reclaim an empty preflight once the
+    /// controller projection has PROVEN the owning actor released the cycle.
+    /// `cancel_empty_preflight` above carries no such proof, so it refuses by
+    /// construction while a first response may still be generating — which is
+    /// why a duplicate invocation had no bounded exit before this.
+    pub cancel_empty_preflight_after_owner_release: fn(&Path) -> Result<bool>,
     pub repair_closeout: fn(&Path) -> Result<String>,
     pub inspect_session: fn(&Path) -> Result<SessionCheckStatus>,
     pub await_closeout_projection: AwaitCloseoutProjectionFn,
@@ -150,7 +156,33 @@ pub fn drain_open_closeout_before_routed_dispatch(
                 CloseoutRecoveryAttempt::Recovered(label) => {
                     return Ok(RouteCloseoutDrainOutcome::Recovered(label));
                 }
-                CloseoutRecoveryAttempt::Blocked(reason) => reason,
+                // `#duplicatepreflightunblock`: ordinary recovery cannot close
+                // an empty preflight — it owns no response to replay and no
+                // drift to commit — so before this the drain reported `Blocked`
+                // and every later duplicate invocation repeated the same 30s
+                // await, indefinitely, until an operator ran `session
+                // cancel-turn` by hand. The projection has now proven the owner
+                // RELEASED the cycle, which is the same fact run cancellation
+                // proves, so the reclaim is authorized and bounded.
+                CloseoutRecoveryAttempt::Blocked(reason) => {
+                    if cycle.is_empty_preflight()
+                        && state.tracked_work_maintenance_required_at_preflight != Some(true)
+                        && (effects.cancel_empty_preflight_after_owner_release)(file)?
+                    {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "route_dispatch_drain_empty_preflight_cancelled_after_owner_release file={} cycle_id={}",
+                                file.display(),
+                                state.cycle_id,
+                            ),
+                        );
+                        return Ok(RouteCloseoutDrainOutcome::Recovered(
+                            "empty_preflight_cancelled_after_owner_release".to_string(),
+                        ));
+                    }
+                    reason
+                }
             }
         }
         CloseoutDrainProjection::AwaitingTerminal => first_reason,

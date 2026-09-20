@@ -97,6 +97,7 @@ pub fn content_and_staleness_warnings(
         warnings.push(warning);
     }
     warnings.extend(stale_plugin_warnings(file));
+    warnings.extend(plugin_byte_identity_warnings(file));
     warnings
 }
 
@@ -431,8 +432,335 @@ pub fn stale_plugin_warnings_from_registrations(
     warnings
 }
 
+/// `#pluginbyteidentity`: what a live editor process actually has *mapped* for
+/// its plugin jar, as opposed to what it *reports* as its version.
+///
+/// [`stale_plugin_warnings`] compares version strings, which is blind to the
+/// dominant real-world shape: `make install` rewrites the jar at the same path
+/// under the same version number, so a running IDE keeps executing the
+/// superseded bytes while every version comparison reports "current". Measured
+/// 2026-09-20 on this project: IDEA pid 1023909 mapped
+/// `agent-doc-jetbrains-0.2.388.jar (deleted)` while disk held a different
+/// inode, both labelled `0.2.388`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MappedPluginJar {
+    /// The mapped jar's backing inode was unlinked. The install replaced the
+    /// file and the process still executes the old bytes. Definitive.
+    Deleted { path: String },
+    /// Mapped, still present, but a different inode than the jar now at that
+    /// path — the same replacement seen through a filesystem that reused the
+    /// name without unlinking what we mapped.
+    Superseded {
+        path: String,
+        mapped_inode: u64,
+        disk_inode: u64,
+    },
+    /// Mapped and byte-identical to what is on disk.
+    Current { path: String, inode: u64 },
+    /// Nothing conclusive: no jar mapped, an unreadable `map_files`, or a
+    /// platform without `/proc`. Fails open — never manufactures a warning.
+    Unknown,
+}
+
+impl MappedPluginJar {
+    /// Whether the live process is running bytes that are no longer the
+    /// installed ones.
+    pub fn is_superseded(&self) -> bool {
+        matches!(
+            self,
+            MappedPluginJar::Deleted { .. } | MappedPluginJar::Superseded { .. }
+        )
+    }
+}
+
+/// Pure classifier for one mapped jar.
+///
+/// `mapped_link` is the raw `readlink` of a `/proc/<pid>/map_files/<range>`
+/// entry; the kernel appends `" (deleted)"` when the backing inode is gone,
+/// and that suffix is the whole signal — no stat can recover it afterwards.
+pub fn classify_mapped_plugin_jar(
+    mapped_link: &str,
+    mapped_inode: Option<u64>,
+    disk_inode: Option<u64>,
+) -> MappedPluginJar {
+    if let Some(path) = mapped_link.strip_suffix(" (deleted)") {
+        return MappedPluginJar::Deleted {
+            path: path.to_string(),
+        };
+    }
+    match (mapped_inode, disk_inode) {
+        (Some(mapped), Some(disk)) if mapped != disk => MappedPluginJar::Superseded {
+            path: mapped_link.to_string(),
+            mapped_inode: mapped,
+            disk_inode: disk,
+        },
+        (Some(mapped), Some(_)) => MappedPluginJar::Current {
+            path: mapped_link.to_string(),
+            inode: mapped,
+        },
+        // A jar we cannot stat on either side proves nothing.
+        _ => MappedPluginJar::Unknown,
+    }
+}
+
+/// Pure core: one deduplicated warning per (kind, pid) running superseded bytes.
+///
+/// The message has to name the version trap explicitly. An operator who reads
+/// "plugin 0.2.388 is running" and "0.2.388 is installed" will otherwise
+/// conclude the restart already happened, which is exactly how two review items
+/// in this project sat gated on a premise that was measurably wrong.
+pub fn plugin_byte_identity_warnings_from(
+    probes: &[(String, u32, MappedPluginJar)],
+) -> Vec<PreflightWarning> {
+    let mut seen: HashSet<(String, u32)> = HashSet::new();
+    let mut warnings = Vec::new();
+    for (kind, pid, mapped) in probes {
+        if !mapped.is_superseded() || !seen.insert((kind.clone(), *pid)) {
+            continue;
+        }
+        let detail = match mapped {
+            MappedPluginJar::Deleted { path } => {
+                format!("{path} is mapped but its inode was unlinked")
+            }
+            MappedPluginJar::Superseded {
+                path,
+                mapped_inode,
+                disk_inode,
+            } => format!(
+                "{path} is mapped as inode {mapped_inode} but disk now holds inode {disk_inode}"
+            ),
+            _ => continue,
+        };
+        warnings.push(PreflightWarning {
+            code: "plugin_bytes_superseded".to_string(),
+            message: format!(
+                "live {kind} editor pid {pid} is running superseded plugin bytes: {detail}. \
+                 The version string cannot show this — an install rewrites the jar under the \
+                 same version, so a version check reports the plugin as current while the \
+                 process keeps executing the replaced build. Restart the editor (or reopen the \
+                 document tab) to pick up the installed jar."
+            ),
+            document_agent: None,
+            active_harness: None,
+        });
+    }
+    warnings
+}
+
+/// Probe one process's mapped plugin jar. Linux-only; every other platform and
+/// every IO error yields [`MappedPluginJar::Unknown`].
+pub fn probe_mapped_plugin_jar(pid: u32, jar_stem: &str) -> MappedPluginJar {
+    let map_files = std::path::PathBuf::from(format!("/proc/{pid}/map_files"));
+    let Ok(entries) = std::fs::read_dir(&map_files) else {
+        return MappedPluginJar::Unknown;
+    };
+    for entry in entries.flatten() {
+        let Ok(target) = std::fs::read_link(entry.path()) else {
+            continue;
+        };
+        let link = target.to_string_lossy().into_owned();
+        let stem = link.strip_suffix(" (deleted)").unwrap_or(&link);
+        if !std::path::Path::new(stem)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(jar_stem) && name.ends_with(".jar"))
+        {
+            continue;
+        }
+        let mapped_inode = inode_of(&entry.path());
+        let disk_inode = inode_of(std::path::Path::new(stem));
+        let classified = classify_mapped_plugin_jar(&link, mapped_inode, disk_inode);
+        if classified.is_superseded() {
+            return classified;
+        }
+    }
+    MappedPluginJar::Unknown
+}
+
+#[cfg(unix)]
+fn inode_of(path: &std::path::Path) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|meta| meta.ino())
+}
+
+#[cfg(not(unix))]
+fn inode_of(_path: &std::path::Path) -> Option<u64> {
+    None
+}
+
+/// `#pluginbyteidentity`: warn when a live editor is executing plugin bytes that
+/// the installed jar has already replaced.
+pub fn plugin_byte_identity_warnings(file: &Path) -> Vec<PreflightWarning> {
+    let registrations =
+        agent_doc_controller_io::project_controller::live_editor_registrations_for_file(file)
+            .unwrap_or_default();
+    let mut probes = Vec::new();
+    let mut probed: HashSet<u32> = HashSet::new();
+    for registration in &registrations {
+        let Some(jar_stem) = plugin_jar_stem(&registration.editor_kind) else {
+            continue;
+        };
+        let pid = u32::try_from(registration.pid).unwrap_or_default();
+        if pid == 0 || !probed.insert(pid) {
+            continue;
+        }
+        probes.push((
+            registration.editor_kind.clone(),
+            pid,
+            probe_mapped_plugin_jar(pid, jar_stem),
+        ));
+    }
+    plugin_byte_identity_warnings_from(&probes)
+}
+
+/// Jar filename prefix for an editor kind. Only editors that load agent-doc as a
+/// jar inside their own process can be probed this way.
+pub fn plugin_jar_stem(editor_kind: &str) -> Option<&'static str> {
+    match editor_kind.to_ascii_lowercase().as_str() {
+        "jetbrains" | "intellij" | "idea" => Some("agent-doc-jetbrains-"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::{
+        MappedPluginJar, classify_mapped_plugin_jar, plugin_byte_identity_warnings_from,
+        plugin_jar_stem,
+    };
+
+    /// `#pluginbyteidentity`: the kernel's `" (deleted)"` suffix is the only
+    /// evidence that survives an install unlinking the jar we are executing.
+    /// Nothing can be stat'd back afterwards, so losing this parse loses the case.
+    #[test]
+    fn deleted_suffix_is_the_definitive_superseded_signal() {
+        let jar = "/home/u/.local/share/JetBrains/x/lib/agent-doc-jetbrains-0.2.388.jar";
+        let deleted = classify_mapped_plugin_jar(&format!("{jar} (deleted)"), None, None);
+        assert_eq!(
+            deleted,
+            MappedPluginJar::Deleted {
+                path: jar.to_string()
+            },
+            "the (deleted) suffix must classify without needing either inode"
+        );
+        assert!(deleted.is_superseded());
+    }
+
+    /// The discriminator must be BYTES, not the version string. Both sides here
+    /// are `0.2.388`; only the inode separates a live IDE running the installed
+    /// build from one running a replaced build under the same name.
+    #[test]
+    fn same_version_string_does_not_suppress_a_byte_mismatch() {
+        let jar = "/opt/idea/plugins/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.2.388.jar";
+
+        let superseded = classify_mapped_plugin_jar(jar, Some(76_585_058), Some(99_000_001));
+        assert!(
+            superseded.is_superseded(),
+            "a differing inode under an identical version must still be superseded: {superseded:?}"
+        );
+
+        let current = classify_mapped_plugin_jar(jar, Some(76_585_058), Some(76_585_058));
+        assert_eq!(
+            current,
+            MappedPluginJar::Current {
+                path: jar.to_string(),
+                inode: 76_585_058
+            },
+            "an identical inode is the only thing that proves the bytes match"
+        );
+        assert!(!current.is_superseded());
+    }
+
+    /// Fail open. A jar we cannot stat on either side proves nothing, and an
+    /// unprovable probe must never manufacture a warning that sends an operator
+    /// restarting a healthy IDE.
+    #[test]
+    fn unstattable_mapping_is_unknown_not_superseded() {
+        let jar = "/opt/idea/lib/agent-doc-jetbrains-0.2.388.jar";
+        for (mapped, disk) in [(None, Some(1_u64)), (Some(1_u64), None), (None, None)] {
+            let classified = classify_mapped_plugin_jar(jar, mapped, disk);
+            assert_eq!(
+                classified,
+                MappedPluginJar::Unknown,
+                "missing inode evidence must fail open: mapped={mapped:?} disk={disk:?}"
+            );
+            assert!(!classified.is_superseded());
+        }
+    }
+
+    /// The warning has to say why the version string lied, or the operator reads
+    /// "0.2.388 running, 0.2.388 installed" and concludes the restart happened.
+    #[test]
+    fn superseded_warning_names_the_version_trap_and_dedups_per_process() {
+        let jar = "/opt/idea/lib/agent-doc-jetbrains-0.2.388.jar";
+        let probes = vec![
+            (
+                "jetbrains".to_string(),
+                1023909_u32,
+                MappedPluginJar::Deleted {
+                    path: jar.to_string(),
+                },
+            ),
+            // same process, probed twice — one warning
+            (
+                "jetbrains".to_string(),
+                1023909_u32,
+                MappedPluginJar::Superseded {
+                    path: jar.to_string(),
+                    mapped_inode: 1,
+                    disk_inode: 2,
+                },
+            ),
+            // healthy process contributes nothing
+            (
+                "jetbrains".to_string(),
+                2_u32,
+                MappedPluginJar::Current {
+                    path: jar.to_string(),
+                    inode: 7,
+                },
+            ),
+            ("jetbrains".to_string(), 3_u32, MappedPluginJar::Unknown),
+        ];
+
+        let warnings = plugin_byte_identity_warnings_from(&probes);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "one warning per superseded process, none for healthy or unknown: {warnings:?}"
+        );
+        let warning = &warnings[0];
+        assert_eq!(warning.code, "plugin_bytes_superseded");
+        assert!(
+            warning.message.contains("1023909"),
+            "the pid is how an operator finds the process: {}",
+            warning.message
+        );
+        assert!(
+            warning.message.contains("version string cannot show this"),
+            "the message must explain WHY the version comparison missed it, not merely \
+             mention versions somewhere: {}",
+            warning.message
+        );
+        assert!(
+            warning.message.contains("unlinked"),
+            "the deleted case must name its own evidence: {}",
+            warning.message
+        );
+    }
+
+    /// Only editors that load agent-doc as a jar inside their own process can be
+    /// probed this way; claiming otherwise would emit a permanently-unknown probe.
+    #[test]
+    fn jar_stem_is_scoped_to_jvm_hosted_editors() {
+        for kind in ["jetbrains", "JetBrains", "intellij", "idea"] {
+            assert_eq!(plugin_jar_stem(kind), Some("agent-doc-jetbrains-"), "{kind}");
+        }
+        for kind in ["vscode", "zed", "neovim", ""] {
+            assert_eq!(plugin_jar_stem(kind), None, "{kind}");
+        }
+    }
+
     /// `#autoinstalldeferstale`: a stale install that merely predates uncommitted
     /// edits is housekeeping; one that predates COMMITTED work means a landed fix
     /// is not running. Those read identically before this note, which is how a

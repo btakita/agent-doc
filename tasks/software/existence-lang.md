@@ -285,6 +285,44 @@ Five for five, each by the test that should kill it. The workflow YAML was parse
 `#auditprtoken` now self-reports and no longer depends on this document for anyone to know it is blocked. I left the review item itself gated — the remedy is still operator-only — but its reporting half is closed.
 
 Queue: `#srcwaiver` and `#archoutage` remain. Exchange is at 224 lines across 9 sections.
+
+### Re: do #srcwaiver — opus-5 · 2026-09-20T16:48-04:00
+
+> **Queue prompt:**
+>
+> do [#srcwaiver]
+
+
+Done and released as `existence` **v0.12.0**, with the ontology renderer and pin pushed alongside it.
+
+**One decision worth surfacing before the rest.** I filed this item saying the record should live in `audit/sources.waivers.json`, and I built it that way first. Then I found that this ontology already has a decision-recording idiom — `[[audit.keep_unlinked]]` in `existence.toml`, under a table whose doc comment literally reads *"decisions a person already made, so the audit stops asking"*, with unused entries reported as `stale_keep`. A second location for the same concept would have been the wrong call, so I moved it: `[[audit.waiver]]` sits in that same `[audit]` table, and an unused one reports as `stale_waiver`. Same idea one level up — `keep_unlinked` accepts a specific unlinked mention, a waiver accepts any finding any class raises.
+
+```toml
+[[audit.waiver]]
+term = "god"
+check = "unreachable_host"
+source = "theunboundedspirit.com"   # optional; matched as a substring of the message
+reason = "domain resold through a redirect chain; no archive copy exists"
+decided_on = "2026-09-20"
+```
+
+**What it does, and two things it deliberately does not.** A match keeps its text and its place in the report but drops to severity `accepted`, carrying the reason: counted as neither an error nor a warning, and no longer blocking `clean`. It does **not** hide the finding — a decision the reader cannot see is indistinguishable from a check that quietly stopped running, which is the worse half of the bug the waiver exists to fix. And it does **not** change what `--fix` applies: a waiver is a decision about reporting, not about content.
+
+`reason` has no default, for the same reason `keep_unlinked`'s does not, and whitespace does not count as a stated reason — a placeholder is how an exemption becomes a silenced check. `decided_on` is required, which is the one field the sibling has no use for: a structural decision holds until someone edits the node, but a decision about somebody else's website is a claim about a world that keeps moving, so the record has to say when its evidence was last checked.
+
+On the renderer side, `accepted` had to be taught to `audit_report.py` or it would have fallen into neither the Errors nor the Warnings partition and vanished from the issue entirely. It now prints in its own `### Accepted` section with the reason, counts nowhere in the headline, and a run whose only remaining findings are accepted says *"only accepted findings remain"* rather than "clean" — nothing is pending, but something is being lived with on purpose.
+
+**Verification.** 128/128 Rust with `make check` green (clippy + fmt), 24/24 Python. Fifteen mutations across both, each against the exact line it covers, green baseline asserted before and after every restore. All killed — but the interesting part is the one that was not:
+
+> The first Rust round left **one survivor**: a `severity == ACCEPTED` guard in `apply`, which I had commented as the thing preventing two waivers from stacking their notes onto one message. No test could kill it, and the reason is that the comment was wrong — `find` already stops at the first match, so the guard was unreachable. I removed it as dead code rather than writing a test to prop it up, re-pointed the mutation at the real mechanism (apply *every* match instead of the first), and that one killed cleanly. A second round then surfaced a genuine gap — nothing covered the empty/whitespace field check — so that got two real tests, and its mutation now dies too.
+
+That is the whole argument for mutating rather than reading: a surviving mutant is either a missing test or a line that does nothing, and the first pass here produced one of each.
+
+**CI is still running and I am not waiting on it.** The ontology's *Issue renderer* job (the `audit_report.py` suite) is already green on `fe131ad`. The *Structure audit* job, and the `existence` CI and Release runs for `v0.12.0`, were still installing when I closed out. The local evidence is the full suite plus a `cargo build` against the bumped `Cargo.lock` that is committed, which is what `--locked` resolves against.
+
+**What I did not do.** I did not write the waiver for `#godsourcegone`. Building the mechanism was this item; choosing between "remove the line" and "accept the standing warning" is that item, and it is explicitly the author's. I rewrote the review entry to carry the exact four lines so saying yes is now a paste rather than a project.
+
+Queue: `#archoutage` remains. Exchange is at 264 lines across 10 sections.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
@@ -292,21 +330,21 @@ Queue: `#srcwaiver` and `#archoutage` remain. Exchange is at 224 lines across 9 
 
 <!-- agent:queue priority go -->
 - ~~do [#prcaplies]~~
-- do [#srcwaiver]
+- ~~do [#srcwaiver]~~
 - do [#archoutage]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#srcwaiver] Give the sources class a way to record an author decision so a decided-unrecoverable citation stops re-reporting. `source_check.rs` has no waiver concept at all (no waiv/accepted/suppress match anywhere in the file), so `audit/report.json` still carries `unreachable_host` for `god` and will every week no matter what is decided. Add a waiver record (term, URL, reason, decided-on date; `audit/sources.waivers.json` or a sources-lock field) that the sources class reads and demotes to an informational line instead of a warning, with the reason rendered into the issue body. Repos: `src/existence-lang/existence` (check + schema), `src/existence-lang/ontology` (record + report). Converts [#godsourcegone] from gated-on-the-author-forever into accepted, recorded, closed.
+- [x] 🚧 [#srcwaiver] Give the sources class a way to record an author decision so a decided-unrecoverable citation stops re-reporting. `source_check.rs` has no waiver concept at all (no waiv/accepted/suppress match anywhere in the file), so `audit/report.json` still carries `unreachable_host` for `god` and will every week no matter what is decided. Add a waiver record (term, URL, reason, decided-on date; `audit/sources.waivers.json` or a sources-lock field) that the sources class reads and demotes to an informational line instead of a warning, with the reason rendered into the issue body. Repos: `src/existence-lang/existence` (check + schema), `src/existence-lang/ontology` (record + report). Converts [#godsourcegone] from gated-on-the-author-forever into accepted, recorded, closed.
 - [ ] [#archoutage] Escalate an outage of the archive host itself from a per-term warning to a run-level degradation note. In the current `audit/report.json`, `web.archive.org` appears as one `unreachable_host` warning scoped to the term `abstraction` - but when that host is down, every archived-copy fallback and every pinned snapshot in the run skips silently, which is most of the sources class. The reader sees 5 warnings and a normal-looking report rather than "half this class did not run". Confirmed live on 2026-09-20: archive.org is serving its Temporarily Offline page, CDX returns that HTML and snapshot paths return 403/503. Retry before declaring the host dead, and report an archive-host outage the way AUDIT_SEMANTIC_STATE reports a class that could not run. Repos: `src/existence-lang/existence`, `src/existence-lang/ontology`.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#godsourcegone] Decide what to do with the `theunboundedspirit.com/existence-is-god/` citation in `src/god.md:13`: the page is unrecoverable. The live URL is a redirect chain through resold domains (theunboundedspirit.com -> yonsa.com -> managementstudyhq.com -> indianhealthjournal.com), none of which serve the article, and archive.today has no copy. The Wayback domain-level exclusion could NOT be re-verified on 2026-09-20 because archive.org is itself temporarily offline (CDX returns its offline HTML page; snapshot paths return 403 and 503) - treat the earlier 403-exclusion finding as unconfirmed-today rather than refreshed. Dropping a citation is an author decision, so the link stays in place; the weekly audit keeps reporting `unreachable_host` for `god` until you either remove that line from `src/god.md` or accept the standing warning. [#srcwaiver] adds the mechanism to record that acceptance so it stops re-reporting. Unblocks by: you deciding.
+- [/] [#godsourcegone] Decide what to do with the `theunboundedspirit.com/existence-is-god/` citation in `src/god.md:13`: the page is unrecoverable. The live URL is a redirect chain through resold domains (theunboundedspirit.com -> yonsa.com -> managementstudyhq.com -> indianhealthjournal.com), none of which serve the article, and archive.today has no copy. The Wayback domain-level exclusion could NOT be re-verified on 2026-09-20 because archive.org is itself temporarily offline (CDX returns its offline HTML page; snapshot paths return 403 and 503) - treat the earlier 403-exclusion finding as unconfirmed-today rather than refreshed. Dropping a citation is an author decision, so the link stays in place. [#srcwaiver] shipped the mechanism to record the other answer: existence v0.12.0 reads `[[audit.waiver]]` from `existence.toml`, so accepting the standing warning is now four lines - `[[audit.waiver]]` / `term = "god"` / `check = "unreachable_host"` / `source = "theunboundedspirit.com"` / `reason = "<why>"` / `decided_on = "2026-09-20"` - after which the finding still prints, carrying your reason, but is counted as neither an error nor a warning. I did not write that entry: which of the two answers is right is the decision this item is about. Unblocks by: you deciding (remove the line from `src/god.md`, or add the waiver).
 - [/] [#auditprtoken] Let the weekly Ontology audit workflow open its own `audit: safe fixes` pull request. Proven closed at the repo level on 2026-09-20: `gh api -X PUT repos/existence-lang/ontology/actions/permissions/workflow -F can_approve_pull_request_reviews=true` returns 409 `The organization does not allow GitHub Actions to create or approve pull requests`, and `-f default_workflow_permissions=write` returns 409 `Write permissions for workflows are disabled by the organization`. The org policy caps the repo-level override, so the repo path is closed, not a workaround. Two operator-only remedies remain: `gh auth refresh -h github.com -s admin:org` then `gh api -X PUT orgs/existence-lang/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true`; or an `AUDIT_TOKEN` repo secret (classic PAT, `repo` scope) which `.github/workflows/audit.yml` already prefers (`gh secret list -R existence-lang/ontology` is still empty). Until then the job pushes the branch and links the compare page; PR #2 is hand-opened and the job keeps it current. The reporting half of this item is now filed as [#prcaplies]. Unblocks by: you.
 - [/] [#semantickey] Mint a Console API key (console.anthropic.com/settings/keys, `sk-ant-api03-...`) and store it with `passage edit btak/ANTHROPIC_API_KEY`: the entry today holds a Claude OAuth access token (`sk-ant-oat01-...`), which the Messages API rejects with HTTP 401, and there is no `btak/OPENAI_API_KEY` entry to fall back to (`passage show` exits 1), so the semantic audit has only been proven against the local stand-in server. Then run `ANTHROPIC_API_KEY="$(passage show btak/ANTHROPIC_API_KEY)" existence --ontology src/existence-lang/ontology audit --semantic --limit 5` once to confirm the live Messages API shape, and `gh secret set ANTHROPIC_API_KEY -R existence-lang/ontology` to switch on the weekly semantic pass that `audit.yml` already gates on that secret (about 117 Opus 5 calls the first week, then only changed neighbourhoods). Re-verified still blocked 2026-09-20.
 <!-- /agent:review -->

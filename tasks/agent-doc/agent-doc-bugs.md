@@ -494,6 +494,40 @@ Doing that surfaced `#qpausepathdouble`: the first attempt with a repo-relative 
 **Not installed.** The shared working tree still holds another session's uncommitted `src/session_actor_cmd.rs` plus JetBrains plugin edits, so `make install` would ship their in-flight work — the same blocker already recorded in `#retainedprojexit1install`, now updated to cover this commit too. Latest CI before the push was green (`35525082336`); the push starts a new run, which I am not waiting on.
 
 One note: this exchange is at 443 lines across 20 response sections, above the clear threshold — flagging it rather than stalling the queue for it.
+
+### Re: #fixrunlazily — the controller was self-RPCing its own socket — opus-5 · 2026-09-20T14:12-04:00
+
+> **Queue prompt:**
+>
+> do [#fixrunlazily]
+
+
+Root-caused and fixed, pushed as `78c36ccd3`. `make check`: **9564 tests run, 9564 passed**, exit 0.
+
+**The lead was right, the lock was not the mechanism.** `runtime.bootstrap_snapshot()` is a `clone()` under a mutex nobody holds across work, so that thread died. What is actually wrong is one scope mismatch: **`in_controller_request()` is thread-local, but "this process is the controller" is a process fact.**
+
+`install_controller_request_thread_context` exists precisely for this, and its own doc comment describes the failure. `serve_client` calls it. Nothing else does. Every other thread the controller spawns starts with fresh thread-locals:
+
+- the startup reliable-sync replica rebuild (`spawn_reliable_sync_recovery_effects`),
+- the post-promotion rebuild (`schedule_editor_replica_rebuild_after_promotion`),
+- the self-promote rebuild,
+- the orphan-drain route worker,
+- `spawn_editor_command_async_worker` — the async worker behind the very command that failed,
+- the supervisor replacement worker.
+
+Each of those calls `log_op`. `log_op` resolves a `turn=` id per line via `load_document_projection`, which branches on `controller_socket.exists() && !in_controller_request()`. With no thread-local marker the worker looks like an external client, so it **opens a 5-second-timeout socket request to the controller it is running inside** — once per logged line, each consuming an accept and a spawned thread in that same controller, during its first seconds.
+
+That reconciles every measurement already in this item. The accept leg is where it fails because the accept leg is what the self-RPCs are saturating. Threads-per-client is true and is why it degrades rather than deadlocks. And the stray `timed out after 5.0s waiting for project controller response` at 14:02:23 is not a second unrelated symptom — 5.0s is exactly this read's timeout.
+
+**Fix: make the identity process-scoped, not per-spawn.** Installing the thread context at each spawn site is the fix that already exists and keeps being forgotten, silently — you only learn about it as an unresponsive controller. So `serve` records its project root once in a process registry, and `load_document_projection` consults it alongside the thread-local. A new `thread::spawn` cannot reintroduce the gap.
+
+It records the **root**, not a bare flag, because the suppression has to stay scoped: a controller serving project A is an ordinary client for project B and must still use B's socket. An unscoped flag would have it read cold state it has no claim to.
+
+**Coverage, mutation-proven in both directions.** A stub actor on the controller socket answers with a projection that could only have come from an RPC: the external-client read must still see it (proving the socket is used), the in-controller read must not (proving the local path is taken). Reverting the fix fails the second assertion; making the suppression unscoped fails the first. The identity is also asserted across a real `thread::spawn`, and the `#ctrlbindbeforeserve` source-ordering guard now additionally requires the root be recorded before the bind — deleting that line reddens it.
+
+`#ctrlbindbeforeserve` itself is holding: all 75 `controller_listener_serve_ready` rows in this project report `bind_to_accept_ms=0`, so hypothesis (3) in the item is closed structurally, not just measured.
+
+Not installed, same blocker as before: the shared tree still holds another session's uncommitted `src/session_actor_cmd.rs` and JetBrains plugin edits. CI run `35527154818` was still in progress at closeout; not waiting on it.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -507,15 +541,15 @@ One note: this exchange is at 443 lines across 20 response sections, above the c
 - ~~do [#github5253release]~~
 - ~~This document's queue stalled. Fix agent-doc causes and fix this class of error.~~
 - ~~📌 do [#resumereplayauditrest]~~
-- ⏭️ do [#fixrunlazily]
+- ~~do [#fixrunlazily]~~
 - do [#retainedprojexit1install]
 - do [#pluginzipeveryrelease]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#ctrlworkerliveproj] Give controller-owned worker threads the LIVE projection instead of the cold state.db path. #ctrlselfrpc (78c36ccd3) stopped those threads self-RPCing the controller socket, but LOCAL_DOCUMENT_PROJECTION_READER and the ops-log turn-attribution memo are still thread-local, so a worker that never called install_controller_request_thread_context now replays the durable ledger per log_op line instead. Bounded and local (a full fold measured 0.08s on this project) so it is no longer a wedge, but it is per line and unmemoized. Fix by threading the runtime into spawn_reliable_sync_recovery_effects / schedule_editor_replica_rebuild_after_promotion / the self-promote rebuild / start_orphan_drain_route_worker / spawn_editor_command_async_worker / the supervisor replacement worker and calling install_controller_request_thread_context plus begin_turn_attribution_scope as the first statements in each closure. The #ctrlbindbeforeserve source guard pins the exact spawn_reliable_sync_recovery_effects call text, so update that assertion with the signature.
 - [ ] [#pluginzipeveryrelease] Attach the JetBrains plugin zip (and the VS Code vsix) to EVERY release, not on its own cadence. #pluginassetpaging (a17cb20aa) made the asset search paginate at per_page=100 across 5 pages, which removes the immediate breakage, but it only buys headroom: measured 2026-09-20, exactly ONE release in the API window carries agent-doc-jetbrains-*.zip (v0.35.398, at index 2 of the default 30-item page). The underlying cause is that .github/workflows/release.yml builds four platform archives plus SHA256SUMS on every tag while the editor plugin zip is published separately, so the gap between plugin-bearing releases grows without bound and plugin install/update depends on how deep the search happens to walk. Reported by the issue #53 author, who measured the same thing independently. Fix at the publish step so the latest release always carries the plugin assets; then the 5-page bound is slack rather than load-bearing.
-- [ ] [#fixrunlazily] Run Agent Doc on lazily.md fails with `command-plane editor_route request failed via .agent-doc/controller.sock: Project Controller did not respond within 60000ms; the controller may be wedged`. NARROWED 2026-09-11, two hypotheses measured and DISPROVED — do not re-walk them. (1) The failure is the ACCEPT leg, not the work leg: the prefix `command-plane editor_route request failed` plus 60000ms is SOCKET_REQUEST_TIMEOUT_MS in sendAcceptedCommandSubmitToSocket; awaitCommandSubmitTerminal uses waitForReadySeconds*1000+grace instead. So the controller failed to ACKNOWLEDGE a command submit for 60s, and handle_editor_command_submit_async_rpc only enqueues. (2) NOT serialized accepts: rpc.rs:11185 listener.accept() spawns a thread per client. (3) NOT a slow pre-serve window: the socket binds at ListenerOptions::create_sync() (rpc.rs:11134) and the accept loop starts at 11184, so synchronous work between them leaves clients connected and hanging — the ss -lxp backlog signature — but the candidate, restore_reliable_sync_liveness, measures 0.08s for all 59,671 reliable_sync_liveness_journal rows / 6.5MB / 60,582 ops on this project, and its recovery effects are already spawned async. Live evidence at the failure window: ffi_ensure_controller_running_failed Connection refused (os error 111) x7 at 14:00:58-59, controller adopted 14:01:44, and a separate client still timing out at 14:02:23 (timed out after 5.0s waiting for project controller response) — unresponsive at least 40s after adoption. NEXT LEAD: what holds a lock across handle_request_locked (rpc.rs:12526) at runtime.bootstrap_snapshot() (12560) during a controller first seconds. Repro lever: kill the controller, then click Run Agent Doc while a replacement is launching.
 - [ ] [#retainedprojexit1install] Install + recycle the agent-doc fixes landed 2026-09-20 (`b7043757b` retained-projection deferral, `ea57c13b6` empty-preflight reclaim authority, `8cb9aa16e` #qmultilinehead queue-preemption + #resumereplayauditrest replay witnesses + #qpausepathdouble admin path anchoring): `make install` in src/agent-doc from a tree with no concurrent-session uncommitted source, then `agent-doc admin recycle`. Still deferred 2026-09-20: the shared working tree holds another session's uncommitted `src/session_actor_cmd.rs` + JetBrains plugin edits (installing would ship their in-flight work) and `lib-install` strands this attached document's Lazily replica mid-session.
 <!-- /agent:backlog -->
 

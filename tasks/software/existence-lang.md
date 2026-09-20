@@ -2,7 +2,8 @@
 agent_doc_session: d076f48f-239e-4d31-95b9-ddaa58e0e1da
 resume:
   claude: a043d832-73c7-4b49-8526-5651b7c5a860
-agent: codex
+  codex: 01a098c1-a937-7271-8f0d-24321f2cb4bf
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -80,26 +81,60 @@ Two credentials still genuinely need you: `#auditprtoken` (`admin:org` scope or 
 Handoff accepted from the current committed boundary. Removing `#pub403name`, `#pubbackfill`, and `#auditcapsline` from the queue is consistent with their completed state; there is no new drainable work.
 
 The two remaining review items, `#auditprtoken` and `#semantickey`, stay correctly gated on operator-provided credentials. The session also reports two recent restart-heavy events, so I resumed cleanly from the committed boundary as advised.
+
+### Re: #actionable-review — opus-5 · 2026-09-20T00:30-04:00
+
+> **Queue prompt:** #actionable-review
+
+Both review items re-verified against live state — **neither is stale, both still need you**:
+
+| item | checked | still blocked |
+|---|---|---|
+| `#auditprtoken` | `gh secret list -R existence-lang/ontology` → **empty**; `repos/.../actions/permissions/workflow` → `default_workflow_permissions: read`, `can_approve_pull_request_reviews: false`; org-level PUT still 403 (token scopes `gist, read:org, repo, workflow, write:packages` — no `admin:org`); PR #2 open, branch force-pushed `dd4f575` 2026-09-14 | yes |
+| `#semantickey` | `passage show btak/ANTHROPIC_API_KEY` still `sk-ant-oat01…`; no `ANTHROPIC_API_KEY` secret on the repo; the Capabilities block in issue #1 is correctly reporting this one pass as off | yes |
+
+One correction to `#semantickey`: it claims `btak/OPENAI_API_KEY` is rejected too, but there is no entry at that path today — `passage show` exits 1. I trimmed that clause rather than assert a path I cannot verify.
+
+Where the actionable work actually is: **the weekly audit is running on a treadmill, and it has been since it was written.**
+
+`audit/safe-fixes` is rebuilt from `main` every run by design, and it carries the only copy of `audit/report.json` and `audit/sources.lock.json` — `git ls-tree -r origin/main --name-only | grep '^audit/'` is empty. Three consequences, all confirmed:
+
+- **The week-over-week diff has never rendered.** `audit.yml:63-66` copies `audit/report.json` to `/tmp/previous-report.json` "before this run overwrites it", but the checkout is `main`, where the file does not exist. `audit_report.py:120` loads `None`, so the `## Since last run` section is skipped — and issue #1 has no such section, despite the workflow header promising "the report **and its diff from last week**". `audit_report.py`'s own docstring says PREVIOUS is "the copy committed on main". It never was.
+- **The sources lock is rebuilt from zero weekly.** 3838 lines of pins, re-derived every run.
+- **The same two fixes are rediscovered every week.** `git diff --stat origin/main FETCH_HEAD` is exactly `src/resolution.md`, `src/attention-schema.md` and the two JSONs. The PR is never merged, so "2 fixed this run" is not progress — it is a loop, and it will read `2` forever.
+
+And the 65 warnings that remain are 61 `quote_moved` + 4 `unreachable_host`. The 61 can never clear: `source_check.rs:350-362` emits `quote_moved` with `fix: None` and no `PinWrite`, unlike the `quote_missing` arm twenty lines above it that pins the archived copy and self-resolves. So the four warnings that a person could act on are buried under sixty-one that nobody can.
+
+**Four backlog items, queued:**
+
+1. `#auditlockmain` — put the audit's machine state on `main` so a run has a predecessor. Fixes the missing diff, the weekly lock rebuild, and the treadmill accounting in one move, and decides nothing about the ontology text: `contents: write` is already granted, and content edits stay on the PR where a person decides them.
+2. `#auditerrcount` — the headline counts resolved findings as outstanding. `audit_report.py:132` prints `summary['errors']` while `:124` filters `!fixed`, so issue #1 reads "2 error(s) … findings remain" above an empty Errors section. `:125` has the mirror-image hole for warnings.
+3. `#auditdeadsrc` — the 4 skipped sources. `ncatlab.org:8080` is just a stale port (the host answers on 443); `juneroca.com` is NXDOMAIN and needs a pin; the other two return 200 to a local `curl -L` and fail only in CI, which points at the fetcher's redirect cap and User-Agent, not at the ontology.
+4. `#quotemovedpin` — give `quote_moved` the resolution path `quote_missing` already has.
+
+All four are completable with no credential. `#auditlockmain` is the one that turns the weekly issue back into a signal.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- do [#existencelangintegrate]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#existencelangintegrate] Can existence-lang integrate with ontology technologies such as OWL, RDF, and SPARQL?
+- [ ] [#auditlockmain] Commit the audit machine state to `main` so each weekly run has a predecessor to diff against: `.github/workflows/audit.yml:63-66` copies `audit/report.json` to `/tmp/previous-report.json` before the run overwrites it, but that file has never existed on `main` (`git ls-tree -r origin/main --name-only | grep ^audit/` is empty) — both `audit/report.json` and `audit/sources.lock.json` live only on the force-rebuilt `audit/safe-fixes` branch. So `audit_report.py:120` loads `None` and the `## Since last run` section has never rendered in issue #1, despite the workflow header promising the diff from last week. Same root cause rebuilds the 3838-line `sources.lock.json` from zero every run and rediscovers the same two fixes (`src/resolution.md`, `src/attention-schema.md`) weekly, which is why "fixed this run" is permanently 2. Push `audit/report.json` + `audit/sources.lock.json` straight to `main` (machine state; `contents: write` is already granted) and leave only `src/` content edits on the PR, or restore the previous report from `origin/$FIX_BRANCH` before the rebuild. Verify by dispatching the audit twice and seeing a `## Since last run` block on the second run.
+- [ ] [#auditerrcount] Stop the weekly audit issue counting resolved findings as outstanding: `audit_report.py:132` prints `summary["errors"]` while `:124` builds the Errors section from `severity == error && !fixed`, so issue #1 on 2026-09-14 reads "2 error(s), 65 warning(s), 2 fixable, 2 fixed this run — findings remain" above no Errors section at all, because both errors were the two fixed that run. `:125` has the mirror-image hole: `warnings` does not exclude `fixed`, so a fixed warning would be listed in both Warnings and "Fixed by this run". Count from the same filtered lists the sections render, and add a fixture for a report whose only errors are fixed.
+- [ ] [#auditdeadsrc] Repair the 4 sources the weekly audit skips outright (`sources / unreachable_host` in issue #1) — their citations go unverified every run. `category-theory` cites `ncatlab.org:8080`, a stale port: the host answers on 443, so dropping `:8080` is the whole fix. `redefine` cites `juneroca.com`, now NXDOMAIN, which needs an archived copy pinned. `god` (`theunboundedspirit.com`) and `category-theory` (`www.cs.nott.ac.uk`) both return 200 to a local `curl -L` and fail only in CI ("too many redirects", "Connection reset by peer"), so check the fetcher redirect cap and User-Agent in `existence` before touching ontology text. Files: `src/category-theory.md`, `src/redefine.md`, `src/god.md`.
+- [ ] [#quotemovedpin] Give `quote_moved` a resolution path so it stops drowning the audit: 61 of the 65 warnings in issue #1 are `quote_moved`, and `src/commands/source_check.rs:350-362` emits them with `fix: None` and no `PinWrite`, unlike the `quote_missing` arm at `:303-320` which pins the archived copy and self-resolves. A quote that drifted but still matches is what a pin is for — pin the currently-verified snapshot beside the anchor (per-quote, per-era pins have been supported since existence 0.8.0) so the next run matches the pin and the warning clears, instead of requoting by hand. Decide explicitly whether pinning is automatic under `--fix` or opt-in behind a flag; either way the 4 actionable `unreachable_host` warnings stop being buried under 61 permanent ones.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
 - [/] [#auditprtoken] Let the weekly Ontology audit workflow open its own `audit: safe fixes` pull request: the `existence-lang` organization forbids GitHub Actions from creating PRs, and lifting it needs an `admin:org` scope this session does not have (`gh auth refresh -h github.com -s admin:org`, then `gh api -X PUT orgs/existence-lang/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true` and the same PUT on `repos/existence-lang/ontology`), or add an `AUDIT_TOKEN` repo secret (classic PAT, `repo` scope) which `.github/workflows/audit.yml` already prefers. Until then the job pushes the branch and links the compare page in the issue; PR #2 was opened by hand and the job keeps it current. Note [#auditcapsline] reports this capability as `on` while PR #2 stays open, because the job takes the already-open path and never attempts a create — the Capabilities line surfaces the restriction only when the PR has to be recreated, which is exactly when it blocks something
-- [/] [#semantickey] Mint a Console API key (console.anthropic.com/settings/keys, `sk-ant-api03-...`) and store it with `passage edit btak/ANTHROPIC_API_KEY`: the entry today holds a Claude OAuth access token (`sk-ant-oat01-...`), which the Messages API rejects with HTTP 401, and `btak/OPENAI_API_KEY` is rejected too, so the semantic audit has only been proven against the local stand-in server. Then run `ANTHROPIC_API_KEY="$(passage show btak/ANTHROPIC_API_KEY)" existence --ontology src/existence-lang/ontology audit --semantic --limit 5` once to confirm the live Messages API shape, and `gh secret set ANTHROPIC_API_KEY -R existence-lang/ontology` to switch on the weekly semantic pass that `audit.yml` already gates on that secret (about 117 Opus 5 calls the first week, then only changed neighbourhoods)
+- [/] [#semantickey] Mint a Console API key (console.anthropic.com/settings/keys, `sk-ant-api03-...`) and store it with `passage edit btak/ANTHROPIC_API_KEY`: the entry today holds a Claude OAuth access token (`sk-ant-oat01-...`), which the Messages API rejects with HTTP 401, and there is no `btak/OPENAI_API_KEY` entry to fall back to (`passage show` exits 1), so the semantic audit has only been proven against the local stand-in server. Then run `ANTHROPIC_API_KEY="$(passage show btak/ANTHROPIC_API_KEY)" existence --ontology src/existence-lang/ontology audit --semantic --limit 5` once to confirm the live Messages API shape, and `gh secret set ANTHROPIC_API_KEY -R existence-lang/ontology` to switch on the weekly semantic pass that `audit.yml` already gates on that secret (about 117 Opus 5 calls the first week, then only changed neighbourhoods). Re-verified still blocked 2026-09-20.
 <!-- /agent:review -->
 
 ## Icebox

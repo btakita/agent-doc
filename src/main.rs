@@ -149,6 +149,28 @@ impl ClaimRuntimeEffects for CliClaimRuntimeEffects {
     }
 }
 
+/// `#commitsilentfirstrun`: what `agent-doc commit` reports when it returns Ok.
+///
+/// The CLI arm discarded the outcome with `.map(|_| ())`, so a commit that
+/// advanced nothing printed NOTHING and exited 0. Measured 2026-09-20 during a
+/// stranded-write recovery on `tasks/agent-doc/agent-doc-bugs.md`: the first
+/// invocation produced 0 bytes and exit 0, and an immediately repeated identical
+/// invocation produced 1611 bytes and exit 1 about the same document. A silent
+/// success reads as a hang or a no-op, and the operator's next move is to
+/// escalate to `--force-disk`, which the same diagnostic forbids.
+///
+/// Both outcomes are legitimate, so both must say which one happened.
+fn commit_outcome_message(did_commit: bool, file: &Path) -> String {
+    if did_commit {
+        format!("[commit] committed {}", file.display())
+    } else {
+        format!(
+            "[commit] nothing to commit: {} already matches HEAD",
+            file.display()
+        )
+    }
+}
+
 fn route_repair_closeout(file: &Path) -> anyhow::Result<String> {
     agent_doc_repair_command_io::repair(file).map(|outcome| format!("{outcome:?}"))
 }
@@ -4576,7 +4598,11 @@ fn try_main() -> anyhow::Result<()> {
                 None => agent_doc_prompt_io::run(&file),
             }
         }
-        Commands::Commit { file } => agent_doc_commit_io::commit(&file).map(|_| ()),
+        Commands::Commit { file } => {
+            let did_commit = agent_doc_commit_io::commit(&file)?;
+            println!("{}", commit_outcome_message(did_commit, &file));
+            Ok(())
+        }
         Commands::Dedupe { file } => dedupe_cmd::run(&file),
         Commands::Cancel { file } => {
             match agent_doc_repair_io::cancel_preflight_cycle(
@@ -6393,6 +6419,43 @@ fn try_main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod controller_auto_start_policy_tests {
     use super::*;
+
+    /// `#commitsilentfirstrun`: neither commit outcome may be silent.
+    ///
+    /// The CLI arm discarded `did_commit` with `.map(|_| ())`. A run that
+    /// advanced nothing then printed zero bytes and exited 0 -- measured on
+    /// 2026-09-20, where the first `agent-doc commit` of a stranded-write
+    /// recovery produced 0 bytes / exit 0 and the immediately repeated identical
+    /// invocation produced 1611 bytes / exit 1 about the same document.
+    ///
+    /// Asserting only the committed branch would have left the exact defect in
+    /// place, because the silent branch is the no-op one.
+    #[test]
+    fn commit_reports_both_outcomes_distinguishably() {
+        let file = Path::new("/tmp/session/plan.md");
+        let committed = commit_outcome_message(true, file);
+        let nothing = commit_outcome_message(false, file);
+
+        for (label, message) in [("committed", &committed), ("no-op", &nothing)] {
+            assert!(
+                !message.trim().is_empty(),
+                "the {label} outcome must say something; silence is the defect"
+            );
+            assert!(
+                message.contains("plan.md"),
+                "the {label} outcome must name the document: {message}"
+            );
+        }
+        assert_ne!(
+            committed, nothing,
+            "a commit that advanced HEAD and one that did not must be distinguishable"
+        );
+        assert!(
+            nothing.contains("nothing to commit"),
+            "the no-op outcome must say so outright, or an operator reads it as a hang \
+             and escalates to --force-disk: {nothing}"
+        );
+    }
 
     fn seed_recent_pane_losses(file: &Path, session_id: &str) {
         let root = file.parent().expect("document parent");

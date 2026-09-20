@@ -168,6 +168,30 @@ Every number now equals its section. `fixable` went 6 → 0 because all six fixa
 CI run 35491745526 — `Issue renderer` green (`Ran 13 tests ... OK`), `Structure audit` green. Also `d29c1a8`, ignoring the `__pycache__` my own test run leaves beside the script.
 
 I did **not** dispatch a fourth audit run to see the new headline in issue #1. Three runs already went out in the last hour, each one committing a report to `main` and force-pushing the PR, and the last one tripped Wayback rate-limiting. The renderer is a pure function of the report file, and I ran the production report through it above, so a live dispatch would add churn without adding evidence. Monday's scheduled run publishes it.
+
+### Re: do [#auditdeadsrc] — opus-5 · 2026-09-20T01:49-04:00
+
+> **Queue prompt:**
+>
+> do [#auditdeadsrc]
+
+
+Three of the four repaired in `95123df`; the fourth is genuinely unrecoverable, and repairing the third exposed why pinning alone does not silence the audit.
+
+| source | finding | outcome |
+|---|---|---|
+| `category-theory` → `ncatlab.org:8080` | timeout | the port is the whole fault — the host answers on 443. Repointed to `https://ncatlab.org/nlab/show/category+theory`, **200, zero redirects** |
+| `category-theory` → `www.cs.nott.ac.uk/~gmh/cat.html` | connection reset | not the fetcher: the page moved, and `curl -L` walks two hops to `https://people.cs.nott.ac.uk/pszgmh/cat.html`. The plain-http hop is what CI saw reset. Repointed to the destination, **200, zero redirects** |
+| `redefine` → `juneroca.com` | NXDOMAIN | pinned the 2014-11-06 Wayback snapshot, verified to load with the article's own title (`Redefining Words \| juneroca`) |
+| `god` → `theunboundedspirit.com` | too many redirects | **unrepairable** — see below |
+
+The item guessed the last two were a fetcher redirect-cap or User-Agent problem. That was wrong for both, and usefully so. `cs.nott.ac.uk` was an ordinary moved page. And `theunboundedspirit.com` is a real redirect loop, not a cap: the domain has been resold and now bounces `theunboundedspirit.com → yonsa.com → managementstudyhq.com → indianhealthjournal.com → …`, with no copy of the article at any hop. The Wayback Machine returns **HTTP 403 for every path on that domain** — `/`, `/about/`, and the article alike, so it is a domain-level exclusion rather than the rate-limiting I was fighting elsewhere this hour — and archive.today 404s. There is nothing to pin. Dropping a citation from a node is an author's decision, so I left `src/god.md` alone and raised it in review.
+
+**Pinning `juneroca` does not stop its warning, and that is a CLI defect.** `source_check.rs:216-226` inserts the host into `client.unreachable` and emits the warning without ever calling `wayback_lookup`, while the 4xx arm twenty lines below *does* look one up and pins it. So a dead link self-heals and an unreachable host never can — even with a verified snapshot sitting right beside it in the node. That is why these four persisted week after week while dead-link findings got fixed. Filed at the top of the backlog. An unreachable *source* host says nothing about the *archive* host, so the lookup should simply still run.
+
+Three `source_check.rs` fixes are now queued or filed. They belong in one `existence` release, after which `EXISTENCE_REV` needs bumping in both `.github/workflows/audit.yml` and `ci.yml` (both pinned at `v0.10.0`). I will carry all three when I take the next queued item.
+
+Verified: `existence --ontology . audit --structure` clean locally, and CI green on `95123df` (`Issue renderer` + `Structure audit`). I did not run a full `--sources` pass — it refetches every URL in the lockfile and Wayback is already refusing me after this hour's three audit runs — so the per-URL proof is the three direct fetches above, which is exactly what that pass does to these four.
 <!-- agent:boundary:39531613 -->
 <!-- /agent:exchange -->
 
@@ -176,14 +200,14 @@ I did **not** dispatch a fourth audit run to see the new headline in issue #1. T
 <!-- agent:queue priority go -->
 - ~~do [#auditlockmain]~~
 - ~~do [#auditerrcount]~~
-- do [#auditdeadsrc]
+- ~~do [#auditdeadsrc]~~
 - do [#quotemovedpin]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority -->
-- [ ] [#auditdeadsrc] Repair the 4 sources the weekly audit skips outright (`sources / unreachable_host` in issue #1) — their citations go unverified every run. `category-theory` cites `ncatlab.org:8080`, a stale port: the host answers on 443, so dropping `:8080` is the whole fix. `redefine` cites `juneroca.com`, now NXDOMAIN, which needs an archived copy pinned. `god` (`theunboundedspirit.com`) and `category-theory` (`www.cs.nott.ac.uk`) both return 200 to a local `curl -L` and fail only in CI ("too many redirects", "Connection reset by peer"), so check the fetcher redirect cap and User-Agent in `existence` before touching ontology text. Files: `src/category-theory.md`, `src/redefine.md`, `src/god.md`.
+- [ ] [#unreachablepin] Let an unreachable host consult its archive pin in `existence`: `src/commands/source_check.rs:216-226` records the host in `client.unreachable` and emits the `unreachable_host` warning without ever calling `wayback_lookup`, while the 4xx arm at `:229-245` does look one up and pins it. So a source on a host that no longer resolves — `juneroca.com` in `src/redefine.md`, which now carries a verified 2014-11-06 snapshot — keeps warning every week even though a pinned copy sits beside it, and `--fix` can never resolve it. An unreachable source host says nothing about the archive host, so the lookup should still run, and a source whose pin fetches should resolve the way a pinned dead link does. Ship together with [#quotemovedpin] and [#pinhostescalate] in one `source_check.rs` release, then bump `EXISTENCE_REV` in `.github/workflows/audit.yml` and `.github/workflows/ci.yml` (both pinned at v0.10.0).
 - [ ] [#quotemovedpin] Give `quote_moved` a resolution path so it stops drowning the audit: 61 of the 65 warnings in issue #1 are `quote_moved`, and `src/commands/source_check.rs:350-362` emits them with `fix: None` and no `PinWrite`, unlike the `quote_missing` arm at `:303-320` which pins the archived copy and self-resolves. A quote that drifted but still matches is what a pin is for — pin the currently-verified snapshot beside the anchor (per-quote, per-era pins have been supported since existence 0.8.0) so the next run matches the pin and the warning clears, instead of requoting by hand. Decide explicitly whether pinning is automatic under `--fix` or opt-in behind a flag; either way the 4 actionable `unreachable_host` warnings stop being buried under 61 permanent ones.
 - [ ] [#pinhostescalate] Stop an unreachable archive host from escalating pins into `quote_missing` errors in `existence`: run 35490429476 reported `unreachable_host` for `web.archive.org` (Connection refused — Wayback rate-limiting two dispatches 17 minutes apart) and, in the same run, two new `quote_missing` errors (`existence`, `abstract-system`) whose messages read "found neither on <live> nor in its pinned copy https://web.archive.org/...". The pinned copy was never fetched, so the check reported the quote absent from a snapshot it could not read; `web.archive.org` answered 200 to a local `curl -L` minutes later. In `src/commands/source_check.rs`, a pin whose host was unreachable must degrade to the `unreachable_host` warning for that source rather than feed an absent-quote verdict into the error arm at `:321-349`. Regression coverage: a fixture where the archive host fetch fails must produce zero `quote_missing` findings.
 <!-- /agent:backlog -->
@@ -191,6 +215,7 @@ I did **not** dispatch a fourth audit run to see the new headline in issue #1. T
 ## Review
 
 <!-- agent:review -->
+- [/] [#godsourcegone] Decide what to do with the `theunboundedspirit.com/existence-is-god/` citation in `src/god.md`: the page is unrecoverable. The Wayback Machine returns HTTP 403 for every path on that domain (`/`, `/about/`, and the article alike — a domain-level exclusion, not rate limiting), archive.today has no copy (404), and the live URL is a redirect loop through resold domains (theunboundedspirit.com → yonsa.com → managementstudyhq.com → indianhealthjournal.com → ...), none of which serve the article. Dropping a citation from a node is an author decision, so the link is left in place; the weekly audit will keep reporting `unreachable_host` for `god` until you either remove that line from `src/god.md` or accept the standing warning. Unblocks by: you deciding.
 - [/] [#auditprtoken] Let the weekly Ontology audit workflow open its own `audit: safe fixes` pull request: the `existence-lang` organization forbids GitHub Actions from creating PRs, and lifting it needs an `admin:org` scope this session does not have (`gh auth refresh -h github.com -s admin:org`, then `gh api -X PUT orgs/existence-lang/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true` and the same PUT on `repos/existence-lang/ontology`), or add an `AUDIT_TOKEN` repo secret (classic PAT, `repo` scope) which `.github/workflows/audit.yml` already prefers. Until then the job pushes the branch and links the compare page in the issue; PR #2 was opened by hand and the job keeps it current. Note [#auditcapsline] reports this capability as `on` while PR #2 stays open, because the job takes the already-open path and never attempts a create — the Capabilities line surfaces the restriction only when the PR has to be recreated, which is exactly when it blocks something
 - [/] [#semantickey] Mint a Console API key (console.anthropic.com/settings/keys, `sk-ant-api03-...`) and store it with `passage edit btak/ANTHROPIC_API_KEY`: the entry today holds a Claude OAuth access token (`sk-ant-oat01-...`), which the Messages API rejects with HTTP 401, and there is no `btak/OPENAI_API_KEY` entry to fall back to (`passage show` exits 1), so the semantic audit has only been proven against the local stand-in server. Then run `ANTHROPIC_API_KEY="$(passage show btak/ANTHROPIC_API_KEY)" existence --ontology src/existence-lang/ontology audit --semantic --limit 5` once to confirm the live Messages API shape, and `gh secret set ANTHROPIC_API_KEY -R existence-lang/ontology` to switch on the weekly semantic pass that `audit.yml` already gates on that secret (about 117 Opus 5 calls the first week, then only changed neighbourhoods). Re-verified still blocked 2026-09-20.
 <!-- /agent:review -->

@@ -631,6 +631,24 @@ pub struct PreflightOutput {
     /// Prompt preset references requested from the changed exchange content.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompt_presets_requested: Vec<String>,
+    /// The resolved BODY of each entry in [`Self::prompt_presets_requested`], in
+    /// the same order (`#orchestratepresetexpand`).
+    ///
+    /// Preset bodies live in the document's `prompt_presets` frontmatter, which
+    /// preflight has already parsed, resolved through
+    /// `resolve_prompt_preset_key`, and validated (a missing preset fails the
+    /// cycle before this point). Emitting the bodies with the request is what
+    /// makes a second "expansion" command unnecessary: the agent reads the
+    /// preset text straight out of the sealed cycle contract.
+    ///
+    /// The command SKILL.md used to route this through,
+    /// `agent-doc orchestrate <FILE> --from-exchange`, never read frontmatter at
+    /// all — it parsed the PREVIOUS response into tasks and, worse, abandoned the
+    /// live `PreflightStarted` cycle the hook had just sealed for the turn
+    /// (`close_open_preflight_handoff_cycle`, correct for a real dispatch, wrong
+    /// for an expansion step). Measured 2026-09-20 on `#actionable-review`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prompt_preset_expansions: Vec<PromptPresetExpansion>,
     /// Explicit cross-document backlog targets resolved from prompt/preset text.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub explicit_backlog_targets: Vec<String>,
@@ -12372,4 +12390,14 @@ mod tests {
             "unanswered id-backed head must remain active:\n{active:?}"
         );
     }
+}
+
+/// One requested prompt preset paired with its frontmatter body
+/// (`#orchestratepresetexpand`). See [`PreflightOutput::prompt_preset_expansions`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PromptPresetExpansion {
+    /// The canonical preset key, as it appears in `prompt_presets` frontmatter.
+    pub name: String,
+    /// The preset body, verbatim.
+    pub body: String,
 }

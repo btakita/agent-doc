@@ -14836,6 +14836,29 @@ pub fn record_reliable_sync_editor_exit(project_root: &Path, pid: u64) {
         );
         return;
     }
+    // `#ghostrelaymember`: the durable plane now says this pid is dead, so the
+    // live relay must agree. `RelayHub` liveness is keyed by opaque CRDT client
+    // id and otherwise only sheds a dead editor's member on the NEXT
+    // registration, so an editor that never comes back holds `live_editors >= 1`
+    // forever — wedging closeout on a delivery ack that cannot arrive and
+    // keeping `authority=editor_buffer` pinned to the ghost's stale canonical
+    // instead of the operator's newer disk text.
+    if let Ok(editor_pid) = u32::try_from(pid) {
+        for reaped in agent_doc_crdt_relay_io::reap_exited_editor_replicas(editor_pid) {
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "crdt_replica_reaped_on_editor_exit editor_pid={editor_pid} \
+document_hash={} client_id={} identity={} removed={} live_editors_after={}",
+                    reaped.document_hash,
+                    reaped.client_id,
+                    reaped.identity,
+                    reaped.removed,
+                    reaped.live_editors_after,
+                ),
+            );
+        }
+    }
     let affected_documents = {
         let mut plane = controller_liveness_plane().lock();
         let affected_documents = plane
@@ -32609,6 +32632,57 @@ mod tests {
             .unwrap()
             .is_empty(),
             "the durable OS-exit liveness transition evicts the crashed registration's ack"
+        );
+
+        *controller_liveness_plane().lock() =
+            agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::new();
+    }
+
+    #[test]
+    fn recording_an_editor_exit_reaps_the_relay_ghost_member() {
+        // `#ghostrelaymember`: an OS-observed editor exit must retire that
+        // process's relay memberships, not just its durable liveness fact.
+        // Without this the hub keeps counting the dead editor
+        // (`live_editors=1`), so closeout waits forever on a delivery ack that
+        // cannot arrive and every resolve answers `authority=editor_buffer`
+        // from the ghost's stale canonical instead of the operator's disk text.
+        // Measured 2026-09-20 on `tasks/monsterrodholders.md` with zero IDE
+        // processes alive on the machine.
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("ghost-editor-exit.md");
+        std::fs::write(&file, "# ghost editor exit
+
+body
+").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let editor_pid = u64::from(std::process::id());
+        let file_str = file.display().to_string();
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: editor_pid,
+                tag: format!("test-editor-{editor_pid}:{file_str}"),
+            }]);
+        let identity = format!("jetbrains-{editor_pid}-ghost:{file_str}");
+        agent_doc_crdt_relay_io::register_replica_for_file(&file, &identity)
+            .unwrap()
+            .expect("a live editor registers a replica");
+        assert_eq!(
+            agent_doc_crdt_relay_io::with_hub(&file, |hub| hub.live_count()).unwrap(),
+            1,
+            "the editor is attached before it exits"
+        );
+
+        record_reliable_sync_editor_exit(&bootstrap.project_root, editor_pid);
+
+        assert_eq!(
+            agent_doc_crdt_relay_io::with_hub(&file, |hub| hub.live_count()).unwrap(),
+            0,
+            "the exited editor must not keep holding multi-replica authority"
         );
 
         *controller_liveness_plane().lock() =

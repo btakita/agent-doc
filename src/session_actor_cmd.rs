@@ -4129,6 +4129,17 @@ fn capability_proof_status(ctx: &SessionContext) -> String {
 
 fn collect_doctor_issues(ctx: &SessionContext) -> Vec<String> {
     let mut issues = Vec::new();
+    // `#pluginactivationprobe`: a registration-INDEPENDENT activation check.
+    // `stale_plugin` only fires from live editor registrations, so it stays
+    // silent exactly when a hand-recorded (plugin version, IDE pid, start time)
+    // premise goes stale — with no editor attached. Comparing the installed jar's
+    // mtime against each live IDE's process start time needs no registration and
+    // no operator bookkeeping.
+    if let Some(issue) =
+        crate::plugin_activation::probe(&crate::plugin::jetbrains_plugin_dirs()).doctor_issue()
+    {
+        issues.push(issue);
+    }
     if ctx.actor_record.is_none() {
         issues.push("authoritative actor record is missing".to_string());
     }

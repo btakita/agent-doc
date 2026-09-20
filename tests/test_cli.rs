@@ -2110,6 +2110,64 @@ fn test_admin_recycle_accepts_document_target() {
 }
 
 #[test]
+fn test_preflight_emits_prompt_preset_bodies_with_the_request() {
+    // `#orchestratepresetexpand`: SKILL.md used to route preset expansion
+    // through `agent-doc orchestrate <FILE> --from-exchange`, which never reads
+    // `prompt_presets` frontmatter at all and abandons the live
+    // `PreflightStarted` cycle the hook just sealed. Preflight already parses and
+    // validates the presets, so it ships the BODY with the request and no second
+    // command is needed.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    let doc = root.join("session.md");
+    fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+    fs::create_dir_all(root.join(".agent-doc/state/cycles")).unwrap();
+
+    let header = concat!(
+        "---\n",
+        "agent_doc_session: preset-expansion\n",
+        "agent_doc_format: template\n",
+        "prompt_presets:\n",
+        "  '#spec-test-commit-push': update spec + tests. commit + push\n",
+        "---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+    );
+    let baseline = format!("{header}### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n");
+    let current = format!(
+        "{header}### Re: prior\n\nDone.\n\n❯ do #spec-test-commit-push\n<!-- /agent:exchange -->\n"
+    );
+    fs::write(&doc, &baseline).unwrap();
+    init_git_repo(root, &doc);
+    seed_snapshot(root, &doc, &baseline);
+    fs::write(&doc, &current).unwrap();
+
+    let mut preflight = agent_doc_cmd();
+    preflight.current_dir(root);
+    preflight.args(["preflight", "session.md"]);
+    let output = preflight.assert().success().get_output().stdout.clone();
+    let stdout = String::from_utf8(output).unwrap();
+    let json_start = stdout.find('{').expect("preflight emits a JSON object");
+    let parsed: serde_json::Value = serde_json::from_str(&stdout[json_start..]).unwrap();
+
+    assert_eq!(
+        parsed["prompt_presets_requested"][0], "#spec-test-commit-push",
+        "the preset request is detected: {stdout}"
+    );
+    assert_eq!(
+        parsed["prompt_preset_expansions"][0]["name"], "#spec-test-commit-push",
+        "the expansion is keyed by the canonical preset name: {stdout}"
+    );
+    assert_eq!(
+        parsed["prompt_preset_expansions"][0]["body"],
+        "update spec + tests. commit + push",
+        "the preset BODY travels with the request, so no expansion command is \
+         needed: {stdout}"
+    );
+}
+
+#[test]
 fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clean_after_commit() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path();

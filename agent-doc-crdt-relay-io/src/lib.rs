@@ -2250,6 +2250,106 @@ pub fn deregister_editor_replica_for_file(
     Ok(removed)
 }
 
+/// One relay membership retired by [`reap_exited_editor_replicas`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReapedEditorReplica {
+    /// The document whose hub held the membership.
+    pub document_hash: String,
+    /// The CRDT client id that was retired.
+    pub client_id: u64,
+    /// The editor replica identity that named the exited process.
+    pub identity: String,
+    /// Whether the hub still held the member (false when it was already gone).
+    pub removed: bool,
+    /// `live_count()` for that document after the reap — `0` once the ghost is
+    /// the last member, which is what unblocks disk authority.
+    pub live_editors_after: usize,
+}
+
+/// Retire every relay membership owned by an editor process the OS has proven
+/// gone (`#ghostrelaymember`).
+///
+/// [`RelayHub`] liveness is keyed by opaque CRDT client id and has no idea a
+/// process died: `hub.live_count()` — the `live_editors` in `crdt_current_text`,
+/// the consistent cut the commit barrier waits on, and the reason
+/// `realtime_doc_resolve` answers `authority=editor_buffer` — only ever dropped
+/// on a graceful `deregister` or on the *next* registration, which retires dead
+/// members through [`dead_editor_replica_ids`]. A crashed or closed editor that
+/// never comes back therefore leaves a ghost member live forever.
+///
+/// Measured 2026-09-20 on `src/boost-client/tasks/monsterrodholders.md`: no
+/// JetBrains or `java` process existed anywhere on the box, yet the live
+/// controller still logged `live_editors=1 authority=multi_replica` for that
+/// document on every resolve. Two operator-visible symptoms follow from the one
+/// ghost: closeout waits on a delivery ack that can never arrive (the turn
+/// "wedges on finish", and restarting the IDE appears to fix it only because the
+/// replacement registration finally prunes the ghost), and every resolve keeps
+/// answering from the ghost's canonical relay text instead of the operator's
+/// newer on-disk edits, so typed `agent:queue` lines read as "rolled back".
+///
+/// This makes that reap **eager**: the OS process-exit watcher already proves
+/// the death, so the same fact retires the memberships instead of waiting for an
+/// editor that may never return. The death fact is authoritative — this does not
+/// re-check OS liveness, because the durable liveness plane has already recorded
+/// `Alive{false}` for the pid and the relay must not disagree with it.
+///
+/// Unrecognized (headless / generic) identities carry no editor pid and are
+/// never reaped here, exactly as in [`dead_editor_replica_ids`].
+pub fn reap_exited_editor_replicas(editor_pid: u32) -> Vec<ReapedEditorReplica> {
+    let mut reaped = Vec::new();
+    for (document_hash, client_id, identity) in editor_replica_memberships_for_pid(editor_pid) {
+        // Same registration → hub lock order as register/deregister, so a
+        // concurrent registration for the replacement editor can never deadlock
+        // against this reap.
+        let Ok(registration_lock) = replica_registration_lock(&document_hash) else {
+            continue;
+        };
+        let _registration_guard = registration_lock.lock();
+        let removed = match hub_handle(&document_hash) {
+            Some(handle) => {
+                let mut hub = handle.lock();
+                let removed = hub.deregister(client_id);
+                retained_canonical_projections()
+                    .retain(&document_hash, hub.retained_canonical_projection());
+                removed
+            }
+            None => false,
+        };
+        let _ = forget_replica_identity(&document_hash, client_id);
+        let live_editors_after = hub_handle(&document_hash)
+            .map_or(0, |handle| handle.lock().live_count());
+        reaped.push(ReapedEditorReplica {
+            document_hash,
+            client_id,
+            identity,
+            removed,
+            live_editors_after,
+        });
+    }
+    reaped
+}
+
+/// Every `(document_hash, client_id, identity)` the identity registry still
+/// holds for `editor_pid`, across all documents. Snapshotted under the registry
+/// lock and returned by value so the caller takes hub locks with the registry
+/// lock released (`#relayhubperdoclock`).
+fn editor_replica_memberships_for_pid(editor_pid: u32) -> Vec<(String, u64, String)> {
+    let registry = replica_identity_registry().lock();
+    let mut memberships = registry
+        .iter()
+        .flat_map(|(document_hash, members)| {
+            members
+                .iter()
+                .filter(move |(_, identity)| editor_process_id(identity) == Some(editor_pid))
+                .map(move |(client_id, identity)| {
+                    (document_hash.clone(), *client_id, identity.clone())
+                })
+        })
+        .collect::<Vec<_>>();
+    memberships.sort_unstable();
+    memberships
+}
+
 /// Relay a **raw encoded yrs update** from an editor replica through the
 /// document's per-document hub: integrate it into the canonical replica and fan
 /// the missing delta out to every OTHER live replica's hub-side mirror
@@ -5545,6 +5645,103 @@ mod tests {
             logical_replica_identity("jetbrains-1234-a1b2:/tmp/doc.md:refresh-next"),
             "jetbrains-1234-a1b2:/tmp/doc.md:refresh-next",
         );
+    }
+
+    #[test]
+    fn editor_exit_reaps_the_ghost_member_without_waiting_for_a_replacement() {
+        // `#ghostrelaymember`. The incident shape (2026-09-20,
+        // `src/boost-client/tasks/monsterrodholders.md`): the IDE is gone — no
+        // JetBrains or `java` process anywhere — yet the controller still
+        // resolved `live_editors=1 authority=multi_replica` on every read,
+        // because a hub member is only retired on a graceful deregister or on
+        // the NEXT registration. Closeout then waits on a delivery ack that can
+        // never arrive, and `authority=editor_buffer` keeps answering from the
+        // ghost's canonical instead of the operator's newer disk text.
+        let (_dir, doc) = temp_doc("ghost-relay-member.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let editor_pid = 4242u32;
+        let identity = format!("jetbrains-{editor_pid}-ghost:{file_str}");
+        let client_id = register_replica_for_file_with_liveness(&doc, &identity, |_| true)
+            .unwrap()
+            .expect("editor should attach while its process is live")
+            .0;
+        with_hub(&doc, |hub| {
+            assert!(hub.is_registered(client_id));
+            assert_eq!(hub.live_count(), 1, "the editor is attached");
+        })
+        .unwrap();
+
+        // The OS proves the editor process is gone. No replacement ever
+        // registers — that is the whole point.
+        let reaped = reap_exited_editor_replicas(editor_pid);
+
+        assert_eq!(reaped.len(), 1, "exactly the ghost membership: {reaped:?}");
+        assert_eq!(reaped[0].client_id, client_id);
+        assert_eq!(reaped[0].identity, identity);
+        assert!(reaped[0].removed, "the hub still held the ghost: {reaped:?}");
+        assert_eq!(
+            reaped[0].live_editors_after, 0,
+            "the ghost was the last member, so disk authority is unblocked: {reaped:?}"
+        );
+        assert!(
+            !replica_identity_registry_has_editor_pid(
+                &agent_doc_fs::document_state_hash(&doc).unwrap(),
+                editor_pid,
+            ),
+            "the identity registry must not keep naming a dead editor process"
+        );
+        // The hub may be evicted once empty; if it survives it must report zero.
+        if let Some(live) = with_existing_hub(&doc, |hub| {
+            assert!(!hub.is_registered(client_id));
+            hub.live_count()
+        })
+        .unwrap()
+        {
+            assert_eq!(live, 0, "no live editor remains after the reap");
+        }
+    }
+
+    #[test]
+    fn editor_exit_reap_leaves_another_editor_process_attached() {
+        // Two IDEs on one document: reaping the one that died must not demote
+        // the one still running, and must not touch a headless/generic replica
+        // whose identity names no editor process at all.
+        let (_dir, doc) = temp_doc("ghost-relay-member-sibling.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let dead_pid = 5151u32;
+        let live_pid = std::process::id();
+        let dead_identity = format!("jetbrains-{dead_pid}-dead:{file_str}");
+        let live_identity = format!("jetbrains-{live_pid}-live:{file_str}");
+        let dead_id = register_replica_for_file_with_liveness(&doc, &dead_identity, |_| true)
+            .unwrap()
+            .expect("first editor attaches")
+            .0;
+        let live_id = register_replica_for_file_with_liveness(&doc, &live_identity, |_| true)
+            .unwrap()
+            .expect("second editor attaches")
+            .0;
+        with_hub(&doc, |hub| assert_eq!(hub.live_count(), 2)).unwrap();
+
+        let reaped = reap_exited_editor_replicas(dead_pid);
+
+        assert_eq!(reaped.len(), 1, "only the dead pid's membership: {reaped:?}");
+        assert_eq!(reaped[0].client_id, dead_id);
+        assert_eq!(
+            reaped[0].live_editors_after, 1,
+            "the surviving editor keeps multi-replica authority: {reaped:?}"
+        );
+        with_hub(&doc, |hub| {
+            assert!(!hub.is_registered(dead_id), "the dead editor is gone");
+            assert!(hub.is_registered(live_id), "the live editor is untouched");
+            assert_eq!(hub.live_count(), 1);
+        })
+        .unwrap();
+
+        // A pid with no memberships is a no-op, not a panic or a stray reap.
+        assert!(reap_exited_editor_replicas(999_999).is_empty());
+        with_hub(&doc, |hub| assert_eq!(hub.live_count(), 1)).unwrap();
     }
 
     #[test]

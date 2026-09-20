@@ -202,7 +202,7 @@ fn release_version(release: &Value) -> &str {
 
 // --- JetBrains ---
 
-fn jetbrains_plugin_dirs() -> Vec<PathBuf> {
+pub(crate) fn jetbrains_plugin_dirs() -> Vec<PathBuf> {
     let home = match std::env::var("HOME") {
         Ok(h) => PathBuf::from(h),
         Err(_) => return vec![],

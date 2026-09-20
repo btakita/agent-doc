@@ -160,8 +160,7 @@ pub fn run_search(
 pub fn index_archive(doc: &Path, archive_path: &Path) -> Result<()> {
     let project_root = find_project_root(doc)?;
     let db_path = db_path(&project_root);
-    let conn = Connection::open(&db_path)
-        .with_context(|| format!("failed to open {}", db_path.display()))?;
+    let conn = open_archive_index(&db_path)?;
     ensure_schema(&conn)?;
     let record = parse_archive(doc, archive_path, &project_root)?;
     upsert_archive(&conn, &record)?;
@@ -179,8 +178,7 @@ pub fn list_recent_turns(
     let current_doc = canonical_document_key(file, &project_root)?;
     let current_session = current_session_id(file)?;
     let db_path = db_path(&project_root);
-    let conn = Connection::open(&db_path)
-        .with_context(|| format!("failed to open {}", db_path.display()))?;
+    let conn = open_archive_index(&db_path)?;
     ensure_schema(&conn)?;
 
     let query_norm = query.map(normalize_text);
@@ -293,8 +291,7 @@ pub fn fetch_turn_window(
     let project_root = find_project_root(file)?;
     sync_project_index(&project_root)?;
     let db_path = db_path(&project_root);
-    let conn = Connection::open(&db_path)
-        .with_context(|| format!("failed to open {}", db_path.display()))?;
+    let conn = open_archive_index(&db_path)?;
     ensure_schema(&conn)?;
 
     let archive_path = normalize_archive_path(&project_root, archive_path);
@@ -369,27 +366,33 @@ pub fn fetch_turn_window(
 
 fn rebuild_project_index(project_root: &Path) -> Result<usize> {
     let db_path = db_path(project_root);
-    let conn = Connection::open(&db_path)
-        .with_context(|| format!("failed to open {}", db_path.display()))?;
+    let conn = open_archive_index(&db_path)?;
     reset_schema(&conn)?;
     let archives = list_archive_files(project_root)?;
+    // One commit for the whole reindex (`#archiveindexwal`): without this each
+    // row of every archive is its own autocommit transaction and its own fsync.
+    let tx = conn.unchecked_transaction()?;
     for archive_path in &archives {
         let record = parse_archive_from_project_root(archive_path, project_root)?;
         upsert_archive(&conn, &record)?;
     }
+    tx.commit()?;
     Ok(archives.len())
 }
 
 fn sync_project_index(project_root: &Path) -> Result<usize> {
     let db_path = db_path(project_root);
-    let conn = Connection::open(&db_path)
-        .with_context(|| format!("failed to open {}", db_path.display()))?;
+    let conn = open_archive_index(&db_path)?;
     ensure_schema(&conn)?;
     let archives = list_archive_files(project_root)?;
+    // One commit for the whole reindex (`#archiveindexwal`): without this each
+    // row of every archive is its own autocommit transaction and its own fsync.
+    let tx = conn.unchecked_transaction()?;
     for archive_path in &archives {
         let record = parse_archive_from_project_root(archive_path, project_root)?;
         upsert_archive(&conn, &record)?;
     }
+    tx.commit()?;
     Ok(archives.len())
 }
 
@@ -398,8 +401,7 @@ fn search_results(file: &Path, options: &SearchOptions<'_>) -> Result<Vec<Search
     let current_doc = canonical_document_key(file, &project_root)?;
     let current_session = current_session_id(file)?;
     let db_path = db_path(&project_root);
-    let conn = Connection::open(&db_path)
-        .with_context(|| format!("failed to open {}", db_path.display()))?;
+    let conn = open_archive_index(&db_path)?;
     ensure_schema(&conn)?;
 
     let query_norm = options.query.map(normalize_text);
@@ -557,6 +559,35 @@ fn archive_backlog_refs(conn: &Connection, archive_id: i64) -> Result<Vec<String
         .query_map(params![archive_id], |row| row.get::<_, String>(0))?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(hits)
+}
+
+/// Open the archive index with the same durability pragmas the state store uses
+/// (`#archiveindexwal`).
+///
+/// This database was opened with `PRAGMA foreign_keys = ON` and nothing else,
+/// which left it on SQLite's default rollback journal with no busy timeout. Two
+/// consequences, both measured 2026-09-20 against a 115.6 MB
+/// `.agent-doc/archive-index.db`: every autocommit statement in
+/// [`upsert_archive`] costs its own journal fsync, and any concurrent writer
+/// fails instantly with `SQLITE_BUSY` instead of waiting. A single
+/// `agent-doc orchestrate --from-exchange` sat four minutes in uninterruptible
+/// sleep with its only non-socket fds on `archive-index.db` and a live
+/// `archive-index.db-journal`, its threads parked in `jbd2_log_wait_commit` /
+/// `folio_wait_bit_common`, burning 7s of CPU across those four minutes.
+///
+/// WAL moves those commits off the rollback journal, `busy_timeout` makes a
+/// concurrent writer wait rather than fail, and [`index_transaction`] batches the
+/// per-row writes so a reindex is one commit instead of thousands.
+fn open_archive_index(db_path: &Path) -> Result<Connection> {
+    let conn = Connection::open(db_path)
+        .with_context(|| format!("failed to open {}", db_path.display()))?;
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA busy_timeout = 30000;
+         PRAGMA foreign_keys = ON;",
+    )
+    .with_context(|| format!("failed to configure {}", db_path.display()))?;
+    Ok(conn)
 }
 
 fn ensure_schema(conn: &Connection) -> Result<()> {
@@ -1130,6 +1161,40 @@ mod tests {
         assert_eq!(archive_count, 1);
         assert_eq!(turn_count, 2);
         assert!(ref_count >= 2);
+    }
+
+    #[test]
+    fn archive_index_opens_in_wal_with_a_busy_timeout() {
+        // `#archiveindexwal`: the index used to open with `foreign_keys` alone,
+        // leaving it on the default rollback journal with no busy timeout — one
+        // fsync per autocommit row and instant `SQLITE_BUSY` for any concurrent
+        // writer. Assert the durability pragmas the state store already sets,
+        // read back from the connection rather than from the source text.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let conn = open_archive_index(&root.join(".agent-doc/archive-index.db")).unwrap();
+
+        let journal_mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            journal_mode.to_ascii_lowercase(),
+            "wal",
+            "the archive index must not sit on the rollback journal"
+        );
+        let busy_timeout: i64 = conn
+            .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            busy_timeout, 30_000,
+            "a concurrent writer must wait, not fail instantly with SQLITE_BUSY"
+        );
+        let foreign_keys: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(foreign_keys, 1, "the cascade deletes still depend on this");
     }
 
     #[test]

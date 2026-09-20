@@ -66,7 +66,7 @@ Detect subcommands before the normal workflow:
 
 ### 0b. Slash Commands
 
-Handle non-empty `slash_commands` or `builtin_commands` before responding. Claude Code invokes `slash_commands` via the `Skill` tool; other harnesses skip them. For `builtin_commands`, tell the user to run the command at the terminal. Trust preflight; do not re-validate fences or blockquotes. If `orchestration_request` is non-null, run `agent-doc orchestrate <FILE> --mode <orchestration_request.mode> --from-exchange` before manual response composition. If `prompt_presets_requested` is non-empty, let `orchestrate` expand the validated presets.
+Handle non-empty `slash_commands` or `builtin_commands` before responding. Claude Code invokes `slash_commands` via the `Skill` tool; other harnesses skip them. For `builtin_commands`, tell the user to run the command at the terminal. Trust preflight; do not re-validate fences or blockquotes. If `orchestration_request` is non-null, run `agent-doc orchestrate <FILE> --mode <orchestration_request.mode> --from-exchange` before manual response composition. If `prompt_presets_requested` is non-empty, read each preset body from `prompt_preset_expansions` in the same contract — preflight already resolved, validated, and expanded them. Do **not** route preset expansion through `orchestrate` (`#orchestratepresetexpand`): it never reads `prompt_presets` frontmatter, and it abandons the live `PreflightStarted` cycle this turn is sealed on.
 
 ### 0c. Model Tier
 

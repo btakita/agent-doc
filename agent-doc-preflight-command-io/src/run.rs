@@ -1448,6 +1448,20 @@ pub fn run_with_options_to_writer(
         );
     }
     let prompt_presets_requested = prompt_preset_resolution.requested;
+    // `#orchestratepresetexpand`: ship the preset BODIES with the request so the
+    // agent never needs a second command to expand them. The names are already
+    // canonicalized and proven present by the `missing` bail above.
+    let prompt_preset_expansions = prompt_presets_requested
+        .iter()
+        .filter_map(|name| {
+            frontmatter_prompt_presets.get(name.as_str()).map(|body| {
+                agent_doc_preflight_io::PromptPresetExpansion {
+                    name: name.clone(),
+                    body: body.clone(),
+                }
+            })
+        })
+        .collect::<Vec<_>>();
     for warning in agent_doc_preflight_io::warnings::content_and_staleness_warnings(
         file,
         &model_source_content,
@@ -2064,6 +2078,7 @@ pub fn run_with_options_to_writer(
         builtin_commands,
         orchestration_request,
         prompt_presets_requested,
+        prompt_preset_expansions,
         explicit_backlog_targets: explicit_backlog_target_paths,
         effective_tier: preflight_read_projection.tiers.effective.clone(),
         required_tier: preflight_read_projection.tiers.required.clone(),

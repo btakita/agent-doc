@@ -634,6 +634,37 @@ A real `vsce package` failure still fails the install (`|| exit 1` is untouched)
 - Both shell branches exercised standalone: vsce absent → warning on stderr, status 0; vsce present → packaging path taken, status 0.
 - `make install` — exit 0 end to end (this worktree has `node_modules`, so it took the packaging path and installed `agent-doc-0.2.71.vsix`). The binary is now on `c3d41f96c` plus this fix, clearing the `stale_install` advisory.
 - CI run `35530446385` for this commit was still in progress at closeout; the two runs before it are also in progress, so nothing is red. Recording as pending rather than waiting.
+
+❯ `make check` — exit 0, nextest reports `9567 tests run: 9567 passed (1 slow), 259 skipped`; all stages ran (clippy, test, sim-medium, version-sync, audit-docs, editor-parity, python-bootstrap-test, lean, tla).
+
+### Re: do #actionable-review — opus-5 · 2026-09-20T15:22-04:00
+
+> **Queue prompt:** do #actionable-review
+
+Preset body: *Add actionable review items into backlog + queue.*
+
+**All eight `agent:review` gates are still genuinely binding**, so none of them converts to an actionable item as written:
+
+| item | gate | still blocking? |
+|---|---|---|
+| `#runsubmitfirstmatch` | human watches one Run Agent Doc dispatch | yes — and the correctness half is already covered by `route_trigger_visible_in_current_draft_answers_for_the_newest_occurrence` (agent-doc-controller/src/dispatch.rs:7037), so only the live UX confirmation remains |
+| `#cargovodtrim` | operator supplies the VOD locator | yes |
+| `#pypiquotafix` | browser auth on pypi.org | yes |
+| `#tmuxfocussyncverify` | IntelliJ restart + pane clicks | yes |
+| `#grokmcpverify` | Grok quota / subscription | yes |
+| `#activateinstalledjetbrai` | IntelliJ restart | yes |
+| `#harnessswitchverify` | live disposable IntelliJ session | yes |
+| `#coder7` | reachable Coder workspace | yes |
+
+What *is* actionable is the agent-doable work those items keep re-deriving by hand, plus two defects this cycle surfaced while expanding the preset. Three items added to `agent:backlog` + queue:
+
+**`#pluginactivationprobe`** — the extraction from the review list. Three of the eight items carry a hand-recorded `(staged plugin version, live IDE PID, process start time)` triple as their premise, and each has been refreshed by hand at least twice. The 2026-09-20 refresh recorded IDEA PID 1645748; as of 15:20 no IntelliJ or java process exists at all, so that premise is dead again. `stale_plugin` (agent-doc-preflight-io/src/warnings.rs:380) only fires from live editor registrations, so it stays silent precisely when the triple rots. A registration-independent probe — installed artifact mtime vs live IDE process start time, surfaced in `session doctor` — makes the premise machine-refreshed.
+
+**`#orchestratepresetexpand`** — SKILL.md §0b says to let `orchestrate` expand validated presets. It doesn't. `agent-doc orchestrate <FILE> --from-exchange` printed `mode: sequential`, parsed the *previous* response's four verification bullets as `tasks: 4`, then logged `closing preflight handoff cycle cycle-1789931555969 before task injection` — closing this turn's sealed cycle. The preset body was never read; I resolved `#actionable-review` from frontmatter `prompt_presets` instead. Nothing was injected into the document (queue and backlog verified unchanged), and a fresh cycle was admitted at 19:12:53Z.
+
+**`#archiveindexwal`** — that orchestrate call sat 4 minutes in state `D`, its only non-socket fds on a 115.6 MB `archive-index.db` plus a live `-journal`, wchan `jbd2_log_wait_commit`, 7s CPU across 4 minutes wall. `archive_index.rs:564` sets only `PRAGMA foreign_keys = ON`; `state_store.rs:657` sets `journal_mode = WAL` with a 30s busy_timeout and documents why. The archive index is the outlier.
+
+Exchange is at 608 lines / 26 sections — noting the size, not stalling the queue for it.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -643,10 +674,14 @@ A real `vsce package` failure still fails the install (`|| exit 1` is untouched)
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do #actionable-review~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority -->
+- [ ] [#orchestratepresetexpand] SKILL.md routes preset expansion through `agent-doc orchestrate <FILE> --from-exchange` whenever preflight reports `prompt_presets_requested`, but that command does not expand the preset. Measured 2026-09-20 on `#actionable-review`: it printed `mode: sequential`, parsed the PREVIOUS response's four verification bullets as `tasks: 4`, then logged `closing preflight handoff cycle cycle-1789931555969 before task injection` — closing the live cycle the UserPromptSubmit hook had just sealed for this turn. It also ran 4+ minutes with zero output before reaching that point. The preset body lives in document frontmatter (`prompt_presets`) and was never read. Either teach orchestrate to expand `prompt_presets_requested` from frontmatter, or stop routing preset expansion through it in SKILL.md — and never close a live preflight handoff cycle from what the agent is told is an expansion step.
+- [ ] [#archiveindexwal] `.agent-doc/archive-index.db` (115.6 MB) opens with only `PRAGMA foreign_keys = ON` (agent-doc-sqlite/src/archive_index.rs:564) — no `journal_mode = WAL` and no `busy_timeout`, unlike agent-doc-sqlite/src/state_store.rs:657 which sets WAL plus a 30s busy_timeout and documents why. Measured 2026-09-20: `agent-doc orchestrate --from-exchange` sat 4 minutes in process state `D` with its only non-socket fds on `archive-index.db` and a live `archive-index.db-journal`, thread wchan `jbd2_log_wait_commit` / `folio_wait_bit_common`, burning 7s CPU across 4 minutes of wall clock. Give the archive index the same WAL + busy_timeout pragmas as the state store and batch its writes into transactions instead of one fsync-bound rollback-journal commit per row.
+- [ ] [#pluginactivationprobe] Three `agent:review` items (#tmuxfocussyncverify, #activateinstalledjetbrai, #harnessswitchverify) carry a hand-recorded (staged plugin version, live IDE PID, process start time) triple as their premise, and each has been refreshed by hand at least twice because that triple rots the moment IntelliJ restarts or exits. The 2026-09-20 refresh recorded IDEA PID 1645748; as of 15:20 today no IntelliJ or java process exists at all, so the premise is dead again. The `stale_plugin` preflight warning (agent-doc-preflight-io/src/warnings.rs:380) only fires from live editor registrations, so it stays silent when no editor is attached — exactly when the triple goes stale. Add a registration-independent activation probe that compares the installed plugin artifact mtime against each live IDE process start time, and surface it in `agent-doc session doctor`, so these premises are machine-refreshed instead of re-derived by the agent every cycle.
 <!-- /agent:backlog -->
 
 ## Review

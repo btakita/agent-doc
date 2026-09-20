@@ -52,6 +52,68 @@ thread_local! {
         const { RefCell::new(None) };
 }
 
+/// The project root this process is the live project controller for.
+///
+/// `#ctrlselfrpc`: [`IN_CONTROLLER_REQUEST`] is thread-local, but "this process
+/// IS the controller" is a **process** fact. Every controller-owned worker
+/// thread that forgets to install the request context therefore looks like an
+/// external client, and its first projection read opens a socket to the
+/// controller it is running inside — a five-second self-RPC per read, each one
+/// consuming an accept and a spawned thread in that same controller.
+///
+/// Installing the thread-local context at each spawn site is the fix that
+/// already exists (`install_controller_request_thread_context`), and it keeps
+/// failing the same way: it has to be remembered at every `thread::spawn`, and
+/// the controller has a dozen of them — the startup replica rebuild, the
+/// post-promotion rebuild, the self-promote rebuild, the orphan-drain route
+/// worker, the editor-command async worker, the supervisor replacement worker.
+/// Missing it is silent; you only learn about it as an unresponsive controller.
+///
+/// The root is recorded rather than a bare flag because the suppression must be
+/// **scoped**: a controller serving project A may legitimately read a document
+/// in project B, where it is an ordinary external client and must use B's
+/// socket. Only a read resolving to this process's own root skips the RPC.
+static CONTROLLER_PROCESS_ROOT: std::sync::RwLock<Option<std::path::PathBuf>> =
+    std::sync::RwLock::new(None);
+
+/// Record that this process serves the project controller for `root`.
+///
+/// Called once, by `serve`, on the thread that is about to bind the socket.
+pub fn set_controller_process_root(root: &Path) {
+    let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    match CONTROLLER_PROCESS_ROOT.write() {
+        Ok(mut slot) => *slot = Some(canonical),
+        Err(err) => eprintln!(
+            "[agent-doc] controller process root registry poisoned ({err}) — controller-owned threads may self-RPC for projection reads"
+        ),
+    }
+}
+
+/// Whether this process is the live project controller for `root`.
+///
+/// Answers `false` on a poisoned registry: the caller then takes the ordinary
+/// client path, which is slow but correct, rather than reading cold state it
+/// has no claim to.
+pub fn process_is_controller_for(root: &Path) -> bool {
+    let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    match CONTROLLER_PROCESS_ROOT.read() {
+        Ok(slot) => slot.as_deref() == Some(canonical.as_path()),
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] controller process root registry poisoned ({err}) — treating this process as an external client"
+            );
+            false
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+pub fn clear_controller_process_root_for_tests() {
+    if let Ok(mut slot) = CONTROLLER_PROCESS_ROOT.write() {
+        *slot = None;
+    }
+}
+
 pub fn set_in_controller_request(value: bool) {
     IN_CONTROLLER_REQUEST.with(|flag| flag.set(value));
 }
@@ -1485,6 +1547,57 @@ mod tests {
             "Timeout Display must read as a timeout: {err}"
         );
         let _ = handle.join();
+    }
+
+    /// `#ctrlselfrpc`: the controller identity must survive `thread::spawn`.
+    ///
+    /// This is the whole point of recording it per process instead of per
+    /// thread. `install_controller_request_thread_context` sets a thread-local,
+    /// so every worker the controller spawns starts out looking like an
+    /// external client unless someone remembered to install it there — and a
+    /// missed install is silent until the controller stops answering.
+    #[test]
+    fn controller_identity_is_process_scoped_and_root_scoped() {
+        let ours = tempfile::TempDir::new().unwrap();
+        let theirs = tempfile::TempDir::new().unwrap();
+        clear_controller_process_root_for_tests();
+
+        assert!(
+            !process_is_controller_for(ours.path()),
+            "an unregistered process is nobody's controller"
+        );
+
+        set_controller_process_root(ours.path());
+
+        assert!(process_is_controller_for(ours.path()));
+        assert!(
+            !process_is_controller_for(theirs.path()),
+            "a controller for one root is an ordinary client for another — \
+             suppressing that root's RPC would read state it does not own"
+        );
+
+        // A fresh thread has fresh thread-locals; the process fact must not be
+        // one of them.
+        let ours_path = ours.path().to_path_buf();
+        let theirs_path = theirs.path().to_path_buf();
+        let observed = std::thread::spawn(move || {
+            (
+                in_controller_request(),
+                process_is_controller_for(&ours_path),
+                process_is_controller_for(&theirs_path),
+            )
+        })
+        .join()
+        .unwrap();
+
+        assert_eq!(
+            observed,
+            (false, true, false),
+            "a spawned worker carries no thread-local marker but must still \
+             know it runs inside its own controller"
+        );
+
+        clear_controller_process_root_for_tests();
     }
 
     #[test]

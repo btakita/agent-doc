@@ -7,6 +7,9 @@ license = "MIT"
 repository = "https://github.com/btakita/agent-doc"
 publish = false
 
+[features]
+test-support = []
+
 [lib]
 name = "agent_doc_state_wire"
 

@@ -789,7 +789,16 @@ pub fn load_document_projection(
     // authority) when a controller is live; replay cold `state.db` only for the
     // actorless/bootstrap boundary. Read-only — no fact is emitted.
     let controller_socket = agent_doc_controller::paths::socket_path(&project_root);
-    if controller_socket.exists() && !in_controller_request() {
+    // `#ctrlselfrpc`: the thread-local marker answers "this THREAD is serving a
+    // controller request"; the process registry answers "this PROCESS is the
+    // controller for this root". A controller-owned worker thread that never
+    // installed the request context satisfies only the second, and without it
+    // opens a five-second self-RPC to the socket it is running behind — the
+    // shape that left a freshly-adopted controller unresponsive for 40s while
+    // its startup replica rebuild logged one line at a time.
+    let served_by_this_process = in_controller_request()
+        || agent_doc_state_wire::process_is_controller_for(&project_root);
+    if controller_socket.exists() && !served_by_this_process {
         let request = serde_json::json!({
             "command": "document_state_projection",
             "file": canonical,
@@ -4949,5 +4958,87 @@ mod project_root_symmetry_tests {
             agent_doc_sqlite::state_store::state_db_path(&root).exists(),
             "the write must have materialized the state db at the root the reader resolves",
         );
+    }
+
+    /// `#ctrlselfrpc`: a projection read inside the controller process must not
+    /// go back out through the controller's own socket.
+    ///
+    /// The live failure this closes: a freshly-adopted controller stayed
+    /// unresponsive for at least 40 seconds while its startup workers rebuilt
+    /// editor replicas. Those workers run on threads the controller spawned,
+    /// which carry none of the thread-local request context, so every `log_op`
+    /// line resolved its `turn=` id through `load_document_projection` — and
+    /// that read opened a five-second-timeout socket request to the controller
+    /// the worker was running inside, consuming one of its accepts each time.
+    ///
+    /// The assertion is behavioural, not a flag check: a stub actor on the
+    /// controller socket answers with a projection that could only have come
+    /// from an RPC. Seeing it proves the socket was used; not seeing it proves
+    /// the local path was taken instead.
+    #[cfg(unix)]
+    #[test]
+    fn a_controller_owned_thread_reads_projections_without_self_rpc() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "# doc\n").unwrap();
+        let socket = agent_doc_controller::paths::socket_path(dir.path());
+        if let Some(parent) = socket.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+
+        // A projection value that no cold `state.db` in this project can hold —
+        // there is no state.db at all — so observing it is proof of an RPC.
+        let rpc_only = agent_doc_state_backbone::DocumentStateProjection::new("rpc-sentinel");
+        let response = serde_json::json!({ "ok": true, "data": rpc_only }).to_string();
+
+        let listener = UnixListener::bind(&socket).unwrap();
+        let contacted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let served = std::sync::Arc::clone(&contacted);
+        let actor = std::thread::spawn(move || {
+            // Two reads run below; answer both so neither can block on accept.
+            for _ in 0..2 {
+                let Ok((stream, _)) = listener.accept() else {
+                    return;
+                };
+                served.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                let _ = reader.read_line(&mut line);
+                let mut stream = stream;
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(b"\n");
+                let _ = stream.flush();
+            }
+        });
+
+        agent_doc_state_wire::clear_controller_process_root_for_tests();
+        let as_external_client = load_document_projection(&doc).unwrap();
+        assert_eq!(
+            as_external_client.map(|projection| projection.document_hash),
+            Some("rpc-sentinel".to_string()),
+            "an ordinary client must still read through the controller socket",
+        );
+
+        agent_doc_state_wire::set_controller_process_root(dir.path());
+        let inside_the_controller = load_document_projection(&doc).unwrap();
+        assert_eq!(
+            inside_the_controller, None,
+            "inside the controller process the read must use the local path, \
+             not the socket this process is itself serving",
+        );
+        assert_eq!(
+            contacted.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "exactly the external-client read may touch the socket",
+        );
+
+        agent_doc_state_wire::clear_controller_process_root_for_tests();
+        // Unblock the stub actor's second accept so the thread can retire.
+        let _ = std::os::unix::net::UnixStream::connect(&socket);
+        let _ = actor.join();
     }
 }

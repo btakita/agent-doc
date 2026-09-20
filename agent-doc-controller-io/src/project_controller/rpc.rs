@@ -11508,6 +11508,16 @@ pub(crate) fn serve_with_options(
     // self-RPCing the socket they are currently serving (which would deadlock
     // the single-request serve loop).
     agent_doc_cycle_state_io::set_in_controller_request(true);
+    // `#ctrlselfrpc`: the marker above covers this thread only. Every worker the
+    // controller spawns — startup replica rebuild, post-promotion rebuild,
+    // self-promote rebuild, orphan-drain route worker, editor-command async
+    // worker, supervisor replacement — gets a fresh thread with fresh
+    // thread-locals, so a projection read there looked like an external client
+    // and self-RPCed this process's own socket on a 5s timeout, once per
+    // `log_op` line. Recording the root makes the suppression a process fact
+    // that a new `thread::spawn` cannot forget, while keeping it scoped: reads
+    // for OTHER project roots still go through their own controller.
+    agent_doc_state_wire::set_controller_process_root(project_root);
     agent_doc_crdt_relay_io::mark_process_as_relay_hub_owner();
     // Detached startup races with short-lived callers (especially TempDir-backed
     // tests). Capture the caller's directory incarnation before any bootstrap
@@ -32261,10 +32271,27 @@ mod tests {
         let liveness_hydrated = serve
             .find("hydrate_reliable_sync_liveness(&durable_project_root)?")
             .expect("reliable-sync liveness hydration");
+        // `#ctrlselfrpc`: the controller identity is a PROCESS fact and must be
+        // recorded before anything can spawn a worker. `set_in_controller_request`
+        // beside it only marks this thread; every worker the controller spawns
+        // gets fresh thread-locals, so without the process root a projection read
+        // there opens a five-second self-RPC to the socket bound below — the shape
+        // that left a freshly-adopted controller unresponsive for 40s. Recording
+        // it before the bind means no spawn ordering can reintroduce the gap.
+        let controller_root_recorded = serve
+            .find("agent_doc_state_wire::set_controller_process_root(project_root)")
+            .expect("controller process-root registration");
         let serve_ready_logged = serve
             .find("controller_listener_serve_ready")
             .expect("bind-to-accept observability");
 
+        assert!(
+            controller_root_recorded < listener_bound
+                && controller_root_recorded < liveness_hydrated,
+            "the controller must own its process identity before it binds a socket or spawns \
+             any startup worker, or a worker's projection read self-RPCs the controller it is \
+             running inside"
+        );
         assert!(
             liveness_hydrated < listener_bound,
             "the durable reliable-sync fold is unbounded work; it must complete before the \

@@ -596,6 +596,44 @@ Done, pushed as `c3d41f96c`. `make check`: **9566 tests run, 9566 passed**, exit
 The workflow itself cannot be exercised from a test, so the invariants are pinned the same way the issue-47 and issue-52 guards are: the dependency, both upload paths, the version-pinned copies, and the separate download directory. Dropping the `plugins` dependency reddens it.
 
 That empties the queue. Both CI runs were still in progress at closeout; not waiting on them.
+
+### Re: do [#vsceoptionalinstall] — opus-5 · 2026-09-20T14:52-04:00
+
+> **Queue prompt:**
+>
+> do [#vsceoptionalinstall]
+
+
+Fixed and pushed as `96d8719f4`.
+
+**Root cause.** `npm run package` runs `vsce package`, and `vsce` resolves from `editors/vscode/node_modules/.bin`. A clean worktree that has never run `npm install` there has no such binary, so the script dies with `sh: line 1: vsce: command not found`. The `|| exit 1` propagated that out of `install-editor-plugins` (Makefile:259) and back through `@$(MAKE) install-editor-plugins` (Makefile:221), so `make install` exited 2 *after* the binary, cdylib, skills and the JetBrains plugin had all installed successfully.
+
+**Fix.** The VS Code branch of `install-editor-plugins` is now gated on vsce being resolvable — either `editors/vscode/node_modules/.bin/vsce` or a global `vsce` on PATH:
+
+```make
+@if agent-doc plugin list 2>/dev/null | grep -q '^vscode'; then \
+	if [ -x editors/vscode/node_modules/.bin/vsce ] || command -v vsce >/dev/null 2>&1; then \
+		( cd editors/vscode && npm run package ) || exit 1; \
+		agent-doc plugin install vscode --local; \
+	else \
+		echo "WARNING: vsce is not installed; VS Code package sync skipped. ..." >&2; \
+	fi; \
+else \
+	echo "No existing VS Code agent-doc package; editor package sync skipped."; \
+fi
+```
+
+The skip warning says the installed VS Code package stays on its previous generation and names the remedy (`npm install` in `editors/vscode`, or a global `@vscode/vsce`, then `make install-editor-plugins`) — a silent skip would just move the failure mode from a confusing exit code to a stale package nobody knew about.
+
+A real `vsce package` failure still fails the install (`|| exit 1` is untouched), and the JetBrains branch still fails closed: there a failed Gradle build means a stale package would be installed, which is a different situation from the tool not being present at all.
+
+**Regression coverage.** `test_missing_vsce_skips_vscode_packaging_instead_of_failing_the_install` in `tests/test_cli.rs` asserts the guard precedes `npm run package`, that the skip message names the remedy, and that nothing in the skip branch exits non-zero. Mutation-checked: reverting the Makefile to its pre-fix shape reddens it (`the VS Code branch must check for vsce before packaging`), and restoring turns it green.
+
+**Verification.**
+- `make check` — exit 0, nextest reports `9567 tests run: 9567 passed (1 slow), 259 skipped`; all stages ran (clippy, test, sim-medium, version-sync, audit-docs, editor-parity, python-bootstrap-test, lean, tla).
+- Both shell branches exercised standalone: vsce absent → warning on stderr, status 0; vsce present → packaging path taken, status 0.
+- `make install` — exit 0 end to end (this worktree has `node_modules`, so it took the packaging path and installed `agent-doc-0.2.71.vsix`). The binary is now on `c3d41f96c` plus this fix, clearing the `stale_install` advisory.
+- CI run `35530446385` for this commit was still in progress at closeout; the two runs before it are also in progress, so nothing is red. Recording as pending rather than waiting.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -609,7 +647,6 @@ That empties the queue. Both CI runs were still in progress at closeout; not wai
 
 
 <!-- agent:backlog priority -->
-- [ ] [#vsceoptionalinstall] `make install` exits 2 at install-editor-plugins when `vsce` is not installed, AFTER the binary, cdylib, skills and JetBrains plugin have all installed successfully (`sh: line 1: vsce: command not found`, Makefile:250 -> Makefile:221). A complete install therefore reports failure, which reads as 'the install failed' and is exactly the shape that gets a real install retried or abandoned. Make the VS Code packaging step skip with a warning when vsce is absent (or have the target check for it up front and say so), so the exit code tracks whether the install actually succeeded. Measured 2026-09-20 installing 78c36ccd3 from a clean worktree.
 <!-- /agent:backlog -->
 
 ## Review

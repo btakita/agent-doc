@@ -1361,6 +1361,15 @@ fn reap_done_in_same_write(write_succeeded: bool, commit_mode: CommitMode) -> bo
     commit_mode != CommitMode::None
 }
 
+/// A captured-finalize replay deliberately runs its tracked-work half with
+/// `CommitMode::None`: the immediately-following continuation owns the one
+/// terminal commit. That transport detail must not demote `--done` to the
+/// ordinary non-committing `[x]` shape, because the continuation would then
+/// commit completed residue and session-check would interrupt after success.
+fn captured_finalize_continuation_owns_commit(options: &CommandOptions) -> bool {
+    options.origin.as_deref() == Some("captured_finalize_resume_tracked_work")
+}
+
 fn apply_pending_and_status_mutations(
     file: &Path,
     options: &CommandOptions,
@@ -2111,7 +2120,8 @@ fn run_command_inner_within_pass(
             &options,
             &pending_kept_open_ids,
             has_pending_ops,
-            commit_mode != CommitMode::None,
+            commit_mode != CommitMode::None
+                || captured_finalize_continuation_owns_commit(&options),
         );
         if let Err(error) = mutation_result {
             // A tracked-work-only commit can retain its exact editor-owned
@@ -2463,7 +2473,8 @@ fn run_command_inner_within_pass(
             &options,
             &pending_kept_open_ids,
             has_pending_ops,
-            reap_done_in_same_write(write_result.is_ok(), commit_mode),
+            reap_done_in_same_write(write_result.is_ok(), commit_mode)
+                || captured_finalize_continuation_owns_commit(&options),
         ) {
             Ok(outcome) => outcome,
             Err(err) => {

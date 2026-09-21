@@ -83,6 +83,12 @@ ACK request and never polls for a receipt. If the editor changes again, is
 unavailable, or its replica is absent, the continuation remains retained without
 a direct disk write.
 
+When a materialized captured finalize replays its tracked-work half before that
+continuation's terminal commit, the replay inherits the continuation's commit
+ownership. A captured `--done` therefore archives and removes the item in that
+same replay target; the internal `pending-only` transport must not demote it to a
+visible `[x]` row that the immediately following commit would make durable.
+
 A retained Compact Exchange continuation owns the same new-cycle and terminal
 closeout gates even after the response cycle is committed and any ordinary
 document-write intent has settled. Until identity-matched compact settlement or

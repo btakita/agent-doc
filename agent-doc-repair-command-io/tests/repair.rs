@@ -2064,6 +2064,7 @@ mod tests {
             "---\n\n",
             "<!-- agent:backlog -->\n",
             "- [ ] [#fix1] original next action\n",
+            "- [ ] [#done1] completed by the retained closeout\n",
             "<!-- /agent:backlog -->\n\n",
             "<!-- agent:review -->\n",
             "<!-- /agent:review -->\n\n",
@@ -2084,6 +2085,7 @@ mod tests {
         let plan = agent_doc_write_command_io::CapturedCloseoutMutationPlan {
             pending_add: vec!["[#new1] follow-up from the dropped half".to_string()],
             pending_gate: vec!["fix1".to_string()],
+            pending_done: vec!["done1".to_string()],
             ..Default::default()
         };
         let plan_json = serde_json::to_string(&plan).unwrap();
@@ -2098,8 +2100,12 @@ mod tests {
         // `#mutprovenancepreresponse`: the intent is recorded before the
         // response write, which is what proves the divergence belongs to this
         // closeout rather than to a fresh operator edit.
-        agent_doc_cycle_state_io::record_requested_tracked_work(&doc, &[], &["new1".to_string()])
-            .unwrap();
+        agent_doc_cycle_state_io::record_requested_tracked_work(
+            &doc,
+            &["done1".to_string()],
+            &["new1".to_string()],
+        )
+        .unwrap();
 
         // Only the response half materialized: `#fix1` is still an open backlog
         // item and `#new1` does not exist anywhere in the document.
@@ -2111,6 +2117,7 @@ mod tests {
             "---\n\n",
             "<!-- agent:backlog -->\n",
             "- [ ] [#fix1] original next action\n",
+            "- [ ] [#done1] completed by the retained closeout\n",
             "<!-- /agent:backlog -->\n\n",
             "<!-- agent:review -->\n",
             "<!-- /agent:review -->\n\n",
@@ -2150,6 +2157,15 @@ mod tests {
         assert!(
             !result.contains("- [ ] [#fix1]"),
             "the captured --backlog-gate must not be dropped by the resume: {result}"
+        );
+        assert!(
+            !result.contains("- [ ] [#done1]") && !result.contains("- [x] [#done1]"),
+            "the captured --done must archive in the replay mutation, not leave completed residue: {result}"
+        );
+        assert!(
+            result.contains("<!-- agent:done -->")
+                && result.contains("[#done1] completed by the retained closeout"),
+            "the continuation's one terminal commit must include the completed-item archive: {result}"
         );
     }
 

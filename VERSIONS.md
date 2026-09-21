@@ -15,6 +15,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
   write return the production retained marker after durable capture. The CLI
   integration test proves that this actual error branch archives `--done` in the
   same closeout and leaves neither an open nor `[x]` row.
+- **Captured-finalize replay preserves terminal reap semantics.** The replayed
+  tracked-work half intentionally uses an internal non-committing transport
+  because its continuation owns the one terminal commit. That transport now
+  inherits the continuation's commit ownership, so a captured `--done` is
+  archived instead of committing completed `[x]` residue.
 
 ## 0.35.401
 

@@ -212,6 +212,24 @@ On every preflight run:
 in the `agent:done archive=...done.md` target as completed-history proof for
 backlog replay and as known identifiers for the coined-ID guard after inline
 history is reaped. Invalid archive targets fail closed instead of being ignored.
+- Same-write reap invariant (`#reappersistcrosscycle`): a closeout that COMMITS
+  archives the items it marks in the SAME write that marks them. It must not
+  leave `[x]` with the `agent:done` move owed, and in particular a RETAINED
+  response write does not license deferring it. Deferring produced a state the
+  three commands read differently — `session-check` reported INTERRUPTED (which
+  the auto-loop skip list treats as a reason to stop the drain), `repair
+  --apply-recovery` called the same document clean, and `commit` refused — for a
+  document that was merely mid-archive. Reaping under a retained write is safe on
+  each mechanism it touches: the external `agent:done` archive is staged into the
+  same pending-write transaction (a direct atomic write only when no transaction
+  is open) and its append is idempotent on an entry already present, and the
+  commit baseline is checkpointed from the branch's own target either way, so
+  this changes what that target contains rather than whether one is written. The
+  session-check guard stays strict: an `[x]` surviving a closeout is still an
+  interruption, including one this cycle recorded, because the writer is now
+  responsible for not producing it. A write with no commit to carry the archive
+  (`write --pending-only` without `--commit`) still defers, and its queue strike
+  is owned separately (`#donequeuestrike`).
 - No-partial-reap invariant: if a completed tracked item is followed by malformed flush-left spill such as pasted command/diff transcript lines, reap/archive the whole logical block with that parent item. Do not delete only the tracked parent line and leave orphan prose behind in the live backlog.
 - No-partial-remove invariant: direct tracked-item removal follows the same logical-block boundary as reaping. It removes malformed flush-left spill through the next tracked item or structural heading/component boundary, while preserving that later structural postlude.
 4. Commit the rewritten component as part of the existing boundary-maintenance commit.

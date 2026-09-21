@@ -1333,6 +1333,34 @@ fn apply_pending_edits(
     Ok(())
 }
 
+/// `#reappersistcrosscycle`: whether this closeout archives its completed items
+/// in the SAME write that marks them, or marks them `[x]` and leaves the
+/// `agent:done` move owed to the next preflight.
+///
+/// A commit-mode closeout always reaps. It used to additionally require the
+/// response write to have SUCCEEDED, which meant a RETAINED write marked the
+/// item `[x]` and deferred the archive move — the live shape behind this bug.
+/// The `[x]` then survived into the next cycle, where
+/// `check_completed_pending_reap_guard` reported a false INTERRUPTED that the
+/// auto-loop skip list treats as a reason to stop the drain, while
+/// `repair --apply-recovery` called the same document clean.
+///
+/// Reaping under a retained write is safe on the three mechanisms it touches:
+/// the external `agent:done` archive is staged into the SAME pending-write
+/// transaction via `stage_raw_write` (a direct write only when no transaction is
+/// open) and its append is idempotent, skipping an entry whose first line is
+/// already present; and `checkpoint_document_baseline` already runs against the
+/// deferred branch's own `target_content`, so this changes WHAT that target
+/// contains, not whether a baseline is checkpointed.
+///
+/// `commit_mode == None` still defers: `write --pending-only` without
+/// `--commit` has no commit to carry the archive, which is the `#donequeuestrike`
+/// case.
+fn reap_done_in_same_write(write_succeeded: bool, commit_mode: CommitMode) -> bool {
+    let _ = write_succeeded;
+    commit_mode != CommitMode::None
+}
+
 fn apply_pending_and_status_mutations(
     file: &Path,
     options: &CommandOptions,
@@ -2435,7 +2463,7 @@ fn run_command_inner_within_pass(
             &options,
             &pending_kept_open_ids,
             has_pending_ops,
-            write_result.is_ok() && commit_mode != CommitMode::None,
+            reap_done_in_same_write(write_result.is_ok(), commit_mode),
         ) {
             Ok(outcome) => outcome,
             Err(err) => {
@@ -5355,6 +5383,38 @@ original
             result, target,
             "target should be returned unchanged when target has no pending"
         );
+    }
+}
+
+#[cfg(test)]
+mod reap_done_in_same_write_policy {
+    use super::{CommitMode, reap_done_in_same_write};
+
+    /// `#reappersistcrosscycle`: the defect. A RETAINED commit-mode closeout
+    /// used to answer `false` here, marking the item `[x]` and leaving the
+    /// archive move owed — which is what produced the false INTERRUPTED on the
+    /// next cycle. It must now reap in the same write.
+    #[test]
+    fn a_retained_commit_mode_closeout_still_reaps() {
+        assert!(
+            reap_done_in_same_write(false, CommitMode::Required),
+            "a retained write must not leave `[x]` with its archive move owed"
+        );
+    }
+
+    #[test]
+    fn a_successful_commit_mode_closeout_reaps() {
+        assert!(reap_done_in_same_write(true, CommitMode::Required));
+        assert!(reap_done_in_same_write(true, CommitMode::BestEffort));
+        assert!(reap_done_in_same_write(false, CommitMode::BestEffort));
+    }
+
+    /// `#donequeuestrike`: `write --pending-only` without `--commit` has no
+    /// commit to carry the archive, so it still defers — success or not.
+    #[test]
+    fn a_non_committing_write_still_defers_its_archive_move() {
+        assert!(!reap_done_in_same_write(true, CommitMode::None));
+        assert!(!reap_done_in_same_write(false, CommitMode::None));
     }
 }
 

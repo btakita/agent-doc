@@ -1141,6 +1141,25 @@ The live session is no longer wedged. Its project controller is active and fresh
 Verification passed: retained-stream integration regression; JetBrains controller self-heal tests; 9,610 Rust tests; docs/version/private-name audits; editor parity including 179 VS Code tests and the native cross-editor simworld; Python bootstrap tests; and all TLA models. The initial full gate's only failure was a generated root skill mirror, which was regenerated and then passed audit. CI run `35596888790` was in progress at the one required post-push observation.
 
 JetBrains plugin 0.2.390 is installed, but the live IDEA PID still maps 0.2.389; restarting IntelliJ is intentionally left as the existing non-blocking operator verification rather than terminating an IDE with possible unsaved state.
+
+### Re: #frontmatterintentmisclass — gpt-5 · 2026-09-21T08:29-04:00
+
+> **Queue prompt:**
+>
+> do [#frontmatterintentmisclass]
+
+
+Completed and released as agent-doc 0.35.403 (`3710fb7ef`). Resume identity is now owned by the harness that produced it, never inferred from the document's `agent:` routing preference.
+
+The production paths now carry explicit identity end to end. Direct runs already supplied their backend; pane launch recording continues to use the running `HarnessConfig.binary`; stale Codex recovery now passes that same running harness into its compare-and-clear projection. I removed the generic helpers that looked up `active_resume_harness()`, eliminating the wrong-key affordance rather than relying on callers to remember not to use it.
+
+The manual ambiguity is resolved at the CLI boundary: `agent-doc resume-id FILE ID` now requires `--harness <claude|codex|opencode|grok|grok-build>`. The command cannot guess from frontmatter. Its realtime-authority write targets exactly that harness key and preserves every other harness history.
+
+Architecture contract: the Sources are the running backend or explicit operator `--harness`, the produced conversation id, and the current resume map. The Computed selects and compare-fences exactly one canonical harness entry. The Effect sets or clears only that entry through document authority. No imperative recovery layer reads `agent:` to repair identity after the fact.
+
+Coverage proves both dangerous directions: a real CLI invocation on a Claude-declared document writes only `resume.codex` while preserving `resume.claude`, and stale-Codex recovery clears `resume.codex` even when `agent: claude` while refusing to clear Claude with the Codex id. The full check passed 9,613 Rust tests, 179 VS Code tests, native cross-editor simulation, docs/parity audits, bootstrap tests, and all formal models.
+
+The exchange remains above the session-accretion threshold, but the active auto queue requires continued draining; no automatic compaction was performed.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -1151,14 +1170,13 @@ JetBrains plugin 0.2.390 is installed, but the live IDEA PID still maps 0.2.389;
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#reapretainedcoverage]~~
-- do [#frontmatterintentmisclass]
+- ~~do [#frontmatterintentmisclass]~~
 - do [#componentresidue]
 - release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority queue -->
-- [ ] [#frontmatterintentmisclass] [P2] Record a resume id against the harness that PRODUCED it, not the one the document declares. Half of this item is fixed by 16f6f5eec — a nested managed frontmatter block (resume: with indented children) no longer reads as operator intent, so the binary's own resume rotation stops stalling its own drain. What remains is the WRONG VALUE, which is the more serious half. Observed 2026-09-21: f41d1069-8f05-4f1d-859a-0af347aafc0d, the live claude-code session's id, was written into the resume.codex slot, which is what produced the harness_mismatch warning in the same preflight contract. Three production sites resolve the slot from fm.active_resume_harness(), which reads the document-declared agent: key and NOT the harness actually running: agent-doc-run-io/src/lib.rs:968 (update_resume_id), agent-doc-start-runtime-io/src/run.rs:343 (record_document_resume_id), and agent-doc-start-runtime-io/src/run.rs:384 (document_without_matching_resume_id). The third is the worst: it is the CLEAR path, so under a harness mismatch it can clear a DIFFERENT harness's resume pointer, losing a real thread id rather than merely misfiling one. The correct-by-construction sibling already exists and is used at run.rs:311/832/1443: record_document_resume_id_for_harness(file, &harness.binary, id). The fix is to route the remaining three through an explicit active harness. The open question, and the reason this is not already done, is where the CLI resume-id path gets its harness from — it has no harness context today, and inventing one is how the wrong slot gets written a second way. Decide that first, then convert all three sites.
 - [ ] [#componentresidue] [P1] A managed component can hold unstructured text that NO agent-doc command can remove, and the operator hit it: tasks/software/tsift.md carries a fenced code block INSIDE its agent:backlog component, above its only real item, and reported it as a queue fence that was never cleared or struck. Origin proven by git archaeology, not guessed: commit 46566f42ce (agent-doc(tsift), 2026-09-18 03:04:39) is the single commit introducing that text, and the SAME write added the operator prompt to the exchange and inserted the fence into a backlog component that was previously EMPTY. It is a processed derivative, not a paste duplicate — the exchange copy starts with the prompt marker and has an indented continuation line, the backlog copy has the marker stripped and the indent trimmed. So a write path normalized a multi-line fenced queue/prompt body and emitted it as a raw component body with no checkbox item prefix. It then becomes a PendingSegment::Text prelude, which parse_items preserves forever: --backlog-edit/--done/--backlog-reorder act only on items, patch:backlog full-replace is rejected, and remove_items_with_trailing_spill only reaps spill TRAILING a removed item, never a prelude. The operator's only recourse is hand-editing a file the design forbids hand-editing. Two parts: (a) find and fix the producer so a multi-line or fenced body is never written as a component body — reject it or render it as a single item; (b) give the operator a way to remove existing residue. (b) needs a deliberate decision, not a guess: a component prelude can also be legitimate operator prose, and the standing rule is that operator-visible text is authoritative and must never be dropped, so a blanket prelude prune is wrong. A defensible narrow rule is to prune only text provably duplicated from the exchange prompt it was derived from. Related: a backlog item whose own text contains a component marker is rejected as an unclosed component (observed 2026-09-21 filing this item) — correct fail-closed behaviour, but worth a clearer message.
 <!-- /agent:backlog -->
 

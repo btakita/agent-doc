@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.405
+
+- **A fresh controller reconstructs its live CRDT model from the retained native
+  replica instead of stranding every open document behind an ambiguous
+  projection hold.** A native-reload registration that reaches a controller
+  with no hub or retained canonical projection now receives the empty canonical
+  frontier and publishes its complete missing CRDT delta through the ordinary
+  durable document-op path. Existing controller state still wins, captured-base
+  replacements retain their precondition, and an IDE restart without a retained
+  frontier continues to use the normal canonical bootstrap. This restores
+  `agent-doc start` and editor-selection tmux synchronization after an install
+  recycles the controller while the editor stays open.
+
 ## 0.35.404
 
 - **Multiline tracked-work adds cannot strand component residue

@@ -1958,6 +1958,38 @@ fn register_replica_for_file_incremental_with_liveness_and_precondition(
     }
     retired_client_ids.sort_unstable();
     retired_client_ids.dedup();
+    // A replacement controller has no process-local Lazily projection yet. If a
+    // live editor retained its native replica across that controller handoff,
+    // seeding a new hub from disk creates an older, unrelated CRDT lineage. The
+    // registration can detect that the retained frontier is ahead, but a full
+    // disk bootstrap then discards the only copy of those accepted operations
+    // and strands the editor behind the three-generation ambiguity guard.
+    //
+    // Start this one cold hub empty instead. The incremental registration below
+    // returns the empty canonical frontier, causing the retained native replica
+    // to publish its complete missing delta through the ordinary durable
+    // document-op path before registration returns. This authority transfer is
+    // available only when the controller has neither a hub nor a retained
+    // canonical projection and the editor proves it owns retained CRDT state.
+    // Existing controller state therefore always wins, and an IDE restart (no
+    // retained frontier) continues to bootstrap from disk.
+    let restore_fresh_controller_from_retained_replica = retained_state_vector.is_some()
+        && expected_canonical_hash.is_none()
+        && hub_handle(&document_hash).is_none()
+        && retained_canonical_projections()
+            .observe(&document_hash)
+            .is_none();
+    if restore_fresh_controller_from_retained_replica {
+        hub_handle_or_insert_with(&document_hash, || RelayHub::new(CANONICAL_CLIENT_ID));
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_register_retained_reseed file={} client_id={} recovery=fresh_controller_retained_replica",
+                file.display(),
+                client_id,
+            ),
+        );
+    }
     let (
         bootstrap,
         canonical_state_vector,
@@ -2002,9 +2034,10 @@ fn register_replica_for_file_incremental_with_liveness_and_precondition(
         // Preserve that unsettled visible-write obligation under the new
         // identity, and force a full canonical bootstrap so a stale retained
         // native frontier cannot union-merge over it.
-        let canonical_projection_retained = force_full_bootstrap
-            || (!hub.controller_projection_established() && retained_state_vector.is_some())
-            || !hub.delivery_converged();
+        let canonical_projection_retained = !restore_fresh_controller_from_retained_replica
+            && (force_full_bootstrap
+                || (!hub.controller_projection_established() && retained_state_vector.is_some())
+                || !hub.delivery_converged());
         let effective_retained_state_vector = if canonical_projection_retained {
             None
         } else {
@@ -2026,6 +2059,11 @@ fn register_replica_for_file_incremental_with_liveness_and_precondition(
         }
         let canonical_state_vector = hub.canonical_state_vector();
         let (bootstrap, incremental) = match effective_retained_state_vector {
+            Some(_) if restore_fresh_controller_from_retained_replica => {
+                // The editor opens its retained encoded state and publishes the
+                // complete delta beyond this empty canonical frontier.
+                (Vec::new(), true)
+            }
             Some(state_vector) => match hub.canonical_covers_state_vector(state_vector) {
                 Ok(true) => match hub.canonical_diff(state_vector) {
                     Ok(delta) => (delta, true),
@@ -5660,6 +5698,40 @@ mod tests {
             .unwrap(),
             Some(true),
         );
+    }
+
+    #[test]
+    fn fresh_controller_reseeds_from_a_retained_native_replica() {
+        let (_dir, doc) = temp_doc("retained-reseed.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let disk = std::fs::read_to_string(&doc).unwrap();
+        let retained_text = format!("{disk}\naccepted only by the retiring controller\n");
+        let retained = agent_doc_merge::crdt_sync::ReplicaState::from_text(77, &retained_text);
+        let identity = "intellij:retained-reseed";
+
+        let registration =
+            register_replica_for_file_incremental(&doc, identity, Some(&retained.state_vector()))
+                .unwrap()
+                .expect("the retained editor should attach to the fresh controller");
+
+        assert!(
+            registration.incremental,
+            "a fresh controller must ask the retained native replica for its missing state"
+        );
+        assert!(registration.bootstrap.is_empty());
+        assert!(!registration.canonical_projection_retained);
+        assert_eq!(registration.canonical_covers_retained_frontier, Some(false));
+
+        let full_retained_delta = retained.diff(&registration.canonical_state_vector).unwrap();
+        assert!(
+            !full_retained_delta.is_empty(),
+            "the returned empty frontier must make the editor publish its retained operations"
+        );
+        relay_replica_update_for_file(&doc, identity, &full_retained_delta)
+            .unwrap()
+            .expect("the retained delta should enter the live controller model");
+        with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), retained_text)).unwrap();
     }
 
     #[test]

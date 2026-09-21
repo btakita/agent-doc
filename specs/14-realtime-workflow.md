@@ -174,10 +174,18 @@ holds a cached client, refresh must retire that cached client and issue a new
 registration. Every stale supervisor/controller recycle request emits that
 forced-refresh event centrally, no matter which turn stage scheduled it. The
 typed `reload_library` intent also refreshes all open document
-replicas. Re-registration publishes the exact current editor buffer as the new
-replica baseline. It never installs or saves a Lazily-retained whole-document
-target first. Retained agent intents replay afterward through the ordered
-document-cell/CRDT delivery path over that published operator cut.
+replicas. If the replacement controller has no live or retained canonical model
+and the editor carries a native-reload frontier, registration starts from an
+empty canonical frontier and the retained replica publishes its missing CRDT
+operations through the normal durable document-op path before attach completes.
+This is not whole-buffer adoption: the encoded replica and frontier are the
+native-generation handoff, and any existing controller model outranks them.
+Without a retained frontier (including an IDE restart), registration uses the
+normal canonical bootstrap. Re-registration thereby publishes the exact current
+editor state as the new replica baseline without consulting disk as authority.
+It never installs or saves a Lazily-retained whole-document target first.
+Retained agent intents replay afterward through the ordered document-cell/CRDT
+delivery path over that published operator cut.
 If a cached client reaches `replica_pull` after the controller generation has
 already changed, the attached controller returns the typed
 `{ "refused": true, "reason": "missing_replica" }` projection. JetBrains and VS

@@ -5387,6 +5387,83 @@ original
 }
 
 #[cfg(test)]
+mod retained_closeout_reap {
+    use super::{CommitMode, apply_pending_and_status_mutations, reap_done_in_same_write};
+
+    /// `#reapretainedcoverage`: drive the REAL mutation code with the flag a
+    /// retained commit-mode closeout now produces, and assert the effect on the
+    /// document — not the decision.
+    ///
+    /// `#reappersistcrosscycle` shipped with a predicate test only, and the full
+    /// suite was green both before and after that one-line policy change, so a
+    /// green suite proved nothing about the behaviour. This closes the next link
+    /// in the chain: given `reap_done_in_same_write == true` for the retained
+    /// case, the item is ARCHIVED rather than left as `[x]` with its move owed.
+    ///
+    /// Not covered here, and still open: driving an actually-retained write
+    /// end to end. `seed_durable_open_zero_live_replica` fails earlier, in
+    /// `prevalidate_tracked_work_response` ("missing_replica recovery exhausted
+    /// and disk read authority is refused"), so it never reaches this code at
+    /// all. The existing `#fzmutloss` coverage is predicate-level for the same
+    /// reason. Reaching it needs a seam that lets the document resolve while the
+    /// write still returns a `RETAINED_FOR_RETRY_MARKER` error.
+    #[test]
+    fn the_retained_case_flag_archives_the_item_instead_of_marking_it() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: retained-reap\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior \u{2014} gpt-5\n\nAnswered.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#rrta] the item whose archive move must not be deferred\n",
+            "- [ ] [#rrtb] an untouched neighbour\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+
+        let mut options =
+            agent_doc_write_command_io::CommandOptions::recovery_from_captured_closeout_mutation_plan(
+                &doc,
+                agent_doc_write_command_io::CapturedCloseoutMutationPlan::default(),
+            );
+        options.is_template = true;
+        options.force_disk = true;
+        options.pending_done = vec!["rrta".to_string()];
+
+        // The flag a RETAINED commit-mode closeout now produces.
+        let reap_in_same_write = reap_done_in_same_write(false, CommitMode::Required);
+        assert!(
+            reap_in_same_write,
+            "precondition: the retained case must ask for a same-write reap"
+        );
+
+        apply_pending_and_status_mutations(&doc, &options, &[], true, reap_in_same_write)
+            .expect("the retained-case mutation must apply");
+
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !after.contains("- [x] [#rrta]"),
+            "the item must not be left `[x]` with its archive move owed:\n{after}"
+        );
+        assert!(
+            !after.contains("- [ ] [#rrta]"),
+            "the item must not still be open:\n{after}"
+        );
+        assert!(
+            after.contains("#rrta"),
+            "the completed item must survive as archived history:\n{after}"
+        );
+        assert!(
+            after.contains("- [ ] [#rrtb]"),
+            "an untouched neighbour must be left alone:\n{after}"
+        );
+    }
+}
+
+#[cfg(test)]
 mod reap_done_in_same_write_policy {
     use super::{CommitMode, reap_done_in_same_write};
 

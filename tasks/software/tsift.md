@@ -1,7 +1,7 @@
 ---
 agent_doc_session: tsift-v0.1
 resume:
-  claude: f0b4e914-6c41-48bc-99ed-8efdd88cc853
+  claude: ffc4ce39-566d-4e12-929b-5d5496cc3f82
   codex: 01a0b337-c18d-7770-8e52-af605f601504
 agent: claude
 claude_model: opus
@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -364,12 +364,59 @@ Scope is narrow on purpose: only the ambient paths **themselves** are refused. A
 - spec: `specs/architecture.md` — the **Workspace Root Resolution** section is now **Ambient State Roots**, covering both defenses and the escape hatch
 
 Exchange is at 287 lines / 11 response sections; worth a compact when convenient.
+
+### Re: release + publish — v0.1.100 tagged — opus-5 · 2026-09-21T05:49-04:00
+
+> **Queue prompt:** release + publish
+
+Released **v0.1.100** — version bumped, verified, committed, tagged, and pushed. The tag-driven workflow is running now.
+
+#### What shipped
+
+Both fixes from this session, plus their spec:
+
+- ambient state roots (`$TMPDIR`, `$HOME`, `/`) no longer resolve as workspaces off a bare `.tsift/` marker, and are refused outright as index roots
+- the index apply commits in bounded 512-file chunks so `wal_autocheckpoint` can reclaim the WAL
+
+#### The bump
+
+No automation exists for this, so it was mechanical: **129 occurrences across 47 files** — every crate `Cargo.toml` plus its inter-crate `version = "…"` dep refs, the `tsift:` version markers in `AGENTS.md` / `.agents/skills/tsift/` / `specs/search-navigation.md`, all 15 `opencode-tsift` command docs, `package.json`, and a fixture's `projection_version`. `Cargo.lock` regenerated via `cargo check --workspace`. I verified every dirty file's diff actually contained a version string before committing, so nothing unrelated rode along.
+
+`VERSIONS.md` gained a `0.1.100` section under `Unreleased` with all three entries.
+
+Verification before tagging: `make check` → **exit 0**, 67 suites, **1861 passed, 0 failed**. Installed binary reports `tsift 0.1.100`. Both prior CI runs (`35580603625`, `35584042723`) came back **green**.
+
+#### One thing to watch on this run
+
+**The previous release, v0.1.99, failed** — and the way it failed is worth knowing, because "failed" was misleading:
+
+| job | v0.1.99 outcome |
+|---|---|
+| verify release inputs | ✓ 7m46s |
+| build ×3 platforms | ✓ |
+| **publish GitHub release** | **✗ 13s** |
+| publish OpenCode npm plugin | ✓ |
+| publish crates.io package | ✓ 15m52s |
+
+crates.io and npm both **succeeded**; only the GitHub Release job died, with `##[error]Error creating asset temp dir`. Cause: `softprops/action-gh-release` was handed `files: dist/*`, which matched a staging **directory** as if it were an asset. Some `.sha256` and archive uploads still landed, so the v0.1.99 GitHub Release exists with an incomplete asset set. Confirmed independently: crates.io reports `max_version: 0.1.99`.
+
+`8987a4c "fix: exclude staging dirs from release assets"` (2026-09-18) was landed for exactly this and **has never actually run a release** — v0.1.100 is its first exercise. So the one thing to check on this run is the `publish GitHub release` job specifically, not the top-line conclusion.
+
+Run: [35585001349](https://github.com/btakita/tsift/actions/runs/35585001349) — still on `verify release inputs` at closeout, ~30 min end to end. I have a background poll on it and will report the per-job outcome.
+
+#### Landed
+
+- `src/tsift` → `dd25e02` (`chore: release v0.1.100`), tag **`v0.1.100`** pushed
+- superproject pointer → `0f93ba244`, pushed
+
+Two notes: last cycle's un-reaped `#tsiftambientexplicit` **self-healed** — this cycle's preflight persisted the reap and the backlog is now empty, so no repair was needed. And preflight's `semantic_completion_match` pointing at `#fixhttpsgithub` is a false positive; that was a different issue from 2026-08-27.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -378,12 +425,6 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-```
-/home/brian/.cargo/bin/agent-doc start --route-owned --route-owned-reap-policy keep-alive --route-owned-start-purpose
-layout-provision --resume -- tasks/discord.md
-Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/discord.md: controller actor generation compare-and-swap failed for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/discord.md: expected 2, found 3
-```
-- [x] 🚧 [#tsiftambientexplicit] Decide whether an explicit `--path` at an ambient root ($HOME, $TMPDIR, /) should be refused outright rather than only excluded from automatic root resolution. The 2026-09-20 thrash reached `--path /home/brian` because resolution picked it, which is now fixed; an operator or hook that passes it explicitly still gets a whole-home index (bounded and linear after chunked commits, but enormous). See specs/architecture.md "Workspace Root Resolution".
 <!-- /agent:backlog -->
 
 ## Review

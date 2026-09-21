@@ -2,6 +2,51 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.401
+
+- **A selection effect uses the document's bound pane; a live probe may only
+  invalidate that binding, never replace it (`#fpeselectstashpane`).** Editor
+  selection focused a pane in the `stash` window while the actor row *and* the
+  durable registry both named the correct visible pane. Both records were right
+  and the selection effect did not use them: the controller candidate resolved a
+  session-log `latest_start_pane` — where the session was last *started*, not
+  where it lives — ahead of the live actor binding, and the standalone focus path
+  reached for the heuristic recovery resolver that normal navigation is supposed
+  to avoid. The bound pane now outranks a differing live-owner candidate whenever
+  its own process tree still runs that document's owner, and the resolver is not
+  consulted at all in that case.
+- **A stashed layout-provision owner ends itself instead of living as long as the
+  tmux server (`#stashpaneunbounded`).** `keep-alive` bounds a commit edge — "do
+  not reap merely because a cycle committed" — but was read as a lifetime, so
+  every document ever selected in the editor leaked one permanent pane. Such an
+  owner holds a pane for an editor column and nothing else, so once its pane is
+  stashed it is an orphan. The proof is its own start purpose and its own pane id,
+  never a working directory or command line, so the reaper cannot touch a pane
+  another session owns; a live-pane-busy reason and an open cycle both
+  short-circuit first.
+- **A committing closeout archives what it marks, even when the response write is
+  retained (`#reappersistcrosscycle`).** A retained write used to mark the item
+  `[x]` and defer its `agent:done` move, leaving a half-state the three commands
+  read differently: `session-check` reported INTERRUPTED (which the auto-loop
+  treats as a reason to stop draining), `repair --apply-recovery` called the same
+  document clean, and `commit` refused. The external archive rides the same
+  pending-write transaction and its append is idempotent, so the deferral bought
+  nothing. A write with no commit to carry the archive still defers.
+- **A timed-out Codex Stop hook reports where its budget went
+  (`#codexstopbudgetblind`).** The hook's phase timer covered three points inside
+  one function and nothing else, so a 45s overrun failed closed while emitting no
+  timing at all. The timeout response now carries a phase report naming the phase
+  still running, and the hook memoizes the document per invocation instead of
+  materializing the same CRDT text once per question — which also makes its
+  queue-clear and queue-head decisions read the same document version.
+- **The binary's own nested frontmatter bookkeeping no longer stalls its own queue
+  drain (`#frontmatterintentmisclass`).** A managed `resume:` block written with
+  indented children exposed a child line whose key is the harness name, not the
+  managed parent, so routine resume rotation classified as fresh operator intent
+  and suppressed queue continuation with drainable heads remaining. Managed
+  frontmatter blocks are now stripped by ownership rather than by name.
+  Operator-settable keys such as `agent:` still preempt a drain.
+
 ## 0.35.400
 
 - **Retained closeouts recover across stalled, silent, and superseding editor

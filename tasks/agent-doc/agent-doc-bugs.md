@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0c41e-feda-7b22-bcc8-e9583e8e7ab2
+  codex: 01a0c451-6475-7fe1-b6ad-3d1a89475a49
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -14,15 +14,14 @@ prompt_presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
-
-GitHub #52 is closed after release-asset and PyPI verification. GitHub #53 is fixed and pushed on main at c92d5d629; atomic gate/type closeout composition is fixed at a10a684b3. Two full make check runs and both make install runs passed. The enforced weekly release gate defers tagging/publishing until 2026-09-22T16:41:52Z; CI runs 35250089483 and 35250915588 are in progress. Existing operator-verification gates remain open.
-<!-- /agent:status --> 
+<!-- /agent:status -->
+ 
 
 ## Exchange
 
@@ -44,6 +43,46 @@ The agent-doc hook rejected this turn before admission. It misparsed `agent-doc 
 That path does not exist, so no cycle contract was created. Per the [agent-doc workflow](/home/brian/work/btakita/agent-loop/.claude/skills/agent-doc/SKILL.md), I must stop without running preflight or modifying the new issue.
 
 Current release state: `v0.35.406` and commit `aa14cbb28` are pushed; GitHub Release/PyPI workflows were still running and are not yet verified complete. The `tasks/api.md` reconciliation defect remains to be fixed in a newly admitted cycle.
+❯ 🚧 Diagnose + unwedge api.md turn. Fix agent-doc causes for this issue:
+```
+› agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md
+
+
+• Agent-doc admission failed closed: the editor-visible changes are stranded, not deferred, and waiting will not commit
+  them. No cycle or retained response capture exists.
+
+  From the pane that owns this session, run:
+
+  agent-doc commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md
+
+  If an unwritten response body remains, use agent-doc write --commit … instead. Other panes will fail with pane
+  ownership mismatch.
+
+  done 10:19 AM
+```
+
+### Re: api.md admission recovery — gpt-5 · 2026-09-21T11:02-04:00
+
+Fixed and deployed the agent-doc cause. The `api.md` turn is unwedgeed: `session-check` now reports cycle `cycle-1789999472341` committed with `commit_success` and `no_drainable_work`.
+
+The failure was an authority-boundary contradiction. A CRDT retry could prove that canonical state and disk already exactly matched the response target, return an unapplied/converged no-op, and then have the outer serialized write path demand a new visible-delivery receipt. Because a no-op emits no new delivery, that manufactured an ownerless retained refusal and made the next admission call the already-durable response “stranded.”
+
+The invariant is now: an attached write is complete without a new ACK only when the relay reports an unapplied converged no-op and both canonical CRDT state and disk exactly match its target hash. `atomic_write_rebased_through_authority_body` remains the policy owner. Applied writes still require the strict editor receipt and native-save proof; non-durable no-ops remain retained; divergent authority still follows the existing rebase path. This remains a one-shot atomic boundary over the existing CRDT observations, so no parallel reactive owner or imperative refresh loop was introduced.
+
+Regression coverage recreates the released-barrier state with a live replica that still has an undelivered patch, proves no visible receipt exists, and verifies the exact canonical+disk target completes without leaving a pending write.
+
+Verification:
+
+- Focused regression: passed.
+- `make check`: passed end-to-end — 9,619 Rust tests, 179 VS Code tests, JetBrains/native cross-editor harness, release/privacy audits, bootstrap tests, and TLA+ model checks.
+- Private-name denylist: no matches in the edited public source.
+- Latest pre-existing CI was green; CI for this push is currently in progress.
+
+Committed and pushed to `agent-doc` main as `9848fe7e8` (`fix: accept exact durable CRDT no-op`). The tested build and both editor packages were installed, and the `api.md` project controller was marked for two-phase recycle.
+
+Operator action: restart IntelliJ IDEA to activate the newly installed JetBrains package generation; the running IDE still maps the superseded plugin JAR.
+
+No actionable backlog follow-up remains because the diagnosed defect, regression coverage, full verification, push, install, and controller recycle request are complete.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -52,13 +91,11 @@ Current release state: `v0.35.406` and commit `aa14cbb28` are pushed; GitHub Rel
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#fixhttpsgithub]
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 
-<!-- agent:backlog priority queue -->
-- [ ] 🚧 [#fixhttpsgithub] Fix https://github.com/btakita/agent-doc/issues/56 + release + publish
+<!-- agent:backlog -->
 <!-- /agent:backlog -->
 
 ## Review
@@ -75,8 +112,6 @@ Current release state: `v0.35.406` and commit `aa14cbb28` are pushed; GitHub Rel
 <!-- /agent:review -->
 
 <!-- agent:icebox -->
-- [ ] [#ha3hpolicy] [MULTI-USER FOLLOW-UP] Recipient-side policy config: .agent-doc/config.toml receive.auto_create_components = ["pending"] (or = false); flip notify/write default from auto-create to consult-recipient-config. Hard-blocked until multi-user workspace support exists; issue #40 (open) explicitly says not to ship before that prerequisite. Moved out of agent:review because it is an unstarted future feature, not code-complete work awaiting validation. Tracked: https://github.com/btakita/agent-doc/issues/40
-- [ ] [#pdar] [recommended] Evaluate optional binary auto-resolution only for the narrow case where the prompt is explicitly do #id and there is exactly one matching open pending item
 <!-- /agent:icebox -->
 
 ## Completed / Reaped

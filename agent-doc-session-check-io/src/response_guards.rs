@@ -141,32 +141,8 @@ pub fn check_dropped_exchange_prompt_guard(file: &Path, rc: &CycleContext) -> Re
     )
 }
 
-/// `#reappersistloop`: whether a completed `[x]` id is genuinely stuck.
-///
-/// An id this cycle reaped is awaiting the next preflight's archive pass, which
-/// is the normal post-closeout state and not an interruption. Anything else has
-/// survived its own archive pass and still fails closed.
-///
-/// Ids are compared with the leading `#` stripped and case-folded, because the
-/// document writes `[#Foo]` while the cycle records `foo`; a literal comparison
-/// silently reports every healthy closeout as stuck.
-pub fn completed_item_is_stuck(item_id: &str, reaped_this_cycle: &[String]) -> bool {
-    fn normalize(id: &str) -> String {
-        id.trim().trim_start_matches('#').to_ascii_lowercase()
-    }
-    let needle = normalize(item_id);
-    if needle.is_empty() {
-        // An id-less completed item can never be matched against the reap record,
-        // so it stays reportable rather than silently passing.
-        return true;
-    }
-    !reaped_this_cycle
-        .iter()
-        .any(|reaped| normalize(reaped) == needle)
-}
-
 pub fn check_completed_pending_reap_guard(
-    file: &Path,
+    _file: &Path,
     rc: &CycleContext,
 ) -> Result<Option<String>> {
     // Phase 6 (#lr-content-6): cached content + parsed components.
@@ -180,38 +156,7 @@ pub fn check_completed_pending_reap_guard(
         return Ok(None);
     }
 
-    // `#reappersistloop`: BOTH the archive move and the `[x]` line removal happen
-    // in the NEXT preflight's maintenance pass, so a healthy closeout always
-    // leaves its own just-completed items visible as `[x]`. Flagging that as
-    // INTERRUPTED fires on the happy path by construction -- measured on
-    // tasks/agent-doc/agent-doc-bugs.md, six consecutive successful closeouts each
-    // reported an interruption with nothing wrong, and the auto-loop skip list
-    // treats a session-check interruption as a valid reason to stop draining. It
-    // also put three commands into open disagreement: `session-check` said
-    // INTERRUPTED, `repair --apply-recovery` said the same document was clean, and
-    // `repair` warned that the `commit` those messages named would commit
-    // unreviewed drift as metadata.
-    //
-    // The cycle already records which ids it reaped, so scope the guard to items
-    // it did NOT: one that survived its own archive pass is genuinely stuck and
-    // still fails closed. Fail SAFE on a missing/unreadable cycle state by keeping
-    // the original behavior -- an unprovable reap is the case worth reporting.
-    let reaped_this_cycle: Vec<String> =
-        agent_doc_cycle_state_io::load_with_closeout_projection(file)
-            .ok()
-            .flatten()
-            .map(|state| state.reaped_pending_ids)
-            .unwrap_or_default();
-
-    let stuck: Vec<_> = completed
-        .into_iter()
-        .filter(|item| completed_item_is_stuck(&item.id, &reaped_this_cycle))
-        .collect();
-    if stuck.is_empty() {
-        return Ok(None);
-    }
-
-    let refs = agent_doc_element_backlog::backlog::tracked_item_refs(&stuck).join(", ");
+    let refs = agent_doc_element_backlog::backlog::tracked_item_refs(&completed).join(", ");
     if refs.is_empty() {
         return Ok(None);
     }
@@ -407,60 +352,4 @@ pub fn check_committed_without_response_body_guard(
         ),
     );
     Ok(GuardResult::Error(msg))
-}
-
-#[cfg(test)]
-mod reap_guard_tests {
-    use super::completed_item_is_stuck;
-
-    /// `#reappersistloop`: the regression. Both the archive move and the `[x]`
-    /// line removal happen on the NEXT preflight, so a healthy closeout always
-    /// leaves its own reaped items visible. Reporting those as stuck fires on the
-    /// happy path -- six consecutive successful closeouts on
-    /// tasks/agent-doc/agent-doc-bugs.md each reported an interruption with
-    /// nothing wrong, and a session-check interruption is a valid reason to stop
-    /// the drain.
-    #[test]
-    fn an_item_reaped_this_cycle_is_not_stuck() {
-        let reaped = vec!["runsubmitautoproof".to_string()];
-        assert!(
-            !completed_item_is_stuck("runsubmitautoproof", &reaped),
-            "the cycle's own reaped item is awaiting the next preflight, not stuck"
-        );
-    }
-
-    /// The complement: scoping the guard must not blind it. An item that survived
-    /// its own archive pass is the real defect and still fails closed.
-    #[test]
-    fn an_item_not_reaped_this_cycle_is_still_stuck() {
-        let reaped = vec!["somethingelse".to_string()];
-        assert!(
-            completed_item_is_stuck("leftoverfromlastcycle", &reaped),
-            "an item outside this cycle's reap record must still be reported"
-        );
-        assert!(
-            completed_item_is_stuck("anything", &[]),
-            "no reap record at all must fail safe to reporting, not to silence"
-        );
-    }
-
-    /// The document writes `[#Foo]`; the cycle records `foo`. A literal compare
-    /// would report every healthy closeout as stuck -- the exact bug, reintroduced
-    /// through normalization instead of scoping.
-    #[test]
-    fn ids_match_across_hash_prefix_and_case() {
-        let reaped = vec!["#RunSubmitAutoProof".to_string()];
-        assert!(!completed_item_is_stuck("runsubmitautoproof", &reaped));
-        assert!(!completed_item_is_stuck("#runsubmitautoproof", &reaped));
-        assert!(!completed_item_is_stuck("  RunSubmitAutoProof  ", &reaped));
-    }
-
-    /// An id-less completed item cannot be matched against the reap record, so it
-    /// must stay reportable rather than pass by accident.
-    #[test]
-    fn an_id_less_completed_item_stays_reportable() {
-        assert!(completed_item_is_stuck("", &["anything".to_string()]));
-        assert!(completed_item_is_stuck("   ", &["anything".to_string()]));
-        assert!(completed_item_is_stuck("#", &["anything".to_string()]));
-    }
 }

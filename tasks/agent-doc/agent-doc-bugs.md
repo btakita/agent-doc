@@ -14,7 +14,7 @@ prompt_presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -1160,6 +1160,30 @@ Architecture contract: the Sources are the running backend or explicit operator 
 Coverage proves both dangerous directions: a real CLI invocation on a Claude-declared document writes only `resume.codex` while preserving `resume.claude`, and stale-Codex recovery clears `resume.codex` even when `agent: claude` while refusing to clear Claude with the Codex id. The full check passed 9,613 Rust tests, 179 VS Code tests, native cross-editor simulation, docs/parity audits, bootstrap tests, and all formal models.
 
 The exchange remains above the session-accretion threshold, but the active auto queue requires continued draining; no automatic compaction was performed.
+
+### Re: #componentresidue — gpt-5 · 2026-09-21T09:07-04:00
+
+> **Queue prompt:**
+>
+> The Codex session crashed. Fix agent-doc causes.
+
+
+> **Queue prompt:**
+>
+> do [#componentresidue]
+
+
+Fixed, released, installed, and pushed. The tracked-work residue fix shipped in agent-doc 0.35.404 (`f5f5677c4`); the controller-recycle recovery found while installing it shipped in 0.35.405 (`74f56761b`).
+
+The residue producer was the tracked-work add path: it stored a captured multiline prompt wholesale in `PendingItem.text`. Rendering made only the first line an item; later fenced lines became flush-left `PendingSegment::Text`. Same-cycle completion could therefore archive the item while leaving the fence inside the component with no addressable id.
+
+The add path now treats the first line as item text and every later line as an indented continuation owned by that item. Exact replay identity includes the continuation, so retained-closeout recovery remains idempotent. Regression coverage exercises the historical fenced prompt through add → done → reap and proves the component is empty afterward.
+
+Existing residue has a narrow, auditable repair path. Lazy backlog backfill recognizes a complete top-level fenced terminal transcript containing either an interactive `› agent-doc ...` invocation or an absolute `.../agent-doc start ...` command. It removes that exact corruption signature through the existing `backlog_non_item_text_dropped` audit path; ordinary fenced prose and unterminated fences remain untouched. The original `tsift.md` residue had already been removed by a later repair cycle, so no manual document edit was needed.
+
+Installation exposed a separate live-controller handoff fault: the replacement controller seeded canonical state from older disk while JetBrains still held the accepted native CRDT frontier, so `agent-doc-bugs.md` and `monsterrodholders.md` entered the fail-closed ambiguous-projection loop. A fresh controller with no retained model now returns its empty frontier and lets the retained native replica publish the missing CRDT delta. Existing controller state still wins, and IDE restarts without retained native state retain the normal canonical bootstrap. Live verification shows both documents reattached; `agent-doc-bugs.md` replaced its stale forwarder and `monsterrodholders.md` projected its deferred write.
+
+Verification passed: all 89 relay tests; the full release gate with 9,616 Rust tests, 179 VS Code tests, native cross-editor simulation, docs and release-parity audits, bootstrap tests, and every TLA model; plus the public-repository private-name scan. The installed binary reports `agent-doc 0.35.405`. Unrelated JetBrains notification and session-actor worktree changes remain untouched.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -1169,15 +1193,10 @@ The exchange remains above the session-accretion threshold, but the active auto 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#reapretainedcoverage]~~
-- ~~do [#frontmatterintentmisclass]~~
-- 🚧 do [#componentresidue]
-- release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#componentresidue] [P1] A managed component can hold unstructured text that NO agent-doc command can remove, and the operator hit it: tasks/software/tsift.md carries a fenced code block INSIDE its agent:backlog component, above its only real item, and reported it as a queue fence that was never cleared or struck. Origin proven by git archaeology, not guessed: commit 46566f42ce (agent-doc(tsift), 2026-09-18 03:04:39) is the single commit introducing that text, and the SAME write added the operator prompt to the exchange and inserted the fence into a backlog component that was previously EMPTY. It is a processed derivative, not a paste duplicate — the exchange copy starts with the prompt marker and has an indented continuation line, the backlog copy has the marker stripped and the indent trimmed. So a write path normalized a multi-line fenced queue/prompt body and emitted it as a raw component body with no checkbox item prefix. It then becomes a PendingSegment::Text prelude, which parse_items preserves forever: --backlog-edit/--done/--backlog-reorder act only on items, patch:backlog full-replace is rejected, and remove_items_with_trailing_spill only reaps spill TRAILING a removed item, never a prelude. The operator's only recourse is hand-editing a file the design forbids hand-editing. Two parts: (a) find and fix the producer so a multi-line or fenced body is never written as a component body — reject it or render it as a single item; (b) give the operator a way to remove existing residue. (b) needs a deliberate decision, not a guess: a component prelude can also be legitimate operator prose, and the standing rule is that operator-visible text is authoritative and must never be dropped, so a blanket prelude prune is wrong. A defensible narrow rule is to prune only text provably duplicated from the exchange prompt it was derived from. Related: a backlog item whose own text contains a component marker is rejected as an unclosed component (observed 2026-09-21 filing this item) — correct fail-closed behaviour, but worth a clearer message.
 <!-- /agent:backlog -->
 
 ## Review

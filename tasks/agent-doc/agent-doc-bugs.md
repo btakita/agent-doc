@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0c3bb-1e1a-7612-84c5-48a9710fa463
+  codex: 01a0c41e-feda-7b22-bcc8-e9583e8e7ab2
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -14,7 +14,7 @@ prompt_presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -34,6 +34,16 @@ GitHub #52 is closed after release-asset and PyPI verification. GitHub #53 is fi
 Compacted content:
 - Archived 46 response topic(s): GitHub issues #52 and #53; macOS-only release cadence and editor-authoritative saves; Response; 43 more
 - Prior summary/context: prior compacted content: Archived 15 response topic(s): #fixcauseslazily; rename-safe panes and route-layout superses...
+
+### Re: Response
+
+The agent-doc hook rejected this turn before admission. It misparsed `agent-doc session-check …` as an invocation and tried to canonicalize:
+
+`/home/brian/work/btakita/agent-loop/session-check`
+
+That path does not exist, so no cycle contract was created. Per the [agent-doc workflow](/home/brian/work/btakita/agent-loop/.claude/skills/agent-doc/SKILL.md), I must stop without running preflight or modifying the new issue.
+
+Current release state: `v0.35.406` and commit `aa14cbb28` are pushed; GitHub Release/PyPI workflows were still running and are not yet verified complete. The `tasks/api.md` reconciliation defect remains to be fixed in a newly admitted cycle.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -43,10 +53,12 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 do [#fixhttpsgithub]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority queue -->
+- [ ] 🚧 [#fixhttpsgithub] Fix https://github.com/btakita/agent-doc/issues/56 + release + publish
 <!-- /agent:backlog -->
 
 ## Review

@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.409
+
+- **Document-turn authority publication no longer re-enters the shared reactive
+  scope.** Authority Effects now admit immutable state-plane commands to a
+  controller-owned worker, so editor stream publication cannot pin document,
+  route, or layout projections at `projection_effect_in_flight`. Regression
+  coverage blocks the publisher while proving actor transitions and authority
+  reads remain responsive.
+
 ## 0.35.408
 
 - **Retained editor transitions no longer hold the shared reactive context.**

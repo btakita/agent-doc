@@ -2576,6 +2576,13 @@ struct DocumentAuthorityKey {
     document_id: String,
 }
 
+#[derive(Clone, Debug)]
+struct DocumentAuthorityPublishCommand {
+    document_hash: String,
+    epoch: u64,
+    projection: agent_doc_turn::cp_projection::TurnProjection,
+}
+
 /// Controller-owned current-document authority.
 ///
 /// The actor model is a process Source and the closeout document projection is
@@ -2594,6 +2601,11 @@ struct ControllerDocumentAuthorityGraph {
         agent_doc_turn::cp_projection::TurnProjection,
     >,
     effects: Mutex<BTreeMap<DocumentAuthorityKey, (lazily::Effect, usize)>>,
+    /// State-plane egress must not run inside the Lazily Effect that derives
+    /// authority. Publishing writes another Source in this same process scope;
+    /// doing that synchronously re-enters the context and can pin every
+    /// controller request behind its lock.
+    publish_sender: Arc<OnceLock<std::sync::mpsc::Sender<DocumentAuthorityPublishCommand>>>,
     runtime: Arc<OnceLock<std::sync::Weak<ControllerRuntime>>>,
     next_epoch: Arc<AtomicU64>,
 }
@@ -2616,6 +2628,7 @@ impl ControllerDocumentAuthorityGraph {
             document_projections,
             projections: lazily::ThreadSafeComputedMap::new(scope.ctx()),
             effects: Mutex::new(BTreeMap::new()),
+            publish_sender: Arc::new(OnceLock::new()),
             runtime: Arc::new(OnceLock::new()),
             next_epoch: Arc::new(AtomicU64::new(1)),
         }
@@ -2673,6 +2686,48 @@ impl ControllerDocumentAuthorityGraph {
 
     fn install_runtime(&self, runtime: &Arc<ControllerRuntime>) {
         let _ = self.runtime.set(Arc::downgrade(runtime));
+        let weak_runtime = Arc::downgrade(runtime);
+        self.install_publisher(Arc::new(move |command| {
+            let Some(runtime) = weak_runtime.upgrade() else {
+                return;
+            };
+            rpc::publish_document_turn_authority(
+                &runtime,
+                &command.document_hash,
+                command.epoch,
+                &command.projection,
+            );
+        }));
+    }
+
+    fn install_publisher(
+        &self,
+        publisher: Arc<dyn Fn(DocumentAuthorityPublishCommand) + Send + Sync>,
+    ) {
+        if self.publish_sender.get().is_some() {
+            return;
+        }
+        let (sender, receiver) = std::sync::mpsc::channel::<DocumentAuthorityPublishCommand>();
+        match std::thread::Builder::new()
+            .name("agent-doc-turn-authority".to_string())
+            .spawn(move || {
+                while let Ok(command) = receiver.recv() {
+                    publisher(command);
+                }
+            }) {
+            Ok(_) => {
+                if self.publish_sender.set(sender).is_err() {
+                    eprintln!(
+                        "[controller] document-turn authority publisher was installed concurrently"
+                    );
+                }
+            }
+            Err(error) => {
+                eprintln!(
+                    "[controller] failed to start document-turn authority publisher: {error}"
+                );
+            }
+        }
     }
 
     /// Materialize the per-document Computed and retain one shared Effect while
@@ -2688,21 +2743,25 @@ impl ControllerDocumentAuthorityGraph {
             return;
         }
         let projection = self.projection_handle(document_hash, document_id);
-        let runtime = Arc::clone(&self.runtime);
+        let publish_sender = Arc::clone(&self.publish_sender);
         let next_epoch = Arc::clone(&self.next_epoch);
         let effect_key = key.clone();
         let effect = self.ctx.effect(move |ctx| {
             let projected_turn = ctx.get(&projection);
-            let Some(runtime) = runtime.get().and_then(std::sync::Weak::upgrade) else {
+            let Some(sender) = publish_sender.get() else {
                 return;
             };
             let epoch = next_epoch.fetch_add(1, Ordering::SeqCst);
-            rpc::publish_document_turn_authority(
-                &runtime,
-                &effect_key.document_hash,
+            if let Err(error) = sender.send(DocumentAuthorityPublishCommand {
+                document_hash: effect_key.document_hash.clone(),
                 epoch,
-                &projected_turn,
-            );
+                projection: projected_turn,
+            }) {
+                eprintln!(
+                    "[controller] document-turn authority enqueue failed for {}: {error}",
+                    effect_key.document_hash
+                );
+            }
         });
         effects.insert(key, (effect, 1));
     }
@@ -8917,6 +8976,60 @@ mod tests {
             authority_graph.projection(document_hash, document_id).state,
             TurnState::Idle
         );
+    }
+
+    #[test]
+    fn document_turn_authority_publisher_does_not_hold_process_scope() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actor_graph = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let document_graphs = ControllerDocumentGraphs::new_in(&scope);
+        let authority_graph = ControllerDocumentAuthorityGraph::new_in(
+            &scope,
+            actor_graph.document_model_states_handle(),
+            document_graphs.projection_handle(),
+        );
+        let document_hash = "authority-blocked-publisher";
+        let document_id = "document-authority-blocked-publisher";
+        let (started_sender, started_receiver) = std::sync::mpsc::channel();
+        let release = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        let publisher_release = Arc::clone(&release);
+        authority_graph.install_publisher(Arc::new(move |command| {
+            let _ = started_sender.send(command.epoch);
+            let (lock, changed) = &*publisher_release;
+            let mut released = lock.lock().unwrap();
+            while !*released {
+                released = changed.wait(released).unwrap();
+            }
+        }));
+
+        authority_graph.acquire_subscription(document_hash, document_id);
+        started_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("authority publisher did not receive the initial projection");
+
+        let transition_started = Instant::now();
+        actor_graph.set(BTreeMap::from([(
+            document_id.to_string(),
+            actor_record_for_test(
+                document_id,
+                "%42",
+                agent_doc_controller::actor::ActorState::Busy,
+            ),
+        )]));
+        assert!(
+            transition_started.elapsed() < Duration::from_millis(250),
+            "a blocked state-plane publisher held the shared reactive context"
+        );
+        assert_eq!(
+            authority_graph.projection(document_hash, document_id).state,
+            agent_doc_turn::cp_projection::TurnState::AwaitingResponse,
+            "the authority projection must remain readable while egress is blocked",
+        );
+
+        let (lock, changed) = &*release;
+        *lock.lock().unwrap() = true;
+        changed.notify_all();
+        authority_graph.release_subscription(document_hash, document_id);
     }
 
     #[test]

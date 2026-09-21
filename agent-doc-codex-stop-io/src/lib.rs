@@ -125,6 +125,79 @@ struct StopHookRun {
     timed_out: bool,
 }
 
+/// `#codexstopbudgetblind`: where one Stop hook invocation spent its budget.
+///
+/// The hook already had a phase timer, but it was called from three places
+/// inside `attempt_stop_closeout` and nowhere else — so every document
+/// resolution before those points, and the whole of `apply_stop` around them,
+/// was attributed to nothing. A hook that blew its 45s budget therefore failed
+/// closed while emitting no timing at all: a search of every log on the dogfood
+/// machine returned zero `codex_stop.` perf lines despite live overruns.
+///
+/// The ledger is shared with the worker thread rather than owned by it, because
+/// the timing is only interesting in exactly the case where the worker has NOT
+/// returned. Rust threads cannot be cancelled, so on timeout the main thread
+/// reads what the still-running worker has recorded so far and names the phase
+/// it is stuck in.
+#[derive(Default)]
+struct StopPhaseLedgerInner {
+    completed: Vec<(String, u128)>,
+    current: Option<(String, std::time::Instant)>,
+}
+
+#[derive(Clone, Default)]
+struct StopPhaseLedger(std::sync::Arc<std::sync::Mutex<StopPhaseLedgerInner>>);
+
+impl StopPhaseLedger {
+    fn enter(&self, phase: &str) {
+        let mut inner = self.0.lock().unwrap_or_else(|err| err.into_inner());
+        if let Some((name, started)) = inner.current.take() {
+            let elapsed = started.elapsed().as_millis();
+            inner.completed.push((name, elapsed));
+        }
+        inner.current = Some((phase.to_string(), std::time::Instant::now()));
+    }
+
+    /// Render `phase=ms` for every completed phase, then the phase still
+    /// running and how long it has been running. Never panics on a poisoned
+    /// lock: a diagnostic that disappears when something else went wrong is
+    /// worthless precisely when it is needed.
+    fn render(&self) -> String {
+        let inner = self.0.lock().unwrap_or_else(|err| err.into_inner());
+        let mut parts: Vec<String> = inner
+            .completed
+            .iter()
+            .map(|(phase, ms)| format!("{phase}={ms}ms"))
+            .collect();
+        if let Some((phase, started)) = inner.current.as_ref() {
+            parts.push(format!(
+                "{phase}=RUNNING_{}ms",
+                started.elapsed().as_millis()
+            ));
+        }
+        if parts.is_empty() {
+            "none recorded".to_string()
+        } else {
+            parts.join(" ")
+        }
+    }
+}
+
+thread_local! {
+    static STOP_PHASE_LEDGER: std::cell::RefCell<Option<StopPhaseLedger>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Record that the Stop hook has entered `phase`. A no-op outside the worker
+/// thread, so call sites need no plumbing and tests need no setup.
+fn stop_phase(phase: &str) {
+    STOP_PHASE_LEDGER.with(|ledger| {
+        if let Some(ledger) = ledger.borrow().as_ref() {
+            ledger.enter(phase);
+        }
+    });
+}
+
 fn stop_hook_budget() -> std::time::Duration {
     resolve_stop_hook_budget(std::env::var(STOP_HOOK_BUDGET_ENV).ok().as_deref())
 }
@@ -306,9 +379,14 @@ where
     F: FnOnce() -> Result<StopResponse> + Send + 'static,
 {
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let ledger = StopPhaseLedger::default();
+    let worker_ledger = ledger.clone();
     std::thread::Builder::new()
         .name("agent-doc-codex-stop".to_string())
         .spawn(move || {
+            STOP_PHASE_LEDGER.with(|slot| {
+                *slot.borrow_mut() = Some(worker_ledger);
+            });
             if sender.send(task()).is_err() {
                 eprintln!(
                     "[agent-doc] Codex Stop hook worker finished after its response receiver closed"
@@ -325,8 +403,9 @@ where
             response: StopResponse::Stop {
                 continue_: false,
                 stop_reason: format!(
-                    "agent-doc Stop hook exceeded its {}s internal budget and failed closed before the harness timeout. The route-owned supervisor retains any captured closeout and continues recovery; do not rerun finalize or recapture the response.",
+                    "agent-doc Stop hook exceeded its {}s internal budget and failed closed before the harness timeout. The route-owned supervisor retains any captured closeout and continues recovery; do not rerun finalize or recapture the response. Phases: {}",
                     budget.as_secs(),
+                    ledger.render(),
                 ),
             },
             timed_out: true,
@@ -354,6 +433,7 @@ pub fn load_bound_session_for_stop(
 }
 
 fn apply_stop(input: &StopInput) -> Result<StopResponse> {
+    stop_phase("load_bound_session");
     let cwd = PathBuf::from(&input.cwd);
     let Some((loaded_root, state)) = load_bound_session_for_stop(&cwd, &input.session_id)? else {
         // Ambient Codex hooks are exact-thread scoped. A durable document queue
@@ -377,11 +457,13 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
         return Ok(StopResponse::Continue { continue_: true });
     }
 
+    stop_phase("session_check_inspect");
     match agent_doc_session_check_io::inspect(
         &file,
         &agent_doc_closeout_runtime_io::session_check_effects(),
     )? {
         agent_doc_session_check_io::SessionCheckStatus::Ok(_) => {
+            stop_phase("auto_queue_continuation");
             if let Some(response) = auto_queue_continuation_response(
                 &file,
                 &cleanup_roots,
@@ -391,6 +473,7 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             )? {
                 return Ok(response);
             }
+            stop_phase("active_session_prompt_writeback");
             if let Some(response) = active_session_prompt_requires_writeback(
                 &file,
                 &cleanup_roots,
@@ -400,6 +483,7 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             )? {
                 return Ok(response);
             }
+            stop_phase("settle_session_binding");
             settle_session_binding(&file, &cleanup_roots, &loaded_root, &state)?;
             Ok(StopResponse::Continue { continue_: true })
         }
@@ -517,6 +601,7 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
 }
 
 fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
+    invalidate_stop_document_cache();
     let Some(key) = agent_doc_repair_command_io::captured_finalize_resume_key(file)
         .ok()
         .flatten()
@@ -748,6 +833,7 @@ fn settle_session_binding(
 }
 
 fn document_queue_requests_clear(file: &Path) -> Result<bool> {
+    stop_phase("document_queue_requests_clear");
     if active_auto_queue_prompt(file)?
         .as_deref()
         .is_some_and(agent_doc_codex_hook_io::prompt_requests_clear)
@@ -767,6 +853,7 @@ fn document_queue_requests_clear(file: &Path) -> Result<bool> {
 }
 
 fn active_session_prompt_or_queue_head(file: &Path) -> Result<Option<String>> {
+    stop_phase("active_session_prompt_or_queue_head");
     if let Some(prompt) = agent_doc_session_check_io::unresolved_exchange_prompt(file)? {
         return Ok(Some(prompt));
     }
@@ -1214,13 +1301,17 @@ fn attempt_stop_closeout(
     input: &StopInput,
 ) -> Result<StopCloseAttempt> {
     let mut phase_started = std::time::Instant::now();
+    stop_phase("closeout_classify_payload");
     let payload =
         agent_doc_template::replay_guard::classify_replay_payload(&input.last_assistant_message);
     let has_response = matches!(
         payload,
         agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(_)
     );
+    stop_phase("closeout_reopen_terminal_cycle");
     reopen_terminal_cycle_before_stop_capture(file, &payload)?;
+    invalidate_stop_document_cache();
+    stop_phase("closeout_detect_bypassed_patchback");
     let has_bypassed_patchback =
         agent_doc_session_check_io::detect_bypassed_response_write(file)?.is_some();
     if !has_response && !has_bypassed_patchback {
@@ -1246,7 +1337,9 @@ fn attempt_stop_closeout(
         });
     }
 
+    stop_phase("closeout_active_queue_prompt");
     let active_queue_prompt = active_auto_queue_prompt(file)?;
+    stop_phase("closeout_open_cycle_check");
     let queue_synthetic_cycle =
         active_queue_prompt.is_some() && open_cycle_started_from_unchanged_file(file)?;
     let captured_response_targets_queue_head = if queue_synthetic_cycle {
@@ -1443,6 +1536,9 @@ fn reopen_terminal_cycle_before_stop_capture(
 }
 
 fn capture_assistant_text(file: &Path, state: &SessionState, input: &StopInput) -> String {
+    // A capture writes the document; a later read in this same invocation must
+    // re-materialize rather than serve the pre-write snapshot.
+    invalidate_stop_document_cache();
     match agent_doc_template::replay_guard::classify_replay_payload(&input.last_assistant_message) {
         agent_doc_template::replay_guard::ReplayPayloadClassification::Empty => {
             capture_missing_stop_response(file, Some(state.last_prompt.as_str()))
@@ -1470,6 +1566,7 @@ fn capture_assistant_text(file: &Path, state: &SessionState, input: &StopInput) 
 }
 
 fn capture_missing_stop_response(file: &Path, last_prompt: Option<&str>) -> String {
+    invalidate_stop_document_cache();
     let reason = "the Stop hook received no final assistant closeout; this can happen when Codex stops after a tool-only or authentication step before the assistant emits the final response";
     match agent_doc_codex_hook_io::save_blocked_stop_payload(
         file,
@@ -1503,6 +1600,7 @@ fn capture_blocked_stop_payload(
     reason: &str,
     last_prompt: Option<&str>,
 ) -> String {
+    invalidate_stop_document_cache();
     match agent_doc_codex_hook_io::save_blocked_stop_payload(
         file,
         payload,
@@ -1559,7 +1657,43 @@ fn response_explicitly_targets_current_queue_head(
     )
 }
 
-fn current_document_content(file: &Path, source: &str) -> Result<String> {
+thread_local! {
+    /// `#codexstopbudgetblind`: one materialized document per path, per Stop
+    /// hook invocation.
+    ///
+    /// The hook is a read-only status gate, and it asks the same question from
+    /// several places — the queue-clear check, the active-prompt/queue-head
+    /// check, and the closeout attempt each resolve the document. On a live
+    /// editor every one of those is a controller round-trip plus a full CRDT
+    /// materialization; the dogfood ops log shows four for a 51KB document in a
+    /// single invocation, all returning the identical `text_hash`.
+    ///
+    /// Memoizing also makes the hook's decisions SELF-CONSISTENT: without it,
+    /// the queue-clear check and the queue-head check could read two different
+    /// document versions and disagree within one invocation.
+    ///
+    /// Scoped to the worker thread and dropped with it, so no invocation can
+    /// serve another one's content. Cleared explicitly by
+    /// [`invalidate_stop_document_cache`] if the hook ever mutates the document.
+    static STOP_DOCUMENT_CACHE: std::cell::RefCell<
+        std::collections::HashMap<PathBuf, String>,
+    > = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Drop the Stop hook's memoized document content.
+///
+/// Call after any path that can change the document within one invocation, so a
+/// later read in the same invocation re-materializes instead of serving a
+/// pre-write snapshot.
+fn invalidate_stop_document_cache() {
+    STOP_DOCUMENT_CACHE.with(|cache| cache.borrow_mut().clear());
+}
+
+/// The uncached resolution. Kept as its own function so the realtime-IO call
+/// keeps the exact one-line shape the architecture guard in `tests/test_cli.rs`
+/// pins, and so the memo above it is visibly a wrapper rather than a rewrite of
+/// how the Stop hook reads a document.
+fn resolve_document_content_uncached(file: &Path, source: &str) -> Result<String> {
     agent_doc_document_realtime_io::try_resolve_current_document_content(file, source).with_context(
         || {
             format!(
@@ -1568,6 +1702,19 @@ fn current_document_content(file: &Path, source: &str) -> Result<String> {
             )
         },
     )
+}
+
+fn current_document_content(file: &Path, source: &str) -> Result<String> {
+    if let Some(cached) = STOP_DOCUMENT_CACHE.with(|cache| cache.borrow().get(file).cloned()) {
+        return Ok(cached);
+    }
+    let content = resolve_document_content_uncached(file, source)?;
+    STOP_DOCUMENT_CACHE.with(|cache| {
+        cache
+            .borrow_mut()
+            .insert(file.to_path_buf(), content.clone())
+    });
+    Ok(content)
 }
 
 fn active_auto_queue_prompt(file: &Path) -> Result<Option<String>> {
@@ -1785,6 +1932,94 @@ mod tests {
             stdout.contains("exceeded its 1s internal budget"),
             "{stdout}"
         );
+        // `#codexstopbudgetblind`: the EMITTED message must carry the phase
+        // report, not just the ledger in isolation. Without this assertion the
+        // report can be dropped from the message with the suite still green --
+        // verified by mutation.
+        assert!(
+            stdout.contains("Phases:"),
+            "a timed-out hook must report where its budget went: {stdout}"
+        );
+    }
+
+    /// `#codexstopbudgetblind`: a timed-out hook must say where the budget went.
+    ///
+    /// The old message named only the budget, so an operator (and the agent
+    /// reading the stop reason) learned that 45s elapsed and nothing else. A
+    /// search of every log on the dogfood machine returned zero `codex_stop.`
+    /// perf lines despite live overruns, because the only phase timer sat
+    /// downstream of the work that is actually slow.
+    #[test]
+    fn a_timed_out_stop_hook_reports_the_phase_it_is_stuck_in() {
+        let ledger = StopPhaseLedger::default();
+        let worker = ledger.clone();
+        // Two phases complete, the third is still running when the budget expires.
+        worker.enter("load_bound_session");
+        worker.enter("session_check_inspect");
+        worker.enter("auto_queue_continuation");
+
+        let rendered = ledger.render();
+        assert!(
+            rendered.contains("load_bound_session="),
+            "a completed phase must carry its duration: {rendered}"
+        );
+        assert!(
+            rendered.contains("session_check_inspect="),
+            "every completed phase must be listed: {rendered}"
+        );
+        assert!(
+            rendered.contains("auto_queue_continuation=RUNNING_"),
+            "the phase still running is the one that matters — it must be \
+             distinguishable from a completed one: {rendered}"
+        );
+        assert!(
+            !rendered.contains("none recorded"),
+            "a populated ledger must not render as empty: {rendered}"
+        );
+    }
+
+    /// An unrecorded ledger still renders, rather than producing a message with
+    /// a dangling `Phases:` and nothing after it.
+    #[test]
+    fn an_empty_phase_ledger_renders_explicitly() {
+        assert_eq!(StopPhaseLedger::default().render(), "none recorded");
+    }
+
+    /// `#codexstopbudgetblind`: the hook asks for the same document from several
+    /// places per invocation. On a live editor each resolution is a controller
+    /// round-trip plus a full CRDT materialization — the dogfood ops log shows
+    /// four for one 51KB document, all returning the identical `text_hash`.
+    #[test]
+    fn the_stop_hook_materializes_a_document_once_per_invocation() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("session.md");
+        std::fs::write(&doc, "---\nagent_doc_format: template\n---\n\nbody\n").unwrap();
+
+        invalidate_stop_document_cache();
+        let first = current_document_content(&doc, "test_first").unwrap();
+
+        // Change the file underneath. A memoized read must still answer with the
+        // content this invocation already resolved, which is what proves the
+        // second call did not go back to the resolver.
+        std::fs::write(&doc, "---\nagent_doc_format: template\n---\n\nCHANGED\n").unwrap();
+        let second = current_document_content(&doc, "test_second").unwrap();
+        assert_eq!(
+            first, second,
+            "the second read must be served from the invocation memo"
+        );
+        assert!(
+            !second.contains("CHANGED"),
+            "a memoized read must not re-resolve: {second}"
+        );
+
+        // A write inside the invocation drops the memo, so the next read is fresh.
+        invalidate_stop_document_cache();
+        let third = current_document_content(&doc, "test_third").unwrap();
+        assert!(
+            third.contains("CHANGED"),
+            "invalidation must force a re-materialization: {third}"
+        );
+        invalidate_stop_document_cache();
     }
 
     struct EnvGuard {

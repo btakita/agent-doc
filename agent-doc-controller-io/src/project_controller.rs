@@ -2482,6 +2482,16 @@ struct ControllerDocumentGraphs {
     /// prevents an editor update RPC from synchronously waiting on a save that
     /// is correctly queued behind that same update in the editor lane.
     retained_persistence_sender: Arc<OnceLock<std::sync::mpsc::Sender<RetainedPersistenceCommand>>>,
+    /// Non-authoritative adapter for retained-transition effects that can
+    /// enter an editor, actor, state-ledger, or controller boundary. The
+    /// reactive graph admits exact typed commands; this worker executes them
+    /// after the Lazily context has been released.
+    retained_transition_sender: Arc<OnceLock<std::sync::mpsc::Sender<RetainedTransitionCommand>>>,
+    /// Exact transition effect already admitted to the asynchronous adapter.
+    /// A failed attempt stays one-shot until a meaningful delivery or
+    /// controller-generation edge derives a different effect identity.
+    retained_transition_attempted_frontier:
+        lazily::ThreadSafeSourceMap<String, Option<RetainedTransitionEffect>>,
     /// Controller-local record of the exact successfully published effect
     /// frontier. Delivery version and controller generation are part of the
     /// typed identity, so a changed frontier can retry while an unchanged one
@@ -2808,6 +2818,18 @@ struct RetainedPersistenceProjection {
 struct RetainedPersistenceCommand {
     document_hash: String,
     envelope: lazily::LatestDurableEnvelope<String, RetainedPersistenceProjection>,
+}
+
+#[derive(Clone, Debug)]
+struct RetainedTransitionCommand {
+    document_hash: String,
+    effect: RetainedTransitionEffect,
+}
+
+#[derive(Debug)]
+enum RetainedTransitionCompletion {
+    Delivery(Option<RetainedDeliveryObservation>),
+    Applied(bool),
 }
 
 /// Claim the latest desired projection after an older in-flight attempt
@@ -3266,6 +3288,15 @@ impl RetainedWriteSettleSink {
         document_hash: &str,
         transition: &RetainedTransitionProjection,
     ) -> bool {
+        #[cfg(test)]
+        if transition.file.file_name().and_then(|name| name.to_str())
+            == Some("blocking-retained-transition.md")
+        {
+            // Regression fixture for the controller/editor cycle: retained
+            // projection may wait on the editor lane, but never while holding
+            // the reactive context that route/layout dispatch also needs.
+            std::thread::sleep(Duration::from_millis(750));
+        }
         let Some(runtime) = self.runtime.upgrade() else {
             return false;
         };
@@ -3496,6 +3527,8 @@ impl ControllerDocumentGraphs {
             retained_transition_effect: lazily::ThreadSafeComputedMap::new(&ctx),
             retained_persistence: lazily::ThreadSafeLatestDurableProjection::new(&ctx, 1),
             retained_persistence_sender: Arc::new(OnceLock::new()),
+            retained_transition_sender: Arc::new(OnceLock::new()),
+            retained_transition_attempted_frontier: lazily::ThreadSafeSourceMap::new(&ctx),
             retained_transition_published_frontier: lazily::ThreadSafeSourceMap::new(&ctx),
             compact_resume: lazily::ThreadSafeComputedMap::new(&ctx),
             compact_resume_applied: lazily::ThreadSafeSourceMap::new(&ctx),
@@ -3580,6 +3613,68 @@ impl ControllerDocumentGraphs {
                 }
                 Err(error) => {
                     eprintln!("[controller] failed to start retained-persistence worker: {error}");
+                }
+            }
+        }
+        if self.retained_transition_sender.get().is_none() {
+            let (sender, receiver) = std::sync::mpsc::channel::<RetainedTransitionCommand>();
+            let worker_sink = sink.clone();
+            match std::thread::Builder::new()
+                .name("agent-doc-retained-transition".to_string())
+                .spawn(move || {
+                    while let Ok(command) = receiver.recv() {
+                        let completion = match &command.effect {
+                            RetainedTransitionEffect::ObserveCurrentDelivery(_) => {
+                                RetainedTransitionCompletion::Delivery(
+                                    worker_sink
+                                        .observe_current_retained_delivery(&command.document_hash),
+                                )
+                            }
+                            RetainedTransitionEffect::ApplyTarget(transition) => {
+                                RetainedTransitionCompletion::Applied(
+                                    worker_sink.project_retained_transition(
+                                        &command.document_hash,
+                                        transition,
+                                    ),
+                                )
+                            }
+                            RetainedTransitionEffect::ResumeCloseout(signal) => {
+                                RetainedTransitionCompletion::Applied(
+                                    worker_sink.resume(&command.document_hash, signal),
+                                )
+                            }
+                            RetainedTransitionEffect::SettleMaterializedCapture(signal) => {
+                                RetainedTransitionCompletion::Applied(
+                                    worker_sink.settle_materialized_capture(
+                                        &command.document_hash,
+                                        signal,
+                                    ),
+                                )
+                            }
+                            RetainedTransitionEffect::PersistLatest(_) => {
+                                // Latest-durable persistence owns a separate
+                                // coalescing worker and must never enter this
+                                // FIFO transition adapter.
+                                RetainedTransitionCompletion::Applied(false)
+                            }
+                        };
+                        let Some(runtime) = worker_sink.runtime.upgrade() else {
+                            break;
+                        };
+                        runtime
+                            .document_graphs
+                            .complete_retained_transition(command, completion);
+                    }
+                }) {
+                Ok(_) => {
+                    if self.retained_transition_sender.set(sender).is_err() {
+                        eprintln!(
+                            "[controller] retained-transition worker sender was installed concurrently"
+                        );
+                    }
+                }
+                Err(error) => {
+                    eprintln!("[controller] failed to start retained-transition worker: {error}");
                 }
             }
         }
@@ -4688,6 +4783,43 @@ impl ControllerDocumentGraphs {
         }
     }
 
+    fn complete_retained_transition(
+        &self,
+        command: RetainedTransitionCommand,
+        completion: RetainedTransitionCompletion,
+    ) {
+        let key = command.document_hash;
+        let effect = command.effect;
+        self.ctx.batch(|ctx| {
+            let attempted = self
+                .retained_transition_attempted_frontier
+                .observe(ctx, &key)
+                .flatten();
+            if attempted.as_ref() != Some(&effect) {
+                // A newer delivery/generation edge was admitted while this
+                // adapter call was in flight. Its receipt owns the frontier;
+                // an older delivery observation must not overwrite it.
+                return;
+            }
+            match completion {
+                RetainedTransitionCompletion::Delivery(Some(observation)) => {
+                    self.retained_transition_published_frontier
+                        .set(ctx, key.clone(), Some(effect));
+                    self.retained_delivery.set(ctx, key, Some(observation));
+                }
+                RetainedTransitionCompletion::Applied(true) => {
+                    self.retained_transition_published_frontier
+                        .set(ctx, key, Some(effect));
+                }
+                RetainedTransitionCompletion::Delivery(None)
+                | RetainedTransitionCompletion::Applied(false) => {
+                    // Keep the exact failed attempt admitted. A changed typed
+                    // effect retries; an unchanged one cannot hot-loop.
+                }
+            }
+        });
+    }
+
     /// Apply the sole effect-bearing projection of the retained-transition
     /// state table. Replica RPCs publish Sources only; this Effect is the one
     /// place that observes activation state, submits a guarded Base -> Target
@@ -4702,28 +4834,17 @@ impl ControllerDocumentGraphs {
         }
         let key = document_hash.to_string();
         let effect_map = self.retained_transition_effect.clone();
-        let delivery = self.retained_delivery.clone();
         let persistence = self.retained_persistence.clone();
         let persistence_sender = self.retained_persistence_sender.clone();
+        let transition_sender = self.retained_transition_sender.clone();
+        let attempted_frontier = self.retained_transition_attempted_frontier.clone();
         let published_frontier = self.retained_transition_published_frontier.clone();
-        let sink = self.settle_sink.clone();
         let effect_key = key.clone();
         let effect = self.ctx.effect(move |ctx| {
             let Some(projected_effect) = effect_map.observe(ctx, &effect_key).flatten() else {
                 return;
             };
-            let Some(sink) = sink.get() else {
-                return;
-            };
             match &projected_effect {
-                RetainedTransitionEffect::ObserveCurrentDelivery(_) => {
-                    let Some(observation) = sink.observe_current_retained_delivery(&effect_key)
-                    else {
-                        return;
-                    };
-                    published_frontier.set(ctx, effect_key.clone(), Some(projected_effect));
-                    delivery.set(ctx, effect_key.clone(), Some(observation));
-                }
                 RetainedTransitionEffect::PersistLatest(projection) => {
                     let generation = projection.controller_generation;
                     if matches!(
@@ -4823,22 +4944,36 @@ impl ControllerDocumentGraphs {
                         );
                     }
                 }
-                RetainedTransitionEffect::ApplyTarget(transition) => {
-                    if sink.project_retained_transition(&effect_key, transition) {
-                        published_frontier.set(ctx, effect_key.clone(), Some(projected_effect));
+                RetainedTransitionEffect::ObserveCurrentDelivery(_)
+                | RetainedTransitionEffect::ApplyTarget(_)
+                | RetainedTransitionEffect::ResumeCloseout(_)
+                | RetainedTransitionEffect::SettleMaterializedCapture(_) => {
+                    let attempted = attempted_frontier.observe(ctx, &effect_key).flatten();
+                    if attempted.as_ref() == Some(&projected_effect) {
+                        return;
                     }
-                }
-                RetainedTransitionEffect::ResumeCloseout(signal) => {
-                    // Advance the frontier only after publication. A stale or
-                    // missing continuation remains eligible for a later
-                    // projection edge.
-                    if sink.resume(&effect_key, signal) {
-                        published_frontier.set(ctx, effect_key.clone(), Some(projected_effect));
-                    }
-                }
-                RetainedTransitionEffect::SettleMaterializedCapture(signal) => {
-                    if sink.settle_materialized_capture(&effect_key, signal) {
-                        published_frontier.set(ctx, effect_key.clone(), Some(projected_effect));
+                    let Some(sender) = transition_sender.get() else {
+                        return;
+                    };
+                    // Publish admission before send: a fast worker can post
+                    // its receipt immediately, and that receipt must never be
+                    // overwritten by a later attempted-frontier write.
+                    attempted_frontier.set(
+                        ctx,
+                        effect_key.clone(),
+                        Some(projected_effect.clone()),
+                    );
+                    if sender
+                        .send(RetainedTransitionCommand {
+                            document_hash: effect_key.clone(),
+                            effect: projected_effect,
+                        })
+                        .is_err()
+                    {
+                        eprintln!(
+                            "[controller] retained-transition worker disconnected for {}",
+                            effect_key
+                        );
                     }
                 }
             }
@@ -14714,6 +14849,29 @@ agent:queue\n\
             .map(|pending| pending.intent_id.clone())
     }
 
+    fn wait_for_captured_finalize_wake_reason(
+        runtime: &Arc<ControllerRuntime>,
+        document_hash: &str,
+        expected_reason: &str,
+    ) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let reason = runtime
+                .captured_finalize_wakes
+                .lock()
+                .get(document_hash)
+                .map(|wake| wake.reason.clone());
+            if reason.as_deref() == Some(expected_reason) {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "captured-finalize wake did not reach {expected_reason}: {reason:?}"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     fn observation(hash: &str) -> agent_doc_state_backbone::retained_write::ContentObservation {
         agent_doc_state_backbone::retained_write::ContentObservation {
             content_hash: hash.to_string(),
@@ -16536,6 +16694,11 @@ revised operator request
                 )
                 .timed_out
         );
+        wait_for_captured_finalize_wake_reason(
+            &runtime,
+            &document_hash,
+            "retained_settled_delivery_reactive",
+        );
         let wakes = runtime.captured_finalize_wakes.lock();
         let wake = wakes.get(&document_hash).unwrap();
         assert_eq!(wake.reason, "retained_settled_delivery_reactive");
@@ -16572,6 +16735,15 @@ revised operator request
             .document_graphs
             .observe_retained_delivery_with_change(&document_hash, Some(materialized.clone()));
 
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while pending_intent_id(&runtime, &document_hash).is_some() {
+            assert!(
+                Instant::now() < deadline,
+                "the retained-transition worker did not publish settlement"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
         assert!(
             !runtime
                 .captured_finalize_wakes
@@ -16601,6 +16773,58 @@ revised operator request
                 .current_retained_resume(&document_hash)
                 .is_none(),
             "repeated delivery projections cannot recreate the settled transition"
+        );
+    }
+
+    #[test]
+    fn retained_transition_adapter_does_not_hold_the_reactive_context() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let file = dir.path().join("blocking-retained-transition.md");
+        let base = "# Queue\n";
+        let target = "# Queue\n\n### Re: done\n";
+        std::fs::write(&file, base).unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let mut projection = retained_resume_projection(&document_hash);
+        let intent = projection.document.pending_write.as_mut().unwrap();
+        intent.expected_content = Some(base.to_string());
+        intent.expected_hash = agent_doc_hash::content_hash(base);
+        intent.target_content = target.to_string();
+        intent.target_hash = agent_doc_hash::content_hash(target);
+        runtime
+            .document_graphs
+            .set_projection(&document_hash, Some(projection));
+
+        let publish_started = Instant::now();
+        runtime
+            .document_graphs
+            .observe_retained_delivery_with_change(
+                &document_hash,
+                Some(RetainedDeliveryObservation {
+                    file: canonical,
+                    content: Arc::from(base),
+                    content_hash: agent_doc_hash::content_hash(base),
+                    live_editors: 1,
+                    delivery_converged: true,
+                    delivery_version: 8,
+                }),
+            );
+        assert!(
+            publish_started.elapsed() < Duration::from_millis(250),
+            "publishing an editor delivery must not wait for retained projection I/O"
+        );
+
+        let read_started = Instant::now();
+        assert!(matches!(
+            runtime
+                .document_graphs
+                .current_retained_transition_state(&document_hash),
+            RetainedTransitionState::ApplyTarget(_)
+        ));
+        assert!(
+            read_started.elapsed() < Duration::from_millis(250),
+            "the retained adapter must release the reactive context while editor I/O is in flight"
         );
     }
 
@@ -16693,13 +16917,10 @@ revised operator request
                 .timed_out,
             "settlement must publish the retained wake receipt"
         );
-        assert_eq!(
-            runtime
-                .captured_finalize_wakes
-                .lock()
-                .get(&document_hash)
-                .map(|wake| wake.reason.as_str()),
-            Some("retained_settled_delivery_reactive")
+        wait_for_captured_finalize_wake_reason(
+            &runtime,
+            &document_hash,
+            "retained_settled_delivery_reactive",
         );
     }
 
@@ -16757,14 +16978,10 @@ revised operator request
             .document_graphs
             .install_settle_sink(dir.path().to_path_buf(), &runtime);
 
-        assert_eq!(
-            runtime
-                .captured_finalize_wakes
-                .lock()
-                .get(&document_hash)
-                .map(|wake| wake.reason.as_str()),
-            Some("retained_settled_delivery_reactive"),
-            "controller activation must derive settlement and closeout continuation from current projections"
+        wait_for_captured_finalize_wake_reason(
+            &runtime,
+            &document_hash,
+            "retained_settled_delivery_reactive",
         );
     }
 

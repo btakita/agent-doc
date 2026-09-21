@@ -2,6 +2,18 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.408
+
+- **Retained editor transitions no longer hold the shared reactive context.**
+  Activation observation, guarded CRDT projection, closeout wake, and
+  materialized-capture settlement are admitted as typed effects and executed
+  by a controller-owned worker. Exact attempted and published frontiers fence
+  stale completions and preserve retry-on-meaningful-change behavior. This
+  removes the remaining controller/editor lock cycle that could leave editor
+  routing at `projection_effect_in_flight`; regression coverage stalls retained
+  projection I/O while proving delivery publication and reactive reads remain
+  responsive.
+
 ## 0.35.407
 
 - **Captured-response projection can no longer wedge the shared controller or

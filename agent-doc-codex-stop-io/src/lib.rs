@@ -246,11 +246,45 @@ fn apply_claude_stop(input: &ClaudeStopInput) -> Result<Option<ClaudeStopBlock>>
     );
     Ok(Some(ClaudeStopBlock {
         decision: "block",
-        reason: format!(
-            "agent-doc Stop hook kept the active queue moving for {disp}. The completed cycle durably proved another drainable head: {prompt:?}. Do not send the final answer. Invoke the `loop` skill now with args `agent-doc {disp}`; its `/loop` admission claims the drain-owner lease before preflight. Do NOT shell-run `agent-doc {disp}` from the owner pane.",
-            disp = file.display(),
-        ),
+        reason: claude_stop_continuation_reason(&file.display().to_string(), &prompt),
     }))
+}
+
+/// `#loopreentrynoop`: the Claude Code Stop-hook continuation instruction.
+///
+/// The original text named exactly one mechanism -- "Invoke the `loop` skill" --
+/// and that mechanism is a NO-OP for every iteration after the first. Once
+/// `/loop` is loaded in a session, the Skill tool answers "already loaded ...
+/// instructions unchanged" and seals no cycle contract, because a Skill call is
+/// not a submitted prompt and so never fires the `UserPromptSubmit` hook that
+/// runs binary preflight. Observed six consecutive times on
+/// tasks/agent-doc/agent-doc-bugs.md.
+///
+/// That left the agent with no legal move: this same message forbids shelling
+/// `agent-doc <FILE>`, and `#preflightinbinary` forbids shelling
+/// `agent-doc preflight`. The drain then looked stalled while the agent was
+/// doing the only thing available to it, and `#qstallguard` scored it as
+/// `no_valid_stop_with_continuation_required`.
+///
+/// So the instruction now names the fallback that actually re-enters with a
+/// sealed contract: schedule a wake-up that SUBMITS the trigger as a real
+/// prompt. Keep the no-op case and the fallback together -- naming the fallback
+/// without naming the symptom leaves the agent unable to tell that it needs one.
+pub fn claude_stop_continuation_reason(file_display: &str, prompt: &str) -> String {
+    format!(
+        "agent-doc Stop hook kept the active queue moving for {file_display}. The completed \
+         cycle durably proved another drainable head: {prompt:?}. Do not send the final answer. \
+         Invoke the `loop` skill now with args `agent-doc {file_display}`; its `/loop` admission \
+         claims the drain-owner lease before preflight. Do NOT shell-run \
+         `agent-doc {file_display}` from the owner pane. `#loopreentrynoop`: if that Skill call \
+         answers `already loaded ... instructions unchanged`, it sealed NO cycle contract -- a \
+         Skill invocation is not a submitted prompt, so the `UserPromptSubmit` hook that runs \
+         binary preflight never fires, and that is the normal answer after the first iteration. \
+         It is NOT a stop reason and NOT a reason to shell `agent-doc preflight`. Re-enter \
+         instead by scheduling a wake-up that SUBMITS `/loop agent-doc {file_display}` as a real \
+         prompt (Claude Code: `ScheduleWakeup` with that exact prompt); a scheduled re-entry is a \
+         continuation, not a stall."
+    )
 }
 
 fn apply_stop_within_budget(input: StopInput, budget: std::time::Duration) -> Result<StopHookRun> {
@@ -1572,6 +1606,58 @@ fn now_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#loopreentrynoop`: the continuation instruction must remain actionable
+    /// after the first iteration.
+    ///
+    /// The original text named only "invoke the `loop` skill", which is a no-op
+    /// once `/loop` is loaded -- every iteration but the first. With the other
+    /// two routes forbidden (this message bans shelling the trigger,
+    /// `#preflightinbinary` bans shelling preflight), an agent that followed it
+    /// literally had no legal way to continue.
+    #[test]
+    fn continuation_reason_names_the_noop_case_and_a_working_reentry() {
+        let reason = claude_stop_continuation_reason("/p/doc.md", "do [#x]");
+
+        assert!(
+            reason.contains("loop` skill"),
+            "the primary mechanism must still be named: {reason}"
+        );
+        // The symptom, so the agent can recognize the no-op when it happens.
+        assert!(
+            reason.contains("already loaded"),
+            "the no-op answer must be named or the agent cannot detect it: {reason}"
+        );
+        // The escape, so recognizing it leads somewhere.
+        assert!(
+            reason.contains("ScheduleWakeup"),
+            "a working re-entry must be named, not just the failing one: {reason}"
+        );
+        assert!(
+            reason.contains("SUBMITS"),
+            "the re-entry must say the trigger has to be SUBMITTED as a prompt, \
+             which is the property a Skill call lacks: {reason}"
+        );
+        // Naming a fallback while still calling the situation a stall would keep
+        // the agent stuck between the hook and the stall detector.
+        assert!(
+            reason.contains("continuation, not a stall"),
+            "a scheduled re-entry must be declared a continuation: {reason}"
+        );
+        // The two forbidden shells must stay forbidden.
+        assert!(
+            reason.contains("Do NOT shell-run"),
+            "shelling the trigger stays forbidden: {reason}"
+        );
+        assert!(
+            reason.contains("NOT a reason to shell `agent-doc preflight`"),
+            "shelling preflight stays forbidden: {reason}"
+        );
+        assert!(
+            reason.contains("/p/doc.md") && reason.contains("do [#x]"),
+            "the document and head must be interpolated: {reason}"
+        );
+    }
 
     #[test]
     fn refused_admission_does_not_capture_explanation_or_drain_previous_queue() {

@@ -1733,6 +1733,19 @@ pub struct ControllerAnsweredFreeTextStrikeInvocation {
     pub node_keys: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+struct AnsweredFreeTextStrikeCommand {
+    document_hash: String,
+    attempt_id: String,
+    invocation: ControllerAnsweredFreeTextStrikeInvocation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AnsweredFreeTextStrikeFailure {
+    projection_id: String,
+    message: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ControllerCompactProjectionCompletion {
     pub file: PathBuf,
@@ -1965,6 +1978,14 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
         &self,
         invocation: ControllerAnsweredFreeTextStrikeInvocation,
     ) -> Result<()> {
+        #[cfg(test)]
+        if invocation.file.file_name().and_then(|name| name.to_str()) == Some("blocking-session.md")
+        {
+            // Regression fixture for the controller/actor cycle: the reactive
+            // Effect must hand this adapter work to its worker instead of
+            // holding the Lazily context while the adapter is blocked.
+            std::thread::sleep(Duration::from_millis(750));
+        }
         let current = std::fs::read_to_string(&invocation.file)
             .context("project controller test free-text strike: failed to read document")?;
         anyhow::ensure!(
@@ -2488,6 +2509,21 @@ struct ControllerDocumentGraphs {
     /// Closeout may commit only after this receipt matches the current
     /// projection; enqueue/admission alone is not durable evidence.
     answered_free_text_strike_applied: lazily::ThreadSafeSourceMap<String, Option<String>>,
+    /// Exact projection+delivery attempt already handed to the asynchronous
+    /// adapter. A failed attempt remains admitted until the delivery frontier
+    /// changes, preserving the former retry-on-new-observation semantics while
+    /// preventing a reactive hot loop.
+    answered_free_text_strike_attempted: lazily::ThreadSafeSourceMap<String, Option<String>>,
+    /// Typed failure receipt for the latest adapter attempt. Queue completion
+    /// observes this Source and surfaces failure without making the controller
+    /// graph wait on actor/editor I/O.
+    answered_free_text_strike_failure:
+        lazily::ThreadSafeSourceMap<String, Option<AnsweredFreeTextStrikeFailure>>,
+    /// Non-authoritative actor/editor adapter. Queue-strike policy remains in
+    /// the Computed above; the worker only executes admitted I/O and publishes
+    /// its typed success receipt back to `answered_free_text_strike_applied`.
+    answered_free_text_strike_sender:
+        Arc<OnceLock<std::sync::mpsc::Sender<AnsweredFreeTextStrikeCommand>>>,
     queue_completion: lazily::ThreadSafeComputedMap<String, QueueCompletionProjection>,
     /// `#preflightreactive`: per-document read observations and the shared
     /// Computed projection consumed by the short-lived preflight CLI process.
@@ -3466,6 +3502,9 @@ impl ControllerDocumentGraphs {
             queue_authority: lazily::ThreadSafeSourceMap::new(&ctx),
             answered_free_text_strike: lazily::ThreadSafeComputedMap::new(&ctx),
             answered_free_text_strike_applied: lazily::ThreadSafeSourceMap::new(&ctx),
+            answered_free_text_strike_attempted: lazily::ThreadSafeSourceMap::new(&ctx),
+            answered_free_text_strike_failure: lazily::ThreadSafeSourceMap::new(&ctx),
+            answered_free_text_strike_sender: Arc::new(OnceLock::new()),
             queue_completion: lazily::ThreadSafeComputedMap::new(&ctx),
             preflight_facts: lazily::ThreadSafeSourceMap::new(&ctx),
             preflight_projection: lazily::ThreadSafeComputedMap::new(&ctx),
@@ -3544,6 +3583,36 @@ impl ControllerDocumentGraphs {
                 }
             }
         }
+        if self.answered_free_text_strike_sender.get().is_none() {
+            let (sender, receiver) = std::sync::mpsc::channel::<AnsweredFreeTextStrikeCommand>();
+            let weak_runtime = Arc::downgrade(runtime);
+            match std::thread::Builder::new()
+                .name("agent-doc-free-text-strike".to_string())
+                .spawn(move || {
+                    while let Ok(command) = receiver.recv() {
+                        let result = runtime_effects().and_then(|effects| {
+                            effects.project_answered_free_text_strike(command.invocation.clone())
+                        });
+                        let Some(runtime) = weak_runtime.upgrade() else {
+                            break;
+                        };
+                        runtime
+                            .document_graphs
+                            .complete_answered_free_text_strike(command, result);
+                    }
+                }) {
+                Ok(_) => {
+                    if self.answered_free_text_strike_sender.set(sender).is_err() {
+                        eprintln!(
+                            "[controller] answered-free-text worker sender was installed concurrently"
+                        );
+                    }
+                }
+                Err(error) => {
+                    eprintln!("[controller] failed to start answered-free-text worker: {error}");
+                }
+            }
+        }
         let mut document_hashes = self
             .settle_effects
             .lock()
@@ -3552,6 +3621,12 @@ impl ControllerDocumentGraphs {
             .collect::<BTreeSet<_>>();
         document_hashes.extend(self.compact_resume_effects.lock().keys().cloned());
         document_hashes.extend(self.retained_transition_effects.lock().keys().cloned());
+        document_hashes.extend(
+            self.answered_free_text_strike_effects
+                .lock()
+                .keys()
+                .cloned(),
+        );
         self.ctx.batch(|ctx| {
             for document_hash in document_hashes {
                 self.settle_generation.set(ctx, document_hash, 1);
@@ -3956,6 +4031,13 @@ impl ControllerDocumentGraphs {
         file: &Path,
         content: String,
     ) -> Result<usize> {
+        // Outcomes published by the asynchronous adapter during this call
+        // belong to its next observation. Snapshot first so this ingress RPC
+        // never races a fast adapter back into synchronous behavior.
+        let prior_failure = self
+            .answered_free_text_strike_failure
+            .observe(&self.ctx, &document_hash.to_string())
+            .flatten();
         let observation = QueueAuthorityObservation {
             file: file.to_path_buf(),
             content_hash: agent_doc_hash::content_hash(&content),
@@ -3967,6 +4049,11 @@ impl ControllerDocumentGraphs {
         if let Some(error) = strike.error {
             anyhow::bail!("{error}");
         }
+        if let Some(failure) = prior_failure
+            && failure.projection_id == strike.projection_id
+        {
+            anyhow::bail!(failure.message);
+        }
         if strike.has_target()
             && self
                 .answered_free_text_strike_applied
@@ -3975,11 +4062,7 @@ impl ControllerDocumentGraphs {
                 .as_deref()
                 != Some(strike.projection_id.as_str())
         {
-            anyhow::bail!(
-                "answered free-text queue projection was not applied for {} (projection_id={})",
-                file.display(),
-                strike.projection_id
-            );
+            return Ok(0);
         }
         let projection = self.current_queue_completion(document_hash);
         if let Some(error) = projection.error {
@@ -4067,6 +4150,9 @@ impl ControllerDocumentGraphs {
     fn current_queue_completion(&self, document_hash: &str) -> QueueCompletionProjection {
         let authority = self.queue_authority.clone();
         let durable_projection = self.projection.clone();
+        let strike_projection = self.answered_free_text_strike.clone();
+        let strike_applied = self.answered_free_text_strike_applied.clone();
+        let strike_failure = self.answered_free_text_strike_failure.clone();
         let projection = self.queue_completion.get_or_insert_with(
             &self.ctx,
             document_hash.to_string(),
@@ -4074,6 +4160,29 @@ impl ControllerDocumentGraphs {
                 let Some(observation) = authority.observe(ctx, key).flatten() else {
                     return QueueCompletionProjection::default();
                 };
+                if let Some(strike) = strike_projection.observe(ctx, key) {
+                    if let Some(error) = strike.error {
+                        return QueueCompletionProjection {
+                            error: Some(error),
+                            ..QueueCompletionProjection::default()
+                        };
+                    }
+                    if strike.has_target() {
+                        if let Some(failure) = strike_failure.observe(ctx, key).flatten()
+                            && failure.projection_id == strike.projection_id
+                        {
+                            return QueueCompletionProjection {
+                                error: Some(failure.message),
+                                ..QueueCompletionProjection::default()
+                            };
+                        }
+                        if strike_applied.observe(ctx, key).flatten().as_deref()
+                            != Some(strike.projection_id.as_str())
+                        {
+                            return QueueCompletionProjection::default();
+                        }
+                    }
+                }
                 match agent_doc_queue::queue_projection::completed_queue_head_projections(
                     &observation.content,
                 ) {
@@ -4282,16 +4391,27 @@ impl ControllerDocumentGraphs {
         let key = document_hash.to_string();
         let projection_map = self.answered_free_text_strike.clone();
         let applied_map = self.answered_free_text_strike_applied.clone();
+        let attempted_map = self.answered_free_text_strike_attempted.clone();
+        let failure_map = self.answered_free_text_strike_failure.clone();
         let retained_delivery = self.retained_delivery.clone();
+        let settle_generation = self.settle_generation.clone();
+        let sender = Arc::clone(&self.answered_free_text_strike_sender);
         let effect_key = key.clone();
         let effect = self.ctx.effect(move |ctx| {
+            // The Effect can be installed before `install_settle_sink` binds
+            // the asynchronous adapter. Observe its installation generation so
+            // an already-derived projection is admitted once the worker exists.
+            let _generation_present = settle_generation.contains_key(ctx, &effect_key);
+            let _generation = settle_generation
+                .observe(ctx, &effect_key)
+                .unwrap_or_default();
             // A strike projection can be admitted while an attached editor still
             // owes the exact target. The runtime effect then retains that write
             // and returns an error. Subscribe to the delivery frontier so its
             // later acknowledgement retries this same projection; observing only
             // the projection and applied receipt made that failure one-shot.
             let _delivery_present = retained_delivery.contains_key(ctx, &effect_key);
-            let _delivery = retained_delivery.observe(ctx, &effect_key);
+            let delivery = retained_delivery.observe(ctx, &effect_key).flatten();
             let Some(projection) = projection_map.observe(ctx, &effect_key) else {
                 return;
             };
@@ -4300,6 +4420,19 @@ impl ControllerDocumentGraphs {
             }
             if applied_map.observe(ctx, &effect_key).flatten().as_deref()
                 == Some(projection.projection_id.as_str())
+            {
+                return;
+            }
+            let delivery_version = delivery
+                .as_ref()
+                .map(|observation| observation.delivery_version)
+                .unwrap_or(0);
+            let attempt_id = agent_doc_hash::content_hash(&format!(
+                "{}:{delivery_version}",
+                projection.projection_id
+            ));
+            if attempted_map.observe(ctx, &effect_key).flatten().as_deref()
+                == Some(attempt_id.as_str())
             {
                 return;
             }
@@ -4317,30 +4450,33 @@ impl ControllerDocumentGraphs {
                 baseline_content: projection.baseline_content.clone(),
                 node_keys: projection.node_keys.clone(),
             };
-            match runtime_effects()
-                .and_then(|effects| effects.project_answered_free_text_strike(invocation))
-            {
-                Ok(()) => {
-                    applied_map.set(
-                        ctx,
-                        effect_key.clone(),
-                        Some(projection.projection_id.clone()),
-                    );
-                    agent_doc_ops_log_io::log_op(
-                        &file,
-                        &format!(
-                            "answered_free_text_strike_applied_receipt file={} projection_id={} capture_id={} nodes={}",
-                            file.display(),
-                            projection.projection_id,
-                            projection.capture_id,
-                            projection.node_keys.len(),
-                        ),
-                    );
-                }
-                Err(error) => eprintln!(
-                    "[controller] answered free-text strike application failed for {}: {error}",
+            let Some(sender) = sender.get() else {
+                return;
+            };
+            let command = AnsweredFreeTextStrikeCommand {
+                document_hash: effect_key.clone(),
+                attempt_id: attempt_id.clone(),
+                invocation,
+            };
+            // Publish admission before the send so a fast worker cannot race a
+            // failure receipt with the pending-state reset below.
+            attempted_map.set(ctx, effect_key.clone(), Some(attempt_id));
+            failure_map.set(ctx, effect_key.clone(), None);
+            if let Err(error) = sender.send(command) {
+                let message = format!(
+                    "answered free-text strike enqueue failed for {}: {error}",
                     file.display()
-                ),
+                );
+                attempted_map.set(ctx, effect_key.clone(), None);
+                failure_map.set(
+                    ctx,
+                    effect_key.clone(),
+                    Some(AnsweredFreeTextStrikeFailure {
+                        projection_id: projection.projection_id.clone(),
+                        message: message.clone(),
+                    }),
+                );
+                eprintln!("[controller] {message}");
             }
         });
         let mut effects = self.answered_free_text_strike_effects.lock();
@@ -4350,6 +4486,56 @@ impl ControllerDocumentGraphs {
             return;
         }
         effects.insert(key, effect);
+    }
+
+    fn complete_answered_free_text_strike(
+        &self,
+        command: AnsweredFreeTextStrikeCommand,
+        result: Result<()>,
+    ) {
+        match result {
+            Ok(()) => {
+                self.ctx.batch(|ctx| {
+                    self.answered_free_text_strike_failure.set(
+                        ctx,
+                        command.document_hash.clone(),
+                        None,
+                    );
+                    self.answered_free_text_strike_applied.set(
+                        ctx,
+                        command.document_hash,
+                        Some(command.invocation.projection_id.clone()),
+                    );
+                });
+                agent_doc_ops_log_io::log_op(
+                    &command.invocation.file,
+                    &format!(
+                        "answered_free_text_strike_applied_receipt file={} projection_id={} capture_id={} attempt_id={} nodes={}",
+                        command.invocation.file.display(),
+                        command.invocation.projection_id,
+                        command.invocation.capture_id,
+                        command.attempt_id,
+                        command.invocation.node_keys.len(),
+                    ),
+                );
+            }
+            Err(error) => {
+                let message = format!(
+                    "answered free-text queue projection was not applied for {} (projection_id={}): {error}",
+                    command.invocation.file.display(),
+                    command.invocation.projection_id,
+                );
+                self.answered_free_text_strike_failure.set(
+                    &self.ctx,
+                    command.document_hash,
+                    Some(AnsweredFreeTextStrikeFailure {
+                        projection_id: command.invocation.projection_id,
+                        message: message.clone(),
+                    }),
+                );
+                eprintln!("[controller] {message}");
+            }
+        }
     }
 
     fn ensure_queue_completion_effect(&self, document_hash: &str) {
@@ -16623,7 +16809,7 @@ revised operator request
     fn captured_response_and_authority_reactively_project_answered_free_text_strike() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let file = dir.path().join("session.md");
+        let file = dir.path().join("blocking-session.md");
         let response = concat!(
             "### Re: staging deploy — gpt-5\n\n",
             "> **Queue prompt:**\n",
@@ -16670,10 +16856,20 @@ revised operator request
                 baseline_content: Some(content.clone()),
             },
         );
-        for event in [preflight_started_event(&document_hash), captured] {
-            append_state_event(dir.path(), &event).unwrap();
-            runtime.apply_state_event(&event).unwrap();
-        }
+        let preflight = preflight_started_event(&document_hash);
+        append_state_event(dir.path(), &preflight).unwrap();
+        runtime.apply_state_event(&preflight).unwrap();
+        runtime
+            .document_queue_authority_observe(&document_hash, &canonical, content.clone())
+            .unwrap();
+
+        let projection_started = Instant::now();
+        append_state_event(dir.path(), &captured).unwrap();
+        runtime.apply_state_event(&captured).unwrap();
+        assert!(
+            projection_started.elapsed() < Duration::from_millis(250),
+            "publishing ResponseCaptured must not wait for the actor/editor adapter"
+        );
         let durable = runtime
             .document_state_projection(&document_hash)
             .unwrap()
@@ -16686,9 +16882,6 @@ revised operator request
             agent_doc_turn::response_replay::response_materialized_in_content(response, &content)
         );
 
-        runtime
-            .document_queue_authority_observe(&document_hash, &canonical, content)
-            .unwrap();
         let strike = runtime
             .document_graphs
             .current_answered_free_text_strike(&document_hash);
@@ -16697,7 +16890,18 @@ revised operator request
             "captured response plus authority must derive a target: {strike:?}"
         );
 
-        let projected = std::fs::read_to_string(&canonical).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let projected = loop {
+            let projected = std::fs::read_to_string(&canonical).unwrap();
+            if projected.contains("auto-struck: answered this cycle (#ftstrike)") {
+                break projected;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the asynchronous strike worker did not publish its effect receipt"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
         assert!(
             projected
                 .contains("- ~~staging deploy~~ — auto-struck: answered this cycle (#ftstrike)"),
@@ -16806,13 +17010,35 @@ revised operator request
             runtime.apply_state_event(&event).unwrap();
         }
 
-        let error = runtime
+        let admitted = runtime
             .document_queue_authority_observe(
                 &document_hash,
                 &canonical,
                 projected_authority.clone(),
             )
-            .unwrap_err();
+            .unwrap();
+        assert_eq!(
+            admitted, 0,
+            "actor admission is not an application receipt and must gate queue completion"
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let error = loop {
+            match runtime.document_queue_authority_observe(
+                &document_hash,
+                &canonical,
+                projected_authority.clone(),
+            ) {
+                Err(error) => break error,
+                Ok(_) => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "the asynchronous adapter failure was not published"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+        };
 
         assert!(
             error
@@ -16844,7 +17070,18 @@ revised operator request
                 }),
             );
 
-        let retried = std::fs::read_to_string(&canonical).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let retried = loop {
+            let retried = std::fs::read_to_string(&canonical).unwrap();
+            if retried.contains("auto-struck: answered this cycle (#ftstrike)") {
+                break retried;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the changed delivery frontier did not retry the adapter"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
         assert!(
             retried
                 .contains("- ~~close the queue~~ — auto-struck: answered this cycle (#ftstrike)"),

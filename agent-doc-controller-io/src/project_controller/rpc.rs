@@ -2298,9 +2298,9 @@ pub(crate) fn handle_queue_authority_observation(
 }
 
 /// Publish authoritative markdown as a controller Source. The returned count
-/// is the derived terminal queue delta at that frontier; durable lifecycle
-/// events are applied by the controller's subscribed Effect before the RPC
-/// completes.
+/// is the derived terminal queue delta at that frontier. Actor/editor mutation
+/// is admitted asynchronously; terminal queue lifecycle stays gated until the
+/// controller's subscribed Effect publishes an exact application receipt.
 pub fn observe_queue_authority(project_root: &Path, file: &Path, content: &str) -> Result<usize> {
     #[cfg(any(test, feature = "test-support"))]
     {

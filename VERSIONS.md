@@ -2,6 +2,19 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.407
+
+- **Captured-response projection can no longer wedge the shared controller or
+  strand editor layout at `projection_effect_in_flight`.** The reactive graph
+  now admits answered-free-text queue strikes to a controller-owned worker
+  instead of synchronously entering the document actor/editor adapter while a
+  finalizer may still own that actor. Exact applied and failed receipts remain
+  reactive Sources, queue lifecycle completion stays gated on the matching
+  applied receipt, and a changed delivery frontier retries a failed projection.
+  Regression coverage blocks the adapter while publishing `ResponseCaptured`
+  and proves the controller remains responsive before verifying eventual
+  projection and receipt publication.
+
 ## 0.35.406
 
 - **Editor-plugin release discovery now stays on stable GitHub releases and

@@ -49,6 +49,15 @@ Every bullet in `agent:backlog` carries a 4-char base32 hash as a visible prefix
   `[#custom] ` is accepted as compatibility input and normalized to the same
   custom id. Custom ids are non-empty ASCII alphanumeric strings with optional
   hyphens. Lazy backfill still generates IDs.
+- **Multiline add ownership (`#componentresidue`):** an add payload's first line
+  is the parent item text. Every later line is rendered as an indented
+  continuation of that same item, including flush-left fenced prompt or command
+  output captured from an operator turn. No add may emit unstructured component
+  text that completion/edit/reorder commands cannot address. Backfill may remove
+  a complete top-level fenced terminal transcript only when it contains the
+  narrow agent-doc invocation signature (`› agent-doc ...` or an absolute
+  `.../agent-doc start ...`); the deletion remains audit-logged and incomplete
+  fences or ordinary operator prose remain untouched.
 - **Mutation-time collision rejection (`#preset-item-id-collision-enforce`):** an
   **explicit** custom id (`id=<id>` / `[#id]`) passed to `--backlog-add` /
   `--backlog-add-after` / `--backlog-add-before` / `--backlog-add-back` /

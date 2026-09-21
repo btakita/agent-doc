@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.404
+
+- **Multiline tracked-work adds cannot strand component residue
+  (`#componentresidue`).** The add path now stores the first line as item text
+  and every later line as an indented continuation, so completing a captured
+  fenced prompt removes the whole item. Lazy backfill also recognizes the exact
+  complete fenced `agent-doc start` transcript left by the historical producer,
+  removes it through the existing audit-logged cleanup path, and preserves
+  incomplete or ordinary operator fences.
+
 ## 0.35.403
 
 - **Resume identity mutations use the harness that produced the identity

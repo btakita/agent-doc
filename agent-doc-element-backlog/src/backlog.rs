@@ -451,8 +451,9 @@ impl PendingLayout {
     ///    `- [ ` was eaten, i.e. a destroyed item boundary;
     /// 3. a fenced `<dynamic_context_ref>` manifest — prompt input that belongs
     ///    to `agent:exchange`, never a tracked-work section;
-    /// 4. a complete top-level fenced agent-doc transcript beginning with the
-    ///    `› agent-doc ...` invocation prompt — captured terminal output, not
+    /// 4. a complete top-level fenced agent-doc transcript containing either an
+    ///    interactive `› agent-doc start ...` prompt or the absolute
+    ///    `.../agent-doc start ...` command — captured terminal output, not
     ///    backlog prose. An unmatched fence is preserved fail-closed.
     ///
     /// Everything else survives: headers, prose, blank spacing, continuation.
@@ -1362,9 +1363,14 @@ pub fn explicit_add_already_satisfied(full_content: &str, item: &str) -> Option<
         items
             .into_iter()
             .any(|existing| {
+                let existing_payload = if existing.continuation.is_empty() {
+                    existing.text.clone()
+                } else {
+                    format!("{}\n{}", existing.text, existing.continuation)
+                };
                 existing.id == id
                     && existing.state != PendingState::Done
-                    && replayed_add_text_identity(&existing.text) == want
+                    && replayed_add_text_identity(&existing_payload) == want
             })
             .then(|| component.name.clone())
     })
@@ -2291,6 +2297,41 @@ fn parse_pending_edit_payload(new_text: &str) -> Result<(String, String)> {
         item.continuation.push('\n');
     }
     Ok((item.text, item.continuation))
+}
+
+/// Canonicalize a multiline add into one tracked item.
+///
+/// Unlike edits, adds are also fed from captured operator prompts, whose
+/// continuation lines are ordinary flush-left Markdown. Storing the whole
+/// payload in `PendingItem::text` made those lines render outside the item;
+/// completing the item could then leave a fenced prompt body behind as
+/// unreachable component residue (`#componentresidue`). Keep the first line as
+/// the item text and indent every later flush-left line so the parser owns it as
+/// continuation. Existing indentation is preserved.
+fn normalize_pending_add_payload(text: &str) -> Result<(String, String)> {
+    let text = text.trim();
+    let (first, rest) = text.split_once('\n').unwrap_or((text, ""));
+    let first = first.trim().to_string();
+    if first.is_empty() {
+        bail!("pending add: text must be non-empty");
+    }
+    if rest.is_empty() {
+        return Ok((first, String::new()));
+    }
+
+    let mut continuation = String::new();
+    for line in rest.lines() {
+        if line.is_empty() {
+            continuation.push('\n');
+        } else {
+            if !is_indented_continuation_line(line) {
+                continuation.push_str("  ");
+            }
+            continuation.push_str(line);
+            continuation.push('\n');
+        }
+    }
+    Ok((first, continuation))
 }
 
 fn trim_boundary_blank_segments(mut segments: Vec<String>) -> Vec<String> {
@@ -3369,7 +3410,17 @@ fn fenced_agent_doc_log_splice_end(segments: &[PendingSegment], start: usize) ->
         if is_closing {
             return contains_agent_doc_prompt.then_some(index + 1);
         }
-        contains_agent_doc_prompt |= line.trim_start().starts_with("› agent-doc ");
+        let trimmed = line.trim_start();
+        let interactive = trimmed.starts_with('›');
+        let command_line = trimmed
+            .strip_prefix('›')
+            .map(str::trim_start)
+            .unwrap_or(trimmed);
+        let mut words = command_line.split_whitespace();
+        let executable = words.next().unwrap_or_default();
+        let subcommand = words.next().unwrap_or_default();
+        contains_agent_doc_prompt |= (interactive && executable == "agent-doc")
+            || (executable.ends_with("/agent-doc") && subcommand == "start");
         index += 1;
     }
     None
@@ -3898,6 +3949,7 @@ pub fn op_add_at_with_outcome_reserved(
             text = cleaned;
         }
     }
+    let (text, continuation) = normalize_pending_add_payload(&text)?;
 
     let mut layout = PendingLayout::parse(body);
     let items = layout.items();
@@ -3939,7 +3991,7 @@ pub fn op_add_at_with_outcome_reserved(
     // capture guard without creating a duplicate row.
     if let Some(existing) = items
         .iter()
-        .find(|i| i.state != PendingState::Done && i.text == text)
+        .find(|i| i.state != PendingState::Done && i.text == text && i.continuation == continuation)
     {
         return Ok(PendingAddOutcome {
             body: body.to_string(),
@@ -3948,7 +4000,10 @@ pub fn op_add_at_with_outcome_reserved(
             deduped_key: None,
         });
     }
-    if items.iter().any(|i| i.text == text) {
+    if items
+        .iter()
+        .any(|i| i.text == text && i.continuation == continuation)
+    {
         bail!(
             "pending add: duplicate completed item text already exists: {}",
             text
@@ -3990,7 +4045,7 @@ pub fn op_add_at_with_outcome_reserved(
         gate_type: None,
         in_progress: false,
         text,
-        continuation: String::new(),
+        continuation,
     };
     match position {
         AddPosition::First => layout.insert_first_item(new_item),
@@ -5346,6 +5401,25 @@ mod tests {
     }
 
     #[test]
+    fn backfill_drops_complete_absolute_agent_doc_start_transcript() {
+        // #componentresidue: exact residue from the live tsift.md incident.
+        let body = concat!(
+            "```\n",
+            "/opt/tools/agent-doc start --route-owned --route-owned-reap-policy keep-alive --resume -- tasks/sample-session.md\n",
+            "Error: project controller command `start_session` failed\n",
+            "```\n",
+            "- [ ] [#keep] a real item\n",
+        );
+
+        let (new_body, changed, dropped) = backfill_reporting_dropped_text(body, DOC_ID, &ids());
+        assert!(changed);
+        assert!(!new_body.contains("agent-doc start"));
+        assert!(!new_body.contains("start_session"));
+        assert!(new_body.contains("[#keep] a real item"));
+        assert_eq!(dropped.len(), 4);
+    }
+
+    #[test]
     fn backfill_preserves_unterminated_fenced_agent_doc_log() {
         let body = concat!(
             "```\n",
@@ -5964,6 +6038,41 @@ mod tests {
         assert_eq!(outcome.id, id);
         assert!(!outcome.inserted);
         assert!(outcome.deduped_key.is_none());
+    }
+
+    #[test]
+    fn op_add_multiline_prompt_keeps_every_line_inside_the_item() {
+        // #componentresidue: a captured prompt used to put the full payload in
+        // PendingItem::text. Rendering made every line after the title a
+        // flush-left Text segment, so same-cycle completion could reap the item
+        // while leaving the fenced terminal transcript behind forever.
+        let prompt = concat!(
+            "id=fixsampleissue Fix sample-session.md issue:\n",
+            "```\n",
+            "/opt/tools/agent-doc start --route-owned --resume -- tasks/sample-session.md\n",
+            "Error: controller generation compare-and-swap failed\n",
+            "```",
+        );
+
+        let (body, id) = op_add("", prompt, DOC_ID, false).unwrap();
+        assert_eq!(id, "fixsampleissue");
+        assert!(body.starts_with("- [ ] [#fixsampleissue] Fix sample-session.md issue:\n"));
+        assert!(body.contains("  ```\n"));
+        assert!(body.contains("  /opt/tools/agent-doc start"));
+        assert!(body.contains("  Error: controller generation compare-and-swap failed\n"));
+
+        let (_, items, _) = parse_items(&body);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].text, "Fix sample-session.md issue:");
+        assert!(items[0].continuation.contains("/agent-doc start"));
+
+        let done = op_done(&body, "fixsampleissue").unwrap();
+        let (reaped, removed) = reap_with_items(&done).unwrap();
+        assert_eq!(removed.len(), 1);
+        assert!(
+            reaped.trim().is_empty(),
+            "completion left residue: {reaped:?}"
+        );
     }
 
     #[test]
@@ -7820,6 +7929,10 @@ mod tests {
         let content = concat!(
             "<!-- agent:backlog -->\n",
             "- [ ] [#newwork] follow up on the wedge\n",
+            "- [ ] [#multiline] capture the terminal failure\n",
+            "  ```\n",
+            "  /opt/bin/agent-doc start --resume -- tasks/example.md\n",
+            "  ```\n",
             "- [x] [#reaped] finished long ago\n",
             "<!-- /agent:backlog -->\n"
         );
@@ -7827,6 +7940,13 @@ mod tests {
         // Same id, same text, still active — the add already happened.
         assert_eq!(
             explicit_add_already_satisfied(content, "[#newwork] follow up on the wedge"),
+            Some("backlog".to_string()),
+        );
+        assert_eq!(
+            explicit_add_already_satisfied(
+                content,
+                "id=multiline capture the terminal failure\n```\n/opt/bin/agent-doc start --resume -- tasks/example.md\n```"
+            ),
             Some("backlog".to_string()),
         );
         // Whitespace is the only difference a replay can introduce.

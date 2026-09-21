@@ -14,7 +14,7 @@ prompt_presets:
   '#agent-doc-causes': Fix agent-doc causes
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -87,6 +87,20 @@ No actionable backlog follow-up remains because the diagnosed defect, regression
 ### Re: Response
 
 Confirmed. The old IntelliJ process is gone, and the new process started at 11:33—after the current plugin JAR was installed at 11:01. The updated plugin generation is active.
+
+### Re: GitHub issue #56 — gpt-5 · 2026-09-21T12:23:01-04:00
+
+> **Queue prompt:** Fix https://github.com/btakita/agent-doc/issues/56 + release + publish
+
+Completed and closed issue #56.
+
+- Implementation: fallback release discovery now excludes prereleases and drafts; GitHub requests use `GITHUB_TOKEN` or `GH_TOKEN` when available; exhausted rate limits report reset and authentication guidance.
+- Specification and tests: regression coverage is in `src/plugin.rs`; the normative release-resolution contract is now in `SPEC.md`.
+- Verification: full local `make check` passed at release commit `aa14cbb28` and again on current main after the spec update. Release CI passed; the spec-only CI run is in progress.
+- Delivery: implementation/release commit `aa14cbb28` shipped as published release `v0.35.406`; spec follow-up `511c8a8b6` is pushed to `origin/main`. The installed CLI reports `agent-doc 0.35.406`.
+- GitHub issue #56 is closed.
+
+No additional follow-up is needed.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -95,11 +109,13 @@ Confirmed. The old IntelliJ process is gone, and the new process started at 11:3
 
 ## Pending / Not Built
 
-<!-- agent:queue -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" go priority -->
+- 🚧 do [#fixhttpsgithub]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
+- [ ] 🚧 [#fixhttpsgithub] Fix https://github.com/btakita/agent-doc/issues/56 + release + publish
 <!-- /agent:backlog -->
 
 ## Review

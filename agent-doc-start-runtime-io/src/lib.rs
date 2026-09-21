@@ -630,6 +630,23 @@ impl agent_doc_supervisor_process::route_owned_completion::RouteOwnedCompletionS
         owned_pane_label(self).to_string()
     }
 
+    /// `#stashpaneunbounded`: observe only THIS supervisor's own pane. A label
+    /// that is not a tmux pane id (the `<pty>` placeholder when this supervisor
+    /// owns no pane) answers `false`, as does an unresolvable window — the
+    /// reaper only ever acts on a pane it can positively prove is stashed.
+    fn owned_pane_is_stashed(&self) -> bool {
+        let pane = owned_pane_label(self);
+        if !pane.starts_with('%') {
+            return false;
+        }
+        let tmux = agent_doc_tmux_io::configured_tmux();
+        let Some(window_id) = agent_doc_tmux_io::target_window_id(&tmux, pane) else {
+            return false;
+        };
+        agent_doc_tmux_io::target_window_name(&tmux, &window_id)
+            .is_some_and(|name| agent_doc_controller::dispatch::is_stash_window_name(&name))
+    }
+
     fn paused_queue_has_no_supervisor_drainable_head(&self, file: &std::path::Path) -> bool {
         if !agent_doc_queue_io::controller_pause::document_queue_controller_paused(file) {
             return false;

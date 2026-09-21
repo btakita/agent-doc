@@ -2283,6 +2283,16 @@ fn target_is_agent_doc_window(tmux: &Tmux, target: &str) -> bool {
 /// operation, then selects the focus pane), so exactly one path performs the
 /// in/out transition. Best-effort: an unresolved window returns `false` so the
 /// caller falls back to selecting in place.
+pub fn pane_in_stash_window(tmux: &Tmux, pane_id: &str) -> bool {
+    let Some(window_id) = agent_doc_tmux_io::target_window_id(tmux, pane_id) else {
+        return false;
+    };
+    match window_name_for_window_id(tmux, &window_id) {
+        Some(name) => is_stash_window_name(&name),
+        None => false,
+    }
+}
+
 /// True when `pane_id`'s own live process tree still runs an agent-doc owner
 /// session for `file`.
 ///
@@ -2298,16 +2308,6 @@ pub fn pane_process_tree_owns_document(tmux: &Tmux, pane_id: &str, file: &Path) 
         &pane_pid.to_string(),
         &file.to_string_lossy(),
     )
-}
-
-pub fn pane_in_stash_window(tmux: &Tmux, pane_id: &str) -> bool {
-    let Some(window_id) = agent_doc_tmux_io::target_window_id(tmux, pane_id) else {
-        return false;
-    };
-    match window_name_for_window_id(tmux, &window_id) {
-        Some(name) => is_stash_window_name(&name),
-        None => false,
-    }
 }
 
 /// Promote a live-owner pane out of a `stash` window into its session's

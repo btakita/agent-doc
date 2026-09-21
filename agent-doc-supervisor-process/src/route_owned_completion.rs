@@ -14,21 +14,33 @@ use agent_doc_harness::HarnessConfig;
 use agent_doc_supervisor::idle_reconcile::ready_busy_conflict_reconcile_decision;
 use agent_doc_supervisor::route_owned::{
     RouteOwnedCycleFacts, RouteOwnedCyclePhase, RouteOwnedLivenessReason, RouteOwnedReapDecision,
-    RouteOwnedReapEffect, RouteOwnedReapEffects, RouteOwnedReapPolicy,
+    RouteOwnedReapEffect, RouteOwnedReapEffects, RouteOwnedReapPolicy, RouteOwnedStartPurpose,
     route_owned_cycle_committed_since_start, route_owned_liveness_reason_for_content,
-    route_owned_reap_decision,
+    route_owned_reap_decision_for_purpose,
 };
 
 pub const ROUTE_OWNED_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(500);
 pub const ROUTE_OWNED_READY_BUSY_RECONCILE_TICKS: u32 = 4;
 
+/// `#stashpaneunbounded`: how often the layout-provision orphan check may issue
+/// its tmux observation. The completion loop polls at 500ms, and an orphan pane
+/// is by definition doing nothing, so re-asking every tick would spend one tmux
+/// query per provisioned pane per half-second to watch a fact that changes when
+/// the operator moves a tab.
+pub const ROUTE_OWNED_LAYOUT_PROVISION_ORPHAN_CHECK_INTERVAL: Duration = Duration::from_secs(15);
+
 pub struct RouteOwnedCompletionConfig {
     pub file: PathBuf,
     pub baseline: Option<agent_doc_cycle_state_io::CycleState>,
     pub reap_policy: RouteOwnedReapPolicy,
+    /// Why this route-owned supervisor was started. `#stashpaneunbounded`: a
+    /// `LayoutProvision` supervisor holds a pane for an editor column and never
+    /// dispatches, so its orphan condition differs from a dispatch owner's.
+    pub start_purpose: RouteOwnedStartPurpose,
     pub harness: HarnessConfig,
     pub poll_interval: Duration,
     pub ready_busy_reconcile_ticks: u32,
+    pub layout_provision_orphan_check_interval: Duration,
 }
 
 impl RouteOwnedCompletionConfig {
@@ -38,13 +50,32 @@ impl RouteOwnedCompletionConfig {
         reap_policy: RouteOwnedReapPolicy,
         harness: HarnessConfig,
     ) -> Self {
+        Self::with_start_purpose(
+            file,
+            baseline,
+            reap_policy,
+            RouteOwnedStartPurpose::default(),
+            harness,
+        )
+    }
+
+    pub fn with_start_purpose(
+        file: PathBuf,
+        baseline: Option<agent_doc_cycle_state_io::CycleState>,
+        reap_policy: RouteOwnedReapPolicy,
+        start_purpose: RouteOwnedStartPurpose,
+        harness: HarnessConfig,
+    ) -> Self {
         Self {
             file,
             baseline,
             reap_policy,
+            start_purpose,
             harness,
             poll_interval: ROUTE_OWNED_COMPLETION_POLL_INTERVAL,
             ready_busy_reconcile_ticks: ROUTE_OWNED_READY_BUSY_RECONCILE_TICKS,
+            layout_provision_orphan_check_interval:
+                ROUTE_OWNED_LAYOUT_PROVISION_ORPHAN_CHECK_INTERVAL,
         }
     }
 }
@@ -54,6 +85,16 @@ pub trait RouteOwnedCompletionState: Send + Sync + 'static {
     fn ready_busy_blocker_reason(&self, harness: &HarnessConfig) -> Option<String>;
     fn live_pane_busy_reason(&self, harness: &HarnessConfig) -> Option<String>;
     fn owned_pane_label(&self) -> String;
+    /// Whether THIS supervisor's own pane currently sits in a `stash` window.
+    ///
+    /// `#stashpaneunbounded`: one question about the one pane this supervisor
+    /// owns. It never enumerates panes and never matches on a working directory
+    /// or command line, so no answer it gives can be about another session's
+    /// pane. Defaults to `false` so a state that cannot observe its pane keeps
+    /// the pre-existing keep-alive behaviour.
+    fn owned_pane_is_stashed(&self) -> bool {
+        false
+    }
     fn paused_queue_has_no_supervisor_drainable_head(&self, _file: &Path) -> bool {
         false
     }
@@ -134,23 +175,75 @@ where
                 file,
                 baseline,
                 reap_policy,
+                start_purpose,
                 harness,
                 poll_interval,
                 ready_busy_reconcile_ticks,
+                layout_provision_orphan_check_interval,
             } = config;
             let mut baseline = baseline.as_ref().map(route_owned_facts_from_cycle_state);
             let reap_effects = RouteOwnedReapEffects::new();
+            let layout_provision_owner = reap_policy == RouteOwnedReapPolicy::KeepAlive
+                && start_purpose == RouteOwnedStartPurpose::LayoutProvision;
+            let mut next_orphan_check = Instant::now();
             let mut ready_busy_ticks: u32 = 0;
             let mut ready_busy_key: Option<(String, String)> = None;
             let mut ready_busy_logged_key: Option<(String, String)> = None;
             while !stop.load(Ordering::Relaxed) && !completed.load(Ordering::Relaxed) {
                 if let Ok(Some(cycle_state)) = load_route_owned_cycle_state(&file) {
                     let facts = route_owned_facts_from_cycle_state(&cycle_state);
+                    // `#stashpaneunbounded`: evaluated BEFORE the commit-edge
+                    // machinery below, because that machinery never fires for the
+                    // shape that actually accumulates — a pane provisioned for an
+                    // editor column and then never used. Its document's cycle
+                    // never changes, so `route_owned_cycle_committed_since_start`
+                    // stays false and no decision is ever reached. The pane then
+                    // lives as long as the tmux server.
+                    if layout_provision_owner
+                        && !facts.phase.is_open()
+                        && Instant::now() >= next_orphan_check
+                    {
+                        next_orphan_check =
+                            Instant::now() + layout_provision_orphan_check_interval;
+                        if state.owned_pane_is_stashed()
+                            && state.live_pane_busy_reason(&harness).is_none()
+                        {
+                            let liveness_reason =
+                                route_owned_liveness_reason_for_file(&file, &facts);
+                            let decision = route_owned_reap_decision_for_purpose(
+                                reap_policy,
+                                start_purpose,
+                                liveness_reason,
+                                true,
+                            );
+                            if decision.reap {
+                                let event = format!(
+                                    "route_owned_reap_decision policy={} purpose={} decision=reap reason={} pane={} cycle={} event={}",
+                                    reap_policy.as_str(),
+                                    start_purpose.as_str(),
+                                    decision.reason,
+                                    state.owned_pane_label(),
+                                    cycle_state.cycle_id,
+                                    cycle_state.last_event,
+                                );
+                                log_session_event(&mut session_log, &event);
+                                agent_doc_ops_log_io::log_op(&file, &event);
+                                completed.store(true, Ordering::Relaxed);
+                                state.request_child_stop();
+                                return;
+                            }
+                        }
+                    }
                     if !route_owned_cycle_committed_since_start(&facts, baseline.as_ref()) {
                         if facts.phase.is_committed()
                             && state.paused_queue_has_no_supervisor_drainable_head(&file)
                         {
-                            let decision = route_owned_reap_decision(reap_policy, None);
+                            let decision = route_owned_reap_decision_for_purpose(
+                                reap_policy,
+                                start_purpose,
+                                None,
+                                layout_provision_owner && state.owned_pane_is_stashed(),
+                            );
                             let effect = RouteOwnedReapEffect {
                                 policy: reap_policy,
                                 decision: decision.clone(),
@@ -242,9 +335,11 @@ where
                             route_owned_liveness_reason_for_file(&file, &facts),
                             state.paused_queue_has_no_supervisor_drainable_head(&file),
                         );
-                        route_owned_reap_decision(
+                        route_owned_reap_decision_for_purpose(
                             reap_policy,
+                            start_purpose,
                             liveness_reason,
+                            layout_provision_owner && state.owned_pane_is_stashed(),
                         )
                     };
                     let busy_guard = decision.reason.starts_with("live_pane_busy_no_idle_prompt");

@@ -1012,10 +1012,11 @@ pub fn run_with_reap_policy_resume_and_harness(
         log_event(&mut session_log, "route_owned_start enabled=true");
         Some(spawn_route_owned_completion_thread(
             shared.clone(),
-            RouteOwnedCompletionConfig::new(
+            RouteOwnedCompletionConfig::with_start_purpose(
                 canonical.clone(),
                 route_owned_cycle_baseline,
                 route_owned_reap_policy,
+                route_owned_start_purpose,
                 harness.clone(),
             ),
             route_owned_completion.clone(),

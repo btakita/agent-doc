@@ -20311,7 +20311,14 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub fn load_route_owned_cycle_state(",
         "pub fn spawn_route_owned_completion_thread",
         "route_owned_liveness_reason_for_content",
-        "route_owned_reap_decision(",
+        // `#stashpaneunbounded`: the loop calls the purpose-aware decision, so a
+        // `keep-alive` layout-provision owner can end itself when its pane is
+        // stashed. The bare `route_owned_reap_decision(` it replaced must NOT
+        // come back here — that spelling is the one that answers
+        // `explicit_keep_alive` unconditionally.
+        "route_owned_reap_decision_for_purpose(",
+        "RouteOwnedStartPurpose::LayoutProvision",
+        "owned_pane_is_stashed()",
         "route_owned_cycle_committed_since_start(",
         "RouteOwnedLivenessReason::AdapterFailure",
         "agent_doc_cycle_state_io::load_with_closeout_projection(file)",
@@ -20334,10 +20341,13 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "start.rs should only implement the live SupervisorShared adapter for the route-owned completion seam"
     );
     assert!(
-        start_run_source.contains("RouteOwnedCompletionConfig::new(")
+        start_run_source.contains("RouteOwnedCompletionConfig::with_start_purpose(")
+            && start_run_source.contains("route_owned_start_purpose,")
             && start_run_source.contains("spawn_route_owned_completion_thread(")
             && start_run_source.contains("log_event,"),
-        "start/run.rs should call the supervisor-process route-owned completion loop directly"
+        "start/run.rs should call the supervisor-process route-owned completion loop directly, \
+         threading the route-owned start purpose so the completion loop can tell a \
+         layout-provision owner from a dispatch owner (#stashpaneunbounded)"
     );
     let cli_main = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
     assert!(

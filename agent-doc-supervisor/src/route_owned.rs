@@ -344,6 +344,65 @@ pub fn route_owned_reap_decision(
     }
 }
 
+/// Whether a liveness signal is *pending interaction* a stashed
+/// layout-provision pane must stay alive for.
+///
+/// `#stashpaneunbounded`: `BacklogNonEmpty` is deliberately NOT one. Every task
+/// document carries a backlog as its steady state, so treating it as liveness
+/// is exactly what made layout-provision panes unbounded — the signal is true
+/// forever and for every document. The remaining reasons all describe work the
+/// operator is mid-way through (a queued prompt, an unanswered exchange tail, a
+/// post-commit follow-up, uncommitted drift) or an adapter the reaper must not
+/// second-guess.
+pub fn route_owned_liveness_blocks_layout_provision_reap(
+    reason: Option<&RouteOwnedLivenessReason>,
+) -> bool {
+    match reason {
+        None | Some(RouteOwnedLivenessReason::BacklogNonEmpty) => false,
+        Some(_) => true,
+    }
+}
+
+/// Purpose-aware reap decision.
+///
+/// `#stashpaneunbounded`: `KeepAlive` means "do not reap merely because a cycle
+/// committed" — it was never meant to mean "never exit, ever," but that is what
+/// it did: [`route_owned_reap_decision`] answers `explicit_keep_alive`
+/// unconditionally, discarding the liveness reason before it is even read.
+/// Measured on the dogfood project: 35 `explicit_keep_alive` decisions across
+/// six documents and not one reap, one permanent pane per document ever visited
+/// in the editor.
+///
+/// A layout-provision supervisor exists to hold a pane for an editor column and
+/// nothing else — queue control fences `Dispatch` and lets `LayoutProvision`
+/// through precisely because it never carries a prompt. Once its pane is
+/// **stashed** it is holding no visible column, so it is doing the one job it
+/// has nowhere at all. That is the orphan condition, and it is proven from the
+/// supervisor's own start purpose and its own pane — never from a working
+/// directory or a command line, and never about a pane another session owns.
+///
+/// Callers must evaluate this only when the document's cycle is not open, and
+/// must let a live-pane-busy reason short-circuit to `reap: false` first, so an
+/// active harness turn in that pane is never reaped.
+pub fn route_owned_reap_decision_for_purpose(
+    policy: RouteOwnedReapPolicy,
+    purpose: RouteOwnedStartPurpose,
+    liveness_reason: Option<RouteOwnedLivenessReason>,
+    owned_pane_stashed: bool,
+) -> RouteOwnedReapDecision {
+    if policy == RouteOwnedReapPolicy::KeepAlive
+        && purpose == RouteOwnedStartPurpose::LayoutProvision
+        && owned_pane_stashed
+        && !route_owned_liveness_blocks_layout_provision_reap(liveness_reason.as_ref())
+    {
+        return RouteOwnedReapDecision {
+            reap: true,
+            reason: "layout_provision_stashed_orphan".to_string(),
+        };
+    }
+    route_owned_reap_decision(policy, liveness_reason)
+}
+
 pub fn route_owned_file_dirty_after_commit(
     content: &str,
     committed_file_hash: Option<&str>,
@@ -509,6 +568,136 @@ mod tests {
             Some(changed),
             "a new lifecycle transition must emit exactly once"
         );
+    }
+
+    /// `#stashpaneunbounded`: the measured defect. `keep-alive` answered
+    /// `explicit_keep_alive` no matter what, so a layout-provision pane never
+    /// exited — 35 such decisions across six documents on the dogfood project
+    /// and not one reap.
+    #[test]
+    fn keep_alive_still_never_reaps_a_visible_layout_provision_pane() {
+        assert_eq!(
+            route_owned_reap_decision_for_purpose(
+                RouteOwnedReapPolicy::KeepAlive,
+                RouteOwnedStartPurpose::LayoutProvision,
+                None,
+                false,
+            ),
+            RouteOwnedReapDecision {
+                reap: false,
+                reason: "explicit_keep_alive".to_string()
+            },
+            "a layout-provision pane holding a visible column is doing its job"
+        );
+    }
+
+    #[test]
+    fn keep_alive_reaps_a_stashed_layout_provision_pane_with_nothing_to_do() {
+        assert_eq!(
+            route_owned_reap_decision_for_purpose(
+                RouteOwnedReapPolicy::KeepAlive,
+                RouteOwnedStartPurpose::LayoutProvision,
+                None,
+                true,
+            ),
+            RouteOwnedReapDecision {
+                reap: true,
+                reason: "layout_provision_stashed_orphan".to_string()
+            }
+        );
+    }
+
+    /// A backlog is the steady state of every task document. Counting it as
+    /// liveness is what made the population unbounded, so a stashed
+    /// layout-provision pane is reaped despite one.
+    #[test]
+    fn a_backlog_alone_does_not_keep_a_stashed_layout_provision_pane_alive() {
+        assert_eq!(
+            route_owned_reap_decision_for_purpose(
+                RouteOwnedReapPolicy::KeepAlive,
+                RouteOwnedStartPurpose::LayoutProvision,
+                Some(RouteOwnedLivenessReason::BacklogNonEmpty),
+                true,
+            ),
+            RouteOwnedReapDecision {
+                reap: true,
+                reason: "layout_provision_stashed_orphan".to_string()
+            }
+        );
+    }
+
+    /// Pending interaction still wins. Each of these means the operator is
+    /// mid-way through something on that document.
+    #[test]
+    fn pending_interaction_keeps_a_stashed_layout_provision_pane_alive() {
+        for reason in [
+            RouteOwnedLivenessReason::QueueNonEmpty,
+            RouteOwnedLivenessReason::PostCommitUserFollowUp,
+            RouteOwnedLivenessReason::ExchangeTailUnresolvedPrompt,
+            RouteOwnedLivenessReason::DocumentDirtyAfterCommit,
+            RouteOwnedLivenessReason::AdapterFailure("read_failed:boom".to_string()),
+        ] {
+            assert_eq!(
+                route_owned_reap_decision_for_purpose(
+                    RouteOwnedReapPolicy::KeepAlive,
+                    RouteOwnedStartPurpose::LayoutProvision,
+                    Some(reason.clone()),
+                    true,
+                ),
+                RouteOwnedReapDecision {
+                    reap: false,
+                    reason: "explicit_keep_alive".to_string()
+                },
+                "{reason:?} is pending interaction, not steady state"
+            );
+        }
+    }
+
+    /// The new leg is scoped to layout provision. A dispatch owner that was
+    /// explicitly told `keep-alive` keeps its pre-existing behaviour even when
+    /// stashed with nothing to do.
+    #[test]
+    fn a_stashed_dispatch_owner_is_not_reaped_by_the_layout_provision_leg() {
+        assert_eq!(
+            route_owned_reap_decision_for_purpose(
+                RouteOwnedReapPolicy::KeepAlive,
+                RouteOwnedStartPurpose::Dispatch,
+                None,
+                true,
+            ),
+            RouteOwnedReapDecision {
+                reap: false,
+                reason: "explicit_keep_alive".to_string()
+            }
+        );
+    }
+
+    /// The other two policies are untouched by purpose or stash state.
+    #[test]
+    fn auto_and_reap_after_commit_are_unchanged_by_the_purpose_aware_wrapper() {
+        for purpose in [
+            RouteOwnedStartPurpose::Dispatch,
+            RouteOwnedStartPurpose::LayoutProvision,
+        ] {
+            for stashed in [false, true] {
+                for policy in [
+                    RouteOwnedReapPolicy::Auto,
+                    RouteOwnedReapPolicy::ReapAfterCommit,
+                ] {
+                    for liveness in [None, Some(RouteOwnedLivenessReason::BacklogNonEmpty)] {
+                        assert_eq!(
+                            route_owned_reap_decision_for_purpose(
+                                policy,
+                                purpose,
+                                liveness.clone(),
+                                stashed,
+                            ),
+                            route_owned_reap_decision(policy, liveness.clone()),
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

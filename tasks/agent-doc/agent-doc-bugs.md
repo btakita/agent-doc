@@ -43,7 +43,7 @@ The agent-doc hook rejected this turn before admission. It misparsed `agent-doc 
 That path does not exist, so no cycle contract was created. Per the [agent-doc workflow](/home/brian/work/btakita/agent-loop/.claude/skills/agent-doc/SKILL.md), I must stop without running preflight or modifying the new issue.
 
 Current release state: `v0.35.406` and commit `aa14cbb28` are pushed; GitHub Release/PyPI workflows were still running and are not yet verified complete. The `tasks/api.md` reconciliation defect remains to be fixed in a newly admitted cycle.
-❯ 🚧 Diagnose + unwedge api.md turn. Fix agent-doc causes for this issue:
+❯ Diagnose + unwedge api.md turn. Fix agent-doc causes for this issue:
 ```
 › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md
 
@@ -83,6 +83,10 @@ Committed and pushed to `agent-doc` main as `9848fe7e8` (`fix: accept exact dura
 Operator action: restart IntelliJ IDEA to activate the newly installed JetBrains package generation; the running IDE still maps the superseded plugin JAR.
 
 No actionable backlog follow-up remains because the diagnosed defect, regression coverage, full verification, push, install, and controller recycle request are complete.
+
+### Re: Response
+
+Confirmed. The old IntelliJ process is gone, and the new process started at 11:33—after the current plugin JAR was installed at 11:01. The updated plugin generation is active.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

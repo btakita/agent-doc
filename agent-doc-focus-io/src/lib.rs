@@ -23,15 +23,19 @@
 //!   metadata without launching or waiting on the project controller.
 //! - Otherwise, looks up the UUID in the durable registry via
 //!   `agent_doc_session_registry_io::lookup`.
-//! - Live-owner precedence: a pane resolved from the local actor record or the
+//! - Bound-pane precedence (`#fpeselectstashpane`): the selection effect uses the
+//!   document's bound pane. A live probe may only *invalidate* that binding, never
+//!   replace it. Before consulting any resolver, focus asks `pane_still_owns_document`
+//!   about the bound pane itself; while that holds, the actor / registry pane is
+//!   selected as-is and `sync::find_live_owner_pane_quiet` is not even run.
+//! - Live-owner repair: a pane resolved from the local actor record or the
 //!   registry is only proof the pane is *alive*, not that it still owns the document.
 //!   After a reroute / fresh-restart the session can move to a new pane while the old
-//!   pane stays alive with a dead owner. Before selecting, focus reconciles the
-//!   candidate against `sync::find_live_owner_pane_quiet`; when a different pane
-//!   provably owns the document right now, focus swaps to that live owner and lets
-//!   resync repair the registry. This also recovers a dead-registered or
-//!   unregistered document whose session is still running in another pane, instead
-//!   of failing closed.
+//!   pane stays alive with a dead owner. Only once the bound pane has stopped owning
+//!   the document does focus reconcile against `sync::find_live_owner_pane_quiet` and
+//!   swap to a provable live owner, letting resync repair the registry. This also
+//!   recovers a dead-registered or unregistered document whose session is still
+//!   running in another pane, instead of failing closed.
 //! - Default `run` delegates focus to the Project Controller. The controller surfaces
 //!   a proven stashed live-owner pane inside the editor focus fence, rechecks
 //!   co-visibility, and selects it only after the move succeeds. Standalone
@@ -56,6 +60,12 @@
 //! - `focus_repairs_stale_registry_to_live_owner` (aspirational): registered pane is alive
 //!   but its owner is gone while the document runs in another pane → focus selects the live
 //!   owner pane, not the stale registry pane.
+//! - `registered_focus_decision_keeps_a_bound_pane_that_still_owns_the_document`
+//!   (`#fpeselectstashpane`): the bound pane still runs this document's owner while a
+//!   heuristic resolver names a different (stashed) pane → the bound pane is selected.
+//! - `live_owner_override_declines_when_the_bound_pane_still_owns_the_document`
+//!   (`#fpeselectstashpane`): a still-valid binding short-circuits before the heuristic
+//!   resolver runs at all.
 //! - `focus_no_session` (aspirational): file frontmatter has no `agent_doc_session` →
 //!   error directing caller to run `claim` is returned.
 //! - `focus_file_not_found` (aspirational): file path does not exist on disk →
@@ -91,6 +101,14 @@ pub trait FocusEffects {
 
     fn pane_in_stash_window(&self, tmux: &Tmux, pane: &str) -> bool;
 
+    /// True when `pane`'s own live process tree still runs an agent-doc owner
+    /// session for `file`.
+    ///
+    /// `#fpeselectstashpane`: this is a *guard on the bound pane*, not a search
+    /// for a replacement. It can only ever invalidate the binding, so no answer
+    /// it gives can nominate some other pane.
+    fn pane_still_owns_document(&self, tmux: &Tmux, pane: &str, file: &Path) -> bool;
+
     fn promote_pane_to_agent_doc_window(&self, tmux: &Tmux, pane: &str) -> Result<bool>;
 }
 
@@ -107,6 +125,16 @@ fn live_owner_override(
     candidate: &str,
     tmux: &Tmux,
 ) -> Option<String> {
+    // `#fpeselectstashpane`: the bound pane outranks any live-resolved
+    // alternative while it still owns the document. `find_live_owner_pane_quiet`
+    // is the *heuristic recovery* resolver (session-log `latest_start_pane`,
+    // supervisor-pid process-tree scan, whole-server cmdline scan), and every
+    // one of those legs can name a superseded pane whose stale owner process is
+    // still alive — the panes that accumulate in the `stash` window. Repair is
+    // for a binding that stopped being true, never for one that is still true.
+    if effects.pane_still_owns_document(tmux, candidate, file) {
+        return None;
+    }
     let owner = effects.find_live_owner_pane_quiet(tmux, file, session_id)?;
     match decide_focus_pane(candidate, Some(owner.as_str())) {
         FocusPaneDecision::RepairToLiveOwner(owner) if tmux.pane_alive(&owner) => Some(owner),
@@ -121,10 +149,19 @@ enum RegisteredFocusDecision<'a> {
     FailUnproven,
 }
 
+/// `#fpeselectstashpane`: `registered_pane_owns_document` is proof read from
+/// the registered pane's OWN process tree. When it holds, the durable binding is
+/// still true and is selected as-is — a differing heuristic `live_owner` never
+/// displaces it. The repair and fail-closed legs are unchanged for a binding
+/// that has actually stopped being true.
 fn decide_registered_focus_candidate<'a>(
     registered_pane: &'a str,
+    registered_pane_owns_document: bool,
     live_owner: Option<&'a str>,
 ) -> RegisteredFocusDecision<'a> {
+    if registered_pane_owns_document {
+        return RegisteredFocusDecision::SelectRegistered;
+    }
     match live_owner {
         Some(owner) if owner != registered_pane => {
             RegisteredFocusDecision::RepairToLiveOwner(owner)
@@ -265,10 +302,20 @@ pub fn run_with_tmux_opts(
             // session runs in another pane, or the pane may be a stale
             // geometry-only binding from passive editor sync. Select only a
             // pane that currently proves ownership.
-            let live_owner = effects
-                .find_live_owner_pane_quiet(tmux, file, &session_id)
-                .filter(|owner| tmux.pane_alive(owner));
-            match decide_registered_focus_candidate(&pane_id, live_owner.as_deref()) {
+            let registered_pane_owns_document =
+                effects.pane_still_owns_document(tmux, &pane_id, file);
+            let live_owner = (!registered_pane_owns_document)
+                .then(|| {
+                    effects
+                        .find_live_owner_pane_quiet(tmux, file, &session_id)
+                        .filter(|owner| tmux.pane_alive(owner))
+                })
+                .flatten();
+            match decide_registered_focus_candidate(
+                &pane_id,
+                registered_pane_owns_document,
+                live_owner.as_deref(),
+            ) {
                 RegisteredFocusDecision::RepairToLiveOwner(owner) => {
                     promote_and_select(effects, tmux, owner, defer_stash_promote)?;
                     eprintln!(
@@ -368,6 +415,10 @@ mod tests {
             false
         }
 
+        fn pane_still_owns_document(&self, _tmux: &Tmux, _pane: &str, _file: &Path) -> bool {
+            false
+        }
+
         fn promote_pane_to_agent_doc_window(&self, _tmux: &Tmux, _pane: &str) -> Result<bool> {
             Ok(false)
         }
@@ -382,7 +433,7 @@ mod tests {
     #[test]
     fn registered_focus_decision_selects_matching_live_owner() {
         assert_eq!(
-            decide_registered_focus_candidate("%7", Some("%7")),
+            decide_registered_focus_candidate("%7", false, Some("%7")),
             RegisteredFocusDecision::SelectRegistered
         );
     }
@@ -390,7 +441,7 @@ mod tests {
     #[test]
     fn registered_focus_decision_repairs_to_different_live_owner() {
         assert_eq!(
-            decide_registered_focus_candidate("%7", Some("%9")),
+            decide_registered_focus_candidate("%7", false, Some("%9")),
             RegisteredFocusDecision::RepairToLiveOwner("%9")
         );
     }
@@ -398,8 +449,86 @@ mod tests {
     #[test]
     fn registered_focus_decision_fails_unproven_alive_registry_pane() {
         assert_eq!(
-            decide_registered_focus_candidate("%7", None),
+            decide_registered_focus_candidate("%7", false, None),
             RegisteredFocusDecision::FailUnproven
+        );
+    }
+
+    /// `#fpeselectstashpane`: the registered pane still runs this document's
+    /// owner, so a differing heuristic `live_owner` — a superseded
+    /// `latest_start_pane` or a whole-server cmdline-scan hit parked in the
+    /// stash — must not displace the binding.
+    #[test]
+    fn registered_focus_decision_keeps_a_bound_pane_that_still_owns_the_document() {
+        assert_eq!(
+            decide_registered_focus_candidate("%5", true, Some("%28")),
+            RegisteredFocusDecision::SelectRegistered,
+            "a selection effect must use the bound pane, never a live-resolved one"
+        );
+    }
+
+    /// A proven bound pane is itself the ownership proof, so the fail-closed
+    /// leg no longer fires just because the heuristic resolver found nothing.
+    #[test]
+    fn registered_focus_decision_does_not_fail_closed_on_a_proven_bound_pane() {
+        assert_eq!(
+            decide_registered_focus_candidate("%5", true, None),
+            RegisteredFocusDecision::SelectRegistered
+        );
+    }
+
+    /// `live_owner_override` short-circuits before the heuristic resolver runs,
+    /// so a bound pane that still owns the document is never even compared
+    /// against a live-resolved alternative.
+    #[test]
+    fn live_owner_override_declines_when_the_bound_pane_still_owns_the_document() {
+        struct BoundPaneStillOwns;
+
+        impl FocusEffects for BoundPaneStillOwns {
+            fn focus_or_resume_document_via_controller(&self, _file: &Path) -> Result<()> {
+                Ok(())
+            }
+
+            fn find_live_owner_pane_quiet(
+                &self,
+                _tmux: &Tmux,
+                _file: &Path,
+                _session_id: &str,
+            ) -> Option<String> {
+                panic!("the heuristic resolver must not run for a still-valid binding");
+            }
+
+            fn local_actor_record_pane_for_document(
+                &self,
+                _file: &Path,
+                _session_id: &str,
+                _tmux: &Tmux,
+            ) -> Option<String> {
+                None
+            }
+
+            fn pane_in_stash_window(&self, _tmux: &Tmux, _pane: &str) -> bool {
+                false
+            }
+
+            fn pane_still_owns_document(&self, _tmux: &Tmux, _pane: &str, _file: &Path) -> bool {
+                true
+            }
+
+            fn promote_pane_to_agent_doc_window(&self, _tmux: &Tmux, _pane: &str) -> Result<bool> {
+                Ok(false)
+            }
+        }
+
+        assert_eq!(
+            live_owner_override(
+                &BoundPaneStillOwns,
+                Path::new("/project/tasks/fpe.md"),
+                "session-id",
+                "%5",
+                &agent_doc_tmux_io::configured_tmux(),
+            ),
+            None
         );
     }
 }

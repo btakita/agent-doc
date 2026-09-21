@@ -69,6 +69,10 @@ impl agent_doc_focus_io::FocusEffects for CliFocusEffects {
         agent_doc_sync_io::sync::pane_in_stash_window(tmux, pane)
     }
 
+    fn pane_still_owns_document(&self, tmux: &Tmux, pane: &str, file: &Path) -> bool {
+        agent_doc_sync_io::sync::pane_process_tree_owns_document(tmux, pane, file)
+    }
+
     fn promote_pane_to_agent_doc_window(&self, tmux: &Tmux, pane: &str) -> Result<bool> {
         agent_doc_sync_io::sync::promote_pane_to_agent_doc_window(tmux, pane)
     }

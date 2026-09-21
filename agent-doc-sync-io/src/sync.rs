@@ -2283,6 +2283,23 @@ fn target_is_agent_doc_window(tmux: &Tmux, target: &str) -> bool {
 /// operation, then selects the focus pane), so exactly one path performs the
 /// in/out transition. Best-effort: an unresolved window returns `false` so the
 /// caller falls back to selecting in place.
+/// True when `pane_id`'s own live process tree still runs an agent-doc owner
+/// session for `file`.
+///
+/// `#fpeselectstashpane`: this is the *bound-pane guard* the focus paths use in
+/// place of resolving a pane live. It asks one question about one named pane —
+/// it never scans for an alternative — so its answer can only invalidate a
+/// binding, never nominate a different pane.
+pub fn pane_process_tree_owns_document(tmux: &Tmux, pane_id: &str, file: &Path) -> bool {
+    let Some(pane_pid) = agent_doc_tmux_io::pane_pid(tmux, pane_id) else {
+        return false;
+    };
+    agent_doc_process_owner_io::process_tree_has_agent_doc_owner_for_file(
+        &pane_pid.to_string(),
+        &file.to_string_lossy(),
+    )
+}
+
 pub fn pane_in_stash_window(tmux: &Tmux, pane_id: &str) -> bool {
     let Some(window_id) = agent_doc_tmux_io::target_window_id(tmux, pane_id) else {
         return false;

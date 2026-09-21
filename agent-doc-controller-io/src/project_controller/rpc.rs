@@ -20795,18 +20795,57 @@ impl FocusPaneRejectReason {
     }
 }
 
+/// The document's bound actor pane, plus the two facts that decide whether the
+/// binding is still usable for a focus handoff.
+///
+/// `#fpeselectstashpane`: `still_owns_document` is a *guard on the bound pane*,
+/// not a search for an alternative one. It is proven from the bound pane's own
+/// live process tree, so it can only ever demote the binding — it can never
+/// nominate some other pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FocusActorCandidate<'a> {
+    pane_id: &'a str,
+    /// The durable actor projection is not `Blocked`/`Closed`.
+    focusable: bool,
+    /// This pane's live process tree still runs an agent-doc owner session for
+    /// this document.
+    still_owns_document: bool,
+}
+
 /// Reconcile the durable actor/registry projections against a pane whose
 /// current process tree proves ownership of the selected document. Focus is a
 /// non-mutating UI handoff, so a closed/blocked projection must not hide a
 /// still-running route-owned agent. The proof wins only when it is exact; the
 /// I/O adapter below rejects dead, bare-shell, and cross-document pane reuse.
+///
+/// `#fpeselectstashpane`: the bound actor pane outranks a *differing*
+/// session-log-derived live owner whenever that bound pane still owns the
+/// document. `proven_session_log_focus_owner` reads `latest_start_pane` — where
+/// the session was last **started**, not where it currently lives — so after a
+/// reroute / resume / rebind it can still name a superseded pane whose stale
+/// owner process is alive and parked in the `stash` window. Letting that
+/// historical record outrank the generation-fenced actor binding is what focused
+/// a stash pane on a document whose actor *and* registry both named the correct
+/// visible pane. A selection effect uses the bound pane; a live probe may only
+/// invalidate that binding, never replace it.
 fn decide_focus_pane_candidate<'a>(
-    actor: Option<(&'a str, bool)>,
+    actor: Option<FocusActorCandidate<'a>>,
     registry_pane: Option<&'a str>,
     proven_live_owner: Option<&'a str>,
 ) -> FocusPaneCandidateDecision<'a> {
+    if let Some(candidate) = actor
+        && candidate.focusable
+        && candidate.still_owns_document
+    {
+        return FocusPaneCandidateDecision::Candidate {
+            pane_id: candidate.pane_id,
+            focused_reason: "focused_agent_doc_actor",
+            not_alive_reason: "actor_pane_not_alive",
+        };
+    }
+
     if let Some(owner) = proven_live_owner {
-        if actor.is_some_and(|(pane, focusable)| focusable && pane == owner) {
+        if actor.is_some_and(|candidate| candidate.focusable && candidate.pane_id == owner) {
             return FocusPaneCandidateDecision::Candidate {
                 pane_id: owner,
                 focused_reason: "focused_agent_doc_actor",
@@ -20820,7 +20859,10 @@ fn decide_focus_pane_candidate<'a>(
         };
     }
 
-    if let Some((pane_id, focusable)) = actor {
+    if let Some(FocusActorCandidate {
+        pane_id, focusable, ..
+    }) = actor
+    {
         if !focusable {
             return FocusPaneCandidateDecision::Reject {
                 reason: FocusPaneRejectReason::ActorNotFocusable,
@@ -21208,7 +21250,20 @@ fn handle_focus_document_pane_with_policy(
             agent_doc_controller::actor::ActorState::Blocked
                 | agent_doc_controller::actor::ActorState::Closed
         );
-        (record.pane_id.as_str(), focusable)
+        // `#fpeselectstashpane`: probe the BOUND pane, never scan for another
+        // one. This is only asked when a differing live owner was derived, so
+        // the ordinary converged path (no live owner, or the same pane) costs
+        // no extra observation.
+        let still_owns_document = focusable
+            && proven_live_owner
+                .as_deref()
+                .is_some_and(|owner| owner != record.pane_id)
+            && process_tree_exactly_owns_document(&tmux, &record.pane_id, &canonical);
+        FocusActorCandidate {
+            pane_id: record.pane_id.as_str(),
+            focusable,
+            still_owns_document,
+        }
     });
     let decision = decide_focus_pane_candidate(
         actor,
@@ -26228,10 +26283,20 @@ mod tests {
         assert_eq!(response["projection"]["commands"][0]["status"], "applied");
     }
 
+    /// Bound actor whose live process tree was NOT proven to still own the
+    /// document — the shape every pre-`#fpeselectstashpane` test described.
+    fn unproven_actor(pane_id: &str, focusable: bool) -> FocusActorCandidate<'_> {
+        FocusActorCandidate {
+            pane_id,
+            focusable,
+            still_owns_document: false,
+        }
+    }
+
     #[test]
     fn focus_candidate_uses_exact_live_owner_when_actor_projection_is_closed() {
         assert_eq!(
-            decide_focus_pane_candidate(Some(("%stale", false)), None, Some("%live")),
+            decide_focus_pane_candidate(Some(unproven_actor("%stale", false)), None, Some("%live")),
             FocusPaneCandidateDecision::Candidate {
                 pane_id: "%live",
                 focused_reason: "focused_live_process_owner",
@@ -26252,12 +26317,69 @@ mod tests {
         );
     }
 
+    /// `#fpeselectstashpane`: the operator-reported shape. `fpe.md`'s actor
+    /// record AND durable registry both name the correct visible pane, while
+    /// the session log's `latest_start_pane` still names a superseded pane
+    /// whose stale owner process is alive in the `stash` window. The bound pane
+    /// wins; a historical start record never outranks the live binding.
+    #[test]
+    fn focus_candidate_keeps_the_bound_actor_pane_over_a_differing_session_log_owner() {
+        assert_eq!(
+            decide_focus_pane_candidate(
+                Some(FocusActorCandidate {
+                    pane_id: "%5",
+                    focusable: true,
+                    still_owns_document: true,
+                }),
+                Some("%5"),
+                Some("%28"),
+            ),
+            FocusPaneCandidateDecision::Candidate {
+                pane_id: "%5",
+                focused_reason: "focused_agent_doc_actor",
+                not_alive_reason: "actor_pane_not_alive",
+            },
+            "a selection effect must use the bound pane, never a live-resolved one",
+        );
+    }
+
+    /// The guard only ever *demotes* the binding. A bound pane that no longer
+    /// runs this document's owner still yields to the proven live owner, so the
+    /// reroute / fresh-restart repair path is unchanged.
     #[test]
     fn focus_candidate_reconciles_stale_active_actor_to_new_live_owner() {
         assert_eq!(
-            decide_focus_pane_candidate(Some(("%old", true)), Some("%old"), Some("%new")),
+            decide_focus_pane_candidate(
+                Some(unproven_actor("%old", true)),
+                Some("%old"),
+                Some("%new"),
+            ),
             FocusPaneCandidateDecision::Candidate {
                 pane_id: "%new",
+                focused_reason: "focused_live_process_owner",
+                not_alive_reason: "live_owner_pane_not_alive",
+            },
+        );
+    }
+
+    /// A non-focusable actor is never rescued by the bound-pane preference:
+    /// `still_owns_document` is gated on `focusable` at the call site, and the
+    /// decision re-checks it, so a `Blocked`/`Closed` projection keeps going
+    /// through the live-owner / rescue path it always did.
+    #[test]
+    fn focus_candidate_bound_pane_preference_does_not_revive_a_closed_actor() {
+        assert_eq!(
+            decide_focus_pane_candidate(
+                Some(FocusActorCandidate {
+                    pane_id: "%closed",
+                    focusable: false,
+                    still_owns_document: true,
+                }),
+                Some("%stale"),
+                Some("%live"),
+            ),
+            FocusPaneCandidateDecision::Candidate {
+                pane_id: "%live",
                 focused_reason: "focused_live_process_owner",
                 not_alive_reason: "live_owner_pane_not_alive",
             },
@@ -26267,7 +26389,11 @@ mod tests {
     #[test]
     fn focus_candidate_still_refuses_closed_actor_without_exact_live_proof() {
         assert_eq!(
-            decide_focus_pane_candidate(Some(("%closed", false)), Some("%stale"), None),
+            decide_focus_pane_candidate(
+                Some(unproven_actor("%closed", false)),
+                Some("%stale"),
+                None,
+            ),
             FocusPaneCandidateDecision::Reject {
                 reason: FocusPaneRejectReason::ActorNotFocusable,
                 pane_id: Some("%closed"),

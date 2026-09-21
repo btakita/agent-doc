@@ -271,6 +271,23 @@ thread or in a detached periodic timer.
   ordered pane list is not a visible column and must not satisfy a layout slot or
   stand in as `expected_focus_pane`, so a stashed pane never counts toward
   `observation=synced`.
+- A selection effect uses the document's **bound** pane; a live probe may only
+  invalidate that binding, never replace it (`#fpeselectstashpane`). The actor
+  row and the durable registry entry are the binding. The live-owner signals are
+  recovery inputs derived from history and from whole-server scans — the session
+  log's `latest_start_pane` records where the session was last *started*, not
+  where it currently lives, and the heuristic resolver additionally walks
+  supervisor-pid process trees and every pane's command line. After a reroute,
+  resume, or rebind, each of those can still name a superseded pane whose stale
+  owner process is alive and parked in `stash`, which is how editor selection
+  focused a stash pane for a document whose actor row *and* registry both named
+  the correct visible pane. So the bound pane outranks a differing live-owner
+  candidate whenever the bound pane's own process tree still runs an agent-doc
+  owner session for that document, and the resolver is not consulted at all in
+  that case. Only a binding that has stopped being true falls through to
+  live-owner repair, and a `Blocked`/`Closed` actor projection is never revived
+  by this precedence. The proof must be a question about the one named bound
+  pane; a scan that can return some *other* pane is a resolution, not a guard.
 - Controller focus surfaces a proven live-owner pane before selecting it. The
   promotion and `select-pane` are one editor focus-fenced effect, and the
   controller re-reads `#{window_id}` after promotion before reporting success.

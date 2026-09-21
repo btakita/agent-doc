@@ -792,6 +792,7 @@ fn derive_layout_actor_bindings(
     desired: Option<&PaneLayoutDesired>,
     actors: &ControllerActorStore,
     structural_receipt: Option<&PaneLayoutStructuralReceipt>,
+    retained_assignments: &[(String, String)],
 ) -> Vec<ControllerTmuxActorBinding> {
     let Some(desired) = desired else {
         return Vec::new();
@@ -844,6 +845,25 @@ fn derive_layout_actor_bindings(
                 generation: receipt.generation,
             });
         }
+    }
+    for (document, pane) in retained_assignments {
+        if pane.is_empty()
+            || !desired_document_set.contains(document.as_str())
+            || !seen.insert(document.clone())
+        {
+            continue;
+        }
+        // Ownership receipts outlive one exact layout shape. If editor-model
+        // authority temporarily disappears, carry the last controller-owned
+        // file-to-pane assignment into the next structural effect. The tmux
+        // adapter still revalidates pane liveness and rejects a foreign process
+        // owner before it can reuse this binding.
+        bindings.push(ControllerTmuxActorBinding {
+            document_path: document.clone(),
+            session_id: String::new(),
+            pane_id: pane.clone(),
+            generation: 0,
+        });
     }
     bindings
 }
@@ -923,11 +943,18 @@ impl ControllerPaneLayoutGraph {
         });
         let desired_for_actor_bindings = desired;
         let structural_receipt_for_actor_bindings = structural_receipt;
+        let owned_assignments_for_actor_bindings = owned_assignments;
         let actor_bindings = ctx.computed(move |ctx| {
             let desired = ctx.get(&desired_for_actor_bindings);
             let actors = ctx.get(&live_actor_bindings);
             let structural_receipt = ctx.get(&structural_receipt_for_actor_bindings);
-            derive_layout_actor_bindings(desired.as_ref(), &actors, structural_receipt.as_ref())
+            let retained_assignments = ctx.get(&owned_assignments_for_actor_bindings);
+            derive_layout_actor_bindings(
+                desired.as_ref(),
+                &actors,
+                structural_receipt.as_ref(),
+                &retained_assignments,
+            )
         });
         let observed = ctx.source(None);
         let receipt = ctx.source(PaneLayoutEffectReceipt::default());
@@ -8378,6 +8405,7 @@ mod tests {
                 (stashed_document.clone(), stashed),
             ]),
             None,
+            &[],
         );
 
         assert_eq!(
@@ -8387,6 +8415,62 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![desired_document.as_str()],
             "a common recorded stash window must not pull unrelated documents into the layout"
+        );
+    }
+
+    #[test]
+    fn retained_layout_ownership_survives_missing_actor_across_layout_change() {
+        use agent_doc_controller::actor::ActorState;
+
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let retained_document = "/project/tasks/retained.md".to_string();
+        let sibling_document = "/project/tasks/sibling.md".to_string();
+        let incoming_document = "/project/tasks/incoming.md".to_string();
+        let actors = ControllerActorGraph::new_in(
+            &scope,
+            BTreeMap::from([
+                (
+                    retained_document.clone(),
+                    actor_record_for_test(&retained_document, "%2", ActorState::Ready),
+                ),
+                (
+                    sibling_document.clone(),
+                    actor_record_for_test(&sibling_document, "%3", ActorState::Ready),
+                ),
+            ]),
+        );
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
+        let mut first_invocation = pane_layout_desired_for_test(1).invocation;
+        first_invocation.columns = vec![retained_document.clone(), sibling_document.clone()];
+        let first = graph.set_desired(first_invocation, None);
+        graph.record_structural_assignment(
+            &first,
+            graph.actor_bindings(),
+            None,
+            vec![
+                (retained_document.clone(), "%2".into()),
+                (sibling_document.clone(), "%3".into()),
+            ],
+        );
+
+        actors.set(BTreeMap::from([(
+            sibling_document.clone(),
+            actor_record_for_test(&sibling_document, "%3", ActorState::Ready),
+        )]));
+        let mut changed_invocation = first.invocation;
+        changed_invocation.columns = vec![retained_document.clone(), incoming_document];
+        changed_invocation.focus = Some(retained_document.clone());
+        graph.set_desired(changed_invocation, None);
+
+        assert_eq!(
+            graph.actor_bindings(),
+            vec![ControllerTmuxActorBinding {
+                document_path: retained_document,
+                session_id: String::new(),
+                pane_id: "%2".to_string(),
+                generation: 0,
+            }],
+            "temporary model-authority loss must not erase a live pane assignment retained by the controller",
         );
     }
 

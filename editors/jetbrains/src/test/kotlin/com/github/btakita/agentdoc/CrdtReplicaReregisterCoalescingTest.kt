@@ -4,6 +4,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.file.Files
+import java.nio.file.Path
 
 class CrdtReplicaReregisterCoalescingTest {
     @Test
@@ -34,6 +36,30 @@ class CrdtReplicaReregisterCoalescingTest {
                 minIntervalMs = 5_000,
             ),
         )
+    }
+
+    @Test
+    fun `typed recovery requires a fresh endpoint and rearms after failure`() {
+        val source =
+            Files.readString(
+                Path.of("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            )
+        val ensureBody =
+            source
+                .substringAfter("fun ensureOpenDocumentReplica(")
+                .substringBefore("private fun rebindOpenDocumentPath(")
+        val recoveryBody =
+            source
+                .substringAfter("fun refreshOpenDocumentReplicaForRecoveryAndWait(")
+                .substringBefore("private fun runOnEdtNonBlocking(")
+
+        assertTrue(ensureBody.contains("requireFreshRegistration: Boolean = false"))
+        assertTrue(ensureBody.contains("forwarder !== previousForwarder"))
+        assertTrue(ensureBody.contains("bypassRetainedProjectionHold = requireFreshRegistration"))
+        assertTrue(ensureBody.contains("bootstrapFromControllerCanonical = pendingLocalAtRegistration"))
+        assertTrue(ensureBody.contains("deferCanonicalProjectionForPendingLocal = pendingLocalAtRegistration"))
+        assertTrue(recoveryBody.contains("requireFreshRegistration = true"))
+        assertTrue(recoveryBody.contains("projectionRecoveryReregisterStartedAtMs.remove(resolvedFilePath)"))
     }
 
     @Test

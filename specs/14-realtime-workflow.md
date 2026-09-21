@@ -1472,6 +1472,18 @@ Implementations must keep tests for these cases:
   synchronous reliable-sync callback cannot republish that edge into the running
   effect; an unchanged edge is single-flight, failure stays retryable, and a
   target that leaves then re-enters the set is eligible again;
+- a typed editor-replica re-registration receipt proves that a different,
+  controller-accepted endpoint replaced the cached endpoint. Returning the
+  cached endpoint is a failed attempt and re-arms the controller's remaining
+  bounded attempts. When exact operator splices are queued, recovery may install
+  a controller-canonical endpoint only while deferring its visible projection;
+  the serialized local worker then rebases those retained splices before the
+  editor-visible buffer can converge;
+- temporary editor-model authority loss does not revoke a controller-proven
+  live file-to-pane assignment. The pane-layout ownership Computed retains that
+  receipt across layout-shape and focus generations; the tmux structural effect
+  may reuse it only after observing a live pane and rejecting any newer foreign
+  process owner;
 - a retained component compact derives completion from only its pending-write,
   exact compact-continuation, and live-delivery frontiers. Aggregate document
   projection changes outside the target component (including queue, backlog,

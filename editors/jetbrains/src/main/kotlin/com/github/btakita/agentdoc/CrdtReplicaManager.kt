@@ -874,6 +874,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         editorText: String? = null,
         await: Boolean = false,
         forceRefresh: Boolean = false,
+        requireFreshRegistration: Boolean = false,
     ): Boolean {
         // TypingTracker reports the Lazily current-document projection after
         // each coalesced edit burst. Once this document already owns a live
@@ -920,16 +921,34 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     )
                     recordRegisterFailure(filePath, "native-ffi-unavailable")
                     return@attach false
-            }
+                }
                 chars = registrationText.length
+                val previousForwarder = forwarders[filePath]
+                val pendingLocalAtRegistration =
+                    requireFreshRegistration && hasPendingLocal(filePath)
                 val forwarder = forwarderFor(
                     filePath,
                     registrationText,
                     bypassRegisterBackoff = forceRefresh,
                     replaceCached = forceRefresh,
                     expectedEditorTextAtSwap = if (forceRefresh) registrationText else null,
+                    // A typed missing-membership repair is already bounded by the
+                    // controller. It must attempt a real registration even when a
+                    // prior three-generation hold armed the ordinary retry gate.
+                    bypassRetainedProjectionHold = requireFreshRegistration,
+                    // If operator splices are queued, install an exact canonical
+                    // endpoint without projecting it over the editor. The serialized
+                    // local worker retains the shadow-relative splice batch and rebases
+                    // it onto this endpoint next; no whole-buffer adoption occurs.
+                    allowPendingLocalAtSwap = pendingLocalAtRegistration,
+                    bootstrapFromControllerCanonical = pendingLocalAtRegistration,
+                    deferCanonicalProjectionForPendingLocal = pendingLocalAtRegistration,
                 )
-                (forwarder != null).also { attached ->
+                val attached =
+                    forwarder != null &&
+                        forwarder.attached &&
+                        (!requireFreshRegistration || forwarder !== previousForwarder)
+                attached.also {
                     if (attached) {
                         // Queue retained semantic replay behind this registration task.
                         // In await mode the caller can therefore observe registration
@@ -2676,6 +2695,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         bootstrapFromControllerCanonical: Boolean = false,
         expectedCanonicalTextAtSwap: String? = null,
         deferCanonicalProjectionForPendingLocal: Boolean = false,
+        bypassRetainedProjectionHold: Boolean = false,
     ): CrdtReplicaForwarder? {
         val cached = forwarders[filePath]
         // A three-generation reconciliation hold is a real registration
@@ -2686,6 +2706,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val retainedProjectionRetryDue =
             !retainedProjectionHeld || shouldAttemptRegister(filePath)
         if (
+            !bypassRetainedProjectionHold &&
             !retainedProjectionHoldAllowsRefreshUtil(
                 retainedProjectionHeld,
                 retainedProjectionRetryDue,
@@ -3730,8 +3751,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 document,
                 await = true,
                 forceRefresh = true,
+                requireFreshRegistration = true,
             )
             if (!attached) {
+                // The controller owns a bounded retry loop. A failed attempt must
+                // release the editor-side cooldown so the next controller attempt
+                // can perform work instead of receiving a coalesced false negative.
+                manager.projectionRecoveryReregisterStartedAtMs.remove(resolvedFilePath)
                 manager.log.warn(
                     "[crdt-replica] projection-recovery re-register failed for $fileName reason=$reason receipt=not_attached",
                 )

@@ -5400,13 +5400,9 @@ mod retained_closeout_reap {
     /// in the chain: given `reap_done_in_same_write == true` for the retained
     /// case, the item is ARCHIVED rather than left as `[x]` with its move owed.
     ///
-    /// Not covered here, and still open: driving an actually-retained write
-    /// end to end. `seed_durable_open_zero_live_replica` fails earlier, in
-    /// `prevalidate_tracked_work_response` ("missing_replica recovery exhausted
-    /// and disk read authority is refused"), so it never reaches this code at
-    /// all. The existing `#fzmutloss` coverage is predicate-level for the same
-    /// reason. Reaching it needs a seam that lets the document resolve while the
-    /// write still returns a `RETAINED_FOR_RETRY_MARKER` error.
+    /// The remaining top link is covered in `finalize_integration` by the
+    /// post-resolution retained-write seam. This unit test stays focused on the
+    /// mutation function so a failure identifies which half of the chain broke.
     #[test]
     fn the_retained_case_flag_archives_the_item_instead_of_marking_it() {
         let tmp = tempfile::TempDir::new().unwrap();

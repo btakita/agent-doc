@@ -2,6 +2,20 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.402
+
+- **Selected-document focus recovers a controller that accepts but no longer
+  serves.** Passive layout observation remains non-launching, while the explicit
+  focus handoff uses the shared controller recovery policy and retries its exact
+  ordered fact once. The native boundary now requires a status receipt rather
+  than treating a successful socket connect as service readiness; verified
+  same-project stale processes are reaped before ordinary launch/adoption.
+- **Retained closeout reap coverage reaches the real write outcome
+  (`#reapretainedcoverage`).** A debug-only post-resolution seam makes the stream
+  write return the production retained marker after durable capture. The CLI
+  integration test proves that this actual error branch archives `--done` in the
+  same closeout and leaves neither an open nor `[x]` row.
+
 ## 0.35.401
 
 - **A selection effect uses the document's bound pane; a live probe may only

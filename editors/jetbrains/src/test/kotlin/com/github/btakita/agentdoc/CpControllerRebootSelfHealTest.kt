@@ -169,24 +169,36 @@ class CpControllerRebootSelfHealTest {
 
     /**
      * `editors/SPEC.md`: the passive editor-surface lane sends "over the
-     * existing-controller socket; it never launches the controller". A tab click
-     * must stay free, so the self-heal is confined to lanes a human asked for.
-     * Putting the retry in the shared send helper — the first thing I did — would
-     * have made every tab click able to start a controller.
+     * existing-controller socket; it never launches the controller". Background
+     * layout sampling must stay free, so the self-heal is confined to the explicit
+     * selected-document focus handoff and other operator lanes.
      */
     @Test
     fun `the passive observation lane never launches a controller`() {
         val client = source("CpRouteClient.kt")
 
         val passiveLane = client.substringAfter("fun observeEditorSurface(")
-            .substringBefore("fun observeDocumentPathTransition(")
+            .substringBefore("fun observeEditorFocus(")
         assertFalse(
             "the passive surface-observation lane must not use the launching send path",
             passiveLane.contains("sendOperatorRequestDataToSocket("),
         )
         assertTrue(
-            "the passive lane keeps the plain, non-launching send path",
-            passiveLane.contains("sendRequestDataToSocket("),
+            "the passive lane keeps self-healing disabled",
+            passiveLane.contains("selfHeal = true").not(),
+        )
+    }
+
+    /** A document switch owns the visible pane, so it must recover its destination controller. */
+    @Test
+    fun `the selected document focus handoff uses controller self heal`() {
+        val client = source("CpRouteClient.kt")
+
+        val focusLane = client.substringAfter("fun observeEditorFocus(")
+            .substringBefore("private fun observeEditorSurfaceWithClient(")
+        assertTrue(
+            "focus handoff must opt into the shared controller recovery lane",
+            focusLane.contains("selfHeal = true"),
         )
     }
 }

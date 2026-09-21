@@ -76,7 +76,7 @@ impl LatestProjectionWorkerState {
 /// resolvable configured session or no window named `agent-doc`. At that point
 /// the co-visibility guard was skipped entirely and focus was mirrored onto
 /// whatever pane the file→pane record named, stash window included. Reported
-/// 2026-09-20: navigating the editor to `monsterrodholders.md` pulled tmux over
+/// 2026-09-20: navigating the editor to `sample-session.md` pulled tmux over
 /// to the `stash` window.
 ///
 /// The stash window is agent-doc's own parking area, so "this pane is stashed"

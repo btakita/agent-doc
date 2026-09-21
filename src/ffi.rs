@@ -3044,7 +3044,7 @@ pub unsafe extern "C" fn agent_doc_editor_surface_forget(project_root: *const c_
     )))
 }
 
-/// Ensure a project controller is listening, launching one if it is not.
+/// Ensure a project controller is serving requests, recovering it if it is not.
 ///
 /// `#rebootselfheal`. Editor plugins connect to `.agent-doc/controller.sock`
 /// directly, and after a host reboot that connect fails in two ways that both
@@ -3062,8 +3062,8 @@ pub unsafe extern "C" fn agent_doc_editor_surface_forget(project_root: *const c_
 /// Shared-Foundation rule, plugins must not carry their own socket recovery
 /// logic.
 ///
-/// Returns `1` when a controller is listening on return (already running or
-/// freshly launched), `0` when the launch was attempted but did not come up,
+/// Returns `1` when a controller is serving on return (already running or
+/// freshly launched), `0` when recovery was attempted but did not come up,
 /// and `-1` on a bad argument.
 ///
 /// # Safety
@@ -3075,7 +3075,7 @@ pub unsafe extern "C" fn agent_doc_ensure_controller_running(project_root: *cons
         return -1;
     };
     let project_root = Path::new(&project_root);
-    match agent_doc_controller_io::project_controller::ensure_controller_running(
+    match agent_doc_controller_io::project_controller::ensure_serving_controller(
         project_root,
         agent_doc_controller::status::LaunchMode::Lazy,
     ) {

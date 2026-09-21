@@ -10979,6 +10979,41 @@ pub fn ensure_controller_running(project_root: &Path, launch_mode: LaunchMode) -
     Ok(())
 }
 
+/// Ensure that an editor-facing controller is serving requests, not merely
+/// accepting socket connections.
+///
+/// This stronger transition is reserved for an editor transport that already
+/// observed a missing listener or an unacknowledged request. Ordinary internal
+/// callers keep [`ensure_controller_running`]'s cheaper connect/adopt contract.
+pub fn ensure_serving_controller(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
+    // A successful connect proves only that the kernel accepted a socket. Focus
+    // handoff reaches this boundary specifically after a request was not served,
+    // so require the controller's status receipt before adopting it. `status`
+    // falls back to process-backed inactive facts; only those verified
+    // same-project PIDs are reaped before the ordinary launch/adopt transition.
+    // This keeps ambiguous foreign sockets fail-closed while allowing an
+    // accepting-but-wedged controller to recover without operator intervention.
+    // Do not call the public `status` projection here. Its inactive fallback
+    // reads durable control-plane counts, and SQLite access is forbidden inside
+    // a reloadable editor host. A direct status receipt is sufficient proof of
+    // service; on failure, process discovery supplies the only reap authority.
+    if request(project_root, "status")
+        .ok()
+        .and_then(|response| serde_json::from_str::<ControllerStatus>(&response).ok())
+        .is_some_and(|status| status.active)
+    {
+        let stream = connect(project_root)?;
+        drop(stream);
+        return Ok(());
+    }
+    for pid in discover_stale_duplicate_pids(project_root, None) {
+        reap_verified_controller_pid(project_root, pid, 0);
+    }
+    let stream = connect_or_launch(project_root, launch_mode)?;
+    drop(stream);
+    Ok(())
+}
+
 /// Wait for the controller socket to become connectable after a handoff drop.
 ///
 /// Unlike [`ensure_controller_running`], this never launches or adopts a
@@ -22263,13 +22298,13 @@ mod pane_layout_projection_dispatch_tests {
                 agent_doc_controller::pane_layout::LatestProjectionWorkerState::default(),
             );
             assert!(state.lock().schedule(7));
-            let file_panes = vec![("/tasks/monsterrodholders.md".to_string(), "%21".to_string())];
+            let file_panes = vec![("/tasks/sample-session.md".to_string(), "%21".to_string())];
             let mut selected = None;
 
             let receipt = apply_pane_layout_focus_effect(
                 &state,
                 7,
-                Some("/tasks/monsterrodholders.md"),
+                Some("/tasks/sample-session.md"),
                 false,
                 &file_panes,
                 PaneLayoutFocusCoVisibility {
@@ -22294,7 +22329,7 @@ mod pane_layout_projection_dispatch_tests {
             assert_eq!(
                 receipt.reason,
                 format!(
-                    "focus_pane_stashed:/tasks/monsterrodholders.md:%21:live_window_name={window_name}"
+                    "focus_pane_stashed:/tasks/sample-session.md:%21:live_window_name={window_name}"
                 )
             );
         }
@@ -22310,13 +22345,13 @@ mod pane_layout_projection_dispatch_tests {
                 agent_doc_controller::pane_layout::LatestProjectionWorkerState::default(),
             );
             assert!(state.lock().schedule(7));
-            let file_panes = vec![("/tasks/monsterrodholders.md".to_string(), "%21".to_string())];
+            let file_panes = vec![("/tasks/sample-session.md".to_string(), "%21".to_string())];
             let mut selected = None;
 
             let receipt = apply_pane_layout_focus_effect(
                 &state,
                 7,
-                Some("/tasks/monsterrodholders.md"),
+                Some("/tasks/sample-session.md"),
                 false,
                 &file_panes,
                 PaneLayoutFocusCoVisibility {
@@ -32772,7 +32807,7 @@ mod tests {
         // (`live_editors=1`), so closeout waits forever on a delivery ack that
         // cannot arrive and every resolve answers `authority=editor_buffer`
         // from the ghost's stale canonical instead of the operator's disk text.
-        // Measured 2026-09-20 on `tasks/monsterrodholders.md` with zero IDE
+        // Measured 2026-09-20 on a route-owned session with zero IDE
         // processes alive on the machine.
         let _env = reliable_sync_env_lock();
         let dir = tempfile::TempDir::new().unwrap();

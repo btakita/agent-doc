@@ -2312,7 +2312,7 @@ pub struct ReapedEditorReplica {
 /// members through [`dead_editor_replica_ids`]. A crashed or closed editor that
 /// never comes back therefore leaves a ghost member live forever.
 ///
-/// Measured 2026-09-20 on `src/boost-client/tasks/monsterrodholders.md`: no
+/// Measured 2026-09-20 on `src/sample-app/tasks/sample-session.md`: no
 /// JetBrains or `java` process existed anywhere on the box, yet the live
 /// controller still logged `live_editors=1 authority=multi_replica` for that
 /// document on every resolve. Two operator-visible symptoms follow from the one
@@ -4229,7 +4229,7 @@ pub fn await_delivery_convergence_for_file(
             // `crdt_replica_barrier_released_without_progress` had never once
             // fired across 11.9 MB of ops history while a silent editor held
             // closeout until the operator restarted the IDE. Measured 2026-09-20
-            // on `src/boost-client/tasks/monsterrodholders.md`: ZERO replica
+            // on `src/sample-app/tasks/sample-session.md`: ZERO replica
             // pulls between 19:41:00Z and 19:47:28Z, `delivery_version` frozen at
             // 60 from 19:41:46Z to 19:44:45Z, cleared only by the IDE restart at
             // 19:44:32Z.
@@ -5820,7 +5820,7 @@ mod tests {
     #[test]
     fn editor_exit_reaps_the_ghost_member_without_waiting_for_a_replacement() {
         // `#ghostrelaymember`. The incident shape (2026-09-20,
-        // `src/boost-client/tasks/monsterrodholders.md`): the IDE is gone — no
+        // `src/sample-app/tasks/sample-session.md`): the IDE is gone — no
         // JetBrains or `java` process anywhere — yet the controller still
         // resolved `live_editors=1 authority=multi_replica` on every read,
         // because a hub member is only retired on a graceful deregister or on

@@ -1340,6 +1340,21 @@ pub(crate) fn run_stream(
         flags.mutation_plan_json.as_deref(),
     )?;
 
+    // `#reapretainedcoverage`: integration tests need the real top-level
+    // retained-write branch without manufacturing an unavailable editor (which
+    // fails during authority prevalidation, before this point). This seam sits
+    // after authoritative document resolution and durable response capture but
+    // before visible application, exactly where a convergence timeout retains
+    // the intent. It is unavailable in optimized production builds.
+    if cfg!(debug_assertions)
+        && std::env::var_os("AGENT_DOC_TEST_RETAIN_STREAM_WRITE_AFTER_RESOLVE").is_some()
+    {
+        anyhow::bail!(
+            "test retained stream write after document resolution; {}",
+            agent_doc_document_realtime_io::RETAINED_FOR_RETRY_MARKER,
+        );
+    }
+
     if try_add_response_cell_via_realtime_backbone(
         file,
         &patches,

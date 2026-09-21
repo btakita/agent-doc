@@ -545,6 +545,55 @@ fn finalize_editor_absent_skips_ipc_and_applies_done_directly() {
     );
 }
 
+/// `#reapretainedcoverage`: exercise the complete retained-write branch.
+///
+/// The hook fires only after the stream path resolved authoritative document
+/// content and durably captured the response. The command must return the real
+/// retained marker while its same closeout archives `--done`; leaving `[x]`
+/// would recreate the next-cycle interrupted/repair-clean contradiction.
+#[test]
+fn retained_stream_write_archives_done_in_the_same_closeout() {
+    let (tmp, doc) = setup_session_stream_doc();
+    insert_pending_item(&doc, "- [ ] [#rrta] Archive this retained closeout item\n");
+    init_git_repo(tmp.path(), &doc);
+    checkpoint_baseline(tmp.path(), &fs::read_to_string(&doc).unwrap());
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .env("AGENT_DOC_TEST_RETAIN_STREAM_WRITE_AFTER_RESOLVE", "1")
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--stream",
+            "--force-disk",
+            "--done",
+            "rrta",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: #rrta retained closeout — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            agent_doc_document_realtime_io::RETAINED_FOR_RETRY_MARKER,
+        ));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !content.contains("- [ ] [#rrta]") && !content.contains("- [x] [#rrta]"),
+        "the retained closeout must not leave an open or completed-unreaped item:\n{content}",
+    );
+    assert!(
+        content.contains("<!-- agent:done -->")
+            && content.contains("[#rrta] Archive this retained closeout item"),
+        "the retained closeout must archive its completed item in the same mutation:\n{content}",
+    );
+    assert!(
+        !content.contains("### Re: #rrta retained closeout"),
+        "the seam must retain the response before visible application:\n{content}",
+    );
+}
+
 #[test]
 fn attached_model_missing_does_not_merge_from_stale_recovery_projection() {
     let tmp = TempDir::new().unwrap();

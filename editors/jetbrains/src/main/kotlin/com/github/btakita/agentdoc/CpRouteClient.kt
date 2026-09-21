@@ -192,8 +192,9 @@ internal object CpRouteClient {
     /**
      * Publish the selected-document source to that document's own controller.
      *
-     * This is a retained editor-surface observation, not a command submission. The controller's
-     * Lazily graph derives the selection Effect and returns its exact receipt.
+     * Selection is a retained Source, but switching documents is also an explicit focus handoff:
+     * its Effect must ensure the destination controller can serve the observation. The shared
+     * native policy owns recovery; this thin client only selects the self-healing transport lane.
      */
     fun observeEditorFocus(
         projectRoot: String,
@@ -207,6 +208,7 @@ internal object CpRouteClient {
             sequence = editorFocusSequence.incrementAndGet(),
             logLabel = "focus-projection",
             timeoutMs = EDITOR_FOCUS_OBSERVE_TIMEOUT_MS,
+            selfHeal = true,
         )
 
     private fun observeEditorSurfaceWithClient(
@@ -217,6 +219,7 @@ internal object CpRouteClient {
         sequence: Long,
         logLabel: String,
         timeoutMs: Long = SOCKET_REQUEST_TIMEOUT_MS,
+        selfHeal: Boolean = false,
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
         val request =
@@ -227,7 +230,16 @@ internal object CpRouteClient {
                 sequence = sequence,
             )
         return try {
-            val receipt = sendRequestDataToSocketWithTimeout(socket, request, timeoutMs)
+            val receipt = if (selfHeal) {
+                sendOperatorRequestDataToSocket(
+                    socket,
+                    request,
+                    timeoutMs = timeoutMs,
+                    selfHealOnTimeout = true,
+                )
+            } else {
+                sendRequestDataToSocketWithTimeout(socket, request, timeoutMs)
+            }
             CpEditorRouteResult(
                 exitCode = 0,
                 output = receipt.toString(),

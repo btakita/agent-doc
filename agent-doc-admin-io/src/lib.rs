@@ -283,9 +283,9 @@ pub fn inspect(
 ///
 /// `#qpausepathdouble`: the controller resolves a relative `file` against the
 /// PROJECT ROOT, while an operator types the path relative to their shell's
-/// CWD. Running `agent-doc admin queue pause src/boost-client/tasks/x.md` from
+/// CWD. Running `agent-doc admin queue pause src/sample-app/tasks/x.md` from
 /// the superproject therefore wrote a control row scoped to
-/// `<root>/src/boost-client/src/boost-client/tasks/x.md` — a document that does
+/// `<root>/src/sample-app/src/sample-app/tasks/x.md` — a document that does
 /// not exist. The command reported `queue_paused accepted`, the real document's
 /// control state never changed, and the operator had no way to see the
 /// difference except by reading the receipt path character by character.
@@ -530,8 +530,8 @@ mod tests {
     /// `#qpausepathdouble`: an operator types a document path relative to their
     /// shell, but the controller resolves a relative `file` against the PROJECT
     /// ROOT. Anchoring here is what keeps
-    /// `agent-doc admin queue pause src/boost-client/tasks/x.md` from writing a
-    /// control row for `<root>/src/boost-client/src/boost-client/tasks/x.md`
+    /// `agent-doc admin queue pause src/sample-app/tasks/x.md` from writing a
+    /// control row for `<root>/src/sample-app/src/sample-app/tasks/x.md`
     /// while reporting `queue_paused accepted`.
     ///
     /// A unit test runs with the crate directory as CWD, so `Cargo.toml` is a

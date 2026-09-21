@@ -876,6 +876,38 @@ Two things I did not do. I did not fix only the test that happened to fail: the 
 **The item I owed, now filed.** `#reappersistloop` covers the closeout interruption I have been describing in prose for five consecutive cycles. It is structural, and it is worse than cosmetic: `session-check` calls it an INTERRUPT, `repair` calls the same document clean, and `commit` refuses while `repair` warns that running `commit` would commit unreviewed drift as metadata. Nothing is lost — a later preflight does land the reap — but a false interruption every cycle is, per the auto-loop skip list, a valid reason to stop draining. It is queued ahead of `#runsubmitautoproof` because it affects every closeout.
 
 Exchange is at 816 lines across 32 sections, accretion now `block`; noting it rather than stalling the queue.
+
+### Re: do [#runsubmitautoproof] — opus-5 · 2026-09-20T20:28-04:00
+
+> **Queue prompt:**
+>
+> do [#runsubmitautoproof]
+
+
+Done. `#runsubmitfirstmatch` now carries a typed verify predicate, so the gate no longer depends on a human watching a pane:
+
+```
+verify=ops_log:controller_editor_route_settled
+disproof=ops_log:startup_miss
+```
+
+**No code was needed** — the `#optverify` machinery already existed, so this was a wiring task. What it required was picking two markers that mean what they claim, and three things needed checking rather than assuming.
+
+**The marker had to be non-self-provable.** Predicates match plain substrings against `ops.log`, and `#gng8` strips double-quoted spans so embedded document prose cannot prove a gate from its own description. Since this response and the review item both *mention* the marker, that mattered: 36 occurrences, all structured `] controller_editor_route_settled ` emissions, **zero** as prose. The gate cannot prove itself.
+
+**The obvious disproof was wrong.** `resubmit_required=true` looks like the failure signal and occurs twice, but post-fix it means the detector *caught* a stranded composer and recovered — the fix working, not failing. The original bug was a **false** `outcome=cleared`, which by construction leaves no honest log signature. So the disproof has to be a real miss: `startup_miss`, a routed dispatch that never became a turn, currently zero.
+
+**The timestamp format could have made the whole thing inert.** `scan_ops_log` filters on epoch seconds while this log is ISO-8601; an epoch-only parser would skip every line and leave the predicate `Pending` forever while looking correctly configured. `parse_log_timestamp` accepts both.
+
+Verified through the real function rather than a reimplementation of its rules: `scan_ops_log` returns `Provable { marker: "controller_editor_route_settled", at: 1789592470 }` against the live log. With `set_at` stamped now, it re-proves on the next Run Agent Doc dispatch.
+
+**A correction to my own filed item.** It said to wire this via `--backlog-set-gate-type`. That flag sets a gate *type* and rejects the predicate outright (`invalid gate type: must be alphanumeric/dash/underscore`); the correct flag is `--backlog-set-verify`. I had misread two adjacent flag descriptions as one when filing. The first attempt was rejected before anything was written, so nothing partial landed.
+
+**One thing I deliberately did not do.** Auto-*resolution* additionally needs `agent_doc_gate_autoverify: true`. There is no write flag or subcommand for frontmatter, so the only routes are hand-editing frontmatter or `.agent-doc/config.toml` — and the latter is project-wide, affecting every document and every concurrent session. Silently flipping human review gates across a shared project is your call, not mine. Without it the binary still reports the gate as `provable`, which is what removes the human-watcher requirement; enabling it removes the last manual step.
+
+**On the `queue_stall_detected` warning.** It is accurate and it is about me. I have been re-entering the drain with scheduled wakeups, which the binary scores as neither a continuation nor a valid stop. The reason is a real defect, now filed as `#loopreentrynoop`: the Stop hook prescribes invoking the `loop` skill, but once `/loop` is loaded, re-invoking it returns "already loaded; instructions unchanged" and seals no contract, because a Skill call is not a submitted prompt. Four consecutive occurrences. With shelling `agent-doc <FILE>` forbidden by the hook and `agent-doc preflight` forbidden by `#preflightinbinary`, a scheduled re-submission was the only mechanism left that yields a sealed contract. Appended rather than prepended so it does not preempt `#reappersistloop`.
+
+No code changed this cycle, so no suite run applies. Exchange is at `block` accretion; noting it rather than stalling the queue.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -885,27 +917,21 @@ Exchange is at 816 lines across 32 sections, accretion now `block`; noting it ra
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#jbversionbumpperbuild]~~
-- ~~do [#pluginbyteidentity]~~
-- ~~do [#missingreplicanoise]~~
-- ~~do [#preflightrefusalcontradiction]~~
-- ~~do [#commitsilentfirstrun]~~
-- do [#runsubmitautoproof]
-- ~~#actionable-review~~
+- ~~do [#runsubmitautoproof]~~
+- do [#reappersistloop]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority queue -->
+- [ ] [#loopreentrynoop] [P1] The Claude Code queue-continuation path the Stop hook prescribes does not work, which is what produces the queue_stall_detected warning on this document. The hook says "Invoke the loop skill now with args agent-doc <FILE>", but once /loop has been loaded earlier in the session the Skill tool returns "Skill /loop is already loaded above; instructions unchanged" and seals NO cycle contract, because a Skill invocation is not a submitted prompt and therefore never fires the UserPromptSubmit hook that runs binary preflight. Observed four consecutive times this session. The agent is then left with no legal way to continue in-turn: shelling agent-doc <FILE> from the owner pane is explicitly forbidden by the same hook, and shelling agent-doc preflight is forbidden by #preflightinbinary. The only mechanism that actually re-enters with a sealed contract is a scheduled wakeup that re-submits /loop agent-doc <FILE> as a real prompt, and the binary scores that as neither a continuation nor a valid stop (reason=no_valid_stop_with_continuation_required). Either the Stop hook must name a mechanism that can seal a contract from inside a turn, or an already-loaded /loop re-invocation must re-submit the prompt rather than no-op, or the stall detector must recognise a scheduled re-entry as a continuation.
 - [ ] [#reappersistloop] [P1] Every cycle ends with its completed items marked [x] in agent:backlog but never moved to the done archive, and the three commands disagree about it. session-check says "INTERRUPTED: document still contains completed tracked item(s) after closeout ... Re-run preflight/repair so the reap is persisted through the snapshot + commit boundary"; agent-doc repair --apply-recovery answers "is clean — no recovery needed" on the same document; and agent-doc commit refuses, with repair separately warning that running commit here would "commit unreviewed content drift as metadata". Observed on EVERY closeout this session (at least 5 consecutive: pluginbyteidentity, missingreplicanoise, jbversionbumpperbuild, preflightrefusalcontradiction, commitsilentfirstrun), so it is structural, not incidental. The reap does eventually land via a later preflight, so nothing is lost, but every cycle reports a false interruption that per the auto-loop skip list is a valid reason to stop the drain. Fix: either make the reap cross the snapshot+commit boundary in the same closeout, or stop classifying a pending archive move as an INTERRUPT. Whichever, the three commands must agree.
-- [x] 🚧 [#preflightrefusalcontradiction] [P1] The preflight admission refusal emits two contradictory halves in one message and the operator cannot tell which to act on. Captured 2026-09-20T20:54Z on this document: it reported recovery=await_editor_replica_no_disk_write with "the same intent resumes when the controller derives settlement", and in the same breath "NO cycle is open and NO response capture is retained, so nothing owns this write and no state edge will fire, the visible edits are STRANDED not deferred, and waiting will not commit them". One half says wait, the other says waiting can never work. Dogfood watch already classified it: issue_class=projection_failure issue_key=1fa46fd1ad84a564d13d16b971df69ad0692de3e32c0c68a4c4507d67d3f8430. Derive one verdict from the ownership facts and emit only that remedy.
-- [x] [#commitsilentfirstrun] [P2] agent-doc commit printed nothing at all on its first invocation and exited, then an immediately repeated identical invocation printed "[commit] repaired committed historical committed_capture drift into snapshot" followed by the real refusal. Captured 2026-09-20T20:55Z on this document while recovering from the preflight refusal above. A recovery command whose first run is silent reads as a hang or a no-op and invites the operator to escalate to force-disk, which is the one thing the same diagnostic forbids. Make the first run either print its repair and verdict, or exit non-zero with a reason.
-- [ ] [#runsubmitautoproof] [P2] Automate the started-turn proof that keeps #runsubmitfirstmatch gated on a human watcher. The claim to verify is that JetBrains Run Agent Doc submits the trigger rather than stranding it in the composer, fixed in 275ab868e. Dispatch-start proof is already recorded, since route diagnostics distinguish proof_scope=accepted_only from dispatch-start and the session log carries latest_start_pane plus committed_after_latest_run, so a predicate over those markers can resolve the gate without a person watching a pane. Wire it as a typed verify predicate via --backlog-set-gate-type verify=ops_log:<marker> so the gate auto-resolves.
+- [x] 🚧 [#runsubmitautoproof] [P2] Automate the started-turn proof that keeps #runsubmitfirstmatch gated on a human watcher. The claim to verify is that JetBrains Run Agent Doc submits the trigger rather than stranding it in the composer, fixed in 275ab868e. Dispatch-start proof is already recorded, since route diagnostics distinguish proof_scope=accepted_only from dispatch-start and the session log carries latest_start_pane plus committed_after_latest_run, so a predicate over those markers can resolve the gate without a person watching a pane. Wire it as a typed verify predicate via --backlog-set-gate-type verify=ops_log:<marker> so the gate auto-resolves.
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] [#runsubmitfirstmatch] [operator-verify] — confirm in a live pane that JetBrains "Run Agent Doc" now submits the trigger instead of stranding it in the composer. Fixed in 275ab868e: route_trigger_visible_in_current_draft scans newest-first, so repair_pass_through_stranded_draft no longer reports outcome=cleared over a composer that still holds the trigger. Reproduce the old shape by running Run Agent Doc twice on the same document without clearing, so a consumed copy of the identical trigger sits within 16 non-empty lines above the new draft. NEXT: a human watches one Run Agent Doc dispatch land as a started turn; then resolve.
+- [/] [#runsubmitfirstmatch] [operator-verify] — confirm in a live pane that JetBrains "Run Agent Doc" now submits the trigger instead of stranding it in the composer. Fixed in 275ab868e: route_trigger_visible_in_current_draft scans newest-first, so repair_pass_through_stranded_draft no longer reports outcome=cleared over a composer that still holds the trigger. Reproduce the old shape by running Run Agent Doc twice on the same document without clearing, so a consumed copy of the identical trigger sits within 16 non-empty lines above the new draft. NEXT: a human watches one Run Agent Doc dispatch land as a started turn; then resolve. <!-- gate-verify verify="controller_editor_route_settled" disproof="startup_miss" set_at="1789950239" -->
 - [/] [#cargovodtrim] [operator-verify] [P2][security] Trim the credential exposure from the livestream VOD once the operator supplies the VOD URL or platform/start-time locator. Known exposed interval: 2026-09-12T02:57:27.170Z through approximately 02:58:14Z.
 - [/] [#pypiquotafix] [operator-auth] [P1] AUTHORIZED cleanup: after 0.35.383 thin wheel is live, sign into https://pypi.org/manage/project/agent-doc/releases/ in Chromium tab 0; then permanently delete the 34 oldest existing releases, 0.35.0 through 0.35.112 (all pre-2026-08-02), freeing about 1.75 GiB. Pinned PyPI installs of deleted versions will stop working. Browser is currently logged out; support request pypi/support#12214 remains open.
 - [/] [#tmuxfocussyncverify] [operator-verify] Restart IntelliJ to activate the staged JetBrains plugin, then keep agent-doc-bugs.md and the cross-root infra.md visible, click each embedded tmux pane, and verify editor selection follows without stealing focus from an actively focused editor component. PREMISE RE-MEASURED 2026-09-20T17:05-04:00 and the prior record was wrong on every identifier: live IDEA is PID 1023909 started 2026-09-20 15:44:32, not PID 1645748; the staged jar was written 2026-09-20 16:42:24, not 2026-09-18 16:39:05. Hard activation proof, stronger than any mtime or version comparison: /proc/1023909/map_files resolves agent-doc-jetbrains-0.2.388.jar as (deleted), so the running IDE executes a superseded inode while disk holds inode 76585058 under the SAME 0.2.388 version string. Still not activated. Automate via #pluginbyteidentity. Plan: tasks/agent-doc/plan-tmux-auto-sync-reactive.md.

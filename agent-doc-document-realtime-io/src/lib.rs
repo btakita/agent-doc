@@ -1126,6 +1126,33 @@ fn atomic_write_rebased_through_authority_body(
             } else {
                 await_serialized_atomic_write_projection(path, &relay_write.content_hash)?
             };
+            // An exact no-op has no new editor delivery to acknowledge. When the
+            // canonical model and disk already contain the target, requiring a
+            // fresh visible-delivery receipt manufactures an unowned retained
+            // write even though every durable plane is settled.
+            let exact_durable_noop = !relay_write.applied
+                && relay_write.delivery_converged
+                && matches!(
+                    &current,
+                    agent_doc_crdt_relay_io::CurrentText::Current { text, .. }
+                        if agent_doc_hash::content_hash(text) == relay_write.content_hash
+                            && canonical_disk_projection_is_exact(path, text)
+                );
+            if exact_durable_noop {
+                clear_deferred_document_write_intent(
+                    path,
+                    &relay_write.content_hash,
+                    "serialized_atomic_write_exact_durable_noop",
+                )?;
+                agent_doc_ops_log_io::log_op(
+                    path,
+                    &format!(
+                        "write_authority action=already_materialized transport=crdt_exact_durable_noop hash={} delivery_converged=true disk_rewritten=false post_proof_rebases={post_proof_rebases}",
+                        relay_write.content_hash,
+                    ),
+                );
+                return Ok(());
+            }
             // `#silentbarrierneverreleases`: `delivery_converged` is an
             // AVAILABILITY policy, not a receipt. It flips to true the moment a
             // non-converging replica is RELEASED from the barrier
@@ -10380,37 +10407,44 @@ mod tests {
     }
 
     #[test]
-    fn stale_delivery_worker_accepts_exact_saved_canonical_noop() {
+    fn serialized_atomic_write_accepts_exact_saved_canonical_noop_without_new_receipt() {
         let baseline = "# Session\n\nvesting question\n";
         let target = "# Session\n\nvesting question\n\nagent response\n";
         let (_dir, file, _canonical) = temp_doc(baseline);
         let identity = "test-stale-delivery-worker-exact-noop";
         seed_reliable_sync_open_without_registration(&file, identity);
-        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+        test_support_register_replica_for_file(&file, identity)
             .unwrap()
             .expect("editor replica should attach");
+        let initial = agent_doc_crdt_relay_io::apply_cp_write_for_file(
+            &file,
+            baseline,
+            target,
+            "exact_saved_canonical_noop_initial_write",
+        )
+        .unwrap()
+        .expect("initial target should enter canonical authority");
+        assert!(initial.applied);
         agent_doc_crdt_relay_io::with_hub(&file, |hub| {
-            hub.apply_local(client_id, 0, baseline.chars().count() as u32, target)
-                .unwrap();
+            for _ in 0..=agent_doc_document_realtime::crdt_relay::MAX_BARRIER_WAITS_WITHOUT_PROGRESS
+            {
+                hub.charge_barrier_wait_without_progress();
+            }
+            assert!(hub.delivery_converged());
         })
         .unwrap();
         std::fs::write(&file, target).expect("simulate the editor's exact native save");
 
-        let receipt = apply_canonical_replace_if_attached(
-            &file,
-            baseline,
-            target,
-            "stale_delivery_worker_exact_noop_test",
-        )
-        .expect("an exact saved canonical projection must settle as a no-op");
+        assert!(
+            !agent_doc_crdt_relay_io::visible_delivery_projected_for_file(&file)
+                .unwrap()
+                .unwrap_or(false),
+            "the already-saved target must not rely on a fresh delivery receipt",
+        );
+        atomic_write_through_authority(&file, target)
+            .expect("an exact saved canonical projection must settle as a no-op");
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
-        let receipt = receipt.expect("attached canonical authority should return a receipt");
-        assert!(!receipt.applied);
-        assert_eq!(receipt.update_bytes, 0);
-        assert_eq!(receipt.targets, 0);
-        assert!(receipt.delivery_converged);
-        assert_eq!(receipt.content_hash, agent_doc_hash::content_hash(target));
         assert!(pending_document_write(&file).is_none());
     }
 

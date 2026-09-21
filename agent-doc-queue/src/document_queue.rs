@@ -2640,6 +2640,93 @@ pub fn dedup_free_text_heads(
     if dropped { Some(deduped) } else { None }
 }
 
+/// Collapse a contiguous sequence of at least three newly-authored, single-line
+/// free-text prompts when each prompt is a strict textual extension of the
+/// previous one.
+///
+/// This is deliberately narrower than ordinary queue deduplication. It models
+/// the progressive editor snapshots that can become visible when an agent CP
+/// projection races with typing: `- investigate`, `- investigate the`, and
+/// `- investigate the timeout` are three versions of one editor line, not three
+/// queue items. Exact entries already present in `snapshot_entries` break a run,
+/// preserving committed operator intent. Callers must additionally have causal
+/// evidence of a raced non-operator projection before applying this repair. A
+/// two-item prefix pair remains untouched because it is plausible independent
+/// operator intent; three monotonic snapshots are the corruption signature.
+pub fn collapse_progressive_free_text_heads(
+    entries: &[QueueEntry],
+    snapshot_entries: &[QueueEntry],
+) -> Option<Vec<QueueEntry>> {
+    let snapshot_keys: std::collections::HashSet<String> = snapshot_entries
+        .iter()
+        .filter_map(progressive_free_text_key)
+        .collect();
+    let mut collapsed = Vec::with_capacity(entries.len());
+    let mut changed = false;
+    let mut index = 0usize;
+
+    while index < entries.len() {
+        let Some((prompt, mut text)) = progressive_free_text_prompt(&entries[index]) else {
+            collapsed.push(entries[index].clone());
+            index += 1;
+            continue;
+        };
+        if snapshot_keys.contains(&text) {
+            collapsed.push(entries[index].clone());
+            index += 1;
+            continue;
+        }
+
+        let mut survivor = index;
+        let mut next = index + 1;
+        while next < entries.len() {
+            let Some((next_prompt, next_text)) = progressive_free_text_prompt(&entries[next])
+            else {
+                break;
+            };
+            if snapshot_keys.contains(&next_text)
+                || next_prompt.indent != prompt.indent
+                || next_prompt.ordered_marker != prompt.ordered_marker
+                || next_text.len() <= text.len()
+                || !next_text.starts_with(&text)
+            {
+                break;
+            }
+            survivor = next;
+            text = next_text;
+            next += 1;
+        }
+
+        if survivor >= index + 2 {
+            changed = true;
+            collapsed.push(entries[survivor].clone());
+        } else {
+            collapsed.extend(entries[index..=survivor].iter().cloned());
+        }
+        index = survivor + 1;
+    }
+
+    changed.then_some(collapsed)
+}
+
+fn progressive_free_text_prompt(entry: &QueueEntry) -> Option<(&QueuePrompt, String)> {
+    let QueueEntry::Prompt(prompt) = entry else {
+        return None;
+    };
+    if prompt.multiline
+        || dedup_key_for_prompt(prompt).is_some()
+        || bare_id_reference_key(prompt).is_some()
+    {
+        return None;
+    }
+    let text = strip_priority_markers(&prompt.text).trim_end().to_string();
+    (!text.is_empty()).then_some((prompt, text))
+}
+
+fn progressive_free_text_key(entry: &QueueEntry) -> Option<String> {
+    progressive_free_text_prompt(entry).map(|(_, text)| text)
+}
+
 /// The visible lifecycle of a queue entry, projected onto the
 /// [`QueueItemLifecycle`] lattice the per-item state machine joins over
 /// (`#queuestatemachine2` / `#cgfx`). A `Prompt` is a `Live` head; a `Completed`
@@ -4320,6 +4407,53 @@ mod tests {
             dedup_free_text_heads(&entries, &entries).is_none(),
             "distinct free-text + do-dups → no free-text collapse"
         );
+    }
+
+    #[test]
+    fn progressive_free_text_heads_keep_only_the_complete_editor_snapshot() {
+        let entries = parse(concat!(
+            "- Does the API return\n",
+            "- Does the API return the generic\n",
+            "- Does the API return the generic forbidden message?\n",
+        ))
+        .unwrap();
+        let collapsed = collapse_progressive_free_text_heads(&entries, &[])
+            .expect("progressive editor snapshots should collapse");
+        assert_eq!(
+            render(&collapsed),
+            "- Does the API return the generic forbidden message?\n"
+        );
+    }
+
+    #[test]
+    fn progressive_free_text_heads_preserve_committed_prefix_items() {
+        let snapshot = parse("- investigate\n- investigate the timeout\n").unwrap();
+        assert!(
+            collapse_progressive_free_text_heads(&snapshot, &snapshot).is_none(),
+            "committed prefix-shaped items are intentional queue entries"
+        );
+    }
+
+    #[test]
+    fn progressive_free_text_heads_preserve_a_fresh_two_item_prefix_pair() {
+        let entries = parse("- investigate\n- investigate the timeout\n").unwrap();
+        assert!(
+            collapse_progressive_free_text_heads(&entries, &[]).is_none(),
+            "two fresh prefix-shaped prompts are not enough evidence of a projection retry chain"
+        );
+    }
+
+    #[test]
+    fn progressive_free_text_heads_do_not_cross_distinct_or_id_backed_items() {
+        let entries = parse(concat!(
+            "- investigate\n",
+            "- keep this separate\n",
+            "- investigate the timeout\n",
+            "- do [#investigate] investigate\n",
+            "- do [#investigate] investigate the timeout\n",
+        ))
+        .unwrap();
+        assert!(collapse_progressive_free_text_heads(&entries, &[]).is_none());
     }
 
     #[test]

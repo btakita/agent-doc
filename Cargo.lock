@@ -724,6 +724,7 @@ dependencies = [
  "agent-doc-op-capture-io",
  "agent-doc-ops-log-io",
  "agent-doc-project-root-io",
+ "agent-doc-queue",
  "agent-doc-queue-io",
  "agent-doc-reliable-sync-io",
  "agent-doc-session-actor-io",

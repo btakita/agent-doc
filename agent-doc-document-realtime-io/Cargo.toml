@@ -43,6 +43,7 @@ agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.406" 
 agent-doc-op-capture-io = { path = "../agent-doc-op-capture-io", version = "0.35.406" }
 agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.406" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.406" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.406" }
 agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.35.406" }
 agent-doc-session-actor-io = { path = "../agent-doc-session-actor-io", version = "0.35.406" }
 agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.406" }

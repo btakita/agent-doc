@@ -2760,6 +2760,12 @@ pub fn apply_canonical_replace_if_attached(
     let mut delivery_wait_elapsed = std::time::Duration::ZERO;
     let mut pending_target: Option<String> = None;
     let mut pending_write: Option<agent_doc_crdt_relay_io::CpRelayWrite> = None;
+    // A raced CP write can be visible in the relay even when the compare-and-swap
+    // reports that it lost to a concurrent editor delta. From that point on, the
+    // visible document is no longer a pure operator branch: remove progressive
+    // queue snapshots and, when available, reconstruct it from the durable
+    // editor-op epoch before rebasing the agent target again.
+    let mut agent_projection_may_be_visible = false;
     let mut projection_observation = ProjectionObservationState::default();
     let mut wait_state = CrdtConvergenceState::TypingQuiescence;
     // `#crdtprojectionprofile`: accumulate time per wait state so a single write reports
@@ -2987,11 +2993,17 @@ pub fn apply_canonical_replace_if_attached(
                             // already contains the response, accept it byte-for-byte.
                             // Re-applying the stale whole-document target here creates
                             // a fresh CRDT transition on every closeout retry.
+                            let relay_text = collapse_progressive_queue_projection(
+                                expected_current,
+                                &relay_text,
+                            )
+                            .unwrap_or(relay_text);
                             let editor_cut = editor_operator_cut_for_agent_rebase(
                                 file,
                                 expected_current,
                                 &relay_text,
                                 source,
+                                true,
                             );
                             let settled_target = rebase_agent_candidate_over_editor_cut(
                                 expected_current,
@@ -3042,6 +3054,7 @@ pub fn apply_canonical_replace_if_attached(
                             // against that cut, then issue one new CRDT delta.
                             pending_target = None;
                             pending_write = None;
+                            agent_projection_may_be_visible = true;
                             projection_observation.reset();
                             frontier_backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
                             wait_state = CrdtConvergenceState::OperatorAdvancedAfterApply;
@@ -3053,11 +3066,18 @@ pub fn apply_canonical_replace_if_attached(
                         {
                             content.to_string()
                         } else {
+                            let relay_text = if agent_projection_may_be_visible {
+                                collapse_progressive_queue_projection(expected_current, &relay_text)
+                                    .unwrap_or_else(|| relay_text.clone())
+                            } else {
+                                relay_text.clone()
+                            };
                             let editor_cut = editor_operator_cut_for_agent_rebase(
                                 file,
                                 expected_current,
                                 &relay_text,
                                 source,
+                                agent_projection_may_be_visible,
                             );
                             let merged = rebase_agent_candidate_over_editor_cut(
                         expected_current,
@@ -3297,6 +3317,7 @@ pub fn apply_canonical_replace_if_attached(
                                 if detail.contains("recovery=retry_crdt_merge")
                                     || detail.contains("editor_sync_pending")
                                 {
+                                    agent_projection_may_be_visible = true;
                                     wait_state = CrdtConvergenceState::CompareAndSwapRaced;
                                     agent_doc_ops_log_io::log_op(
                                         file,
@@ -3593,7 +3614,7 @@ fn recover_concatenated_document_generations(
         return Ok(Some(target.to_string()));
     }
     let editor_cut =
-        editor_operator_cut_for_agent_rebase(file, expected, editor_generation, source);
+        editor_operator_cut_for_agent_rebase(file, expected, editor_generation, source, false);
     let merged = rebase_agent_candidate_over_editor_cut(expected, target, &editor_cut)?;
     let canonical = canonicalize_and_validate_agent_rebase(&merged, target, file, source)?;
     Ok((canonical != content).then_some(canonical))
@@ -3774,6 +3795,35 @@ fn structurally_invalid_post_apply_editor_cut(
     agent_doc_element::element::structural_corruption_reason(observed_editor_cut)
 }
 
+/// Remove progressive snapshots of one newly-typed queue line from a document
+/// that is already known to contain a raced agent projection. The pure queue
+/// repair refuses to cross committed snapshot entries or structurally distinct
+/// heads; without the caller's causal race evidence this normalization is not
+/// applied at all.
+fn collapse_progressive_queue_projection(expected_base: &str, observed: &str) -> Option<String> {
+    let observed_components = agent_doc_element::element::parse(observed).ok()?;
+    let observed_queue = observed_components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    let snapshot_body = agent_doc_element::element::parse(expected_base)
+        .ok()?
+        .into_iter()
+        .find(|component| component.name == "queue")
+        .map(|component| component.content(expected_base))
+        .unwrap_or_default();
+    let observed_entries =
+        agent_doc_queue::document_queue::parse(observed_queue.content(observed)).ok()?;
+    let snapshot_entries = agent_doc_queue::document_queue::parse(snapshot_body).ok()?;
+    let collapsed = agent_doc_queue::document_queue::collapse_progressive_free_text_heads(
+        &observed_entries,
+        &snapshot_entries,
+    )?;
+    Some(observed_queue.replace_content(
+        observed,
+        &agent_doc_queue::document_queue::render(&collapsed),
+    ))
+}
+
 /// Resolve the operator-authored editor cut independently from agent projection
 /// bytes. A live IDE buffer normally wins as-is. If it is structurally poisoned
 /// by a prior non-operator CP projection (duplicate boundary/exchange), and the
@@ -3785,6 +3835,7 @@ fn editor_operator_cut_for_agent_rebase(
     expected_base: &str,
     observed_editor: &str,
     source: &str,
+    prefer_operator_ops: bool,
 ) -> String {
     let Ok(Some(ops)) = agent_doc_op_capture_io::editor_ops_for_base(file, expected_base) else {
         return observed_editor.to_string();
@@ -3792,7 +3843,9 @@ fn editor_operator_cut_for_agent_rebase(
     let Some(operator_cut) = agent_doc_merge::crdt::replay_editor_ops(expected_base, &ops) else {
         return observed_editor.to_string();
     };
-    if operator_cut == observed_editor || canonical_document_target_is_valid(observed_editor) {
+    if operator_cut == observed_editor
+        || (!prefer_operator_ops && canonical_document_target_is_valid(observed_editor))
+    {
         return observed_editor.to_string();
     }
     if !canonical_document_target_is_valid(&operator_cut) {
@@ -3801,11 +3854,16 @@ fn editor_operator_cut_for_agent_rebase(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "{source}_operator_cut_reconstructed file={} ops={} observed_hash={} operator_hash={} reason=invalid_non_operator_editor_projection recovery=replay_operator_ops_then_agent_intents",
+            "{source}_operator_cut_reconstructed file={} ops={} observed_hash={} operator_hash={} reason={} recovery=replay_operator_ops_then_agent_intents",
             file.display(),
             ops.len(),
             agent_doc_hash::content_hash(observed_editor),
             agent_doc_hash::content_hash(&operator_cut),
+            if prefer_operator_ops {
+                "post_agent_projection_race"
+            } else {
+                "invalid_non_operator_editor_projection"
+            },
         ),
     );
     operator_cut
@@ -4695,6 +4753,7 @@ pub fn deferred_document_write_reconnect_content(
                 &merge_base,
                 &merged,
                 "editor_reconnect",
+                false,
             );
         }
         let merged_hash = agent_doc_hash::content_hash(&merged);
@@ -8782,12 +8841,18 @@ mod tests {
             &orphan_comment_terminator
         ));
         let recovered =
-            editor_operator_cut_for_agent_rebase(&file, base, &poisoned, "test_reconnect");
+            editor_operator_cut_for_agent_rebase(&file, base, &poisoned, "test_reconnect", false);
         assert_eq!(recovered, operator_cut);
         assert!(recovered.contains("queue: stop"));
         assert_eq!(recovered.matches("agent:boundary:").count(), 1);
         assert_eq!(
-            editor_operator_cut_for_agent_rebase(&file, base, &unclosed_exchange, "test_reconnect"),
+            editor_operator_cut_for_agent_rebase(
+                &file,
+                base,
+                &unclosed_exchange,
+                "test_reconnect",
+                false,
+            ),
             operator_cut
         );
         assert_eq!(
@@ -8796,9 +8861,68 @@ mod tests {
                 base,
                 &orphan_comment_terminator,
                 "test_reconnect",
+                false,
             ),
             operator_cut
         );
+    }
+
+    #[test]
+    fn post_projection_race_replays_progressive_queue_typing_once() {
+        let base = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior\n\nDone.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, file, _) = temp_doc(base);
+        let full_prompt = "- Does the API return the generic forbidden message?\n";
+        let agent_target = base.replacen(
+            "<!-- agent:boundary:abc123 -->",
+            "### Re: current\n\nThe generic message is returned.\n<!-- agent:boundary:abc123 -->",
+            1,
+        );
+        let raced_projection = agent_target.replacen(
+            "<!-- /agent:queue -->",
+            concat!(
+                "- Does the API return \n",
+                "- Does the API return the generic \n",
+                "- Does the API return the generic forbidden message?\n",
+                "<!-- /agent:queue -->",
+            ),
+            1,
+        );
+        assert!(canonical_document_target_is_valid(&raced_projection));
+
+        let collapsed = collapse_progressive_queue_projection(base, &raced_projection)
+            .expect("the raced projection should expose a progressive queue chain");
+        let recovered = editor_operator_cut_for_agent_rebase(
+            &file,
+            base,
+            &collapsed,
+            "test_progressive_queue_race",
+            true,
+        );
+        assert_eq!(recovered.matches(full_prompt.trim_end()).count(), 1);
+        assert!(
+            !recovered
+                .lines()
+                .any(|line| line == "- Does the API return")
+        );
+
+        let merged = rebase_agent_candidate_over_editor_cut(base, &agent_target, &recovered)
+            .expect("agent response should rebase over the replayed operator cut");
+        assert_eq!(merged.matches(full_prompt.trim_end()).count(), 1);
+        assert!(!merged.lines().any(|line| line == "- Does the API return"));
+        assert!(
+            !merged
+                .lines()
+                .any(|line| line == "- Does the API return the generic")
+        );
+        assert!(merged.contains("The generic message is returned."));
     }
 
     #[test]

@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.406
+
+- **Editor-plugin release discovery now stays on stable GitHub releases and
+  reports rate limits as rate limits (GH #56).** The fallback paginated walk
+  skips prereleases and drafts, matching the `/releases/latest` fast path.
+  GitHub API requests authenticate with `GITHUB_TOKEN` or `GH_TOKEN` when
+  available, while exhausted unauthenticated limits now report the reset epoch
+  and the token-based remedy instead of looking like a connectivity failure.
+
 ## 0.35.405
 
 - **A fresh controller reconstructs its live CRDT model from the retained native

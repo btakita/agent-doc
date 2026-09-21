@@ -27,6 +27,8 @@
 //! - find_local_zip_prefers_signed: dist dir with both zips → signed path returned
 //! - find_local_vscode_vsix_requires_manifest_version: stale VSIX files are ignored and a missing current build fails closed
 //! - jetbrains_discovery_excludes_config_and_service_roots: only versioned IDE data roots are candidates
+//! - release_search_skips_prereleases_and_drafts: the fallback walk matches `/releases/latest` stable-release semantics
+//! - github_rate_limit_error_reports_reset_and_auth_guidance: exhausted API limits produce an actionable diagnostic
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -44,14 +46,75 @@ fn build_agent() -> ureq::Agent {
         .into()
 }
 
+fn github_token_from(mut get_var: impl FnMut(&str) -> Option<String>) -> Option<String> {
+    ["GITHUB_TOKEN", "GH_TOKEN"]
+        .into_iter()
+        .find_map(|name| get_var(name).filter(|token| !token.trim().is_empty()))
+}
+
+fn github_token() -> Option<String> {
+    github_token_from(|name| std::env::var(name).ok())
+}
+
+fn github_get_request(
+    agent: &ureq::Agent,
+    url: &str,
+    token: Option<&str>,
+) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
+    let request = agent
+        .get(url)
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "agent-doc");
+    if let Some(token) = token {
+        request.header("Authorization", &format!("Bearer {token}"))
+    } else {
+        request
+    }
+}
+
+fn ensure_github_api_success<T>(response: &ureq::http::Response<T>, context: &str) -> Result<()> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(());
+    }
+
+    if status.as_u16() == 403
+        && response
+            .headers()
+            .get("x-ratelimit-remaining")
+            .and_then(|value| value.to_str().ok())
+            == Some("0")
+    {
+        let reset = response
+            .headers()
+            .get("x-ratelimit-reset")
+            .and_then(|value| value.to_str().ok())
+            .map(|value| format!("; resets at Unix timestamp {value}"))
+            .unwrap_or_default();
+        bail!(
+            "GitHub API rate limit exhausted{reset}; set GITHUB_TOKEN or GH_TOKEN to authenticate"
+        );
+    }
+
+    bail!("{context}: GitHub returned HTTP {status}")
+}
+
+fn fetch_github(url: &str, context: &str) -> Result<ureq::http::Response<ureq::Body>> {
+    let agent = build_agent();
+    let token = github_token();
+    let response = github_get_request(&agent, url, token.as_deref())
+        .config()
+        .http_status_as_error(false)
+        .build()
+        .call()
+        .with_context(|| context.to_string())?;
+    ensure_github_api_success(&response, context)?;
+    Ok(response)
+}
+
 fn fetch_latest_release() -> Result<Value> {
     let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
-    let resp = build_agent()
-        .get(&url)
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "agent-doc")
-        .call()
-        .context("Failed to fetch latest release from GitHub")?;
+    let resp = fetch_github(&url, "Failed to fetch latest release from GitHub")?;
     let body: Value = resp
         .into_body()
         .read_json()
@@ -83,12 +146,10 @@ fn releases_page_url(page: usize) -> String {
 }
 
 fn fetch_releases_page(page: usize) -> Result<Vec<Value>> {
-    let resp = build_agent()
-        .get(&releases_page_url(page))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "agent-doc")
-        .call()
-        .context("Failed to fetch releases from GitHub")?;
+    let resp = fetch_github(
+        &releases_page_url(page),
+        "Failed to fetch releases from GitHub",
+    )?;
     let body: Vec<Value> = resp
         .into_body()
         .read_json()
@@ -115,7 +176,7 @@ fn find_release_with_asset(
         let is_final_page = releases.len() < RELEASES_PER_PAGE;
         scanned += releases.len();
         for release in releases {
-            if has_asset(&release, prefix, ext) {
+            if is_stable_release(&release) && has_asset(&release, prefix, ext) {
                 return Ok(release);
             }
         }
@@ -124,6 +185,11 @@ fn find_release_with_asset(
         }
     }
     bail!("No {prefix}*.{ext} asset found in the {scanned} most recent GitHub releases")
+}
+
+fn is_stable_release(release: &Value) -> bool {
+    !release["prerelease"].as_bool().unwrap_or(false)
+        && !release["draft"].as_bool().unwrap_or(false)
 }
 
 fn find_asset<'a>(release: &'a Value, prefix: &str, ext: &str) -> Result<(&'a str, &'a str)> {
@@ -779,9 +845,10 @@ pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Resu
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::{
-        RELEASES_PER_PAGE, RELEASE_SEARCH_MAX_PAGES, choose_plugins_dir_with_interactivity,
-        existing_jetbrains_agent_doc_dirs, find_asset, find_best_local_zip, find_local_vscode_vsix,
-        find_local_zip, find_release_with_asset, has_asset, installed_jetbrains_plugin_version,
+        RELEASE_SEARCH_MAX_PAGES, RELEASES_PER_PAGE, choose_plugins_dir_with_interactivity,
+        ensure_github_api_success, existing_jetbrains_agent_doc_dirs, find_asset,
+        find_best_local_zip, find_local_vscode_vsix, find_local_zip, find_release_with_asset,
+        github_get_request, github_token_from, has_asset, installed_jetbrains_plugin_version,
         is_jetbrains_ide_data_dir, jetbrains_install_success_message,
         jetbrains_plugin_dirs_in_roots, local_jetbrains_zip_in, local_jetbrains_zip_version,
         release_version, releases_page_url,
@@ -804,6 +871,12 @@ mod tests {
                 "browser_download_url": format!("https://example.invalid/{tag}.zip"),
             }],
         })
+    }
+
+    fn nonstable_plugin_release(tag: &str, field: &str) -> serde_json::Value {
+        let mut release = plugin_release(tag);
+        release[field] = json!(true);
+        release
     }
 
     /// Pages of `RELEASES_PER_PAGE` filler releases with the plugin-bearing one
@@ -831,7 +904,10 @@ mod tests {
         // The bug was a bare `/releases`: GitHub's 30-per-page default, one
         // page only. Both parameters have to be on the wire.
         let url = releases_page_url(3);
-        assert!(url.contains(&format!("per_page={RELEASES_PER_PAGE}")), "{url}");
+        assert!(
+            url.contains(&format!("per_page={RELEASES_PER_PAGE}")),
+            "{url}"
+        );
         assert!(url.contains("page=3"), "{url}");
         assert!(url.contains("/repos/btakita/agent-doc/releases?"), "{url}");
     }
@@ -853,6 +929,67 @@ mod tests {
     }
 
     #[test]
+    fn release_search_skips_prereleases_and_drafts() {
+        let prerelease = nonstable_plugin_release("v0.3.0-rc.1", "prerelease");
+        let draft = nonstable_plugin_release("v0.2.1", "draft");
+        let stable = plugin_release("v0.2.0");
+
+        let found = find_release_with_asset("agent-doc-jetbrains", "zip", |_| {
+            Ok(vec![prerelease.clone(), draft.clone(), stable.clone()])
+        })
+        .unwrap();
+
+        assert_eq!(release_version(&found), "v0.2.0");
+    }
+
+    #[test]
+    fn github_token_prefers_github_token_and_falls_back_to_gh_token() {
+        let preferred = github_token_from(|name| match name {
+            "GITHUB_TOKEN" => Some("github".into()),
+            "GH_TOKEN" => Some("gh".into()),
+            _ => None,
+        });
+        assert_eq!(preferred.as_deref(), Some("github"));
+
+        let fallback = github_token_from(|name| match name {
+            "GH_TOKEN" => Some("gh".into()),
+            _ => None,
+        });
+        assert_eq!(fallback.as_deref(), Some("gh"));
+    }
+
+    #[test]
+    fn github_request_adds_bearer_authorization_when_token_present() {
+        let agent = super::build_agent();
+        let request = github_get_request(&agent, "https://example.invalid", Some("secret"));
+
+        assert_eq!(
+            request
+                .headers_ref()
+                .and_then(|headers| headers.get("Authorization"))
+                .and_then(|value| value.to_str().ok()),
+            Some("Bearer secret")
+        );
+    }
+
+    #[test]
+    fn github_rate_limit_error_reports_reset_and_auth_guidance() {
+        let response = ureq::http::Response::builder()
+            .status(403)
+            .header("x-ratelimit-remaining", "0")
+            .header("x-ratelimit-reset", "1789999999")
+            .body(())
+            .unwrap();
+
+        let err = ensure_github_api_success(&response, "Failed to fetch releases from GitHub")
+            .unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("rate limit exhausted"), "{message}");
+        assert!(message.contains("1789999999"), "{message}");
+        assert!(message.contains("GITHUB_TOKEN or GH_TOKEN"), "{message}");
+    }
+
+    #[test]
     fn release_search_stops_at_the_first_match() {
         let mut pages_fetched = Vec::new();
         let mut source = paged_source(500, Some(7));
@@ -862,7 +999,11 @@ mod tests {
         })
         .unwrap();
         assert_eq!(release_version(&found), "v0.7.0");
-        assert_eq!(pages_fetched, vec![1], "a match on page 1 must not fetch page 2");
+        assert_eq!(
+            pages_fetched,
+            vec![1],
+            "a match on page 1 must not fetch page 2"
+        );
     }
 
     #[test]
@@ -900,7 +1041,10 @@ mod tests {
         })
         .unwrap_err();
         assert_eq!(pages_fetched.len(), RELEASE_SEARCH_MAX_PAGES);
-        assert!(err.to_string().contains("No agent-doc-jetbrains*.zip"), "{err}");
+        assert!(
+            err.to_string().contains("No agent-doc-jetbrains*.zip"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -909,7 +1053,10 @@ mod tests {
             anyhow::bail!("Failed to fetch releases from GitHub")
         })
         .unwrap_err();
-        assert!(err.to_string().contains("Failed to fetch releases"), "{err}");
+        assert!(
+            err.to_string().contains("Failed to fetch releases"),
+            "{err}"
+        );
     }
 
     #[test]

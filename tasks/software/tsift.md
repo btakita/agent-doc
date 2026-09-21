@@ -321,13 +321,55 @@ Restored and touched after each mutation; both green again.
 - CI run `35580603625` was still in progress at closeout; local evidence above stands on its own
 
 Exchange is at 210 lines / 10 response sections — worth a compact when convenient.
+
+### Re: #tsiftambientexplicit — refuse ambient state roots — opus-5 · 2026-09-21T05:35-04:00
+
+> **Queue prompt:**
+>
+> do [#tsiftambientexplicit]
+
+
+Decided and implemented: **refuse by default at the index-build boundary, and name the escape hatch rather than making it unreachable.**
+
+#### The decision
+
+`fcf26b2` stopped root *resolution* from picking `$HOME` off tsift's own `~/.tsift/` state directory. That closed the path the thrash actually took, but not the target. An explicit root still reached the index builder from an operator typo, `cd ~ && tsift index`, a hook that computed the root wrongly, or a future regression in resolution itself.
+
+I argued both sides and landed on refusal because the escape hatch makes it cheap to be wrong in the safe direction. A whole-home index is now *bounded and linear* thanks to chunked commits, so it is no longer catastrophic — but a multi-GB index of every cache, checkout, and build directory the user owns is still not something anyone asked for, and I could not construct a legitimate use for it. `TSIFT_ALLOW_AMBIENT_ROOT=1` (also `true`/`yes`/`on`) overrides, so the one person who does want it is inconvenienced by a single env var instead of blocked.
+
+#### Two guard sites, deliberately not the same check
+
+The helpers moved from `tsift-quality::lint` down into a new **`tsift-index::roots`** module so resolution and the build guard share one definition (tsift-quality already depends on tsift-index, so no cycle).
+
+| site | what it catches |
+|---|---|
+| `ensure_indexable_db_path` at `IndexDb::open` | Index dbs live at `<root>/.tsift/...`, so the root is the parent of the nearest `.tsift` ancestor. Refusing here means a refused run **creates nothing**. |
+| `ensure_indexable_root` at `apply_changes_inner` + `rebuild_excluding` | Backstop for roots that never pass through a db path. In `rebuild` it runs **before** the bulk DELETEs, so a refused root never clears a healthy index on its way to failing. |
+
+That first site came out of testing rather than design. My initial placement — the guard at `apply_changes` only — refused correctly but ran *after* `IndexDb::open` had already created `~/.tsift/index.db` (112 KB) and `index.lock`. The refusal was leaving behind a small version of the artifact it was rejecting. Verified fixed: `~/.tsift/` now holds only `artifacts/`, `prompt-cache-history/`, `gpu-lease.json`, and its lock after a refused run.
+
+Scope is narrow on purpose: only the ambient paths **themselves** are refused. A directory *under* `$TMPDIR` or `$HOME` — where nearly every real project lives — indexes as usual, and an explicit `.git` repo at an ambient path still resolves as a workspace.
+
+#### Verification
+
+- Mutation-checked: neutering `ensure_indexable_root` fails **4 tests**, including both `IndexDb`-level integration tests (`apply_changes_refuses_an_ambient_state_root`, `rebuild_refuses_an_ambient_state_root_without_clearing_the_index`). All 12 pass restored.
+- `make check` → **exit 0**, 67 suites, **1861 passed, 0 failed** (counted from the runner's own `test result:` lines).
+- Live on the installed binary: `tsift index /home/brian` refuses with the message naming `TSIFT_ALLOW_AMBIENT_ROOT=1` and creates nothing; `tsift index .` in a repo is unaffected.
+- **Last cycle's CI run `35580603625` completed green.** This cycle's run `35584042723` was in progress at closeout.
+
+#### Landed
+
+- `src/tsift` → `ebd2847`, pushed
+- superproject pointer → `fa9b5849f`, pushed
+- spec: `specs/architecture.md` — the **Workspace Root Resolution** section is now **Ambient State Roots**, covering both defenses and the escape hatch
+
+Exchange is at 287 lines / 11 response sections; worth a compact when convenient.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~tsift is currently thrashing. fix the tsift cause.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -341,7 +383,7 @@ https://github.com/chopratejas/headroom
 layout-provision --resume -- tasks/discord.md
 Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/discord.md: controller actor generation compare-and-swap failed for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/discord.md: expected 2, found 3
 ```
-- [ ] [#tsiftambientexplicit] Decide whether an explicit `--path` at an ambient root ($HOME, $TMPDIR, /) should be refused outright rather than only excluded from automatic root resolution. The 2026-09-20 thrash reached `--path /home/brian` because resolution picked it, which is now fixed; an operator or hook that passes it explicitly still gets a whole-home index (bounded and linear after chunked commits, but enormous). See specs/architecture.md "Workspace Root Resolution".
+- [x] 🚧 [#tsiftambientexplicit] Decide whether an explicit `--path` at an ambient root ($HOME, $TMPDIR, /) should be refused outright rather than only excluded from automatic root resolution. The 2026-09-20 thrash reached `--path /home/brian` because resolution picked it, which is now fixed; an operator or hook that passes it explicitly still gets a whole-home index (bounded and linear after chunked commits, but enormous). See specs/architecture.md "Workspace Root Resolution".
 <!-- /agent:backlog -->
 
 ## Review

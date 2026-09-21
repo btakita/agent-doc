@@ -1651,6 +1651,16 @@ fn apply_pending_and_status_mutations_with_mode(
                                 for id in &options.pending_done {
                                     backlog_cmd::done(file, id)?;
                                 }
+                                // `#reappersistcrosscycle`: this branch marks the
+                                // item `[x]` and OWES its archive move — a retained
+                                // response write cannot carry the `agent:done` move
+                                // (which may reach an external archive file) in the
+                                // same transaction, so the reap is deferred to the
+                                // next preflight. The owed ids reach cycle state
+                                // through the shared `record_pending_done_ids` call
+                                // below, which runs for BOTH branches; the guard in
+                                // `check_completed_pending_reap_guard` reads them to
+                                // tell an owed reap from real corruption.
                                 let target_content = backlog_cmd::project_tracked_work_document(
                                     file,
                                     "backlog_done_queue_completion",

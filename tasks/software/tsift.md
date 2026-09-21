@@ -1,7 +1,7 @@
 ---
 agent_doc_session: tsift-v0.1
 resume:
-  claude: 7ec8a9b0-c6b3-46ca-b057-dfbb94db6d6d
+  claude: f0b4e914-6c41-48bc-99ed-8efdd88cc853
   codex: 01a0b337-c18d-7770-8e52-af605f601504
 agent: claude
 claude_model: opus
@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -244,13 +244,90 @@ Fixed, installed, and pushed as `e1ec2820e`.
 - Live verification recovered `monsterrodholders.md` in pane `%21` with a healthy supervisor and recovered `discord.md` in pane `%22`, ready with generation 6. The later route refusals were capability-proof checks after pane recovery, not pane-loading or generation-CAS failures.
 
 The pre-existing unrelated JetBrains and session-actor worktree changes were left untouched.
+
+### Re: tsift thrash — root cause and fix — opus-5 · 2026-09-21T04:58-04:00
+
+> **Queue prompt:** tsift is currently thrashing. fix the tsift cause.
+
+Fixed. One process, two compounding defects, both landed with mutation-checked regression tests.
+
+#### What was thrashing
+
+A single `tsift --envelope source-read` (pid 433178) had been running **11 hours at 97% CPU**, 2.7 GB RSS. Its command line was the tell:
+
+```
+tsift --envelope source-read .claude/projects/-home-brian-work-btakita-agent-loop-src-haiven-dev/memory/project_agent_doc_missing_replica_wedge_recovery.md --path /home/brian ...
+```
+
+`--path /home/brian` — it was indexing the entire home directory. Evidence from `/proc/433178`:
+
+| signal | value |
+|---|---|
+| `rchar` | 101 TB |
+| `syscr` | 24.7 billion read syscalls |
+| `perf` top symbol | **`walFindFrame` — 89.36%** |
+| `~/.tsift/index.db` | **4.0 KB** |
+| `~/.tsift/index.db-wal` | **8093 MB** |
+| tables committed | **zero** |
+
+An 8 GB WAL in front of an empty database, after 11 hours. Nothing was ever committed.
+
+#### Defect 1 — `$HOME` was resolving as a workspace root
+
+`~/.tsift/` is tsift's *own* user-level state directory — `tsift-local-model` writes the GPU lease there (`$XDG_STATE_HOME/tsift/gpu-lease.json` → `~/.tsift/gpu-lease.json`), which creates the directory. From that moment `~/.tsift/` satisfied the `.tsift/`-directory workspace marker in both `project_root_from_canonical_path` and `harness_root_from_canonical_path`, so the ancestor walk from `~/.claude/projects/<slug>/memory/*.md` found no `.git` until it hit `$HOME` — and returned `$HOME`.
+
+The code already knew about this bug class: it special-cased `$TMPDIR` (`ambient_temp_root`) and stopped there. `$HOME` is the same defect, and tsift is the one that creates the marker.
+
+`ambient_state_roots()` now names `$TMPDIR`, `$HOME`, and `/`, and the `.tsift` marker is ignored at those paths. Scoped to that marker only — an explicit `.git`/`.gitmodules` repo at an ambient path (a dotfiles repo at `$HOME`) is user-created and still resolves as a workspace root.
+
+#### Defect 2 — one unbounded transaction made the build quadratic
+
+`apply_changes_inner` wrapped the *entire* apply in one `SAVEPOINT sp_apply`. `wal_autocheckpoint` (256 pages) only fires when a write transaction commits, so every dirty page stayed pinned in the WAL. Once the WAL outgrew its index hash blocks, SQLite's `walFindFrame` degraded into a backwards scan of those blocks on **every page read** — which is exactly the 89% and the 24.7 billion reads.
+
+The apply now commits on a file boundary every 512 files (`INDEX_APPLY_COMMIT_CHUNK_FILES`), so the autocheckpoint can reclaim the WAL and the build stays linear in changed files. A change set that fits inside one chunk — the common incremental case — is still all-or-nothing. `file_state` is now written **last** per file, so the "fully indexed at this mtime" marker never precedes the rows it vouches for.
+
+This one matters independently of defect 1: any sufficiently large repo would have hit it.
+
+#### Proof the tests are not vacuous
+
+Both were mutation-checked against pre-fix behavior:
+
+- re-enable the `.tsift` marker at ambient roots → `ambient_tsift_state_dir_is_not_a_workspace_root` **FAILED**
+- disable chunked commits → `apply_changes_commits_in_bounded_chunks` **FAILED**, `assertion left == right failed: expected the completed chunk to be durable, got 0 of 576`
+
+Restored and touched after each mutation; both green again.
+
+#### Verification
+
+- `make check` → **exit 0**, 67 suites, **1850 passed, 0 failed** (counted from the runner's own `test result:` lines, not an output grep)
+- End-to-end: the exact command that spawned the thrashing process now declines — `tsift rewrite: no rewrite: no project root found for source read ...` — so the original `cat` runs unchanged, with no `--path /home/brian`
+- In-repo rewrites still resolve normally (`--path .../src/tsift`)
+- `~/.tsift/index.db` did not reappear
+
+#### Cleanup done
+
+- Killed pid 433178; reclaimed the 8 GB orphan WAL (`index.db-wal`, `index.db-shm`, the empty `index.db`, and the stale `index.lock`). `artifacts/`, `prompt-cache-history/`, and `gpu-lease.json` were left alone.
+
+#### Two things you should know
+
+1. **The `src/tsift` checkout was 22 commits behind `origin/main`** (checkout at `0.1.88`, installed binary at `0.1.99`) with 25 dirty files. Those turned out to be a month-old `cargo fmt` pass plus generated `tsift init` output — no semantic content. I stashed them (`pre-thrash-fix: stale 2026-08-26 cargo-fmt pass + tsift init 0.1.99 regen`) and fast-forwarded before touching anything, so the fix is on current code. The stash is superseded by the 22 upstream commits; drop it unless you want it.
+2. **`cargo install --path packages/tsift-cli` does not update the `tsift` binary** — that package's bin target is `tsift-cli`. The `tsift` binary comes from the workspace root crate, so `cargo install --path .` is the one that counts. It was previously installed from `.worktrees/tsift-csharp-index`; it now comes from `src/tsift`.
+
+#### Landed
+
+- `src/tsift` → `fcf26b2`, pushed to `origin/main`
+- superproject pointer → `bfd53af95`, pushed
+- spec: `specs/architecture.md` gained a rewritten **Transactional Index Updates** section and a new **Workspace Root Resolution** section
+- CI run `35580603625` was still in progress at closeout; local evidence above stands on its own
+
+Exchange is at 210 lines / 10 response sections — worth a compact when convenient.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 tsift is currently thrashing. fix the tsift cause.
+- ~~tsift is currently thrashing. fix the tsift cause.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -264,6 +341,7 @@ https://github.com/chopratejas/headroom
 layout-provision --resume -- tasks/discord.md
 Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/discord.md: controller actor generation compare-and-swap failed for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/discord.md: expected 2, found 3
 ```
+- [ ] [#tsiftambientexplicit] Decide whether an explicit `--path` at an ambient root ($HOME, $TMPDIR, /) should be refused outright rather than only excluded from automatic root resolution. The 2026-09-20 thrash reached `--path /home/brian` because resolution picked it, which is now fixed; an operator or hook that passes it explicitly still gets a whole-home index (bounded and linear after chunked commits, but enormous). See specs/architecture.md "Workspace Root Resolution".
 <!-- /agent:backlog -->
 
 ## Review

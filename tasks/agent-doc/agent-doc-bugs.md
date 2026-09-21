@@ -972,6 +972,51 @@ No mid-session `make install`: this document is attached to a live JetBrains edi
 **One thing I did not close.** Your secondary note is a real defect, and I filed it rather than fixing it here because the fix is a reaper acting on shared tmux — the same reason you declined `session doctor --repair`. Those layout-provision panes are created with `--route-owned-reap-policy keep-alive`, so nothing ever reaps them: every editor tab visit to a document with no live actor leaves a permanent pane. It is `#stashpaneunbounded`, appended rather than prepended so it does not preempt the drain.
 
 Two notes on the tree. The working copy carries another session's uncommitted `editors/jetbrains/**` and `src/session_actor_cmd.rs` changes; I committed only the five files of this fix, so `make check` was green over a tree that includes their work. And the exchange is at 913 lines across 35 response sections — noting it, not stopping for it, since the queue is active.
+
+### Re: #stashpaneunbounded — opus-5 · 2026-09-21T05:43-04:00
+
+Fixed and pushed as `0252240c8`. I also chased the tsift.md report you sent mid-turn; that one I filed rather than fixed, and the reason is specific — see the end.
+
+**The defect, measured before touching anything.** `keep-alive` should bound a *commit edge* — "do not reap merely because a cycle committed." It was read as a lifetime. `route_owned_reap_decision` takes a liveness reason and, for `KeepAlive`, discards it unread:
+
+```rust
+RouteOwnedReapPolicy::KeepAlive => { reap: false, reason: "explicit_keep_alive" }
+```
+
+The haiven-dev ops log settles it: **45 `policy=keep_alive` decisions, 35 of them `reason=explicit_keep_alive`, zero reaps** — across api, contracts, docs, infra, payments-ledger, and sdk. One permanent pane per document ever selected in the editor. That is the 15-pane stash window, and it is the supply of wrong answers every live pane resolver draws from, which is how it fed `#fpeselectstashpane`.
+
+**Why the reap is safe to do from inside the supervisor.** A layout-provision owner exists to hold a pane for an editor column and never dispatches — `route_owned_start_blocked_by_queue_control` fences `Dispatch` and admits `LayoutProvision` for exactly that reason. Once its pane is **stashed** it is holding no visible column, so it is doing its one job nowhere at all. It now ends itself and publishes `layout_provision_stashed_orphan`. Re-selecting the document provisions a new owner through the same missing-actor path that created this one.
+
+This directly answers your constraint about `session doctor --repair`. Nothing here enumerates panes. `owned_pane_is_stashed` asks one question about the one pane this supervisor owns, and an unresolvable pane or window answers `false`, so the reaper acts only where it can positively prove a stash. No working directory, no command line, and structurally impossible to touch a pane another session owns.
+
+Two more guards: a live-pane-busy reason and an open cycle each short-circuit first, so an active harness turn is never reaped. And a **non-empty backlog is not liveness for this leg** — it is the steady state of every task document, so counting it would restore the unbounded behaviour outright. A queued prompt, unanswered exchange tail, post-commit follow-up, uncommitted drift, or adapter failure all still keep the owner alive.
+
+**The subtlety that would have made a smaller patch inert.** The existing loop only reaches a reap decision after `route_owned_cycle_committed_since_start`. The shape that actually accumulates — a pane provisioned for a column and then never used — never moves its document's cycle, so that predicate stays false and no decision is ever evaluated. Eight haiven-dev panes sat there indefinitely while the loop polled every 500ms. The orphan check therefore runs *before* the commit-edge machinery, on its own 15s throttle so it does not spend a tmux query per pane per half-second watching a fact that changes when you move a tab.
+
+`auto` and `reap-after-commit` are provably untouched: one test asserts the purpose-aware wrapper is identical to the old function across both policies × both purposes × both stash states × both liveness shapes. A `keep-alive` **dispatch** owner is likewise untouched.
+
+Also fixed a slip from my previous commit: `pane_process_tree_owns_document` had been inserted between `pane_in_stash_window`'s doc comment and its signature, silently stealing it. Moved below.
+
+`make check`: 9599 run, 9599 passed, 259 skipped. `cargo build --release` green. One architecture guard in `tests/test_cli.rs` pinned the seam by substring and failed on the rename — I updated it to the new API and added the bare `route_owned_reap_decision(` spelling to the forbidden list, since that spelling is the one that answers `explicit_keep_alive` unconditionally. CI `35584864204` queued; the `#fpeselectstashpane` run before it is in progress.
+
+### Re: the tsift.md fence — opus-5 · 2026-09-21T05:43-04:00
+
+> **Queue prompt:**
+>
+> do [#stashpaneunbounded]
+
+
+I found it, and it is not where the symptom points. tsift.md's queue component is clean (`- 🚧 do [#tsiftambientexplicit]`). The fenced block is **inside the backlog component**, above the only real item.
+
+I traced the origin rather than guessing: `git log -S` gives exactly one commit, `46566f42ce` (2026-09-18 03:04:39), and the *same write* added your "Fix discord.md issue" prompt to the exchange and inserted the fence into a backlog component that was previously empty. It is a processed derivative, not a paste duplicate — the exchange copy carries the prompt marker and an indented continuation line; the backlog copy has the marker stripped and the indent trimmed. So some write path normalized a multi-line fenced prompt body and emitted it as a raw component body with no checkbox prefix.
+
+Once there it is permanent. It parses as a `PendingSegment::Text` prelude, which `parse_items` preserves by design; `--backlog-edit` / `--done` / `--backlog-reorder` act only on items, `patch:backlog` full-replace is rejected, and `remove_items_with_trailing_spill` reaps only spill *trailing a removed item* — never a prelude. Your only recourse today is hand-editing a file the design forbids hand-editing.
+
+I did not fix it in this cycle, and not because it is hard. The removal half needs a decision I should not make unilaterally: a component prelude can also be legitimate prose you wrote, and the standing rule is that operator-visible text is authoritative and must never be dropped, so a blanket prelude prune is the wrong instinct. The narrow rule I think is defensible — prune only text provably duplicated from the exchange prompt it was derived from — is a design choice worth your yes or no before I build it. Filed as `#componentresidue` at P1 with all of the above, appended so it does not preempt the drain. Say the word and I will take the narrow rule.
+
+One aside found while filing it: a backlog item whose own text contains a component marker is rejected with "unclosed component" and nothing is applied. Fail-closed is right; the message just does not say that your *item text* was the cause.
+
+Exchange is at 946 lines across 36 sections; noting it, not stopping.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -981,13 +1026,16 @@ Two notes on the tree. The working copy carries another session's uncommitted `e
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#stashpaneunbounded]~~
 - ~~do [#fpeselectstashpane]~~
 - do [#reappersistcrosscycle]
+- release + publish
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog priority queue -->
-- [ ] [#stashpaneunbounded] [P2] Layout-provision panes accumulate in the stash without bound — 15 in window 0:1 right now, 8 of them agent-doc processes in src/haiven-dev. Each is created by handle_focus_document_pane_with_policy's missing-actor branch (controller_focus_resumed_missing_actor -> route_auto_start with ControllerRouteAutoStartPolicy::ProvisionOnly), which starts agent-doc start --route-owned --route-owned-reap-policy keep-alive --route-owned-start-purpose layout-provision. keep-alive means nothing ever reaps them, so every editor tab visit to a document with no live actor leaves a permanent pane. They are the supply of wrong answers every live pane resolver draws from (#fpeselectstashpane was one consequence), and they are why session doctor --repair is unsafe here — the operator declined to run it because it acts on shared tmux and could kill panes other live sessions own. Fix the lifecycle: a layout-provision pane that no editor surface still names, and whose document has a different live actor, should be reaped at an idle boundary. Any reaper must prove the pane is a layout-provision orphan from its own start record, never from cwd or command matching.
+- [ ] [#componentresidue] [P1] A managed component can hold unstructured text that NO agent-doc command can remove, and the operator hit it: tasks/software/tsift.md carries a fenced code block INSIDE its agent:backlog component, above its only real item, and reported it as a queue fence that was never cleared or struck. Origin proven by git archaeology, not guessed: commit 46566f42ce (agent-doc(tsift), 2026-09-18 03:04:39) is the single commit introducing that text, and the SAME write added the operator prompt to the exchange and inserted the fence into a backlog component that was previously EMPTY. It is a processed derivative, not a paste duplicate — the exchange copy starts with the prompt marker and has an indented continuation line, the backlog copy has the marker stripped and the indent trimmed. So a write path normalized a multi-line fenced queue/prompt body and emitted it as a raw component body with no checkbox item prefix. It then becomes a PendingSegment::Text prelude, which parse_items preserves forever: --backlog-edit/--done/--backlog-reorder act only on items, patch:backlog full-replace is rejected, and remove_items_with_trailing_spill only reaps spill TRAILING a removed item, never a prelude. The operator's only recourse is hand-editing a file the design forbids hand-editing. Two parts: (a) find and fix the producer so a multi-line or fenced body is never written as a component body — reject it or render it as a single item; (b) give the operator a way to remove existing residue. (b) needs a deliberate decision, not a guess: a component prelude can also be legitimate operator prose, and the standing rule is that operator-visible text is authoritative and must never be dropped, so a blanket prelude prune is wrong. A defensible narrow rule is to prune only text provably duplicated from the exchange prompt it was derived from. Related: a backlog item whose own text contains a component marker is rejected as an unclosed component (observed 2026-09-21 filing this item) — correct fail-closed behaviour, but worth a clearer message.
+- [x] 🚧 [#stashpaneunbounded] [P2] Layout-provision panes accumulate in the stash without bound — 15 in window 0:1 right now, 8 of them agent-doc processes in src/haiven-dev. Each is created by handle_focus_document_pane_with_policy's missing-actor branch (controller_focus_resumed_missing_actor -> route_auto_start with ControllerRouteAutoStartPolicy::ProvisionOnly), which starts agent-doc start --route-owned --route-owned-reap-policy keep-alive --route-owned-start-purpose layout-provision. keep-alive means nothing ever reaps them, so every editor tab visit to a document with no live actor leaves a permanent pane. They are the supply of wrong answers every live pane resolver draws from (#fpeselectstashpane was one consequence), and they are why session doctor --repair is unsafe here — the operator declined to run it because it acts on shared tmux and could kill panes other live sessions own. Fix the lifecycle: a layout-provision pane that no editor surface still names, and whose document has a different live actor, should be reaped at an idle boundary. Any reaper must prove the pane is a layout-provision orphan from its own start record, never from cwd or command matching.
 - [ ] [#reappersistcrosscycle] [P2] Finish the other half of #reappersistloop. 80b49e61f scoped the completed-reap guard to items the CURRENT cycle did not reap, which covers the session-check immediately after respond, where all six measured false interruptions occurred and which is the observation the auto-loop reads. It does NOT cover a session-check run mid-NEXT-cycle: reaped_pending_ids lives in per-cycle state, so a new cycle has none by construction, and the [x] item legitimately persists until that cycle closeout performs the archive move. Verified live: the guard still interrupted on a fresh cycle holding the previous cycle [x] runsubmitautoproof. Closing this needs a design choice the fix deliberately did not guess at: either perform the archive move inside the same closeout that marks [x], or add a durable reap-in-flight marker that outlives the cycle row. Pick one and make session-check, repair, and commit agree under it.
 <!-- /agent:backlog -->
 

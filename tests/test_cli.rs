@@ -2012,6 +2012,45 @@ fn test_cli_help() {
 }
 
 #[test]
+fn test_resume_id_records_the_explicit_producer_not_document_agent() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let doc = dir.path().join("session.md");
+    fs::write(
+        &doc,
+        concat!(
+            "---\n",
+            "agent: claude\n",
+            "resume:\n",
+            "  claude: claude-thread\n",
+            "---\n\n",
+            "# Session\n",
+        ),
+    )
+    .unwrap();
+
+    agent_doc_cmd()
+        .current_dir(dir.path())
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .args([
+            "resume-id",
+            doc.to_str().unwrap(),
+            "codex-thread",
+            "--harness",
+            "codex",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("recorded codex resume id"));
+
+    let updated = fs::read_to_string(&doc).unwrap();
+    let (fm, _) = agent_doc_frontmatter::frontmatter::parse(&updated).unwrap();
+    assert_eq!(fm.active_resume_harness(), "claude");
+    assert_eq!(fm.resume_for_harness("claude"), Some("claude-thread"));
+    assert_eq!(fm.resume_for_harness("codex"), Some("codex-thread"));
+}
+
+#[test]
 fn test_cli_env_json_reports_classification_and_reason() {
     let mut cmd = agent_doc_cmd();
     cmd.args(["env", "--json"]);
@@ -10699,7 +10738,7 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
         "pub fn apply_template_response",
         "pub fn normalize_direct_run_prompt_prefixes",
         "pub fn normalize_direct_run_template_content",
-        "pub fn update_resume_id",
+        "pub fn update_resume_id_for_harness",
         "pub fn direct_run_atomic_write",
         "pub fn compute_run_diff",
         "pub fn active_queue_prompt_diff",

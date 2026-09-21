@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.403
+
+- **Resume identity mutations use the harness that produced the identity
+  (`#frontmatterintentmisclass`).** Direct runs already carried their backend;
+  pane launches and stale-Codex recovery now keep that explicit harness through
+  record and clear operations instead of consulting the document's possibly
+  switched `agent:` value. The manual `resume-id` command now requires
+  `--harness`, eliminating its previously unanswerable inference. Regression
+  coverage proves a stale Codex id is cleared from `resume.codex` while a
+  document declaring Claude keeps `resume.claude` intact.
+
 ## 0.35.402
 
 - **Selected-document focus recovers a controller that accepts but no longer

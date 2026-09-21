@@ -955,19 +955,9 @@ pub fn normalize_direct_run_template_content(
     effects.normalize_template_structure_or_fail(&normalized, file)
 }
 
-pub fn update_resume_id(
-    effects: &impl DirectRunEffects,
-    file: &Path,
-    session_id: &str,
-) -> Result<()> {
-    let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
-        file,
-        "direct_run_update_resume_id",
-    )?;
-    let (fm, _) = frontmatter::parse(&current)?;
-    update_resume_id_for_harness(effects, file, fm.active_resume_harness(), session_id)
-}
-
+/// Persist the response conversation id under the backend that produced it.
+/// The caller supplies that backend explicitly; document `agent:` is routing
+/// intent and may already name a different harness.
 pub fn update_resume_id_for_harness(
     effects: &impl DirectRunEffects,
     file: &Path,

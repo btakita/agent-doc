@@ -334,16 +334,10 @@ fn assign_and_record_session_id(
 /// followed by a single write, so there is no second read for a pass to answer.
 /// Wrapping a resolve/write pair in a memoizing pass adds a scope and saves
 /// nothing.
-pub fn record_document_resume_id(file: &Path, id: &str) -> Result<bool> {
-    let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
-        file,
-        "start_resume_id_capture",
-    )?;
-    let (fm, _) = frontmatter::parse(&current)?;
-    let harness = fm.active_resume_harness();
-    record_document_resume_id_from_current(file, harness, id, current)
-}
-
+/// Record the conversation id under the harness that produced it.
+///
+/// `#frontmatterintentmisclass`: this harness must come from the running launch
+/// or an explicit operator argument, never from the document's `agent:` field.
 pub fn record_document_resume_id_for_harness(file: &Path, harness: &str, id: &str) -> Result<bool> {
     let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,
@@ -374,14 +368,20 @@ fn record_document_resume_id_from_current(
     Ok(true)
 }
 
-/// Clear a stale conversation pointer only when it still names the failed id.
+/// Clear a stale conversation pointer only when the running harness's entry
+/// still names the failed id.
 ///
 /// The compare protects a concurrent operator edit: a newer replacement id (or
 /// an already-removed pointer) must never be overwritten by late child-exit
-/// handling from the failed resume attempt.
-fn document_without_matching_resume_id(current: &str, id: &str) -> Result<Option<String>> {
+/// handling from the failed resume attempt. The harness is explicit because a
+/// concurrent or pending `agent:` switch must not redirect this clear into a
+/// different harness's history (`#frontmatterintentmisclass`).
+fn document_without_matching_resume_id(
+    current: &str,
+    harness: &str,
+    id: &str,
+) -> Result<Option<String>> {
     let (mut fm, body) = frontmatter::parse(current)?;
-    let harness = fm.active_resume_harness();
     if fm.resume_for_harness(harness) != Some(id.trim()) {
         return Ok(None);
     }
@@ -389,7 +389,12 @@ fn document_without_matching_resume_id(current: &str, id: &str) -> Result<Option
     Ok(Some(frontmatter::write_preserving(current, &fm, body)?))
 }
 
-fn stale_resume_clear_target(file: &Path, current: &str, id: &str) -> Result<Option<String>> {
+fn stale_resume_clear_target(
+    file: &Path,
+    current: &str,
+    harness: &str,
+    id: &str,
+) -> Result<Option<String>> {
     let normalized =
         agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
             file,
@@ -397,15 +402,15 @@ fn stale_resume_clear_target(file: &Path, current: &str, id: &str) -> Result<Opt
             "start_stale_resume_clear",
         )?
         .unwrap_or_else(|| current.to_string());
-    document_without_matching_resume_id(&normalized, id)
+    document_without_matching_resume_id(&normalized, harness, id)
 }
 
-fn clear_document_resume_id_if_matches(file: &Path, id: &str) -> Result<bool> {
+fn clear_document_resume_id_if_matches(file: &Path, harness: &str, id: &str) -> Result<bool> {
     let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,
         "start_stale_resume_clear",
     )?;
-    let Some(updated) = stale_resume_clear_target(file, &current, id)? else {
+    let Some(updated) = stale_resume_clear_target(file, &current, harness, id)? else {
         return Ok(false);
     };
     agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
@@ -1985,7 +1990,11 @@ pub fn run_with_reap_policy_resume_and_harness(
         }
 
         if let Some((stale_id, recovery_reason)) = codex_resume_recovery {
-            let cleared = match clear_document_resume_id_if_matches(&canonical, &stale_id) {
+            let cleared = match clear_document_resume_id_if_matches(
+                &canonical,
+                &harness.binary,
+                &stale_id,
+            ) {
                 Ok(cleared) => cleared,
                 Err(err) => {
                     eprintln!(
@@ -2562,7 +2571,7 @@ mod tests {
     #[test]
     fn stale_resume_clear_only_removes_the_matching_pointer() {
         let source = "---\nagent: codex\nresume: stale-id\nqueue: stop\n---\n\n# Plan\n";
-        let updated = document_without_matching_resume_id(source, "stale-id")
+        let updated = document_without_matching_resume_id(source, "codex", "stale-id")
             .unwrap()
             .expect("matching stale pointer should be removed");
         let (fm, body) = frontmatter::parse(&updated).unwrap();
@@ -2571,7 +2580,7 @@ mod tests {
         assert_eq!(body, "\n# Plan\n");
 
         assert_eq!(
-            document_without_matching_resume_id(source, "newer-id").unwrap(),
+            document_without_matching_resume_id(source, "codex", "newer-id").unwrap(),
             None,
             "a different current resume pointer must survive stale recovery"
         );
@@ -2581,18 +2590,23 @@ mod tests {
     fn stale_resume_clear_preserves_other_harness_pointers() {
         let source = concat!(
             "---\n",
-            "agent: codex\n",
+            "agent: claude\n",
             "resume:\n",
             "  claude: claude-thread\n",
             "  codex: stale-codex\n",
             "---\n\n# Plan\n",
         );
-        let updated = document_without_matching_resume_id(source, "stale-codex")
+        let updated = document_without_matching_resume_id(source, "codex", "stale-codex")
             .unwrap()
-            .expect("active stale pointer should be removed");
+            .expect("the running harness's stale pointer should be removed");
         let (fm, _) = frontmatter::parse(&updated).unwrap();
         assert_eq!(fm.resume_for_harness("codex"), None);
         assert_eq!(fm.resume_for_harness("claude"), Some("claude-thread"));
+        assert_eq!(
+            document_without_matching_resume_id(source, "claude", "stale-codex").unwrap(),
+            None,
+            "a stale id from another harness must not clear the document-active pointer"
+        );
     }
 
     #[test]
@@ -2609,7 +2623,7 @@ mod tests {
         let tail = &sound[sound.find(", even though").unwrap()..];
         let corrupted = format!("{sound}{tail}");
 
-        let updated = stale_resume_clear_target(file, &corrupted, "stale-id")
+        let updated = stale_resume_clear_target(file, &corrupted, "codex", "stale-id")
             .unwrap()
             .expect("matching stale pointer and exact suffix are repairable");
         let (fm, _) = frontmatter::parse(&updated).unwrap();

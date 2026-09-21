@@ -2845,6 +2845,10 @@ enum Commands {
         file: PathBuf,
         /// Harness conversation id (e.g. a Claude Code session UUID)
         id: String,
+        /// Harness that produced this conversation id. Required because the
+        /// document's `agent:` value may name a different harness.
+        #[arg(long, value_parser = ["claude", "codex", "opencode", "grok", "grok-build"])]
+        harness: String,
     },
     /// Get or set the document mode (format + write strategy)
     Mode {
@@ -5258,18 +5262,20 @@ fn try_main() -> anyhow::Result<()> {
             agent_doc_format,
             agent_doc_write,
         } => convert::run(&file, mode.as_ref(), agent_doc_format, agent_doc_write),
-        Commands::ResumeId { file, id } => {
+        Commands::ResumeId { file, id, harness } => {
             let id = id.trim();
             if id.is_empty() {
                 anyhow::bail!("conversation id must not be empty");
             }
             // Goes through the realtime authority, not a raw disk write: the
             // document may be open in an editor that owns its current text.
-            let changed = agent_doc_start_runtime_io::record_document_resume_id(&file, id)?;
+            let changed = agent_doc_start_runtime_io::record_document_resume_id_for_harness(
+                &file, &harness, id,
+            )?;
             if changed {
-                println!("recorded resume id {id} for {}", file.display());
+                println!("recorded {harness} resume id {id} for {}", file.display());
             } else {
-                println!("{} already resumes {id}", file.display());
+                println!("{} already resumes {harness} id {id}", file.display());
             }
             Ok(())
         }
@@ -6669,6 +6675,46 @@ mod recycle_force_tests {
                 assert!(target.is_none());
             }
             _ => panic!("expected admin recycle subcommand"),
+        }
+    }
+
+    #[test]
+    fn resume_id_requires_the_producer_harness() {
+        let owned = vec![
+            "agent-doc".to_string(),
+            "resume-id".to_string(),
+            "plan.md".to_string(),
+            "thread-id".to_string(),
+        ];
+        let parsed = std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || Cli::try_parse_from(&owned))
+            .expect("spawn parse thread")
+            .join()
+            .expect("parse thread");
+        assert!(
+            parsed.is_err(),
+            "resume-id must not infer its producer from document frontmatter"
+        );
+    }
+
+    #[test]
+    fn resume_id_carries_the_explicit_producer_harness() {
+        let cmd = parse(&[
+            "agent-doc",
+            "resume-id",
+            "plan.md",
+            "thread-id",
+            "--harness",
+            "codex",
+        ]);
+        match cmd {
+            Commands::ResumeId { file, id, harness } => {
+                assert_eq!(file, PathBuf::from("plan.md"));
+                assert_eq!(id, "thread-id");
+                assert_eq!(harness, "codex");
+            }
+            _ => panic!("expected resume-id subcommand"),
         }
     }
 

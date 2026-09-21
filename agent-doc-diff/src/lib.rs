@@ -344,9 +344,48 @@ pub fn truncate_for_log(s: &str, max: usize) -> String {
     }
 }
 
-/// Byte-precise removal of the managed `agent_doc_pipeline:` frontmatter block
-/// for diff comparison. Keeping this local pure helper avoids pulling the full
-/// frontmatter parser into diff classification.
+/// Byte-precise removal of every agent-managed frontmatter block for diff
+/// comparison, including its indented children.
+///
+/// `#frontmatterintentmisclass`: this used to strip `agent_doc_pipeline:` alone,
+/// by name. `resume:` is equally agent-managed and equally rotated by the binary,
+/// but it is written as a NESTED block:
+///
+/// ```yaml
+/// resume:
+///   claude: 3d56a2a6-...
+///   codex: f41d1069-...
+/// ```
+///
+/// so the line the diff actually sees is `  codex: <uuid>`, whose key is `codex`.
+/// `line_is_managed_state_only` splits on `:` and asks
+/// `is_agent_managed_frontmatter_key("codex")` — which is false, because the
+/// managed key is the PARENT. The binary's own resume bookkeeping therefore read
+/// as fresh operator intent and dropped `queue_continuation_required` to false
+/// with four drainable heads queued. That is the same defect `#resumeuuidstallsdrain`
+/// fixed for the FLAT `resume: <uuid>` spelling; the nested spelling was never
+/// covered.
+///
+/// The key set is derived from `is_agent_managed_frontmatter_key` rather than
+/// hand-listed here, which is the anti-drift rule the sibling comment in
+/// `line_is_managed_state_only` already states: a second list is how the flat
+/// form got fixed while the nested form stayed broken.
+/// Whether `line` opens a top-level frontmatter block the agent owns.
+///
+/// Top-level only: an indented line is a CHILD, and children are consumed by the
+/// block skip rather than opening one of their own. Without that, an operator
+/// key nested under their own block could be skipped because it happened to share
+/// a name with a managed top-level key.
+fn line_opens_agent_managed_frontmatter_block(line: &str) -> bool {
+    if line.starts_with(' ') || line.starts_with('\t') {
+        return false;
+    }
+    let Some((key, _)) = line.split_once(':') else {
+        return false;
+    };
+    agent_doc_frontmatter::frontmatter::is_agent_managed_frontmatter_key(key.trim())
+}
+
 fn strip_pipeline_block_lines(content: &str) -> String {
     let lines: Vec<&str> = content.split('\n').collect();
     if lines.first().map(|line| line.trim_end()) != Some("---") {
@@ -375,7 +414,7 @@ fn strip_pipeline_block_lines(content: &str) -> String {
             }
             skipping = false;
         }
-        if line.trim_start().starts_with("agent_doc_pipeline:") {
+        if line_opens_agent_managed_frontmatter_block(line) {
             skipping = true;
             continue;
         }
@@ -5792,6 +5831,51 @@ Done.\n\
             PromptBearingChangeKind::ContentEdit,
             "queue_active: false"
         )));
+    }
+
+    /// `#frontmatterintentmisclass`: the operator-reported shape. The binary's
+    /// own NESTED resume bookkeeping must not read as a fresh operator prompt.
+    ///
+    /// Observed 2026-09-21 on `tasks/agent-doc/agent-doc-bugs.md`: preflight
+    /// reported `queue_active: true` with four drainable heads but
+    /// `queue_continuation_required: false`, and the only entries in
+    /// `user_intent_prompt_changes` were `  codex: <uuid>` and `agent: codex`.
+    /// `#resumeuuidstallsdrain` had already fixed the FLAT `resume: <uuid>`
+    /// spelling; this document writes the nested one.
+    #[test]
+    fn a_nested_resume_block_child_is_not_operator_intent() {
+        let before = "---\nagent_doc_format: template\nresume:\n  claude: aaaa\n  codex: bbbb\n---\n\n## Body\n";
+        let after = "---\nagent_doc_format: template\nresume:\n  claude: aaaa\n  codex: cccc\n---\n\n## Body\n";
+        assert_eq!(
+            strip_pipeline_block_lines(before),
+            strip_pipeline_block_lines(after),
+            "rotating a nested resume child must be invisible to diff classification"
+        );
+    }
+
+    /// The strip is by OWNERSHIP, not by name, so an operator key nested under
+    /// their own block is untouched even when it shares a managed key's name.
+    #[test]
+    fn an_operator_block_child_named_like_a_managed_key_survives() {
+        let content = "---\nmy_notes:\n  resume: operator wrote this\n---\n\n## Body\n";
+        assert_eq!(
+            strip_pipeline_block_lines(content),
+            content,
+            "a child under an operator-owned block must not be stripped: {content}"
+        );
+    }
+
+    /// Operator frontmatter stays visible — the filter must not swallow a real
+    /// edit just because it sits in the frontmatter region.
+    #[test]
+    fn operator_frontmatter_edits_still_reach_the_diff() {
+        let before = "---\nagent: claude\nresume:\n  codex: bbbb\n---\n\n## Body\n";
+        let after = "---\nagent: codex\nresume:\n  codex: bbbb\n---\n\n## Body\n";
+        assert_ne!(
+            strip_pipeline_block_lines(before),
+            strip_pipeline_block_lines(after),
+            "`agent:` is operator-settable and must still preempt a drain"
+        );
     }
 
     #[test]

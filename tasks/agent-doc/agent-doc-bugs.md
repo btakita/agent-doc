@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -242,6 +242,45 @@ Released and published `agent-doc` 0.35.417 from the exact tested commit `0be958
 Confidence: high. The source worktree is clean and the public tag, release assets, checksum, package registry, and installed version agree.
 
 Operator activation note: the currently running IntelliJ process still maps the superseded unlinked JetBrains plugin jar. Restart IntelliJ or close and reopen the affected editor tab to load the already-installed 0.2.392 package; this does not affect the published release.
+
+### Re: concise IDEA lint failure — gpt-5 · 2026-09-22T13:13:44-04:00
+
+> **Queue prompt:** Make this error message easier for a human to read given a small prompt dialog in Idea:
+
+Implemented and pushed the IDEA-specific presentation fix as agent-doc 0.35.418 / JetBrains plugin 0.2.394 (`3b4a481ec`, `fix: simplify JetBrains lint failure notifications`).
+
+The compact notification now reads like this instead of embedding the full nested controller error:
+
+```text
+Agent Doc couldn't compact this document because a document directive is malformed.
+
+api.md, line 449
+Attribute `queu0000e` on `agent:backlog` is missing `=value`.
+
+Suggested fix: `queu0000e= `
+
+Fix the directive, then try again.
+```
+
+The complete subprocess output remains in the IDEA log for diagnosis. Unknown failures are capped to a bounded notification length, so another verbose backend error cannot fill the small UI surface.
+
+Changed paths:
+
+- `editors/jetbrains/.../TerminalUtil.kt`: action-specific compact failure text, lint diagnostic extraction, and bounded fallback.
+- `editors/jetbrains/.../TerminalUtilTest.kt`: exact regression for the reported error plus the generic length bound.
+- `specs/14-realtime-workflow.md`: operator-notification contract.
+- `VERSIONS.md`, `editors/release-parity.tsv`, package manifests, generated skill copies, and JetBrains `gradle.properties`: 0.35.418 / 0.2.394 version projection.
+
+Verification and delivery:
+
+- Focused `TerminalUtilTest`: passed.
+- `make check`: passed twice, including the final post-install metadata; exit 0 and zero detected failures.
+- `make install`: installed CLI/library 0.35.418, JetBrains 0.2.394, and VS Code 0.2.71; `agent-doc --version` reports 0.35.418.
+- `git diff --check`: passed; source worktree clean after commit.
+- Commit `3b4a481ec49ba94f4a247a23a41f774206a0bc04` is on `origin/main`.
+- GitHub CI run 35759252186 is in progress; the preceding CI run is green, and local full-suite evidence is complete.
+
+Confidence: high. No escalation is needed. Restart the running IDEA instance to activate JetBrains plugin 0.2.394. The exchange is now 216+ lines; the active queue was drained without interrupting it for compaction, as required.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -251,7 +290,8 @@ Operator activation note: the currently running IntelliJ process still maps the 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 Make this error message easier for a human to read given a small prompt dialog in Idea:
+  agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: [lint-gate] INTERRUPTED: 1 blocking lint finding(s) for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md (mode=warn, source=default). Fix the directives below before re-running `agent-doc finalize` / `agent-doc write --commit`, or set `agent_doc_lint_dialect: off` in frontmatter / `[lint] dialect = "off"` in `.agent-doc/config.toml` to temporarily skip this gate. /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md:449:1 error: attribute `queu0000e` on `agent:backlog` is missing `=value` [agent-doc/malformed-attr] hint: try `queu0000e= `
 <!-- /agent:queue -->
 
 

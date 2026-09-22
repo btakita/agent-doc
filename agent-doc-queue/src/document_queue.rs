@@ -2640,27 +2640,30 @@ pub fn dedup_free_text_heads(
     if dropped { Some(deduped) } else { None }
 }
 
-/// Collapse a contiguous sequence of at least three newly-authored, single-line
-/// free-text prompts when each prompt is a strict textual extension of the
-/// previous one.
+/// Collapse a contiguous sequence of progressive, single-line free-text prompt
+/// snapshots when each prompt is a strict textual extension of the previous
+/// one.
 ///
 /// This is deliberately narrower than ordinary queue deduplication. It models
 /// the progressive editor snapshots that can become visible when an agent CP
 /// projection races with typing: `- investigate`, `- investigate the`, and
 /// `- investigate the timeout` are three versions of one editor line, not three
-/// queue items. Exact entries already present in `snapshot_entries` break a run,
-/// preserving committed operator intent. Callers must additionally have causal
-/// evidence of a raced non-operator projection before applying this repair. A
-/// two-item prefix pair remains untouched because it is plausible independent
-/// operator intent; three monotonic snapshots are the corruption signature.
+/// queue items. Callers must additionally have causal evidence of a raced
+/// non-operator projection before applying this repair. A two-item prefix pair
+/// is enough only when its first item is the single snapshot-authored version
+/// and its extension is live-only: that is the stale-baseline + completed-edit
+/// shape produced when a turn starts while the operator is still typing. Two
+/// fresh items, two snapshot-authored items, and snapshot-authored duplicates
+/// remain untouched because they are plausible independent operator intent;
+/// three fresh monotonic snapshots remain the corruption signature.
 pub fn collapse_progressive_free_text_heads(
     entries: &[QueueEntry],
     snapshot_entries: &[QueueEntry],
 ) -> Option<Vec<QueueEntry>> {
-    let snapshot_keys: std::collections::HashSet<String> = snapshot_entries
-        .iter()
-        .filter_map(progressive_free_text_key)
-        .collect();
+    let mut snapshot_counts = std::collections::HashMap::<String, usize>::new();
+    for key in snapshot_entries.iter().filter_map(progressive_free_text_key) {
+        *snapshot_counts.entry(key).or_insert(0) += 1;
+    }
     let mut collapsed = Vec::with_capacity(entries.len());
     let mut changed = false;
     let mut index = 0usize;
@@ -2671,11 +2674,8 @@ pub fn collapse_progressive_free_text_heads(
             index += 1;
             continue;
         };
-        if snapshot_keys.contains(&text) {
-            collapsed.push(entries[index].clone());
-            index += 1;
-            continue;
-        }
+        let initial_text = text.clone();
+        let snapshot_seed_count = snapshot_counts.get(&initial_text).copied().unwrap_or(0);
 
         let mut survivor = index;
         let mut next = index + 1;
@@ -2684,7 +2684,7 @@ pub fn collapse_progressive_free_text_heads(
             else {
                 break;
             };
-            if snapshot_keys.contains(&next_text)
+            if snapshot_counts.contains_key(&next_text)
                 || next_prompt.indent != prompt.indent
                 || next_prompt.ordered_marker != prompt.ordered_marker
                 || next_text.len() <= text.len()
@@ -2697,7 +2697,9 @@ pub fn collapse_progressive_free_text_heads(
             next += 1;
         }
 
-        if survivor >= index + 2 {
+        let progressive_snapshot_chain = survivor >= index + 2;
+        let baseline_version_superseded = survivor == index + 1 && snapshot_seed_count == 1;
+        if progressive_snapshot_chain || baseline_version_superseded {
             changed = true;
             collapsed.push(entries[survivor].clone());
         } else {
@@ -4431,6 +4433,37 @@ mod tests {
         assert!(
             collapse_progressive_free_text_heads(&snapshot, &snapshot).is_none(),
             "committed prefix-shaped items are intentional queue entries"
+        );
+    }
+
+    #[test]
+    fn progressive_free_text_heads_replace_one_baseline_version_with_its_live_extension() {
+        let snapshot = parse("- review the change.\n").unwrap();
+        let entries = parse(concat!(
+            "- review the change.\n",
+            "- review the change. How is the final revision handled?\n",
+        ))
+        .unwrap();
+        let collapsed = collapse_progressive_free_text_heads(&entries, &snapshot)
+            .expect("a live extension must supersede the one stale baseline version");
+        assert_eq!(
+            render(&collapsed),
+            "- review the change. How is the final revision handled?\n"
+        );
+    }
+
+    #[test]
+    fn progressive_free_text_heads_preserve_duplicate_baseline_versions() {
+        let snapshot = parse("- investigate\n- investigate\n").unwrap();
+        let entries = parse(concat!(
+            "- investigate\n",
+            "- investigate the timeout\n",
+            "- investigate\n",
+        ))
+        .unwrap();
+        assert!(
+            collapse_progressive_free_text_heads(&entries, &snapshot).is_none(),
+            "a duplicated committed prefix is intentional authored multiplicity"
         );
     }
 

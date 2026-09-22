@@ -241,6 +241,15 @@ backlog edits continue to reject Review-only targets.
   validation or write leaves them durable for a later retry. This preserves
   operator deletion of struck queue rows across capacity pauses
   (`#pauseddeletetombstone`).
+- **Projection-race queue edits keep only the newest line version.** When the
+  realtime write state proves that an agent projection raced the editor, a
+  single snapshot-authored free-text queue line immediately followed by one
+  live-only strict extension is one in-place edit, not two queue items. The
+  queue policy owner replaces the stale baseline version with the completed
+  text before semantic response rebasing. Two fresh prefix-shaped items, two
+  versions already authored in the snapshot, duplicate snapshot multiplicity,
+  multiline entries, and id-backed heads remain distinct. Without the existing
+  projection-race evidence this normalization is never applied.
 - A session-document response requires `finalize` or explicit `write --commit`. Bare/non-committing `write`, including `write --stream`, fails before stdin, response capture, document mutation, queue mutation, or lifecycle advancement; partial response checkpoints may exist only in recovery sidecars.
 - Strict response placement, answered queue-head removal, backlog/review/done mutations, snapshot publication, and commit are one transaction. A failure before terminal proof must not expose a response prefix or mark a queue head consumed. `AlreadyApplied` is valid only when the visible document proves the exact complete expected final response from this transaction.
 - Every tracked-work flag in one closeout is evaluated against one virtual

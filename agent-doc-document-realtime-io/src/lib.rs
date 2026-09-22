@@ -8926,6 +8926,43 @@ mod tests {
     }
 
     #[test]
+    fn post_projection_race_replaces_a_baseline_queue_prefix_with_the_completed_edit() {
+        let partial_prompt = "- Review the proposed change.\n";
+        let complete_prompt =
+            "- Review the proposed change. How is the final revision handled?\n";
+        let base = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- Review the proposed change.\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let agent_target = base.replacen(
+            "<!-- agent:boundary:abc123 -->",
+            "### Re: current\n\nDone.\n<!-- agent:boundary:abc123 -->",
+            1,
+        );
+        let raced_projection = agent_target.replacen(
+            partial_prompt,
+            &format!("{partial_prompt}{complete_prompt}"),
+            1,
+        );
+
+        let collapsed = collapse_progressive_queue_projection(base, &raced_projection)
+            .expect("the completed live edit must supersede its stale baseline prefix");
+        assert_eq!(collapsed.matches(complete_prompt.trim_end()).count(), 1);
+        assert!(!collapsed.lines().any(|line| line == partial_prompt.trim_end()));
+
+        let merged = rebase_agent_candidate_over_editor_cut(base, &agent_target, &collapsed)
+            .expect("the agent response should rebase over the completed queue edit");
+        assert_eq!(merged.matches(complete_prompt.trim_end()).count(), 1);
+        assert!(!merged.lines().any(|line| line == partial_prompt.trim_end()));
+        assert!(merged.contains("### Re: current"));
+    }
+
+    #[test]
     fn detached_base_replays_pending_operator_queue_deletion() {
         let base = concat!(
             "---\nqueue: go\n---\n\n",

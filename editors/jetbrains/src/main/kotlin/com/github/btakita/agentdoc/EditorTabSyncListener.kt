@@ -100,6 +100,15 @@ class EditorTabSyncListener : FileEditorManagerListener {
         private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
         private val GSON = com.google.gson.Gson()
         private const val FOCUS_COALESCE_MS = 12L
+        private val FOCUS_LAYOUT_REPAIR_REASONS =
+            setOf(
+                "actor_pane_not_visible",
+                "actor_not_focusable",
+                "missing_actor_record",
+                "actor_pane_not_alive",
+                "registry_pane_not_alive",
+                "live_owner_pane_not_alive",
+            )
 
         private val instances = ConcurrentHashMap<Project, EditorTabSyncListener>()
 
@@ -172,9 +181,11 @@ class EditorTabSyncListener : FileEditorManagerListener {
         }
 
         /**
-         * A focus-only projection cannot move panes, but its exact receipt can prove that the
-         * selected document's pane drifted into stash. Re-publish the complete editor surface in
-         * that case so the layout graph, which owns structural reconciliation, can move it back.
+         * A focus-only projection cannot move or create panes, but its exact receipt can prove
+         * that the selected document has no usable visible owner. Re-publish the complete editor
+         * surface in that case so the layout graph, which owns structural reconciliation, can
+         * restore a reaped/dead owner or move a stashed owner back without letting this narrow
+         * projection grow the layout itself.
          */
         internal fun focusProjectionRequiresLayoutRepair(receiptJson: String): Boolean {
             return try {
@@ -191,8 +202,9 @@ class EditorTabSyncListener : FileEditorManagerListener {
                         ?.takeIf { it.isJsonObject }
                         ?.asJsonObject
                         ?: outcome
+                val reason = data.get("reason")?.asString
                 data.get("focused")?.asBoolean == false &&
-                    data.get("reason")?.asString == "actor_pane_not_visible"
+                    reason in FOCUS_LAYOUT_REPAIR_REASONS
             } catch (_: Exception) {
                 false
             }

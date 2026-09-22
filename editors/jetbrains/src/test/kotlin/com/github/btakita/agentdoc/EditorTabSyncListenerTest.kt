@@ -110,6 +110,54 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `missing selected pane requests generation fenced structural repair`() {
+        val repairReasons =
+            listOf(
+                "actor_pane_not_visible",
+                "actor_not_focusable",
+                "missing_actor_record",
+                "actor_pane_not_alive",
+                "registry_pane_not_alive",
+                "live_owner_pane_not_alive",
+            )
+
+        for (reason in repairReasons) {
+            val response =
+                FocusProjectionEffectResponse(
+                    request =
+                        FocusProjectionEffectRequest(
+                            generation = 11,
+                            projectRoot = "/repo",
+                            filePath = "/repo/tasks/reaped.md",
+                            surfaceJson = "{}",
+                        ),
+                    transport =
+                        CpEditorRouteResult(
+                            exitCode = 0,
+                            output =
+                                """{"idle":false,"outcome":"{\"focused\":false,\"reason\":\"$reason\"}"}""",
+                        ),
+                )
+
+            assertEquals(
+                reason,
+                EditorTabSyncListener.FocusProjectionReceiptDecision.RepairLayout,
+                EditorTabSyncListener.decideFocusProjectionReceipt(
+                    response = response,
+                    currentGeneration = 11,
+                    projectWindowActive = true,
+                ),
+            )
+        }
+
+        assertFalse(
+            EditorTabSyncListener.focusProjectionRequiresLayoutRepair(
+                """{"idle":false,"outcome":"{\"focused\":false,\"reason\":\"desktop_editor_inactive\"}"}""",
+            ),
+        )
+    }
+
+    @Test
     fun `passive focus effect has a short transport deadline`() {
         assertTrue(CpRouteClient.EDITOR_FOCUS_OBSERVE_TIMEOUT_MS in 1..2_000)
         val source =
@@ -166,13 +214,13 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `stashed focus projection requests structural layout repair only for visible drift`() {
+    fun `unusable focus projection requests structural layout repair`() {
         assertTrue(
             EditorTabSyncListener.focusProjectionRequiresLayoutRepair(
                 """{"idle":false,"outcome":"{\"focused\":false,\"reason\":\"actor_pane_not_visible\"}"}""",
             ),
         )
-        assertFalse(
+        assertTrue(
             EditorTabSyncListener.focusProjectionRequiresLayoutRepair(
                 """{"idle":false,"outcome":"{\"focused\":false,\"reason\":\"missing_actor_record\"}"}""",
             ),

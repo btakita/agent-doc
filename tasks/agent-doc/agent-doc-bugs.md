@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0c52a-3488-73f3-ab3c-ccb7fd477509
+  codex: 01a0ca2a-32e2-7f02-9153-2532df91477d
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -298,6 +298,26 @@ Also:
 - Keep #538 consumer-side; reusable logic should live in a neutral shared-action repository, not `haiven-contracts`.
 
 The response is durably captured in agent-doc’s CRDT authority, but IntelliJ rejected the final native-save request after installation. Please restart IntelliJ once; the controller owns the retained response and should finish the document commit automatically. Do not manually resend or save the response.
+
+### Re: Response
+
+Fixed, committed, pushed, installed, and live-verified.
+
+- `67edf5415` — `fix: retain editor route across layout churn`
+  - Passive editor layouts can no longer supersede an in-flight Run Agent Doc route.
+  - The newest passive layout is retained and applied after dispatch settles.
+  - Newer explicit foreground layouts still supersede correctly.
+- Live `Run Agent Doc` for `tasks/software/tsift.md` succeeded on the first attempt with no `superseded_by_newer_layout_state`.
+- `make check` passed: 9,642 Rust tests, 179 VS Code tests, cross-editor simulation, parity checks, and formal models.
+- Installed controller is active. [CI is running](https://github.com/btakita/agent-doc/actions/runs/35770646184).
+- Earlier queue-race fix remains pushed as `c3879bc81`. Existing divergent uncommitted work was preserved in local commit `3f6692b78`.
+
+For haiven-api:
+
+- PR #538 does not currently need rebasing onto #544; their merge is clean.
+- If #544 lands first, rebase #538 onto the resulting `main` commit—not directly onto the PR branch.
+- I would not move #538 wholesale into `haiven-contracts`: it operates on consumer-repository state such as the contracts gitlink, secrets, and workflows.
+- If multiple consumers need it, extract the reusable mechanism into a neutral versioned action/tool and keep a thin consumer-specific wrapper in each repository.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

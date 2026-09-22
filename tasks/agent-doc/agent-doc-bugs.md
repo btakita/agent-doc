@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -226,6 +226,22 @@ Verification passed:
 - installed CLI reports `agent-doc 0.35.417`; the matching native library and editor packages were installed, and supervisors/controllers were marked for safe-boundary recycle.
 
 Source commit `0be958a30` (`fix: preserve live editor state at commit barriers`) is pushed to `origin/main`. No additional follow-up remains for this defect.
+
+### Re: release 0.35.417 — gpt-5.6 · 2026-09-22T11:03:15-04:00
+
+> **Queue prompt:** release + publish
+
+Released and published `agent-doc` 0.35.417 from the exact tested commit `0be958a30d3c345b5dbcd0ca6e06401232ff5002` (`fix: preserve live editor state at commit barriers`).
+
+- Pushed immutable tag `v0.35.417`; both `origin/main` and the tag resolve to `0be958a30`.
+- GitHub Release is public at https://github.com/btakita/agent-doc/releases/tag/v0.35.417 with GNU Linux, musl Linux, ARM64 Linux, Windows, JetBrains 0.2.392, VS Code 0.2.71, and `SHA256SUMS` artifacts.
+- PyPI serves `agent-doc==0.35.417` as `agent_doc-0.35.417-py3-none-any.whl`.
+- GitHub `CI`, `Release`, and `PyPI` workflows all completed successfully. The PyPI workflow's final verification performed a clean install and confirmed the downloaded native CLI reports `agent-doc 0.35.417`.
+- Local verification on the tagged commit had already passed `make check` (9,637 Rust tests plus editor, native SimWorld, Python, Lean, and TLA+ coverage), `make tmux-ci`, focused commit-barrier regressions, and `make install`; the installed CLI also reports `agent-doc 0.35.417`.
+
+Confidence: high. The source worktree is clean and the public tag, release assets, checksum, package registry, and installed version agree.
+
+Operator activation note: the currently running IntelliJ process still maps the superseded unlinked JetBrains plugin jar. Restart IntelliJ or close and reopen the affected editor tab to load the already-installed 0.2.392 package; this does not affect the published release.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -234,7 +250,8 @@ Source commit `0be958a30` (`fix: preserve live editor state at commit barriers`)
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 release + publish
 <!-- /agent:queue -->
 
 

@@ -61,8 +61,11 @@ boundary or inherits the shorter ordinary-RPC deadline.
 - The route's layout wait is owned by the pane-layout graph. If a newer passive
   editor generation still contains the routed document, route follows that
   generation until convergence instead of republishing another layout intent.
-  A newer layout that omits the document, operator ownership, or a terminal
-  non-converged state still fails closed before dispatch.
+  While that route is in flight, a passive generation that omits the document
+  is retained but cannot supersede the route; the newest retained generation is
+  projected after the routed dispatch attempt settles. A newer explicit route,
+  operator ownership, or a terminal non-converged state still fails closed
+  before dispatch (`#routelayoutlease`).
 - Fresh auto-starts and live reroutes both require the Project Controller's reactive per-document admission projection after dispatch; accepted input alone is not sufficient.
 - Automatic editor-layout `Sync` generations are structural edges and must cross the tmux effect boundary even when the desired columns match a retained structural receipt. A first observation or controller-observed drift cannot be declared converged from an older pane assignment; focus-only changes use their separate effect.
 - When a project has no explicit tmux-session configuration, the layout observer must resolve the observed session from that generation's effect-owned pane assignment. A configured session remains authoritative; the observer must not reject an already-applied shared-session effect merely because the target project omitted redundant session configuration.

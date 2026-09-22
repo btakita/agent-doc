@@ -8918,11 +8918,10 @@ fn handle_editor_route_rpc(
         layout_invocation.focus.as_deref() == Some(routed_document.as_str()),
         "editor route refused before layout publication: focused document does not match routed document"
     );
-    let layout_receipt = handle_sync_tmux_layout_invocation(
+    let (layout_receipt, _route_layout_lease) = handle_editor_route_layout(
         bootstrap,
         runtime,
         layout_invocation,
-        PaneLayoutPublication::FreshIntent,
     )?;
     anyhow::ensure!(
         tmux_layout_command_applied(&layout_receipt),
@@ -21929,15 +21928,36 @@ pub(crate) fn handle_sync_tmux_layout(
     await_sync_tmux_layout_projection(bootstrap, runtime, desired, invocation)
 }
 
-fn handle_sync_tmux_layout_invocation(
+fn handle_editor_route_layout<'a>(
     bootstrap: &ControllerBootstrap,
-    runtime: &ControllerRuntime,
+    runtime: &'a ControllerRuntime,
     invocation: ControllerTmuxLayoutSyncInvocation,
-    publication: PaneLayoutPublication,
-) -> Result<ControllerTmuxLayoutSyncReceipt> {
-    let (desired, invocation) =
-        publish_pane_layout_desired_invocation(bootstrap, runtime, invocation, None, publication)?;
-    await_sync_tmux_layout_projection(bootstrap, runtime, desired, invocation)
+) -> Result<(ControllerTmuxLayoutSyncReceipt, PaneLayoutRouteLeaseGuard<'a>)> {
+    let (desired, invocation) = publish_pane_layout_desired_invocation(
+        bootstrap,
+        runtime,
+        invocation,
+        None,
+        PaneLayoutPublication::FreshRouteIntent,
+    )?;
+    let lease = PaneLayoutRouteLeaseGuard {
+        runtime,
+        generation: desired.generation,
+    };
+    let receipt = await_sync_tmux_layout_projection(bootstrap, runtime, desired, invocation)?;
+    Ok((receipt, lease))
+}
+
+struct PaneLayoutRouteLeaseGuard<'a> {
+    runtime: &'a ControllerRuntime,
+    generation: u64,
+}
+
+impl Drop for PaneLayoutRouteLeaseGuard<'_> {
+    fn drop(&mut self) {
+        self.runtime
+            .release_pane_layout_route_lease(self.generation);
+    }
 }
 
 fn await_sync_tmux_layout_projection(
@@ -21948,7 +21968,7 @@ fn await_sync_tmux_layout_projection(
 ) -> Result<ControllerTmuxLayoutSyncReceipt> {
     #[cfg(any(test, feature = "test-support"))]
     {
-        let _ = desired;
+        let _ = &desired;
         let mut invocation = invocation;
         invocation.actor_bindings = runtime.pane_layout_actor_bindings();
         return runtime_effects()?.sync_tmux_layout(&bootstrap.project_root, invocation);
@@ -22004,7 +22024,7 @@ fn await_sync_tmux_layout_projection(
         let receipt_generation = pane_layout_projection_desired(&projection)
             .map(|current| current.generation)
             .unwrap_or(desired.generation);
-        Ok(ControllerTmuxLayoutSyncReceipt {
+        let receipt = ControllerTmuxLayoutSyncReceipt {
             applied,
             reason: reason.to_string(),
             columns: receipt_invocation.columns,
@@ -22014,7 +22034,8 @@ fn await_sync_tmux_layout_projection(
             exact_visible: receipt_invocation.exact_visible,
             routes_created_panes,
             file_panes: runtime.pane_layout_effect_file_panes(receipt_generation),
-        })
+        };
+        Ok(receipt)
     }
 }
 
@@ -25929,7 +25950,7 @@ mod tests {
             .find("controller_editor_route_layout_converged")
             .expect("layout convergence log")];
         assert_eq!(
-            route.matches("handle_sync_tmux_layout_invocation(").count(),
+            route.matches("handle_editor_route_layout(").count(),
             1,
             "semantic supersession belongs to the layout graph, not an RPC republish loop"
         );

@@ -507,8 +507,14 @@ pub(crate) fn pane_layout_projection_desired(
 
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 fn pane_layout_contains_document(desired: &PaneLayoutDesired, document: &str) -> bool {
-    desired
-        .invocation
+    invocation_columns_contain_document(&desired.invocation, document)
+}
+
+fn invocation_columns_contain_document(
+    invocation: &ControllerTmuxLayoutSyncInvocation,
+    document: &str,
+) -> bool {
+    invocation
         .columns
         .iter()
         .flat_map(|column| column.split(','))
@@ -893,6 +899,7 @@ struct ControllerPaneLayoutGraph {
     sink: Arc<OnceLock<Arc<dyn PaneLayoutProjectionSink>>>,
     sink_ready: Source<bool>,
     next_generation: AtomicU64,
+    publication_state: Mutex<PaneLayoutPublicationState>,
     /// The latest generation published by `set_desired`. The structural-effect
     /// worker binds its own generation against this so the sync body can bail
     /// early when a newer layout supersedes the one it is applying.
@@ -911,6 +918,23 @@ struct ControllerPaneLayoutGraph {
 enum PaneLayoutPublication {
     CoalesceIdentical,
     FreshIntent,
+    FreshRouteIntent,
+}
+
+#[derive(Default)]
+struct PaneLayoutPublicationState {
+    active_route: Option<PaneLayoutRouteLease>,
+    pending_passive: Option<PendingPaneLayoutPublication>,
+}
+
+struct PaneLayoutRouteLease {
+    generation: u64,
+    document: String,
+}
+
+struct PendingPaneLayoutPublication {
+    invocation: ControllerTmuxLayoutSyncInvocation,
+    source_plane_version: Option<u64>,
 }
 
 impl ControllerPaneLayoutGraph {
@@ -1024,6 +1048,7 @@ impl ControllerPaneLayoutGraph {
             sink,
             sink_ready,
             next_generation: AtomicU64::new(1),
+            publication_state: Mutex::new(PaneLayoutPublicationState::default()),
             published_generation: Arc::new(AtomicU64::new(0)),
             waiters: Condvar::new(),
             wait_lock: Mutex::new(()),
@@ -1064,6 +1089,18 @@ impl ControllerPaneLayoutGraph {
         )
     }
 
+    fn set_fresh_route_desired(
+        &self,
+        invocation: ControllerTmuxLayoutSyncInvocation,
+        source_plane_version: Option<u64>,
+    ) -> PaneLayoutDesired {
+        self.set_desired_with_publication(
+            invocation,
+            source_plane_version,
+            PaneLayoutPublication::FreshRouteIntent,
+        )
+    }
+
     fn set_desired_with_publication(
         &self,
         mut invocation: ControllerTmuxLayoutSyncInvocation,
@@ -1073,6 +1110,50 @@ impl ControllerPaneLayoutGraph {
         if invocation.caller_kind.is_empty() {
             invocation.caller_kind = "projection".to_string();
         }
+        let mut publication_state = self.publication_state.lock();
+        if let Some(active_route) = &publication_state.active_route {
+            if publication == PaneLayoutPublication::CoalesceIdentical
+                && invocation.caller_kind == "automatic"
+            {
+                if !invocation_columns_contain_document(&invocation, &active_route.document) {
+                    publication_state.pending_passive = Some(PendingPaneLayoutPublication {
+                        invocation,
+                        source_plane_version,
+                    });
+                    return self
+                        .ctx
+                        .get(&self.desired)
+                        .expect("an active route lease retains desired layout state");
+                }
+                // A newer passive state that still covers the route is safe to
+                // project immediately and replaces any older deferred state.
+                publication_state.pending_passive = None;
+            } else if publication != PaneLayoutPublication::FreshRouteIntent {
+                // A newer foreground command owns supersession. Retire this
+                // route's lease and do not let an older buffered editor state
+                // overwrite that explicit intent when the old guard drops.
+                publication_state.active_route = None;
+                publication_state.pending_passive = None;
+            }
+        }
+        let desired = self.publish_desired(invocation, source_plane_version, publication);
+        if publication == PaneLayoutPublication::FreshRouteIntent
+            && let Some(document) = desired.invocation.focus.clone()
+        {
+            publication_state.active_route = Some(PaneLayoutRouteLease {
+                generation: desired.generation,
+                document,
+            });
+        }
+        desired
+    }
+
+    fn publish_desired(
+        &self,
+        invocation: ControllerTmuxLayoutSyncInvocation,
+        source_plane_version: Option<u64>,
+        publication: PaneLayoutPublication,
+    ) -> PaneLayoutDesired {
         if publication == PaneLayoutPublication::CoalesceIdentical
             && let Some(mut current) = self.ctx.get(&self.desired)
             && current.invocation == invocation
@@ -1110,6 +1191,25 @@ impl ControllerPaneLayoutGraph {
         });
         self.waiters.notify_all();
         desired
+    }
+
+    fn release_route_lease(&self, generation: u64) {
+        let mut publication_state = self.publication_state.lock();
+        if !publication_state
+            .active_route
+            .as_ref()
+            .is_some_and(|active| active.generation == generation)
+        {
+            return;
+        }
+        publication_state.active_route = None;
+        if let Some(pending) = publication_state.pending_passive.take() {
+            self.publish_desired(
+                pending.invocation,
+                pending.source_plane_version,
+                PaneLayoutPublication::CoalesceIdentical,
+            );
+        }
     }
 
     fn actor_bindings(&self) -> Vec<ControllerTmuxActorBinding> {
@@ -5921,6 +6021,9 @@ impl ControllerRuntime {
             PaneLayoutPublication::FreshIntent => self
                 .pane_layout_graph
                 .set_fresh_desired(invocation, source_plane_version),
+            PaneLayoutPublication::FreshRouteIntent => self
+                .pane_layout_graph
+                .set_fresh_route_desired(invocation, source_plane_version),
         }
     }
 
@@ -6001,6 +6104,10 @@ impl ControllerRuntime {
     ) -> PaneLayoutProjection {
         self.pane_layout_graph
             .await_route_document(document, timeout)
+    }
+
+    fn release_pane_layout_route_lease(&self, generation: u64) {
+        self.pane_layout_graph.release_route_lease(generation);
     }
 
     fn try_claim_coordination(&self, scopes: &[String], owner_token: &str, owner_pid: u32) -> bool {
@@ -9418,6 +9525,67 @@ mod tests {
         let next = graph.set_fresh_desired(invocation, None);
         assert_eq!(runs.lock().last().copied(), Some(next.generation));
         assert_eq!(runs.lock().len(), 3);
+    }
+
+    /// `#routelayoutlease`: a passive editor snapshot can arrive after Run
+    /// Agent Doc publishes its exact-visible layout but before tmux convergence.
+    /// It must remain the next desired state without cancelling that route.
+    #[test]
+    fn editor_route_lease_defers_a_passive_layout_that_omits_the_document() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actors = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
+
+        let mut route_invocation = pane_layout_desired_for_test(1).invocation;
+        route_invocation.caller_kind = "editor_route".to_string();
+        let routed_document = route_invocation.focus.clone().unwrap();
+        let route = graph.set_fresh_route_desired(route_invocation, None);
+
+        let mut first_passive = pane_layout_desired_for_test(2).invocation;
+        first_passive.columns = vec!["tasks/other.md".to_string()];
+        first_passive.focus = first_passive.columns.first().cloned();
+        first_passive.caller_kind = "automatic".to_string();
+        let retained = graph.set_desired(first_passive, Some(42));
+        assert_eq!(retained.generation, route.generation);
+        assert!(pane_layout_contains_document(&retained, &routed_document));
+
+        let mut latest_passive = pane_layout_desired_for_test(3).invocation;
+        latest_passive.columns = vec!["tasks/latest.md".to_string()];
+        latest_passive.focus = latest_passive.columns.first().cloned();
+        latest_passive.caller_kind = "automatic".to_string();
+        graph.set_desired(latest_passive.clone(), Some(43));
+        assert_eq!(graph.desired().unwrap().generation, route.generation);
+
+        graph.release_route_lease(route.generation);
+        let projected = graph.desired().unwrap();
+        assert_eq!(projected.invocation, latest_passive);
+        assert_eq!(projected.source_plane_version, Some(43));
+        assert!(projected.generation > route.generation);
+    }
+
+    #[test]
+    fn newer_foreground_layout_retires_the_route_lease_and_its_passive_buffer() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actors = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
+
+        let mut route_invocation = pane_layout_desired_for_test(1).invocation;
+        route_invocation.caller_kind = "editor_route".to_string();
+        let route = graph.set_fresh_route_desired(route_invocation, None);
+
+        let mut passive = pane_layout_desired_for_test(2).invocation;
+        passive.columns = vec!["tasks/passive.md".to_string()];
+        passive.focus = passive.columns.first().cloned();
+        passive.caller_kind = "automatic".to_string();
+        graph.set_desired(passive, Some(42));
+
+        let mut foreground = pane_layout_desired_for_test(3).invocation;
+        foreground.columns = vec!["tasks/foreground.md".to_string()];
+        foreground.focus = foreground.columns.first().cloned();
+        let foreground = graph.set_fresh_desired(foreground, None);
+        graph.release_route_lease(route.generation);
+
+        assert_eq!(graph.desired().unwrap(), foreground);
     }
 
     #[test]

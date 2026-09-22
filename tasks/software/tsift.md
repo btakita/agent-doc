@@ -77,13 +77,36 @@ Under that same mutation the pre-existing `search_cmd_uses_wal_snapshot_fallback
 This pane is the failed `tsift.md` launch itself: it never received agent-doc’s required preflight contract, so the workflow must fail closed.
 
 The original API session is actively implementing the systemic route-layout fix. No changes were made from this pane. Once that session lands and installs the fix, rerun **Run Agent Doc** on `tsift.md`.
+
+### Re: release + publish — gpt-5 · 2026-09-22T16:03-04:00
+
+> **Queue prompt:**
+>
+> release + publish
+
+Prepared and fully verified `tsift` **v0.1.101** at commit `e47c34870` with local tag `v0.1.101`. The tag will be pushed immediately after this binary-owned document closeout; that push triggers the repository's trusted-publishing workflow for the Rust workspace crates, the `opencode-tsift` npm package, and GitHub release assets.
+
+This release includes the post-0.1.100 harness-skill linking and version-drift work, plus a release-blocking concurrency fix discovered by the gate: managed skill and runbook refreshes now replace files atomically, so parallel `status --fix` / `init` processes cannot expose a truncated marker block. The regression proves an update replaces the inode rather than truncating in place and preserves existing permissions.
+
+Verification completed against the exact 50-path release candidate:
+
+- focused atomic-update regression: passed;
+- previously failing `status_fix_refreshes_stale_index_before_reporting_json`: passed;
+- full `make check`: exit 0, zero failure groups;
+- `cargo build --release`: passed;
+- `cargo install --path . --locked`: passed; installed `tsift 0.1.101`;
+- `tsift status`: fresh index and current `v0.1.101` instructions;
+- added-line private-name and whitespace checks: clean;
+- latest pre-release CI on `main` (`35766280628`): green.
+
+Separate operator warning: IntelliJ still has superseded agent-doc plugin bytes mapped. Restart IntelliJ or reopen the document tab to load the installed jar.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- release + publish
+- 🚧 release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: start
 ---
 
 ## Status
@@ -123,6 +123,20 @@ Fixed and deployed through agent-doc 0.35.414 (`924bbdbdf`, `d6779f7ad`, `105d6d
 - Closeout-owner claim and release now share one serialized durable-append → live-apply ingress with editor, retained-write, compact, and queue state events. The claim no longer retains the live projection mutex while waiting for SQLite, removing the memory↔SQLite inversion exposed by the post-0.35.413 finalize attempt. A deterministic regression holds SQLite's writer lock, proves the claim waits, and simultaneously acquires the projection mutex.
 
 Verification passed through the complete release gate: 9,633 Rust tests, simulations, 179 VS Code tests, JetBrains and VS Code suites, cross-editor native simulation, version/docs/parity audits, Python bootstrap tests, Lean, and all TLA models. Direct ledger evidence confirms the timed-out attempts created no new response capture or editor-op capture, so this preserved response remains the sole closeout payload.
+
+### Re: GitHub issue #56 queue cleanup — gpt-5.6 · 2026-09-21T21:51-04:00
+
+> **Queue prompt:**
+>
+> The sessiuon c
+
+
+> **Queue prompt:**
+>
+> do [#fixhttpsgithub]
+
+
+`#fixhttpsgithub` was already completed: GitHub issue #56 is closed, release `v0.35.406` was published, and the implementation, specification, tests, push, and installation are recorded in the earlier issue response and completed-work archive. I marked the duplicate stale backlog/queue item done; no additional follow-up is needed.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -132,8 +146,8 @@ Verification passed through the complete release gate: 9,633 Rust tests, simulat
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go priority -->
-- Run Agent Doc on agent-doc-bugs.md issue: route_queue_activation: failed to resolve current document /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md: editor is still attached for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; missing_replica recovery exhausted and disk read authority is refused
-- 🚧 do [#fixhttpsgithub]
+- ~~do [#fixhttpsgithub]~~
+- The session crashed
 - Run Agent Doc on dev.md with agent:queue not in go mode resulted in a single tmux pane layout.
 - Fix Run Agent Doc on docs.md then switching editor to dev.md resulted in focusing on a tmux pane in the stash tmux window.
 - Address new comments on gh issue #55.
@@ -143,7 +157,6 @@ Verification passed through the complete release gate: 9,633 Rust tests, simulat
 
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#fixhttpsgithub] Fix https://github.com/btakita/agent-doc/issues/56 + release + publish
 <!-- /agent:backlog -->
 
 ## Review

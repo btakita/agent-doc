@@ -3,7 +3,7 @@ agent_doc_session: tsift-v0.1
 resume:
   claude: 03da93b9-58a8-4aa3-b530-ca5405b2ea0b
   codex: 01a0b337-c18d-7770-8e52-af605f601504
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -71,12 +71,19 @@ Under that same mutation the pre-existing `search_cmd_uses_wal_snapshot_fallback
 **CI is queued, not green yet** — run `35766280628` was 4s old at push time. The preceding run on `2171338` is green. Local evidence above is what this closeout rests on.
 
 **One thing worth knowing for future sessions:** `lint::tests::ambient_tsift_state_dir_is_not_a_workspace_root` fails if `TMPDIR` points anywhere under `$HOME`. The test builds a fake home in a tempdir and declares only that tempdir ambient, so the ancestor walk continues past it and finds the real `~/.tsift`, resolving the root to `/home/brian`. That is arguably correct behavior rather than a bug — `$HOME` genuinely is `.tsift`-marked and was not declared ambient — but it means a `TMPDIR` override is not a safe way to work around a full `/tmp` for this suite. The full run above used the default `/tmp` after the reclaim.
+
+### Re: Response
+
+This pane is the failed `tsift.md` launch itself: it never received agent-doc’s required preflight contract, so the workflow must fail closed.
+
+The original API session is actively implementing the systemic route-layout fix. No changes were made from this pane. Once that session lands and installs the fix, rerun **Run Agent Doc** on `tsift.md`.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- release + publish
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -2197,6 +2197,10 @@ pub(crate) struct ControllerRuntime {
     coordination_graph: ControllerCoordinationGraph,
     supervisor_recycle_graph: ControllerSupervisorRecycleGraph,
     state_plane_graph: ControllerStatePlaneGraph,
+    /// Keep the authoritative wake map and its covering state-plane Snapshot
+    /// in one publication order. The map lock alone cannot prevent a thread
+    /// that cloned an older Snapshot from publishing after a newer wake.
+    captured_finalize_wake_publication: Mutex<()>,
     captured_finalize_wakes: Mutex<BTreeMap<String, rpc::CapturedFinalizeWakeProjection>>,
     pane_layout_graph: ControllerPaneLayoutGraph,
     /// Editor facts, history-dependent intent, and tmux consequences share the
@@ -5878,6 +5882,7 @@ impl ControllerRuntime {
             coordination_graph,
             supervisor_recycle_graph,
             state_plane_graph,
+            captured_finalize_wake_publication: Mutex::new(()),
             captured_finalize_wakes: Mutex::new(BTreeMap::new()),
             pane_layout_graph,
             editor_surface_graph,
@@ -14289,6 +14294,7 @@ agent:queue\n\
             state_projection_waiters: Condvar::new(),
             document_graphs,
             state_plane_graph: ControllerStatePlaneGraph::new_in(&scope),
+            captured_finalize_wake_publication: Mutex::new(()),
             captured_finalize_wakes: Mutex::new(BTreeMap::new()),
             pane_layout_graph,
             editor_surface_graph,

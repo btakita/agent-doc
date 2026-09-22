@@ -19516,6 +19516,27 @@ pub(super) fn publish_pinned_captured_finalize_wake(
     response_sha256: &str,
     reason: &str,
 ) -> bool {
+    publish_pinned_captured_finalize_wake_with_hook(
+        runtime,
+        document_hash,
+        cycle_id,
+        capture_id,
+        response_sha256,
+        reason,
+        || {},
+    )
+}
+
+fn publish_pinned_captured_finalize_wake_with_hook(
+    runtime: &ControllerRuntime,
+    document_hash: &str,
+    cycle_id: &str,
+    capture_id: &str,
+    response_sha256: &str,
+    reason: &str,
+    before_publish: impl FnOnce(),
+) -> bool {
+    let _publication = runtime.captured_finalize_wake_publication.lock();
     let payload = CapturedFinalizeWakeProjection {
         document_hash: document_hash.to_string(),
         cycle_id: cycle_id.to_string(),
@@ -19525,11 +19546,17 @@ pub(super) fn publish_pinned_captured_finalize_wake(
     };
     let snapshot = {
         let mut wakes = runtime.captured_finalize_wakes.lock();
+        if wakes.get(document_hash).is_some_and(|current| {
+            !captured_finalize_wake_should_replace(current, &payload)
+        }) {
+            return true;
+        }
         wakes.insert(document_hash.to_string(), payload);
         CapturedFinalizeWakeSnapshot {
             wakes: wakes.clone(),
         }
     };
+    before_publish();
     let epoch = CAPTURED_FINALIZE_WAKE_EPOCH.fetch_add(1, Ordering::SeqCst);
     let producer_id = match runtime.bootstrap_snapshot() {
         Ok(bootstrap) => format!(
@@ -19564,7 +19591,24 @@ pub(super) fn publish_pinned_captured_finalize_wake(
     true
 }
 
+fn captured_finalize_wake_should_replace(
+    current: &CapturedFinalizeWakeProjection,
+    incoming: &CapturedFinalizeWakeProjection,
+) -> bool {
+    if current == incoming {
+        return false;
+    }
+    let same_capture = current.document_hash == incoming.document_hash
+        && current.cycle_id == incoming.cycle_id
+        && current.capture_id == incoming.capture_id
+        && current.response_sha256 == incoming.response_sha256;
+    !same_capture
+        || current.reason != super::RETAINED_SETTLED_DELIVERY_REACTIVE_REASON
+        || incoming.reason == super::RETAINED_SETTLED_DELIVERY_REACTIVE_REASON
+}
+
 pub(super) fn clear_captured_finalize_wake(runtime: &ControllerRuntime, document_hash: &str) {
+    let _publication = runtime.captured_finalize_wake_publication.lock();
     runtime.captured_finalize_wakes.lock().remove(document_hash);
 }
 
@@ -25163,6 +25207,97 @@ mod tests {
             message_json,
         };
         assert_eq!(captured_finalize_wakes_from_frames(&[frame]), vec![wake]);
+    }
+
+    #[test]
+    fn captured_finalize_wake_publication_cannot_reorder_map_and_snapshot() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let release = Arc::new(std::sync::Barrier::new(2));
+
+        let first_runtime = Arc::clone(&runtime);
+        let first_release = Arc::clone(&release);
+        let first = std::thread::spawn(move || {
+            publish_pinned_captured_finalize_wake_with_hook(
+                &first_runtime,
+                "document",
+                "cycle",
+                "capture",
+                "response",
+                "wake-a",
+                || {
+                    entered_tx.send(()).unwrap();
+                    first_release.wait();
+                },
+            )
+        });
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+
+        let second_runtime = Arc::clone(&runtime);
+        let (second_done_tx, second_done_rx) = std::sync::mpsc::channel();
+        let second = std::thread::spawn(move || {
+            let published = publish_pinned_captured_finalize_wake(
+                &second_runtime,
+                "document",
+                "cycle",
+                "capture",
+                "response",
+                "wake-b",
+            );
+            second_done_tx.send(published).unwrap();
+        });
+        assert!(
+            second_done_rx
+                .recv_timeout(Duration::from_millis(100))
+                .is_err(),
+            "a newer map write must not overtake the older covering Snapshot"
+        );
+
+        release.wait();
+        assert!(first.join().unwrap());
+        assert!(second_done_rx.recv_timeout(Duration::from_secs(2)).unwrap());
+        second.join().unwrap();
+
+        let current = runtime
+            .captured_finalize_wakes
+            .lock()
+            .get("document")
+            .cloned()
+            .unwrap();
+        let subscription = runtime.subscribe_state_plane(
+            CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
+            None,
+            0,
+            Duration::ZERO,
+        );
+        assert_eq!(current.reason, "wake-b");
+        assert_eq!(
+            captured_finalize_wakes_from_frames(&subscription.frames),
+            vec![current]
+        );
+    }
+
+    #[test]
+    fn retained_settled_wake_cannot_be_downgraded_for_the_same_capture() {
+        let retained = CapturedFinalizeWakeProjection {
+            document_hash: "document".to_string(),
+            cycle_id: "cycle".to_string(),
+            capture_id: "capture".to_string(),
+            response_sha256: "response".to_string(),
+            reason: super::RETAINED_SETTLED_DELIVERY_REACTIVE_REASON.to_string(),
+        };
+        let mut generic = retained.clone();
+        generic.reason = "document_write_converged".to_string();
+        assert!(!captured_finalize_wake_should_replace(&retained, &generic));
+        assert!(captured_finalize_wake_should_replace(&generic, &retained));
+
+        let mut next_capture = generic;
+        next_capture.capture_id = "capture-2".to_string();
+        assert!(captured_finalize_wake_should_replace(
+            &retained,
+            &next_capture
+        ));
     }
 
     #[test]

@@ -1476,6 +1476,82 @@ fn write_commit_pending_only_update_reopens_committed_cycle() {
     );
 }
 
+/// A response-bearing tracked-work closeout can enter the same committed-cycle
+/// compatibility lane as a pending-only write. The foreground lease attempt is
+/// made before that lane reopens the cycle, so it must be reacquired against the
+/// fresh cycle before the response capture can wake binary-owned recovery.
+#[test]
+fn response_and_done_reopen_acquires_fresh_cycle_owner_before_capture() {
+    let (tmp, doc) = setup_session_stream_doc();
+    let original = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- agent:backlog -->\n<!-- /agent:backlog -->",
+        "<!-- agent:backlog -->\n- [ ] [#done1] Finish retained work\n<!-- /agent:backlog -->",
+    );
+    fs::write(&doc, &original).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    checkpoint_baseline(tmp.path(), &original);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--stream",
+            "--origin",
+            "skill",
+        ])
+        .write_stdin("<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--stream",
+            "--origin",
+            "skill",
+            "--done",
+            "done1",
+            "--no-followups",
+        ])
+        .write_stdin("<!-- patch:exchange -->\n### Re: second — gpt-5\n\nSecond response.\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+
+    assert_eq!(
+        read_cycle_phase(tmp.path(), &doc).as_deref(),
+        Some("committed")
+    );
+    let head = head_blob(tmp.path());
+    assert_eq!(
+        head.matches("### Re: second — gpt-5").count(),
+        1,
+        "the response-bearing reopen must commit exactly one response:\n{head}",
+    );
+    assert!(
+        !head.contains("- [ ] [#done1] Finish retained work"),
+        "the same closeout must land its tracked-work mutation:\n{head}",
+    );
+
+    let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    let reopened = ops_log
+        .rfind("baseline_replay_pending_only_reopened")
+        .expect("the committed cycle should reopen");
+    let after_reopen = &ops_log[reopened..];
+    let acquired = after_reopen
+        .find("closeout_owner_actor_claim")
+        .expect("the fresh cycle should be claimed");
+    let capture = after_reopen
+        .find("closeout_mutation_plan_captured_before_authority_resolution")
+        .expect("the response/mutation envelope should be captured");
+    assert!(
+        acquired < capture && after_reopen[acquired..capture].contains("outcome=Acquired"),
+        "fresh-cycle ownership must be acquired before response capture:\n{after_reopen}",
+    );
+}
+
 /// The `#committedwedge` escape is scoped to tracked-work mutations: a bare
 /// empty-stdin replay with no mutations is still a no-op and still fails closed.
 #[test]

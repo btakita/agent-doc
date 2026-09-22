@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.415
+
+- **Committed-cycle tracked-work reopen owns the fresh cycle before response
+  capture.** A foreground finalize whose first owner claim sees the previous
+  terminal cycle now reacquires ownership immediately after the compatibility
+  path opens its new cycle. The supervisor can no longer wake on an ownerless
+  response capture and race the same response plus `--done` mutation under a
+  second hash. A regression covers response + `--done` + `--no-followups`,
+  proves the fresh-cycle claim precedes capture, and verifies one terminal
+  commit.
+
 ## 0.35.414
 
 - **Closeout-owner state transitions use one durable-first ingress order.** The

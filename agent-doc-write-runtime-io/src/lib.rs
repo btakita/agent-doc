@@ -1946,7 +1946,7 @@ fn run_command_inner_within_pass(
 ) -> Result<()> {
     let file = options.file.as_path();
     let closeout_role = WriteCloseoutOwnerRole::from_origin(options.origin.as_deref());
-    let _closeout_owner = claim_foreground_closeout_owner(file, closeout_role)?;
+    let mut _closeout_owner = claim_foreground_closeout_owner(file, closeout_role)?;
     let _force_disk_authority_scope = if options.force_disk {
         Some(
             agent_doc_document_realtime_io::begin_force_disk_authority_scope(
@@ -2374,7 +2374,30 @@ fn run_command_inner_within_pass(
     )? {
         // Auto-reopened a committed cycle for a genuinely new response: diff against
         // the fresh HEAD baseline, not a stale lifecycle projection.
-        Some(fresh_head_baseline) => Some(fresh_head_baseline),
+        Some(fresh_head_baseline) => {
+            // `#reopencloseoutowner`: the first lease attempt runs before this
+            // compatibility gate and therefore sees the previous terminal cycle.
+            // The controller correctly returns `CycleSuperseded`, but continuing
+            // without retrying leaves the newly opened cycle ownerless. Its first
+            // durable response-capture edge can then wake the supervisor, which
+            // races the still-running foreground finalize and may replay the same
+            // response/mutation plan under a different response hash.
+            //
+            // Reacquire immediately after the fresh cycle is durable and before
+            // any response capture or document mutation. Actorless documents keep
+            // the existing compatibility path; a project actor that cannot grant
+            // the new-cycle lease fails closed instead of creating ownerless work.
+            if _closeout_owner.is_none() {
+                _closeout_owner = claim_foreground_closeout_owner(file, closeout_role)?;
+                anyhow::ensure!(
+                    _closeout_owner.is_some()
+                        || agent_doc_project_root_io::project_root_containing(file).is_none(),
+                    "fresh closeout cycle for {} could not acquire foreground ownership",
+                    file.display(),
+                );
+            }
+            Some(fresh_head_baseline)
+        }
         None => read_document_baseline(file)?,
     };
 

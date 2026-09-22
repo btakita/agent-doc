@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: start
 ---
 
 ## Status
@@ -338,6 +338,21 @@ Verification passed:
 - local CLI, native library, JetBrains, and VS Code install.
 
 The installed controller was marked for a two-phase recycle. CI run `35783752395` was in progress at the required one-time post-push check. Restart IntelliJ to activate the newly installed plugin package.
+
+### Re: Response
+
+Fixed and pushed to `main` in two commits:
+
+- `9d2fe3ff2` — hermetic checks, Cargo/temp path handling, non-interactive VS Code packaging, safer recycle guidance.
+- `b667a885c` — serialized finalize-wake publication and protected retained-settled wakes from generic downgrades.
+
+Verification:
+
+- `make check`: 9,648 Rust tests passed, plus editor, cross-editor, bootstrap, audit, and TLA+ checks.
+- `make install`: successful; binary, native library, JetBrains, and VS Code packages installed.
+- Idle-boundary recycling scheduled automatically.
+- Worktree clean.
+- CI snapshot was queued: run `35791291748`; not polled further per repository policy.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -347,10 +362,11 @@ The installed controller was marked for a two-phase recycle. CI run `35783752395
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 The struck multi-line queue item below was not cleared when `agent:queue` completed.
+- ~~The struck multi-line queue item below was not cleared when `agent:queue` completed.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~Make this error message easier for a human to read given a small prompt dialog in Idea:~~
   agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: [lint-gate] INTERRUPTED: 1 blocking lint finding(s) for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md (mode=warn, source=default). Fix the directives below before re-running `agent-doc finalize` / `agent-doc write --commit`, or set `agent_doc_lint_dialect: off` in frontmatter / `[lint] dialect = "off"` in `.agent-doc/config.toml` to temporarily skip this gate. /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md:449:1 error: attribute `queu0000e` on `agent:backlog` is missing `=value` [agent-doc/malformed-attr] hint: try `queu0000e= `
 - On tsift.md, I switched `agent: claude` to `agent: codex` but agent-doc reverts my change. Now switching the editor to tsift.md does not auto-sync the tmux pane.
+- Fix api.md session issue: • Agent-doc accepted the response intent but deferred its terminal commit while the editor replica converges. Per its recovery protocol, I’m checking the session exactly once and will not resend or force-write the response.
 <!-- /agent:queue -->
 
 

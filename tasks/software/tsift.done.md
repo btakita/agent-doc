@@ -546,3 +546,4 @@
 - 2026-09-17 [#tsiftinstrpolicy] [recommended] Implement team-safe instruction deployment modes from #tsiftfriendlyteam: personal (no tracked repo mutation; user-scoped skill plus bundled runbook), shared (explicit AGENTS.md plus tracked runbook), and off; preserve existing installs and never default to AGENTS.override.md.
 - 2026-09-18 [#fixdiscordissue] Fix discord.md issue:
 - 2026-09-22 [#tsiftsupportskill] Does tsift support a skill so we don't need to use AGENTS.md?
+- 2026-09-22 [#claudeskillmerge] Decide what happens to the hand-maintained ~/.claude/skills/tsift/SKILL.md (7.6K, user-invocable /tsift, own runbooks/, pinned tsift-version 0.1.62). It is richer than the generated 2.4K skill but 38 versions stale, and 'tsift init --harness claude' now fails closed on it by design. Either fold its extra content into the generated skill template so the symlink can take over, or skip --harness claude and keep maintaining it by hand.

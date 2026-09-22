@@ -281,6 +281,23 @@ Verification and delivery:
 - GitHub CI run 35759252186 is in progress; the preceding CI run is green, and local full-suite evidence is complete.
 
 Confidence: high. No escalation is needed. Restart the running IDEA instance to activate JetBrains plugin 0.2.394. The exchange is now 216+ lines; the active queue was drained without interrupting it for compaction, as required.
+❯ In api.md, I was typing in agent:queue when a turn started. My queue item was duplicated with a previous version of the item. Fix this category of bug in agent-doc.
+```
+- Review https://github.com/haiven-dev/haiven-api/pull/544. 
+- Review https://github.com/haiven-dev/haiven-api/pull/544. How are the squashed merge SHAs handled?
+```
+
+### Re: Response
+
+Implemented and pushed the queue-race fix as `c3879bc81`. Full `make check` passed, and CI is running.
+
+Also:
+
+- Preserved prior uncommitted work in local commit `3f6692b78`; not pushed because that checkout has divergent history.
+- #538 need not be rebased onto #544 now. If #544 merges first, rebase #538 onto updated `main`, not the squash-discarded PR head.
+- Keep #538 consumer-side; reusable logic should live in a neutral shared-action repository, not `haiven-contracts`.
+
+The response is durably captured in agent-doc’s CRDT authority, but IntelliJ rejected the final native-save request after installation. Please restart IntelliJ once; the controller owns the retained response and should finish the document commit automatically. Do not manually resend or save the response.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -290,8 +307,10 @@ Confidence: high. No escalation is needed. Restart the running IDEA instance to 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- The struck multi-line queue item below was not cleared when `agent:queue` completed.
 - ~~Make this error message easier for a human to read given a small prompt dialog in Idea:~~ — auto-struck: answered this cycle (#ftstrike)
   agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: [lint-gate] INTERRUPTED: 1 blocking lint finding(s) for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md (mode=warn, source=default). Fix the directives below before re-running `agent-doc finalize` / `agent-doc write --commit`, or set `agent_doc_lint_dialect: off` in frontmatter / `[lint] dialect = "off"` in `.agent-doc/config.toml` to temporarily skip this gate. /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md:449:1 error: attribute `queu0000e` on `agent:backlog` is missing `=value` [agent-doc/malformed-attr] hint: try `queu0000e= `
+- On tsift.md, I switched `agent: claude` to `agent: codex` but agent-doc reverts my change. Now switching the editor to tsift.md does not auto-sync the tmux pane.
 <!-- /agent:queue -->
 
 

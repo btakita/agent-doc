@@ -2506,6 +2506,9 @@ struct ControllerDocumentGraphs {
     >,
     /// Controller-local receipt for the exact compact continuation Effect.
     compact_resume_applied: lazily::ThreadSafeSourceMap<String, Option<String>>,
+    /// Exact compact attempt admitted to the out-of-scope document-effect
+    /// worker. Generation and retry frontier are part of the identity.
+    compact_resume_attempted: lazily::ThreadSafeSourceMap<String, Option<String>>,
     /// Authoritative markdown is ingress state. Terminal queue lifecycle facts
     /// are derived beside the durable document projection instead of being
     /// recorded by whichever mutation path happened to observe a strike.
@@ -2535,6 +2538,15 @@ struct ControllerDocumentGraphs {
     answered_free_text_strike_sender:
         Arc<OnceLock<std::sync::mpsc::Sender<AnsweredFreeTextStrikeCommand>>>,
     queue_completion: lazily::ThreadSafeComputedMap<String, QueueCompletionProjection>,
+    /// Exact durable side-effect frontiers admitted by settlement and queue
+    /// Effects. These prevent unchanged failures from spinning while allowing
+    /// a controller-generation or projection edge to retry.
+    settle_attempted: lazily::ThreadSafeSourceMap<String, Option<String>>,
+    queue_completion_attempted: lazily::ThreadSafeSourceMap<String, Option<String>>,
+    /// Durable state-ledger / compact adapter. Reactive Effects only enqueue
+    /// immutable commands; this worker crosses every external boundary after
+    /// the shared Lazily context has been released.
+    document_effect_sender: Arc<OnceLock<std::sync::mpsc::Sender<DocumentEffectCommand>>>,
     /// `#preflightreactive`: per-document read observations and the shared
     /// Computed projection consumed by the short-lived preflight CLI process.
     preflight_facts: lazily::ThreadSafeSourceMap<
@@ -3108,6 +3120,36 @@ struct QueueCompletionProjection {
     error: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+struct RetainedSettleCommand {
+    document_hash: String,
+    intent_id: String,
+    retained_target_hash: String,
+    settled_hash: String,
+    proof_token: String,
+    intent_source: agent_doc_state_backbone::DocumentWriteSource,
+}
+
+#[derive(Clone, Debug)]
+struct CompactResumeCommand {
+    document_hash: String,
+    continuation: agent_doc_state_backbone::DocumentCompactProjectionContinuation,
+}
+
+#[derive(Clone, Debug)]
+struct QueueCompletionCommand {
+    document_hash: String,
+    file: PathBuf,
+    projection: QueueCompletionProjection,
+}
+
+#[derive(Clone, Debug)]
+enum DocumentEffectCommand {
+    Settle(RetainedSettleCommand),
+    CompleteCompact(CompactResumeCommand),
+    CompleteQueue(QueueCompletionCommand),
+}
+
 impl RetainedWriteSettleSink {
     /// Append + apply the convergence fact. Applying re-enters
     /// [`ControllerDocumentGraphs::set_projection`], which invalidates the
@@ -3122,6 +3164,10 @@ impl RetainedWriteSettleSink {
         source: &str,
         intent_source: &agent_doc_state_backbone::DocumentWriteSource,
     ) -> bool {
+        #[cfg(test)]
+        if intent_id == "blocking-document-effect" {
+            std::thread::sleep(Duration::from_millis(750));
+        }
         let Some(runtime) = self.runtime.upgrade() else {
             // The controller is shutting down; the intent stays retained and the
             // next controller derives the same verdict from the same ledger.
@@ -3532,7 +3578,7 @@ impl RetainedWriteSettleSink {
                 },
             );
             match append_state_event(&self.project_root, &event) {
-                Ok(_) => {
+                Ok(true) => {
                     if let Err(error) = runtime.apply_state_event(&event) {
                         eprintln!(
                             "[controller] queue completion apply failed for {document_hash}: {error}"
@@ -3550,6 +3596,11 @@ impl RetainedWriteSettleSink {
                             projection.content_hash,
                         ),
                     );
+                }
+                Ok(false) => {
+                    // A stale queued command may arrive after an earlier
+                    // command completed the same head. The durable event id is
+                    // the receipt; never manufacture another live state edge.
                 }
                 Err(error) => {
                     eprintln!(
@@ -3591,6 +3642,7 @@ impl ControllerDocumentGraphs {
             retained_transition_published_frontier: lazily::ThreadSafeSourceMap::new(&ctx),
             compact_resume: lazily::ThreadSafeComputedMap::new(&ctx),
             compact_resume_applied: lazily::ThreadSafeSourceMap::new(&ctx),
+            compact_resume_attempted: lazily::ThreadSafeSourceMap::new(&ctx),
             queue_authority: lazily::ThreadSafeSourceMap::new(&ctx),
             answered_free_text_strike: lazily::ThreadSafeComputedMap::new(&ctx),
             answered_free_text_strike_applied: lazily::ThreadSafeSourceMap::new(&ctx),
@@ -3598,6 +3650,9 @@ impl ControllerDocumentGraphs {
             answered_free_text_strike_failure: lazily::ThreadSafeSourceMap::new(&ctx),
             answered_free_text_strike_sender: Arc::new(OnceLock::new()),
             queue_completion: lazily::ThreadSafeComputedMap::new(&ctx),
+            settle_attempted: lazily::ThreadSafeSourceMap::new(&ctx),
+            queue_completion_attempted: lazily::ThreadSafeSourceMap::new(&ctx),
+            document_effect_sender: Arc::new(OnceLock::new()),
             preflight_facts: lazily::ThreadSafeSourceMap::new(&ctx),
             preflight_projection: lazily::ThreadSafeComputedMap::new(&ctx),
             settle_effects: Mutex::new(BTreeMap::new()),
@@ -3648,6 +3703,70 @@ impl ControllerDocumentGraphs {
             runtime: Arc::downgrade(runtime),
         };
         let _ = self.settle_sink.set(sink.clone());
+        if self.document_effect_sender.get().is_none() {
+            let (sender, receiver) = std::sync::mpsc::channel::<DocumentEffectCommand>();
+            let worker_sink = sink.clone();
+            match std::thread::Builder::new()
+                .name("agent-doc-document-effects".to_string())
+                .spawn(move || {
+                    while let Ok(command) = receiver.recv() {
+                        match command {
+                            DocumentEffectCommand::Settle(command) => {
+                                let source = "controller_retained_write_settlement_effect";
+                                if worker_sink.settle(
+                                    &command.document_hash,
+                                    &command.intent_id,
+                                    &command.retained_target_hash,
+                                    source,
+                                    &command.intent_source,
+                                ) {
+                                    agent_doc_ops_log_io::log_op(
+                                        &worker_sink.project_root,
+                                        &format!(
+                                            "retained_write_settled_from_derived_verdict document_hash={} intent_id={} retained_target_hash={} settled_hash={} proof={} source={source}",
+                                            command.document_hash,
+                                            command.intent_id,
+                                            command.retained_target_hash,
+                                            command.settled_hash,
+                                            command.proof_token,
+                                        ),
+                                    );
+                                }
+                            }
+                            DocumentEffectCommand::CompleteCompact(command) => {
+                                let applied = worker_sink.complete_compact(
+                                    &command.document_hash,
+                                    &command.continuation,
+                                );
+                                let Some(runtime) = worker_sink.runtime.upgrade() else {
+                                    break;
+                                };
+                                runtime
+                                    .document_graphs
+                                    .complete_compact_resume(command, applied);
+                            }
+                            DocumentEffectCommand::CompleteQueue(command) => {
+                                worker_sink.complete_queue_heads(
+                                    &command.document_hash,
+                                    &command.file,
+                                    &command.projection,
+                                );
+                            }
+                        }
+                    }
+                }) {
+                Ok(_) => {
+                    if self.document_effect_sender.set(sender).is_err() {
+                        eprintln!(
+                            "[controller] document-effect worker sender was installed concurrently"
+                        );
+                    }
+                }
+                Err(error) => {
+                    eprintln!("[controller] failed to start document-effect worker: {error}");
+                }
+            }
+        }
         if self.retained_persistence_sender.get().is_none() {
             let (sender, receiver) = std::sync::mpsc::channel::<RetainedPersistenceCommand>();
             let worker_sink = sink.clone();
@@ -3781,6 +3900,7 @@ impl ControllerDocumentGraphs {
                 .keys()
                 .cloned(),
         );
+        document_hashes.extend(self.queue_completion_effects.lock().keys().cloned());
         self.ctx.batch(|ctx| {
             for document_hash in document_hashes {
                 self.settle_generation.set(ctx, document_hash, 1);
@@ -4409,14 +4529,15 @@ impl ControllerDocumentGraphs {
         let verdict_map = self.verdict.clone();
         let settle_generation = self.settle_generation.clone();
         let retained_delivery = self.retained_delivery.clone();
-        let sink = self.settle_sink.clone();
+        let attempted = self.settle_attempted.clone();
+        let sender = Arc::clone(&self.document_effect_sender);
         let effect_key = key.clone();
         let effect = self.ctx.effect(move |ctx| {
             // Subscribe directly to the controller-generation Source. The
             // verdict value may remain `Satisfied` across reconstruction, so
             // relying only on value propagation through the Computed would
             // leave the pre-sink no-op effect dormant.
-            let _generation = settle_generation
+            let generation = settle_generation
                 .observe(ctx, &effect_key)
                 .unwrap_or_default();
             // Reading through the map is what subscribes this effect; a verdict
@@ -4436,42 +4557,46 @@ impl ControllerDocumentGraphs {
             // projection receipt. Keep the pending intent alive until that
             // receipt arrives so its delivery edge can produce the closeout
             // wake rather than clearing the only resumable state too early.
-            let delivery_pending = retained_delivery
+            let delivery = retained_delivery
                 .contains_key(ctx, &effect_key)
                 .then(|| retained_delivery.observe(ctx, &effect_key))
                 .flatten()
-                .flatten()
-                .is_some_and(|delivery| {
-                    delivery.live_editors > 0 && !delivery.delivery_converged
-                });
+                .flatten();
+            let delivery_pending = delivery.as_ref().is_some_and(|delivery| {
+                delivery.live_editors > 0 && !delivery.delivery_converged
+            });
             if delivery_pending {
                 return;
             }
-            let Some(sink) = sink.get() else {
-                // No sink bound (test runtime): say so rather than silently
-                // dropping a settlement.
-                eprintln!(
-                    "[controller] retained-write settle skipped for {effect_key}: no sink installed"
-                );
-                return;
-            };
-            let source = "controller_retained_write_settlement_effect";
-            if !sink.settle(
-                &effect_key,
-                &intent_id,
-                &retained_target_hash,
-                source,
-                &intent_source,
-            ) {
+            let attempt_id = agent_doc_hash::content_hash(&format!(
+                "{intent_id}:{retained_target_hash}:{generation}:{}",
+                delivery
+                    .as_ref()
+                    .map(|observation| observation.delivery_version)
+                    .unwrap_or_default(),
+            ));
+            if attempted.observe(ctx, &effect_key).flatten().as_deref()
+                == Some(attempt_id.as_str())
+            {
                 return;
             }
-            agent_doc_ops_log_io::log_op(
-                &sink.project_root,
-                &format!(
-                    "retained_write_settled_from_derived_verdict document_hash={effect_key} intent_id={intent_id} retained_target_hash={retained_target_hash} settled_hash={settled_hash} proof={} source={source}",
-                    proof.token(),
-                ),
-            );
+            let Some(sender) = sender.get() else {
+                return;
+            };
+            attempted.set(ctx, effect_key.clone(), Some(attempt_id));
+            if let Err(error) = sender.send(DocumentEffectCommand::Settle(RetainedSettleCommand {
+                document_hash: effect_key.clone(),
+                intent_id,
+                retained_target_hash,
+                settled_hash,
+                proof_token: proof.token().to_string(),
+                intent_source,
+            })) {
+                attempted.set(ctx, effect_key.clone(), None);
+                eprintln!(
+                    "[controller] retained-write settlement enqueue failed for {effect_key}: {error}"
+                );
+            }
         });
         // Losing the mint race means another thread already installed an
         // equivalent effect; drop ours rather than leaving two subscribed.
@@ -4496,29 +4621,42 @@ impl ControllerDocumentGraphs {
         let signal_map = self.compact_resume.clone();
         let settle_generation = self.settle_generation.clone();
         let compact_retry_generation = self.compact_retry_generation.clone();
-        let applied = self.compact_resume_applied.clone();
-        let sink = self.settle_sink.clone();
+        let attempted = self.compact_resume_attempted.clone();
+        let sender = Arc::clone(&self.document_effect_sender);
         let effect_key = key.clone();
         let effect = self.ctx.effect(move |ctx| {
             let _generation_present = settle_generation.contains_key(ctx, &effect_key);
-            let _generation = settle_generation
+            let generation = settle_generation
                 .observe(ctx, &effect_key)
                 .unwrap_or_default();
             let _retry_generation_present = compact_retry_generation.contains_key(ctx, &effect_key);
-            let _retry_generation = compact_retry_generation
+            let retry_generation = compact_retry_generation
                 .observe(ctx, &effect_key)
                 .unwrap_or_default();
             let Some(continuation) = signal_map.observe(ctx, &effect_key).flatten() else {
                 return;
             };
-            let Some(sink) = sink.get() else {
+            let attempt_id = agent_doc_hash::content_hash(&format!(
+                "{}:{generation}:{retry_generation}",
+                continuation.continuation_id,
+            ));
+            if attempted.observe(ctx, &effect_key).flatten().as_deref() == Some(attempt_id.as_str())
+            {
+                return;
+            }
+            let Some(sender) = sender.get() else {
                 return;
             };
-            if sink.complete_compact(&effect_key, &continuation) {
-                applied.set(
-                    ctx,
-                    effect_key.clone(),
-                    Some(continuation.continuation_id.clone()),
+            attempted.set(ctx, effect_key.clone(), Some(attempt_id));
+            if let Err(error) = sender.send(DocumentEffectCommand::CompleteCompact(
+                CompactResumeCommand {
+                    document_hash: effect_key.clone(),
+                    continuation,
+                },
+            )) {
+                attempted.set(ctx, effect_key.clone(), None);
+                eprintln!(
+                    "[controller] compact completion enqueue failed for {effect_key}: {error}"
                 );
             }
         });
@@ -4529,6 +4667,16 @@ impl ControllerDocumentGraphs {
             return;
         }
         effects.insert(key, effect);
+    }
+
+    fn complete_compact_resume(&self, command: CompactResumeCommand, applied: bool) {
+        if applied {
+            self.compact_resume_applied.set(
+                &self.ctx,
+                command.document_hash,
+                Some(command.continuation.continuation_id),
+            );
+        }
     }
 
     /// Subscribe durable queue completion to the authoritative markdown
@@ -4703,9 +4851,15 @@ impl ControllerDocumentGraphs {
         let key = document_hash.to_string();
         let projection_map = self.queue_completion.clone();
         let authority_map = self.queue_authority.clone();
-        let sink = self.settle_sink.clone();
+        let settle_generation = self.settle_generation.clone();
+        let attempted = self.queue_completion_attempted.clone();
+        let sender = Arc::clone(&self.document_effect_sender);
         let effect_key = key.clone();
         let effect = self.ctx.effect(move |ctx| {
+            let _generation_present = settle_generation.contains_key(ctx, &effect_key);
+            let generation = settle_generation
+                .observe(ctx, &effect_key)
+                .unwrap_or_default();
             let Some(projection) = projection_map.observe(ctx, &effect_key) else {
                 return;
             };
@@ -4715,10 +4869,34 @@ impl ControllerDocumentGraphs {
             let Some(observation) = authority_map.observe(ctx, &effect_key).flatten() else {
                 return;
             };
-            let Some(sink) = sink.get() else {
+            let completion_frontier = projection
+                .completions
+                .iter()
+                .map(|head| format!("{}:{}", head.node_key, head.index))
+                .collect::<Vec<_>>()
+                .join("|");
+            let attempt_id = agent_doc_hash::content_hash(&format!(
+                "{}:{generation}:{completion_frontier}",
+                projection.content_hash,
+            ));
+            if attempted.observe(ctx, &effect_key).flatten().as_deref() == Some(attempt_id.as_str())
+            {
+                return;
+            }
+            let Some(sender) = sender.get() else {
                 return;
             };
-            sink.complete_queue_heads(&effect_key, &observation.file, &projection);
+            attempted.set(ctx, effect_key.clone(), Some(attempt_id));
+            if let Err(error) = sender.send(DocumentEffectCommand::CompleteQueue(
+                QueueCompletionCommand {
+                    document_hash: effect_key.clone(),
+                    file: observation.file,
+                    projection,
+                },
+            )) {
+                attempted.set(ctx, effect_key.clone(), None);
+                eprintln!("[controller] queue completion enqueue failed for {effect_key}: {error}");
+            }
         });
         let mut effects = self.queue_completion_effects.lock();
         if effects.contains_key(&key) {
@@ -14962,12 +15140,52 @@ agent:queue\n\
             .map(|pending| pending.intent_id.clone())
     }
 
+    fn wait_for_pending_intent(
+        runtime: &Arc<ControllerRuntime>,
+        document_hash: &str,
+        expected: Option<&str>,
+    ) {
+        // Durable document effects run on controller workers. Keep eventual
+        // receipt assertions independent of parallel-test scheduler pressure;
+        // responsiveness has separate sub-250 ms assertions below.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let current = pending_intent_id(runtime, document_hash);
+            if current.as_deref() == expected {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "pending intent did not reach {expected:?}: {current:?}"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn wait_for_document_projection(
+        runtime: &Arc<ControllerRuntime>,
+        document_hash: &str,
+        ready: impl Fn(&agent_doc_state_backbone::DocumentStateProjection) -> bool,
+        message: &str,
+    ) -> agent_doc_state_backbone::DocumentStateProjection {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(projection) = runtime.document_state_projection(document_hash).unwrap()
+                && ready(&projection)
+            {
+                return projection;
+            }
+            assert!(Instant::now() < deadline, "{message}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     fn wait_for_captured_finalize_wake_reason(
         runtime: &Arc<ControllerRuntime>,
         document_hash: &str,
         expected_reason: &str,
     ) {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let reason = runtime
                 .captured_finalize_wakes
@@ -15058,6 +15276,14 @@ agent:queue\n\
             Some(observation("target")),
         );
 
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while pending_intent_id(&runtime, &document_hash).is_some() {
+            assert!(
+                Instant::now() < deadline,
+                "the asynchronous settlement worker did not clear the intent"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert_eq!(
             pending_intent_id(&runtime, &document_hash),
             None,
@@ -15072,6 +15298,58 @@ agent:queue\n\
             )),
             "the clear must be durable, not just an in-memory projection edit"
         );
+    }
+
+    #[test]
+    fn durable_document_effects_do_not_hold_the_reactive_context() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (file, document_hash) = retained_test_document(&dir);
+        defer_document_write(
+            &runtime,
+            dir.path(),
+            &document_hash,
+            "blocking-document-effect",
+            "target",
+        );
+
+        let settlement_started = Instant::now();
+        runtime.document_retained_write_verdict(
+            &document_hash,
+            &file,
+            Some(observation("target")),
+            Some(observation("target")),
+        );
+        assert!(
+            settlement_started.elapsed() < Duration::from_millis(250),
+            "settlement admission waited for durable state-ledger I/O"
+        );
+
+        let reactive_read_started = Instant::now();
+        let projection = runtime.document_preflight_projection(
+            &document_hash,
+            agent_doc_state_backbone::preflight::PreflightReadFacts {
+                document_hash: document_hash.clone(),
+                baseline_hash: "base".to_string(),
+                config_hash: "config".to_string(),
+                diff: Some("+still responsive".to_string()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(projection.diff.as_deref(), Some("+still responsive"));
+        assert!(
+            reactive_read_started.elapsed() < Duration::from_millis(250),
+            "a blocked durable effect held the shared reactive context"
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while pending_intent_id(&runtime, &document_hash).is_some() {
+            assert!(
+                Instant::now() < deadline,
+                "the blocked settlement did not eventually publish its receipt"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
@@ -15147,6 +15425,7 @@ agent:queue\n\
             ),
         );
 
+        wait_for_pending_intent(&runtime, &document_hash, None);
         assert_eq!(
             pending_intent_id(&runtime, &document_hash),
             None,
@@ -15179,10 +15458,10 @@ agent:queue\n\
         );
 
         assert_eq!(
-            verdict,
-            agent_doc_state_backbone::retained_write::SettlementVerdict::NoRetainedIntent,
-            "the subscribed effect may clear synchronously before the query returns",
+            verdict, receipt,
+            "the query returns the derived proof while durable settlement runs out of scope",
         );
+        wait_for_pending_intent(&runtime, &document_hash, None);
         assert_eq!(
             pending_intent_id(&runtime, &document_hash),
             None,
@@ -15240,6 +15519,7 @@ agent:queue\n\
                 delivery_version: 2,
             }),
         );
+        wait_for_pending_intent(&runtime, &document_hash, None);
         assert_eq!(
             pending_intent_id(&runtime, &document_hash),
             None,
@@ -15299,6 +15579,7 @@ agent:queue\n\
             &file,
             observation("target"),
         );
+        wait_for_pending_intent(&runtime, &document_hash, None);
         assert_eq!(
             pending_intent_id(&runtime, &document_hash),
             None,
@@ -15326,6 +15607,7 @@ agent:queue\n\
             Some(observation("target")),
             Some(observation("target")),
         );
+        wait_for_pending_intent(&runtime, &document_hash, None);
         assert_eq!(pending_intent_id(&runtime, &document_hash), None);
 
         // A second intent stamped at the SAME target hash the last observation
@@ -15388,6 +15670,7 @@ agent:queue\n\
         // generation edge. No verdict query, retry, or session-check follows.
         let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
 
+        wait_for_pending_intent(&runtime, &document_hash, None);
         assert_eq!(
             pending_intent_id(&runtime, &document_hash),
             None,
@@ -16632,10 +16915,15 @@ revised operator request
             &file,
             observation(&target_hash),
         );
-        let projection = runtime
-            .document_state_projection(&document_hash)
-            .unwrap()
-            .unwrap();
+        let projection = wait_for_document_projection(
+            &runtime,
+            &document_hash,
+            |projection| {
+                projection.document.pending_write.is_none()
+                    && projection.document.pending_compact_projection.is_none()
+            },
+            "the exact authority+disk projection did not settle write and compact effects",
+        );
         assert!(
             projection.document.pending_write.is_none(),
             "the exact authority+disk projection must settle the retained write"
@@ -16701,10 +16989,12 @@ revised operator request
         append_state_event(dir.path(), &retained).unwrap();
         runtime.apply_state_event(&retained).unwrap();
 
-        let projection = runtime
-            .document_state_projection(&document_hash)
-            .unwrap()
-            .unwrap();
+        let projection = wait_for_document_projection(
+            &runtime,
+            &document_hash,
+            |projection| projection.document.pending_compact_projection.is_none(),
+            "the typed terminal compact receipt did not clear the effect frontier",
+        );
         assert!(
             projection.document.pending_compact_projection.is_none(),
             "the typed terminal receipt must clear the retained effect frontier"
@@ -17122,10 +17412,23 @@ revised operator request
             .unwrap();
 
         assert_eq!(projected, 1);
-        let state = runtime
-            .document_state_projection(&document_hash)
-            .unwrap()
-            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let state = loop {
+            let state = runtime.document_state_projection(&document_hash).unwrap();
+            if state.as_ref().is_some_and(|state| {
+                state
+                    .queue
+                    .completed_heads
+                    .contains("queue:0:completed-work:0")
+            }) {
+                break state.unwrap();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the asynchronous queue-completion worker did not publish its receipt"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
         assert!(
             state
                 .queue

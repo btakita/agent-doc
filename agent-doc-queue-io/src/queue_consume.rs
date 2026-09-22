@@ -1687,7 +1687,7 @@ mod core_tests {
     use std::fs;
     use std::fs::OpenOptions;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
     use tempfile::TempDir;
 
     struct TestQueueConsumeEffects;
@@ -4104,18 +4104,35 @@ Old.
             .unwrap();
         assert_eq!(snap, planned, "detached disk prune should update snapshot");
         let document_hash = agent_doc_hash::document_id_for_path(&doc);
-        let ledger =
-            agent_doc_controller_io::project_controller::load_state_event_ledger(dir.path())
-                .unwrap();
-        let projection = ledger
-            .project_document(&document_hash)
-            .expect("pruned queue state should project for document");
-        let completed = projection
-            .queue
-            .heads
-            .values()
-            .find(|head| head.backlog_id.as_deref() == Some("kcb5"))
-            .expect("pruned queue head should have durable terminal state");
+        // Queue authority is reactive ingress. Terminal lifecycle persistence
+        // is deliberately performed by the controller's out-of-scope document
+        // effect worker, so await its typed durable receipt instead of assuming
+        // the RPC caller's scheduler slice also completed that worker command.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let completed = loop {
+            let ledger =
+                agent_doc_controller_io::project_controller::load_state_event_ledger(dir.path())
+                    .unwrap();
+            if let Some(completed) =
+                ledger
+                    .project_document(&document_hash)
+                    .and_then(|projection| {
+                        projection
+                            .queue
+                            .heads
+                            .values()
+                            .find(|head| head.backlog_id.as_deref() == Some("kcb5"))
+                            .cloned()
+                    })
+            {
+                break completed;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "pruned queue head should have durable terminal state"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
         assert_eq!(
             completed.phase,
             agent_doc_state_backbone::QueueHeadPhase::Completed

@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.410
+
+- **All durable document completion effects now run outside the shared reactive
+  scope.** Retained-write settlement, compact completion, and terminal queue
+  lifecycle publication are admitted as exact, generation-fenced commands to a
+  controller-owned worker. Blocking state-ledger or editor-adapter I/O can no
+  longer strand document, route, or layout reads at
+  `projection_effect_in_flight`; regression coverage blocks settlement while
+  proving preflight projection remains responsive.
+
 ## 0.35.409
 
 - **Document-turn authority publication no longer re-enters the shared reactive

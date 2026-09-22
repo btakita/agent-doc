@@ -213,7 +213,7 @@ Per the [agent-doc skill](/home/brian/work/btakita/agent-loop/.codex/skills/agen
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

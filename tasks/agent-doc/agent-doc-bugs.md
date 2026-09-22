@@ -185,6 +185,26 @@ Regression coverage proves both the no-relay-witness decision and the observatio
 The full release build, native library, and both editor packages are installed. The CLI reports 0.35.416. During installation the original supervisor PID and exact Codex child PID remained alive; the fleet handoff is marked to occur at the safe post-turn boundary.
 
 No additional backlog follow-up is needed for this crash.
+❯ Fix Run Agent Doc on dev.md issue: route found legacy pane-association evidence for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md, but the normal path will not re-elect ownership from %68.
+❯ Inspect the candidate, claim it explicitly if it is authoritative, or kill it before rerouting.
+- %68 session=0 window=@0 (agent-doc) cmd=agent-doc sources=session-log,process-tree,supervisor-pid
+  ❯ view: tmux capture-pane -pt %68 | tail -n 80
+  ❯ assign: agent-doc claim /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/dev.md --pane %68 --force
+  ❯ kill: tmux kill-pane -t %68
+
+### Re: Response
+
+Cannot fix this in the current turn: agent-doc refused admission before opening a cycle because an editor write is stranded with no owner.
+
+From the session’s owning pane, run:
+
+```bash
+agent-doc commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md
+```
+
+If an unwritten response body remains, use `agent-doc write --commit …` instead. Then invoke agent-doc again to diagnose and fix the underlying cause.
+
+Per the [agent-doc skill](/home/brian/work/btakita/agent-loop/.codex/skills/agent-doc/SKILL.md), I did not recreate preflight or mutate the document from this unadmitted turn.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

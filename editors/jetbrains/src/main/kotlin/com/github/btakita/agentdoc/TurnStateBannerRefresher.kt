@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.intellij.notification.Notification
 import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
@@ -79,6 +80,8 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
     private val subscriptions = ConcurrentHashMap<String, CpTurnAuthoritySubscription>()
     private val presentations = ConcurrentHashMap<String, TurnStateBridge.TurnStatePresentation>()
     private val transientStatuses = TransientDocumentStatus()
+    private val inputRequiredNotifications =
+        InputRequiredNotifications<Notification> { it.expire() }
     private val listeners = CopyOnWriteArrayList<Listener>()
 
     fun start() {
@@ -108,6 +111,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
                         subscriptions.remove(file.path)?.close()
                         presentations.remove(file.path)
                         transientStatuses.clear(file.path)
+                        inputRequiredNotifications.clear(file.path)
                         notifyUi(file.path, "file-closed")
                     }
                 },
@@ -183,8 +187,16 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
                         "[turn-state] projection changed via $reason for $filePath: " +
                             next.label.ifEmpty { "(idle, hidden)" },
                     )
-                    if (next.inputRequired && previous?.inputRequired != true) {
-                        notifyInputRequired(filePath)
+                    // `#jbinputrequiredstale`: the balloon tracks the CURRENT state, so it is
+                    // retracted the moment the document stops requiring input. Leaving it up
+                    // turned every answered prompt into a standing false positive, and every
+                    // later edge stacked another balloon beside the stale one.
+                    if (next.inputRequired) {
+                        if (previous?.inputRequired != true) {
+                            notifyInputRequired(filePath)
+                        }
+                    } else {
+                        inputRequiredNotifications.clear(filePath)
                     }
                     notifyUi(filePath, "controller-authority-stream")
                 }
@@ -196,6 +208,10 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
     }
 
     private fun notifyInputRequired(filePath: String) {
+        inputRequiredNotifications.raise(filePath) { buildInputRequiredNotification(filePath) }
+    }
+
+    private fun buildInputRequiredNotification(filePath: String): Notification {
         val fileName = java.io.File(filePath).name
         val notification =
             NotificationGroupManager.getInstance()
@@ -239,6 +255,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
             },
         )
         notification.notify(project)
+        return notification
     }
 
     private fun notifyUi(filePath: String, reason: String) {
@@ -258,6 +275,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         subscriptions.clear()
         presentations.clear()
         transientStatuses.clearAll()
+        inputRequiredNotifications.clearAll()
         listeners.clear()
     }
 

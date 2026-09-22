@@ -6979,8 +6979,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                     .strip_prefix(*p)
                     .and_then(|suffix| suffix.chars().next())
                     .is_some_and(char::is_whitespace)
-        }) || (trimmed.starts_with("\u{23f5}\u{23f5} ")
-            && trimmed.contains("(shift+tab to cycle)"))
+        }) || (trimmed.starts_with("\u{23f5}\u{23f5} ") && trimmed.contains("(shift+tab to cycle)"))
     }
 
     #[test]
@@ -7091,11 +7090,7 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
   \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle)
 ";
         assert!(
-            !route_trigger_visible_in_current_draft(
-                both_consumed,
-                trigger,
-                claude_prompt_line
-            ),
+            !route_trigger_visible_in_current_draft(both_consumed, trigger, claude_prompt_line),
             "an empty composer below the newest occurrence still means consumed scrollback"
         );
     }

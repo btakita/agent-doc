@@ -227,10 +227,7 @@ fn retained_refusal(file: &Path, message: String) -> anyhow::Error {
     // The verdict and the remedy come from the predicate, so the two halves can
     // no longer disagree. Joined on a sentence boundary because a bare space ran
     // "(content_hash=...)" straight into "NO cycle is open".
-    await_editor_replica_no_disk_write(format!(
-        "{message}. {}",
-        retained_write_remedy_for(file)
-    ))
+    await_editor_replica_no_disk_write(format!("{message}. {}", retained_write_remedy_for(file)))
 }
 
 #[derive(Debug)]

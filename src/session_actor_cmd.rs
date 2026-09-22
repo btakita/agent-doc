@@ -4187,7 +4187,7 @@ fn collect_doctor_issues(ctx: &SessionContext) -> Vec<String> {
                 Some(live_window),
             ) {
                 issues.push(format!(
-                    "{source} window {recorded_window} for pane {pane} is stale — the pane now lives in {live_window} (a pane moved out of the visible window cannot mirror editor focus; repair with `agent-doc sync`)"
+                    "{source} window {recorded_window} for pane {pane} is stale — the pane now lives in {live_window} (a pane moved out of the visible window cannot mirror editor focus; repair with `agent-doc session doctor --repair`)"
                 ));
             }
         }
@@ -5749,6 +5749,28 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             issues
                 .iter()
                 .any(|issue| issue.contains("supervisor socket"))
+        );
+    }
+
+    #[test]
+    fn doctor_stale_window_issue_names_the_command_that_actually_repairs_it() {
+        // `agent-doc sync` and `resync --fix` re-place panes but never rebind the
+        // recorded window, so naming them here sent operators in a loop while the
+        // drift survived. Only the explicit repair path runs
+        // `repair_pane_window_binding` (`#panewindowbindingrebind`).
+        let record = test_actor_record(ActorState::Ready);
+        let mut ctx = test_session_context(record, test_supervisor_runtime(None), None);
+        ctx.live_pane_window = Some("@4".to_string());
+
+        let issues = collect_doctor_issues(&ctx);
+
+        let stale = issues
+            .iter()
+            .find(|issue| issue.contains("window @1 for pane %7 is stale"))
+            .expect("a pane whose live window differs from the record must be flagged");
+        assert!(
+            stale.contains("agent-doc session doctor --repair"),
+            "remedy must name the path that rebinds the record: {stale}"
         );
     }
 

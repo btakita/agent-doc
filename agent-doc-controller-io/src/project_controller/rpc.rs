@@ -22361,7 +22361,10 @@ mod pane_layout_projection_dispatch_tests {
             Some(("@904".to_string(), "stash-3".to_string()))
         );
         // "tmux could not say" — never a refusal for either leg.
-        assert_eq!(observed_pane_window(Err(anyhow::anyhow!("no server"))), None);
+        assert_eq!(
+            observed_pane_window(Err(anyhow::anyhow!("no server"))),
+            None
+        );
         assert_eq!(
             observed_pane_window(Ok((String::new(), "stash".to_string()))),
             None
@@ -22414,7 +22417,10 @@ mod pane_layout_projection_dispatch_tests {
                 "a stashed pane must never reach tmux select-pane ({window_name})"
             );
             assert!(receipt.required);
-            assert!(!receipt.applied, "a refused focus must not count as applied");
+            assert!(
+                !receipt.applied,
+                "a refused focus must not count as applied"
+            );
             assert_eq!(
                 receipt.reason,
                 format!(
@@ -22445,9 +22451,7 @@ mod pane_layout_projection_dispatch_tests {
                 &file_panes,
                 PaneLayoutFocusCoVisibility {
                     layout_window: None,
-                    observe_pane_window: |_| {
-                        Some(("@904".to_string(), window_name.to_string()))
-                    },
+                    observe_pane_window: |_| Some(("@904".to_string(), window_name.to_string())),
                 },
                 |pane| {
                     selected = Some(pane.to_string());
@@ -22493,7 +22497,11 @@ mod pane_layout_projection_dispatch_tests {
 
         assert!(selected.is_none());
         assert!(!receipt.applied);
-        assert!(receipt.reason.starts_with("focus_pane_stashed:"), "{}", receipt.reason);
+        assert!(
+            receipt.reason.starts_with("focus_pane_stashed:"),
+            "{}",
+            receipt.reason
+        );
     }
 
     /// Strict tightening, mirroring the pure predicate: a window we cannot
@@ -22506,7 +22514,10 @@ mod pane_layout_projection_dispatch_tests {
         for (layout_window, live_window) in [
             (None, Some(("@904".to_string(), "agent-doc".to_string()))),
             (Some("@894"), None),
-            (Some("  "), Some(("@904".to_string(), "agent-doc".to_string()))),
+            (
+                Some("  "),
+                Some(("@904".to_string(), "agent-doc".to_string())),
+            ),
             (Some("@894"), Some((String::new(), String::new()))),
         ] {
             let state = Mutex::new(
@@ -33092,10 +33103,14 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("ghost-editor-exit.md");
-        std::fs::write(&file, "# ghost editor exit
+        std::fs::write(
+            &file,
+            "# ghost editor exit
 
 body
-").unwrap();
+",
+        )
+        .unwrap();
         let bootstrap = test_bootstrap(&dir);
         let editor_pid = u64::from(std::process::id());
         let file_str = file.display().to_string();

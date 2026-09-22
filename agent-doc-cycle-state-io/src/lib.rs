@@ -796,8 +796,8 @@ pub fn load_document_projection(
     // opens a five-second self-RPC to the socket it is running behind — the
     // shape that left a freshly-adopted controller unresponsive for 40s while
     // its startup replica rebuild logged one line at a time.
-    let served_by_this_process = in_controller_request()
-        || agent_doc_state_wire::process_is_controller_for(&project_root);
+    let served_by_this_process =
+        in_controller_request() || agent_doc_state_wire::process_is_controller_for(&project_root);
     if controller_socket.exists() && !served_by_this_process {
         let request = serde_json::json!({
             "command": "document_state_projection",

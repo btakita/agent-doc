@@ -241,8 +241,17 @@ pub fn jetbrains_ide_label(cmdline: &str) -> Option<String> {
     }
     // The toolbox launchers exec a product-named binary directly.
     const PRODUCT_BINARIES: &[&str] = &[
-        "/idea", "/clion", "/goland", "/phpstorm", "/pycharm", "/rider", "/rubymine", "/rustrover",
-        "/webstorm", "/datagrip", "/aqua",
+        "/idea",
+        "/clion",
+        "/goland",
+        "/phpstorm",
+        "/pycharm",
+        "/rider",
+        "/rubymine",
+        "/rustrover",
+        "/webstorm",
+        "/datagrip",
+        "/aqua",
     ];
     let first = cmdline.split_whitespace().next()?;
     PRODUCT_BINARIES
@@ -257,8 +266,7 @@ pub fn jetbrains_ide_label(cmdline: &str) -> Option<String> {
 pub fn probe(plugins_dirs: &[PathBuf]) -> ActivationProbe {
     if !cfg!(target_os = "linux") {
         return ActivationProbe::Unavailable {
-            reason: "process start times are read from /proc; this probe is Linux-only"
-                .to_string(),
+            reason: "process start times are read from /proc; this probe is Linux-only".to_string(),
         };
     }
     classify_activation(
@@ -274,7 +282,9 @@ mod tests {
 
     fn artifact(modified: SystemTime) -> InstalledPluginArtifact {
         InstalledPluginArtifact {
-            path: PathBuf::from("/plugins/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.35.400.jar"),
+            path: PathBuf::from(
+                "/plugins/agent-doc-jetbrains/lib/agent-doc-jetbrains-0.35.400.jar",
+            ),
             version: "0.35.400".to_string(),
             modified,
         }
@@ -293,7 +303,10 @@ mod tests {
         let install = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000);
         let probe = classify_activation(
             Some(artifact(install)),
-            &[process(1645748, SystemTime::UNIX_EPOCH + Duration::from_secs(1_400))],
+            &[process(
+                1645748,
+                SystemTime::UNIX_EPOCH + Duration::from_secs(1_400),
+            )],
         );
         let ActivationProbe::Stale { stale, .. } = &probe else {
             panic!("an IDE older than the install is stale: {probe:?}");
@@ -314,7 +327,10 @@ mod tests {
         let install = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000);
         let probe = classify_activation(
             Some(artifact(install)),
-            &[process(7, SystemTime::UNIX_EPOCH + Duration::from_secs(2_001))],
+            &[process(
+                7,
+                SystemTime::UNIX_EPOCH + Duration::from_secs(2_001),
+            )],
         );
         assert_eq!(
             probe,
@@ -389,10 +405,11 @@ mod tests {
             artifact.version.starts_with("0.35."),
             "only agent-doc jars are considered: {artifact:?}"
         );
-        assert!(artifact.path.ends_with(format!(
-            "agent-doc-jetbrains-{}.jar",
-            artifact.version
-        )));
+        assert!(
+            artifact
+                .path
+                .ends_with(format!("agent-doc-jetbrains-{}.jar", artifact.version))
+        );
     }
 
     #[test]

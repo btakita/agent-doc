@@ -2120,8 +2120,7 @@ fn run_command_inner_within_pass(
             &options,
             &pending_kept_open_ids,
             has_pending_ops,
-            commit_mode != CommitMode::None
-                || captured_finalize_continuation_owns_commit(&options),
+            commit_mode != CommitMode::None || captured_finalize_continuation_owns_commit(&options),
         );
         if let Err(error) = mutation_result {
             // A tracked-work-only commit can retain its exact editor-owned

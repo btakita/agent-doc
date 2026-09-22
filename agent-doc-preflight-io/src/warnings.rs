@@ -754,7 +754,11 @@ mod tests {
     #[test]
     fn jar_stem_is_scoped_to_jvm_hosted_editors() {
         for kind in ["jetbrains", "JetBrains", "intellij", "idea"] {
-            assert_eq!(plugin_jar_stem(kind), Some("agent-doc-jetbrains-"), "{kind}");
+            assert_eq!(
+                plugin_jar_stem(kind),
+                Some("agent-doc-jetbrains-"),
+                "{kind}"
+            );
         }
         for kind in ["vscode", "zed", "neovim", ""] {
             assert_eq!(plugin_jar_stem(kind), None, "{kind}");

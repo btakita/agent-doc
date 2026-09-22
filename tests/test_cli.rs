@@ -2199,8 +2199,7 @@ fn test_preflight_emits_prompt_preset_bodies_with_the_request() {
         "the expansion is keyed by the canonical preset name: {stdout}"
     );
     assert_eq!(
-        parsed["prompt_preset_expansions"][0]["body"],
-        "update spec + tests. commit + push",
+        parsed["prompt_preset_expansions"][0]["body"], "update spec + tests. commit + push",
         "the preset BODY travels with the request, so no expansion command is \
          needed: {stdout}"
     );
@@ -14314,9 +14313,7 @@ fn test_every_release_publishes_the_editor_packages() {
     // bootstrap launcher and `make release-macos-assets`. The editor packages
     // also match `agent-doc-*`, so downloading them into that directory would
     // silently rewrite the platform-archive manifest.
-    let download = &release[release
-        .find("  release:")
-        .expect("release job")..];
+    let download = &release[release.find("  release:").expect("release job")..];
     assert!(
         download.contains("pattern: agent-doc-*") && download.contains("path: editor-packages"),
         "editor packages must download to their own directory so they stay out of SHA256SUMS"

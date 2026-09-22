@@ -1006,7 +1006,6 @@ pub fn missing_replica_disposition(recovery_attempted: bool) -> &'static str {
     }
 }
 
-
 /// Live document text resolved from the CRDT relay authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CurrentText {
@@ -2419,8 +2418,8 @@ pub fn reap_exited_editor_replicas(editor_pid: u32) -> Vec<ReapedEditorReplica> 
             None => false,
         };
         let _ = forget_replica_identity(&document_hash, client_id);
-        let live_editors_after = hub_handle(&document_hash)
-            .map_or(0, |handle| handle.lock().live_count());
+        let live_editors_after =
+            hub_handle(&document_hash).map_or(0, |handle| handle.lock().live_count());
         reaped.push(ReapedEditorReplica {
             document_hash,
             client_id,
@@ -5984,7 +5983,10 @@ mod tests {
         assert_eq!(reaped.len(), 1, "exactly the ghost membership: {reaped:?}");
         assert_eq!(reaped[0].client_id, client_id);
         assert_eq!(reaped[0].identity, identity);
-        assert!(reaped[0].removed, "the hub still held the ghost: {reaped:?}");
+        assert!(
+            reaped[0].removed,
+            "the hub still held the ghost: {reaped:?}"
+        );
         assert_eq!(
             reaped[0].live_editors_after, 0,
             "the ghost was the last member, so disk authority is unblocked: {reaped:?}"
@@ -6031,7 +6033,11 @@ mod tests {
 
         let reaped = reap_exited_editor_replicas(dead_pid);
 
-        assert_eq!(reaped.len(), 1, "only the dead pid's membership: {reaped:?}");
+        assert_eq!(
+            reaped.len(),
+            1,
+            "only the dead pid's membership: {reaped:?}"
+        );
         assert_eq!(reaped[0].client_id, dead_id);
         assert_eq!(
             reaped[0].live_editors_after, 1,

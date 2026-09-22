@@ -720,7 +720,10 @@ mod tests {
     fn only_a_proven_half_apply_names_a_resubmit_remedy() {
         for (failure, may_resubmit) in [
             (TrackedWorkMutationFailure::HalfApplied, true),
-            (TrackedWorkMutationFailure::DeferredDeliveryProjection, false),
+            (
+                TrackedWorkMutationFailure::DeferredDeliveryProjection,
+                false,
+            ),
             (
                 TrackedWorkMutationFailure::ProjectionFailedAfterLanding,
                 false,

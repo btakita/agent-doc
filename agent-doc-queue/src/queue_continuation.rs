@@ -1337,9 +1337,7 @@ mod tests {
     #[test]
     fn an_ungated_review_row_does_not_defer_the_head() {
         // Only a GATED row is an external gate. An open row is ordinary work.
-        let doc = review_gated_queue_doc(
-            "- [ ] [#fpeoptimizedprofileacceptance] no longer gated",
-        );
+        let doc = review_gated_queue_doc("- [ ] [#fpeoptimizedprofileacceptance] no longer gated");
         assert_eq!(deferred_head_count(&doc), 0);
         assert!(gated_review_ids(&doc).is_empty());
     }
@@ -1355,19 +1353,17 @@ mod tests {
     /// operator action, not a wait for one, so it must not read as deferred.
     #[test]
     fn an_operator_answered_head_is_not_deferred() {
-        let doc = format!(
-            concat!(
-                "<!-- agent:queue preset=\"x\" priority go -->\n",
-                "- do [#fpeoptimizedprofileacceptance]: I lift the push hold\n",
-                "<!-- /agent:queue -->\n\n",
-                "<!-- agent:backlog -->\n",
-                "- [ ] [#unrelated] unrelated open work\n",
-                "<!-- /agent:backlog -->\n\n",
-                "<!-- agent:review -->\n",
-                "- [/] [#fpeoptimizedprofileacceptance] [operator-verify] repeat the workload\n",
-                "<!-- /agent:review -->\n",
-            ),
-        );
+        let doc = format!(concat!(
+            "<!-- agent:queue preset=\"x\" priority go -->\n",
+            "- do [#fpeoptimizedprofileacceptance]: I lift the push hold\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#unrelated] unrelated open work\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#fpeoptimizedprofileacceptance] [operator-verify] repeat the workload\n",
+            "<!-- /agent:review -->\n",
+        ),);
         let answered = operator_answered_head_ids(&doc);
         assert!(
             answered.contains("fpeoptimizedprofileacceptance"),

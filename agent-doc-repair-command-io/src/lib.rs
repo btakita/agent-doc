@@ -270,24 +270,27 @@ pub fn drop_already_applied_mutations(
     current_content: &str,
 ) -> Vec<String> {
     let mut dropped = Vec::new();
-    let mut retain_witnessed = |shape: &str,
-                                entries: &mut Vec<String>,
-                                still_pending: &dyn Fn(&str) -> bool| {
-        entries.retain(|entry| {
-            if still_pending(entry) {
-                return true;
-            }
-            dropped.push(format!("{shape}:#{}", dropped_entry_id(entry)));
-            false
-        });
-    };
+    let mut retain_witnessed =
+        |shape: &str, entries: &mut Vec<String>, still_pending: &dyn Fn(&str) -> bool| {
+            entries.retain(|entry| {
+                if still_pending(entry) {
+                    return true;
+                }
+                dropped.push(format!("{shape}:#{}", dropped_entry_id(entry)));
+                false
+            });
+        };
     // Resolve and remove both TAKE the item out of `agent:review`, so presence
     // in that component is the exact "not yet applied" witness. Not
     // `collect_gated_review_ids`: it matches only the untyped `- [/]` prefix, so
     // a typed gate (`- [/release]`) would read as applied and be dropped.
     let review_witness =
         |id: &str| agent_doc_element_review::review_component_contains_id(current_content, id);
-    retain_witnessed("review-resolve", &mut options.review_resolve, &review_witness);
+    retain_witnessed(
+        "review-resolve",
+        &mut options.review_resolve,
+        &review_witness,
+    );
     retain_witnessed("review-remove", &mut options.review_remove, &review_witness);
     // Ungate resolves against `agent:review` first and falls back to the backlog
     // component, so "absent from review" is the WRONG witness for it — an item

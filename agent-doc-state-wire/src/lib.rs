@@ -188,8 +188,8 @@ pub fn set_local_document_projection_reader(
 /// that never installed a thread context still reads the live authority
 /// instead of replaying the durable ledger.
 pub fn local_document_projection(document_hash: &str) -> Option<Option<DocumentStateProjection>> {
-    if let Some(projection) =
-        LOCAL_DOCUMENT_PROJECTION_READER.with(|slot| slot.borrow().as_ref().map(|r| r(document_hash)))
+    if let Some(projection) = LOCAL_DOCUMENT_PROJECTION_READER
+        .with(|slot| slot.borrow().as_ref().map(|r| r(document_hash)))
     {
         return Some(projection);
     }

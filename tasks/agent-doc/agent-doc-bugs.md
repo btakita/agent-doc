@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -290,7 +290,7 @@ Confidence: high. No escalation is needed. Restart the running IDEA instance to 
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 Make this error message easier for a human to read given a small prompt dialog in Idea:
+- ~~Make this error message easier for a human to read given a small prompt dialog in Idea:~~ — auto-struck: answered this cycle (#ftstrike)
   agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: [lint-gate] INTERRUPTED: 1 blocking lint finding(s) for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md (mode=warn, source=default). Fix the directives below before re-running `agent-doc finalize` / `agent-doc write --commit`, or set `agent_doc_lint_dialect: off` in frontmatter / `[lint] dialect = "off"` in `.agent-doc/config.toml` to temporarily skip this gate. /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md:449:1 error: attribute `queu0000e` on `agent:backlog` is missing `=value` [agent-doc/malformed-attr] hint: try `queu0000e= `
 <!-- /agent:queue -->
 

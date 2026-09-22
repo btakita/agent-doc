@@ -2084,6 +2084,14 @@ impl ControllerMemoryState {
 pub(crate) struct ControllerRuntime {
     bootstrap: Mutex<ControllerBootstrap>,
     memory: Mutex<ControllerMemoryState>,
+    /// Serialize the controller-owned durable-append -> live-apply boundary.
+    ///
+    /// No caller may hold `memory` while appending to SQLite: ordinary event
+    /// ingress takes the durable store first and then `memory`, so reversing
+    /// that order in closeout-owner CAS creates an ABBA under editor traffic.
+    /// This mutex preserves exact CAS ordering while allowing the projection
+    /// lock to be dropped before durable I/O.
+    state_event_ingress: Mutex<()>,
     actor_graph: ControllerActorGraph,
     document_authority_graph: ControllerDocumentAuthorityGraph,
     coordination_graph: ControllerCoordinationGraph,
@@ -3192,12 +3200,8 @@ impl RetainedWriteSettleSink {
                 intent_source: intent_source.clone(),
             },
         );
-        if let Err(e) = append_state_event(&self.project_root, &event) {
-            eprintln!("[controller] retained-write settle append failed for {document_hash}: {e}");
-            return false;
-        }
-        if let Err(e) = runtime.apply_state_event(&event) {
-            eprintln!("[controller] retained-write settle apply failed for {document_hash}: {e}");
+        if let Err(e) = runtime.append_apply_state_event_serialized(&self.project_root, &event) {
+            eprintln!("[controller] retained-write settle ingress failed for {document_hash}: {e}");
             return false;
         }
         true
@@ -3545,15 +3549,11 @@ impl RetainedWriteSettleSink {
                 )
             }
         };
-        if let Err(error) = append_state_event(&self.project_root, &event) {
+        if let Err(error) =
+            runtime.append_apply_state_event_serialized(&self.project_root, &event)
+        {
             eprintln!(
-                "[controller] compact projection receipt append failed for {document_hash}: {error:#}"
-            );
-            return false;
-        }
-        if let Err(error) = runtime.apply_state_event(&event) {
-            eprintln!(
-                "[controller] compact projection receipt apply failed for {document_hash}: {error:#}"
+                "[controller] compact projection receipt ingress failed for {document_hash}: {error:#}"
             );
             return false;
         }
@@ -3586,14 +3586,8 @@ impl RetainedWriteSettleSink {
                     hosting_epoch: None,
                 },
             );
-            match append_state_event(&self.project_root, &event) {
+            match runtime.append_apply_state_event_serialized(&self.project_root, &event) {
                 Ok(true) => {
-                    if let Err(error) = runtime.apply_state_event(&event) {
-                        eprintln!(
-                            "[controller] queue completion apply failed for {document_hash}: {error}"
-                        );
-                        return;
-                    }
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
@@ -5778,6 +5772,7 @@ impl ControllerRuntime {
         Ok(Self {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(memory),
+            state_event_ingress: Mutex::new(()),
             actor_graph,
             document_authority_graph,
             coordination_graph,
@@ -6096,6 +6091,19 @@ impl ControllerRuntime {
         self.supervisor_recycle_waiters.notify_all();
         self.state_projection_waiters.notify_all();
         Ok(())
+    }
+
+    fn append_apply_state_event_serialized(
+        &self,
+        project_root: &Path,
+        event: &agent_doc_state_backbone::StateEvent,
+    ) -> Result<bool> {
+        let _ingress = self.state_event_ingress.lock();
+        let inserted = append_state_event(project_root, event)?;
+        if inserted {
+            self.apply_state_event(event)?;
+        }
+        Ok(inserted)
     }
 
     /// The document's derived settlement verdict, given content observations the
@@ -14103,6 +14111,7 @@ agent:queue\n\
                 state_projection,
                 map_backend: "std_btree_map",
             }),
+            state_event_ingress: Mutex::new(()),
             actor_graph,
             document_authority_graph,
             supervisor_recycle_graph,

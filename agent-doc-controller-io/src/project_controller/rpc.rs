@@ -15376,6 +15376,11 @@ fn run_closeout_owner_claim(
         CloseoutOwnerClaimAuthorization, CloseoutOwnerClaimOutcome, StateFact,
     };
     let document_hash = agent_doc_hash::document_id_for_path(file);
+    // Serialize the decision with every controller-owned state ingress, but do
+    // not retain the projection lock across durable I/O. Ordinary ingress is
+    // SQLite -> memory; the former memory -> SQLite order here deadlocked
+    // finalize against concurrent editor/state publication.
+    let _state_event_ingress = runtime.state_event_ingress.lock();
     // The wake is a Lazily state-plane projection produced only after exact
     // retained Base -> Target convergence. Read it before the state-memory
     // lock, then validate its full capture identity inside the pure backbone
@@ -15399,97 +15404,87 @@ fn run_closeout_owner_claim(
             CloseoutOwnerClaimAuthorization::Exclusive
         };
 
-    let (outcome, recycle) = {
-        let mut memory = runtime.memory.lock();
-        let current = memory
+    let current = {
+        let memory = runtime.memory.lock();
+        memory
             .state_projection
             .document(&document_hash)
             .map(|document| document.closeout.clone())
-            .unwrap_or_default();
-        let current_owner_alive = current.owner.as_ref().and_then(|owner| {
-            (owner.owner_id != claim.owner_id
-                && owner.is_active_at(claim.now_secs)
-                && claim.allow_dead_owner_takeover)
-                .then(|| process_is_alive(owner.owner_pid))
-        });
-        // `#closeoutterminalreactive`: the same derived gate the reactive
-        // `CloseoutGateState` exposes, read here so the live path and the graph
-        // cannot drift. Its value is the *reason* the incumbent stopped
-        // blocking, and a `lease_expired` reason is the stopgap firing — a
-        // derived fact should have released this claim earlier and none did.
-        // Logged as feedback rather than swallowed, because in a healthy system
-        // this never appears.
-        let displaced = agent_doc_state_backbone::closeout_gate::closeout_gate(
-            current.cycle_id.as_deref(),
-            current.owner.as_ref(),
-            claim.now_secs,
-            current_owner_alive,
-            claim.allow_dead_owner_takeover,
+            .unwrap_or_default()
+    };
+    let current_owner_alive = current.owner.as_ref().and_then(|owner| {
+        (owner.owner_id != claim.owner_id
+            && owner.is_active_at(claim.now_secs)
+            && claim.allow_dead_owner_takeover)
+            .then(|| process_is_alive(owner.owner_pid))
+    });
+    // `#closeoutterminalreactive`: the same derived gate the reactive
+    // `CloseoutGateState` exposes, read here so the live path and the graph
+    // cannot drift. Its value is the *reason* the incumbent stopped blocking.
+    let displaced = agent_doc_state_backbone::closeout_gate::closeout_gate(
+        current.cycle_id.as_deref(),
+        current.owner.as_ref(),
+        claim.now_secs,
+        current_owner_alive,
+        claim.allow_dead_owner_takeover,
+    );
+    if displaced.released_by_stopgap()
+        && let Some(owner) = displaced.owner()
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "closeout_owner_released_by_stopgap file={} cycle_id={} owner_id={} owner_pid={} role={} reason=lease_expired",
+                file.display(),
+                owner.cycle_id,
+                owner.owner_id,
+                owner.owner_pid,
+                owner.role,
+            ),
         );
-        if displaced.released_by_stopgap()
-            && let Some(owner) = displaced.owner()
-        {
+    }
+    let ordinary_outcome = current.decide_owner_claim(&claim, current_owner_alive);
+    let outcome = current.decide_owner_claim_with_authorization(
+        &claim,
+        current_owner_alive,
+        &authorization,
+    );
+    let retained_handoff = matches!(ordinary_outcome, CloseoutOwnerClaimOutcome::HeldByOther(_))
+        && matches!(&outcome, CloseoutOwnerClaimOutcome::Acquired(_));
+    if let CloseoutOwnerClaimOutcome::Acquired(owner) = &outcome {
+        let event = agent_doc_state_backbone::StateEvent::new(
+            format!(
+                "closeout-owner-claimed:{document_hash}:{}:{}:{}",
+                owner.cycle_id,
+                owner.owner_id,
+                closeout_owner_event_nonce()
+            ),
+            StateFact::CloseoutOwnerClaimed {
+                document_hash: document_hash.clone(),
+                cycle_id: owner.cycle_id.clone(),
+                owner_id: owner.owner_id.clone(),
+                owner_pid: owner.owner_pid,
+                role: owner.role.clone(),
+                claimed_secs: owner.claimed_secs,
+                expires_secs: owner.expires_secs,
+            },
+        );
+        if append_state_event(&bootstrap.project_root, &event)? {
+            runtime.apply_state_event(&event)?;
+        }
+        if retained_handoff {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "closeout_owner_released_by_stopgap file={} cycle_id={} owner_id={} owner_pid={} role={} reason=lease_expired",
+                    "closeout_owner_transition_projected file={} cycle_id={} owner_id={} role={} source=exact_retained_continuation",
                     file.display(),
                     owner.cycle_id,
                     owner.owner_id,
-                    owner.owner_pid,
                     owner.role,
                 ),
             );
         }
-        let ordinary_outcome = current.decide_owner_claim(&claim, current_owner_alive);
-        let outcome = current.decide_owner_claim_with_authorization(
-            &claim,
-            current_owner_alive,
-            &authorization,
-        );
-        let retained_handoff =
-            matches!(ordinary_outcome, CloseoutOwnerClaimOutcome::HeldByOther(_))
-                && matches!(&outcome, CloseoutOwnerClaimOutcome::Acquired(_));
-        if let CloseoutOwnerClaimOutcome::Acquired(owner) = &outcome {
-            let event = agent_doc_state_backbone::StateEvent::new(
-                format!(
-                    "closeout-owner-claimed:{document_hash}:{}:{}:{}",
-                    owner.cycle_id,
-                    owner.owner_id,
-                    closeout_owner_event_nonce()
-                ),
-                StateFact::CloseoutOwnerClaimed {
-                    document_hash: document_hash.clone(),
-                    cycle_id: owner.cycle_id.clone(),
-                    owner_id: owner.owner_id.clone(),
-                    owner_pid: owner.owner_pid,
-                    role: owner.role.clone(),
-                    claimed_secs: owner.claimed_secs,
-                    expires_secs: owner.expires_secs,
-                },
-            );
-            append_state_event(&bootstrap.project_root, &event)?;
-            memory.state_ledger.append(event.clone());
-            memory.state_projection.apply(&event);
-            if retained_handoff {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "closeout_owner_transition_projected file={} cycle_id={} owner_id={} role={} source=exact_retained_continuation",
-                        file.display(),
-                        owner.cycle_id,
-                        owner.owner_id,
-                        owner.role,
-                    ),
-                );
-            }
-        }
-        let recycle = memory.state_projection.project_supervisor_recycle();
-        (outcome, recycle)
-    };
-    runtime.supervisor_recycle_graph.set(recycle);
-    runtime.supervisor_recycle_waiters.notify_all();
-    runtime.state_projection_waiters.notify_all();
+    }
 
     agent_doc_ops_log_io::log_op(
         file,
@@ -15515,45 +15510,39 @@ fn run_closeout_owner_release(
 ) -> Result<bool> {
     use agent_doc_state_backbone::StateFact;
     let document_hash = agent_doc_hash::document_id_for_path(file);
+    let _state_event_ingress = runtime.state_event_ingress.lock();
 
-    let (released, recycle) = {
-        let mut memory = runtime.memory.lock();
-        let release_matches = memory
+    let released = {
+        let memory = runtime.memory.lock();
+        memory
             .state_projection
             .document(&document_hash)
             .is_some_and(|document| {
                 document
                     .closeout
                     .owner_release_matches(&release.cycle_id, &release.owner_id)
-            });
-        if release_matches {
-            let event = agent_doc_state_backbone::StateEvent::new(
-                format!(
-                    "closeout-owner-released:{document_hash}:{}:{}:{}",
-                    release.cycle_id,
-                    release.owner_id,
-                    closeout_owner_event_nonce()
-                ),
-                StateFact::CloseoutOwnerReleased {
-                    document_hash: document_hash.clone(),
-                    cycle_id: release.cycle_id.clone(),
-                    owner_id: release.owner_id.clone(),
-                    reason: release.reason.clone(),
-                    released_secs: release.released_secs,
-                },
-            );
-            append_state_event(&bootstrap.project_root, &event)?;
-            memory.state_ledger.append(event.clone());
-            memory.state_projection.apply(&event);
-        }
-        (
-            release_matches,
-            memory.state_projection.project_supervisor_recycle(),
-        )
+            })
     };
-    runtime.supervisor_recycle_graph.set(recycle);
-    runtime.supervisor_recycle_waiters.notify_all();
-    runtime.state_projection_waiters.notify_all();
+    if released {
+        let event = agent_doc_state_backbone::StateEvent::new(
+            format!(
+                "closeout-owner-released:{document_hash}:{}:{}:{}",
+                release.cycle_id,
+                release.owner_id,
+                closeout_owner_event_nonce()
+            ),
+            StateFact::CloseoutOwnerReleased {
+                document_hash,
+                cycle_id: release.cycle_id.clone(),
+                owner_id: release.owner_id.clone(),
+                reason: release.reason.clone(),
+                released_secs: release.released_secs,
+            },
+        );
+        if append_state_event(&bootstrap.project_root, &event)? {
+            runtime.apply_state_event(&event)?;
+        }
+    }
     Ok(released)
 }
 
@@ -16296,16 +16285,10 @@ fn append_apply_state_event(
     runtime: &ControllerRuntime,
     event: agent_doc_state_backbone::StateEvent,
 ) -> Result<bool> {
-    let inserted = append_state_event(&bootstrap.project_root, &event)?;
-    // The durable event id is also the reactive ingress identity. Replaying a
-    // deduplicated event into the live projection would manufacture a state
-    // edge that never existed in the ledger. In particular, a repeated
-    // `DocumentWriteConverged` would republish the captured-finalize wake and
-    // make the keyed supervisor worker trigger itself forever.
-    if inserted {
-        runtime.apply_state_event(&event)?;
-    }
-    Ok(inserted)
+    // The durable event id is also the reactive ingress identity. The runtime
+    // serializes durable append followed by live apply so closeout-owner CAS and
+    // ordinary editor/state ingress share one lock order.
+    runtime.append_apply_state_event_serialized(&bootstrap.project_root, &event)
 }
 
 /// Controller authority for a `command_plane_submit` request: route the lazily
@@ -28218,6 +28201,71 @@ mod tests {
                 ..
             }) if owner_id == "owner-2"
         ));
+    }
+
+    /// A closeout claim can wait on the durable SQLite writer under editor
+    /// traffic, but that wait must never retain the live projection mutex. The
+    /// old memory -> SQLite order deadlocked against ordinary SQLite -> memory
+    /// state ingestion and made finalize silence the whole controller.
+    #[test]
+    fn closeout_owner_claim_releases_projection_before_durable_append() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/session.md");
+        std::fs::write(&doc, "body\n").unwrap();
+        let cycle = agent_doc_cycle_state_io::start_preflight(
+            &doc,
+            Some("body\n"),
+            Some("body\n"),
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+
+        let durable_writer = open_state_db(&bootstrap.project_root).unwrap();
+        durable_writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+        let claimant_runtime = Arc::clone(&runtime);
+        let claimant_bootstrap = bootstrap.clone();
+        let claimant_doc = doc.clone();
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let claimant = std::thread::spawn(move || {
+            let result = run_closeout_owner_claim(
+                &claimant_bootstrap,
+                &claimant_runtime,
+                &claimant_doc,
+                CloseoutOwnerClaimRequest {
+                    expected_cycle_id: Some(cycle.cycle_id),
+                    owner_id: "durable-wait-owner".to_string(),
+                    owner_pid: std::process::id(),
+                    role: "test_closeout".to_string(),
+                    now_secs: timestamp_secs(),
+                    lease_secs: 30,
+                    allow_dead_owner_takeover: true,
+                },
+            );
+            let _ = result_tx.send(result);
+        });
+
+        assert!(
+            result_rx
+                .recv_timeout(Duration::from_millis(200))
+                .is_err(),
+            "the claim must be waiting behind the held durable writer"
+        );
+        assert!(
+            runtime.memory.try_lock().is_some(),
+            "a durable append wait must not retain the live projection mutex"
+        );
+
+        durable_writer.execute_batch("ROLLBACK").unwrap();
+        let outcome = result_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("claim completes after durable writer releases")
+            .unwrap();
+        claimant.join().unwrap();
+        assert!(matches!(outcome, CloseoutOwnerClaimOutcome::Acquired(_)));
     }
 
     #[test]

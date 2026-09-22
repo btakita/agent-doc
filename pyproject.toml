@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-doc"
-version = "0.35.413"
+version = "0.35.414"
 description = "Interactive document sessions with AI agents"
 readme = "README.md"
 license = "MIT"

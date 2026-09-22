@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.414
+
+- **Closeout-owner state transitions use one durable-first ingress order.** The
+  claim/release CAS no longer holds the live projection mutex while waiting for
+  SQLite, and controller-owned editor, compact, retained-write, and queue facts
+  share the same append/apply sequencer. Finalize can therefore claim an active
+  attached-editor cycle without deadlocking concurrent state publication. A
+  blocked-writer regression proves the live projection remains independently
+  lockable while the claim waits on durable storage.
+
 ## 0.35.413
 
 - **Turn attribution is resolved before controller, route, or idle-watch domain

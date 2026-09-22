@@ -205,6 +205,27 @@ agent-doc commit /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-b
 If an unwritten response body remains, use `agent-doc write --commit …` instead. Then invoke agent-doc again to diagnose and fix the underlying cause.
 
 Per the [agent-doc skill](/home/brian/work/btakita/agent-loop/.codex/skills/agent-doc/SKILL.md), I did not recreate preflight or mutate the document from this unadmitted turn.
+
+### Re: live editor edits lost at commit barrier — gpt-5.6 · 2026-09-22T10:27-04:00
+
+Fixed and deployed in agent-doc 0.35.417.
+
+The `entitlements.md` loss was caused by the commit barrier treating an ordinary intermediate JetBrains save as an out-of-band disk correction while the editor replica was still live. That rebuilt the canonical CRDT epoch from the lagging disk text and rotated its lineage. The editor's next legitimate document-op frames then looked stale, were quarantined, and the canonical rebootstrap replaced the buffer—dropping the queue item, preset, and queue/backlog priority edits.
+
+The barrier now preserves live-editor authority: baseline-to-disk reconciliation runs only when there are no live editor replicas. With an editor attached, the barrier flushes the live CRDT into the consistent cut without rebuilding the epoch or rotating lineage. Explicit controller writes continue through the CRDT publication path. A regression reproduces a lagging intermediate disk save plus an unflushed queue/priority edit and proves both edits survive with unchanged lineage. The existing out-of-band-correction regression now explicitly disconnects the editor before disk reconciliation.
+
+While running the full gate I also fixed a deterministic test-support lifetime race: the isolated controller runtime could drop its final strong reference before its asynchronous queue-completion worker published the terminal receipt. The test adapter now retains the runtime until the projected receipts are durable.
+
+The exact lost `entitlements.md` settings were recovered from IntelliJ Local History and restored: queue preset `create a PR if needed`, queue priority/go, and backlog priority/queue mirroring. The already-completed HAVN-1331 research prompt was not requeued. At the final 0.35.417 commit boundary, the user's newer live `#implementhttpshaiven` queue item and mirrored backlog item were also preserved and committed in `haiven-dev` as `8f9bdff`.
+
+Verification passed:
+
+- focused CRDT commit-barrier regressions: 7/7;
+- full `make check`: 9,637 Rust tests, 179 VS Code tests, native cross-editor SimWorld, release/version/docs/parity audits, Python bootstrap tests, Lean, and all TLA+ models;
+- local `make tmux-ci`: passed;
+- installed CLI reports `agent-doc 0.35.417`; the matching native library and editor packages were installed, and supervisors/controllers were marked for safe-boundary recycle.
+
+Source commit `0be958a30` (`fix: preserve live editor state at commit barriers`) is pushed to `origin/main`. No additional follow-up remains for this defect.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

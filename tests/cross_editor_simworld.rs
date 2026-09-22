@@ -3,6 +3,7 @@ use assert_cmd::cargo::cargo_bin_cmd;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::Value;
+use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command as ProcessCommand, Stdio};
@@ -80,6 +81,18 @@ struct NativePluginHarness {
     responses: Receiver<Value>,
 }
 
+fn cargo_target_debug_dir(manifest_dir: &Path, configured: Option<&OsStr>) -> PathBuf {
+    let target = configured
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("target"));
+    let target = if target.is_absolute() {
+        target
+    } else {
+        manifest_dir.join(target)
+    };
+    target.join("debug")
+}
+
 impl NativePluginHarness {
     fn spawn(
         kind: PluginHarnessKind,
@@ -87,7 +100,8 @@ impl NativePluginHarness {
         project_root: &Path,
         file: &Path,
     ) -> anyhow::Result<Self> {
-        let target_debug = manifest_dir.join("target/debug");
+        let configured_target = std::env::var_os("CARGO_TARGET_DIR");
+        let target_debug = cargo_target_debug_dir(manifest_dir, configured_target.as_deref());
         let native_lib = target_debug.join(format!(
             "{}agent_doc{}",
             std::env::consts::DLL_PREFIX,
@@ -469,6 +483,23 @@ fn assert_harness_matches_shipped_plugin_sources(manifest_dir: &Path) {
         assert!(source.contains("replica_deregister"));
         assert!(source.contains("controller.sock"));
     }
+}
+
+#[test]
+fn cargo_target_debug_dir_honors_default_relative_and_absolute_targets() {
+    let manifest = Path::new("/work/agent-doc");
+    assert_eq!(
+        cargo_target_debug_dir(manifest, None),
+        Path::new("/work/agent-doc/target/debug")
+    );
+    assert_eq!(
+        cargo_target_debug_dir(manifest, Some(OsStr::new("build-cache"))),
+        Path::new("/work/agent-doc/build-cache/debug")
+    );
+    assert_eq!(
+        cargo_target_debug_dir(manifest, Some(OsStr::new("/var/tmp/agent-doc-target"))),
+        Path::new("/var/tmp/agent-doc-target/debug")
+    );
 }
 
 #[test]

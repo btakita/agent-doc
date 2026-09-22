@@ -3,6 +3,9 @@
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
 TMUX_TEST_THREADS ?= 1
+CARGO_TARGET_DIR_ABS := $(abspath $(if $(strip $(CARGO_TARGET_DIR)),$(CARGO_TARGET_DIR),target))
+AGENT_DOC_TEST_TMPDIR ?= $(if $(strip $(TMPDIR)),$(TMPDIR),$(shell if test -d /var/tmp && test -w /var/tmp; then printf '%s' /var/tmp; else printf '%s' /tmp; fi))
+VSCODE_NODE_LOCK := editors/vscode/node_modules/.package-lock.json
 CARGO_CLEAN_ENV = env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE
 NEXTEST_QUIET_FLAGS ?= --cargo-quiet --show-progress none --status-level fail --final-status-level fail --failure-output immediate-final --success-output never
 LOCAL_INSTALL_PROFILE ?= release-local
@@ -62,9 +65,14 @@ release-version:
 # Prefer cargo-nextest when installed; it runs test binaries concurrently while
 # preserving Cargo's integration-test environment. Fall back to Cargo's own
 # runner rather than reimplementing test execution.
+test sim-medium cross-editor-simworld dev-harness-test editor-parity tmux-ci check: export TMPDIR := $(AGENT_DOC_TEST_TMPDIR)
+
+$(VSCODE_NODE_LOCK): editors/vscode/package.json editors/vscode/package-lock.json
+	npm ci --prefix editors/vscode
+
 test:
 	@set -e; \
-	test_agent_doc_bin="$$(pwd)/target/debug/agent-doc"; \
+	test_agent_doc_bin="$(CARGO_TARGET_DIR_ABS)/debug/agent-doc"; \
 	$(CARGO_CLEAN_ENV) cargo build --bin agent-doc --lib --quiet; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
 		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo nextest run --workspace --all-targets $(NEXTEST_QUIET_FLAGS); then \
@@ -101,9 +109,9 @@ sim-medium:
 # Compile and run the shipped JetBrains and VS Code CRDT forwarders, controller
 # transports, and native FFI nodes as peers through a real agent-doc controller.
 # Zed stays staged by editors/plugin-parity.tsv until its native endpoint exists.
-cross-editor-simworld:
+cross-editor-simworld: $(VSCODE_NODE_LOCK)
 	@set -e; \
-	test_agent_doc_bin="$$(pwd)/target/debug/agent-doc"; \
+	test_agent_doc_bin="$(CARGO_TARGET_DIR_ABS)/debug/agent-doc"; \
 	$(CARGO_CLEAN_ENV) cargo build --bin agent-doc --lib --quiet; \
 	( cd editors/vscode && npm run compile ); \
 	( cd editors/jetbrains && ./gradlew --no-daemon --console=plain -q testClasses ); \
@@ -113,7 +121,7 @@ cross-editor-simworld:
 # default development suite and run on CI where tmux is installed.
 tmux-ci:
 	@set -e; \
-	test_agent_doc_bin="$$(pwd)/target/debug/agent-doc"; \
+	test_agent_doc_bin="$(CARGO_TARGET_DIR_ABS)/debug/agent-doc"; \
 	$(CARGO_CLEAN_ENV) cargo build --bin agent-doc --quiet; \
 	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test --all-targets -- --ignored --skip native_plugin_harnesses_peer_through_real_agent_doc_controller --test-threads="$(TMUX_TEST_THREADS)"; \
 	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test -p agent-doc-sync-io repair_layout_ -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
@@ -130,7 +138,7 @@ clippy:
 version-sync:
 	@python3 scripts/agent-doc-dev verify-release-version
 
-dev-harness-test:
+dev-harness-test: $(VSCODE_NODE_LOCK)
 	@python3 scripts/agent-doc-dev self-test
 	@cd editors/jetbrains && ./gradlew --no-daemon --console=plain -q test
 	@cd editors/vscode && npm test

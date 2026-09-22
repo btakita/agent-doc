@@ -1184,8 +1184,19 @@ pub fn subscribe_captured_finalize_wakes_for_file(
         request,
         timeout.saturating_add(Duration::from_secs(2)),
     )?;
-    let wakes = subscription
-        .frames
+    let wakes = captured_finalize_wakes_from_frames(&subscription.frames);
+    Ok(CapturedFinalizeWakeSubscription {
+        controller_generation: subscription.controller_generation,
+        latest_version: subscription.latest_version,
+        timed_out: subscription.timed_out,
+        wakes,
+    })
+}
+
+pub(super) fn captured_finalize_wakes_from_frames(
+    frames: &[ControllerStatePlaneFrame],
+) -> Vec<CapturedFinalizeWakeProjection> {
+    frames
         .iter()
         .filter_map(|frame| {
             let message: lazily::IpcMessage = serde_json::from_str(&frame.message_json).ok()?;
@@ -1198,13 +1209,7 @@ pub fn subscribe_captured_finalize_wakes_for_file(
             serde_json::from_slice::<CapturedFinalizeWakeSnapshot>(&payload).ok()
         })
         .flat_map(|snapshot| snapshot.wakes.into_values())
-        .collect();
-    Ok(CapturedFinalizeWakeSubscription {
-        controller_generation: subscription.controller_generation,
-        latest_version: subscription.latest_version,
-        timed_out: subscription.timed_out,
-        wakes,
-    })
+        .collect()
 }
 
 /// Send one editor-replica request through the project controller.
@@ -25149,6 +25154,15 @@ mod tests {
             serde_json::from_slice::<CapturedFinalizeWakeSnapshot>(&payload).unwrap(),
             snapshot
         );
+        let frame = ControllerStatePlaneFrame {
+            channel: CAPTURED_FINALIZE_WAKE_STATE_CHANNEL.to_string(),
+            producer_id: "rust-test".to_string(),
+            epoch: 43,
+            base_epoch: None,
+            plane_version: 8,
+            message_json,
+        };
+        assert_eq!(captured_finalize_wakes_from_frames(&[frame]), vec![wake]);
     }
 
     #[test]

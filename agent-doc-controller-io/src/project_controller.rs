@@ -15430,22 +15430,37 @@ agent:queue\n\
         runtime: &Arc<ControllerRuntime>,
         document_hash: &str,
         expected_reason: &str,
-    ) {
+        mut cursor: ControllerStatePlaneSubscription,
+    ) -> rpc::CapturedFinalizeWakeProjection {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            let reason = runtime
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "captured-finalize state plane did not publish {expected_reason}"
+            );
+            let subscription = runtime.subscribe_state_plane(
+                rpc::CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
+                Some(cursor.controller_generation),
+                cursor.latest_version,
+                remaining,
+            );
+            if let Some(wake) = rpc::captured_finalize_wakes_from_frames(&subscription.frames)
+                .into_iter()
+                .find(|wake| wake.document_hash == document_hash && wake.reason == expected_reason)
+            {
+                return wake;
+            }
+            let current_reason = runtime
                 .captured_finalize_wakes
                 .lock()
                 .get(document_hash)
                 .map(|wake| wake.reason.clone());
-            if reason.as_deref() == Some(expected_reason) {
-                return;
-            }
             assert!(
-                Instant::now() < deadline,
-                "captured-finalize wake did not reach {expected_reason}: {reason:?}"
+                !subscription.timed_out,
+                "captured-finalize state plane did not publish {expected_reason}; current projection: {current_reason:?}"
             );
-            std::thread::sleep(Duration::from_millis(10));
+            cursor = subscription;
         }
     }
 
@@ -17333,23 +17348,12 @@ revised operator request
         // Native-save receipts may already be flushing this graph on their
         // worker thread. Observe the published Effect receipt, not scheduler
         // timing immediately after a Source update.
-        assert!(
-            !runtime
-                .subscribe_state_plane(
-                    rpc::CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
-                    Some(wake_cursor.controller_generation),
-                    wake_cursor.latest_version,
-                    Duration::from_secs(2),
-                )
-                .timed_out
-        );
-        wait_for_captured_finalize_wake_reason(
+        let wake = wait_for_captured_finalize_wake_reason(
             &runtime,
             &document_hash,
             "retained_settled_delivery_reactive",
+            wake_cursor,
         );
-        let wakes = runtime.captured_finalize_wakes.lock();
-        let wake = wakes.get(&document_hash).unwrap();
         assert_eq!(wake.reason, "retained_settled_delivery_reactive");
         assert_eq!(wake.capture_id, "capture-1");
     }
@@ -17555,21 +17559,11 @@ revised operator request
             observation("target"),
         );
         runtime.document_retained_write_observe_disk(&document_hash, &file, observation("target"));
-        assert!(
-            !runtime
-                .subscribe_state_plane(
-                    rpc::CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
-                    Some(wake_cursor.controller_generation),
-                    wake_cursor.latest_version,
-                    Duration::from_secs(2),
-                )
-                .timed_out,
-            "settlement must publish the retained wake receipt"
-        );
         wait_for_captured_finalize_wake_reason(
             &runtime,
             &document_hash,
             "retained_settled_delivery_reactive",
+            wake_cursor,
         );
     }
 
@@ -17623,6 +17617,13 @@ revised operator request
                 .contains_key(&document_hash)
         );
 
+        let wake_cursor = runtime.subscribe_state_plane(
+            rpc::CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
+            None,
+            0,
+            Duration::ZERO,
+        );
+
         runtime
             .document_graphs
             .install_settle_sink(dir.path().to_path_buf(), &runtime);
@@ -17631,6 +17632,7 @@ revised operator request
             &runtime,
             &document_hash,
             "retained_settled_delivery_reactive",
+            wake_cursor,
         );
     }
 

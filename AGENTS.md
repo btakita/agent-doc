@@ -329,8 +329,10 @@ editors/
 
 ## Release Process
 
-Run `make check`, install with `make install`, commit, push, and recycle
-long-lived surfaces as usual. Tags and their hosted Linux/Windows assets may be
+Run `make check`, install with `make install`, commit, and push. During an active
+agent-doc response cycle, rely on the install's idle-boundary handoff and do not
+explicitly recycle that session/project before `respond`; recycle long-lived
+surfaces only after closeout (`#closeout-before-explicit-recycle`). Tags and their hosted Linux/Windows assets may be
 published on demand. Only Darwin asset uploads are weekly
 (`#weekly-macos-assets`): the upload path reads the latest matching GitHub asset
 `created_at` timestamp and fails closed unless it proves seven days have elapsed.

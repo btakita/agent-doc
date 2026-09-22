@@ -1584,6 +1584,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // A tick cannot span two turns, so the scope is exact rather
                 // than a TTL guess, and it drops at the end of each iteration.
                 let _turn_attribution = agent_doc_ops_log_io::begin_turn_attribution_scope();
+                agent_doc_ops_log_io::prime_turn_attribution(&path);
                 // `#idlequiet`: stale-binary convergence is the one check that
                 // must remain prompt at every stage of a turn. Keep it ahead of
                 // every quiescent fast-path gate; it is a local inode/stat probe

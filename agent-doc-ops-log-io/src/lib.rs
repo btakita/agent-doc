@@ -159,6 +159,19 @@ pub fn begin_turn_attribution_scope() -> TurnAttributionScope {
     }
 }
 
+/// Resolve and memoize turn attribution before entering a document-domain
+/// critical section.
+///
+/// Controller requests can log while holding a per-document CRDT relay mutex.
+/// Deferring the first cache miss until that log would acquire the controller's
+/// live state projection in the inverse order of state transitions that publish
+/// relay observations. Request admission calls this once, while it owns no
+/// document lock, so every later `log_op` for the canonical file is a local memo
+/// hit for the exact lifetime of the request.
+pub fn prime_turn_attribution(file: &Path) {
+    let _ = cached_turn_id(file);
+}
+
 impl Drop for TurnAttributionScope {
     fn drop(&mut self) {
         TURN_ATTRIBUTION_SCOPE.with(|scope| {
@@ -528,6 +541,31 @@ mod tests {
 
         // Outside any scope resolution is always fresh, which is correct.
         assert_eq!(cached_turn_id(&doc), resolve_turn_id(&doc));
+    }
+
+    /// Request admission must be able to finish the only state-projection read
+    /// before domain dispatch. Later logging then remains a pure memo lookup,
+    /// even if the durable source is no longer available.
+    #[test]
+    fn primed_turn_attribution_survives_source_removal_inside_scope() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        let started = agent_doc_cycle_state_io::start_preflight(
+            &doc,
+            Some("---\n---\n"),
+            Some("---\n---\n"),
+        )
+        .unwrap();
+
+        let _scope = begin_turn_attribution_scope();
+        prime_turn_attribution(&doc);
+        std::fs::remove_dir_all(tmp.path().join(".agent-doc")).unwrap();
+
+        assert_eq!(
+            cached_turn_id(&doc).as_deref(),
+            Some(started.cycle_id.as_str()),
+            "logging after admission must not reload the state projection"
+        );
     }
 
     #[test]

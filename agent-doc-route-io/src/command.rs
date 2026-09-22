@@ -48,6 +48,7 @@ pub fn run_with_tmux_with_options(
     // re-hashes the document. The scope — not a clock — bounds the memo, so a
     // later turn can never log under this turn's id.
     let _turn_attribution = agent_doc_ops_log_io::begin_turn_attribution_scope();
+    agent_doc_ops_log_io::prime_turn_attribution(file);
     // Clean stale registry entries before lookup, but stay on the editor-driven
     // fast path: use `SkipExpensiveStashCleanup` so the pre-lookup prune does NOT
     // scan stash panes. The expensive stash-pane purge re-resolves every live

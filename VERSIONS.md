@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.413
+
+- **Turn attribution is resolved before controller, route, or idle-watch domain
+  dispatch.** Request logging now uses a request-local memo instead of loading
+  the live document projection while a CRDT relay mutex may be held. This
+  removes the remaining relay/state lock inversion that could wedge attached
+  editor finalization and leave later routes for `dev.md` or `fpe.md` at
+  `projection_effect_in_flight`. Regressions prove admission precedes dispatch
+  and that logging remains projection-free after priming.
+
 ## 0.35.412
 
 - **Current-document reads release the per-document CRDT relay before durable

@@ -13097,6 +13097,14 @@ pub(crate) fn handle_request_locked(
         .cloned()
         .and_then(|identity| serde_json::from_value::<ControllerBinaryIdentity>(identity).ok());
     let bootstrap_snapshot = runtime.bootstrap_snapshot()?;
+    // Prime the request-local turn memo before dispatch can enter a document
+    // relay or state critical section. A cache miss from `log_op` while holding
+    // the relay would otherwise load the live controller projection and invert
+    // the state -> relay publication order used by transitions.
+    if let Some(requested_file) = request.file.as_deref() {
+        let canonical = canonical_controller_request_file(&bootstrap_snapshot, requested_file);
+        agent_doc_ops_log_io::prime_turn_attribution(&canonical);
+    }
     match request.command.as_str() {
         "coordination_claim" => {
             let scopes: Vec<String> = serde_json::from_str(
@@ -25913,6 +25921,31 @@ mod tests {
             route.matches("handle_sync_tmux_layout_invocation(").count(),
             1,
             "semantic supersession belongs to the layout graph, not an RPC republish loop"
+        );
+    }
+
+    #[test]
+    fn controller_request_primes_turn_attribution_before_domain_dispatch() {
+        let source = include_str!("rpc.rs");
+        let handler = &source[source
+            .find("pub(crate) fn handle_request_locked(")
+            .expect("controller request handler")..];
+        let handler = &handler[..handler
+            .find("\nfn serve_document_turn_authority_stream(")
+            .expect("next top-level helper")];
+        let snapshot = handler
+            .find("let bootstrap_snapshot = runtime.bootstrap_snapshot()?")
+            .expect("bootstrap snapshot admission");
+        let prime = handler
+            .find("agent_doc_ops_log_io::prime_turn_attribution(&canonical)")
+            .expect("turn attribution prime");
+        let dispatch = handler
+            .find("match request.command.as_str()")
+            .expect("domain command dispatch");
+
+        assert!(
+            snapshot < prime && prime < dispatch,
+            "turn attribution must resolve at request admission, before any command can acquire a relay or state lock"
         );
     }
 

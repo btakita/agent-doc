@@ -778,6 +778,45 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `compact lint failure is concise and actionable in a small notification`() {
+        val output = """
+            Error: project controller command `compact_document` failed: [lint-gate] INTERRUPTED: 1 blocking lint finding(s) for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md (mode=warn, source=default). Fix the directives below before re-running `agent-doc finalize` / `agent-doc write --commit`, or set `agent_doc_lint_dialect: off` in frontmatter / `[lint] dialect = "off"` in `.agent-doc/config.toml` to temporarily skip this gate. /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md:449:1 error: attribute `queu0000e` on `agent:backlog` is missing `=value` [agent-doc/malformed-attr] hint: try `queu0000e= `
+        """.trimIndent()
+
+        val message = TerminalUtil.buildCommandFailureMessage("compact this document", 1, output)
+
+        assertEquals(
+            """
+                Agent Doc couldn't compact this document because a document directive is malformed.
+
+                api.md, line 449
+                Attribute `queu0000e` on `agent:backlog` is missing `=value`.
+
+                Suggested fix: `queu0000e= `
+
+                Fix the directive, then try again.
+            """.trimIndent(),
+            message,
+        )
+        assertFalse(message.contains("project controller command"))
+        assertFalse(message.contains("agent_doc_lint_dialect"))
+        assertTrue(message.length < 300)
+    }
+
+    @Test
+    fun `generic command failure is bounded for a small notification`() {
+        val message = TerminalUtil.buildCommandFailureMessage(
+            action = "complete the command",
+            exitCode = 7,
+            output = "x".repeat(900),
+        )
+
+        assertTrue(message.startsWith("Agent Doc couldn't complete the command (exit 7)."))
+        assertTrue(message.endsWith("..."))
+        assertTrue(message.length < 550)
+    }
+
+    @Test
     fun `protected prompt input clear refusal parses protected reason`() {
         val output = """
             Error: session_clear refused for /repo/tasks/root.md because pane %2 contains protected prompt input (reason=drafted prompt input, source=authoritative_actor, current_command=agent-doc, tail="› unfinished prompt"). Clear the prompt input manually, or run `agent-doc session interrupt-clear /repo/tasks/root.md` to intentionally interrupt the pane and clear context.

@@ -772,6 +772,13 @@ before routing; `saveAllDocuments()` is forbidden because it can synchronously
 wake an unrelated document's retained delivery and surface that projection failure as
 the selected document's compact result.
 
+JetBrains document-command failures retain the complete subprocess output in the
+IDE log, but the operator-facing notification must fit the small notification
+surface. A lint-gate failure is rendered as the attempted action, document basename
+and line, human-readable finding, suggested replacement when present, and retry
+instruction. Nested controller/CLI wrappers, configuration escape hatches, and
+absolute paths are diagnostic detail and must not dominate that notification.
+
 When the deferred reconnect result differs from the open JetBrains document, a
 forced refresh must install those exact bytes into the visible `Document` before
 registering the replacement replica. Installation is compare-and-swap against the

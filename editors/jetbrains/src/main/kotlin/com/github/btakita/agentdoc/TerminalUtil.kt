@@ -69,6 +69,9 @@ object TerminalUtil {
         """authoritative actor record for (.+?) is running harness ([^,\s]+), but frontmatter now resolves to ([^;\s]+); deferring to boundary agent restart instead of replacing live pane""",
         RegexOption.DOT_MATCHES_ALL,
     )
+    private val LINT_DIAGNOSTIC_REGEX = Regex(
+        """((?:[A-Za-z]:)?[/\\][^\r\n]*?):(\d+):(\d+)\s+error:\s+(.+?)\s+\[[^]]+](?:\s+hint:\s*(.*))?$""",
+    )
     private val SESSION_STATUS_ACTOR_GENERATION_REGEX = Regex("""\bactor:\s+generation=(\d+)""")
     private val RESTART_TELEMETRY_EVENT_NAMES = listOf(
         "session_restart_force_used",
@@ -1197,6 +1200,7 @@ object TerminalUtil {
             file = file,
             command = buildCompactExchangeCommand(resolveAgentDoc(cwd), relativePath),
             startedMessage = "Compacting exchange for ${file.name}",
+            failureAction = "compact this document",
             onSuccess = { resolvedPath, output ->
                 showHint(project, output.ifBlank { "Compacted exchange for $resolvedPath" })
             },
@@ -1365,6 +1369,7 @@ object TerminalUtil {
         file: VirtualFile,
         command: List<String>,
         startedMessage: String,
+        failureAction: String = "complete the command",
         onSuccess: (String, String) -> Unit,
         onFailure: ((String, Int, String) -> Unit)? = null,
         onComplete: (() -> Unit)? = null,
@@ -1390,7 +1395,7 @@ object TerminalUtil {
                     onFailure?.invoke(relativePath, exitCode, output)
                         ?: notifyError(
                                 project,
-                                "agent-doc command failed (exit $exitCode):\n$output",
+                                buildCommandFailureMessage(failureAction, exitCode, output),
                             )
                     } else {
                         onSuccess(relativePath, output)
@@ -1873,6 +1878,32 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
 
     fun notifyError(project: Project, content: String) {
         notify(project, content, NotificationType.ERROR)
+    }
+
+    internal fun buildCommandFailureMessage(action: String, exitCode: Int, output: String): String {
+        val diagnostic = LINT_DIAGNOSTIC_REGEX.findAll(output.trim()).lastOrNull()
+        if (diagnostic != null) {
+            val path = diagnostic.groupValues[1]
+            val fileName = path.substringAfterLast('/').substringAfterLast('\\')
+            val line = diagnostic.groupValues[2]
+            val problem = diagnostic.groupValues[4].trim().replaceFirstChar { it.titlecase() }
+                .let { if (it.endsWith('.') || it.endsWith('!') || it.endsWith('?')) it else "$it." }
+            val suggestion = diagnostic.groupValues.getOrNull(5).orEmpty().trim()
+                .removePrefix("try ").trim()
+            return buildString {
+                append("Agent Doc couldn't $action because a document directive is malformed.\n\n")
+                append("$fileName, line $line\n")
+                append(problem)
+                if (suggestion.isNotBlank()) {
+                    append("\n\nSuggested fix: $suggestion")
+                }
+                append("\n\nFix the directive, then try again.")
+            }
+        }
+
+        val detail = output.trim().ifBlank { "No error details were returned." }
+        val conciseDetail = if (detail.length <= 480) detail else detail.take(477).trimEnd() + "..."
+        return "Agent Doc couldn't $action (exit $exitCode).\n\n$conciseDetail"
     }
 
     fun notifyWarning(project: Project, content: String) {

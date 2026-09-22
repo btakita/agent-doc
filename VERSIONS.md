@@ -2,6 +2,16 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.418
+
+- **JetBrains compact lint failures now fit the notification surface.** The
+  plugin keeps the complete subprocess failure in the IDE log while presenting
+  the attempted action, document basename and line, malformed directive,
+  suggested replacement, and retry instruction. Nested controller wrappers,
+  absolute paths, and lint-disable escape hatches no longer bury the actionable
+  finding in a small notification. Unknown command failures are bounded rather
+  than rendering unbounded process output.
+
 ## 0.35.417
 
 - **A commit racing an editor save no longer rebuilds the live CRDT from an

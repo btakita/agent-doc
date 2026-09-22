@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -137,6 +137,54 @@ Verification passed through the complete release gate: 9,633 Rust tests, simulat
 
 
 `#fixhttpsgithub` was already completed: GitHub issue #56 is closed, release `v0.35.406` was published, and the implementation, specification, tests, push, and installation are recorded in the earlier issue response and completed-work archive. I marked the duplicate stale backlog/queue item done; no additional follow-up is needed.
+
+### Re: supervisor restart crash — gpt-5.6 · 2026-09-21T23:50-04:00
+
+> **Queue prompt:**
+>
+> release + publish
+
+
+> **Queue prompt:**
+>
+> Fix gh issue #57.
+
+
+> **Queue prompt:**
+>
+> Address new comments on gh issue #55.
+
+
+> **Queue prompt:**
+>
+> Fix Run Agent Doc on docs.md then switching editor to dev.md resulted in focusing on a tmux pane in the stash tmux window.
+
+
+> **Queue prompt:**
+>
+> Run Agent Doc on dev.md with agent:queue not in go mode resulted in a single tmux pane layout.
+
+
+> **Queue prompt:**
+>
+> do [#sessioncrashedduring]
+
+
+> **Queue prompt:** The session crashed during restart?
+
+Yes. The earlier install-triggered restart genuinely killed the supervisor handoff while leaving its preserved Codex child orphaned.
+
+The old supervisor executed `execve_preserve_child`, but the replacement ran ordinary document admission during the controller/editor relay handoff. With no usable current-text witness at that instant, admission failed with `editor is still attached ... missing_replica recovery exhausted and disk read authority is refused`; the replacement exited before `supervisor_reexec_adopted_child`, and the session then ended as `sync_missing_pane`.
+
+Fixed and deployed in agent-doc 0.35.416, commit `6f8228609` (`fix: preserve child across supervisor reentry`), pushed to `origin/main`.
+
+The replacement-supervisor path is now explicitly a transport reentry around an already-running child. If live controller/editor authority is momentarily unavailable during that handoff, it may read disk only as observational launch metadata, without publishing disk replica authority. It preserves the existing actor/session lifecycle, skips ordinary frontmatter repair, registers the transport, and schedules the existing live-model reconciliation. Ordinary new-session admission remains fail-closed.
+
+Regression coverage proves both the no-relay-witness decision and the observational metadata fallback. Verification passed: 9,636 Rust tests under bounded concurrency, doctests, deterministic simulator, clippy, version/privacy/generated-doc audits, 179 VS Code tests, JetBrains tests, the real native cross-editor controller harness, Python bootstrap tests, Lean, and all TLA+ models. Two unrelated default-concurrency flakes were rerun individually and passed; the full bounded matrix was clean.
+
+The full release build, native library, and both editor packages are installed. The CLI reports 0.35.416. During installation the original supervisor PID and exact Codex child PID remained alive; the fleet handoff is marked to occur at the safe post-turn boundary.
+
+No additional backlog follow-up is needed for this crash.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -145,14 +193,7 @@ Verification passed through the complete release gate: 9,633 Rust tests, simulat
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go priority -->
-- ~~do [#fixhttpsgithub]~~
-- The session crashed
-- Run Agent Doc on dev.md with agent:queue not in go mode resulted in a single tmux pane layout.
-- Fix Run Agent Doc on docs.md then switching editor to dev.md resulted in focusing on a tmux pane in the stash tmux window.
-- Address new comments on gh issue #55.
-- Fix gh issue #57.
-- release + publish
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 <!-- /agent:queue -->
 
 

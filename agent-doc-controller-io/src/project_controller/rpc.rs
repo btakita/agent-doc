@@ -2322,7 +2322,35 @@ pub fn observe_queue_authority(project_root: &Path, file: &Path, content: &str) 
             .install_settle_sink(project_root.to_path_buf(), &runtime);
         let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
         let document_hash = agent_doc_hash::document_id_for_path(&canonical);
-        runtime.document_queue_authority_observe(&document_hash, &canonical, content.to_string())
+        let projected = runtime.document_queue_authority_observe(
+            &document_hash,
+            &canonical,
+            content.to_string(),
+        )?;
+        // The runtime above is intentionally process-local for isolated tests.
+        // Keep its only strong reference alive until the queued Effect has
+        // published the terminal receipts it projected; otherwise dropping the
+        // runtime at function return races the worker's Weak upgrade and makes
+        // queue lifecycle tests nondeterministic under scheduler pressure.
+        if projected > 0 {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let completed = runtime
+                    .document_state_projection(&document_hash)?
+                    .map(|projection| projection.queue.completed_heads.len())
+                    .unwrap_or_default();
+                if completed >= projected {
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    anyhow::bail!(
+                        "test queue authority projection did not publish {projected} terminal receipt(s); observed {completed}"
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        Ok(projected)
     }
 
     #[cfg(not(any(test, feature = "test-support")))]

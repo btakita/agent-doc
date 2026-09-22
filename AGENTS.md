@@ -483,7 +483,7 @@ history without introducing a second document model.
 
 agent-doc extends the existence kernel vocabulary with domain-specific terms. See the full ontology table in [README.md](README.md#domain-ontology).
 
-<!-- tsift:code-navigation v=0.1.99 -->
+<!-- tsift:code-navigation v=0.1.100 -->
 ## Code Navigation
 
 Use the repository tsift skill at [`.agents/skills/tsift/SKILL.md`](.agents/skills/tsift/SKILL.md) for code search, source reading, call graphs, diffs, logs, and test output.

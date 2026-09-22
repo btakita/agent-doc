@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.417
+
+- **A commit racing an editor save no longer rebuilds the live CRDT from an
+  intermediate disk projection.** While any editor replica is live, the commit
+  barrier preserves editor authority and flushes that replica into the
+  consistent cut without rotating the document lineage. Baseline-to-disk
+  reconciliation remains available after all editor replicas disconnect. This
+  prevents follow-up typing—such as queue items, presets, and component
+  priorities—from being quarantined as stale and then overwritten by a
+  canonical rebootstrap.
+
 ## 0.35.416
 
 - **A supervisor hot-reload cannot orphan its preserved agent child when the

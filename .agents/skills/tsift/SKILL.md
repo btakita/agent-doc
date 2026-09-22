@@ -2,7 +2,7 @@
 name: tsift
 description: Use tsift for token-efficient repository navigation, code search and reading, call graphs, diffs, logs, tests, session context, and workspace memory. Use when exploring or changing a codebase with tsift installed.
 ---
-<!-- tsift:skill v=0.1.99 -->
+<!-- tsift:skill v=0.1.100 -->
 # tsift
 
 Run `tsift status` at session start from the owning repo root. If the task or file lives under a git submodule (for example `src/tsift/...`), switch to that submodule root first so the harness loads the narrower local instructions and repo state instead of the superproject root. `tsift status` repairs the `.tsift/` index state it owns and never rewrites tracked files (`--no-fix` skips even that). If status reports stale or missing instructions, run `tsift init` to refresh the repository-local tsift skill and its reference; it names every tracked file it rewrites or moves. When the harness cannot perform write commands, ask the user to run the printed `run:` command instead.

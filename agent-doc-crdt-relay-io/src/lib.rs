@@ -3614,11 +3614,17 @@ fn commit_barrier_for_file_with_authority_and_delivery(
         return true;
     }
     match with_existing_hub(file, |hub| {
-        // `#staleinmem` — out-of-band baseline reconcile, BEFORE flushing live
-        // editors into the canonical for the commit cut. This compares the real
-        // document file to the relay's last committed baseline; it never creates
-        // a relay hub from disk and never consults live-buffer sidecars.
-        if let Ok(on_disk) = std::fs::read_to_string(file) {
+        // `#staleinmem` — reconcile an out-of-band disk correction only when no
+        // live editor can hold a newer projection. While an editor is live, its
+        // CRDT replica is authoritative and an ordinary IDE save can make disk
+        // temporarily differ from both the committed baseline and the canonical
+        // text. Rebuilding from that intermediate save rotates the lineage and
+        // can quarantine the very keystrokes still arriving from the editor.
+        // Flush the live replicas below instead; explicit controller writes use
+        // the normal CRDT publication path.
+        if hub.live_count() == 0
+            && let Ok(on_disk) = std::fs::read_to_string(file)
+        {
             match hub.reconcile_canonical_against_baseline(&on_disk) {
                 Ok(true) => agent_doc_ops_log_io::log_op(
                     file,
@@ -7981,7 +7987,7 @@ mod tests {
     }
 
     #[test]
-    fn commit_barrier_rebuilds_canonical_after_out_of_band_disk_correction() {
+    fn commit_barrier_rebuilds_canonical_after_out_of_band_disk_correction_without_live_editor() {
         // `#staleinmem`: after a corrupt commit, an out-of-band disk correction
         // (e.g. `git checkout HEAD` / `reset --from-current`) must rebuild the stale
         // canonical at the NEXT commit barrier so the discarded content cannot
@@ -7996,6 +8002,7 @@ mod tests {
             hub.apply_local(editor, 0, 0, corrupt).unwrap();
             // Mark this as the state we last committed to disk.
             hub.record_committed_baseline(corrupt);
+            hub.disconnect(editor);
         })
         .unwrap();
 
@@ -8018,10 +8025,53 @@ mod tests {
                 !hub.canonical_text().contains("CORRUPT-RESPONSE"),
                 "the discarded out-of-band content is gone from the canonical"
             );
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn commit_barrier_preserves_live_editor_when_disk_is_an_intermediate_save() {
+        // Regression for #entitlementsliveeditloss: a synthetic commit raced a
+        // JetBrains typing burst. Disk had advanced beyond the last commit but
+        // still lagged the live CRDT, so treating it as an out-of-band correction
+        // rotated the lineage and the next queue/backlog edits were quarantined.
+        let (_dir, doc) = temp_doc("live-intermediate-save.md");
+        let editor = mint_client_id("intellij:live-intermediate-save");
+        let baseline = "# Session\n\n";
+        let first_live_edit = "prompt preset\n";
+        let queued_edit = "queue item + priority\n";
+        std::fs::write(&doc, baseline).unwrap();
+        let lineage_before = with_hub(&doc, |hub| {
+            hub.register(editor).unwrap();
+            hub.apply_local(editor, 0, 0, baseline).unwrap();
+            hub.record_committed_baseline(baseline);
+            let end = hub.canonical_text().chars().count() as u32;
+            hub.apply_local(editor, end, 0, first_live_edit).unwrap();
+            let end = hub.member_text(editor).unwrap().chars().count() as u32;
+            // This edit is still local when the commit barrier begins.
+            hub.local_edit(editor, end, 0, queued_edit).unwrap();
+            hub.lineage().to_string()
+        })
+        .unwrap();
+
+        // The IDE has saved one intermediate revision. It is neither the last
+        // committed baseline nor the current live editor projection.
+        std::fs::write(&doc, format!("{baseline}{first_live_edit}")).unwrap();
+
+        assert!(commit_barrier_for_file_with_authority(
+            &doc,
+            CrdtAuthority::MultiReplica,
+        ));
+        with_hub(&doc, |hub| {
             assert_eq!(
-                hub.member_text(editor).as_deref(),
-                Some(good),
-                "the editor mirror was reseeded so a flush cannot reintroduce the corruption"
+                hub.canonical_text(),
+                format!("{baseline}{first_live_edit}{queued_edit}"),
+                "the live editor, including its in-flight local edit, must win over lagging disk"
+            );
+            assert_eq!(
+                hub.lineage(),
+                lineage_before,
+                "an intermediate editor save must not rotate the live document lineage"
             );
         })
         .unwrap();

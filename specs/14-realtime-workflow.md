@@ -883,6 +883,14 @@ realtime authority rules.
 | `AppliedVerified` | Post-apply source-of-truth | The owner-visible document contains the agent operation and preserves observed operator text. | Save backup state and commit. |
 | `ConflictBlocked` | Current source-of-truth | Merge or delivery could not prove preservation of operator text. | Leave the document untouched and report/retry later. |
 
+The commit barrier must not infer an out-of-band disk correction while at least
+one editor replica is live. An editor save can temporarily advance disk beyond
+the last committed baseline while still lagging the CRDT typing stream. In that
+state the barrier flushes live replicas without rebuilding the canonical epoch
+or rotating its lineage. Baseline-to-disk reconciliation is permitted only when
+the relay has no live editor; explicit controller mutations continue to publish
+through the CRDT transport.
+
 Each live editor registration on the reliable-sync plane must carry a stable
 frontend capability proof before the controller treats that editor as safe for
 operator-preserving mutation. The canonical capability is

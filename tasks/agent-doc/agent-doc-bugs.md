@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0cab6-c41d-7fc2-b343-06276b54b9c3
+  codex: 01a0cb4d-e033-7a20-b7fb-4d4a3825fa39
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: go
 ---
 
 ## Status
@@ -353,6 +353,27 @@ Verification:
 - Idle-boundary recycling scheduled automatically.
 - Worktree clean.
 - CI snapshot was queued: run `35791291748`; not polled further per repository policy.
+
+### Re: 2026-09-22T19:23:58-04:00 — gpt-5.6
+
+> **Queue prompt:** On tsift.md, I switched agent: claude to agent: codex but agent-doc reverts my change. Now switching the editor to tsift.md does not auto-sync the tmux pane.
+
+Fixed and deployed.
+
+The frontmatter edit was not ultimately reverted: the authoritative document now retains `agent: codex`, and the controller successfully started/focused Codex pane `%117`. The later failure was a lifecycle gap: once that layout-provision pane moved to stash, the bounded orphan policy correctly reaped it, but the low-latency focus-only projection classified the resulting dead/closed actor as a non-structural refusal. Since the editor layout itself had not changed, no full reconciliation followed, so later tab selections had no pane to focus.
+
+The JetBrains adapter now treats every unusable selected-owner receipt—stashed, reaped/dead, missing actor or registry binding, or non-focusable actor—as a generation-fenced request for a forced full-surface reconciliation. Pane creation remains exclusively in the structural layout graph, preserving exact pane cardinality and avoiding the earlier focus-path three-pane growth bug. A stale receipt still cannot override a newer editor selection, and inactive-desktop refusals remain non-structural.
+
+Verification and deployment:
+
+- The focused EditorTabSyncListener suite passed all 49 tests, including the new table-driven missing-owner regression.
+- Full `make check` passed.
+- JetBrains package generation advanced from 0.2.394 to 0.2.395, with the source digest fence updated.
+- Commit `6034ff0b39` (`fix: recover reaped pane on editor selection`) was pushed to `origin/main`.
+- `make install` installed the CLI/native library and JetBrains 0.2.395 package; the project controller was marked for two-phase recycle.
+- CI run 35797157295 was observed once and is in progress.
+
+Restart IntelliJ to activate plugin 0.2.395; the running IDE still has the superseded 0.2.394 JAR mapped. After restart, selecting `tasks/software/tsift.md` should force structural recovery when its pane has been reaped, then focus the replacement Codex pane.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

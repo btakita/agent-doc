@@ -1,7 +1,7 @@
 ---
 agent_doc_session: tsift-v0.1
 resume:
-  claude: ffc4ce39-566d-4e12-929b-5d5496cc3f82
+  claude: a94b1365-b90c-4933-88e4-eb3cd1573d55
   codex: 01a0b337-c18d-7770-8e52-af605f601504
 agent: claude
 claude_model: opus
@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -410,13 +410,85 @@ Run: [35585001349](https://github.com/btakita/tsift/actions/runs/35585001349) �
 - superproject pointer → `0f93ba244`, pushed
 
 Two notes: last cycle's un-reaped `#tsiftambientexplicit` **self-healed** — this cycle's preflight persisted the reap and the backlog is now empty, so no repair was needed. And preflight's `semantic_completion_match` pointing at `#fixhttpsgithub` is a false positive; that was a different issue from 2026-08-27.
+
+### Re: Does tsift support a skill so we don't need to use AGENTS.md? — opus-5 · 2026-09-22T13:22-04:00
+
+> **Queue prompt:** Does tsift support a skill so we don't need to use AGENTS.md?
+
+Partly, before this cycle. It does now.
+
+Your Codex session on `src/haiven-dev/tasks/infra.md` answered "yes — use `tsift init --instructions personal`". That half is right: personal mode installs `~/.agents/skills/tsift/SKILL.md` and touches nothing tracked. But it stops one step short, and the step it skips is the one that matters.
+
+#### The gap
+
+**No harness scans `.agents/skills/`.** Claude Code reads `.claude/skills/`, Codex `.codex/skills/`, OpenCode `.opencode/skills/`, Grok `.grok/skills/`. The only thing making the canonical skill reachable was the marker-owned router `shared` mode writes into `AGENTS.md` — the exact file you want to stop using. So `--instructions personal` installed a skill *nothing loaded*.
+
+Your own machine is the proof:
+
+| path | version | loaded by Claude Code? |
+|---|---|---|
+| `~/.agents/skills/tsift/SKILL.md` | **0.1.100** (generated) | **no** |
+| `~/.claude/skills/tsift/SKILL.md` | **0.1.62** (hand-written) | yes |
+
+The skill in this session's own skill list is the 0.1.62 one — 38 versions stale — while the current generated skill sits in a directory nothing reads. `~/.codex/skills/` holds `compose-skills` and `watch`, not tsift, so Codex was not loading it either.
+
+#### What I built
+
+`tsift init --harness <claude|codex|opencode|grok|all>` — the four you named — symlinks the canonical skill into each harness's own skill directory.
+
+```bash
+tsift init --instructions personal --harness all   # what you want for haiven-dev
+```
+
+```
+~/.claude/skills/tsift   -> ~/.agents/skills/tsift
+~/.codex/skills/tsift    -> ~/.agents/skills/tsift
+~/.opencode/skills/tsift -> ~/.agents/skills/tsift
+~/.grok/skills/tsift     -> ~/.agents/skills/tsift
+```
+
+Verified end to end in a scratch repo: all four resolve to `tsift:skill v=0.1.100`, and the repo stays clean — no `AGENTS.md`, no tracked diff.
+
+**A symlink, never a copy.** A copy is exactly how you ended up with a 0.1.62 skill next to a 0.1.100 one: the harness keeps loading a release-old file while `tsift status` reports the canonical surface as *current*, because status only ever reads the canonical path. One symlink means one `tsift init` refresh updates every harness at once, and staleness stays detectable.
+
+Other decisions worth knowing:
+
+- **Shared mode links relatively** (`../../.agents/skills/tsift`), so the checkout stays relocatable — I moved a test checkout and the link still resolved. Personal links are absolute because their target is outside any project. The `..` climb is derived from each harness directory's own depth, so a harness added at a different depth can't silently produce a dangling link.
+- **An existing path that isn't a tsift-owned link fails closed**, naming the harness and path. Your hand-written `~/.claude/skills/tsift/` will hit this — see below.
+- **`--instructions off --harness all` removes the links** from both project and user roots, so tearing down the canonical skill can't strand a dangling skill directory.
+- **`--harness` does not require `shared`**, unlike `--codex`/`--opencode`. Making the skill loadable without tracked files is the entire point of personal mode.
+
+#### One thing that will stop you
+
+`--harness claude` **will refuse** on your machine, by design:
+
+```
+Refusing to replace the unmanaged claude skill at ~/.claude/skills/tsift — move it aside, then re-run with --harness claude
+```
+
+That file is hand-maintained (7.6K, `user-invocable: true`, `/tsift` trigger, its own `runbooks/`) and richer than the generated 2.4K skill, so destroying it silently would be the wrong default. And since `--harness all` bails on the first refusal, nothing gets linked until you resolve it. Two options: move it aside and let the link take over, or run `--harness codex --harness opencode --harness grok` and keep managing Claude's by hand. Backlogged as `#claudeskillmerge` since the real fix is folding its extra content into the generated template.
+
+#### Verification
+
+- `make check` → **exit 0**, 67 suites, **1868 passed, 0 failed** (7 new tests).
+- Mutation-checked both guards rather than trusting them: breaking the relative-target climb reddened 3 tests; forcing `is_tsift_owned_skill_link` to always return true reddened the refusal test. Restored, re-verified green.
+- `cargo install --path .` → `tsift 0.1.100` with the new flag live.
+- Probes: personal + shared modes, all four harnesses resolving, relocatability after a checkout move, idempotence (`already present`), and refusal against an unmanaged skill.
+
+#### Landed
+
+- `src/tsift` → `aac7c11`, pushed
+- superproject pointer → `e342169f04`, pushed
+- CI [35760196615](https://github.com/btakita/tsift/actions/runs/35760196615) — **still in progress** at closeout, reporting from local evidence.
+
+One correction to last cycle's record: it said both prior CI runs were green. The v0.1.100 release run `35584999376` actually **failed** — `search_cmd_uses_wal_snapshot_fallback_when_lock_appears_after_precheck`, 479 passed / 1 failed, CI-only. That test installs a process-global post-precheck WAL-lock hook, so a parallel test sharing that global is the likely mechanism. Backlogged as `#ciwalflake` rather than waved off as flaky.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 do [#tsiftsupportskill]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -425,6 +497,9 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#claudeskillmerge] Decide what happens to the hand-maintained ~/.claude/skills/tsift/SKILL.md (7.6K, user-invocable /tsift, own runbooks/, pinned tsift-version 0.1.62). It is richer than the generated 2.4K skill but 38 versions stale, and 'tsift init --harness claude' now fails closed on it by design. Either fold its extra content into the generated skill template so the symlink can take over, or skip --harness claude and keep maintaining it by hand.
+- [ ] [#ciwalflake] Fix the CI-only failure in tsift-cli test search_cmd_uses_wal_snapshot_fallback_when_lock_appears_after_precheck — run 35584999376 (the v0.1.100 release commit) failed there with 479 passed / 1 failed while the full local suite is green. The test installs a process-global post-precheck WAL-lock hook, so a parallel test sharing that global is the likely mechanism.
+- [ ] 🚧 [#tsiftsupportskill] Does tsift support a skill so we don't need to use AGENTS.md?
 <!-- /agent:backlog -->
 
 ## Review

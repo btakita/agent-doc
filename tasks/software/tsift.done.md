@@ -545,3 +545,4 @@
 - 2026-09-17 [#csharpindex] [recommended] Promote C# from structural-only to the indexable navigation tier: add symbol/call queries and .cs graph indexing, enable symbol-resolved rename, and prove it against a real Haiven C# fixture.
 - 2026-09-17 [#tsiftinstrpolicy] [recommended] Implement team-safe instruction deployment modes from #tsiftfriendlyteam: personal (no tracked repo mutation; user-scoped skill plus bundled runbook), shared (explicit AGENTS.md plus tracked runbook), and off; preserve existing installs and never default to AGENTS.override.md.
 - 2026-09-18 [#fixdiscordissue] Fix discord.md issue:
+- 2026-09-22 [#tsiftsupportskill] Does tsift support a skill so we don't need to use AGENTS.md?

@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -413,6 +413,11 @@ Two notes: last cycle's un-reaped `#tsiftambientexplicit` **self-healed** — th
 
 ### Re: Does tsift support a skill so we don't need to use AGENTS.md? — opus-5 · 2026-09-22T13:22-04:00
 
+> **Queue prompt:**
+>
+> do [#tsiftsupportskill]
+
+
 > **Queue prompt:** Does tsift support a skill so we don't need to use AGENTS.md?
 
 Partly, before this cycle. It does now.
@@ -488,7 +493,6 @@ One correction to last cycle's record: it said both prior CI runs were green. Th
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#tsiftsupportskill]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -499,7 +503,6 @@ https://github.com/chopratejas/headroom
 <!-- agent:backlog priority queue -->
 - [ ] [#claudeskillmerge] Decide what happens to the hand-maintained ~/.claude/skills/tsift/SKILL.md (7.6K, user-invocable /tsift, own runbooks/, pinned tsift-version 0.1.62). It is richer than the generated 2.4K skill but 38 versions stale, and 'tsift init --harness claude' now fails closed on it by design. Either fold its extra content into the generated skill template so the symlink can take over, or skip --harness claude and keep maintaining it by hand.
 - [ ] [#ciwalflake] Fix the CI-only failure in tsift-cli test search_cmd_uses_wal_snapshot_fallback_when_lock_appears_after_precheck — run 35584999376 (the v0.1.100 release commit) failed there with 479 passed / 1 failed while the full local suite is green. The test installs a process-global post-precheck WAL-lock hook, so a parallel test sharing that global is the likely mechanism.
-- [ ] 🚧 [#tsiftsupportskill] Does tsift support a skill so we don't need to use AGENTS.md?
 <!-- /agent:backlog -->
 
 ## Review

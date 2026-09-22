@@ -362,10 +362,10 @@ Verification:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~The struck multi-line queue item below was not cleared when `agent:queue` completed.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~The struck multi-line queue item below was not cleared when `agent:queue` completed.~~
 - ~~Make this error message easier for a human to read given a small prompt dialog in Idea:~~
   agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: [lint-gate] INTERRUPTED: 1 blocking lint finding(s) for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md (mode=warn, source=default). Fix the directives below before re-running `agent-doc finalize` / `agent-doc write --commit`, or set `agent_doc_lint_dialect: off` in frontmatter / `[lint] dialect = "off"` in `.agent-doc/config.toml` to temporarily skip this gate. /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md:449:1 error: attribute `queu0000e` on `agent:backlog` is missing `=value` [agent-doc/malformed-attr] hint: try `queu0000e= `
-- On tsift.md, I switched `agent: claude` to `agent: codex` but agent-doc reverts my change. Now switching the editor to tsift.md does not auto-sync the tmux pane.
+- 🚧 On tsift.md, I switched `agent: claude` to `agent: codex` but agent-doc reverts my change. Now switching the editor to tsift.md does not auto-sync the tmux pane.
 - Fix api.md session issue: • Agent-doc accepted the response intent but deferred its terminal commit while the editor replica converges. Per its recovery protocol, I’m checking the session exactly once and will not resend or force-write the response.
 <!-- /agent:queue -->
 

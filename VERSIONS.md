@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.411
+
+- **State-plane subscription no longer inverts the channel-wait and shared
+  reactive locks.** Subscribers observe the revision and history before taking
+  the condition mutex, then recheck the revision under that mutex before
+  sleeping. A publisher can therefore notify a subscriber while another Effect
+  owns the process scope without deadlocking every document, route, and layout
+  projection at `projection_effect_in_flight`.
+
 ## 0.35.410
 
 - **All durable document completion effects now run outside the shared reactive

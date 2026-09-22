@@ -1621,8 +1621,13 @@ impl ControllerStatePlaneGraph {
         let deadline = Instant::now() + timeout;
         self.ensure_channel_effect(channel);
         let dependency = self.channel_dependency(channel);
-        let mut guard = dependency.change_lock.lock();
         loop {
+            // Never hold the channel wait mutex while entering the shared
+            // reactive context. Publication Effects run under that context and
+            // take `change_lock` to make notification + sleep atomic; taking
+            // the two locks in the opposite order here deadlocks every process
+            // projection behind one state-plane subscriber.
+            let observed_revision = dependency.revision.load(Ordering::SeqCst);
             let history = self
                 .histories
                 .observe(&self.ctx, &channel.to_string())
@@ -1659,6 +1664,10 @@ impl ControllerStatePlaneGraph {
                     timed_out: latest_version <= effective_after_version,
                     frames,
                 };
+            }
+            let mut guard = dependency.change_lock.lock();
+            if dependency.revision.load(Ordering::SeqCst) != observed_revision {
+                continue;
             }
             dependency.changed.wait_for(
                 &mut guard,
@@ -10016,6 +10025,66 @@ mod tests {
         );
         assert!(warm.frames.is_empty());
         assert!(warm.timed_out, "an unchanged pull must not publish a wake");
+    }
+
+    #[test]
+    fn state_plane_subscriber_never_inverts_channel_and_process_scope_locks() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let plane = Arc::new(ControllerStatePlaneGraph::new_in(&scope));
+        let channel = "test/nonblocking-subscriber";
+        plane.ensure_channel_effect(channel);
+        let dependency = plane.channel_dependency(channel);
+
+        // Hold the process scope inside an Effect. A subscriber must wait for
+        // that scope without owning the channel condition mutex, otherwise the
+        // publisher's notification path takes the inverse lock order and both
+        // sides deadlock.
+        let blocker = scope.ctx().source(false);
+        let entered = Arc::new(std::sync::Barrier::new(2));
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let entered_effect = Arc::clone(&entered);
+        let release_effect = Arc::clone(&release);
+        let blocker_effect = blocker;
+        let blocking_effect = scope.ctx().effect(move |ctx| {
+            if ctx.get(&blocker_effect) {
+                entered_effect.wait();
+                release_effect.wait();
+            }
+        });
+        let blocking_ctx = scope.ctx().clone();
+        let blocker_thread = std::thread::spawn(move || {
+            blocking_ctx.set(&blocker, true);
+        });
+        entered.wait();
+
+        let subscriber_plane = Arc::clone(&plane);
+        let subscriber_started = Arc::new(std::sync::Barrier::new(2));
+        let subscriber_started_thread = Arc::clone(&subscriber_started);
+        let subscriber = std::thread::spawn(move || {
+            subscriber_started_thread.wait();
+            subscriber_plane.subscribe(channel, 0, false, Duration::ZERO)
+        });
+        subscriber_started.wait();
+        std::thread::sleep(Duration::from_millis(50));
+
+        let (notified_tx, notified_rx) = std::sync::mpsc::channel();
+        let notifier = std::thread::spawn(move || {
+            dependency.project_change();
+            let _ = notified_tx.send(());
+        });
+        let notification_was_responsive = notified_rx
+            .recv_timeout(Duration::from_millis(250))
+            .is_ok();
+
+        release.wait();
+        blocker_thread.join().unwrap();
+        subscriber.join().unwrap();
+        notifier.join().unwrap();
+        scope.ctx().dispose_effect(&blocking_effect);
+        assert!(
+            notification_was_responsive,
+            "a state-plane subscriber held its channel mutex while waiting for the process scope"
+        );
     }
 
     #[test]

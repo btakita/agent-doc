@@ -1,7 +1,7 @@
 ---
 agent_doc_session: tsift-v0.1
 resume:
-  claude: a94b1365-b90c-4933-88e4-eb3cd1573d55
+  claude: 4202ed71-8001-4378-b4cc-4f3974f43f7e
   codex: 01a0b337-c18d-7770-8e52-af605f601504
 agent: claude
 claude_model: opus
@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -487,12 +487,74 @@ That file is hand-maintained (7.6K, `user-invocable: true`, `/tsift` trigger, it
 - CI [35760196615](https://github.com/btakita/tsift/actions/runs/35760196615) — **still in progress** at closeout, reporting from local evidence.
 
 One correction to last cycle's record: it said both prior CI runs were green. The v0.1.100 release run `35584999376` actually **failed** — `search_cmd_uses_wal_snapshot_fallback_when_lock_appears_after_precheck`, 479 passed / 1 failed, CI-only. That test installs a process-global post-precheck WAL-lock hook, so a parallel test sharing that global is the likely mechanism. Backlogged as `#ciwalflake` rather than waved off as flaky.
+
+### Re: #claudeskillmerge — what the evals say, and versions now tested — opus-5 · 2026-09-22T13:34-04:00
+
+> **Queue prompt:** do [#claudeskillmerge]: What do the evals say? Add evals to test the versions.
+
+#### What the evals say: nothing — and that is the finding
+
+`evals/` holds `agent-doc/{agentic,diff-interpretation,write-latency}` and `general/token-efficiency`. **There is no tsift suite at all**, so the evals had nothing to say about skill versions.
+
+The sharper answer is that the deterministic check was already there and was passing on a broken input. `tsift audit` exists to detect skill drift. Pointed at the real skills directory it reported:
+
+```json
+{"name": "tsift", "has_skill_md": true, "description": "Primary source for the tsift code-RAG CLI…", "issues": []}
+```
+
+`total=3 healthy=3 broken=0`. It looked straight at a skill pinned to `0.1.62` next to a `0.1.100` binary and called it healthy — because a stale skill has a `SKILL.md` and it has a `description`, which is all the audit ever checked. That is the eval to add, and it belongs in `audit` rather than in an LLM rubric: version equality is a deterministic property, and a judged eval would be a worse instrument for it.
+
+#### `#skillversioneval` — the audit now reads the declared version
+
+The scan reads the version a skill *declares*, from either surface tsift stamps:
+
+1. `<!-- tsift:skill v=0.1.100 -->` — the ownership marker on a generated skill
+2. `tsift-version:` frontmatter — how a hand-maintained tsift skill pins what it was written against
+
+Marker wins when both are present. A mismatch becomes an issue and moves the skill from `healthy` to `broken`; the value surfaces as `declared_tsift_version` in JSON. A skill declaring neither is not tsift's and is **never** flagged — inventing a version for an unrelated skill would manufacture drift across the whole directory. The expected version is the running binary's own `CARGO_PKG_VERSION`, not a separately maintained constant that could drift on its own (there is a test pinning exactly that).
+
+Same command, same directory, after install:
+
+```
+total=3 healthy=2 broken=1
+ ISSUE tsift | declared=0.1.62 | tsift version drift: SKILL.md declares 0.1.62
+              but the installed tsift is 0.1.100 — run `tsift init` to refresh it
+```
+
+#### `#claudeskillmerge` — decision: fold it in
+
+I folded the hand-maintained skill's durable value into the generated template, so the symlink can take over. The reason to fold rather than keep two: **the private copy is the one that went stale.** Operators kept it because the generated skill was thinner, and thinness is what created the divergence.
+
+Folded in — `user-invocable: true` + `argument-hint` (so `/tsift` works as a slash command, which the generated skill had lost), `TRIGGER:`/`SKIP:`/`VERSION CHECK:` in the description, a `tsift-version` stamp, a version-check paragraph, a compact command surface, and a line telling harnesses without a `PreToolUse` rewrite to drive the envelope commands themselves.
+
+Deliberately not folded — the `../../../src/tsift/SPEC.md` relative links (they only resolve from one checkout), the five extra runbooks (`references/code-navigation.md` already covers that ground and `tsift --help` is the live surface), and **`tsift status --fix`**, which the hand-written skill taught twice and which is in `DEPRECATED_FLAG_USAGES`. A gate test now asserts the enriched template still passes that check.
+
+An existing gate caught me mid-edit and was right: `SKILL.md` must not restate the reference's commands, and must stay the smaller of the two. My first draft made the skill 4402 bytes against a 4363-byte reference. Rather than shave bytes I put the full command surface and the version-drift detail into the reference — which had **no** command surface section at all, a real gap the fold exposed. Skill 4402, reference 6233.
+
+#### Verification
+
+- `make check` → **exit 0**, 67 suites, **1875 passed, 0 failed** (7 new tests this cycle).
+- Mutation-checked the new guard rather than trusting it: neutering the version comparison reddened both drift tests; restored and re-verified green.
+- Live `tsift audit` before/after against the real skills directory, shown above.
+- `tsift init` re-run on this repo, restamping both generated surfaces; `tsift status` → `instructions: current (v0.1.100)`.
+
+#### Landed
+
+- `src/tsift` → `b4bedd1`, superproject → `ea2080abc7`, both pushed.
+- CI [35761622442](https://github.com/btakita/tsift/actions/runs/35761622442) queued at closeout.
+- **Last cycle's CI run `35760196615` came back green** — the `--harness` work passed.
+
+`~/.claude/skills/tsift/` is still the hand-written 0.1.62 file; that is yours to move aside, and `tsift audit` will now tell you so every time you run it. Once it is gone, `tsift init --instructions personal --harness all` links the generated skill into all four harnesses.
+
+Exchange is at 453 lines / 14 sections; noting it rather than pausing the drain. Next head is `#ciwalflake`.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 do [#claudeskillmerge]: What do the evals say? Add evals to test the versions.
+- do [#ciwalflake]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -501,7 +563,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#claudeskillmerge] Decide what happens to the hand-maintained ~/.claude/skills/tsift/SKILL.md (7.6K, user-invocable /tsift, own runbooks/, pinned tsift-version 0.1.62). It is richer than the generated 2.4K skill but 38 versions stale, and 'tsift init --harness claude' now fails closed on it by design. Either fold its extra content into the generated skill template so the symlink can take over, or skip --harness claude and keep maintaining it by hand.
+- [ ] 🚧 [#claudeskillmerge] Decide what happens to the hand-maintained ~/.claude/skills/tsift/SKILL.md (7.6K, user-invocable /tsift, own runbooks/, pinned tsift-version 0.1.62). It is richer than the generated 2.4K skill but 38 versions stale, and 'tsift init --harness claude' now fails closed on it by design. Either fold its extra content into the generated skill template so the symlink can take over, or skip --harness claude and keep maintaining it by hand.
 - [ ] [#ciwalflake] Fix the CI-only failure in tsift-cli test search_cmd_uses_wal_snapshot_fallback_when_lock_appears_after_precheck — run 35584999376 (the v0.1.100 release commit) failed there with 479 passed / 1 failed while the full local suite is green. The test installs a process-global post-precheck WAL-lock hook, so a parallel test sharing that global is the likely mechanism.
 <!-- /agent:backlog -->
 

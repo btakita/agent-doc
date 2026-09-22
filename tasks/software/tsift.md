@@ -2,7 +2,7 @@
 agent_doc_session: tsift-v0.1
 resume:
   claude: 03da93b9-58a8-4aa3-b530-ca5405b2ea0b
-  codex: 01a0b337-c18d-7770-8e52-af605f601504
+  codex: 01a0ca63-49bb-7040-a638-a80239e1503e
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status

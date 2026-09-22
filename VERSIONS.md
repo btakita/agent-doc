@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.412
+
+- **Current-document reads release the per-document CRDT relay before durable
+  turn-attribution logging.** Finalize can therefore resolve an attached
+  editor's canonical text while concurrent editor/state callbacks advance the
+  same document without inverting the relay and state-ledger locks or stranding
+  later controller requests. A regression asserts that the relay is independently
+  lockable at the exact pre-log boundary.
+
 ## 0.35.411
 
 - **State-plane subscription no longer inverts the channel-wait and shared

@@ -1154,6 +1154,22 @@ fn current_text_for_file_with_authority_inner(
     recover_missing_from_projection: bool,
     flush_barrier: bool,
 ) -> Result<CurrentText> {
+    current_text_for_file_with_authority_inner_before_log(
+        file,
+        authority,
+        recover_missing_from_projection,
+        flush_barrier,
+        || {},
+    )
+}
+
+fn current_text_for_file_with_authority_inner_before_log(
+    file: &Path,
+    authority: CrdtAuthority,
+    recover_missing_from_projection: bool,
+    flush_barrier: bool,
+    mut before_log: impl FnMut(),
+) -> Result<CurrentText> {
     if !authority.editor_attached() {
         return Ok(CurrentText::Detached);
     }
@@ -1199,8 +1215,8 @@ fn current_text_for_file_with_authority_inner(
         );
         return Ok(CurrentText::EditorAttachedMissingReplica);
     };
-    let mut hub = handle.lock();
-    let hub = &mut *hub;
+    let mut hub_guard = handle.lock();
+    let hub = &mut *hub_guard;
 
     let ready = if flush_barrier {
         hub.commit_barrier_under_authority(authority)?
@@ -1215,13 +1231,22 @@ fn current_text_for_file_with_authority_inner(
     let delivery = hub.delivery_convergence_witness();
     let delivery_converged = delivery.converged;
     if !ready {
+        let live_editors = hub.live_count();
+        // `log_op` resolves turn attribution from the durable state ledger.
+        // Never carry the per-document relay mutex across that state boundary:
+        // a concurrent controller transition may own the ledger while it waits
+        // to publish an editor/relay observation for this same document. That
+        // inverse order used to strand every later controller request behind
+        // `crdt_current_text` during finalize.
+        drop(hub_guard);
+        before_log();
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "{} file={} authority=multi_replica reason=sync_pending live_editors={} delivery_converged={} delivery_version={}",
                 OpsLogEvent::CrdtCurrentTextUnavailable,
                 file.display(),
-                hub.live_count(),
+                live_editors,
                 delivery_converged,
                 delivery.version,
             ),
@@ -1239,6 +1264,11 @@ fn current_text_for_file_with_authority_inner(
                     queue_unresolved_prompts,
                 },
             );
+    // Logging crosses into the durable turn-attribution ledger. Release the
+    // document-local relay authority first so state-ledger and relay operations
+    // have one lock order under concurrent editor callbacks and closeout reads.
+    drop(hub_guard);
+    before_log();
     // `process_pid` mirrors the `crdt_current_text_unavailable` sibling above.
     // Without it this line says a full-document read happened but not *who*
     // asked: the relay-side log carries no `source=` (only the controller RPC
@@ -4725,6 +4755,33 @@ mod tests {
     use super::*;
     use parking_lot::Mutex;
     use std::io::Write;
+
+    #[test]
+    fn current_text_releases_document_relay_before_turn_attribution_log() {
+        let (_dir, doc) = temp_doc("current-text-log-lock-order.md");
+        with_hub_seeded_from_file(&doc, |_| ()).unwrap();
+        let document_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let reached_log_boundary = std::cell::Cell::new(false);
+
+        let current = current_text_for_file_with_authority_inner_before_log(
+            &doc,
+            CrdtAuthority::MultiReplica,
+            false,
+            false,
+            || {
+                let handle = hub_handle(&document_hash).expect("seeded relay hub");
+                assert!(
+                    handle.try_lock().is_some(),
+                    "turn-attribution logging must not retain the document relay mutex"
+                );
+                reached_log_boundary.set(true);
+            },
+        )
+        .unwrap();
+
+        assert!(reached_log_boundary.get());
+        assert!(matches!(current, CurrentText::Current { .. }));
+    }
 
     #[test]
     fn editor_replica_reregister_reason_has_a_distinct_wire_token() {

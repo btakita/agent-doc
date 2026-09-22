@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0c451-6475-7fe1-b6ad-3d1a89475a49
+  codex: 01a0c52a-3488-73f3-ab3c-ccb7fd477509
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -12,6 +12,7 @@ codex_args: -s danger-full-access
 prompt_presets:
   '#actionable-review': Add actionable review items into backlog + queue
   '#agent-doc-causes': Fix agent-doc causes
+  '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
 queue: go
@@ -101,6 +102,27 @@ Completed and closed issue #56.
 - GitHub issue #56 is closed.
 
 No additional follow-up is needed.
+
+### Re: attached-replica recovery and layout convergence — gpt-5.6 · 2026-09-21T21:41-04:00
+
+> **Queue prompt:**
+>
+> Run Agent Doc on agent-doc-bugs.md issue: route_queue_activation: failed to resolve current document /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md: editor is still attached for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; missing_replica recovery exhausted and disk read authority is refused
+
+Fixed and deployed through agent-doc 0.35.414 (`924bbdbdf`, `d6779f7ad`, `105d6de8a`, `f777a3fbf`, `1b632504f`, `8c19dfd52`, `4749c7ac6`, `ccf73b94d`, and `5eb2d3555`, pushed to `origin/main`).
+
+- Attached editors with a missing controller replica now get a bounded fresh-endpoint recovery: the controller bypasses a stale retained hold only for that repair, seeds the canonical frontier, preserves queued local splices, and rearms cooldown instead of refusing disk authority forever.
+- Editor layout now retains controller-owned file-to-pane assignments across temporary model-authority loss, with live-pane and foreign-owner revalidation. Focusing `agent-doc-bugs2.md` no longer evicts or swaps out the existing document pane.
+- Captured-response queue projection no longer performs document-actor/editor I/O while holding the shared reactive controller context. It admits that work to an asynchronous controller worker and publishes exact applied/failed receipts back as Sources. Queue completion still waits for the matching applied receipt, while unrelated editor layout can converge independently. This also fixes the reported `dev.md` dispatch failure ending in `projection_effect_in_flight`.
+- The remaining retained-transition effects—activation observation, guarded CRDT projection, closeout wake, and materialized-capture settlement—now use a separate asynchronous worker with exact attempted/published frontier fencing. A blocked editor transition can no longer pin the Lazily context used by route/layout dispatch.
+- Document-turn authority publication now crosses its own asynchronous boundary instead of writing the state plane from inside the deriving Lazily Effect. A regression blocks the publisher while proving actor transitions and authority reads remain responsive.
+- Every remaining durable document-completion edge—retained-write settlement, compact completion, and terminal queue lifecycle publication—now admits exact generation-fenced commands to one controller worker. State-ledger or editor-adapter I/O therefore cannot hold the shared Lazily context. This closes the common `projection_effect_in_flight` cause for both the reported `dev.md` and `fpe.md` Run Agent Doc failures.
+- The final controller-wide deadlock was a state-plane lock inversion: a subscriber held its channel condition mutex while acquiring the process reactive scope, while publication held that scope while notifying the channel. Subscribers now observe revision and history first, then take the wait mutex and recheck the revision before sleeping. The deterministic regression blocks the process scope and proves channel publication notification remains responsive.
+- The last finalize-only lock inversion was in attached-editor current-text logging: `crdt_current_text` retained the per-document relay mutex while operation logging crossed into the durable turn-attribution ledger. Current-text reads now release the relay before that boundary. The regression acquires the relay at the exact pre-log seam, proving concurrent editor/state callbacks cannot strand the controller.
+- Turn attribution is now primed at controller-request, route, and idle-watch admission, before any CRDT relay or state critical section can be entered. Later operation logs are request-local memo hits instead of live-projection reads. This removes the remaining relay/state inversion exposed by the first post-0.35.412 finalize attempt; regressions prove admission precedes domain dispatch and that logging does not revisit its durable source after priming.
+- Closeout-owner claim and release now share one serialized durable-append → live-apply ingress with editor, retained-write, compact, and queue state events. The claim no longer retains the live projection mutex while waiting for SQLite, removing the memory↔SQLite inversion exposed by the post-0.35.413 finalize attempt. A deterministic regression holds SQLite's writer lock, proves the claim waits, and simultaneously acquires the projection mutex.
+
+Verification passed through the complete release gate: 9,633 Rust tests, simulations, 179 VS Code tests, JetBrains and VS Code suites, cross-editor native simulation, version/docs/parity audits, Python bootstrap tests, Lean, and all TLA models. Direct ledger evidence confirms the timed-out attempts created no new response capture or editor-op capture, so this preserved response remains the sole closeout payload.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -110,7 +132,13 @@ No additional follow-up is needed.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go priority -->
+- Run Agent Doc on agent-doc-bugs.md issue: route_queue_activation: failed to resolve current document /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md: editor is still attached for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; missing_replica recovery exhausted and disk read authority is refused
 - 🚧 do [#fixhttpsgithub]
+- Run Agent Doc on dev.md with agent:queue not in go mode resulted in a single tmux pane layout.
+- Fix Run Agent Doc on docs.md then switching editor to dev.md resulted in focusing on a tmux pane in the stash tmux window.
+- Address new comments on gh issue #55.
+- Fix gh issue #57.
+- release + publish
 <!-- /agent:queue -->
 
 

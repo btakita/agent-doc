@@ -9621,6 +9621,53 @@ mod tests {
     }
 
     #[test]
+    fn queue_maintenance_clears_completed_item_with_indented_continuation() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- ~~Make the compact error human-readable:~~\n",
+            "  command failed (exit 1): malformed directive\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let components = agent_doc_element::element::parse(&updated).unwrap();
+        let queue = components
+            .iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        assert!(queue.content(&updated).trim().is_empty(), "{updated}");
+        assert!(!queue.attrs.contains_key("auto"), "{updated}");
+        assert!(!updated.contains("queue_active: true"), "{updated}");
+
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(snapshot, updated);
+    }
+
+    #[test]
     fn queue_maintenance_preserves_operator_verdict_for_gated_review_head() {
         // `#qgateverdict`: the queue item is the operator's answer to the gate.
         // It must be dispatched before the still-gated review row can change.

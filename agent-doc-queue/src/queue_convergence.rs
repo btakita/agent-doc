@@ -153,20 +153,60 @@ pub fn entry_carries_operator_text(entry: &document_queue::QueueEntry) -> bool {
 /// text (`#queuelineclobber`). "No drainable prompt" is NOT the same question:
 /// a queue can hold zero prompts and still hold an operator's words.
 pub fn queue_body_clear_is_lossless(entries: &[document_queue::QueueEntry]) -> bool {
-    !entries.iter().any(entry_carries_operator_text)
+    queue_entries_are_discardable(entries)
 }
 
 /// True when the queue body contains only drained non-live residue.
 pub fn queue_entries_are_drained_residue(entries: &[document_queue::QueueEntry]) -> bool {
-    !entries.is_empty()
-        && entries.iter().all(|entry| {
-            matches!(
-                entry,
-                document_queue::QueueEntry::Completed(_)
-                    | document_queue::QueueEntry::Preset(_)
-                    | document_queue::QueueEntry::Dispatch(_)
-            )
-        })
+    !entries.is_empty() && queue_entries_are_discardable(entries)
+}
+
+/// Classify queue residue in encounter order so an indented Markdown
+/// continuation remains owned by the completed inline row immediately above it
+/// (`#queuemultilineclear`). The tolerant queue parser deliberately represents
+/// such continuation lines as `Freeform`; treating every `Freeform` as unrelated
+/// operator text leaves an otherwise-drained queue permanently uncleared.
+///
+/// The ownership rule stays fail-closed: only indentation at or beyond the
+/// completed list item's content column is discardable. Unindented prose,
+/// shallow indentation, a continuation after a fenced/multiline completion, or
+/// any live prompt still prevents whole-body cleanup.
+fn queue_entries_are_discardable(entries: &[document_queue::QueueEntry]) -> bool {
+    let mut completed_continuation_column = None;
+
+    for entry in entries {
+        match entry {
+            document_queue::QueueEntry::Completed(prompt) => {
+                completed_continuation_column = (!prompt.multiline).then(|| {
+                    prompt.indent
+                        + prompt
+                            .ordered_marker
+                            .as_deref()
+                            .map_or(2, |marker| marker.len() + 1)
+                });
+            }
+            document_queue::QueueEntry::Preset(_) | document_queue::QueueEntry::Dispatch(_) => {
+                completed_continuation_column = None;
+            }
+            document_queue::QueueEntry::Freeform(_) if !entry_carries_operator_text(entry) => {
+                completed_continuation_column = None;
+            }
+            document_queue::QueueEntry::Freeform(line) => {
+                let Some(required_column) = completed_continuation_column else {
+                    return false;
+                };
+                let leading_spaces = line.bytes().take_while(|byte| *byte == b' ').count();
+                if leading_spaces < required_column {
+                    return false;
+                }
+            }
+            document_queue::QueueEntry::Prompt(_)
+            | document_queue::QueueEntry::StartFence(_)
+            | document_queue::QueueEntry::StopFence => return false,
+        }
+    }
+
+    true
 }
 
 fn first_queue_prompt_identity(content: &str) -> Option<String> {
@@ -411,6 +451,40 @@ mod tests {
         ]));
         assert!(!queue_entries_are_drained_residue(&[]));
         assert!(!queue_entries_are_drained_residue(&[completed, prompt]));
+    }
+
+    #[test]
+    fn completed_inline_queue_item_owns_indented_continuation_residue() {
+        let entries = document_queue::parse(
+            "- ~~Make the compact error human-readable:~~\n  command failed (exit 1): malformed directive\n  Fix the directive, then retry.\n",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            entries.as_slice(),
+            [
+                document_queue::QueueEntry::Completed(_),
+                document_queue::QueueEntry::Freeform(_),
+                document_queue::QueueEntry::Freeform(_),
+            ]
+        ));
+        assert!(queue_entries_are_drained_residue(&entries));
+        assert!(queue_body_clear_is_lossless(&entries));
+    }
+
+    #[test]
+    fn completed_inline_queue_item_does_not_own_unindented_or_shallow_freeform() {
+        let unindented = document_queue::parse(
+            "- ~~Completed prompt~~\noperator-authored text that must survive\n",
+        )
+        .unwrap();
+        let shallow =
+            document_queue::parse("  - ~~Nested completion~~\n   operator text\n").unwrap();
+
+        assert!(!queue_entries_are_drained_residue(&unindented));
+        assert!(!queue_body_clear_is_lossless(&unindented));
+        assert!(!queue_entries_are_drained_residue(&shallow));
+        assert!(!queue_body_clear_is_lossless(&shallow));
     }
 
     #[test]

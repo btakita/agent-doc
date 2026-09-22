@@ -512,6 +512,8 @@ Before emitting queue state, preflight may:
 
 ### Post-commit queue consumption
 
+- **Completed multiline row residue drains with its row (`#queuemultilineclear`).** An indented Markdown continuation at or beyond a completed inline row's content column belongs to that row and drains with it. Unindented, shallow, or otherwise unowned freeform operator text remains a lossless-cleanup blocker.
+
 - After a successful response closeout, required closeouts mark the first prompt complete in the queue in the same locked read/parse/write cycle. If a manual closeout resolves multiple contiguous queued `do #id` prompts with repeated `--done <id>` flags, it may consume that contiguous done-backed head batch in one closeout; it must stop before the first unresolved queued prompt.
 - Explicit done IDs also mark matching queued prompts completed in place when they are not part of the contiguous active-head consumption range. This preserves the current head while striking opportunistically completed queued work, and the document/snapshot must be updated together before commit.
 - Queue-head identity checks strip leading priority markers (`:pushpin:`, `:round_pushpin:`, markdown pin/prioritized aliases, and pin emoji) before comparing or classifying the head. A pinned `do [#id]` remains an id-backed directive that requires explicit completion proof; it is not a free-text head completed by any response body.

@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0ca2a-32e2-7f02-9153-2532df91477d
+  codex: 01a0cab6-c41d-7fc2-b343-06276b54b9c3
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -318,6 +318,26 @@ For haiven-api:
 - If #544 lands first, rebase #538 onto the resulting `main` commit—not directly onto the PR branch.
 - I would not move #538 wholesale into `haiven-contracts`: it operates on consumer-repository state such as the contracts gitlink, secrets, and workflows.
 - If multiple consumers need it, extract the reusable mechanism into a neutral versioned action/tool and keep a thin consumer-specific wrapper in each repository.
+
+### Re: completed multiline queue cleanup — gpt-5 · 2026-09-22T17:44:34-04:00
+
+> **Queue prompt:** The struck multi-line queue item below was not cleared when `agent:queue` completed.
+
+Fixed and shipped in `agent-doc` commit `4b4fabdc2` (`fix: clear completed multiline queue residue`), now pushed to `main`.
+
+The queue convergence policy now owns an indented Markdown continuation when it begins at or beyond the content column of the preceding completed inline queue row. That continuation drains with the completed row. Unindented, shallow-indented, or otherwise unowned freeform operator text still blocks lossless cleanup.
+
+The invariant and policy owner are explicit: completed-row residue is decided once from the parsed ordered queue entries in `agent-doc-queue/src/queue_convergence.rs`; this is a pure one-shot convergence decision, so no polling or reactive state topology is needed. The preflight integration test proves the completed row plus indented command-error continuation clears the queue body, `auto`, and active queue state together.
+
+Verification passed:
+
+- focused queue-policy and preflight integration tests;
+- the complete `make check` gate (9,645-test/editor-parity surface, exit 0);
+- `git diff --check`;
+- public/private-name denylist scan (no matches);
+- local CLI, native library, JetBrains, and VS Code install.
+
+The installed controller was marked for a two-phase recycle. CI run `35783752395` was in progress at the required one-time post-push check. Restart IntelliJ to activate the newly installed plugin package.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -327,8 +347,8 @@ For haiven-api:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- The struck multi-line queue item below was not cleared when `agent:queue` completed.
-- ~~Make this error message easier for a human to read given a small prompt dialog in Idea:~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 The struck multi-line queue item below was not cleared when `agent:queue` completed.
+- ~~Make this error message easier for a human to read given a small prompt dialog in Idea:~~
   agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: [lint-gate] INTERRUPTED: 1 blocking lint finding(s) for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md (mode=warn, source=default). Fix the directives below before re-running `agent-doc finalize` / `agent-doc write --commit`, or set `agent_doc_lint_dialect: off` in frontmatter / `[lint] dialect = "off"` in `.agent-doc/config.toml` to temporarily skip this gate. /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md:449:1 error: attribute `queu0000e` on `agent:backlog` is missing `=value` [agent-doc/malformed-attr] hint: try `queu0000e= `
 - On tsift.md, I switched `agent: claude` to `agent: codex` but agent-doc reverts my change. Now switching the editor to tsift.md does not auto-sync the tmux pane.
 <!-- /agent:queue -->

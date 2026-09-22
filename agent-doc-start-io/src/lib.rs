@@ -293,7 +293,7 @@ fn prepare_start_document_for_tmux_bootstrap(file: &Path) -> Result<()> {
     }
 
     let _ = agent_doc_run_io::repair_document_frontmatter_on_disk(file);
-    let start_document = resolve_start_admission_document(file)
+    let start_document = resolve_start_admission_document(file, StartRuntimeAdmission::NewSession)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let content = start_document.content;
     agent_doc_frontmatter_io::session::require_agent_doc_document(&content, file)?;
@@ -849,14 +849,12 @@ impl SupervisorLaunchLog for StartAdmissionLaunchLog<'_> {
 enum StartAdmissionReadAuthority {
     CurrentDocument,
     DiskMetadataBootstrapEditorModelUnavailable,
+    DiskMetadataBootstrapSupervisorReentry,
 }
 
 impl StartAdmissionReadAuthority {
     fn needs_post_start_document_model_ensure(self) -> bool {
-        matches!(
-            self,
-            StartAdmissionReadAuthority::DiskMetadataBootstrapEditorModelUnavailable
-        )
+        !matches!(self, StartAdmissionReadAuthority::CurrentDocument)
     }
 }
 
@@ -876,6 +874,19 @@ fn start_admission_fallback_for_current_text(
         agent_doc_crdt_relay_io::CurrentText::Detached
         | agent_doc_crdt_relay_io::CurrentText::Current { .. } => None,
     }
+}
+
+fn start_admission_fallback_authority(
+    admission: StartRuntimeAdmission,
+    current: Option<&agent_doc_crdt_relay_io::CurrentText>,
+) -> Option<StartAdmissionReadAuthority> {
+    current
+        .and_then(start_admission_fallback_for_current_text)
+        .or_else(|| {
+            admission
+                .preserves_session_lifecycle()
+                .then_some(StartAdmissionReadAuthority::DiskMetadataBootstrapSupervisorReentry)
+        })
 }
 
 fn current_text_label(current: &agent_doc_crdt_relay_io::CurrentText) -> &'static str {
@@ -964,18 +975,30 @@ fn start_admission_local_current_text_for_fallback(
 
 fn resolve_start_admission_disk_metadata_bootstrap(
     file: &Path,
-    current: agent_doc_crdt_relay_io::CurrentText,
+    authority: StartAdmissionReadAuthority,
+    current: Option<&agent_doc_crdt_relay_io::CurrentText>,
     original_error: &str,
 ) -> Result<StartAdmissionDocument> {
-    let Some(authority) = start_admission_fallback_for_current_text(&current) else {
-        anyhow::bail!(
-            "start admission disk metadata bootstrap requires missing editor model state"
-        );
-    };
-    let content = agent_doc_document_realtime_io::resolve_disk_current_document_content(
-        file,
-        "prepare_start_runtime_metadata_bootstrap",
-    )
+    let content = match authority {
+        StartAdmissionReadAuthority::DiskMetadataBootstrapEditorModelUnavailable => {
+            agent_doc_document_realtime_io::resolve_disk_current_document_content(
+                file,
+                "prepare_start_runtime_metadata_bootstrap",
+            )
+        }
+        StartAdmissionReadAuthority::DiskMetadataBootstrapSupervisorReentry => {
+            // A hot-reexec replaces only the supervisor transport around an
+            // already-running child. Disk is metadata input here, not document
+            // authority competing with the actor during controller handoff.
+            agent_doc_document_realtime_io::peek_disk_document_content(
+                file,
+                "prepare_start_runtime_reentry_metadata_bootstrap",
+            )
+        }
+        StartAdmissionReadAuthority::CurrentDocument => anyhow::bail!(
+            "start admission disk metadata bootstrap requires a disk bootstrap authority"
+        ),
+    }
     .with_context(|| {
         format!(
             "prepare_start_runtime: failed to read disk metadata bootstrap {}",
@@ -985,16 +1008,28 @@ fn resolve_start_admission_disk_metadata_bootstrap(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "start_admission_disk_metadata_bootstrap file={} current_state={} original_error={}",
+            "start_admission_disk_metadata_bootstrap file={} mode={} current_state={} original_error={}",
             file.display(),
-            current_text_label(&current),
+            match authority {
+                StartAdmissionReadAuthority::DiskMetadataBootstrapEditorModelUnavailable => {
+                    "editor_model_unavailable"
+                }
+                StartAdmissionReadAuthority::DiskMetadataBootstrapSupervisorReentry => {
+                    "supervisor_reentry"
+                }
+                StartAdmissionReadAuthority::CurrentDocument => "invalid",
+            },
+            current.map(current_text_label).unwrap_or("unavailable"),
             original_error.replace('\n', "\\n")
         ),
     );
     Ok(StartAdmissionDocument { content, authority })
 }
 
-fn resolve_start_admission_document(file: &Path) -> Result<StartAdmissionDocument> {
+fn resolve_start_admission_document(
+    file: &Path,
+    admission: StartRuntimeAdmission,
+) -> Result<StartAdmissionDocument> {
     match agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,
         "prepare_start_runtime",
@@ -1004,14 +1039,18 @@ fn resolve_start_admission_document(file: &Path) -> Result<StartAdmissionDocumen
             authority: StartAdmissionReadAuthority::CurrentDocument,
         }),
         Err(resolve_err) => {
-            let Some(current) = start_admission_current_text_for_fallback(file) else {
+            let current = start_admission_current_text_for_fallback(file);
+            let authority = start_admission_fallback_authority(admission, current.as_ref());
+            let Some(authority) = authority else {
                 return Err(resolve_err);
             };
-            if start_admission_fallback_for_current_text(&current).is_none() {
-                return Err(resolve_err);
-            }
             let original_error = format!("{resolve_err:#}");
-            resolve_start_admission_disk_metadata_bootstrap(file, current, &original_error)
+            resolve_start_admission_disk_metadata_bootstrap(
+                file,
+                authority,
+                current.as_ref(),
+                &original_error,
+            )
         }
     }
 }
@@ -1143,8 +1182,10 @@ fn prepare_start_runtime_with_admission(
         );
     }
 
-    let _ = agent_doc_run_io::repair_document_frontmatter_on_disk(file);
-    let start_document = resolve_start_admission_document(file)
+    if !admission.preserves_session_lifecycle() {
+        let _ = agent_doc_run_io::repair_document_frontmatter_on_disk(file);
+    }
+    let start_document = resolve_start_admission_document(file, admission)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let post_start_document_model_ensure = start_document
         .authority
@@ -2375,6 +2416,30 @@ mod tests {
     }
 
     #[test]
+    fn supervisor_reentry_falls_back_when_controller_handoff_has_no_relay_witness() {
+        let detached = agent_doc_crdt_relay_io::CurrentText::Detached;
+        assert_eq!(
+            start_admission_fallback_authority(
+                StartRuntimeAdmission::SupervisorReexecPreservingChild,
+                None,
+            ),
+            Some(StartAdmissionReadAuthority::DiskMetadataBootstrapSupervisorReentry)
+        );
+        assert_eq!(
+            start_admission_fallback_authority(
+                StartRuntimeAdmission::SupervisorReexecPreservingChild,
+                Some(&detached),
+            ),
+            Some(StartAdmissionReadAuthority::DiskMetadataBootstrapSupervisorReentry)
+        );
+        assert_eq!(
+            start_admission_fallback_authority(StartRuntimeAdmission::NewSession, None),
+            None,
+            "ordinary admission must keep failing closed without authority evidence"
+        );
+    }
+
+    #[test]
     fn start_admission_bootstraps_metadata_from_disk_when_editor_model_is_missing() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -2394,12 +2459,36 @@ mod tests {
                 tag: format!("test-editor-{pid}"),
             }]);
 
-        let document = resolve_start_admission_document(&file).unwrap();
+        let document =
+            resolve_start_admission_document(&file, StartRuntimeAdmission::NewSession).unwrap();
 
         assert_eq!(document.content, disk);
         assert_eq!(
             document.authority,
             StartAdmissionReadAuthority::DiskMetadataBootstrapEditorModelUnavailable
+        );
+        assert!(document.authority.needs_post_start_document_model_ensure());
+    }
+
+    #[test]
+    fn supervisor_reentry_uses_observational_metadata_when_relay_is_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("session.md");
+        let disk = "---\nagent_doc_session: reentry-test\nagent: codex\n---\n\n# Session\n";
+        std::fs::write(&file, disk).unwrap();
+
+        let document = resolve_start_admission_disk_metadata_bootstrap(
+            &file,
+            StartAdmissionReadAuthority::DiskMetadataBootstrapSupervisorReentry,
+            None,
+            "controller handoff unavailable",
+        )
+        .unwrap();
+
+        assert_eq!(document.content, disk);
+        assert_eq!(
+            document.authority,
+            StartAdmissionReadAuthority::DiskMetadataBootstrapSupervisorReentry
         );
         assert!(document.authority.needs_post_start_document_model_ensure());
     }

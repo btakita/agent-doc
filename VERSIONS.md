@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.416
+
+- **A supervisor hot-reload cannot orphan its preserved agent child when the
+  controller/editor replica is temporarily unavailable.** Reentry around an
+  already-running child is now treated as a transport replacement rather than
+  ordinary document admission: it may read disk only as non-authoritative
+  launch metadata, preserves the existing actor/session lifecycle, and
+  rechecks the live document model after registration. Ordinary new-session
+  admission remains fail-closed. Regressions cover both the missing relay
+  witness and observational metadata paths.
+
 ## 0.35.415
 
 - **Committed-cycle tracked-work reopen owns the fresh cycle before response

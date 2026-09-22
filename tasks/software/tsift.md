@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -547,14 +547,63 @@ An existing gate caught me mid-edit and was right: `SKILL.md` must not restate t
 `~/.claude/skills/tsift/` is still the hand-written 0.1.62 file; that is yours to move aside, and `tsift audit` will now tell you so every time you run it. Once it is gone, `tsift init --instructions personal --harness all` links the generated skill into all four harnesses.
 
 Exchange is at 453 lines / 14 sections; noting it rather than pausing the drain. Next head is `#ciwalflake`.
+
+### Re: #ciwalflake — flake fixed; /tmp is 100% full — opus-5 · 2026-09-22T13:45-04:00
+
+> **Queue prompt:** do [#ciwalflake]
+
+The fix is landed and pushed. Two things to report: what the flake actually was, and an environment problem that stopped this cycle short of the hardening I wanted to add.
+
+#### The flake was three defects, and my filed hypothesis was wrong
+
+The backlog item said "a process-global post-precheck WAL-lock hook, so a parallel test sharing that global is the likely mechanism." That was wrong — `SEARCH_POST_PRECHECK_LOCK_HOOK` is a `thread_local!`, so parallel tests never shared it. The real causes:
+
+1. **The readiness wait was a latency assertion.** It gave a spawned thread **1 second** to open SQLite, switch journal modes, create a probe table, insert, take an exclusive lock, and confirm the WAL sidecar exists. The WAL hook does strictly more setup than its rollback-journal sibling — which is precisely why the sibling passed in the same CI run while this one blew the budget. Now 30s: a deadlock-breaker, not a timing window.
+2. **The lock was held for a fixed `sleep(200ms)`.** A slow runner could release it *before* the search reached the contended read, so the test would pass while exercising none of the fallback it names — a false green, not merely a flake. The holder now waits on a release channel the test's guard disconnects on drop, bounded by the same 30s so a blocking search cannot deadlock the suite.
+3. **Both fallback tests asserted a bare `result.is_ok()`.** That is why the red run reported only `assertion failed: result.is_ok()` and nothing about the cause. They now carry the error.
+
+**Verified by reproduction, not argument:** with the old 1s bound plus 1.5s of injected setup latency the test fails — and now names `waiting for search post-precheck lock hook` instead of staying silent. The 30s bound passes under that same latency. Normal-case runtime is unchanged: 10.06s for the 12 fallback tests, before and after. `make check` → exit 0, 67 suites, **1875 passed, 0 failed**.
+
+Landed `2171338`, superproject `19140cc5eb`, both pushed.
+
+#### `/tmp` is a 94G tmpfs at 100% — this needs you
+
+Mid-cycle every shell command started failing with `ENOSPC`. `/tmp` is full:
+
+```
+tmpfs  94G  94G  0  100% /tmp
+4.4G  /tmp/agent-doc-gradle
+3.2G  /tmp/fpe-projected-chart.TUYByz
+3.1G  /tmp/haiven-remove-fpe-cognito-fpe
+3.1G  /tmp/fpe-nats-spin.ffNTCj
+3.1G  /tmp/fpe-embedded-eval-suite
+3.1G  /tmp/fpe-cutover-deploy.kJO6f6
+2.5G  /tmp/haiven-infra-inline-demo
+2.5G  /tmp/haiven-infra-all-embedded-sbx
+2.4G  /tmp/haiven-remove-fpe-cognito-infra
+2.2G  /tmp/lazily-release.b3oPCE
+2.0G  /tmp/agent-doc-queue-dup-nTetBP
+```
+
+These are other sessions' worktrees and scratch dirs — fpe, haiven, lazily, agent-doc. **I did not delete any of them.** Some may hold in-flight work from a concurrent session, and that judgement is yours, not mine. Clearing my own session scratch recovered 40K, which is enough for small commands and nothing else.
+
+One casualty worth naming honestly: the `ENOSPC` interrupted a `python3` heredoc that was mid-edit on `packages/tsift-cli/src/lib.rs`. I verified afterwards that the write never landed — `git status` is clean and HEAD is `2171338`, so **there is no unverified edit sitting in the repo**.
+
+#### What I could not finish
+
+I wanted to make the latency injection permanent rather than a one-off I ran by hand: thread a `setup_delay` through `SearchPostPrecheckLockHook` and add a test that installs the WAL hook with a delay exceeding the old 1s budget. That test would have failed before this fix and passes after — real regression coverage for the exact class. It needs a compile and a full-suite run, and with 40K free neither is possible. Filed as `#ciwalflakeregress` at the top of the backlog; it is blocked on the filesystem, not on effort.
+
+I am marking `#ciwalflake` done regardless: the defect is fixed, proven by reproduction, and shipped. The regression test is additive hardening, not the fix.
+
+CI [35762442050](https://github.com/btakita/tsift/actions/runs/35762442050) was still `in_progress` at closeout — recorded as pending per the runbook rather than waited on. Worth saying plainly: one green run would not prove a flake fixed anyway. The reproduction is the stronger evidence, and it is the evidence I have.
+
+Exchange is at 513 lines / 15 sections; noting it rather than stalling the drain.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#claudeskillmerge]: What do the evals say? Add evals to test the versions.~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#ciwalflake]
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom
@@ -563,7 +612,7 @@ https://github.com/chopratejas/headroom
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ciwalflake] Fix the CI-only failure in tsift-cli test search_cmd_uses_wal_snapshot_fallback_when_lock_appears_after_precheck — run 35584999376 (the v0.1.100 release commit) failed there with 479 passed / 1 failed while the full local suite is green. The test installs a process-global post-precheck WAL-lock hook, so a parallel test sharing that global is the likely mechanism.
+- [ ] [#ciwalflakeregress] Make the #ciwalflake latency injection permanent: thread a setup_delay through SearchPostPrecheckLockHook and add a test that installs the WAL hook with a delay exceeding the old 1s readiness budget. That test fails before commit 2171338 and passes after, giving deterministic regression coverage for the class. BLOCKED 2026-09-22: /tmp is a 94G tmpfs at 100%, so cargo cannot compile or run the suite.
 <!-- /agent:backlog -->
 
 ## Review

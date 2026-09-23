@@ -4165,6 +4165,15 @@ fn run_resume_capture(file: &Path) -> anyhow::Result<()> {
                 file.display()
             )
         }
+        agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetryAt {
+            reason,
+            retry_at_secs,
+        } => {
+            anyhow::bail!(
+                "captured finalize for {} is retained behind a closeout lease until epoch {retry_at_secs}: {reason}. The supervisor owns that timer edge; do NOT re-send the response or force disk",
+                file.display(),
+            )
+        }
         agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetryableEffect { reason } => {
             anyhow::bail!(
                 "captured finalize for {} failed transiently: {reason}. The same capture remains durable; rerun `agent-doc repair --resume-capture {}` once the controller/editor is reachable",

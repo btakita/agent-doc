@@ -518,6 +518,12 @@ pub fn captured_finalize_resume_retry_delay(attempt: u32) -> Duration {
     Duration::from_secs((BASE_SECS << shift).min(MAX_SECS))
 }
 
+/// Convert an epoch lease expiry into the supervisor's monotonic retry edge.
+/// A past deadline still waits one tick so a stale projection cannot hot-loop.
+pub fn captured_finalize_resume_retry_at_delay(now_secs: u64, retry_at_secs: u64) -> Duration {
+    Duration::from_secs(retry_at_secs.saturating_sub(now_secs).max(1))
+}
+
 /// `#supinstallfeedback` phases of the supervisor dogfood auto-install, used to
 /// build the user-visible owned-pane status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -824,6 +830,22 @@ mod tests {
         assert_eq!(
             captured_finalize_resume_retry_delay(99),
             Duration::from_secs(30)
+        );
+    }
+
+    #[test]
+    fn captured_finalize_lease_retry_uses_deadline_and_avoids_hot_loop() {
+        assert_eq!(
+            captured_finalize_resume_retry_at_delay(100, 145),
+            Duration::from_secs(45)
+        );
+        assert_eq!(
+            captured_finalize_resume_retry_at_delay(145, 145),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            captured_finalize_resume_retry_at_delay(200, 145),
+            Duration::from_secs(1)
         );
     }
 

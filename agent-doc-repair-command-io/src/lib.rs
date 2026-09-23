@@ -24,6 +24,12 @@ pub enum CapturedFinalizeResumeOutcome {
     WaitingForSignal {
         reason: String,
     },
+    /// A state edge may arrive sooner, but lease expiry is itself a typed time
+    /// edge and must re-arm the same capture even when no process releases it.
+    RetryAt {
+        reason: String,
+        retry_at_secs: u64,
+    },
     /// The effect itself failed transiently; controller reconnect/backoff may
     /// retry this exact capture without inventing a new response operation.
     RetryableEffect {
@@ -531,6 +537,13 @@ fn resume_materialized_captured_finalize(
         Ok(agent_doc_session_check_io::CapturedFinalizeResumeOutcome::Retained { reason }) => {
             CapturedFinalizeResumeOutcome::WaitingForSignal { reason }
         }
+        Ok(agent_doc_session_check_io::CapturedFinalizeResumeOutcome::RetryAt {
+            reason,
+            retry_at_secs,
+        }) => CapturedFinalizeResumeOutcome::RetryAt {
+            reason,
+            retry_at_secs,
+        },
         Ok(agent_doc_session_check_io::CapturedFinalizeResumeOutcome::NotApplicable) => {
             CapturedFinalizeResumeOutcome::WaitingForSignal {
                 reason: "the materialized captured closeout continuation is not yet applicable"

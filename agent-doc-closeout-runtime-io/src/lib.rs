@@ -21,7 +21,7 @@ enum RecoveryCloseoutOwnerResolution {
     Acquired(RecoveryCloseoutOwnerGuard),
     Terminal,
     Superseded,
-    Retained(String),
+    RetryAt { reason: String, retry_at_secs: u64 },
 }
 
 impl Drop for RecoveryCloseoutOwnerGuard {
@@ -102,11 +102,14 @@ fn try_claim_recovery_closeout_owner_once(
             }),
         ),
         controller::CloseoutOwnerClaimOutcome::HeldByOther(owner) => {
-            Ok(RecoveryCloseoutOwnerResolution::Retained(format!(
-                "foreground closeout operation is already in progress: owner {} pid={} role={}; \
-             recovery follows the cycle's terminal state (lease stopgap expires at {})",
-                owner.owner_id, owner.owner_pid, owner.role, owner.expires_secs
-            )))
+            Ok(RecoveryCloseoutOwnerResolution::RetryAt {
+                reason: format!(
+                    "foreground closeout operation is already in progress: owner {} pid={} role={}; \
+                     recovery follows the cycle's terminal state (lease stopgap expires at {})",
+                    owner.owner_id, owner.owner_pid, owner.role, owner.expires_secs
+                ),
+                retry_at_secs: owner.expires_secs,
+            })
         }
         controller::CloseoutOwnerClaimOutcome::CycleSuperseded => {
             Ok(RecoveryCloseoutOwnerResolution::Superseded)
@@ -131,8 +134,12 @@ fn resolve_recovery_closeout_owner_after_first_claim(
     await_progress: impl FnOnce() -> anyhow::Result<CloseoutCycleWaitOutcome>,
     retry_claim: impl FnOnce() -> anyhow::Result<RecoveryCloseoutOwnerResolution>,
 ) -> anyhow::Result<RecoveryCloseoutOwnerResolution> {
-    let RecoveryCloseoutOwnerResolution::Retained(held_reason) = first else {
-        return Ok(first);
+    let (held_reason, retry_at_secs) = match first {
+        RecoveryCloseoutOwnerResolution::RetryAt {
+            reason,
+            retry_at_secs,
+        } => (reason, retry_at_secs),
+        other => return Ok(other),
     };
 
     // The foreground finalize guard can outlive its CLI response by the few
@@ -143,12 +150,11 @@ fn resolve_recovery_closeout_owner_after_first_claim(
         Ok(CloseoutCycleWaitOutcome::Terminal) => Ok(RecoveryCloseoutOwnerResolution::Terminal),
         Ok(CloseoutCycleWaitOutcome::Superseded) => Ok(RecoveryCloseoutOwnerResolution::Superseded),
         Ok(CloseoutCycleWaitOutcome::OwnerReleased) => retry_claim(),
-        Ok(CloseoutCycleWaitOutcome::TimedOut) => Ok(RecoveryCloseoutOwnerResolution::Retained(
-            format!("{held_reason}; reactive owner wait timed out"),
-        )),
-        Err(err) => Ok(RecoveryCloseoutOwnerResolution::Retained(format!(
-            "{held_reason}; reactive owner wait failed: {err:#}"
-        ))),
+        Ok(CloseoutCycleWaitOutcome::TimedOut) => retry_claim(),
+        Err(err) => Ok(RecoveryCloseoutOwnerResolution::RetryAt {
+            reason: format!("{held_reason}; reactive owner wait failed: {err:#}"),
+            retry_at_secs,
+        }),
     }
 }
 
@@ -890,8 +896,14 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
                 });
             }
             RecoveryCloseoutOwnerResolution::Superseded => return Ok(Outcome::Superseded),
-            RecoveryCloseoutOwnerResolution::Retained(reason) => {
-                return Ok(Outcome::Retained { reason });
+            RecoveryCloseoutOwnerResolution::RetryAt {
+                reason,
+                retry_at_secs,
+            } => {
+                return Ok(Outcome::RetryAt {
+                    reason,
+                    retry_at_secs,
+                });
             }
         };
         let (Some(capture_id), Some(response_sha256)) =
@@ -1305,7 +1317,10 @@ mod tests {
         let waits = std::cell::Cell::new(0);
         let retries = std::cell::Cell::new(0);
         let resolution = resolve_recovery_closeout_owner_after_first_claim(
-            RecoveryCloseoutOwnerResolution::Retained("foreground owner active".to_string()),
+            RecoveryCloseoutOwnerResolution::RetryAt {
+                reason: "foreground owner active".to_string(),
+                retry_at_secs: 100,
+            },
             || {
                 waits.set(waits.get() + 1);
                 Ok(CloseoutCycleWaitOutcome::OwnerReleased)
@@ -1327,6 +1342,35 @@ mod tests {
             1,
             "owner release must trigger exactly one fresh claim"
         );
+    }
+
+    #[test]
+    fn recovery_claim_timeout_preserves_the_lease_expiry_retry_edge() {
+        let retries = std::cell::Cell::new(0);
+        let resolution = resolve_recovery_closeout_owner_after_first_claim(
+            RecoveryCloseoutOwnerResolution::RetryAt {
+                reason: "foreground owner active".to_string(),
+                retry_at_secs: 250,
+            },
+            || Ok(CloseoutCycleWaitOutcome::TimedOut),
+            || {
+                retries.set(retries.get() + 1);
+                Ok(RecoveryCloseoutOwnerResolution::RetryAt {
+                    reason: "foreground owner still active".to_string(),
+                    retry_at_secs: 250,
+                })
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(
+            resolution,
+            RecoveryCloseoutOwnerResolution::RetryAt {
+                retry_at_secs: 250,
+                ..
+            }
+        ));
+        assert_eq!(retries.get(), 1);
     }
 
     #[test]

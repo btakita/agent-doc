@@ -651,6 +651,24 @@ fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
                 );
                 return false;
             }
+            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetryAt {
+                reason,
+                retry_at_secs,
+            } => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "codex_stop_captured_finalize_resume_lease_retry cycle_id={} capture_id={} response_sha256={} attempt={} retry_at_secs={} reason_bytes={} action=await_supervisor_timer_edge",
+                        key.cycle_id,
+                        key.capture_id,
+                        key.response_sha256,
+                        attempt,
+                        retry_at_secs,
+                        reason.len(),
+                    ),
+                );
+                return false;
+            }
             agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetryableEffect {
                 reason,
             } => {

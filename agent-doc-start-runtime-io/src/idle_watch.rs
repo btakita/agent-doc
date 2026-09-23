@@ -28,9 +28,9 @@ use agent_doc_supervisor::{
     idle_revision::{ControllerProbeHealth, IdleRevisionState, RevisionObservation},
     idle_watch::{
         CapturedFinalizeResumeFacts, CapturedFinalizeResumeTriggers, SupervisorAutoInstallPhase,
-        captured_finalize_resume_retry_delay, captured_finalize_resume_should_start,
-        idle_queue_context_reset_ops_log_message, paused_idle_watch_should_skip,
-        supervisor_auto_install_pane_message,
+        captured_finalize_resume_retry_at_delay, captured_finalize_resume_retry_delay,
+        captured_finalize_resume_should_start, idle_queue_context_reset_ops_log_message,
+        paused_idle_watch_should_skip, supervisor_auto_install_pane_message,
     },
     lifecycle::{
         MAX_CYCLE_OPEN_DEFER_TICKS, MAX_REEXEC_ESCALATIONS, SupervisorInstallAction,
@@ -1698,6 +1698,35 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         key.cycle_id,
                         key.capture_id,
                         key.response_sha256,
+                        reason.len(),
+                        agent_doc_hash::content_hash(&reason),
+                    );
+                    log_event(&mut session_log, &event);
+                    agent_doc_ops_log_io::log_op(&path, &event);
+                }
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::RetryAt {
+                    reason,
+                    retry_at_secs,
+                } => {
+                    let delay = captured_finalize_resume_retry_at_delay(
+                        current_epoch_secs(),
+                        retry_at_secs,
+                    );
+                    resume_retry = Some(CapturedFinalizeResumeRetry {
+                        key: key.clone(),
+                        attempts: 0,
+                        retry_at: now + delay,
+                        needs_operator: false,
+                        trigger_published: false,
+                    });
+                    let event = format!(
+                        "captured_finalize_resume_lease_retry_scheduled file={} cycle_id={} capture_id={} response_sha256={} retry_at_secs={} delay_ms={} reason_bytes={} reason_sha256={} authority=editor_crdt no_force_disk=true",
+                        path.display(),
+                        key.cycle_id,
+                        key.capture_id,
+                        key.response_sha256,
+                        retry_at_secs,
+                        delay.as_millis(),
                         reason.len(),
                         agent_doc_hash::content_hash(&reason),
                     );

@@ -107,6 +107,7 @@ pub enum CapturedFinalizeResumeOutcome {
     Committed,
     Superseded,
     Retained { reason: String },
+    RetryAt { reason: String, retry_at_secs: u64 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1136,7 +1137,8 @@ fn run_with_options_inner(
                         ),
                     );
                 }
-                CapturedFinalizeResumeOutcome::Retained { reason } => {
+                CapturedFinalizeResumeOutcome::Retained { reason }
+                | CapturedFinalizeResumeOutcome::RetryAt { reason, .. } => {
                     anyhow::bail!(
                         "[session-check] INTERRUPTED: editor-native save converged for {}, but the same retained closeout could not finish: {}",
                         file.display(),
@@ -1510,7 +1512,8 @@ fn resume_captured_finalize_for_recovery(
             Ok(true)
         }
         CapturedFinalizeResumeOutcome::NotApplicable
-        | CapturedFinalizeResumeOutcome::Retained { .. } => Ok(false),
+        | CapturedFinalizeResumeOutcome::Retained { .. }
+        | CapturedFinalizeResumeOutcome::RetryAt { .. } => Ok(false),
     }
 }
 
@@ -2357,7 +2360,8 @@ fn inspect_core_profiled(
                 return inspect_core_with_captured_resume(file, effects, false);
             }
             CapturedFinalizeResumeOutcome::NotApplicable => {}
-            CapturedFinalizeResumeOutcome::Retained { reason } => {
+            CapturedFinalizeResumeOutcome::Retained { reason }
+            | CapturedFinalizeResumeOutcome::RetryAt { reason, .. } => {
                 captured_resume_reason = Some(reason);
             }
         }

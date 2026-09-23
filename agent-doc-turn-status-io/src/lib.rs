@@ -16,8 +16,10 @@
 //! the turn: outside tmux, or on any tmux error, it succeeds quietly.
 
 use agent_doc_sqlite::state_store::{
-    CoordinationLeaseRecord, clear_coordination_lease_in_db, load_coordination_lease_from_db,
-    open_state_db, upsert_coordination_lease_in_db,
+    CoordinationLeaseRecord, clear_coordination_lease_if_holder_in_db,
+    clear_coordination_lease_in_db, load_coordination_lease_from_db,
+    load_coordination_leases_for_scope_kind_from_db, open_state_db,
+    upsert_coordination_lease_in_db,
 };
 use agent_doc_turn::turn_status::{
     TurnActiveMarker, pane_title_for_status, turn_active_marker_is_fresh,
@@ -36,6 +38,8 @@ fn now_secs() -> u64 {
 
 const TURN_ACTIVE_SCOPE: &str = "turn_active";
 const SUPERVISOR_STALE_SCOPE: &str = "supervisor_stale";
+// Compatibility key written by agent-doc versions before turn-active leases
+// became pane-scoped.
 const PROJECT_SCOPE_ID: &str = "project";
 
 /// Record the current turn owner in the project state database.
@@ -49,7 +53,7 @@ fn write_turn_active_marker_at(base: &Path, pane: &str, written_at: u64) -> Resu
         &conn,
         &CoordinationLeaseRecord {
             scope_kind: TURN_ACTIVE_SCOPE.to_string(),
-            scope_id: PROJECT_SCOPE_ID.to_string(),
+            scope_id: pane.to_string(),
             holder: pane.to_string(),
             holder_pid: Some(std::process::id()),
             heartbeat_secs: written_at,
@@ -57,10 +61,22 @@ fn write_turn_active_marker_at(base: &Path, pane: &str, written_at: u64) -> Resu
     )
 }
 
-/// Clear the current turn owner (turn idle / superseded). Absent is OK.
-pub fn clear_turn_active_marker(base: &Path) -> Result<()> {
+/// Clear one pane's turn owner (turn idle / superseded). Absent is OK.
+pub fn clear_turn_active_marker(base: &Path, pane: &str) -> Result<()> {
     let conn = open_state_db(base)?;
-    clear_coordination_lease_in_db(&conn, TURN_ACTIVE_SCOPE, PROJECT_SCOPE_ID).map(|_| ())
+    clear_coordination_lease_in_db(&conn, TURN_ACTIVE_SCOPE, pane)?;
+    // Retire only a matching legacy singleton. A Stop hook from another pane
+    // must not erase the active owner written by an older installed binary.
+    clear_coordination_lease_if_holder_in_db(&conn, TURN_ACTIVE_SCOPE, PROJECT_SCOPE_ID, pane)?;
+    Ok(())
+}
+
+fn marker_from_lease(lease: CoordinationLeaseRecord, now: u64) -> Option<TurnActiveMarker> {
+    let marker = TurnActiveMarker {
+        pane: lease.holder,
+        written_at: lease.heartbeat_secs,
+    };
+    turn_active_marker_is_fresh(&marker, now).then_some(marker)
 }
 
 /// Read the turn-active marker if it exists and is not expired. An expired
@@ -68,16 +84,32 @@ pub fn clear_turn_active_marker(base: &Path) -> Result<()> {
 /// wedging the session busy.
 pub fn read_turn_active_marker_at(base: &Path, now: u64) -> Option<TurnActiveMarker> {
     let conn = open_state_db(base).ok()?;
-    let lease =
-        load_coordination_lease_from_db(&conn, TURN_ACTIVE_SCOPE, PROJECT_SCOPE_ID).ok()??;
-    let marker = TurnActiveMarker {
-        pane: lease.holder,
-        written_at: lease.heartbeat_secs,
+    load_coordination_leases_for_scope_kind_from_db(&conn, TURN_ACTIVE_SCOPE)
+        .ok()?
+        .into_iter()
+        .filter_map(|lease| marker_from_lease(lease, now))
+        .max_by_key(|marker| marker.written_at)
+}
+
+fn read_turn_active_marker_for_pane_at(
+    base: &Path,
+    pane: &str,
+    now: u64,
+) -> Option<TurnActiveMarker> {
+    let conn = open_state_db(base).ok()?;
+    let pane_lease = load_coordination_lease_from_db(&conn, TURN_ACTIVE_SCOPE, pane)
+        .ok()
+        .flatten();
+    let lease = match pane_lease {
+        Some(lease) => lease,
+        None => {
+            let legacy =
+                load_coordination_lease_from_db(&conn, TURN_ACTIVE_SCOPE, PROJECT_SCOPE_ID)
+                    .ok()??;
+            (legacy.holder == pane).then_some(legacy)?
+        }
     };
-    if !turn_active_marker_is_fresh(&marker, now) {
-        return None;
-    }
-    Some(marker)
+    marker_from_lease(lease, now)
 }
 
 /// Read the non-expired turn-active marker under `base`, if present.
@@ -98,8 +130,14 @@ pub fn turn_active(base: &Path) -> bool {
 
 /// True when the non-expired marker belongs to `pane`.
 pub fn turn_active_for_pane(base: &Path, pane: &str) -> bool {
-    read_turn_active_marker(base)
+    read_turn_active_marker_for_pane_at(base, pane, now_secs())
         .is_some_and(|marker| turn_active_marker_matches_pane(&marker, pane))
+}
+
+/// True when the project containing `file` has a fresh marker for `pane`.
+pub fn turn_active_for_pane_for_file(file: &Path, pane: &str) -> bool {
+    agent_doc_project_root_io::project_root_containing(file)
+        .is_some_and(|root| turn_active_for_pane(&root, pane))
 }
 
 /// Publish the stale-supervisor flag in the project state database.
@@ -190,7 +228,7 @@ pub fn set_pane_title_for_status(base: &Path, pane: &str, active: bool) {
 /// have stronger idle evidence than a missed harness `Stop` hook.
 pub fn clear_turn_status_for_pane(base: &Path, pane: &str) -> Result<()> {
     set_pane_title_for_status(base, pane, false);
-    clear_turn_active_marker(base)
+    clear_turn_active_marker(base, pane)
 }
 
 /// Set the current tmux pane's border title to reflect the turn state. No-op
@@ -221,7 +259,7 @@ pub fn run(active: bool) -> anyhow::Result<()> {
         let result = if active {
             write_turn_active_marker(&base, &pane)
         } else {
-            clear_turn_active_marker(&base)
+            clear_turn_active_marker(&base, &pane)
         };
         if let Err(e) = result {
             eprintln!("[turn-status] warning: failed to update turn-active marker: {e:#}");
@@ -257,13 +295,13 @@ mod tests {
         assert_eq!(marker.pane, "%7");
         assert_eq!(marker.written_at, 1000);
 
-        clear_turn_active_marker(base).unwrap();
+        clear_turn_active_marker(base, "%7").unwrap();
         assert!(
             read_turn_active_marker_at(base, 1000).is_none(),
             "absent after clear"
         );
         // Clearing an absent marker is a no-op, not an error.
-        clear_turn_active_marker(base).unwrap();
+        clear_turn_active_marker(base, "%7").unwrap();
     }
 
     #[test]
@@ -299,5 +337,52 @@ mod tests {
 
         assert!(turn_active_for_pane(base, "%7"));
         assert!(!turn_active_for_pane(base, "%8"));
+    }
+
+    #[test]
+    fn concurrent_pane_markers_survive_sibling_idle() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        std::fs::create_dir_all(base.join(".agent-doc")).unwrap();
+
+        write_turn_active_marker_at(base, "%7", now_secs()).unwrap();
+        write_turn_active_marker_at(base, "%8", now_secs()).unwrap();
+        assert!(turn_active_for_pane(base, "%7"));
+        assert!(turn_active_for_pane(base, "%8"));
+
+        clear_turn_active_marker(base, "%8").unwrap();
+        assert!(
+            turn_active_for_pane(base, "%7"),
+            "sibling Stop must preserve the active pane"
+        );
+        assert!(!turn_active_for_pane(base, "%8"));
+    }
+
+    #[test]
+    fn pane_scoped_reads_and_clears_support_legacy_project_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        std::fs::create_dir_all(base.join(".agent-doc")).unwrap();
+        let conn = open_state_db(base).unwrap();
+        upsert_coordination_lease_in_db(
+            &conn,
+            &CoordinationLeaseRecord {
+                scope_kind: TURN_ACTIVE_SCOPE.to_string(),
+                scope_id: PROJECT_SCOPE_ID.to_string(),
+                holder: "%7".to_string(),
+                holder_pid: None,
+                heartbeat_secs: now_secs(),
+            },
+        )
+        .unwrap();
+
+        assert!(turn_active_for_pane(base, "%7"));
+        clear_turn_active_marker(base, "%8").unwrap();
+        assert!(
+            turn_active_for_pane(base, "%7"),
+            "foreign idle must not clear a legacy owner"
+        );
+        clear_turn_active_marker(base, "%7").unwrap();
+        assert!(!turn_active_for_pane(base, "%7"));
     }
 }

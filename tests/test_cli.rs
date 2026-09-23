@@ -7139,8 +7139,9 @@ fn test_agent_doc_turn_owns_turn_status_policy() {
     let session_actor_cmd =
         fs::read_to_string(manifest_dir.join("src/session_actor_cmd.rs")).unwrap();
     assert!(
-        session_actor_cmd.contains("agent_doc_turn_status_io::read_turn_active_marker"),
-        "session actor command should read turn-active markers through the focused IO crate"
+        session_actor_cmd.contains("agent_doc_turn_status_io::turn_active_for_pane(")
+            && session_actor_cmd.contains("agent_doc_turn_status_io::turn_active("),
+        "session actor command should read pane-scoped turn-active state, with an unknown-pane fallback, through the focused IO crate"
     );
     for relative_path in [
         "agent-doc-start-runtime-io/src/lib.rs",
@@ -7156,8 +7157,9 @@ fn test_agent_doc_turn_owns_turn_status_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/lib.rs")).unwrap();
     assert!(
         !start_source.contains("agent_doc_fs::find_project_root(")
+            && start_source.contains("agent_doc_turn_status_io::turn_active_for_pane_for_file(")
             && start_source.contains("agent_doc_turn_status_io::read_turn_active_marker_for_file("),
-        "start.rs should ask turn-status IO for file-scoped marker reads instead of owning root discovery"
+        "start.rs should ask turn-status IO for pane-scoped file reads and its unknown-pane fallback instead of owning root discovery"
     );
 }
 

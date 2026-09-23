@@ -1556,9 +1556,6 @@ pub(crate) fn cancel_turn_action(turn_active: bool) -> CancelTurnAction {
 /// pane when one is known. When no owned pane can be resolved, any non-expired
 /// marker counts (the marker itself self-expires via its TTL).
 fn document_turn_active(ctx: &SessionContext) -> bool {
-    let Some(marker) = agent_doc_turn_status_io::read_turn_active_marker(&ctx.base_dir) else {
-        return false;
-    };
     let owned_pane = ctx
         .actor_record
         .as_ref()
@@ -1566,8 +1563,10 @@ fn document_turn_active(ctx: &SessionContext) -> bool {
         .map(|record| record.pane_id.clone())
         .or_else(|| ctx.registry_entry.as_ref().map(|entry| entry.pane.clone()));
     match owned_pane {
-        Some(pane) if !pane.is_empty() => marker.pane == pane,
-        _ => true,
+        Some(pane) if !pane.is_empty() => {
+            agent_doc_turn_status_io::turn_active_for_pane(&ctx.base_dir, &pane)
+        }
+        _ => agent_doc_turn_status_io::turn_active(&ctx.base_dir),
     }
 }
 

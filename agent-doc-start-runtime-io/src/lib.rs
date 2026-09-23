@@ -292,13 +292,10 @@ fn clear_matching_turn_status_projection(
     reason: &str,
     session_log: &mut Option<SessionLog>,
 ) -> bool {
-    let Some(marker) = agent_doc_turn_status_io::read_turn_active_marker_for_file(file) else {
-        return false;
-    };
     let Some(pane) = owned_pane_id(shared) else {
         return false;
     };
-    if marker.pane != pane {
+    if !agent_doc_turn_status_io::turn_active_for_pane_for_file(file, pane) {
         return false;
     }
     let Some(base) = agent_doc_project_root_io::project_root_containing(file) else {
@@ -348,18 +345,14 @@ fn turn_active_for_owned_pane_with_idle_evidence(
     _prompt_visible: bool,
     _session_log: &mut Option<SessionLog>,
 ) -> bool {
-    let Some(marker) = agent_doc_turn_status_io::read_turn_active_marker_for_file(file) else {
-        return false;
-    };
     match owned_pane_id(shared) {
         // The harness-owned marker is stronger evidence than a rendered ready
         // prompt. Harnesses can redraw a composer between tool calls while the
         // turn is still live; clearing here let idle-watch inject another
         // drain trigger into that active turn. The Stop/idle hook owns normal
         // retirement, and the marker TTL remains the missed-hook fail-safe.
-        Some(pane) if marker.pane == pane => true,
-        Some(_) => false,
-        None => true,
+        Some(pane) => agent_doc_turn_status_io::turn_active_for_pane_for_file(file, pane),
+        None => agent_doc_turn_status_io::read_turn_active_marker_for_file(file).is_some(),
     }
 }
 

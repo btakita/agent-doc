@@ -1839,6 +1839,33 @@ pub fn load_coordination_lease_from_db(
     .context("load coordination lease")
 }
 
+pub fn load_coordination_leases_for_scope_kind_from_db(
+    conn: &Connection,
+    scope_kind: &str,
+) -> Result<Vec<CoordinationLeaseRecord>> {
+    let mut statement = conn
+        .prepare(
+            "SELECT scope_kind, scope_id, holder, holder_pid, heartbeat_secs \
+             FROM coordination_leases WHERE scope_kind = ?1",
+        )
+        .context("prepare coordination lease scope query")?;
+    let rows = statement
+        .query_map(params![scope_kind], |row| {
+            let holder_pid: Option<i64> = row.get(3)?;
+            let heartbeat_secs: i64 = row.get(4)?;
+            Ok(CoordinationLeaseRecord {
+                scope_kind: row.get(0)?,
+                scope_id: row.get(1)?,
+                holder: row.get(2)?,
+                holder_pid: holder_pid.and_then(|pid| u32::try_from(pid).ok()),
+                heartbeat_secs: u64::try_from(heartbeat_secs).unwrap_or_default(),
+            })
+        })
+        .context("query coordination leases by scope kind")?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .context("collect coordination leases by scope kind")
+}
+
 pub fn clear_coordination_lease_in_db(
     conn: &Connection,
     scope_kind: &str,
@@ -1847,6 +1874,19 @@ pub fn clear_coordination_lease_in_db(
     Ok(conn.execute(
         "DELETE FROM coordination_leases WHERE scope_kind = ?1 AND scope_id = ?2",
         params![scope_kind, scope_id],
+    )? > 0)
+}
+
+pub fn clear_coordination_lease_if_holder_in_db(
+    conn: &Connection,
+    scope_kind: &str,
+    scope_id: &str,
+    holder: &str,
+) -> Result<bool> {
+    Ok(conn.execute(
+        "DELETE FROM coordination_leases \
+         WHERE scope_kind = ?1 AND scope_id = ?2 AND holder = ?3",
+        params![scope_kind, scope_id, holder],
     )? > 0)
 }
 

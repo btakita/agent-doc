@@ -217,6 +217,29 @@ struct CapturedFinalizeResumeRetry {
     trigger_published: bool,
 }
 
+/// Publish new document evidence to captured-finalize recovery and retire any
+/// operator gate that was derived from the previous document state.
+///
+/// Both the closeout state plane and the retained-delivery plane can make a
+/// previously deferred capture safe to resume. They must feed the same trigger:
+/// delivery convergence without a cycle-phase change is still a real state edge.
+fn observe_captured_finalize_document_edge(
+    triggers: &CapturedFinalizeResumeTriggers,
+    retry: &mut Option<CapturedFinalizeResumeRetry>,
+    now: std::time::Instant,
+) -> bool {
+    triggers.observe_state_edge();
+    let Some(retry) = retry.as_mut().filter(|retry| retry.needs_operator) else {
+        return false;
+    };
+    retry.needs_operator = false;
+    retry.retry_at = now;
+    // The document edge itself owns the next attempt; publishing a timed retry
+    // on top of it would turn one transition into two effects.
+    retry.trigger_published = true;
+    true
+}
+
 struct CapturedFinalizeResumeSignalWatch {
     result: std::sync::mpsc::Receiver<()>,
 }
@@ -1606,6 +1629,26 @@ pub(super) fn spawn_idle_queue_watch_thread(
         }
         if document_delivery_debounce.take_ready(now) {
             document_delivery_reconcile_pending = true;
+            let operator_gate_cleared = observe_captured_finalize_document_edge(
+                &resume_triggers,
+                &mut resume_retry,
+                now,
+            );
+            resume_key_refresh_pending = true;
+            last_quiescent_maintenance = None;
+            if operator_gate_cleared
+                && let Some(retry) = resume_retry.as_ref()
+            {
+                let event = format!(
+                    "captured_finalize_resume_operator_gate_cleared file={} cycle_id={} capture_id={} response_sha256={} reason=controller_document_delivery_edge (#deliveryresumewake)",
+                    path.display(),
+                    retry.key.cycle_id,
+                    retry.key.capture_id,
+                    retry.key.response_sha256,
+                );
+                log_event(&mut session_log, &event);
+                agent_doc_ops_log_io::log_op(&path, &event);
+            }
         }
         let document_delivery_edge_due = document_delivery_reconcile_pending;
         if resume_signal_watch.as_ref().is_some_and(|watch| {
@@ -1615,7 +1658,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
             }
             observed
         }) {
-            resume_triggers.observe_state_edge();
+            let operator_gate_cleared = observe_captured_finalize_document_edge(
+                &resume_triggers,
+                &mut resume_retry,
+                now,
+            );
             // `#needsoperatorstateedge`: the trigger graph retires the
             // operator-required verdict on a document transition, so the
             // orchestration's own copy of that latch must retire with it.
@@ -1623,13 +1670,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // independent gate — leaving it set would keep
             // `captured_finalize_resume_should_start` false and reproduce the
             // deadlock the trigger fix removes.
-            if let Some(retry) = resume_retry.as_mut()
-                && retry.needs_operator
+            if operator_gate_cleared
+                && let Some(retry) = resume_retry.as_ref()
             {
-                retry.needs_operator = false;
-                retry.retry_at = now;
-                // The state edge IS the trigger; do not also publish a backoff edge.
-                retry.trigger_published = true;
                 let event = format!(
                     "captured_finalize_resume_operator_gate_cleared file={} cycle_id={} capture_id={} response_sha256={} reason=controller_document_state_edge (#needsoperatorstateedge)",
                     path.display(),
@@ -5032,6 +5075,36 @@ mod tests {
         unavailable.record(None);
         assert!(!unavailable.due(None));
         assert!(unavailable.due(Some("sv-1")));
+    }
+
+    #[test]
+    fn retained_delivery_edge_rearms_captured_finalize_and_retires_operator_gate() {
+        let triggers = CapturedFinalizeResumeTriggers::new();
+        let key = agent_doc_repair_command_io::CapturedFinalizeResumeKey {
+            cycle_id: "cycle-a".to_string(),
+            capture_id: "capture-a".to_string(),
+            response_sha256: "response-a".to_string(),
+        };
+        triggers.observe_operation(Some("cycle-a:capture-a:response-a".to_string()));
+        triggers.consume_attempt();
+        triggers.require_operator();
+        let now = std::time::Instant::now();
+        let mut retry = Some(CapturedFinalizeResumeRetry {
+            key,
+            attempts: 1,
+            retry_at: now + std::time::Duration::from_secs(30),
+            needs_operator: true,
+            trigger_published: false,
+        });
+
+        assert!(observe_captured_finalize_document_edge(
+            &triggers, &mut retry, now,
+        ));
+        assert!(triggers.ready());
+        let retry = retry.unwrap();
+        assert!(!retry.needs_operator);
+        assert_eq!(retry.retry_at, now);
+        assert!(retry.trigger_published);
     }
 
     #[test]

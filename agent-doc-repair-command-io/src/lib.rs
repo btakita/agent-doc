@@ -631,6 +631,21 @@ fn resume_captured_finalize_intent(
 }
 
 fn classify_captured_finalize_resume_error(reason: &str) -> CapturedFinalizeResumeOutcome {
+    if let Some(retry_at_secs) = reason
+        .split_once(agent_doc_write_runtime_io::CLOSEOUT_OWNER_RETRY_AT_MARKER)
+        .and_then(|(_, suffix)| {
+            suffix
+                .split(|character: char| !character.is_ascii_digit())
+                .next()
+        })
+        .filter(|digits| !digits.is_empty())
+        .and_then(|digits| digits.parse::<u64>().ok())
+    {
+        return CapturedFinalizeResumeOutcome::RetryAt {
+            reason: reason.to_string(),
+            retry_at_secs,
+        };
+    }
     let lower = reason.to_ascii_lowercase();
     // Every needle here matches error *prose* except one. `#retainconv`:
     // `await_editor_replica` was written for the name of the typed error the
@@ -696,6 +711,21 @@ mod captured_finalize_resume_tests {
                 CapturedFinalizeResumeOutcome::WaitingForSignal { .. }
             ));
         }
+    }
+
+    #[test]
+    fn closeout_owner_collision_preserves_its_lease_deadline() {
+        let reason = format!(
+            "tracked-work replay: closeout operation is already in progress [{}123456]",
+            agent_doc_write_runtime_io::CLOSEOUT_OWNER_RETRY_AT_MARKER,
+        );
+        assert!(matches!(
+            classify_captured_finalize_resume_error(&reason),
+            CapturedFinalizeResumeOutcome::RetryAt {
+                retry_at_secs: 123456,
+                ..
+            }
+        ));
     }
 
     #[test]

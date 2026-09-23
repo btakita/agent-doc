@@ -540,7 +540,10 @@ enum WriteCloseoutOwnerRole {
 
 impl WriteCloseoutOwnerRole {
     fn from_origin(origin: Option<&str>) -> Self {
-        if origin == Some("captured_finalize_resume") {
+        if matches!(
+            origin,
+            Some("captured_finalize_resume" | "captured_finalize_resume_tracked_work")
+        ) {
             Self::CapturedFinalizeResume
         } else {
             Self::ForegroundFinalize
@@ -565,6 +568,14 @@ impl WriteCloseoutOwnerRole {
         }
     }
 }
+
+/// Stable cross-crate marker for a serialized closeout-owner lease boundary.
+///
+/// Captured-finalize recovery crosses an `anyhow` boundary while replaying its
+/// tracked-work half, so the typed controller outcome is not available to the
+/// supervisor there. Keep the deadline machine-readable instead of reducing a
+/// timed retry to an unbounded controller-state wait.
+pub const CLOSEOUT_OWNER_RETRY_AT_MARKER: &str = "closeout_owner_retry_at=";
 
 fn claim_foreground_closeout_owner(
     file: &Path,
@@ -603,12 +614,14 @@ fn claim_foreground_closeout_owner(
         controller::CloseoutOwnerClaimOutcome::Acquired(owner) => owner.cycle_id,
         controller::CloseoutOwnerClaimOutcome::HeldByOther(owner) => {
             anyhow::bail!(
-                "closeout operation is already in progress for cycle {} by {} pid={} role={} until={}",
+                "closeout operation is already in progress for cycle {} by {} pid={} role={} until={} [{}{}]",
                 owner.cycle_id,
                 owner.owner_id,
                 owner.owner_pid,
                 owner.role,
-                owner.expires_secs
+                owner.expires_secs,
+                CLOSEOUT_OWNER_RETRY_AT_MARKER,
+                owner.expires_secs,
             );
         }
         controller::CloseoutOwnerClaimOutcome::CycleSuperseded => return Ok(None),
@@ -3639,6 +3652,11 @@ mod tests {
         assert_eq!(
             WriteCloseoutOwnerRole::from_origin(Some("captured_finalize_resume")),
             WriteCloseoutOwnerRole::CapturedFinalizeResume,
+        );
+        assert_eq!(
+            WriteCloseoutOwnerRole::from_origin(Some("captured_finalize_resume_tracked_work")),
+            WriteCloseoutOwnerRole::CapturedFinalizeResume,
+            "the tracked-work half is the same captured-finalize owner, not a new foreground finalize",
         );
     }
 

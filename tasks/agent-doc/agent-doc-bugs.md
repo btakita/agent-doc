@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: start
 ---
 
 ## Status
@@ -374,6 +374,19 @@ Verification and deployment:
 - CI run 35797157295 was observed once and is in progress.
 
 Restart IntelliJ to activate plugin 0.2.395; the running IDE still has the superseded 0.2.394 JAR mapped. After restart, selecting `tasks/software/tsift.md` should force structural recovery when its pane has been reaped, then focus the replacement Codex pane.
+
+### Re: Response
+
+Completed and committed the agent-doc cycle.
+
+- Fixed reaped-pane editor auto-sync.
+- Pushed `6034ff0b39` to `origin/main`.
+- Full `make check` passed.
+- Installed JetBrains plugin 0.2.395 and recycled the controller.
+- CI is running.
+- Restart IntelliJ to activate plugin 0.2.395.
+
+The next queue item was handed to the supervisor for automatic continuation.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -386,7 +399,7 @@ Restart IntelliJ to activate plugin 0.2.395; the running IDE still has the super
 - ~~The struck multi-line queue item below was not cleared when `agent:queue` completed.~~
 - ~~Make this error message easier for a human to read given a small prompt dialog in Idea:~~
   agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: [lint-gate] INTERRUPTED: 1 blocking lint finding(s) for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md (mode=warn, source=default). Fix the directives below before re-running `agent-doc finalize` / `agent-doc write --commit`, or set `agent_doc_lint_dialect: off` in frontmatter / `[lint] dialect = "off"` in `.agent-doc/config.toml` to temporarily skip this gate. /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md:449:1 error: attribute `queu0000e` on `agent:backlog` is missing `=value` [agent-doc/malformed-attr] hint: try `queu0000e= `
-- 🚧 On tsift.md, I switched `agent: claude` to `agent: codex` but agent-doc reverts my change. Now switching the editor to tsift.md does not auto-sync the tmux pane.
+- ~~On tsift.md, I switched `agent: claude` to `agent: codex` but agent-doc reverts my change. Now switching the editor to tsift.md does not auto-sync the tmux pane.~~ — auto-struck: answered this cycle (#ftstrike)
 - Fix api.md session issue: • Agent-doc accepted the response intent but deferred its terminal commit while the editor replica converges. Per its recovery protocol, I’m checking the session exactly once and will not resend or force-write the response.
 <!-- /agent:queue -->
 

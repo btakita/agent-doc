@@ -387,6 +387,18 @@ Completed and committed the agent-doc cycle.
 - Restart IntelliJ to activate plugin 0.2.395.
 
 The next queue item was handed to the supervisor for automatic continuation.
+
+### Re: 2026-09-23 10:26 EDT — gpt-5.6
+
+> **Queue prompt:** Fix api.md session issue: • Agent-doc accepted the response intent but deferred its terminal commit while the editor replica converges. Per its recovery protocol, I’m checking the session exactly once and will not resend or force-write the response.
+
+Fixed and deployed.
+
+The `api.md` response was not lost: its terminal commit `bf80a8e` succeeded, and the durable cycle projection reached `committed`. The defect was a stale negative receipt from `session-check`: after the controller accepted the commit, recovery immediately reread the controller projection while it could still be `write_applied`, then reported `INTERRUPTED` even though the queued `commit_observed` event landed moments later.
+
+Recovery now records whether the commit was controller-owned. If its first post-commit read is still open, it subscribes once to that exact live editor/controller cycle and derives the result only after the authoritative projection advances. Headless commits retain their existing non-blocking behavior, and superseded cycles remain explicitly classified.
+
+Added a regression test for the commit → reactive projection barrier → receipt ordering. Validation passed: the focused closeout suite (8 tests), the full `make check` gate (9,649 Rust tests plus editor, cross-editor, documentation, release, and formal-model checks), formatting, diff hygiene, and the private-name denylist. Installed locally, pushed commit `dda4c3fca` to `origin/main`, and marked the live controller for two-phase recycle. No GitHub Actions run had registered for the commit at the observation point.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -396,10 +408,6 @@ The next queue item was handed to the supervisor for automatic continuation.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~The struck multi-line queue item below was not cleared when `agent:queue` completed.~~
-- ~~Make this error message easier for a human to read given a small prompt dialog in Idea:~~
-  agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: [lint-gate] INTERRUPTED: 1 blocking lint finding(s) for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md (mode=warn, source=default). Fix the directives below before re-running `agent-doc finalize` / `agent-doc write --commit`, or set `agent_doc_lint_dialect: off` in frontmatter / `[lint] dialect = "off"` in `.agent-doc/config.toml` to temporarily skip this gate. /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md:449:1 error: attribute `queu0000e` on `agent:backlog` is missing `=value` [agent-doc/malformed-attr] hint: try `queu0000e= `
-- ~~On tsift.md, I switched `agent: claude` to `agent: codex` but agent-doc reverts my change. Now switching the editor to tsift.md does not auto-sync the tmux pane.~~ — auto-struck: answered this cycle (#ftstrike)
 - Fix api.md session issue: • Agent-doc accepted the response intent but deferred its terminal commit while the editor replica converges. Per its recovery protocol, I’m checking the session exactly once and will not resend or force-write the response.
 <!-- /agent:queue -->
 

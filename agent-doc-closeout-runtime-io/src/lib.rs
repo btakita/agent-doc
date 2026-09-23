@@ -1019,24 +1019,60 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
                 reason: format!("failed to project write-applied state: {err:#}"),
             });
         }
+        let controller_owned_commit =
+            agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file);
         if let Err(err) = agent_doc_commit_io::commit(file) {
             return Ok(Outcome::Retained {
                 reason: format!("same-capture commit remains retryable: {err:#}"),
             });
         }
 
-        let committed =
-            agent_doc_cycle_state_io::load_with_closeout_projection(file)?.is_some_and(|current| {
-                current.cycle_id == state.cycle_id && current.phase == CyclePhase::Committed
-            });
-        if committed {
-            Ok(Outcome::Committed)
-        } else {
-            Ok(Outcome::Retained {
+        let committed = || -> Result<bool> {
+            Ok(
+                agent_doc_cycle_state_io::load_with_closeout_projection(file)?.is_some_and(
+                    |current| {
+                        current.cycle_id == state.cycle_id && current.phase == CyclePhase::Committed
+                    },
+                ),
+            )
+        };
+        if committed()? {
+            return Ok(Outcome::Committed);
+        }
+
+        if !controller_owned_commit {
+            return Ok(Outcome::Retained {
                 reason: "same-capture commit returned without a committed cycle projection"
                     .to_string(),
-            })
+            });
         }
+
+        // A controller-owned commit can durably append `commit_observed`
+        // before the controller's live Lazily projection has applied that
+        // event. Do not turn that causality gap into a stale INTERRUPTED
+        // receipt. Subscribe to the exact cycle once and let the controller
+        // wake this recovery when its authoritative projection advances.
+        let progress = match await_closeout_cycle_progress(file, &state.cycle_id) {
+            Ok(progress) => progress,
+            Err(err) => {
+                return Ok(Outcome::Retained {
+                    reason: format!(
+                        "same-capture commit projection could not be observed reactively: {err:#}"
+                    ),
+                });
+            }
+        };
+        if committed()? {
+            return Ok(Outcome::Committed);
+        }
+        if progress == CloseoutCycleWaitOutcome::Superseded {
+            return Ok(Outcome::Superseded);
+        }
+        Ok(Outcome::Retained {
+            reason: format!(
+                "same-capture commit returned before the controller projected a terminal cycle (reactive wait outcome: {progress:?})"
+            ),
+        })
     }
 
     fn resume_retained_closeout_after_native_save(
@@ -1349,6 +1385,38 @@ mod tests {
         assert!(
             !body.contains("atomic_write_force_disk_through_authority"),
             "captured closeout recovery must never replace the editor-owned buffer via disk"
+        );
+    }
+
+    #[test]
+    fn controller_commit_recovery_awaits_terminal_projection_before_reporting_retained() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("fn resume_captured_finalize(")
+            .expect("captured finalize recovery must exist");
+        let body = &source[start..];
+        let end = body
+            .find("\n}\n\npub struct RuntimeCloseoutEffects")
+            .expect("resume handler must have a bounded source span");
+        let body = &body[..end];
+
+        let commit = body
+            .find("agent_doc_commit_io::commit(file)")
+            .expect("recovery must retry the exact captured commit");
+        let await_projection = body
+            .find("await_closeout_cycle_progress(file, &state.cycle_id)")
+            .expect("controller-owned recovery must await its live terminal projection");
+        let terminal_receipt = body
+            .find("reactive wait outcome: {progress:?}")
+            .expect("a non-terminal receipt must describe the completed reactive wait");
+
+        assert!(
+            body.contains("live_editor_endpoint_attached_for_file(file)"),
+            "the reactive await must remain scoped to controller-owned editor commits"
+        );
+        assert!(
+            commit < await_projection && await_projection < terminal_receipt,
+            "the recovery receipt must be derived after the controller's reactive projection barrier"
         );
     }
 

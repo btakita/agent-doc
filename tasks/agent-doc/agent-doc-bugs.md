@@ -427,6 +427,10 @@ Verification and deployment:
 - the original payments-ledger document now reports cycle `cycle-1790176451306` committed with no drainable work
 
 Operator verify: restart IntelliJ (or reopen its host) to unload the superseded JetBrains JAR and load plugin generation 0.2.396. No additional backlog follow-up is needed because the concurrency invariant is specified, regression-tested, installed, and the affected document cycle has converged.
+
+### Re: Response
+
+Great—the updated IntelliJ plugin generation `0.2.396` is now active. Everything is complete.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

@@ -17,6 +17,13 @@ struct RecoveryCloseoutOwnerGuard {
     owner_id: String,
 }
 
+enum RecoveryCloseoutOwnerResolution {
+    Acquired(RecoveryCloseoutOwnerGuard),
+    Terminal,
+    Superseded,
+    Retained(String),
+}
+
 impl Drop for RecoveryCloseoutOwnerGuard {
     fn drop(&mut self) {
         if let Err(err) =
@@ -63,10 +70,10 @@ pub fn await_closeout_cycle_progress(
     )
 }
 
-fn try_claim_recovery_closeout_owner(
+fn try_claim_recovery_closeout_owner_once(
     file: &std::path::Path,
     cycle_id: &str,
-) -> anyhow::Result<Result<RecoveryCloseoutOwnerGuard, String>> {
+) -> anyhow::Result<RecoveryCloseoutOwnerResolution> {
     use agent_doc_controller_io::project_controller as controller;
 
     let now_secs = current_epoch_secs();
@@ -87,19 +94,61 @@ fn try_claim_recovery_closeout_owner(
             allow_dead_owner_takeover: true,
         },
     )? {
-        controller::CloseoutOwnerClaimOutcome::Acquired(_) => Ok(Ok(RecoveryCloseoutOwnerGuard {
-            file: file.to_path_buf(),
-            cycle_id: cycle_id.to_string(),
-            owner_id,
-        })),
-        controller::CloseoutOwnerClaimOutcome::HeldByOther(owner) => Ok(Err(format!(
-            "foreground closeout operation is already in progress: owner {} pid={} role={}; \
+        controller::CloseoutOwnerClaimOutcome::Acquired(_) => Ok(
+            RecoveryCloseoutOwnerResolution::Acquired(RecoveryCloseoutOwnerGuard {
+                file: file.to_path_buf(),
+                cycle_id: cycle_id.to_string(),
+                owner_id,
+            }),
+        ),
+        controller::CloseoutOwnerClaimOutcome::HeldByOther(owner) => {
+            Ok(RecoveryCloseoutOwnerResolution::Retained(format!(
+                "foreground closeout operation is already in progress: owner {} pid={} role={}; \
              recovery follows the cycle's terminal state (lease stopgap expires at {})",
-            owner.owner_id, owner.owner_pid, owner.role, owner.expires_secs
-        ))),
-        controller::CloseoutOwnerClaimOutcome::CycleSuperseded => {
-            Ok(Err("captured closeout cycle was superseded".to_string()))
+                owner.owner_id, owner.owner_pid, owner.role, owner.expires_secs
+            )))
         }
+        controller::CloseoutOwnerClaimOutcome::CycleSuperseded => {
+            Ok(RecoveryCloseoutOwnerResolution::Superseded)
+        }
+    }
+}
+
+fn claim_recovery_closeout_owner(
+    file: &std::path::Path,
+    cycle_id: &str,
+) -> anyhow::Result<RecoveryCloseoutOwnerResolution> {
+    let first = try_claim_recovery_closeout_owner_once(file, cycle_id)?;
+    resolve_recovery_closeout_owner_after_first_claim(
+        first,
+        || await_closeout_cycle_progress(file, cycle_id),
+        || try_claim_recovery_closeout_owner_once(file, cycle_id),
+    )
+}
+
+fn resolve_recovery_closeout_owner_after_first_claim(
+    first: RecoveryCloseoutOwnerResolution,
+    await_progress: impl FnOnce() -> anyhow::Result<CloseoutCycleWaitOutcome>,
+    retry_claim: impl FnOnce() -> anyhow::Result<RecoveryCloseoutOwnerResolution>,
+) -> anyhow::Result<RecoveryCloseoutOwnerResolution> {
+    let RecoveryCloseoutOwnerResolution::Retained(held_reason) = first else {
+        return Ok(first);
+    };
+
+    // The foreground finalize guard can outlive its CLI response by the few
+    // milliseconds needed to publish its release fact. A status probe is
+    // promised exactly one recovery attempt, so follow that request-scoped
+    // owner reactively instead of racing it and emitting a stale INTERRUPTED.
+    match await_progress() {
+        Ok(CloseoutCycleWaitOutcome::Terminal) => Ok(RecoveryCloseoutOwnerResolution::Terminal),
+        Ok(CloseoutCycleWaitOutcome::Superseded) => Ok(RecoveryCloseoutOwnerResolution::Superseded),
+        Ok(CloseoutCycleWaitOutcome::OwnerReleased) => retry_claim(),
+        Ok(CloseoutCycleWaitOutcome::TimedOut) => Ok(RecoveryCloseoutOwnerResolution::Retained(
+            format!("{held_reason}; reactive owner wait timed out"),
+        )),
+        Err(err) => Ok(RecoveryCloseoutOwnerResolution::Retained(format!(
+            "{held_reason}; reactive owner wait failed: {err:#}"
+        ))),
     }
 }
 
@@ -820,9 +869,30 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         ) {
             return Ok(Outcome::NotApplicable);
         }
-        let _closeout_owner = match try_claim_recovery_closeout_owner(file, &state.cycle_id)? {
-            Ok(owner) => owner,
-            Err(reason) => return Ok(Outcome::Retained { reason }),
+        let _closeout_owner = match claim_recovery_closeout_owner(file, &state.cycle_id)? {
+            RecoveryCloseoutOwnerResolution::Acquired(owner) => owner,
+            RecoveryCloseoutOwnerResolution::Terminal => {
+                let terminal = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+                if terminal.as_ref().is_some_and(|current| {
+                    current.cycle_id == state.cycle_id && current.phase == CyclePhase::Committed
+                }) {
+                    return Ok(Outcome::Committed);
+                }
+                if terminal
+                    .as_ref()
+                    .is_none_or(|current| current.cycle_id != state.cycle_id)
+                {
+                    return Ok(Outcome::Superseded);
+                }
+                return Ok(Outcome::Retained {
+                    reason: "foreground closeout reached a non-committed terminal projection"
+                        .to_string(),
+                });
+            }
+            RecoveryCloseoutOwnerResolution::Superseded => return Ok(Outcome::Superseded),
+            RecoveryCloseoutOwnerResolution::Retained(reason) => {
+                return Ok(Outcome::Retained { reason });
+            }
         };
         let (Some(capture_id), Some(response_sha256)) =
             (state.capture_id.clone(), state.response_sha256.clone())
@@ -1229,6 +1299,35 @@ mod tests {
     use super::*;
     use agent_doc_session_check_io::{CapturedFinalizeResumeOutcome, SessionCheckEffects};
     use agent_doc_turn::CyclePhase;
+
+    #[test]
+    fn recovery_claim_follows_foreground_guard_release_once() {
+        let waits = std::cell::Cell::new(0);
+        let retries = std::cell::Cell::new(0);
+        let resolution = resolve_recovery_closeout_owner_after_first_claim(
+            RecoveryCloseoutOwnerResolution::Retained("foreground owner active".to_string()),
+            || {
+                waits.set(waits.get() + 1);
+                Ok(CloseoutCycleWaitOutcome::OwnerReleased)
+            },
+            || {
+                retries.set(retries.get() + 1);
+                Ok(RecoveryCloseoutOwnerResolution::Superseded)
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(
+            resolution,
+            RecoveryCloseoutOwnerResolution::Superseded
+        ));
+        assert_eq!(waits.get(), 1, "recovery must await the incumbent once");
+        assert_eq!(
+            retries.get(),
+            1,
+            "owner release must trigger exactly one fresh claim"
+        );
+    }
 
     #[test]
     fn legacy_pending_only_commit_requires_atomic_queue_strike_and_done_row_deletion() {

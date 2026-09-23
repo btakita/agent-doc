@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0cb4d-e033-7a20-b7fb-4d4a3825fa39
+  codex: 01a0ceca-d9a0-7920-97a0-ad58cb51e27a
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -399,6 +399,34 @@ The `api.md` response was not lost: its terminal commit `bf80a8e` succeeded, and
 Recovery now records whether the commit was controller-owned. If its first post-commit read is still open, it subscribes once to that exact live editor/controller cycle and derives the result only after the authoritative projection advances. Headless commits retain their existing non-blocking behavior, and superseded cycles remain explicitly classified.
 
 Added a regression test for the commit → reactive projection barrier → receipt ordering. Validation passed: the focused closeout suite (8 tests), the full `make check` gate (9,649 Rust tests plus editor, cross-editor, documentation, release, and formal-model checks), formatting, diff hygiene, and the private-name denylist. Installed locally, pushed commit `dda4c3fca` to `origin/main`, and marked the live controller for two-phase recycle. No GitHub Actions run had registered for the commit at the observation point.
+
+### Re: do [#runpaymentsledger] — gpt-5 · 2026-09-23
+
+> **Queue prompt:**
+>
+> do [#runpaymentsledger]
+
+
+Fixed and installed. The payments-ledger turn did not complete because turn-active evidence was stored as one project-wide SQLite lease. Two concurrent document panes could overwrite that singleton, and either pane's Stop hook could clear the other pane's active evidence. The supervisor then observed `turn_active=false` and reconciled the still-running actor from busy to ready after four ticks. The live log showed exactly that sequence: the payments pane entered its new preflight, another project pane shared the same lease domain, and `idle_queue_watch_stale_busy_reconciled` released the active actor while its turn was still executing.
+
+The invariant is now: a pane may refresh or retire only its own active-turn evidence. `agent-doc-turn-status-io` owns that policy. Turn-active leases use the pane id as their SQLite scope id; reads by the start runtime and session actor are pane-specific; Stop and stale-projection repair clear only the matching pane. Migration remains safe: a legacy `project` lease is readable by its recorded holder and is deleted only with an atomic holder match.
+
+The covered transition rows are active(A), active(B) preserving A, idle(B) preserving A, idle(A), expired evidence, a matching legacy holder, and a foreign idle against a legacy holder. Regression tests prove concurrent pane markers coexist and a sibling Stop cannot erase the active pane; the source-boundary contract now requires pane-scoped reads with the existing unknown-pane fallback.
+
+Reactive topology remains event-driven: harness lifecycle hook event → durable pane-scoped lease source → owned-pane activity derivation → supervisor idle-reconcile effect. SQLite is the cross-process projection sink, not a second transition authority. I removed the callers' imperative “read whichever project marker won, then compare it” derivation and routed them through the pane-scoped adapter. The hook write remains a justified one-shot boundary ingress because the harness already emits active/Stop events; no poller, retry loop, or disconnected reactive context was added.
+
+Edited surfaces were limited to the coordination-lease query API, turn-status adapter, start/session consumers, functional spec, contract/regression tests, and the required JetBrains package-generation bump. Public code and fixtures contain no private project names.
+
+Verification and deployment:
+
+- focused turn-status and supervisor-gate tests: pass, zero failures
+- source-contract regression: pass
+- `make check`: exit 0; 9,653/9,653 tests passed, 259 skipped; editor parity covered; all TLA models reported no errors
+- `make install`: exit 0; agent-doc 0.35.418, JetBrains plugin 0.2.396, and VS Code plugin 0.2.71 installed
+- implementation commit: `24861d690` (`fix: scope active turn leases by pane`)
+- the original payments-ledger document now reports cycle `cycle-1790176451306` committed with no drainable work
+
+Operator verify: restart IntelliJ (or reopen its host) to unload the superseded JetBrains JAR and load plugin generation 0.2.396. No additional backlog follow-up is needed because the concurrency invariant is specified, regression-tested, installed, and the affected document cycle has converged.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -407,8 +435,7 @@ Added a regression test for the commit → reactive projection barrier → recei
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Fix api.md session issue: • Agent-doc accepted the response intent but deferred its terminal commit while the editor replica converges. Per its recovery protocol, I’m checking the session exactly once and will not resend or force-write the response.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

@@ -195,7 +195,7 @@ fn session_state_key(session_id: &str) -> String {
     )
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct UserPromptSubmitInput {
     pub session_id: String,
     /// Codex supplies a per-turn id; Claude Code does not. Session binding and
@@ -205,6 +205,61 @@ pub struct UserPromptSubmitInput {
     pub turn_id: String,
     pub cwd: String,
     pub prompt: String,
+}
+
+/// An exact repeated Codex trigger that may keep using its already-admitted cycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SameTurnAdmittedInvocation {
+    pub doc_path: PathBuf,
+    pub cycle_id: String,
+}
+
+/// Return the existing admission only when Codex repeats the exact trigger in
+/// the exact turn that already opened the document's still-uncaptured cycle.
+///
+/// Codex can steer another user message into an active turn. Re-running
+/// preflight for that message makes the cycle look like a competing fresh turn
+/// and fails closed against its own `preflight_started` state. The durable
+/// admission receipt plus exact session/turn/prompt/document identity is the
+/// continuation edge: anything less specific remains on normal admission.
+pub fn same_turn_admitted_invocation(
+    input: &UserPromptSubmitInput,
+) -> Result<Option<SameTurnAdmittedInvocation>> {
+    if input.turn_id.trim().is_empty() {
+        return Ok(None);
+    }
+    let cwd = PathBuf::from(&input.cwd);
+    let Some(doc_path) = resolve_agent_doc_path(&input.prompt, &cwd) else {
+        return Ok(None);
+    };
+    let roots = tracking_roots(&cwd, Some(&doc_path));
+    let Some((_, state)) = load_state_any(&roots, &input.session_id)? else {
+        return Ok(None);
+    };
+    let stored_doc = PathBuf::from(&state.doc_path);
+    let stored_doc = stored_doc.canonicalize().unwrap_or(stored_doc);
+    if !state.has_harness_identity()
+        || state.last_turn_id != input.turn_id
+        || state.last_prompt != input.prompt
+        || state.preflight_admitted != Some(true)
+        || stored_doc != doc_path
+    {
+        return Ok(None);
+    }
+    let Some(cycle) = agent_doc_cycle_state_io::load(&doc_path)? else {
+        return Ok(None);
+    };
+    if !cycle.is_open()
+        || cycle.last_event != "preflight_started"
+        || cycle.capture_id.is_some()
+        || cycle.response_sha256.is_some()
+    {
+        return Ok(None);
+    }
+    Ok(Some(SameTurnAdmittedInvocation {
+        doc_path,
+        cycle_id: cycle.cycle_id,
+    }))
 }
 
 pub fn handle_user_prompt_submit() -> Result<()> {
@@ -858,6 +913,57 @@ mod tests {
         assert_eq!(PathBuf::from(state.doc_path), doc);
         assert_eq!(state.last_turn_id, "turn-1");
         assert_eq!(state.last_prompt, format!("agent-doc {}", doc.display()));
+    }
+
+    #[test]
+    fn exact_same_turn_trigger_reuses_admitted_open_preflight() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        let input = UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            prompt: format!("agent-doc {}", doc.display()),
+        };
+
+        apply_user_prompt_submit(&input).unwrap();
+        let content = fs::read_to_string(&doc).unwrap();
+        let cycle = agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content))
+            .unwrap();
+        record_preflight_admission(&input, true).unwrap();
+
+        assert_eq!(
+            same_turn_admitted_invocation(&input).unwrap(),
+            Some(SameTurnAdmittedInvocation {
+                doc_path: doc,
+                cycle_id: cycle.cycle_id,
+            })
+        );
+    }
+
+    #[test]
+    fn same_turn_reuse_rejects_changed_prompt_turn_or_refused_admission() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        let input = UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            prompt: format!("agent-doc {}", doc.display()),
+        };
+        apply_user_prompt_submit(&input).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, None, None).unwrap();
+        record_preflight_admission(&input, true).unwrap();
+
+        let mut changed = input.clone();
+        changed.turn_id = "turn-2".to_string();
+        assert!(same_turn_admitted_invocation(&changed).unwrap().is_none());
+        changed = input.clone();
+        changed.prompt.push_str(" again");
+        assert!(same_turn_admitted_invocation(&changed).unwrap().is_none());
+
+        record_preflight_admission(&input, false).unwrap();
+        assert!(same_turn_admitted_invocation(&input).unwrap().is_none());
     }
 
     #[test]

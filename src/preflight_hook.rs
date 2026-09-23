@@ -501,6 +501,25 @@ pub fn handle_codex_user_prompt_submit() -> anyhow::Result<()> {
             }
         };
 
+    // Codex may deliver a second identical trigger as real-time steering into
+    // the turn whose hook already admitted this document. Preserve that
+    // admission before `apply_user_prompt_submit` replaces its receipt with a
+    // fresh pending one. Exact turn/prompt/document identity keeps unrelated
+    // and genuinely new prompts on the normal fail-closed path.
+    if let Some(existing) = agent_doc_codex_hook_io::same_turn_admitted_invocation(&input)? {
+        let reuse = serde_json::to_string_pretty(&serde_json::json!({
+            "reused_admission": true,
+            "kind": "same_turn_repeat",
+            "document": existing.doc_path,
+            "cycle_id": existing.cycle_id,
+            "required_action": "Continue the unresolved work in the current turn; the original cycle contract remains authoritative.",
+        }))?;
+        emit_user_prompt_submit_context(&format!(
+            "{reuse}\n{CONTRACT_MARKER}\n{CODEX_IN_PANE_ADMISSION_DIRECTIVE}"
+        ));
+        return Ok(());
+    }
+
     if let Err(err) = agent_doc_codex_hook_io::apply_user_prompt_submit(&input) {
         eprintln!("[agent-doc] Codex session tracking failed: {err:#}");
         // Tracking failed, so preflight must not open a cycle the Stop hook

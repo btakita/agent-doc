@@ -293,6 +293,53 @@ fn codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit() {
 }
 
 #[test]
+fn codex_hook_cli_reuses_exact_same_turn_admission() {
+    let (tmp, doc) = setup_template_doc();
+    init_git_repo(tmp.path(), &doc);
+    let submit_payload = json!({
+        "session_id": "same-turn-session",
+        "turn_id": "same-turn-id",
+        "cwd": tmp.path().display().to_string(),
+        "prompt": format!("agent-doc {}", doc.display()),
+    });
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["hook", "codex-user-prompt-submit"])
+        .write_stdin(submit_payload.to_string())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "cycle contract (preflight already ran",
+        ));
+    let before = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+
+    let repeated = agent_doc()
+        .current_dir(tmp.path())
+        .args(["hook", "codex-user-prompt-submit"])
+        .write_stdin(submit_payload.to_string())
+        .assert()
+        .success();
+    let hook_output: serde_json::Value = serde_json::from_slice(&repeated.get_output().stdout)
+        .expect("same-turn reuse stdout must be exactly one valid JSON document");
+    let context = hook_output["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .expect("same-turn reuse must carry additionalContext");
+    assert!(context.contains("\"reused_admission\": true"));
+    assert!(context.contains("\"kind\": \"same_turn_repeat\""));
+    assert!(context.contains("cycle contract (preflight already ran"));
+    assert!(!context.contains("cycle contract UNAVAILABLE"));
+
+    let after = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+    assert_eq!(after.cycle_id, before.cycle_id);
+    assert_eq!(after.last_event, "preflight_started");
+    let state = agent_doc_codex_hook_io::load_state(tmp.path(), "same-turn-session")
+        .unwrap()
+        .unwrap();
+    assert_eq!(state.preflight_admitted, Some(true));
+}
+
+#[test]
 fn codex_hook_cli_wraps_admission_failure_in_one_json_document() {
     let tmp = TempDir::new().unwrap();
     let missing = tmp.path().join("missing.md");

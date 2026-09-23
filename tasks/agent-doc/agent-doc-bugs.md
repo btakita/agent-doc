@@ -431,6 +431,40 @@ Operator verify: restart IntelliJ (or reopen its host) to unload the superseded 
 ### Re: Response
 
 Great—the updated IntelliJ plugin generation `0.2.396` is now active. Everything is complete.
+❯ 🚧 Fix Run Agent Doc on infra.md
+```
+› agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md
+
+
+• The second agent-doc invocation was rejected because the original PR #157 review cycle is still preflight_started and
+  has no captured response yet.
+
+  Wait for that cycle to become stale, or restart the harness pane and rerun the agent-doc command from the fresh pane.
+```
+
+### Re: Fix Run Agent Doc on infra.md — gpt-5.6-sol · 2026-09-23T14:42:08-04:00
+
+> **Queue prompt:**
+>
+> do [#fixruninfra]
+
+
+Fixed and installed in agent-doc commit `48e62b867` (`fix: reuse same-turn Codex admission`).
+
+The rejection was caused by real-time Codex steering, not by a competing agent: the second identical `agent-doc .../infra.md` prompt arrived inside the same Codex turn after that turn had already been admitted. The hook overwrote the successful admission receipt and reran preflight, which then rejected its own 30-second-old `preflight_started` cycle.
+
+The hook now treats the durable receipt plus exact session, nonempty turn ID, prompt text, canonical document, and uncaptured `preflight_started` cycle as a continuation edge. An exact repeat reuses the existing admission and tells Codex to continue the unresolved work in the current turn. Changed turns, prompts, documents, refused receipts, captured responses, and later cycle phases still follow normal fail-closed admission.
+
+Verification passed:
+
+- all 19 `agent-doc-codex-hook-io` tests;
+- all 8 Codex hook integration tests, including a new first-admission/identical-repeat reproduction;
+- full `make check`;
+- `make install`;
+- private-name denylist scan;
+- latest upstream CI was green.
+
+The original `infra.md` PR #157 review also completed successfully after recovery; this change prevents the same-turn repeat from interrupting that work in the future.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

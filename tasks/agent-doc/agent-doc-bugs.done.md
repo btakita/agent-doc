@@ -133,3 +133,10 @@
 - 2026-09-21 [#fixhttpsgithub] Fix https://github.com/btakita/agent-doc/issues/56 + release + publish
 - 2026-09-21 [#sessioncrashedduring] The session crashed during restart?
 - 2026-09-23 [#runpaymentsledger] Run Agent Doc on payments-ledger.md turn did not complete. Fix agent-doc causes.
+- 2026-09-23 [#fixruninfra] Fix Run Agent Doc on infra.md
+  ```
+  › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/infra.md
+  • The second agent-doc invocation was rejected because the original PR #157 review cycle is still preflight_started and
+  has no captured response yet.
+  Wait for that cycle to become stale, or restart the harness pane and rerun the agent-doc command from the fresh pane.
+  ```

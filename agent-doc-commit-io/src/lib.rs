@@ -187,37 +187,41 @@ fn late_answered_free_text_strike_capture(
     } else {
         None
     };
-    let (capture_id, response_body) = if let Some(captured) = captured {
-        captured
+    let components = agent_doc_element::element::parse(committed_content)?;
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return Ok(None);
+    };
+    let Some(response_body) =
+        agent_doc_document::write_normalization::latest_response_block_from_exchange_body(
+            exchange.content(committed_content),
+        )
+    else {
+        return Ok(None);
+    };
+    let capture_id = if let Some((capture_id, captured_body)) = captured {
+        // A strict-template capture retains its `patch:exchange` envelope while
+        // committed HEAD contains only the visible response cell. Prove that
+        // this capture is the latest committed cell, then project queue
+        // consumption from those visible bytes rather than from patch syntax.
+        if !agent_doc_turn::response_replay::response_materialized_in_content(
+            &captured_body,
+            committed_content,
+        ) || !agent_doc_turn::response_replay::response_materialized_in_content(
+            &captured_body,
+            &response_body,
+        ) {
+            return Ok(None);
+        }
+        capture_id
     } else {
-        let components = agent_doc_element::element::parse(committed_content)?;
-        let Some(exchange) = components
-            .iter()
-            .find(|component| component.name == "exchange")
-        else {
-            return Ok(None);
-        };
-        let Some(response_body) =
-            agent_doc_document::write_normalization::latest_response_block_from_exchange_body(
-                exchange.content(committed_content),
-            )
-        else {
-            return Ok(None);
-        };
-        (
-            format!(
-                "committed-head:{}",
-                agent_doc_hash::content_hash(&response_body)
-            ),
-            response_body,
+        format!(
+            "committed-head:{}",
+            agent_doc_hash::content_hash(&response_body)
         )
     };
-    if !agent_doc_turn::response_replay::response_materialized_in_content(
-        &response_body,
-        committed_content,
-    ) {
-        return Ok(None);
-    }
     if agent_doc_queue::queue_heads::active_free_text_queue_heads(committed_content).is_empty() {
         return Ok(None);
     }

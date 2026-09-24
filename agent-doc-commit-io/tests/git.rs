@@ -2521,7 +2521,10 @@ Duplicate replay should stay live.
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&committed), Some(&committed))
             .unwrap();
-        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        let captured_response = format!(
+            "<!-- patch:exchange -->\n{response}<!-- /patch:exchange -->\n"
+        );
+        let capture = agent_doc_capture_io::capture_response(&doc, &captured_response).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_applied",

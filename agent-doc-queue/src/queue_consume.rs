@@ -1095,8 +1095,38 @@ pub fn project_answered_free_text_strike(
     }
     let annotated = annotate_newly_struck_free_text_heads(content, &struck)?;
     let remaining = crate::queue_heads::active_queue_heads(&annotated).len();
-    let target_content =
-        agent_doc_frontmatter::frontmatter::merge_queue_state(&annotated, remaining > 0)?;
+    let mut target_content = annotated;
+    if remaining == 0 {
+        let components = element::parse(&target_content)?;
+        if let Some(queue) = components
+            .iter()
+            .find(|component| component.name == "queue")
+        {
+            let entries = document_queue::parse(queue.content(&target_content))?;
+            if crate::queue_convergence::queue_body_clear_is_lossless(&entries) {
+                target_content = queue.replace_content(&target_content, "");
+                let components = element::parse(&target_content)?;
+                if let Some(queue) = components
+                    .iter()
+                    .find(|component| component.name == "queue")
+                {
+                    let raw = &target_content[queue.open_start..queue.open_end];
+                    let new_tag = document_queue::strip_auto_from_tag(
+                        &document_queue::strip_control_from_tag(raw),
+                    );
+                    if new_tag != raw {
+                        let mut rebuilt = String::with_capacity(target_content.len());
+                        rebuilt.push_str(&target_content[..queue.open_start]);
+                        rebuilt.push_str(&new_tag);
+                        rebuilt.push_str(&target_content[queue.open_end..]);
+                        target_content = rebuilt;
+                    }
+                }
+            }
+        }
+    }
+    target_content =
+        agent_doc_frontmatter::frontmatter::merge_queue_state(&target_content, remaining > 0)?;
     Ok(Some(AnsweredFreeTextStrikeProjection {
         node_keys,
         target_content,
@@ -2332,5 +2362,50 @@ Old.
                 .contains("- ~~completed work~~ — auto-struck: answered this cycle (#ftstrike)")
         );
         assert!(projected.target_content.contains("- remaining work"));
+    }
+
+    #[test]
+    fn answered_free_text_projection_drains_terminal_queue_in_same_projection() {
+        let document = concat!(
+            "---\n",
+            "agent_doc_session: queue-projection\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: final question — gpt-5\n\n",
+            "> **Queue prompt:**\n>\n> final question\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority start auto -->\n",
+            "- final question\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "### Re: final question — gpt-5\n\n",
+            "> **Queue prompt:**\n>\n> final question\n\n",
+            "Answered.\n",
+        );
+
+        let projected = project_answered_free_text_strike(document, response, Some(document))
+            .unwrap()
+            .expect("terminal answered head should project a drained queue");
+
+        assert!(
+            projected.target_content.contains("queue: stop"),
+            "{}",
+            projected.target_content
+        );
+        assert!(
+            projected
+                .target_content
+                .contains("<!-- agent:queue priority -->\n<!-- /agent:queue -->")
+        );
+        assert!(!projected.target_content.contains("final question~~"));
+        assert!(
+            project_answered_free_text_strike(&projected.target_content, response, Some(document))
+                .unwrap()
+                .is_none(),
+            "terminal drain must be idempotent"
+        );
     }
 }

@@ -1217,18 +1217,18 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
             };
 
             if drained {
-                if has_auto {
-                    let comps = element::parse(&current)?;
-                    if let Some(q) = comps.iter().find(|c| c.name == "queue") {
-                        let raw = &current[q.open_start..q.open_end];
-                        let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
-                        if new_tag != raw {
-                            let mut rebuilt = String::with_capacity(current.len());
-                            rebuilt.push_str(&current[..q.open_start]);
-                            rebuilt.push_str(&new_tag);
-                            rebuilt.push_str(&current[q.open_end..]);
-                            current = rebuilt;
-                        }
+                let comps = element::parse(&current)?;
+                if let Some(q) = comps.iter().find(|c| c.name == "queue") {
+                    let raw = &current[q.open_start..q.open_end];
+                    let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(
+                        &agent_doc_queue::document_queue::strip_control_from_tag(raw),
+                    );
+                    if new_tag != raw {
+                        let mut rebuilt = String::with_capacity(current.len());
+                        rebuilt.push_str(&current[..q.open_start]);
+                        rebuilt.push_str(&new_tag);
+                        rebuilt.push_str(&current[q.open_end..]);
+                        current = rebuilt;
                     }
                 }
                 current = frontmatter::merge_queue_state(&current, false)?;
@@ -1252,8 +1252,6 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                     let snap_body = &snap[snap_queue.open_end..snap_queue.close_start];
                     let snap_entries = agent_doc_queue::document_queue::parse(snap_body)
                         .context("queue consume: failed to parse snapshot queue")?;
-                    let snap_has_auto =
-                        agent_doc_queue::document_queue::has_auto_attr(&snap_queue.attrs);
                     let (snap_completed_entries, snapshot_consumed_texts) =
                         mark_entries_completed_by_done_ids(&snap_entries, done_ids);
                     if normalized_done_id_bag(&snapshot_consumed_texts)
@@ -1312,12 +1310,13 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
                             })?
                     };
                     if drained {
-                        if snap_has_auto
-                            && let Ok(sc2) = element::parse(&new_snap)
+                        if let Ok(sc2) = element::parse(&new_snap)
                             && let Some(sq2) = sc2.iter().find(|c| c.name == "queue")
                         {
                             let raw = &new_snap[sq2.open_start..sq2.open_end];
-                            let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(raw);
+                            let new_tag = agent_doc_queue::document_queue::strip_auto_from_tag(
+                                &agent_doc_queue::document_queue::strip_control_from_tag(raw),
+                            );
                             if new_tag != raw {
                                 let mut rebuilt = String::with_capacity(new_snap.len());
                                 rebuilt.push_str(&new_snap[..sq2.open_start]);

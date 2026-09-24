@@ -3659,6 +3659,86 @@ fn pending_only_done_without_commit_strikes_its_queue_head() {
     );
 }
 
+/// A gate is a terminal queue resolution just like `--done`. Both transitions
+/// must land in the tracked-work projection before an editor-retained response
+/// can defer later closeout stages.
+#[test]
+fn pending_only_done_and_gate_drain_the_queue_atomically() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let baseline_content = concat!(
+        "---\n",
+        "agent_doc_format: template\n",
+        "queue: start\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "\u{276f} start\n",
+        "<!-- agent:boundary:1234abcd -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue priority start -->\n",
+        "- do [#implementhttpshaiven]\n",
+        "- do [#havn1361contracts]\n",
+        "<!-- /agent:queue -->\n\n",
+        "<!-- agent:backlog -->\n",
+        "- [ ] [#implementhttpshaiven] implement HTTP integration\n",
+        "- [ ] [#havn1361contracts] publish contracts\n",
+        "<!-- /agent:backlog -->\n\n",
+        "<!-- agent:review -->\n",
+        "<!-- /agent:review -->\n",
+    );
+    fs::write(&doc, baseline_content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    checkpoint_baseline(tmp.path(), baseline_content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--pending-only",
+            "--done",
+            "implementhttpshaiven",
+            "--backlog-edit",
+            "havn1361contracts=publish contracts after operator approval",
+            "--backlog-gate",
+            "havn1361contracts",
+        ])
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("[queue] drained"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("queue: stop"), "{content}");
+    assert!(
+        content.contains("<!-- agent:queue priority -->\n<!-- /agent:queue -->"),
+        "{content}"
+    );
+    assert!(
+        !content.contains("- do [#implementhttpshaiven]"),
+        "{content}"
+    );
+    assert!(!content.contains("- do [#havn1361contracts]"), "{content}");
+    assert!(
+        content.contains("[#havn1361contracts]")
+            && content.contains("publish contracts after operator approval"),
+        "{content}"
+    );
+    let backlog_body = content
+        .split_once("<!-- agent:backlog -->")
+        .and_then(|(_, tail)| tail.split_once("<!-- /agent:backlog -->"))
+        .map(|(body, _)| body)
+        .unwrap();
+    let review_body = content
+        .split_once("<!-- agent:review -->")
+        .and_then(|(_, tail)| tail.split_once("<!-- /agent:review -->"))
+        .map(|(body, _)| body)
+        .unwrap();
+    assert!(!backlog_body.contains("havn1361contracts"), "{content}");
+    assert!(review_body.contains("havn1361contracts"), "{content}");
+}
+
 #[test]
 fn finalize_does_not_consume_when_queue_inactive() {
     let tmp = TempDir::new().unwrap();

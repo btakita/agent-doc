@@ -1430,6 +1430,11 @@ fn apply_pending_and_status_mutations_with_mode(
 ) -> Result<PendingStatusMutationOutcome> {
     let validate_only = mode.is_validate();
     let queue_completion_projected = std::cell::Cell::new(false);
+    let queue_resolution_ids = agent_doc_queue::queue_heads::explicit_queue_resolution_ids(
+        &options.pending_done,
+        &options.pending_gate,
+        &options.review_resolve,
+    );
     if !validate_only && (has_pending_ops || options.status.is_some()) {
         let current_content =
             agent_doc_document_realtime_io::try_resolve_current_doc_from_file_with_source(
@@ -1484,6 +1489,7 @@ fn apply_pending_and_status_mutations_with_mode(
                     let added_ids = std::cell::RefCell::new(None);
                     let reap_outcome = std::cell::RefCell::new(None);
                     let composed_queue_completion = std::cell::RefCell::new(None);
+                    let queue_projection_target = std::cell::RefCell::new(None);
                     let tracked_work_envelope = || {
                         if options.pending_clear {
                             backlog_cmd::clear(file)?;
@@ -1633,23 +1639,22 @@ fn apply_pending_and_status_mutations_with_mode(
                         for id in &options.pending_done {
                             agent_doc_session_check_io::enforce_review_done_guard(file, id)?;
                         }
-                        if !options.pending_done.is_empty() {
-                            // `#donequeuestrike`: the `agent:queue` strike for a
-                            // completed id belongs to the same tracked-work
-                            // transaction as the done transition — NOT to the reap.
+                        if !queue_resolution_ids.is_empty() {
+                            // `#donequeuestrike`: every terminal tracked-work
+                            // transition owns its `agent:queue` strike in this
+                            // same transaction — NOT in later response cleanup.
                             // Both branches below run this projection so a deferred
                             // reap can never leave `- [x] [#id]` in the backlog beside
                             // a live `- do [#id]` queue head, which the next preflight
                             // and the go-mode drain would re-serve as unfinished work.
                             let project_queue_completion = |content: &str| {
-                                let mut plan =
-                                queue_consume::plan_queue_prompt_consumption_with_snapshot_and_count(
+                                let mut plan = queue_consume::plan_queue_prompt_consumption_with_snapshot_and_count(
                                     file,
-                            content,
-                            None,
-                            &options.pending_done,
-                            1,
-                        )?;
+                                    content,
+                                    None,
+                                    &queue_resolution_ids,
+                                    1,
+                                )?;
                                 let planned = plan
                                     .as_ref()
                                     .map(|plan| plan.new_document.as_str())
@@ -1657,7 +1662,7 @@ fn apply_pending_and_status_mutations_with_mode(
                                 let (projected, marked_count) =
                                 agent_doc_queue::queue_consume::mark_queue_prompts_completed_by_done_ids_in_content(
                                     planned,
-                                    &options.pending_done,
+                                    &queue_resolution_ids,
                                 )?;
                                 let consumed_count = plan
                                     .as_ref()
@@ -1680,7 +1685,7 @@ fn apply_pending_and_status_mutations_with_mode(
                                 let still_live =
                                     agent_doc_queue::queue_consume::live_queue_prompt_done_ids(
                                         &projected,
-                                        &options.pending_done,
+                                        &queue_resolution_ids,
                                     )?;
                                 anyhow::ensure!(
                                     still_live.is_empty(),
@@ -1689,39 +1694,49 @@ fn apply_pending_and_status_mutations_with_mode(
                                     file.display(),
                                     still_live
                                 );
+                                queue_projection_target.replace(Some(projected.clone()));
                                 Ok(projected)
                             };
-                            let planned_reap_outcome = if reap_done_in_same_write {
-                                backlog_cmd::done_and_reap_many_with_target_projection(
-                                    file,
-                                    &options.pending_done,
-                                    project_queue_completion,
-                                )?
+                            if !options.pending_done.is_empty() {
+                                let planned_reap_outcome = if reap_done_in_same_write {
+                                    backlog_cmd::done_and_reap_many_with_target_projection(
+                                        file,
+                                        &options.pending_done,
+                                        project_queue_completion,
+                                    )?
+                                } else {
+                                    for id in &options.pending_done {
+                                        backlog_cmd::done(file, id)?;
+                                    }
+                                    // `#reappersistcrosscycle`: this branch marks the
+                                    // item `[x]` and OWES its archive move — a retained
+                                    // response write cannot carry the `agent:done` move
+                                    // (which may reach an external archive file) in the
+                                    // same transaction, so the reap is deferred to the
+                                    // next preflight. The owed ids reach cycle state
+                                    // through the shared `record_pending_done_ids` call
+                                    // below, which runs for BOTH branches; the guard in
+                                    // `check_completed_pending_reap_guard` reads them to
+                                    // tell an owed reap from real corruption.
+                                    let target_content =
+                                        backlog_cmd::project_tracked_work_document(
+                                            file,
+                                            "backlog_done_queue_completion",
+                                            project_queue_completion,
+                                        )?;
+                                    backlog_cmd::DoneAndReapOutcome {
+                                        removed_ids: Vec::new(),
+                                        target_content,
+                                    }
+                                };
+                                reap_outcome.replace(Some(planned_reap_outcome));
                             } else {
-                                for id in &options.pending_done {
-                                    backlog_cmd::done(file, id)?;
-                                }
-                                // `#reappersistcrosscycle`: this branch marks the
-                                // item `[x]` and OWES its archive move — a retained
-                                // response write cannot carry the `agent:done` move
-                                // (which may reach an external archive file) in the
-                                // same transaction, so the reap is deferred to the
-                                // next preflight. The owed ids reach cycle state
-                                // through the shared `record_pending_done_ids` call
-                                // below, which runs for BOTH branches; the guard in
-                                // `check_completed_pending_reap_guard` reads them to
-                                // tell an owed reap from real corruption.
-                                let target_content = backlog_cmd::project_tracked_work_document(
+                                backlog_cmd::project_tracked_work_document(
                                     file,
-                                    "backlog_done_queue_completion",
+                                    "backlog_terminal_queue_completion",
                                     project_queue_completion,
                                 )?;
-                                backlog_cmd::DoneAndReapOutcome {
-                                    removed_ids: Vec::new(),
-                                    target_content,
-                                }
-                            };
-                            reap_outcome.replace(Some(planned_reap_outcome));
+                            }
                         }
                         if let Some(ref order) = options.pending_reorder {
                             let ids = parse_id_order(order);
@@ -1815,17 +1830,17 @@ fn apply_pending_and_status_mutations_with_mode(
                             );
                         }
                     }
+                    if let Some(target_content) = queue_projection_target.into_inner() {
+                        // Response closeouts commit from the response snapshot. Refresh
+                        // that same commit input after the one-target mutation so HEAD
+                        // cannot lag the editor-authoritative tracked-work mutation.
+                        agent_doc_snapshot_io::checkpoint_document_baseline(
+                            file,
+                            &target_content,
+                            agent_doc_ops_log_io::log_op,
+                        )?;
+                    }
                     if let Some(reap_outcome) = reap_outcome.into_inner() {
-                        if let Some(target_content) = reap_outcome.target_content.as_deref() {
-                            // Response closeouts commit from the response snapshot. Refresh
-                            // that same commit input after the one-target reap so HEAD
-                            // cannot lag the editor-authoritative tracked-work mutation.
-                            agent_doc_snapshot_io::checkpoint_document_baseline(
-                                file,
-                                target_content,
-                                agent_doc_ops_log_io::log_op,
-                            )?;
-                        }
                         agent_doc_cycle_state_io::record_pending_done_ids(
                             file,
                             &options.pending_done,

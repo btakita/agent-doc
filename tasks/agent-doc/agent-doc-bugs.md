@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -501,6 +501,43 @@ Confidence is high: the duplicated live process IDs were observed directly befor
 One independent warning remains: IntelliJ PID 3471585 still has the replaced `agent-doc-jetbrains-0.2.396.jar` inode mapped. Restart IntelliJ (or reopen the document tab) to activate the installed plugin bytes. This does not block the repaired API Codex session.
 
 The exchange has grown large; I left it un-compacted because auto-compaction is disabled and compaction requires your approval.
+Fix agent-doc api.md issue:
+```
+route found legacy pane-association evidence for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md, but the normal path will not re-elect ownership from %156.
+Inspect the candidate, claim it explicitly if it is authoritative, or kill it before rerouting.
+  - %156 session=0 window=@0 (agent-doc) cmd=agent-doc sources=session-log,process-tree,supervisor-pid
+    view: tmux capture-pane -pt %156 | tail -n 80
+    assign: agent-doc claim /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md --pane %156 --force
+    kill: tmux kill-pane -t %156
+```
+
+### Re: do [#fixapiissue] — gpt-5 · 2026-09-23T21:24-04:00
+
+> **Queue prompt:**
+>
+> do [#fixapiissue]
+
+
+Fixed the API editor-route failure and installed the repair.
+
+The route now restores a missing actor/registry binding automatically only when ownership is strongly and uniquely proven: exactly one live candidate, no redundant panes, the document-scoped supervisor socket reports a PID inside that pane, and the pane process tree independently names the same canonical document. Session-log, registry-rebind, or process-tree evidence without the supervisor proof still fails closed with the existing inspect/claim/kill guidance.
+
+The implementation adds the supervisor-proven policy to `agent-doc-tmux`, uses it in the dispatch-only associated-pane recovery path before any prompt is submitted, and updates the routing and actor-contract specs. Regression coverage proves the positive case and rejects process-tree-only and redundant-pane cases.
+
+Live recovery also succeeded. The safe install recycle replaced stale pane `%156` with API pane `%157`; `agent-doc route --dispatch-only --plain-trigger` then completed through the normal route path. Session status now reports actor generation 111, pane `%157`, state `ready`, a present registry binding, a healthy supervisor, and a ready controller lease. No manual force-claim or pane kill was needed.
+
+Verification:
+
+- Focused ownership-policy test: 1 passed, 0 failed.
+- Route crate unit suite: 80 passed, 0 failed, 14 skipped.
+- Full `make check`: 9,663 Rust tests passed (259 skipped), 179 JavaScript tests passed, cross-editor integration passed, five bootstrap tests passed, and all six formal models completed without errors.
+- Exact touched-file formatting and private-name checks passed.
+- Latest upstream CI run `35938529822` is green.
+- `make install` completed successfully.
+
+Code commit: `0e202769a fix: recover supervisor-proven route ownership`. The requested push follows this document closeout so the agent-doc response commit is included.
+
+The exchange remains large (484 lines before this response); I left it uncompacted because the automatic queue is active.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -509,11 +546,14 @@ The exchange has grown large; I left it un-compacted because auto-compaction is 
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#fixapiissue]~~
+- do [#recovertwodocs]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
+- [ ] [#recovertwodocs] How can we recover from two docs having the same conversation ID? Should there be an alert or should one of the sessions be reassigned?
 <!-- /agent:backlog -->
 
 ## Review

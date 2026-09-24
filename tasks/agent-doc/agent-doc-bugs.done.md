@@ -140,3 +140,12 @@
   has no captured response yet.
   Wait for that cycle to become stale, or restart the harness pane and rerun the agent-doc command from the fresh pane.
   ```
+- 2026-09-23 [#fixapiissue] Fix agent-doc api.md issue:
+  ```
+  route found legacy pane-association evidence for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md, but the normal path will not re-elect ownership from %156.
+  Inspect the candidate, claim it explicitly if it is authoritative, or kill it before rerouting.
+  - %156 session=0 window=@0 (agent-doc) cmd=agent-doc sources=session-log,process-tree,supervisor-pid
+  view: tmux capture-pane -pt %156 | tail -n 80
+  assign: agent-doc claim /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md --pane %156 --force
+  kill: tmux kill-pane -t %156
+  ```

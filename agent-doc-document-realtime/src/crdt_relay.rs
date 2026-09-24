@@ -2041,8 +2041,19 @@ impl RelayHub {
             }
             _ => {}
         }
+        let before_frontier = self.canonical.state_vector();
         let before = self.canonical.text();
         self.apply_document_op_delta(delta)?;
+        // A fresh controller may deliberately start with an empty canonical and
+        // wait for the retained native replica to reseed it. The editor publishes
+        // that frontier through both the direct replica-update path and the
+        // durable document-op plane. Accepting the lineage-fenced durable frame
+        // must therefore promote the hub too; otherwise its delivery queue can be
+        // fully converged while every current-text read remains `sync_pending`.
+        // A stale/legacy frame or an accepted no-op is not promotion evidence.
+        if lineage.is_some() && self.canonical.state_vector() != before_frontier {
+            self.complete_retained_replica_reseed();
+        }
         Ok(DocumentOpDeltaOutcome::Applied {
             changed: self.canonical.text() != before,
         })
@@ -5508,6 +5519,56 @@ mod tests {
         assert!(recovered.retained_replica_reseed_pending());
         assert!(!recovered.commit_barrier_ready().unwrap());
         assert!(!recovered.commit_barrier().unwrap());
+    }
+
+    #[test]
+    fn lineage_fenced_document_op_promotes_retained_replica_reseed() {
+        let source = RelayHub::from_text(1, "retained editor body\n");
+        let retained_frontier = source.canonical_encoded_state();
+        let mut recovered = RelayHub::new(2);
+        recovered.begin_retained_replica_reseed();
+        let lineage = recovered.lineage().to_string();
+
+        assert_eq!(
+            recovered
+                .apply_document_op_delta_in_lineage(Some(&lineage), &retained_frontier)
+                .unwrap(),
+            DocumentOpDeltaOutcome::Applied { changed: true },
+        );
+        assert_eq!(recovered.canonical_text(), "retained editor body\n");
+        assert!(
+            !recovered.retained_replica_reseed_pending(),
+            "the durable native frontier is the same promotion proof as a direct replica update"
+        );
+        assert!(recovered.commit_barrier_ready().unwrap());
+    }
+
+    #[test]
+    fn no_op_or_wrong_lineage_document_op_cannot_promote_retained_replica_reseed() {
+        let mut recovered = RelayHub::new(1);
+        recovered.begin_retained_replica_reseed();
+        let lineage = recovered.lineage().to_string();
+        let empty = ReplicaState::new(2).encode_state();
+
+        assert_eq!(
+            recovered
+                .apply_document_op_delta_in_lineage(Some(&lineage), &empty)
+                .unwrap(),
+            DocumentOpDeltaOutcome::Applied { changed: false },
+        );
+        assert!(recovered.retained_replica_reseed_pending());
+
+        let source = RelayHub::from_text(3, "stale body\n");
+        assert_eq!(
+            recovered
+                .apply_document_op_delta_in_lineage(
+                    Some("wrong-lineage"),
+                    &source.canonical_encoded_state(),
+                )
+                .unwrap(),
+            DocumentOpDeltaOutcome::StaleLineage,
+        );
+        assert!(recovered.retained_replica_reseed_pending());
     }
 
     #[test]

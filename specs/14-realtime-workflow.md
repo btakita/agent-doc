@@ -178,6 +178,10 @@ replicas. If the replacement controller has no live or retained canonical model
 and the editor carries a native-reload frontier, registration starts from an
 empty canonical frontier and the retained replica publishes its missing CRDT
 operations through the normal durable document-op path before attach completes.
+An accepted matching-lineage document-op frame that advances the canonical
+frontier clears the retained-reseed gate exactly as the direct replica-update
+path does. Stale-lineage, legacy-unscoped, and causal no-op frames cannot clear
+that gate.
 This is not whole-buffer adoption: the encoded replica and frontier are the
 native-generation handoff, and any existing controller model outranks them.
 Without a retained frontier (including an IDE restart), registration uses the

@@ -193,6 +193,14 @@ fn resume_id_owner(canonical: &Path, request: &agent_doc_harness::ResumeRequest)
         return None;
     };
     let id = id.trim();
+    // `#resumehookclaim`: frontmatter is a projection, not the complete Codex
+    // conversation claim. A live/parked hook binding can still own an older id
+    // after both documents' frontmatter has advanced. Check the exact cold-start
+    // ledger first so two supervisors cannot launch `codex resume <same-id>` and
+    // leave one at Codex's "conversation is open in another app" lock screen.
+    if let Ok(Some(owner)) = agent_doc_codex_hook_io::resume_id_owner_for_file(canonical, id) {
+        return Some(owner);
+    }
     let project_root = agent_doc_project_root_io::project_root_containing(canonical)?;
     let conn = agent_doc_sqlite::state_store::open_state_db(&project_root).ok()?;
     let mut stmt = conn

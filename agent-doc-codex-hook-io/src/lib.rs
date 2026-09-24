@@ -664,6 +664,55 @@ pub fn load_latest_state_for_file(file: &Path) -> Result<Option<ActiveSessionSta
     load_latest_file_state_matching(file, SessionState::has_harness_identity)
 }
 
+/// Return the other document that owns an exact Codex conversation id.
+///
+/// This is a cold-start admission lookup. The hook ledger is the durable seed
+/// for the controller-owned conversation binding, and can remain authoritative
+/// after frontmatter has advanced to a newer id. Selecting only by sibling
+/// frontmatter would then admit two live supervisors for the same Codex thread.
+///
+/// Roots are written with one shared `updated_at`, but a process interruption
+/// can leave equal-generation rows split across roots. At the newest observed
+/// timestamp, any foreign claimant wins over `file`; starting fresh is safer
+/// than asking Codex to open one conversation in two apps.
+pub fn resume_id_owner_for_file(file: &Path, session_id: &str) -> Result<Option<String>> {
+    let session_id = session_id.trim();
+    if session_id.is_empty() {
+        return Ok(None);
+    }
+    let current_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let mut newest_updated_at = None;
+    let mut newest_claimants = Vec::new();
+
+    for root in project_roots_for(file) {
+        let Some(state) = load_state(&root, session_id)? else {
+            continue;
+        };
+        if !state.has_harness_identity() {
+            continue;
+        }
+        let claimant = PathBuf::from(&state.doc_path)
+            .canonicalize()
+            .unwrap_or_else(|_| PathBuf::from(&state.doc_path));
+        match newest_updated_at {
+            Some(updated_at) if state.updated_at < updated_at => continue,
+            Some(updated_at) if state.updated_at == updated_at => {}
+            _ => {
+                newest_updated_at = Some(state.updated_at);
+                newest_claimants.clear();
+            }
+        }
+        if !newest_claimants.contains(&claimant) {
+            newest_claimants.push(claimant);
+        }
+    }
+
+    Ok(newest_claimants
+        .into_iter()
+        .find(|claimant| claimant != &current_file)
+        .map(|claimant| claimant.to_string_lossy().to_string()))
+}
+
 fn load_latest_file_state_matching(
     file: &Path,
     include: impl Fn(&SessionState) -> bool,
@@ -1142,6 +1191,65 @@ agent-doc {}\n",
 
         let loaded = load_latest_prompt_for_file(&doc).unwrap();
         assert_eq!(loaded.as_deref(), Some("/clear"));
+    }
+
+    #[test]
+    fn resume_id_owner_for_file_detects_a_foreign_hook_binding() {
+        let dir = setup_project();
+        let current = write_doc(&dir);
+        let owner = dir.path().join("tasks").join("owner.md");
+        std::fs::create_dir_all(owner.parent().unwrap()).unwrap();
+        std::fs::write(&owner, "---\nagent_doc_format: template\n---\n").unwrap();
+        let root = project_root_for(dir.path()).unwrap();
+        save_state(
+            &root,
+            &SessionState {
+                identity_origin: Default::default(),
+                session_id: "shared-codex-session".to_string(),
+                doc_path: owner.display().to_string(),
+                last_turn_id: "turn-1".to_string(),
+                last_prompt: String::new(),
+                last_auto_queue_head: None,
+                last_context_clear_at: None,
+                last_prompt_cycle: None,
+                preflight_admitted: None,
+                updated_at: 20,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            resume_id_owner_for_file(&current, "shared-codex-session").unwrap(),
+            Some(owner.canonicalize().unwrap().display().to_string())
+        );
+    }
+
+    #[test]
+    fn resume_id_owner_for_file_allows_the_same_document_binding() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        let root = project_root_for(dir.path()).unwrap();
+        save_state(
+            &root,
+            &SessionState {
+                identity_origin: Default::default(),
+                session_id: "owned-codex-session".to_string(),
+                doc_path: doc.display().to_string(),
+                last_turn_id: "turn-1".to_string(),
+                last_prompt: String::new(),
+                last_auto_queue_head: None,
+                last_context_clear_at: None,
+                last_prompt_cycle: None,
+                preflight_admitted: None,
+                updated_at: 20,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            resume_id_owner_for_file(&doc, "owned-codex-session").unwrap(),
+            None
+        );
     }
 
     #[test]

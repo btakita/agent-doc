@@ -538,6 +538,21 @@ Verification:
 Code commit: `0e202769a fix: recover supervisor-proven route ownership`. The requested push follows this document closeout so the agent-doc response commit is included.
 
 The exchange remains large (484 lines before this response); I left it uncompacted because the automatic queue is active.
+
+### Re: do [#recovertwodocs] — gpt-5 · 2026-09-23T21:38-04:00
+
+Use both: emit a visible conflict alert and deterministically reassign the later/intruding document to a fresh conversation. Never allow both documents to resume the shared ID, and never randomly move the incumbent owner—the older durable owner may still contain context that cannot be reconstructed.
+
+That is already the implemented recovery policy:
+
+- The document with the durable ownership claim keeps the conversation ID.
+- A different document attempting the same ID gets a warning naming both the ID and owning document, then starts fresh rather than falling back to “continue latest.” Its newly assigned conversation ID is persisted through the normal launch path.
+- Codex checks the durable hook/thread ledger before frontmatter, so a stale or already-advanced `resume:` projection cannot hide a live/parked owner. Sibling frontmatter/controller authority remains the cross-harness fallback.
+- Session registration is a final fail-closed guard: it refuses a duplicate session identity rather than letting two supervisors attach.
+
+For an already-running collision, preserve the incumbent, stop/restart the intruding document fresh, and let its new ID replace the copied/stale claim. The alert is important for diagnosis, but alert-only recovery is insufficient because it leaves the unsafe shared identity in place.
+
+The base ownership policy landed in `647562db4`; the Codex durable-ledger gap was closed by `130ba6097`. Existing regression tests cover foreign-owner detection, same-document admission, warning/fresh-start behavior, and duplicate registry rejection. This turn’s full `make check` passed all 9,664 Rust tests plus the editor, bootstrap, integration, and formal-model gates, so no additional code change was needed for this queue item.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -549,6 +564,7 @@ The exchange remains large (484 lines before this response); I left it uncompact
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#fixapiissue]~~
 - do [#recovertwodocs]
+- The api.md turn did not complete. The queue item `- 🚧 do [#accessurlbearer]` was not struck.
 <!-- /agent:queue -->
 
 

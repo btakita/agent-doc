@@ -14,6 +14,9 @@
 //! - `run` reads replacement content from the `content` argument or stdin when `None`.
 //! - A non-empty replacement is newline-terminated before the component close marker, including
 //!   after append/prepend composition and hook transformation.
+//! - If the requested component has exactly one `<-- agent:name ... -->` opener (missing only the
+//!   comment `!`), no valid opener, and a matching closer, `patch` repairs that unambiguous typo
+//!   before replacing the component. Other structural corruption still fails closed.
 //!
 //! ## Agentic Contracts
 //! - `run(file, component_name, content)` — returns `Err` if the file is missing, the component is not found, or any hook fails.
@@ -94,14 +97,34 @@ pub fn run(
     }
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
 
-    let doc = agent_doc_document_realtime_io::try_resolve_current_document_content(
+    let mut doc = agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,
         "patch_command_document",
     )
     .with_context(|| format!("failed to resolve {}", file.display()))?;
 
-    let components = element::parse(&doc)
-        .with_context(|| format!("failed to parse components in {}", file.display()))?;
+    let components = match element::parse(&doc) {
+        Ok(components) => components,
+        Err(original_error) => {
+            let Some(repaired) = repair_missing_bang_open_marker(&doc, component_name) else {
+                return Err(original_error)
+                    .with_context(|| format!("failed to parse components in {}", file.display()));
+            };
+            doc = repaired;
+            eprintln!(
+                "Repaired malformed opener for component '{}' in {}",
+                component_name,
+                file.display()
+            );
+            element::parse(&doc).with_context(|| {
+                format!(
+                    "failed to parse components in {} after repairing malformed '{}' opener",
+                    file.display(),
+                    component_name
+                )
+            })?
+        }
+    };
 
     let comp = components
         .iter()
@@ -210,6 +233,21 @@ fn terminate_component_content(mut content: String) -> String {
         content.push('\n');
     }
     content
+}
+
+fn repair_missing_bang_open_marker(doc: &str, component_name: &str) -> Option<String> {
+    let malformed = format!("<-- agent:{component_name}");
+    let valid = format!("<!-- agent:{component_name}");
+    let closing = format!("<!-- /agent:{component_name} -->");
+
+    if doc.matches(&malformed).count() != 1
+        || doc.contains(&valid)
+        || doc.matches(&closing).count() != 1
+    {
+        return None;
+    }
+
+    Some(doc.replacen(&malformed, &valid, 1))
 }
 
 /// Run a pre_patch hook. Passes content on stdin, returns transformed content from stdout.
@@ -347,6 +385,35 @@ mod tests {
             agent_doc_element::element::structural_corruption_reason(&result),
             None
         );
+    }
+
+    #[test]
+    fn patch_repairs_single_missing_bang_open_marker_for_target_component() {
+        let dir = setup_project();
+        let doc = write_doc(
+            dir.path(),
+            "test.md",
+            "<-- agent:queue go -->\n- duplicated partial prompt\n<!-- /agent:queue -->\n",
+        );
+
+        run(&doc, "queue", PatchMode::Replace, Some("")).unwrap();
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(result, "<!-- agent:queue go -->\n<!-- /agent:queue -->\n");
+        assert_eq!(element::structural_corruption_reason(&result), None);
+    }
+
+    #[test]
+    fn patch_does_not_guess_when_missing_bang_repair_is_ambiguous() {
+        let dir = setup_project();
+        let doc = write_doc(
+            dir.path(),
+            "test.md",
+            "<-- agent:queue -->\nfirst\n<-- agent:queue -->\nsecond\n<!-- /agent:queue -->\n",
+        );
+
+        let error = run(&doc, "queue", PatchMode::Replace, Some("")).unwrap_err();
+        assert!(error.to_string().contains("failed to parse components"));
     }
 
     #[test]

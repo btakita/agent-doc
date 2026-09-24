@@ -1175,6 +1175,9 @@ impl Frontmatter {
     /// over generic `model`.
     /// Harness mapping: `"claude-code"` uses `claude_model`, `"codex"` uses `codex_model`,
     /// and `"opencode"` uses `opencode_model`.
+    /// Values that name an agent-doc harness are rejected: `model: codex` is
+    /// not an alias for `agent: codex` and must never become
+    /// `claude --model codex` through the generic fallback.
     pub fn resolve_harness_model(&self, harness: &str) -> Option<&str> {
         let harness_specific = match harness {
             "claude-code" => self.claude_model.as_deref(),
@@ -1182,7 +1185,9 @@ impl Frontmatter {
             "opencode" => self.opencode_model.as_deref(),
             _ => None,
         };
-        harness_specific.or(self.model.as_deref())
+        harness_specific
+            .or(self.model.as_deref())
+            .filter(|model| !agent_doc_model_tier::is_known_harness_selector(model))
     }
 
     pub fn collaboration_mode(&self) -> CollaborationMode {
@@ -4269,6 +4274,23 @@ mod tests {
         assert_eq!(fm.resolve_harness_model("codex"), Some("gpt-5"));
         assert_eq!(fm.resolve_harness_model("opencode"), Some("gpt-5"));
         assert_eq!(fm.resolve_harness_model("default"), Some("gpt-5"));
+    }
+
+    #[test]
+    fn resolve_harness_model_rejects_agent_selector_as_model() {
+        let generic = Frontmatter {
+            model: Some("codex".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(generic.resolve_harness_model("claude-code"), None);
+        assert_eq!(generic.resolve_harness_model("codex"), None);
+
+        let harness_specific = Frontmatter {
+            claude_model: Some("opencode".to_string()),
+            model: Some("opus".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(harness_specific.resolve_harness_model("claude-code"), None);
     }
 
     #[test]

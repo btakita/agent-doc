@@ -242,6 +242,33 @@ pub fn harness_key_for_agent_name(agent_name: &str) -> String {
     }
 }
 
+/// Return whether a value names one of agent-doc's harnesses rather than a
+/// model in that harness's namespace.
+///
+/// Frontmatter keeps `agent:` and `model:` as separate controls.  Treating a
+/// harness selector such as `codex` as a generic model otherwise leaks it into
+/// every harness fallback and can produce launches such as
+/// `claude --model codex`.
+pub fn is_known_harness_selector(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase().replace(['_', ' '], "-");
+    matches!(
+        normalized.as_str(),
+        "claude"
+            | "claude-code"
+            | "claudecode"
+            | "claude-code-cli"
+            | "codex"
+            | "codex-cli"
+            | "openai-codex"
+            | "opencode"
+            | "open-code"
+            | "opencode-ai"
+            | "grok"
+            | "grok-build"
+            | "junie"
+    )
+}
+
 pub fn canonical_harness_name(value: &str) -> Option<String> {
     let normalized = value.trim().to_ascii_lowercase().replace(['_', ' '], "-");
     match normalized.as_str() {
@@ -827,6 +854,24 @@ mod tests {
         assert_eq!(harness_key_for_agent_name("claude_code"), "claude-code");
         assert_eq!(harness_key_for_agent_name("codex"), "codex");
         assert_eq!(harness_key_for_agent_name("opencode"), "opencode");
+    }
+
+    #[test]
+    fn known_harness_selectors_are_not_model_names() {
+        for selector in [
+            "claude",
+            "claude_code",
+            "codex",
+            "openai-codex",
+            "opencode",
+            "grok-build",
+            "junie",
+        ] {
+            assert!(is_known_harness_selector(selector), "{selector}");
+        }
+        for model in ["opus", "gpt-5.4", "grok-4.6", "openai/gpt-5.4"] {
+            assert!(!is_known_harness_selector(model), "{model}");
+        }
     }
 
     #[test]

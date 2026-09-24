@@ -685,6 +685,23 @@ mod tests {
     }
 
     #[test]
+    fn claude_launch_does_not_treat_codex_agent_selector_as_model() {
+        let (fm, _) = frontmatter::parse("---\nmodel: codex\n---\n").unwrap();
+        let dir = TempDir::new().unwrap();
+        let spec = build_harness_launch_spec(
+            &fm,
+            &agent_doc_config::Config::default(),
+            &dir.path().join("notes.md"),
+            &mut RecordingLaunchLog::default(),
+        )
+        .unwrap();
+
+        assert_eq!(spec.harness.binary, "claude");
+        assert!(!spec.base_args.iter().any(|arg| arg == "--model"));
+        assert!(!spec.base_args.iter().any(|arg| arg == "codex"));
+    }
+
+    #[test]
     fn launch_resume_reads_only_the_selected_harness_entry() {
         let project = TempDir::new().unwrap();
         let document = project.path().join("plan.md");

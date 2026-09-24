@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -134,6 +134,19 @@ Verification passed:
 The live `src/haiven-dev/tasks/api.md` session is not currently crashed: its owner process is alive, and the document now has `queue: stop` with an empty queue. The installed repair command correctly reports that `#havn1361contracts` is already drained.
 
 Installation updated the binary and editor packages. The running JetBrains process still has superseded plugin bytes mapped, so restart/reopen IntelliJ when convenient to activate the installed plugin generation; I did not restart it during this session.
+
+### Re: recovered response
+
+Fixed and pushed as `965db70d3` (`fix(queue): atomically drain terminal resolutions`).
+
+- Done/gated/review-resolved IDs now update the queue atomically.
+- Terminal free-text completion clears residual struck rows and stops the queue immediately.
+- `api.md` is healthy, owner process alive, with `queue: stop` and an empty queue.
+- Focused regressions and full `make check` passed.
+- `make install` completed; latest CI was green.
+- The agent-doc response cycle committed successfully after retained-write convergence.
+
+Restart/reopen IntelliJ when convenient to load the newly installed plugin bytes.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -145,7 +158,7 @@ Installation updated the binary and editor packages. The running JetBrains proce
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 - Please make plugin upgrades not require a restart.
 - ~~do [#runsubmitfirstmatch]~~
-- When the api.md queue was complete, the struck `- ~~🚧 #advance-review~~` item was not cleared.
+- ~~When the api.md queue was complete, the struck `- ~~#advance-review~~` item was not cleared.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

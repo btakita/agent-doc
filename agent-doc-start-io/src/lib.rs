@@ -623,18 +623,23 @@ fn should_enforce_route_owned_queue_control(
 
 fn validate_supervisor_reentry_actor(
     canonical: &Path,
-    session_id: &str,
+    document_session_id: &str,
     pane_id: &str,
     record: agent_doc_controller::actor::ActorRecord,
 ) -> Result<agent_doc_controller::actor::ActorRecord> {
-    if record.session_id != session_id
-        || record.pane_id != pane_id
-        || record.state == agent_doc_controller::actor::ActorState::Closed
+    // A supervisor self-exec preserves the already-running child and therefore
+    // the controller actor is the live session authority. The document's durable
+    // `session:` metadata can legitimately lag that actor (for example after an
+    // operator restores the document from HEAD while keeping the live session).
+    // Requiring those two ids to match kills the replacement supervisor and
+    // strands the healthy child. The pane binding and non-closed actor state are
+    // the transport ownership proof; callers adopt `record.session_id` below.
+    if record.pane_id != pane_id || record.state == agent_doc_controller::actor::ActorState::Closed
     {
         anyhow::bail!(
-            "cannot reenter supervisor for {}: inherited session={} pane={}, authoritative session={} pane={} generation={} state={}",
+            "cannot reenter supervisor for {}: document metadata session={} pane={}, authoritative session={} pane={} generation={} state={}",
             canonical.display(),
-            session_id,
+            document_session_id,
             pane_id,
             record.session_id,
             record.pane_id,
@@ -1198,7 +1203,7 @@ fn prepare_start_runtime_with_admission(
     let resolved_identity =
         resolve_start_session_identity(&project_root, file, updated_content, session_id)?;
     let updated_content = resolved_identity.content;
-    let session_id = resolved_identity.session_id;
+    let mut session_id = resolved_identity.session_id;
     let rekeyed_session_identity = resolved_identity.rekey;
     let document_identity_changed =
         assigned_missing_session_uuid || rekeyed_session_identity.is_some();
@@ -1406,20 +1411,8 @@ fn prepare_start_runtime_with_admission(
         rebind_project_tmux_session_if_expected_dead(&tmux, &pane_id, &expected_session);
     }
 
-    let prior_entry = agent_doc_session_registry_io::lookup_entry(&session_id)?;
     let pane_window = agent_doc_tmux_io::target_window_id(&tmux, &pane_id).unwrap_or_default();
-    let supervisor_instance_id = if admission.preserves_session_lifecycle() {
-        prior_entry
-            .as_ref()
-            .map(|entry| entry.supervisor_instance_id.trim())
-            .filter(|instance_id| !instance_id.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
-    } else {
-        uuid::Uuid::new_v4().to_string()
-    };
-
-    let actor_record = if admission.preserves_session_lifecycle() {
+    let reentry_actor = if admission.preserves_session_lifecycle() {
         agent_doc_controller_io::project_controller::ensure_controller_running(
             &project_root,
             LaunchMode::Lazy,
@@ -1435,6 +1428,40 @@ fn prepare_start_runtime_with_admission(
             )
         })?;
         let record = validate_supervisor_reentry_actor(&canonical, &session_id, &pane_id, record)?;
+        if record.session_id != session_id {
+            let metadata_session_id = std::mem::replace(&mut session_id, record.session_id.clone());
+            let message = format!(
+                "supervisor_reexec_session_authority_adopted file={} pane={} metadata_session={} authoritative_session={} generation={} reason=preserved_child_actor_is_live_authority",
+                file.display(),
+                pane_id,
+                metadata_session_id,
+                session_id,
+                record.generation,
+            );
+            log_event(&mut session_log, &message);
+            agent_doc_ops_log_io::log_op(file, &message);
+            // Continue the replacement supervisor in the live actor's session
+            // log. The metadata-session log keeps the adoption receipt above.
+            session_log = open_session_log(&canonical, &session_id);
+            log_event(&mut session_log, &message);
+        }
+        Some(record)
+    } else {
+        None
+    };
+    let prior_entry = agent_doc_session_registry_io::lookup_entry(&session_id)?;
+    let supervisor_instance_id = if admission.preserves_session_lifecycle() {
+        prior_entry
+            .as_ref()
+            .map(|entry| entry.supervisor_instance_id.trim())
+            .filter(|instance_id| !instance_id.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+    } else {
+        uuid::Uuid::new_v4().to_string()
+    };
+
+    let actor_record = if let Some(record) = reentry_actor {
         log_event(
             &mut session_log,
             &format!(
@@ -2543,14 +2570,29 @@ mod tests {
     }
 
     #[test]
-    fn surviving_child_reentry_rejects_binding_drift_without_replacement() {
+    fn surviving_child_reentry_adopts_live_actor_session_when_document_metadata_lags() {
+        let record = reentry_actor(
+            "live-session",
+            "%26",
+            532,
+            agent_doc_controller::actor::ActorState::Busy,
+        );
+
+        let retained = validate_supervisor_reentry_actor(
+            Path::new("/tmp/reentry.md"),
+            "restored-document-session",
+            "%26",
+            record.clone(),
+        )
+        .unwrap();
+
+        assert_eq!(retained, record);
+        assert_eq!(retained.session_id, "live-session");
+    }
+
+    #[test]
+    fn surviving_child_reentry_rejects_pane_or_lifecycle_drift_without_replacement() {
         for record in [
-            reentry_actor(
-                "session-other",
-                "%26",
-                532,
-                agent_doc_controller::actor::ActorState::Busy,
-            ),
             reentry_actor(
                 "session-a",
                 "%27",

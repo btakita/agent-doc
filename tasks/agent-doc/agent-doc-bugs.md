@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -147,7 +147,6 @@ Fixed and pushed as `965db70d3` (`fix(queue): atomically drain terminal resoluti
 - The agent-doc response cycle committed successfully after retained-write convergence.
 
 Restart/reopen IntelliJ when convenient to load the newly installed plugin bytes.
-
 ### Re: restart-free plugin upgrades — gpt-5.6-sol · 2026-09-24T17:40-04:00
 
 > **Queue prompt:**
@@ -180,10 +179,7 @@ One migration caveat remains: the currently running IntelliJ process loaded 0.2.
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
-- 🚧 Please make plugin upgrades not require a restart.
-- ~~do [#runsubmitfirstmatch]~~
-- ~~When the api.md queue was complete, the struck `- ~~#advance-review~~` item was not cleared.~~
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

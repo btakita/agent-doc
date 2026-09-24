@@ -150,3 +150,11 @@
   kill: tmux kill-pane -t %156
   ```
 - 2026-09-23 [#recovertwodocs] How can we recover from two docs having the same conversation ID? Should there be an alert or should one of the sessions be reassigned?
+- 2026-09-24 [#runfronendrecovery] Run Agent Doc on fronend.md should do the recovery:
+  ```
+  › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
+  • The recovery commands still haven’t been applied. From the session’s owning pane, run these before invoking agent-doc
+  <file> again:
+  agent-doc commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
+  agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
+  ```

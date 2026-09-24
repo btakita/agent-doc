@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -58,6 +58,22 @@ Agent-doc admission failed before a cycle contract could be created:
 `Codex session tracking failed: failed to canonicalize /home/brian/work/btakita/agent-loop/session-check: No such file or directory`
 
 Per the agent-doc safety contract, I stopped and interrupted the running full test gate. Existing fixes remain uncommitted; the new Claim Tmux Pane issue was not yet changed.
+
+### Re: frontend recovery — gpt-5 · 2026-09-24T10:10-04:00
+
+> **Queue prompt:**
+>
+> do [#runfronendrecovery]
+
+
+Completed `#runfronendrecovery`.
+
+The frontend document no longer needs recovery: `agent-doc commit` reports that it already matches `HEAD`, and `agent-doc session-check` reports cycle `cycle-1790256598587` committed with `commit_already_current`, no drainable work, and no next agent action.
+
+The stall was caused by the Codex hook parsing recovery commands such as `agent-doc session-check …` as document invocations, then binding the session to a nonexistent `session-check` path. The installed fix rejects subcommands as document paths, clears stale nonexistent bindings, retries the bounded editor-sync failure, normalizes cosmetic queue markers, and requires captured responses to exist in a real assistant response cell rather than merely being quoted in the prompt.
+
+The source fix passed all 9,685 tests, was rebuilt and installed, and was pushed as agent-doc commit `1d330f9b9` with parent gitlink commit `9dbf254b5`.
+
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -67,19 +83,10 @@ Per the agent-doc safety contract, I stopped and interrupted the running full te
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 do [#runfronendrecovery]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#runfronendrecovery] Run Agent Doc on fronend.md should do the recovery:
-  ```
-  › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
-  • The recovery commands still haven’t been applied. From the session’s owning pane, run these before invoking agent-doc
-  <file> again:
-  agent-doc commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
-  agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
-  ```
 <!-- /agent:backlog -->
 
 ## Review

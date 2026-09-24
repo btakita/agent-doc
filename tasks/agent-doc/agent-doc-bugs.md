@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0ceca-d9a0-7920-97a0-ad58cb51e27a
+  codex: 01a0d0c2-f585-7451-97f0-29c98ab72467
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -465,6 +465,42 @@ Verification passed:
 - latest upstream CI was green.
 
 The original `infra.md` PR #157 review also completed successfully after recovery; this change prevents the same-turn repeat from interrupting that work in the future.
+❯ 🚧 api.md codex session has:
+```
+  🔒  This conversation is open in another app                                                             R to Retry
+      ❯ 🚧 Close it there and press R to continue here.
+```
+
+### Re: API Codex conversation lock — gpt-5 · 2026-09-23T20:28-04:00
+
+Fixed and live-recovered.
+
+Root cause: `api.md` and `fpe.md` had both launched `codex resume 01a0cacc-c317-7f90-9190-0f9d0bc0bb98`. Codex correctly allowed one process to own that conversation and left the other at “This conversation is open in another app.” The existing duplicate-resume guard checked sibling document frontmatter, but both frontmatter projections had already advanced to newer, distinct IDs; the durable Codex hook ledger still recorded the live old ID as belonging to `api.md`, and start admission did not consult it.
+
+The product fix is pushed in agent-doc commit `130ba6097` (`fix: prevent duplicate Codex resume ownership`):
+
+- `agent-doc-codex-hook-io/src/lib.rs` now resolves the newest exact Codex hook-ledger owner for a conversation ID, treating equal-generation cross-root foreign claims conservatively.
+- `agent-doc-start-runtime-io/src/run.rs` checks that cold-start ownership before the existing frontmatter scan, so a second document starts fresh instead of launching the same `codex resume <id>` and reaching Codex’s lock screen.
+- Regression coverage proves both foreign-owner rejection and same-document admission.
+
+Live recovery also succeeded. I replaced the FPE child through the supervisor; it now resumes its own `01a0c9f0-24b3-79c1-a789-1bc029cf43a5` conversation. API is the only remaining process on `01a0cacc-c317-7f90-9190-0f9d0bc0bb98`, and sending Retry returned its pane to an idle Codex prompt.
+
+Verification:
+
+- targeted regression tests: 2 passed, 0 failed;
+- targeted start-runtime compile/test: exit 0;
+- exact-file `rustfmt --check`: passed;
+- full `make check`: 9,662 Rust tests passed, 259 skipped; 179 JavaScript tests passed; cross-editor integration, release/docs audits, bootstrap tests, and all formal-model checks passed;
+- private-name denylist scan: clean;
+- latest pre-change upstream CI: green;
+- installed CLI/native library plus JetBrains and VS Code packages successfully;
+- pushed `130ba6097` to `origin/main`; the new CI run `35938529822` is in progress, so I did not wait on it.
+
+Confidence is high: the duplicated live process IDs were observed directly before the change, the ownership gap has regression coverage, and the affected panes now use distinct conversation IDs.
+
+One independent warning remains: IntelliJ PID 3471585 still has the replaced `agent-doc-jetbrains-0.2.396.jar` inode mapped. Restart IntelliJ (or reopen the document tab) to activate the installed plugin bytes. This does not block the repaired API Codex session.
+
+The exchange has grown large; I left it un-compacted because auto-compaction is disabled and compaction requires your approval.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

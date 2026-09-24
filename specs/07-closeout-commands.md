@@ -124,7 +124,11 @@ finalize request is still running. Terminal-cycle and request-owner-release
 facts wake recovery immediately; owner release, controller reconnect, or a
 bounded 30-second crashed-owner fallback retries the keyed operation once.
 Foreground lease expiry remains a safety stopgap, not the normal synchronization
-mechanism.
+mechanism. A newer controller document-state edge preempts any lease-expiry
+retry derived from the prior state. In particular, an identity-matched retained
+delivery wake that authorizes captured-finalize handoff must trigger the next
+attempt immediately rather than waiting for the superseded foreground lease
+deadline.
 
 If a route becomes stale after a turn stage's entry probe—for example, queue
 convergence times out while waiting for a terminal receipt—that stage must

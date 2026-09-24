@@ -217,8 +217,9 @@ struct CapturedFinalizeResumeRetry {
     trigger_published: bool,
 }
 
-/// Publish new document evidence to captured-finalize recovery and retire any
-/// operator gate that was derived from the previous document state.
+/// Publish new document evidence to captured-finalize recovery, retire any
+/// operator gate, and preempt a retry deadline derived from the previous
+/// document state.
 ///
 /// Both the closeout state plane and the retained-delivery plane can make a
 /// previously deferred capture safe to resume. They must feed the same trigger:
@@ -229,15 +230,19 @@ fn observe_captured_finalize_document_edge(
     now: std::time::Instant,
 ) -> bool {
     triggers.observe_state_edge();
-    let Some(retry) = retry.as_mut().filter(|retry| retry.needs_operator) else {
+    let Some(retry) = retry.as_mut() else {
         return false;
     };
+    let operator_gate_cleared = retry.needs_operator;
     retry.needs_operator = false;
     retry.retry_at = now;
-    // The document edge itself owns the next attempt; publishing a timed retry
-    // on top of it would turn one transition into two effects.
+    // The document edge itself owns the next attempt. This also preempts a
+    // live-owner lease deadline: an exact retained-delivery wake can authorize
+    // captured-finalize handoff before that lease expires, so the deadline was
+    // derived from evidence that is no longer current. Publishing a timed retry
+    // on top of the state edge would turn one transition into two effects.
     retry.trigger_published = true;
-    true
+    operator_gate_cleared
 }
 
 struct CapturedFinalizeResumeSignalWatch {
@@ -5103,6 +5108,35 @@ mod tests {
         assert!(triggers.ready());
         let retry = retry.unwrap();
         assert!(!retry.needs_operator);
+        assert_eq!(retry.retry_at, now);
+        assert!(retry.trigger_published);
+    }
+
+    #[test]
+    fn retained_delivery_edge_preempts_a_live_owner_lease_retry() {
+        let triggers = CapturedFinalizeResumeTriggers::new();
+        let key = agent_doc_repair_command_io::CapturedFinalizeResumeKey {
+            cycle_id: "cycle-a".to_string(),
+            capture_id: "capture-a".to_string(),
+            response_sha256: "response-a".to_string(),
+        };
+        triggers.observe_operation(Some("cycle-a:capture-a:response-a".to_string()));
+        triggers.consume_attempt();
+        let now = std::time::Instant::now();
+        let mut retry = Some(CapturedFinalizeResumeRetry {
+            key,
+            attempts: 0,
+            retry_at: now + std::time::Duration::from_secs(300),
+            needs_operator: false,
+            trigger_published: false,
+        });
+
+        assert!(
+            !observe_captured_finalize_document_edge(&triggers, &mut retry, now),
+            "preempting a lease retry must not claim that an operator gate cleared"
+        );
+        assert!(triggers.ready());
+        let retry = retry.unwrap();
         assert_eq!(retry.retry_at, now);
         assert!(retry.trigger_published);
     }

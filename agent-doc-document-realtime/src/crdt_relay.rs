@@ -551,6 +551,11 @@ pub struct RetainedCanonicalProjection {
     pub last_committed_text: Option<String>,
     pub last_committed_state_vector: Option<Vec<u8>>,
     pub compact_epoch_requested: bool,
+    /// A replacement controller temporarily starts with an empty canonical so
+    /// a retained editor can publish its complete missing delta. Until that
+    /// round trip lands, the empty hub is transport state, not document
+    /// authority, and must not satisfy a commit/read barrier.
+    pub retained_replica_reseed_pending: bool,
 }
 
 /// Star-topology relay hub: one canonical replica + N registered editor replicas.
@@ -613,6 +618,10 @@ pub struct RelayHub {
     /// relay generation. This reactive fact prevents command arrival order from
     /// selecting an editor buffer as authority.
     controller_projection_established: Source<bool>,
+    /// True only during the two-RPC retained-editor handoff: registration has
+    /// installed an empty relay frontier, but the editor has not yet published
+    /// the retained state that makes that frontier authoritative.
+    retained_replica_reseed_pending: Source<bool>,
     /// Per-member liveness as a keyed reactive family (keyed by `client_id`). This is
     /// the **single** source of truth for whether a member is connected — the former
     /// `Member.live` field is gone. The present set only grows (deferral, not
@@ -654,6 +663,7 @@ struct LivenessCore {
     liveness: ThreadSafeSourceMap<u64, bool>,
     canonical_projection_required: ThreadSafeSourceMap<u64, bool>,
     controller_projection_established: Source<bool>,
+    retained_replica_reseed_pending: Source<bool>,
     membership_epoch: Source<u64>,
     live_editor_count: Computed<usize>,
     delivery_epoch: Source<u64>,
@@ -1199,6 +1209,7 @@ impl RelayHub {
         let membership_epoch = ctx.source(0u64);
         let delivery_epoch = ctx.source(0u64);
         let controller_projection_established = ctx.source(false);
+        let retained_replica_reseed_pending = ctx.source(false);
         // Cells materialize on `register`; the factory value (`true` = live-on-register)
         // only applies before the explicit `set` in `set_live`.
         let liveness: ThreadSafeSourceMap<u64, bool> = ThreadSafeSourceMap::new(&ctx);
@@ -1223,6 +1234,7 @@ impl RelayHub {
             liveness,
             canonical_projection_required,
             controller_projection_established,
+            retained_replica_reseed_pending,
             membership_epoch,
             live_editor_count,
             delivery_epoch,
@@ -1338,6 +1350,7 @@ impl RelayHub {
             liveness,
             canonical_projection_required,
             controller_projection_established,
+            retained_replica_reseed_pending,
             membership_epoch,
             live_editor_count,
             delivery_epoch,
@@ -1360,6 +1373,7 @@ impl RelayHub {
             live_document_projection,
             ctx,
             controller_projection_established,
+            retained_replica_reseed_pending,
             liveness,
             membership_epoch,
             live_editor_count,
@@ -1442,6 +1456,10 @@ impl RelayHub {
         hub.last_committed_text = projection.last_committed_text.clone();
         hub.last_committed_state_vector = projection.last_committed_state_vector.clone();
         hub.compact_epoch_requested = projection.compact_epoch_requested;
+        hub.ctx.set(
+            &hub.retained_replica_reseed_pending,
+            projection.retained_replica_reseed_pending,
+        );
         if hub.live_document_projection_enabled() {
             let recovered_text = hub.canonical.text();
             hub.reset_live_document_projection(&recovered_text);
@@ -1459,6 +1477,7 @@ impl RelayHub {
             last_committed_text: self.last_committed_text.clone(),
             last_committed_state_vector: self.last_committed_state_vector.clone(),
             compact_epoch_requested: self.compact_epoch_requested,
+            retained_replica_reseed_pending: self.retained_replica_reseed_pending(),
         }
     }
 
@@ -1622,6 +1641,25 @@ impl RelayHub {
     /// canonical projection.
     pub fn establish_controller_projection(&self) {
         self.ctx.set(&self.controller_projection_established, true);
+    }
+
+    /// Fence the transient empty hub used to recover a retained native replica.
+    /// The hub remains routable so the editor can publish its delta, but it is
+    /// not a readable or committable canonical document yet.
+    pub fn begin_retained_replica_reseed(&self) {
+        self.ctx.set(&self.retained_replica_reseed_pending, true);
+        self.bump_delivery_epoch();
+    }
+
+    pub fn retained_replica_reseed_pending(&self) -> bool {
+        self.ctx.get(&self.retained_replica_reseed_pending)
+    }
+
+    fn complete_retained_replica_reseed(&self) {
+        if self.retained_replica_reseed_pending() {
+            self.ctx.set(&self.retained_replica_reseed_pending, false);
+            self.bump_delivery_epoch();
+        }
     }
 
     /// Whether additive updates from `client_id` must remain quarantined until
@@ -1924,6 +1962,10 @@ impl RelayHub {
             component_scope: ComponentScopeOutcome::NotRequested,
         };
         self.enqueue_delivery(&packet);
+        // The retained native replica has now supplied a decodable causal
+        // frontier. Only this content-bearing round trip can promote the
+        // fresh controller's temporary empty hub to document authority.
+        self.complete_retained_replica_reseed();
         Ok(packet)
     }
 
@@ -2574,6 +2616,9 @@ impl RelayHub {
     /// snapshot of the canonical replica ([`Self::projection_bytes`]) is safe to
     /// write to git.
     pub fn commit_barrier(&self) -> Result<bool> {
+        if self.retained_replica_reseed_pending() {
+            return Ok(false);
+        }
         let before_text = self.canonical.text();
         let settled = flush_to_commit_barrier(&self.canonical, &self.live_editors())?;
         let after_text = self.canonical.text();
@@ -2584,6 +2629,9 @@ impl RelayHub {
     /// Whether the canonical replica is already a consistent cut of the live
     /// editors (no flush) — the non-mutating barrier probe.
     pub fn commit_barrier_ready(&self) -> Result<bool> {
+        if self.retained_replica_reseed_pending() {
+            return Ok(false);
+        }
         commit_barrier_ready(&self.canonical, &self.live_editors())
     }
 
@@ -5447,6 +5495,19 @@ mod tests {
             !recovered.is_safe_to_evict(),
             "a changed CRDT frontier must fence eviction without a whole-text comparison"
         );
+    }
+
+    #[test]
+    fn retained_replica_reseed_pending_survives_controller_projection_handoff() {
+        let hub = RelayHub::new(1);
+        hub.begin_retained_replica_reseed();
+        assert!(!hub.commit_barrier_ready().unwrap());
+
+        let retained = hub.retained_canonical_projection();
+        let recovered = RelayHub::from_retained_canonical_projection(2, &retained).unwrap();
+        assert!(recovered.retained_replica_reseed_pending());
+        assert!(!recovered.commit_barrier_ready().unwrap());
+        assert!(!recovered.commit_barrier().unwrap());
     }
 
     #[test]

@@ -1071,6 +1071,9 @@ pub fn current_revision_for_file_with_authority(
         return Ok(CurrentRevision::EditorAttachedMissingReplica);
     };
     let hub = handle.lock();
+    if hub.retained_replica_reseed_pending() {
+        return Ok(CurrentRevision::EditorAttachedMissingReplica);
+    }
 
     Ok(CurrentRevision::Current {
         lineage: hub.lineage().to_string(),
@@ -2009,7 +2012,11 @@ fn register_replica_for_file_incremental_with_liveness_and_precondition(
             .observe(&document_hash)
             .is_none();
     if restore_fresh_controller_from_retained_replica {
-        hub_handle_or_insert_with(&document_hash, || RelayHub::new(CANONICAL_CLIENT_ID));
+        hub_handle_or_insert_with(&document_hash, || {
+            let hub = RelayHub::new(CANONICAL_CLIENT_ID);
+            hub.begin_retained_replica_reseed();
+            hub
+        });
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -5784,6 +5791,21 @@ mod tests {
         assert!(registration.bootstrap.is_empty());
         assert!(!registration.canonical_projection_retained);
         assert_eq!(registration.canonical_covers_retained_frontier, Some(false));
+        assert_eq!(
+            current_revision_for_file_with_authority(&doc, CrdtAuthority::MultiReplica).unwrap(),
+            CurrentRevision::EditorAttachedMissingReplica,
+            "the transport-only empty hub must not publish a current revision"
+        );
+        assert_eq!(
+            current_text_for_file_with_authority(&doc, CrdtAuthority::MultiReplica).unwrap(),
+            CurrentText::EditorSyncPending,
+            "a session start racing retained reseed must wait instead of reading empty text"
+        );
+        with_hub(&doc, |hub| {
+            assert!(hub.retained_replica_reseed_pending());
+            assert!(!hub.commit_barrier_ready().unwrap());
+        })
+        .unwrap();
 
         let full_retained_delta = retained.diff(&registration.canonical_state_vector).unwrap();
         assert!(
@@ -5793,7 +5815,12 @@ mod tests {
         relay_replica_update_for_file(&doc, identity, &full_retained_delta)
             .unwrap()
             .expect("the retained delta should enter the live controller model");
-        with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), retained_text)).unwrap();
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), retained_text);
+            assert!(!hub.retained_replica_reseed_pending());
+            assert!(hub.commit_barrier_ready().unwrap());
+        })
+        .unwrap();
     }
 
     #[test]

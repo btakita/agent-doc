@@ -4022,7 +4022,7 @@ mod tests {
         let live = original
             .replace(
                 "<!-- agent:queue -->\n<!-- /agent:queue -->",
-                "<!-- agent:queue -->\n- do [#recover]\n<!-- /agent:queue -->",
+                "<!-- agent:queue -->\n- 🚧 do [#recover]\n<!-- /agent:queue -->",
             )
             .replace(
                 "<!-- agent:backlog -->\n<!-- /agent:backlog -->",
@@ -4085,7 +4085,7 @@ mod tests {
             .unwrap()
             .expect("preflight recovery must create a committed document");
         assert!(
-            committed.contains("- do [#recover]")
+            committed.contains("- 🚧 do [#recover]")
                 && committed.contains("- [ ] [#recover] answer stranded prompt"),
             "preflight recovery must commit the stranded prompt bookkeeping:\n{committed}"
         );

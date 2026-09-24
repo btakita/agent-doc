@@ -3836,7 +3836,7 @@ fn test_agent_doc_repair_io_owns_repair_state_adapters() {
         "agent_doc_flow_io::closeout::log_closeout_guard_event(",
         "agent_doc_frontmatter::frontmatter::parse(",
         "visible_response_recovery_is_adoptable(",
-        "response_replay::response_already_applied(",
+        "response_replay::response_materialized_in_exchange_response_cell(",
         "repair_adopt_existing_response file=",
         "agent_doc_workflow::capture::decide_stale_capture_retirement(",
         "agent_doc_capture_io::replay_baseline_drifted_with_current_content(",

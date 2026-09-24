@@ -3692,6 +3692,65 @@ mod tests {
     }
 
     #[test]
+    fn recover_replays_plain_projected_capture_quoted_in_unresolved_prompt() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Run Agent Doc should recover this output:\n",
+            "```\n",
+            "Agent-doc admission failed before a cycle contract could be created.\n\n",
+            "`Codex session tracking failed.`\n\n",
+            "Existing fixes remain uncommitted.\n",
+            "```\n",
+            "❯ Agent-doc admission failed before a cycle contract could be created.\n",
+            "❯ `Codex session tracking failed.`\n",
+            "❯ Existing fixes remain uncommitted.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let response = concat!(
+            "Agent-doc admission failed before a cycle contract could be created.\n\n",
+            "`Codex session tracking failed.`\n\n",
+            "Existing fixes remain uncommitted.\n",
+        );
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::mark_committed(&doc).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        assert!(!capture.capture_id.is_empty());
+        assert!(
+            !agent_doc_turn::response_replay::response_materialized_in_exchange_response_cell(
+                response, content
+            )
+        );
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(recovered, RepairOutcome::ReplayedResponse);
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            agent_doc_turn::response_replay::response_materialized_in_exchange_response_cell(
+                response, &result
+            )
+        );
+    }
+
+    #[test]
     fn recover_repairs_escaped_exchange_tail_when_response_already_present() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");

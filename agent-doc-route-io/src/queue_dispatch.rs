@@ -15,6 +15,7 @@ pub struct RouteQueueEffects {
 }
 
 const ROUTE_QUEUE_MAX_WRITE_ATTEMPTS: usize = 3;
+const ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS: usize = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteQueueEnqueueOutcome {
@@ -42,10 +43,13 @@ pub fn enqueue_route_dispatch_prompt(
     let mut attempt = 0usize;
     loop {
         attempt += 1;
-        let original = agent_doc_document_realtime_io::try_resolve_current_document_content(
-            file,
-            "route_dispatch_queue_enqueue",
-        )?;
+        let original =
+            resolve_route_queue_document_content(file, "route_dispatch_queue_enqueue", || {
+                agent_doc_document_realtime_io::try_resolve_current_document_content(
+                    file,
+                    "route_dispatch_queue_enqueue",
+                )
+            })?;
         let update = agent_doc_queue::route_dispatch::prepare_route_dispatch_queue_update(
             &original,
             prompt_text,
@@ -218,10 +222,13 @@ pub fn activate_existing_route_queue_head(
     let mut attempt = 0usize;
     loop {
         attempt += 1;
-        let original = agent_doc_document_realtime_io::try_resolve_current_document_content(
-            file,
-            "route_queue_activation",
-        )?;
+        let original =
+            resolve_route_queue_document_content(file, "route_queue_activation", || {
+                agent_doc_document_realtime_io::try_resolve_current_document_content(
+                    file,
+                    "route_queue_activation",
+                )
+            })?;
         let Some(prompt_text) = inactive_route_queue_head_in_content(file, &original)? else {
             return Ok(None);
         };
@@ -289,6 +296,41 @@ fn is_retryable_crdt_merge_error(err: &anyhow::Error) -> bool {
     format!("{err:#}").contains("recovery=retry_crdt_merge")
 }
 
+fn resolve_route_queue_document_content(
+    file: &Path,
+    reason: &str,
+    mut resolve: impl FnMut() -> Result<String>,
+) -> Result<String> {
+    for attempt in 1..=ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS {
+        match resolve() {
+            Ok(content) => return Ok(content),
+            Err(err)
+                if attempt < ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS
+                    && is_retryable_editor_authority_recovery_error(&err) =>
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{reason}_resolve_retry file={} attempt={} max_attempts={} reason=editor_authority_recovery error={}",
+                        file.display(),
+                        attempt,
+                        ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS,
+                        agent_doc_secret_redact::redact(&format!("{err:#}")).replace('\n', " "),
+                    ),
+                );
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    unreachable!("bounded route queue resolver always returns from the loop")
+}
+
+fn is_retryable_editor_authority_recovery_error(err: &anyhow::Error) -> bool {
+    let message = format!("{err:#}");
+    message.contains("sync_pending recovery exhausted")
+        && message.contains("disk read authority is refused")
+}
+
 fn log_route_queue_write_retry(
     file: &Path,
     reason: &str,
@@ -309,4 +351,60 @@ fn log_route_queue_write_retry(
             agent_doc_secret_redact::redact(&format!("{err:#}")).replace('\n', " "),
         ),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn route_queue_resolution_retries_editor_authority_recovery_once() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let mut calls = 0usize;
+
+        let content = resolve_route_queue_document_content(&file, "route_queue_activation", || {
+            calls += 1;
+            if calls == 1 {
+                anyhow::bail!("sync_pending recovery exhausted and disk read authority is refused");
+            }
+            Ok("live editor content".to_string())
+        })
+        .unwrap();
+
+        assert_eq!(content, "live editor content");
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn route_queue_resolution_does_not_retry_unrelated_errors() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let mut calls = 0usize;
+
+        let err = resolve_route_queue_document_content(&file, "route_queue_activation", || {
+            calls += 1;
+            anyhow::bail!("unrelated resolver failure")
+        })
+        .unwrap_err();
+
+        assert_eq!(calls, 1);
+        assert!(format!("{err:#}").contains("unrelated resolver failure"));
+    }
+
+    #[test]
+    fn route_queue_resolution_stops_after_second_editor_authority_exhaustion() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let mut calls = 0usize;
+
+        let err = resolve_route_queue_document_content(&file, "route_queue_activation", || {
+            calls += 1;
+            anyhow::bail!("sync_pending recovery exhausted and disk read authority is refused")
+        })
+        .unwrap_err();
+
+        assert_eq!(calls, ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS);
+        assert!(format!("{err:#}").contains("disk read authority is refused"));
+    }
 }

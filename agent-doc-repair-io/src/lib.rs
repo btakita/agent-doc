@@ -814,11 +814,7 @@ pub fn run_with_queue_completion_ids_and_force_disk<
     // IPC write (e.g., IPC timeout path exits with code 75 without calling clear_pending,
     // but the plugin already applied the content via the IPC patch file).
     let response_already_present =
-        response_replay::response_already_applied(&doc_content, &response)
-            || response_replay::response_already_applied_after_prefix_strip(
-                &doc_content,
-                &response,
-            );
+        response_replay::response_materialized_in_exchange_response_cell(&response, &doc_content);
     if response_already_present {
         if let Some(ref capture) = capture {
             agent_doc_capture_io::validate_replay_with_current_content(
@@ -1203,7 +1199,9 @@ pub fn ensure_repair_materialized_response(
     final_doc: &str,
     response: &str,
 ) -> Result<()> {
-    if agent_doc_turn::response_replay::response_materialized_in_content(response, final_doc) {
+    if agent_doc_turn::response_replay::response_materialized_in_exchange_response_cell(
+        response, final_doc,
+    ) {
         return Ok(());
     }
     anyhow::bail!(
@@ -1312,10 +1310,17 @@ pub fn replay_orphaned_response(
         response.to_string()
     };
     let response_to_write = if document_is_template && !response_to_write.contains("<!-- patch:") {
-        format!(
-            "<!-- patch:exchange -->\n{}\n<!-- /patch:exchange -->\n",
-            response_to_write.trim_end()
+        let response_body = response_to_write.trim_end();
+        let response_body = if agent_doc_turn::response_replay::first_response_heading_line(
+            response_body,
         )
+        .is_some()
+        {
+            response_body.to_string()
+        } else {
+            format!("### Re: recovered response\n\n{response_body}")
+        };
+        format!("<!-- patch:exchange -->\n{response_body}\n<!-- /patch:exchange -->\n")
     } else {
         response_to_write
     };
@@ -2005,7 +2010,7 @@ pub fn historical_committed_capture_replay(
     doc_content: &str,
 ) -> Result<Option<HistoricalCommittedCapture>> {
     if let Some(capture) = projected_committed_capture_response(file)? {
-        return historical_committed_capture_replay_candidate(file, doc_content, capture);
+        return historical_committed_capture_replay_candidate(file, doc_content, capture, true);
     }
 
     let Some(capture) = agent_doc_capture_io::latest_committed(file)? else {
@@ -2022,6 +2027,7 @@ pub fn historical_committed_capture_replay(
             file_hash: capture.file_hash,
             baseline_content: capture.baseline_content,
         },
+        false,
     )
 }
 
@@ -2117,6 +2123,7 @@ fn historical_committed_capture_replay_candidate(
     file: &Path,
     doc_content: &str,
     capture: HistoricalCommittedCapture,
+    current_projected_committed_capture: bool,
 ) -> Result<Option<HistoricalCommittedCapture>> {
     let has_exact_fragment_shell =
         agent_doc_turn::response_replay::repair_retained_response_replay_fragments(
@@ -2125,26 +2132,30 @@ fn historical_committed_capture_replay_candidate(
         )
         .is_some();
     if !has_exact_fragment_shell
-        && agent_doc_turn::response_replay::response_materialized_in_content(
+        && agent_doc_turn::response_replay::response_materialized_in_exchange_response_cell(
             &capture.response_body,
             doc_content,
         )
     {
         return Ok(None);
     }
-    let Some(response_heading) =
-        agent_doc_turn::response_replay::first_response_heading_line(&capture.response_body)
-    else {
-        return Ok(None);
-    };
     let has_matching_prompt =
-        agent_doc_turn::response_replay::has_matching_orphan_prompt_for_committed_capture(
-            doc_content,
-            response_heading,
-        );
+        agent_doc_turn::response_replay::first_response_heading_line(&capture.response_body)
+            .is_some_and(|response_heading| {
+                agent_doc_turn::response_replay::has_matching_orphan_prompt_for_committed_capture(
+                    doc_content,
+                    response_heading,
+                )
+            });
     let has_partial_response_proof =
         historical_capture_has_partial_response_proof(file, doc_content, &capture)?;
-    if !has_exact_fragment_shell && !has_matching_prompt && !has_partial_response_proof {
+    let has_unresolved_prompt_tail = current_projected_committed_capture
+        && agent_doc_turn::exchange_tail::prompt_only_exchange_tail(doc_content).is_some();
+    if !has_exact_fragment_shell
+        && !has_matching_prompt
+        && !has_partial_response_proof
+        && !has_unresolved_prompt_tail
+    {
         return Ok(None);
     }
     agent_doc_ops_log_io::log_op(
@@ -2158,6 +2169,8 @@ fn historical_committed_capture_replay_candidate(
                 "exact_fragment_shell"
             } else if has_partial_response_proof {
                 "partial_response_proof"
+            } else if has_unresolved_prompt_tail {
+                "projected_committed_capture_unresolved_prompt_tail"
             } else {
                 "matching_orphan_prompt"
             }
@@ -3518,6 +3531,7 @@ mod tests {
                 Path::new("unused.md"),
                 current,
                 capture,
+                false,
             )
             .unwrap()
             .is_none()
@@ -3564,6 +3578,7 @@ mod tests {
                 Path::new("unused.md"),
                 current,
                 capture,
+                false,
             )
             .unwrap()
             .is_some()

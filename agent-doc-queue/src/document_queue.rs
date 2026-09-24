@@ -1184,7 +1184,9 @@ pub fn queue_ids_including_struck(doc: &str) -> std::collections::HashSet<String
     for line in queue.content(doc).lines() {
         let no_bullet = strip_queue_bullet(line.trim());
         let unstruck = strip_strike_markers(no_bullet);
-        for id in crate::queue_directive::do_directive_target_ids_in_line(unstruck) {
+        // The in-progress marker is presentation state, not part of queue identity.
+        let unmarked = strip_in_progress_marker(unstruck);
+        for id in crate::queue_directive::do_directive_target_ids_in_line(&unmarked) {
             ids.insert(id);
         }
     }
@@ -3370,6 +3372,17 @@ mod tests {
         assert_eq!(
             strip_in_progress_marker("🚧 :pushpin: do [#alpha]"),
             ":pushpin: do [#alpha]"
+        );
+
+        let document = concat!(
+            "<!-- agent:queue priority go -->\n",
+            "- 🚧 do [#alpha]\n",
+            "<!-- /agent:queue -->\n"
+        );
+        assert_eq!(
+            queue_ids_including_struck(document),
+            std::collections::HashSet::from(["alpha".to_string()]),
+            "the cosmetic in-progress marker must not hide queue identity"
         );
     }
 

@@ -288,6 +288,7 @@ pub fn apply_user_prompt_submit(input: &UserPromptSubmitInput) -> Result<()> {
         previous_state
             .as_ref()
             .map(|state| PathBuf::from(&state.doc_path))
+            .filter(|path| path.is_file())
     });
     let Some(doc_path) = doc_path else {
         return Ok(());
@@ -962,6 +963,39 @@ mod tests {
         assert_eq!(PathBuf::from(state.doc_path), doc);
         assert_eq!(state.last_turn_id, "turn-1");
         assert_eq!(state.last_prompt, format!("agent-doc {}", doc.display()));
+    }
+
+    #[test]
+    fn ordinary_prompt_ignores_stale_nonexistent_document_binding() {
+        let dir = setup_project();
+        let root = project_root_for(dir.path()).unwrap();
+        save_state(
+            &root,
+            &SessionState {
+                session_id: "codex-session".to_string(),
+                identity_origin: SessionIdentityOrigin::HarnessHook,
+                doc_path: dir.path().join("session-check").display().to_string(),
+                last_turn_id: "turn-1".to_string(),
+                last_prompt: "agent-doc session-check tasks/frontend.md".to_string(),
+                last_auto_queue_head: None,
+                last_context_clear_at: None,
+                last_prompt_cycle: None,
+                preflight_admitted: None,
+                updated_at: now_secs(),
+            },
+        )
+        .unwrap();
+
+        apply_user_prompt_submit(&UserPromptSubmitInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-2".to_string(),
+            cwd: dir.path().display().to_string(),
+            prompt: "What is going on? I cannot run anything".to_string(),
+        })
+        .unwrap();
+
+        let state = load_state(&root, "codex-session").unwrap().unwrap();
+        assert_eq!(state.last_turn_id, "turn-1");
     }
 
     #[test]

@@ -283,6 +283,144 @@ pub fn response_materialized_in_content(response: &str, content: &str) -> bool {
             || response_already_applied_after_prefix_strip(&normalized_content, &probe))
 }
 
+/// True only when the captured response is present in a real top-level
+/// assistant response cell. This accepts both template responses inside
+/// `agent:exchange` and append-mode `## Assistant` cells, including an escaped
+/// assistant cell that template repair will move back inside the exchange.
+/// Matching prose quoted inside a user's fenced prompt is not durable response
+/// materialization.
+pub fn response_materialized_in_exchange_response_cell(response: &str, content: &str) -> bool {
+    let body = agent_doc_frontmatter::frontmatter::parse(content)
+        .map(|(_, body)| body.to_string())
+        .unwrap_or_else(|_| content.to_string());
+    let lines = body.lines().collect::<Vec<_>>();
+    let mut in_fence: Option<&str> = None;
+
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            in_fence = match in_fence {
+                Some("```") => None,
+                None => Some("```"),
+                other => other,
+            };
+            continue;
+        }
+        if trimmed.starts_with("~~~") {
+            in_fence = match in_fence {
+                Some("~~~") => None,
+                None => Some("~~~"),
+                other => other,
+            };
+            continue;
+        }
+        if in_fence.is_some() || !super::closeout_signal::is_exchange_response_heading(trimmed) {
+            continue;
+        }
+
+        let mut cell_end = lines.len();
+        let mut cell_fence: Option<&str> = None;
+        for (offset, candidate) in lines[index + 1..].iter().enumerate() {
+            let candidate = candidate.trim();
+            if candidate.starts_with("```") {
+                cell_fence = match cell_fence {
+                    Some("```") => None,
+                    None => Some("```"),
+                    other => other,
+                };
+                continue;
+            }
+            if candidate.starts_with("~~~") {
+                cell_fence = match cell_fence {
+                    Some("~~~") => None,
+                    None => Some("~~~"),
+                    other => other,
+                };
+                continue;
+            }
+            if cell_fence.is_none()
+                && (super::closeout_signal::is_exchange_response_heading(candidate)
+                    || candidate.starts_with("<!-- agent:boundary:")
+                    || candidate == "## User")
+            {
+                cell_end = index + 1 + offset;
+                break;
+            }
+        }
+        let cell = lines[index..cell_end].join("\n");
+        if response_materialized_in_content(response, &cell) {
+            return true;
+        }
+    }
+
+    // Template writers may materialize plain response prose (including a
+    // leading code fence) after the binary-owned exchange boundary without a
+    // heading. The boundary keeps quoted prompt text out of this proof.
+    let boundary_index = lines
+        .iter()
+        .rposition(|line| line.trim().starts_with("<!-- agent:boundary:"));
+    if let Some(boundary_index) = boundary_index {
+        let response_region = lines[boundary_index + 1..].join("\n");
+        if response_materialized_in_content(response, &response_region) {
+            return true;
+        }
+    }
+
+    let probe =
+        agent_doc_template::response_materialization::response_materialization_probe_from_response(
+            response,
+        );
+    if probe
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .is_some_and(|line| {
+            let line = line.trim();
+            line.starts_with("```") || line.starts_with("~~~")
+        })
+        && response_materialized_in_content(response, &body)
+    {
+        return true;
+    }
+
+    // A boundary makes the response side authoritative. Do not fall back to
+    // whole-document legacy matching: editor normalization can leave a
+    // captured response quoted or prompt-prefixed before the boundary, and
+    // that text is not a durable assistant response cell.
+    if boundary_index.is_some() {
+        return false;
+    }
+
+    // Legacy documents may have neither a response heading nor a boundary.
+    // Retain that compatibility, but remove fenced user quotations before
+    // applying the content-level deduplication proof.
+    let mut visible_unfenced = String::new();
+    let mut quoted_fence: Option<&str> = None;
+    for line in &lines {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            quoted_fence = match quoted_fence {
+                Some("```") => None,
+                None => Some("```"),
+                other => other,
+            };
+            continue;
+        }
+        if trimmed.starts_with("~~~") {
+            quoted_fence = match quoted_fence {
+                Some("~~~") => None,
+                None => Some("~~~"),
+                other => other,
+            };
+            continue;
+        }
+        if quoted_fence.is_none() {
+            visible_unfenced.push_str(line);
+            visible_unfenced.push('\n');
+        }
+    }
+    response_materialized_in_content(response, &visible_unfenced)
+}
+
 /// Materialize a missing assistant response into the current exchange component.
 ///
 /// Returns `Some(current)` unchanged when the response is already present, or
@@ -296,14 +434,19 @@ pub fn materialize_response_in_current_exchange(
         repair_retained_response_replay_fragments(&repaired_current, expected_response)
             .unwrap_or(repaired_current);
     let current = repaired_current.as_str();
-    if !expected_response.trim().is_empty() && current.contains(expected_response.trim()) {
+    if !expected_response.trim().is_empty() && expected_response.trim() == current.trim() {
+        return Some(current.to_string());
+    }
+    if response_materialized_in_exchange_response_cell(expected_response, current) {
         return Some(current.to_string());
     }
     let response =
         agent_doc_template::response_materialization::response_materialization_probe_from_response(
             expected_response,
         );
-    if response.trim().is_empty() || response_materialized_in_content(&response, current) {
+    if response.trim().is_empty()
+        || response_materialized_in_exchange_response_cell(&response, current)
+    {
         return Some(current.to_string());
     }
     let components = agent_doc_element::element::parse(current).ok()?;
@@ -1329,6 +1472,72 @@ mod tests {
             materialize_response_in_current_exchange(current, current).as_deref(),
             Some(current)
         );
+    }
+
+    #[test]
+    fn quoted_response_inside_prompt_is_not_adopted_as_assistant_cell() {
+        let current = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ Run Agent Doc should recover this output:\n",
+            "```\n",
+            "### Re: recovery — gpt-5\n\n",
+            "Run agent-doc commit tasks/frontend.md.\n",
+            "```\n",
+            "<!-- agent:boundary:quoted -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: recovery — gpt-5\n\n",
+            "Run agent-doc commit tasks/frontend.md.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        assert!(response_materialized_in_content(response, current));
+        assert!(!response_materialized_in_exchange_response_cell(
+            response, current
+        ));
+
+        let repaired = materialize_response_in_current_exchange(current, response)
+            .expect("quoted response should be replayed as a real response cell");
+        assert!(response_materialized_in_exchange_response_cell(
+            response, &repaired
+        ));
+        assert_eq!(repaired.matches("### Re: recovery — gpt-5").count(), 2);
+    }
+
+    #[test]
+    fn prompt_prefixed_capture_before_boundary_is_not_adopted_as_response_cell() {
+        let current = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ Run Agent Doc should recover this output:\n",
+            "```\n",
+            "Agent-doc admission failed before a cycle contract could be created.\n\n",
+            "`Codex session tracking failed.`\n\n",
+            "Existing fixes remain uncommitted.\n",
+            "```\n",
+            "❯ Agent-doc admission failed before a cycle contract could be created.\n",
+            "❯ `Codex session tracking failed.`\n",
+            "❯ Existing fixes remain uncommitted.\n",
+            "<!-- agent:boundary:quoted -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "Agent-doc admission failed before a cycle contract could be created.\n\n",
+            "`Codex session tracking failed.`\n\n",
+            "Existing fixes remain uncommitted.\n",
+        );
+
+        assert!(response_materialized_in_content(response, current));
+        assert!(!response_materialized_in_exchange_response_cell(
+            response, current
+        ));
+
+        let repaired = materialize_response_in_current_exchange(current, response)
+            .expect("prompt-prefixed capture should be replayed after the boundary");
+        assert!(response_materialized_in_exchange_response_cell(
+            response, &repaired
+        ));
     }
 
     #[test]

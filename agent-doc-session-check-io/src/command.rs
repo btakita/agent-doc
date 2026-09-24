@@ -2101,10 +2101,17 @@ pub fn detect_uncommitted_closeout_drift_with_context(
             if detect_unstarted_prompt_bearing_diff(file)?.is_some() {
                 return Ok(None);
             }
+            let identity = rc
+                .snapshot_content()
+                .zip(rc.head_content())
+                .map(|(snapshot, head)| snapshot_head_drift_identity(&snapshot, &head))
+                .unwrap_or_else(|| "snapshot_sha256=unavailable, head_sha256=unavailable, first_differing_line=unavailable".to_string());
             Ok(Some(format!(
-                "snapshot differs from HEAD without an open or recoverable agent-doc cycle (snapshot_len={}, head_len={}){} {}",
+                "snapshot differs from HEAD without an open or recoverable agent-doc cycle (snapshot_len={}, head_len={}, {}; recovery_rejected=no_open_cycle_or_recognized_safe_binary_owned_drift; inspect=`agent-doc doctor {} --json`){} {}",
                 snapshot_len,
                 head_len,
+                identity,
+                file.display(),
                 agent_doc_git_io::status::tracked_side_effect_note(file)?,
                 effects.closeout_recovery_hint(file)
             )))
@@ -2114,6 +2121,28 @@ pub fn detect_uncommitted_closeout_drift_with_context(
         | agent_doc_snapshot_io::SnapshotCommitStatus::NoHead
         | agent_doc_snapshot_io::SnapshotCommitStatus::NotInGitRepo => Ok(None),
     }
+}
+
+fn snapshot_head_drift_identity(snapshot: &str, head: &str) -> String {
+    let snapshot_lines = snapshot.lines().collect::<Vec<_>>();
+    let head_lines = head.lines().collect::<Vec<_>>();
+    let first_differing_line = snapshot_lines
+        .iter()
+        .zip(&head_lines)
+        .position(|(snapshot_line, head_line)| snapshot_line != head_line)
+        .map(|index| index + 1)
+        .or_else(|| {
+            (snapshot_lines.len() != head_lines.len())
+                .then(|| snapshot_lines.len().min(head_lines.len()) + 1)
+        });
+    format!(
+        "snapshot_sha256={}, head_sha256={}, first_differing_line={}",
+        agent_doc_hash::content_hash(snapshot),
+        agent_doc_hash::content_hash(head),
+        first_differing_line
+            .map(|line| line.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    )
 }
 
 fn projected_open_closeout_message(
@@ -2870,6 +2899,14 @@ fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
 mod terminal_convergence_tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn snapshot_head_drift_identity_reports_hashes_and_first_line() {
+        let identity = snapshot_head_drift_identity("one\ntwo\n", "one\nchanged\n");
+        assert!(identity.contains("snapshot_sha256="));
+        assert!(identity.contains("head_sha256="));
+        assert!(identity.contains("first_differing_line=2"));
+    }
 
     #[test]
     fn retained_write_gate_never_preserves_false_ok_status() {

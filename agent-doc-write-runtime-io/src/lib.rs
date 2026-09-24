@@ -3353,7 +3353,22 @@ fn adopt_current_response_without_duplication(
     snapshot: Option<&str>,
     response: &str,
 ) -> Result<Option<String>> {
-    if !agent_doc_turn::response_replay::response_already_applied(content_current, response)
+    let response_probe =
+        agent_doc_template::response_materialization::response_materialization_probe_from_response(
+            response,
+        );
+    let response_is_materialized = if response_probe.trim().is_empty() {
+        // Component-only writes (for example the explicit replace-pending escape
+        // hatch) have no assistant response cell. Preserve their legacy exact
+        // payload proof instead of treating an empty response probe as present.
+        agent_doc_turn::response_replay::response_already_applied(content_current, response)
+    } else {
+        agent_doc_turn::response_replay::response_materialized_in_exchange_response_cell(
+            response,
+            content_current,
+        )
+    };
+    if !response_is_materialized
         && !response_already_in_current(base, content_ours, content_current)
     {
         return Ok(None);

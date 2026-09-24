@@ -126,7 +126,9 @@ fn parse_agent_doc_invocation_tokens<'a>(tokens: &[&'a str]) -> Option<AgentDocI
         ["agent-doc", "compact", file, ..] | ["/agent-doc", "compact", file, ..] => {
             (HarnessInvocationKind::Compact, *file, 3usize)
         }
-        ["agent-doc", file, ..] | ["/agent-doc", file, ..] => {
+        ["agent-doc", file, ..] | ["/agent-doc", file, ..]
+            if looks_like_session_document_path(file) =>
+        {
             (HarnessInvocationKind::Session, *file, 2usize)
         }
         _ => return None,
@@ -136,6 +138,14 @@ fn parse_agent_doc_invocation_tokens<'a>(tokens: &[&'a str]) -> Option<AgentDocI
         file,
         consumed_tokens,
     })
+}
+
+fn looks_like_session_document_path(file: &str) -> bool {
+    let lower = file.to_ascii_lowercase();
+    file.contains('/')
+        || file.contains('\\')
+        || lower.ends_with(".md")
+        || lower.ends_with(".markdown")
 }
 
 fn same_file(lhs: &Path, rhs: &Path) -> bool {
@@ -301,6 +311,28 @@ agent-doc tasks/session.md\n";
         assert!(agent_doc_invocation_file_from_text("agent-doc <FILE>").is_none());
         assert!(
             agent_doc_invocation_file_from_text("```\nagent-doc tasks/session.md\n```").is_none()
+        );
+    }
+
+    #[test]
+    fn invocation_file_scan_rejects_recovery_commands_and_quoted_diagnostic() {
+        assert!(
+            agent_doc_invocation_file_from_text("agent-doc commit tasks/frontend.md").is_none()
+        );
+        assert!(
+            agent_doc_invocation_file_from_text("agent-doc session-check tasks/frontend.md")
+                .is_none()
+        );
+
+        let diagnostic = "The error message should have more details: › agent-doc tasks/frontend.md\n\n\
+• Agent-doc is still blocked by document-only drift. From the owning pane, run:\n\n\
+  agent-doc commit tasks/frontend.md\n\
+  agent-doc session-check tasks/frontend.md\n\n\
+Then rerun agent-doc tasks/frontend.md.";
+        assert!(agent_doc_invocation_file_from_text(diagnostic).is_none());
+        assert_eq!(
+            agent_doc_invocation_file_from_text("agent-doc tasks/frontend.md"),
+            Some("tasks/frontend.md")
         );
     }
 }

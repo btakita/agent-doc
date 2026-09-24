@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0d18c-7816-7693-84d7-d906f96fe3b9
+  codex: 01a0d430-809b-7582-9eae-a74b0fcb4cdc
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: go
 ---
 
 ## Status
@@ -73,6 +73,16 @@ The frontend document no longer needs recovery: `agent-doc commit` reports that 
 The stall was caused by the Codex hook parsing recovery commands such as `agent-doc session-check …` as document invocations, then binding the session to a nonexistent `session-check` path. The installed fix rejects subcommands as document paths, clears stale nonexistent bindings, retries the bounded editor-sync failure, normalizes cosmetic queue markers, and requires captured responses to exist in a real assistant response cell rather than merely being quoted in the prompt.
 
 The source fix passed all 9,685 tests, was rebuilt and installed, and was pushed as agent-doc commit `1d330f9b9` with parent gitlink commit `9dbf254b5`.
+
+### Re: Anonymous queue identity rejection — gpt-5 · 2026-09-24T13:08-04:00
+
+> **Queue prompt:** On fpe.md, fix agent-doc causes of: • The document write was rejected before applying anything because the anonymous “Locate…” queue line has no matching backlog ID. I’m leaving that line for the supervisor and closing only the explicit #writeplanfile item; the response itself was not duplicated or partially written.
+
+Fixed the agent-doc causes without changing the anonymous queue item into tracked work. Semantic preflight schema v2 now distinguishes a node's internal identity from an explicit tracked-work ID: free-text queue entries keep their synthetic identity for ordering and strike behavior, but expose no `item_id` / `tracked_item_id`, so agents no longer mistake them for valid `--done` targets. Neighbor metadata was removed from the public semantic delta at the same boundary.
+
+The restart also exposed and verified a retained-replica recovery defect. A fresh controller now clears its reseed gate when a matching-lineage durable document-op advances the canonical frontier, while stale-lineage, legacy-unscoped, and causal no-op frames remain unable to promote it. The live restarted editor exercised that path: authority became current and converged instead of remaining permanently `sync_pending`.
+
+Regression coverage was added for both behaviors. The targeted tests, full realtime crate suite, `make check`, and `make install` passed. The source fixes were pushed as agent-doc commits `b115bdc9d` and `d01d15a8b`; the corresponding parent gitlink commits are `4ae68295ac` and `055827b688`. CI runs `36028372773` and `36031416342` were still in progress at closeout.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

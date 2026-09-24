@@ -5905,7 +5905,15 @@ fn defer_visible_delivery_projection_with_ownership(
             match ownership {
                 ProjectionRefusalOwnership::PriorWrite =>
                     agent_doc_turn::write_ownership::RetainedProjectionOwnership::ResponseWrite(
-                        agent_doc_capture_io::retained_write_ownership(file),
+                        // This refusal is emitted only after the current write
+                        // entered the durable delivery projection. That
+                        // projection owns the write even when there is no open
+                        // response cycle or retained response capture (the
+                        // pending-only closeout shape). Carry the fact we just
+                        // proved instead of asking the capture-only I/O shell
+                        // to rediscover an edge that has not settled yet.
+                        agent_doc_capture_io::retained_write_ownership(file)
+                            .with_retained_projection(true),
                     ),
                 ProjectionRefusalOwnership::PrewriteBase =>
                     agent_doc_turn::write_ownership::RetainedProjectionOwnership::PrewriteMutation,
@@ -5945,6 +5953,14 @@ mod retained_refusal_token_tests {
             err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
                 .is_some(),
             "and stay the typed retained-write error"
+        );
+        assert!(
+            rendered.contains("same intent commits itself once delivery converges"),
+            "the write that created this projection owns it even without a cycle or capture: {rendered}"
+        );
+        assert!(
+            !rendered.contains("visible edits are STRANDED"),
+            "a just-retained delivery projection must never be classified as stranded: {rendered}"
         );
     }
 

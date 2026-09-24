@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0d4aa-a47f-71e2-9559-cb68a0f260f9
+  codex: 01a0d5a6-d534-7c42-91b1-56516ab58197
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -34,6 +34,27 @@ queue: stop
 Compacted content:
 - Archived 8 response topic(s): recovered response; frontend recovery; Anonymous queue identity rejection; 5 more
 - Prior summary/context: prior compacted content: Archived 25 response topic(s): Response; api.md admission recovery; Response; 22 more
+
+### Re: actionable operator verification belongs in Backlog — gpt-5 · 2026-09-24T19:28-04:00
+
+> **Queue prompt:**
+>
+> In fpe.md, #stgnatsrollout was not added into the backlog.
+
+Confirmed and fixed at the product level. The original FPE cycle created `#stgnatsrollout` with `--review-add` even though the response called the remaining work actionable. A later corrective cycle moved it into Backlog; the shipped rule now prevents the same lifecycle error: `[operator-verify]` is metadata, not a gate, while agent-executable steps remain. When an external gate clears but work remains, agents must use `--backlog-ungate <id>` (and `--backlog-edit` if needed), not leave new next steps behind `--review-edit`.
+
+> **Queue prompt:**
+>
+> Ensure plugin parity
+
+Parity is complete. The rule is in the shared skill, pending/respond runbooks, and pending-system spec; generated Claude, Codex, OpenCode, Cursor, and Grok surfaces all carry it. A regression test renders every supported environment and asserts the installed pending-ops runbook contains the rule.
+
+Verification and delivery:
+- Focused skill/parity tests passed.
+- Clean standalone `make check` passed: 9,694/9,694 Rust tests, instruction audit, JetBrains/VS Code parity, native cross-editor simulation, Python bootstrap tests, and all TLA+ models.
+- `make install` succeeded; agent-doc 0.35.418, native library, JetBrains 0.2.397 (byte-identical), and VS Code 0.2.71 are locally converged.
+- Commit `e2c1e14fd` (`fix(skill): keep actionable verification in backlog`) is pushed to `origin/main`.
+- CI run `36072812478` was in progress at the required one-shot post-push check; local verification is complete.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -42,8 +63,9 @@ Compacted content:
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-- 
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 In fpe.md, #stgnatsrollout was not added into the backlog.
+- Ensure plugin parity
 <!-- /agent:queue -->
 
 

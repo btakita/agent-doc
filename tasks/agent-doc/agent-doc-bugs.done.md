@@ -158,3 +158,4 @@
   agent-doc commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
   agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
   ```
+- 2026-09-24 [#runsubmitfirstmatch] [P1] Reproduce and fix the JetBrains Run Agent Doc startup_miss after the prior controller_editor_route_settled gate failed: run the action twice with an identical consumed trigger within 16 non-empty lines above the new draft, trace the admission/route failure, add deterministic regression coverage, rebuild and install, commit and push, then return the item to live operator verification.

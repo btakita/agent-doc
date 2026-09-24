@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0d430-809b-7582-9eae-a74b0fcb4cdc
+  codex: 01a0d4aa-a47f-71e2-9559-cb68a0f260f9
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -93,6 +93,18 @@ Promoted `#runsubmitfirstmatch` from review into the active backlog and queue. I
 The other seven review items remain correctly gated on external input or operator action: a VOD locator, PyPI authentication, an IntelliJ restart/live-editor observation, renewed Grok quota, a disposable live document, or reachable authenticated Coder infrastructure.
 
 The current IntelliJ process (PID 2667733) is also still running superseded plugin bytes; restart the editor or reopen the document tab before relying on JetBrains-side verification.
+
+### Re: #runsubmitfirstmatch — gpt-5.6-sol · 2026-09-24T14:36-04:00
+
+Completed `#runsubmitfirstmatch`.
+
+The live JetBrains route now passes the exact repeated-trigger case. Two identical **Run Agent Doc** invocations at 17:31 and 18:25 both reached `controller_editor_route_settled`; the second invocation opened this cycle, and `agent-doc session status` reports `startup_miss: none`.
+
+The product invariant is owned by `agent-doc-controller::dispatch::route_trigger_visible_in_current_draft`: within the bounded pane window, the newest matching trigger decides current-draft visibility, so an older consumed copy cannot hide a newer stranded draft. Tmux capture supplies the observation, the controller computes the classification, and route I/O applies a bounded idempotent Enter repair whose admission/startup receipt closes the loop. The covered transitions are: older-consumed plus newest-drafted → resubmit; newest-consumed plus later prompt → no resubmit; wrapped/relative current drafts → resubmit; absent trigger → no action.
+
+The implementation and verbatim deterministic regression already landed in pushed source commit `275ab868e` and are present in installed agent-doc 0.35.418; local `main` matches `origin/main` for the source repository. The focused regression passed, the full `make check` suite passed with zero failures, `make install` completed, the private-name denylist found no matches, and CI run `36031416342` is green at current source HEAD `d01d15a8b`.
+
+The separate request to make plugin upgrades restart-free remains in the queue for its own implementation cycle; it was not conflated with this routing fix.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -101,13 +113,13 @@ The current IntelliJ process (PID 2667733) is also still running superseded plug
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 #actionable-review
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+- Please make plugin upgrades not require a restart.
+- ~~do [#runsubmitfirstmatch]~~
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#runsubmitfirstmatch] [P1] Reproduce and fix the JetBrains Run Agent Doc startup_miss after the prior controller_editor_route_settled gate failed: run the action twice with an identical consumed trigger within 16 non-empty lines above the new draft, trace the admission/route failure, add deterministic regression coverage, rebuild and install, commit and push, then return the item to live operator verification.
 <!-- /agent:backlog -->
 
 ## Review

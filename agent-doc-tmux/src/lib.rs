@@ -400,6 +400,19 @@ impl AssociatedPaneCandidate {
             .collect::<Vec<_>>()
             .join(",")
     }
+
+    /// A document-scoped supervisor socket plus the pane process tree is
+    /// strong enough to restore a missing dispatch binding when there is no
+    /// competing pane. Session-log or process-tree evidence alone remains
+    /// diagnostic-only and must fail closed.
+    pub fn proves_unique_live_supervisor_owner(
+        &self,
+        redundant: &[AssociatedPaneCandidate],
+    ) -> bool {
+        redundant.is_empty()
+            && self.sources.contains(&AssociatedPaneSource::SupervisorPid)
+            && self.sources.contains(&AssociatedPaneSource::ProcessTree)
+    }
 }
 
 pub fn associated_pane_candidates_detail<'a>(
@@ -1671,6 +1684,37 @@ distinct, identical ones still dedupe"
             ]
             .join("\n")
         );
+    }
+
+    #[test]
+    fn associated_pane_rebind_requires_unique_supervisor_and_process_tree_proof() {
+        let proven = associated_candidate(
+            "%419",
+            "@3",
+            "agent-doc",
+            &[
+                AssociatedPaneSource::SessionLog,
+                AssociatedPaneSource::ProcessTree,
+                AssociatedPaneSource::SupervisorPid,
+            ],
+        );
+        assert!(proven.proves_unique_live_supervisor_owner(&[]));
+
+        let process_tree_only = associated_candidate(
+            "%420",
+            "@3",
+            "agent-doc",
+            &[AssociatedPaneSource::ProcessTree],
+        );
+        assert!(!process_tree_only.proves_unique_live_supervisor_owner(&[]));
+
+        let redundant = vec![associated_candidate(
+            "%417",
+            "@9",
+            "stash",
+            &[AssociatedPaneSource::ProcessTree],
+        )];
+        assert!(!proven.proves_unique_live_supervisor_owner(&redundant));
     }
 
     #[test]

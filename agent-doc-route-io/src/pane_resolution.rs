@@ -658,6 +658,50 @@ pub fn resolve_or_create_pane_dispatch_only(
         let any_candidate_alive = tmux.pane_alive(&winner.pane_id)
             || redundant.iter().any(|c| tmux.pane_alive(&c.pane_id));
         if any_candidate_alive {
+            if tmux.pane_alive(&winner.pane_id)
+                && winner.proves_unique_live_supervisor_owner(redundant)
+            {
+                // #supervisorprovenrebind: the document-scoped supervisor socket
+                // identifies a live PID inside this exact pane and the process
+                // tree independently names this document. With no competing pane,
+                // restore the missing actor/registry projection and continue the
+                // editor reopen instead of requiring a manual force-claim.
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_only_associated_pane_rebound file={} pane={} sources={}",
+                        file_path,
+                        winner.pane_id,
+                        winner.source_summary()
+                    ),
+                );
+                register_dispatch_target(tmux, session_id, &winner.pane_id, file_path)?;
+                rescue_target(&winner.pane_id);
+                return dispatch_only_reopen_existing_pane(
+                    tmux,
+                    file,
+                    pane,
+                    col_args,
+                    session_id,
+                    file_path,
+                    target_session,
+                    harness,
+                    created_panes,
+                    pending_prompt_context
+                        .as_ref()
+                        .map(|context| context.marker.as_str()),
+                    pending_prompt_context
+                        .as_ref()
+                        .map(|context| context.prompt_text.as_str()),
+                    true,
+                    true,
+                    false,
+                    &winner.pane_id,
+                    DispatchOnlyReopenDelivery::DirectPaneSubmit,
+                    dispatch_only_effects,
+                    false,
+                );
+            }
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(

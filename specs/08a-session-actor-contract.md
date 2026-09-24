@@ -276,7 +276,12 @@ progress. The controller transaction remains authoritative for that transition.
   re-elect ownership from latest-open session logs, `registry_rebind`
   successors, or generic same-file process-tree scans. Those sources still
   matter for diagnostics and explicit repair, but they cannot silently reclaim
-  authority away from the actor-backed path.
+  authority away from the actor-backed path. A narrow dispatch-only recovery is
+  permitted when the actor/registry projection is missing, exactly one live
+  pane remains, and both the document-scoped supervisor socket PID and that
+  pane's process tree prove the same canonical document. That recovery writes a
+  normal `dispatch_bind` actor transition before submitting input; competing
+  panes or either proof missing still fail closed.
 - Phase-9 verification must keep explicit regression coverage for generation
   monotonicity; phase-4 authoritative route-state handling (`ready` direct
   dispatch, `starting` / `busy` optimistic queueing, `waiting_input`

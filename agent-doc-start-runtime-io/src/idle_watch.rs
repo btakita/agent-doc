@@ -275,6 +275,39 @@ impl DocumentDeliveryWakeDebounce {
     }
 }
 
+/// Prevent an active go-mode queue from dispatching an item while the operator
+/// is still typing it. Lazily delivery convergence proves that the latest CRDT
+/// delta reached the editor; it does not prove that the operator finished the
+/// next delta. The head itself must therefore remain unchanged for the
+/// document's configured settle interval before pane injection is eligible.
+#[derive(Debug, Default)]
+struct QueueHeadDispatchSettle {
+    head: Option<String>,
+    stable_since: Option<std::time::Instant>,
+}
+
+impl QueueHeadDispatchSettle {
+    fn observe(
+        &mut self,
+        head: Option<&str>,
+        now: std::time::Instant,
+        settle: std::time::Duration,
+    ) -> bool {
+        let Some(head) = head else {
+            self.head = None;
+            self.stable_since = None;
+            return false;
+        };
+        if self.head.as_deref() != Some(head) {
+            self.head = Some(head.to_string());
+            self.stable_since = Some(now);
+            return settle.is_zero();
+        }
+        self.stable_since
+            .is_some_and(|since| now.duration_since(since) >= settle)
+    }
+}
+
 fn spawn_document_delivery_signal_watch(
     file: PathBuf,
     stop: Arc<AtomicBool>,
@@ -1364,6 +1397,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 );
             }
             let mut last_dispatched: Option<String> = None;
+            let queue_head_settle_duration = std::time::Duration::from_millis(
+                agent_doc_preflight_io::debounce::authority_settle_ms(&path),
+            );
+            let mut queue_head_dispatch_settle = QueueHeadDispatchSettle::default();
             let queue_continuation_triggers =
                 agent_doc_supervisor::idle_watch::QueueContinuationTriggers::new();
             let stale_busy_reconcile_effects =
@@ -2251,6 +2288,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let mut turn_boundary = false;
                 let mut head_pending = false;
                 let mut drain_completed = false;
+                let mut queue_head_settled = false;
                 'drain: {
                 // The head and its delivery-transition state come out of ONE
                 // authority read (`#recycletransitionwedge`).
@@ -2545,6 +2583,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // own process-local relay registry, which can only ever miss.
             current_transition_pending =
                 active_head.is_some() && active_transition == IdleQueueTransition::Pending;
+            queue_head_settled = queue_head_dispatch_settle.observe(
+                active_head.as_deref(),
+                now,
+                queue_head_settle_duration,
+            );
             if current_transition_pending {
                 if !current_transition_pending_logged {
                     log_event(
@@ -4447,6 +4490,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     last_dispatched: last_dispatched.as_deref(),
             }) {
                 IdleQueueDrainDecision::Dispatch => {
+                    if !queue_head_settled {
+                        continue;
+                    }
                     if !queue_continuation_triggers.ready() {
                         continue;
                     }
@@ -5214,6 +5260,37 @@ mod tests {
             ),
             "one burst must produce one reconcile receipt"
         );
+    }
+
+    #[test]
+    fn queue_head_must_remain_stable_for_the_typing_settle_interval() {
+        let first = std::time::Instant::now();
+        let settle = std::time::Duration::from_secs(2);
+        let mut gate = QueueHeadDispatchSettle::default();
+
+        assert!(!gate.observe(Some("We just"), first, settle));
+        assert!(!gate.observe(
+            Some("We just"),
+            first + std::time::Duration::from_millis(1900),
+            settle,
+        ));
+        assert!(gate.observe(
+            Some("We just"),
+            first + std::time::Duration::from_secs(2),
+            settle,
+        ));
+
+        assert!(!gate.observe(
+            Some("We just had an excessive logging spike. Please assess."),
+            first + std::time::Duration::from_millis(2100),
+            settle,
+        ));
+        assert!(!gate.observe(None, first + std::time::Duration::from_secs(5), settle,));
+        assert!(!gate.observe(
+            Some("next item"),
+            first + std::time::Duration::from_secs(6),
+            settle,
+        ));
     }
 
     /// `#idlewatchrevisiongate`: the memo answers only for the revision it was

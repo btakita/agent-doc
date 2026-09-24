@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0d0c2-f585-7451-97f0-29c98ab72467
+  codex: 01a0ceca-d9a0-7920-97a0-ad58cb51e27a
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -553,6 +553,42 @@ That is already the implemented recovery policy:
 For an already-running collision, preserve the incumbent, stop/restart the intruding document fresh, and let its new ID replace the copied/stale claim. The alert is important for diagnosis, but alert-only recovery is insufficient because it leaves the unsafe shared identity in place.
 
 The base ownership policy landed in `647562db4`; the Codex durable-ledger gap was closed by `130ba6097`. Existing regression tests cover foreign-owner detection, same-document admission, warning/fresh-start behavior, and duplicate registry rejection. This turn’s full `make check` passed all 9,664 Rust tests plus the editor, bootstrap, integration, and formal-model gates, so no additional code change was needed for this queue item.
+
+### Re: repeated session crashes, queue duplication, and infra model wedge
+
+> **Queue prompt:**
+>
+> The api.md turn did not complete. The queue item `- 🚧 do [#accessurlbearer]` was not struck.
+
+
+> **Queue prompt:**
+>
+> do [#recovertwodocs]
+
+
+Fixed, installed, and live-verified.
+
+The repeated Codex session crash was a supervisor self-reexec ownership bug. The replacement supervisor preserved the existing child PID/PTY, but rejected reentry when restored document metadata still named session `3f069…` while the controller actor correctly owned the same pane under live session `da571…`. That killed the replacement supervisor; the watchdog later spawned a new Codex child, which looked like another session crash. The reentry path now treats the same-pane, non-closed controller actor as live session authority, adopts its session ID before registry publication, and still rejects pane drift or a closed actor.
+
+The partial `We just` duplication was a separate queue race. The idle watcher dispatched the active queue head after seeing the seven-byte intermediate editor state, before typing had settled; queue maintenance then marked that fragment in progress while the editor completed the full sentence. Queue heads must now remain byte-identical for the configured document settle interval before dispatch.
+
+The `infra.md` wedge was a third issue: generic `model: codex` flowed into the active Claude launch as `claude --model codex`. The shared model resolver now rejects known harness selectors as model names across supervisor, run, stream, capture, and attribution paths. I also added a fail-closed recovery for exactly one malformed missing-bang component opener, which let the live `<-- agent:queue ... -->` typo be repaired through controller/editor authority rather than a raw disk edit.
+
+Live recovery completed:
+
+- `infra.md` now has `agent: codex`, an empty canonical queue, and a committed recovery note proving the duplicate free-text head was intentionally consumed.
+- Its interrupted cycle is committed and `session-check` reports `no_drainable_work`.
+- Its supervisor restarted successfully as Codex; PID 2943278 is running `codex resume ...` with no invalid `--model codex` argument.
+- This session survived the install recycle with the same supervisor PID 2018051 and child PID 2018671. The log records `supervisor_reexec_adopted_child pid=2018671`; no replacement child was spawned.
+
+Source commits pushed to `agent-doc`:
+
+- `c90a6d785` — preserve live session authority across reexec
+- `c4f0b8f81` — settle queue heads before dispatch
+- `9a39cbea1` — reject harness selectors as model names
+- `e24850c45` — repair unambiguous component opener typos
+
+The parent gitlink is updated in `ae4b46133`. Full `make check` passed: 9,675 Rust tests, 179 editor tests, cross-editor native integration, bootstrap tests, docs/release audits, and all formal models. The pushed Book and Pages workflows are green; the pushed CI workflow is still running.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -562,14 +598,10 @@ The base ownership policy landed in `647562db4`; the Codex durable-ledger gap wa
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#fixapiissue]~~
-- do [#recovertwodocs]
-- The api.md turn did not complete. The queue item `- 🚧 do [#accessurlbearer]` was not struck.
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
-- [ ] [#recovertwodocs] How can we recover from two docs having the same conversation ID? Should there be an alert or should one of the sessions be reassigned?
 <!-- /agent:backlog -->
 
 ## Review

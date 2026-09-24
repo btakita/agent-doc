@@ -149,3 +149,4 @@
   assign: agent-doc claim /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md --pane %156 --force
   kill: tmux kill-pane -t %156
   ```
+- 2026-09-23 [#recovertwodocs] How can we recover from two docs having the same conversation ID? Should there be an alert or should one of the sessions be reassigned?

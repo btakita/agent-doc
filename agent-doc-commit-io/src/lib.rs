@@ -124,6 +124,49 @@ enum LateAnsweredFreeTextStrike {
     Recurring(String),
 }
 
+fn without_blank_lines_immediately_before_response(
+    content: &str,
+    response_body: &str,
+) -> Option<String> {
+    let response_heading = response_body.lines().next()?.trim();
+    if response_heading.is_empty() {
+        return None;
+    }
+    let components = agent_doc_element::element::parse(content).ok()?;
+    let exchange = components
+        .iter()
+        .find(|component| component.name == "exchange")?;
+    let exchange_body = exchange.content(content);
+    let lines = exchange_body.split_inclusive('\n').collect::<Vec<_>>();
+    let heading_index = lines
+        .iter()
+        .rposition(|line| line.trim() == response_heading)?;
+    let mut normalized = Vec::with_capacity(lines.len());
+    for (index, line) in lines.into_iter().enumerate() {
+        if index == heading_index {
+            while normalized.last().is_some_and(|line: &&str| line.trim().is_empty()) {
+                normalized.pop();
+            }
+        }
+        normalized.push(line);
+    }
+    Some(exchange.replace_content(content, &normalized.concat()))
+}
+
+fn exact_or_response_separator_equivalent(
+    expected: &str,
+    current: &str,
+    response_body: &str,
+) -> bool {
+    expected == current
+        || without_blank_lines_immediately_before_response(expected, response_body).is_some_and(
+            |normalized_expected| {
+                without_blank_lines_immediately_before_response(current, response_body)
+                    .is_some_and(|normalized_current| normalized_expected == normalized_current)
+            },
+        )
+}
+
 fn late_answered_free_text_strike_capture(
     file: &Path,
     committed_content: &str,
@@ -189,14 +232,23 @@ fn late_answered_free_text_strike_capture(
     else {
         return Ok(None);
     };
-    let exact_struck_target = projection.target_content == current_content;
+    // Live editor reconciliation can remove only the blank separator immediately
+    // before the already-committed response while applying the terminal queue
+    // projection. Treat that formatting-only shape as exact, but keep every
+    // nonblank exchange line and every other component byte-for-byte fenced.
+    let exact_struck_target = exact_or_response_separator_equivalent(
+        &projection.target_content,
+        current_content,
+        &response_body,
+    );
     let exact_reaped_target = if exact_struck_target {
         false
     } else {
-        agent_doc_queue::queue_consume::remove_queue_nodes_by_key(
+        let reaped = agent_doc_queue::queue_consume::remove_queue_nodes_by_key(
             committed_content,
             &projection.node_keys,
-        )? == current_content
+        )?;
+        exact_or_response_separator_equivalent(&reaped, current_content, &response_body)
     };
     if exact_struck_target || exact_reaped_target {
         return Ok(Some(LateAnsweredFreeTextStrike::Exact(capture_id)));

@@ -2543,7 +2543,10 @@ Duplicate replay should stay live.
         .unwrap()
         .expect("fixture response must own its free-text queue head")
         .target_content;
-        let recurring = struck.replacen(
+        // Terminal free-text resolution now stops the queue atomically. Model a
+        // real later recurrence by reactivating it as well as restoring the row;
+        // a row under `queue: stop` is intentionally not drainable work.
+        let recurring = struck.replacen("queue: stop", "queue: start", 1).replacen(
             "<!-- /agent:queue -->",
             "- finish the plan\n<!-- /agent:queue -->",
             1,

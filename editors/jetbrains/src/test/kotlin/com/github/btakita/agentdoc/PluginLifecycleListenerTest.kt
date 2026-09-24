@@ -46,15 +46,29 @@ class PluginLifecycleListenerTest {
     }
 
     @Test
-    fun `plugin package restart policy is independent of native generation hot reload`() {
+    fun `plugin package supports restart-free dynamic upgrades`() {
         val pluginXml = Files.readString(
             Paths.get("src/main/resources/META-INF/plugin.xml")
                 .takeIf { Files.exists(it) }
                 ?: Paths.get("editors/jetbrains/src/main/resources/META-INF/plugin.xml")
         )
 
-        assertTrue(pluginXml.contains("<idea-plugin require-restart=\"true\">"))
-        assertFalse(pluginXml.contains("<idea-plugin require-restart=\"false\">"))
+        assertTrue(pluginXml.contains("<idea-plugin>"))
+        assertFalse(pluginXml.contains("require-restart"))
+        assertTrue(pluginXml.contains("PluginUnloadCleanupService"))
+        assertTrue(pluginXml.contains("ProjectPluginLifecycleService"))
+
+        val source = Files.readString(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt")
+                .takeIf { Files.exists(it) }
+                ?: Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt")
+        )
+        assertTrue(source.contains("class PluginUnloadCleanupService : Disposable"))
+        assertTrue(source.contains("class ProjectPluginLifecycleService"))
+        assertTrue(source.contains("connect(lifecycle)"))
+        assertTrue(source.contains("addDocumentListener(TypingTracker, lifecycle)"))
+        assertTrue(source.contains("ProjectManager.getInstance().openProjects"))
+        assertTrue(source.contains("disposeProjectResources"))
     }
 
     @Test

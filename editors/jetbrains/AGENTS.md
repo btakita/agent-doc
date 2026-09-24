@@ -28,7 +28,7 @@ Reference zips via glob: `build/distributions/agent-doc-jetbrains-*-signed.zip`.
 
 IDEA → Settings → Plugins → gear icon → "Install Plugin from Disk..." → select the zip.
 
-If classes changed structurally (new imports, methods, fields): **uninstall first → restart → install → restart**. Reinstalling over an existing plugin may not replace cached bytecode.
+The plugin is dynamically unloadable. Install/update through the normal package path and let JetBrains replace the plugin classloader without a mandatory IDE restart. Programmatic listeners must use `ProjectPluginLifecycleService` as their parent disposable, and static project registries must be released by the lifecycle services; if JetBrains detects an unload leak, treat its explicit restart request as a defect and inspect the `com.intellij.ide.plugins.DynamicPlugins` log category.
 
 ## Logging
 

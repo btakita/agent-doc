@@ -6,7 +6,7 @@ Extends `editors/SPEC.md` with JetBrains-specific behavior.
 
 - **ID:** `com.github.btakita.agent-doc`
 - **Name:** Agent Doc
-- **Restart:** Required for Kotlin plugin package upgrades (`require-restart="true"`)
+- **Restart:** Dynamic Kotlin package upgrades; no mandatory IDE restart
 - **Native upgrades:** Safe in-process generation handoff
 
 ## Implementation Details
@@ -39,8 +39,23 @@ failure may restore the old named shadow. Durable reliable-sync
 outboxes live in the project controller; the reloadable cdylib sends typed
 controller RPCs and retains no SQLite connection.
 
-`require-restart="true"` applies to Kotlin package/classloader upgrades only;
-it does not disable the native-library handoff.
+The package omits `require-restart`, so JetBrains may unload the plugin and
+replace its classloader during an update. A plugin-owned project service is the
+parent disposable for every programmatic startup listener and releases the
+project's static manager registries. An application service additionally
+cleans every still-open project during plugin unload.
+An unload leak is a defect and JetBrains' explicit unload-failure prompt is the
+only package-update restart fallback. The one migration exception is an IDE
+that already loaded a package generation declaring `require-restart="true"`;
+that old generation must be restarted once before this dynamic lifecycle can
+govern later upgrades.
+
+Local package convergence compares every ZIP payload byte and relative path
+with the installed plugin tree before replacing it. A byte-identical package is
+a true no-op: the installer leaves the existing files and inodes in place so a
+live IDE does not retain deleted mappings of the same generation. Changed
+packages retain the ordinary package replacement path and dynamic descriptor.
+This package lifecycle is independent of the native-library handoff.
 
 ### Claim — Split Position Detection
 

@@ -118,11 +118,17 @@ fn retained_pending_commit_proof(
 /// open. This is deliberately reconstructed from committed HEAD, not from the
 /// current document: an operator edit or a recurring later prompt changes the
 /// exact target and therefore cannot satisfy the proof.
+#[derive(Debug, PartialEq, Eq)]
+enum LateAnsweredFreeTextStrike {
+    Exact(String),
+    Recurring(String),
+}
+
 fn late_answered_free_text_strike_capture(
     file: &Path,
     committed_content: &str,
     current_content: &str,
-) -> Result<Option<String>> {
+) -> Result<Option<LateAnsweredFreeTextStrike>> {
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(None);
     };
@@ -164,7 +170,17 @@ fn late_answered_free_text_strike_capture(
             &projection.node_keys,
         )? == current_content
     };
-    Ok((exact_struck_target || exact_reaped_target).then_some(capture.capture_id))
+    if exact_struck_target || exact_reaped_target {
+        return Ok(Some(LateAnsweredFreeTextStrike::Exact(capture.capture_id)));
+    }
+    let recurring = current_content != committed_content
+        && !agent_doc_queue::queue_consume::answered_free_text_head_node_keys(
+            current_content,
+            &capture.response_body,
+            Some(committed_content),
+        )?
+        .is_empty();
+    Ok(recurring.then_some(LateAnsweredFreeTextStrike::Recurring(capture.capture_id)))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1963,11 +1979,24 @@ where
     }
 
     let mut binary_owned_side_effects = binary_owned_commit_side_effects(file, &file_content)?;
-    if snapshot_matches_head
+    let late_answered_free_text = if snapshot_matches_head
         && binary_owned_side_effects.is_empty()
         && let Some(head) = head_doc.as_deref()
-        && let Some(capture_id) = late_answered_free_text_strike_capture(file, head, &file_content)?
     {
+        late_answered_free_text_strike_capture(file, head, &file_content)?
+    } else {
+        None
+    };
+    if let Some(LateAnsweredFreeTextStrike::Recurring(capture_id)) =
+        late_answered_free_text.as_ref()
+    {
+        anyhow::bail!(
+            "refusing to close {}: a later queue prompt recurs after committed response capture {}; run agent-doc again to answer the new prompt",
+            file.display(),
+            capture_id,
+        );
+    }
+    if let Some(LateAnsweredFreeTextStrike::Exact(capture_id)) = late_answered_free_text {
         eprintln!(
             "[commit] committing exact late answered free-text strike or its reaped target for {} (capture_id={capture_id})",
             file.display()

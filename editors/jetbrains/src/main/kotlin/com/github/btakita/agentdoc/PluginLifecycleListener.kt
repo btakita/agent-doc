@@ -2,26 +2,32 @@ package com.github.btakita.agentdoc
 
 import com.intellij.openapi.application.ApplicationActivationListener
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.project.ProjectManagerListener
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.wm.IdeFrame
 
 /**
- * Disposes per-project resources when a project closes.
+ * Owns per-project startup and cleanup for both project close and dynamic plugin unload.
  *
- * Registered in plugin.xml as a projectListener so IntelliJ manages the lifecycle. Native code is
- * process-lifetime state, so plugin updates require a full IDE restart.
+ * Registered in plugin.xml as a projectListener so IntelliJ manages the project lifecycle. The
+ * application-level [PluginUnloadCleanupService] calls the same idempotent cleanup while open
+ * projects survive a dynamic plugin replacement.
  */
 class PluginLifecycleListener : ProjectManagerListener {
     override fun projectOpened(project: Project) {
+        // Force creation of the application service whose Disposable boundary is plugin unload.
+        ApplicationManager.getApplication().getService(PluginUnloadCleanupService::class.java)
+        val lifecycle = project.getService(ProjectPluginLifecycleService::class.java)
         // Track document changes for typing debounce in SubmitAction
-        EditorFactory.getInstance().eventMulticaster.addDocumentListener(TypingTracker, project)
+        EditorFactory.getInstance().eventMulticaster.addDocumentListener(TypingTracker, lifecycle)
         // Attach markdown buffers as CRDT replicas when the CP endpoint is available.
         CrdtReplicaManager.getInstance(project)
         // Registration is retained independently of the controller's current
@@ -50,7 +56,7 @@ class PluginLifecycleListener : ProjectManagerListener {
         // Register EditorTabSyncListener via code (not XML) so it survives hot-reload
         val editorTabSync = EditorTabSyncListener.install(project)
         project.messageBus
-            .connect(project)
+            .connect(lifecycle)
             .subscribe(
                 FileEditorManagerListener.FILE_EDITOR_MANAGER,
                 editorTabSync,
@@ -61,7 +67,7 @@ class PluginLifecycleListener : ProjectManagerListener {
         // frame becomes active so the normal controller projection repairs tmux automatically.
         ApplicationManager.getApplication()
             .messageBus
-            .connect(project)
+            .connect(lifecycle)
             .subscribe(
                 ApplicationActivationListener.TOPIC,
                 object : ApplicationActivationListener {
@@ -81,7 +87,7 @@ class PluginLifecycleListener : ProjectManagerListener {
         // embedded-terminal focus changes, and suppresses hidden cross-root targets.
         TmuxPaneFocusSync.install(project)
         project.messageBus
-            .connect(project)
+            .connect(lifecycle)
             .subscribe(
                 FileEditorManagerListener.FILE_EDITOR_MANAGER,
                 object : FileEditorManagerListener {
@@ -128,18 +134,46 @@ class PluginLifecycleListener : ProjectManagerListener {
     companion object {
         private val LOG =
             com.intellij.openapi.diagnostic.Logger.getInstance(PluginLifecycleListener::class.java)
+
+        internal fun disposeProjectResources(project: Project) {
+            ReliableSyncLivenessListener.disposeProject(project)
+            CrdtReplicaManager.disposeProject(project)
+            PatchWatcher.disposeProject(project)
+            LayoutChangeDetector.disposeProject(project)
+            VisualHighlighterManager.disposeProject(project)
+            // Stop feeding focus events before releasing the surface graph, so a
+            // late observation cannot re-create the root we are about to forget.
+            EditorFocusSyncListener.disposeProject(project)
+            EditorTabSyncListener.disposeProject(project)
+            TmuxPaneFocusSync.disposeProject(project)
+        }
     }
 
     override fun projectClosed(project: Project) {
-        ReliableSyncLivenessListener.disposeProject(project)
-        CrdtReplicaManager.disposeProject(project)
-        PatchWatcher.disposeProject(project)
-        LayoutChangeDetector.disposeProject(project)
-        VisualHighlighterManager.disposeProject(project)
-        // Stop feeding focus events before releasing the surface graph, so a
-        // late observation cannot re-create the root we are about to forget.
-        EditorFocusSyncListener.disposeProject(project)
-        EditorTabSyncListener.disposeProject(project)
-        TmuxPaneFocusSync.disposeProject(project)
+        disposeProjectResources(project)
+    }
+}
+
+/** Project-owned parent disposable for programmatic listeners installed at startup. */
+class ProjectPluginLifecycleService(
+    private val project: Project,
+) : Disposable {
+    override fun dispose() {
+        PluginLifecycleListener.disposeProjectResources(project)
+    }
+}
+
+/**
+ * Plugin-owned application service whose disposal boundary is a dynamic plugin unload.
+ *
+ * Projects remain open while JetBrains swaps the plugin classloader, so their project-close
+ * listeners do not run. Clearing every static per-project registry here prevents the old
+ * classloader from being retained and lets the replacement generation initialize cleanly.
+ */
+class PluginUnloadCleanupService : Disposable {
+    override fun dispose() {
+        ProjectManager.getInstance().openProjects.forEach { project ->
+            PluginLifecycleListener.disposeProjectResources(project)
+        }
     }
 }

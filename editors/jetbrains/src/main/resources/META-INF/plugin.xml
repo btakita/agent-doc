@@ -1,4 +1,4 @@
-    <idea-plugin require-restart="true">
+    <idea-plugin>
     <id>com.github.btakita.agent-doc</id>
     <name>Agent Doc</name>
     <vendor url="https://github.com/btakita">btakita</vendor>
@@ -26,6 +26,8 @@
                                  instance="com.github.btakita.agentdoc.AgentDocColorConfigurable"
                                  displayName="Agent Doc Colors"/>
         <applicationService serviceImplementation="com.github.btakita.agentdoc.MarkdownStyleSettings"/>
+        <applicationService serviceImplementation="com.github.btakita.agentdoc.PluginUnloadCleanupService"/>
+        <projectService serviceImplementation="com.github.btakita.agentdoc.ProjectPluginLifecycleService"/>
         <applicationConfigurable parentId="tools"
                                  id="com.github.btakita.agentdoc.markdownStyleConfigurable"
                                  instance="com.github.btakita.agentdoc.MarkdownStyleConfigurable"

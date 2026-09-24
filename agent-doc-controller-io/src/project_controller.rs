@@ -17960,7 +17960,7 @@ revised operator request
         let deadline = Instant::now() + Duration::from_secs(3);
         let retried = loop {
             let retried = std::fs::read_to_string(&canonical).unwrap();
-            if retried.contains("auto-struck: answered this cycle (#ftstrike)") {
+            if retried.contains("queue: stop") && !retried.contains("- close the queue") {
                 break retried;
             }
             assert!(
@@ -17970,9 +17970,8 @@ revised operator request
             std::thread::sleep(Duration::from_millis(10));
         };
         assert!(
-            retried
-                .contains("- ~~close the queue~~ — auto-struck: answered this cycle (#ftstrike)"),
-            "a changed retained-delivery frontier must retry the owned strike: {retried}"
+            retried.contains("queue: stop") && !retried.contains("- close the queue"),
+            "a changed retained-delivery frontier must retry the owned terminal queue drain: {retried}"
         );
         let projection = runtime
             .document_graphs

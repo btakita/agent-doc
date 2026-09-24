@@ -16,7 +16,11 @@
 //! - `update(editor)` — returns `Ok(())` early (no-op) when the JetBrains plugin is already at the latest version.
 //! - `list()` — always returns `Ok(())`; emits a stderr message when no plugins are found.
 //! - Unrecognized `editor` strings return `Err` with a list of supported values.
-//! - Old JetBrains plugin installation (`agent-doc-jetbrains/` directory) is removed before extracting the new zip.
+//! - Byte-identical local JetBrains packages are true no-ops: the installed tree is not
+//!   rewritten, so a live IDE never maps an unlinked duplicate of the same generation.
+//! - Changed JetBrains packages replace the old `agent-doc-jetbrains/` directory before
+//!   extraction; the package descriptor is dynamic so JetBrains can reload it without a
+//!   mandatory IDE restart.
 //!
 //! ## Evals
 //! - install_unknown_editor: `install("emacs")` → Err containing "Unknown editor"
@@ -32,6 +36,7 @@
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::{self, IsTerminal as _, Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -540,10 +545,21 @@ fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<()> {
     let dirs = jetbrains_plugin_dirs();
     let target_dir = choose_plugins_dir(&dirs, plugins_dir)?;
     let zip_path = local_jetbrains_zip()?;
-    install_jetbrains_local_zip_into(&zip_path, &target_dir)?;
-
-    eprintln!("Plugin installed to {}", target_dir.display());
-    eprintln!("Restart your IDE to activate.");
+    match install_jetbrains_local_zip_into(&zip_path, &target_dir)? {
+        JetbrainsLocalInstallOutcome::Installed => {
+            eprintln!("Plugin installed to {}", target_dir.display());
+            eprintln!(
+                "The package supports JetBrains dynamic reload; an IDE already running the older restart-required generation needs one final restart."
+            );
+        }
+        JetbrainsLocalInstallOutcome::Unchanged => {
+            eprintln!(
+                "Plugin already byte-identical at {}; kept the live generation in place",
+                target_dir.display()
+            );
+            eprintln!("No JetBrains restart is required; no installed plugin bytes changed.");
+        }
+    }
     Ok(())
 }
 
@@ -568,15 +584,34 @@ fn install_jetbrains_local_all_existing() -> Result<()> {
     }
 
     let zip_path = local_jetbrains_zip()?;
+    let mut installed = 0usize;
+    let mut unchanged = 0usize;
     for target_dir in &targets {
-        install_jetbrains_local_zip_into(&zip_path, target_dir)?;
-        eprintln!("Plugin installed to {}", target_dir.display());
+        match install_jetbrains_local_zip_into(&zip_path, target_dir)? {
+            JetbrainsLocalInstallOutcome::Installed => {
+                installed += 1;
+                eprintln!("Plugin installed to {}", target_dir.display());
+            }
+            JetbrainsLocalInstallOutcome::Unchanged => {
+                unchanged += 1;
+                eprintln!(
+                    "Plugin already byte-identical at {}; kept the live generation in place",
+                    target_dir.display()
+                );
+            }
+        }
     }
     eprintln!(
-        "Installed the matching local JetBrains package into {} existing IDE installation(s).",
-        targets.len()
+        "JetBrains package convergence: {installed} updated, {unchanged} already current across {} existing IDE installation(s).",
+        targets.len(),
     );
-    eprintln!("Restart running IDEs to activate the package generation.");
+    if installed > 0 {
+        eprintln!(
+            "The package supports JetBrains dynamic reload; an IDE already running the older restart-required generation needs one final restart."
+        );
+    } else {
+        eprintln!("No JetBrains restart is required; no installed plugin bytes changed.");
+    }
     Ok(())
 }
 
@@ -638,10 +673,78 @@ fn local_jetbrains_zip_version(zip_path: &Path) -> Result<String> {
         .context("Local JetBrains build has an unexpected filename")
 }
 
-fn install_jetbrains_local_zip_into(zip_path: &Path, target_dir: &Path) -> Result<()> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JetbrainsLocalInstallOutcome {
+    Installed,
+    Unchanged,
+}
+
+fn collect_installed_plugin_files(
+    root: &Path,
+    directory: &Path,
+    files: &mut BTreeSet<PathBuf>,
+) -> Result<()> {
+    for entry in fs::read_dir(directory)
+        .with_context(|| format!("Failed to read {}", directory.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            collect_installed_plugin_files(root, &path, files)?;
+        } else if file_type.is_file() {
+            files.insert(path.strip_prefix(root)?.to_path_buf());
+        }
+    }
+    Ok(())
+}
+
+fn jetbrains_local_zip_matches_installation(zip_path: &Path, target_dir: &Path) -> Result<bool> {
+    let installed_root = target_dir.join("agent-doc-jetbrains");
+    if !installed_root.is_dir() {
+        return Ok(false);
+    }
+
+    let file = fs::File::open(zip_path).context("Failed to open zip")?;
+    let mut archive = zip::ZipArchive::new(file).context("Failed to read zip archive")?;
+    let mut packaged_files = BTreeSet::new();
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index)?;
+        if entry.is_dir() {
+            continue;
+        }
+        let enclosed = entry
+            .enclosed_name()
+            .with_context(|| format!("Unsafe path in JetBrains package: {}", entry.name()))?;
+        let relative = enclosed
+            .strip_prefix("agent-doc-jetbrains")
+            .with_context(|| format!("Unexpected JetBrains package root: {}", enclosed.display()))?
+            .to_path_buf();
+        let installed = installed_root.join(&relative);
+        let mut packaged = Vec::new();
+        entry.read_to_end(&mut packaged)?;
+        if fs::read(&installed).ok().as_deref() != Some(packaged.as_slice()) {
+            return Ok(false);
+        }
+        packaged_files.insert(relative);
+    }
+
+    let mut installed_files = BTreeSet::new();
+    collect_installed_plugin_files(&installed_root, &installed_root, &mut installed_files)?;
+    Ok(installed_files == packaged_files)
+}
+
+fn install_jetbrains_local_zip_into(
+    zip_path: &Path,
+    target_dir: &Path,
+) -> Result<JetbrainsLocalInstallOutcome> {
     let expected_version = local_jetbrains_zip_version(zip_path)?;
     eprintln!("Installing from local build: {}", zip_path.display());
     fs::create_dir_all(target_dir).context("Failed to create JetBrains plugins directory")?;
+
+    if jetbrains_local_zip_matches_installation(zip_path, target_dir)? {
+        return Ok(JetbrainsLocalInstallOutcome::Unchanged);
+    }
 
     // Remove old installation if present
     let dest = target_dir.join("agent-doc-jetbrains");
@@ -682,7 +785,7 @@ fn install_jetbrains_local_zip_into(zip_path: &Path, target_dir: &Path) -> Resul
             installed_version
         );
     }
-    Ok(())
+    Ok(JetbrainsLocalInstallOutcome::Installed)
 }
 
 fn install_vscode_local() -> Result<()> {
@@ -845,18 +948,38 @@ pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Resu
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::{
-        RELEASE_SEARCH_MAX_PAGES, RELEASES_PER_PAGE, choose_plugins_dir_with_interactivity,
-        ensure_github_api_success, existing_jetbrains_agent_doc_dirs, find_asset,
-        find_best_local_zip, find_local_vscode_vsix, find_local_zip, find_release_with_asset,
-        github_get_request, github_token_from, has_asset, installed_jetbrains_plugin_version,
+        JetbrainsLocalInstallOutcome, RELEASE_SEARCH_MAX_PAGES, RELEASES_PER_PAGE,
+        choose_plugins_dir_with_interactivity, ensure_github_api_success,
+        existing_jetbrains_agent_doc_dirs, find_asset, find_best_local_zip, find_local_vscode_vsix,
+        find_local_zip, find_release_with_asset, github_get_request, github_token_from, has_asset,
+        install_jetbrains_local_zip_into, installed_jetbrains_plugin_version,
         is_jetbrains_ide_data_dir, jetbrains_install_success_message,
-        jetbrains_plugin_dirs_in_roots, local_jetbrains_zip_in, local_jetbrains_zip_version,
-        release_version, releases_page_url,
+        jetbrains_local_zip_matches_installation, jetbrains_plugin_dirs_in_roots,
+        local_jetbrains_zip_in, local_jetbrains_zip_version, release_version, releases_page_url,
     };
     use serde_json::json;
     use std::fs;
+    use std::io::Write as _;
     use std::path::PathBuf;
     use tempfile::TempDir;
+
+    fn write_test_jetbrains_zip(path: &std::path::Path, version: &str, plugin: &[u8]) {
+        let file = fs::File::create(path).unwrap();
+        let mut archive = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        archive
+            .start_file(
+                format!("agent-doc-jetbrains/lib/agent-doc-jetbrains-{version}.jar"),
+                options,
+            )
+            .unwrap();
+        archive.write_all(plugin).unwrap();
+        archive
+            .start_file("agent-doc-jetbrains/lib/dependency.jar", options)
+            .unwrap();
+        archive.write_all(b"dependency").unwrap();
+        archive.finish().unwrap();
+    }
 
     /// `#pluginassetpaging`: a release with no assets at all.
     fn bare_release(tag: &str) -> serde_json::Value {
@@ -1290,6 +1413,57 @@ mod tests {
             .unwrap(),
             "0.2.264"
         );
+    }
+
+    #[test]
+    fn byte_identical_jetbrains_install_keeps_live_files_in_place() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("plugins");
+        let lib = target.join("agent-doc-jetbrains/lib");
+        fs::create_dir_all(&lib).unwrap();
+        let plugin = lib.join("agent-doc-jetbrains-0.2.396.jar");
+        fs::write(&plugin, b"plugin").unwrap();
+        fs::write(lib.join("dependency.jar"), b"dependency").unwrap();
+        let zip = tmp.path().join("agent-doc-jetbrains-0.2.396.zip");
+        write_test_jetbrains_zip(&zip, "0.2.396", b"plugin");
+
+        assert!(jetbrains_local_zip_matches_installation(&zip, &target).unwrap());
+        #[cfg(unix)]
+        let inode_before = std::os::unix::fs::MetadataExt::ino(&fs::metadata(&plugin).unwrap());
+
+        assert_eq!(
+            install_jetbrains_local_zip_into(&zip, &target).unwrap(),
+            JetbrainsLocalInstallOutcome::Unchanged
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            std::os::unix::fs::MetadataExt::ino(&fs::metadata(&plugin).unwrap()),
+            inode_before,
+            "a no-op install must not unlink the JAR mapped by a live IDE"
+        );
+    }
+
+    #[test]
+    fn changed_jetbrains_install_replaces_and_verifies_package() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("plugins");
+        let lib = target.join("agent-doc-jetbrains/lib");
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(lib.join("agent-doc-jetbrains-0.2.396.jar"), b"old").unwrap();
+        fs::write(lib.join("stale.jar"), b"stale").unwrap();
+        let zip = tmp.path().join("agent-doc-jetbrains-0.2.397.zip");
+        write_test_jetbrains_zip(&zip, "0.2.397", b"new");
+
+        assert!(!jetbrains_local_zip_matches_installation(&zip, &target).unwrap());
+        assert_eq!(
+            install_jetbrains_local_zip_into(&zip, &target).unwrap(),
+            JetbrainsLocalInstallOutcome::Installed
+        );
+        assert_eq!(
+            fs::read(lib.join("agent-doc-jetbrains-0.2.397.jar")).unwrap(),
+            b"new"
+        );
+        assert!(!lib.join("stale.jar").exists());
     }
 }
 

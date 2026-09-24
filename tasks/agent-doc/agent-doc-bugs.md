@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -43,10 +43,19 @@ Compacted content:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 do [#runfronendrecovery]
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
+- [ ] 🚧 [#runfronendrecovery] Run Agent Doc on fronend.md should do the recovery:
+  ```
+  › agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
+  • The recovery commands still haven’t been applied. From the session’s owning pane, run these before invoking agent-doc
+  <file> again:
+  agent-doc commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
+  agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
+  ```
 <!-- /agent:backlog -->
 
 ## Review

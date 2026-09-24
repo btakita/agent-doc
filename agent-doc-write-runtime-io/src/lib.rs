@@ -2254,41 +2254,6 @@ fn run_command_inner_within_pass(
                 file.display()
             )
         })?;
-        // `#mutprovenancepreresponse`: the envelope is valid, so record what this
-        // cycle INTENDS before the response cell is published. The post-hoc
-        // record in the mutation phase runs after the response write; a write
-        // that fails once the response has landed leaves no provenance at all,
-        // and the divergence is then misclassified as a fresh operator edit and
-        // swept. Intent recorded here survives a failure at any position.
-        let requested_added_ids: Vec<String> = options
-            .pending_add
-            .iter()
-            .chain(options.pending_add_gated.iter())
-            .chain(options.pending_add_back.iter())
-            .filter_map(|text| agent_doc_element_backlog::backlog::explicit_custom_id(text))
-            .collect();
-        // `#mutplanwitness`: the id lists above only describe `--done` and
-        // explicitly-named adds. Record the plain fact that this cycle asked for
-        // tracked-work mutations too, so a gate/ungate/edit/reorder/status-only
-        // closeout has a witness at all.
-        if let Err(err) = agent_doc_cycle_state_io::record_requested_tracked_work_mutations(file) {
-            eprintln!(
-                "[write] warning: failed to record tracked-work mutation intent for {}: {err:#}",
-                file.display()
-            );
-        }
-        if let Err(err) = agent_doc_cycle_state_io::record_requested_tracked_work(
-            file,
-            &options.pending_done,
-            &requested_added_ids,
-        ) {
-            // Never fatal: provenance is a recovery aid, and failing the turn
-            // here would turn a bookkeeping problem into a lost closeout.
-            eprintln!(
-                "[write] warning: failed to record tracked-work intent for {}: {err:#}",
-                file.display()
-            );
-        }
     }
 
     let write_flags = WriteFlags {
@@ -2412,6 +2377,45 @@ fn run_command_inner_within_pass(
         }
         None => read_document_baseline(file)?,
     };
+
+    if has_pending_ops {
+        // `#mutprovenancepreresponse`: the envelope is valid and any committed
+        // cycle has now been reopened, so record what THIS cycle intends before
+        // the response cell is published. Recording before the compatibility
+        // reopen attached the witness to the already-terminal predecessor; a
+        // retained response then saw no requested mutations on the fresh cycle,
+        // skipped mutation-plan replay, committed only the response, and served
+        // the same queue head again.
+        let requested_added_ids: Vec<String> = options
+            .pending_add
+            .iter()
+            .chain(options.pending_add_gated.iter())
+            .chain(options.pending_add_back.iter())
+            .filter_map(|text| agent_doc_element_backlog::backlog::explicit_custom_id(text))
+            .collect();
+        // `#mutplanwitness`: the id lists above only describe `--done` and
+        // explicitly-named adds. Record the plain fact that this cycle asked for
+        // tracked-work mutations too, so a gate/ungate/edit/reorder/status-only
+        // closeout has a witness at all.
+        if let Err(err) = agent_doc_cycle_state_io::record_requested_tracked_work_mutations(file) {
+            eprintln!(
+                "[write] warning: failed to record tracked-work mutation intent for {}: {err:#}",
+                file.display()
+            );
+        }
+        if let Err(err) = agent_doc_cycle_state_io::record_requested_tracked_work(
+            file,
+            &options.pending_done,
+            &requested_added_ids,
+        ) {
+            // Never fatal: provenance is a recovery aid, and failing the turn
+            // here would turn a bookkeeping problem into a lost closeout.
+            eprintln!(
+                "[write] warning: failed to record tracked-work intent for {}: {err:#}",
+                file.display()
+            );
+        }
+    }
 
     let current_content = if options.force_disk {
         Some(resolve_force_disk_document(file, "pre_write_guards")?.into_content())

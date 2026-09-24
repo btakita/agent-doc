@@ -1524,6 +1524,13 @@ fn response_and_done_reopen_acquires_fresh_cycle_owner_before_capture() {
         read_cycle_phase(tmp.path(), &doc).as_deref(),
         Some("committed")
     );
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+        .unwrap()
+        .expect("fresh closeout cycle state");
+    assert!(
+        state.requested_done_ids.contains(&"done1".to_string()),
+        "the done witness must belong to the reopened cycle so retained recovery cannot drop the tracked-work half: {state:?}",
+    );
     let head = head_blob(tmp.path());
     assert_eq!(
         head.matches("### Re: second — gpt-5").count(),

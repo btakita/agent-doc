@@ -1000,6 +1000,21 @@ pub struct DispatchOnlyRouteCycleStamp<'a> {
     pub phase: Option<CyclePhase>,
 }
 
+/// An open cycle owns the document turn and therefore owns the next pane input.
+///
+/// Route evaluates this at the actual send edge, not only during its earlier
+/// closeout drain. Another ingress path can open a cycle while route waits for
+/// supervisor recycle/readiness, and treating that cycle as route's new
+/// baseline would otherwise allow a duplicate trigger into the live turn.
+pub const fn dispatch_only_route_cycle_owns_input(stamp: DispatchOnlyRouteCycleStamp<'_>) -> bool {
+    matches!(
+        stamp.phase,
+        Some(
+            CyclePhase::PreflightStarted | CyclePhase::ResponseCaptured | CyclePhase::WriteApplied
+        )
+    )
+}
+
 /// A newer non-abandoned cycle for this document owns the operator's intent.
 ///
 /// This is evaluated immediately before pane input. It prevents a route that
@@ -5775,6 +5790,30 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 phase: Some(CyclePhase::Abandoned),
             }
         ));
+    }
+
+    #[test]
+    fn open_cycle_discovered_at_send_edge_owns_input_even_when_it_is_the_baseline() {
+        for phase in [
+            CyclePhase::PreflightStarted,
+            CyclePhase::ResponseCaptured,
+            CyclePhase::WriteApplied,
+        ] {
+            assert!(dispatch_only_route_cycle_owns_input(
+                DispatchOnlyRouteCycleStamp {
+                    cycle_id: Some("cycle-auto-trigger"),
+                    phase: Some(phase),
+                }
+            ));
+        }
+        for phase in [CyclePhase::Committed, CyclePhase::Abandoned] {
+            assert!(!dispatch_only_route_cycle_owns_input(
+                DispatchOnlyRouteCycleStamp {
+                    cycle_id: Some("cycle-terminal"),
+                    phase: Some(phase),
+                }
+            ));
+        }
     }
 
     #[test]

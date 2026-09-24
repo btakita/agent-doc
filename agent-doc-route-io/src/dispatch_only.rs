@@ -44,10 +44,10 @@ use agent_doc_controller::dispatch::{
     DispatchOnlyStartingPaneNotReadyMessageFacts, RoutedReopenGuardReason, StartingPaneBlocker,
     classify_direct_pane_submit_policy, dispatch_only_blocked_guard_reason,
     dispatch_only_blocker_recovery_hint, dispatch_only_effective_ready_probe_required,
-    dispatch_only_route_superseded_by_new_cycle, dispatch_only_should_print_unproven_progress,
-    dispatch_only_starting_pane_actor_settled, dispatch_only_starting_pane_draft_message,
-    dispatch_only_starting_pane_not_ready_message, prompt_ready_barrier_failed_event,
-    routed_admission_timeout_with_client_deadline,
+    dispatch_only_route_cycle_owns_input, dispatch_only_route_superseded_by_new_cycle,
+    dispatch_only_should_print_unproven_progress, dispatch_only_starting_pane_actor_settled,
+    dispatch_only_starting_pane_draft_message, dispatch_only_starting_pane_not_ready_message,
+    prompt_ready_barrier_failed_event, routed_admission_timeout_with_client_deadline,
 };
 use agent_doc_harness::HarnessConfig;
 use agent_doc_supervisor::route_runtime::authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible;
@@ -272,6 +272,68 @@ fn classify_dispatch_only_blocker(
     DispatchOnlyBlockerAction::Refuse
 }
 
+/// Re-check document-turn ownership at the pane-input edge.
+///
+/// The outer route drains closeout before it begins actor/readiness work, but a
+/// supervisor auto-trigger or another route can admit the document during that
+/// wait. The current open cycle wins even when it was already present by the
+/// time `dispatch_only_send_reopen` started; using it as a fresh baseline was
+/// the race that injected a second Codex trigger into `frontend.md`.
+fn dispatch_only_cycle_owns_pane_input(
+    file: &Path,
+    pane: &str,
+    harness: &HarnessConfig,
+    baseline: DispatchOnlyRouteCycleStamp<'_>,
+) -> Result<bool> {
+    let current_closeout = agent_doc_cycle_state_io::load_closeout_projection(file)?;
+    let current = DispatchOnlyRouteCycleStamp {
+        cycle_id: current_closeout
+            .as_ref()
+            .and_then(|projection| projection.cycle_id.as_deref()),
+        phase: current_closeout
+            .as_ref()
+            .and_then(|projection| projection.phase),
+    };
+    let open_cycle_owns_input = dispatch_only_route_cycle_owns_input(current);
+    let newer_cycle_owns_input = dispatch_only_route_superseded_by_new_cycle(baseline, current);
+    if !open_cycle_owns_input && !newer_cycle_owns_input {
+        return Ok(false);
+    }
+
+    let reason = if open_cycle_owns_input {
+        "open_cycle"
+    } else {
+        "newer_cycle"
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_dispatch_only_cycle_owns_input file={} pane={} harness={} baseline_cycle={} current_cycle={} current_phase={} reason={} outcome=no_pane_input",
+            file.display(),
+            pane,
+            harness.binary,
+            baseline.cycle_id.unwrap_or("none"),
+            current.cycle_id.unwrap_or("none"),
+            current
+                .phase
+                .map(agent_doc_turn::CyclePhase::as_str)
+                .unwrap_or("none"),
+            reason,
+        ),
+    );
+    eprintln!(
+        "[route] coalesced dispatch-only {} reopen for {}: document cycle {} is already {}; no duplicate trigger was submitted",
+        harness.binary,
+        file.display(),
+        current.cycle_id.unwrap_or("unknown"),
+        current
+            .phase
+            .map(agent_doc_turn::CyclePhase::as_str)
+            .unwrap_or("active"),
+    );
+    Ok(true)
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct DispatchOnlySendReopenOptions<'a> {
     pub delivery: DispatchOnlyReopenDelivery,
@@ -301,6 +363,17 @@ pub fn dispatch_only_send_reopen(
     wait_for_dispatch_only_recycle_inflight_settle(file, file_path, pane, &harness.binary)?;
 
     let route_start_closeout = agent_doc_cycle_state_io::load_closeout_projection(file)?;
+    let route_start_stamp = DispatchOnlyRouteCycleStamp {
+        cycle_id: route_start_closeout
+            .as_ref()
+            .and_then(|projection| projection.cycle_id.as_deref()),
+        phase: route_start_closeout
+            .as_ref()
+            .and_then(|projection| projection.phase),
+    };
+    if dispatch_only_cycle_owns_pane_input(file, pane, harness, route_start_stamp)? {
+        return Ok(pane.to_string());
+    }
     let mut dispatch_pane = pane.to_string();
     let mut log_status =
         agent_doc_supervisor_io::startup_miss::session_log_status(file, session_id)
@@ -381,6 +454,14 @@ pub fn dispatch_only_send_reopen(
                     &route_trigger,
                 ) {
                     StartingPaneBlocker::StrandedTrigger => {
+                        if dispatch_only_cycle_owns_pane_input(
+                            file,
+                            &dispatch_pane,
+                            harness,
+                            route_start_stamp,
+                        )? {
+                            return Ok(dispatch_pane);
+                        }
                         drop(pre_dispatch_route_guard.take());
                         register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
                         resubmit_stranded_dispatch_only_trigger(
@@ -538,6 +619,14 @@ pub fn dispatch_only_send_reopen(
                 agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(blocker.unblocker());
             match (blocker, draft.as_deref()) {
                 (StartingPaneBlocker::StrandedTrigger, Some(_)) => {
+                    if dispatch_only_cycle_owns_pane_input(
+                        file,
+                        &dispatch_pane,
+                        harness,
+                        route_start_stamp,
+                    )? {
+                        return Ok(dispatch_pane);
+                    }
                     drop(pre_dispatch_route_guard.take());
                     register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
                     resubmit_stranded_dispatch_only_trigger(
@@ -573,39 +662,7 @@ pub fn dispatch_only_send_reopen(
         }
     }
 
-    let current_closeout = agent_doc_cycle_state_io::load_closeout_projection(file)?;
-    let route_start_stamp = DispatchOnlyRouteCycleStamp {
-        cycle_id: route_start_closeout
-            .as_ref()
-            .and_then(|projection| projection.cycle_id.as_deref()),
-        phase: route_start_closeout
-            .as_ref()
-            .and_then(|projection| projection.phase),
-    };
-    let current_stamp = DispatchOnlyRouteCycleStamp {
-        cycle_id: current_closeout
-            .as_ref()
-            .and_then(|projection| projection.cycle_id.as_deref()),
-        phase: current_closeout
-            .as_ref()
-            .and_then(|projection| projection.phase),
-    };
-    if dispatch_only_route_superseded_by_new_cycle(route_start_stamp, current_stamp) {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "route_dispatch_only_superseded_by_new_cycle file={} pane={} harness={} baseline_cycle={} current_cycle={} current_phase={} outcome=no_pane_input",
-                file.display(),
-                dispatch_pane,
-                harness.binary,
-                route_start_stamp.cycle_id.unwrap_or("none"),
-                current_stamp.cycle_id.unwrap_or("none"),
-                current_stamp
-                    .phase
-                    .map(agent_doc_turn::CyclePhase::as_str)
-                    .unwrap_or("none"),
-            ),
-        );
+    if dispatch_only_cycle_owns_pane_input(file, &dispatch_pane, harness, route_start_stamp)? {
         return Ok(dispatch_pane);
     }
 
@@ -1187,6 +1244,35 @@ pub fn retry_dispatch_only_after_busy_pane(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn send_edge_coalesces_an_open_cycle_that_started_after_the_outer_drain() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("frontend.md");
+        let content = "---\nagent_doc_session: frontend\n---\n\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let projection = agent_doc_cycle_state_io::load_closeout_projection(&doc)
+            .unwrap()
+            .expect("open cycle projection");
+        let baseline = DispatchOnlyRouteCycleStamp {
+            cycle_id: projection.cycle_id.as_deref(),
+            phase: projection.phase,
+        };
+        let harness = HarnessConfig::codex();
+
+        assert!(
+            dispatch_only_cycle_owns_pane_input(&doc, "%158", &harness, baseline).unwrap(),
+            "a supervisor auto-trigger admitted during route readiness must own the pane input edge"
+        );
+
+        agent_doc_cycle_state_io::mark_committed(&doc, "test_commit", Some(content), Some(content))
+            .unwrap();
+        assert!(
+            !dispatch_only_cycle_owns_pane_input(&doc, "%158", &harness, baseline).unwrap(),
+            "the same terminal cycle no longer blocks a later route"
+        );
+    }
 
     /// Operator-reported 2026-07-25: Run Agent Doc refused to dispatch into a pane
     /// whose composer held only Claude's dim autosuggest hint

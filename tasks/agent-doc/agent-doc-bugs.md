@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0ceca-d9a0-7920-97a0-ad58cb51e27a
+  codex: 01a0d18c-7816-7693-84d7-d906f96fe3b9
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: go
 ---
 
 ## Status
@@ -34,6 +34,22 @@ queue: start
 Compacted content:
 - Archived 25 response topic(s): Response; api.md admission recovery; Response; 22 more
 - Prior summary/context: prior compacted content: Archived 46 response topic(s): GitHub issues #52 and #53; macOS-only release cadence and edi...
+❯ Run Agent Doc on fronend.md should do the recovery:
+```
+› agent-doc /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
+
+
+• The recovery commands still haven’t been applied. From the session’s owning pane, run these before invoking agent-doc
+  <file> again:
+
+  agent-doc commit /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
+  agent-doc session-check /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/frontend.md
+```
+❯ Agent-doc admission failed before a cycle contract could be created:
+
+❯ `Codex session tracking failed: failed to canonicalize /home/brian/work/btakita/agent-loop/session-check: No such file or directory`
+
+❯ Per the agent-doc safety contract, I stopped and interrupted the running full test gate. Existing fixes remain uncommitted; the new Claim Tmux Pane issue was not yet changed.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

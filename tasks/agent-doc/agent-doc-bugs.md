@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -92,7 +92,7 @@ Regression coverage was added for both behaviors. The targeted tests, full realt
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 On fpe.md, fix agent-doc causes of: • The document write was rejected before applying anything because the anonymous “Locate…” queue line has no matching backlog ID. I’m leaving that line for the supervisor and closing only the explicit #writeplanfile item; the response itself was not duplicated or partially written.
+- ~~On fpe.md, fix agent-doc causes of: • The document write was rejected before applying anything because the anonymous “Locate…” queue line has no matching backlog ID. I’m leaving that line for the supervisor and closing only the explicit #writeplanfile item; the response itself was not duplicated or partially written.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 

@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -73,7 +73,6 @@ The frontend document no longer needs recovery: `agent-doc commit` reports that 
 The stall was caused by the Codex hook parsing recovery commands such as `agent-doc session-check …` as document invocations, then binding the session to a nonexistent `session-check` path. The installed fix rejects subcommands as document paths, clears stale nonexistent bindings, retries the bounded editor-sync failure, normalizes cosmetic queue markers, and requires captured responses to exist in a real assistant response cell rather than merely being quoted in the prompt.
 
 The source fix passed all 9,685 tests, was rebuilt and installed, and was pushed as agent-doc commit `1d330f9b9` with parent gitlink commit `9dbf254b5`.
-
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -83,6 +82,7 @@ The source fix passed all 9,685 tests, was rebuilt and installed, and was pushed
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 On fpe.md, fix agent-doc causes of: • The document write was rejected before applying anything because the anonymous “Locate…” queue line has no matching backlog ID. I’m leaving that line for the supervisor and closing only the explicit #writeplanfile item; the response itself was not duplicated or partially written.
 <!-- /agent:queue -->
 
 

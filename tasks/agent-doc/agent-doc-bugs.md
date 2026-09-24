@@ -147,6 +147,31 @@ Fixed and pushed as `965db70d3` (`fix(queue): atomically drain terminal resoluti
 - The agent-doc response cycle committed successfully after retained-write convergence.
 
 Restart/reopen IntelliJ when convenient to load the newly installed plugin bytes.
+
+### Re: restart-free plugin upgrades — gpt-5.6-sol · 2026-09-24T17:40-04:00
+
+> **Queue prompt:**
+>
+> Please make plugin upgrades not require a restart.
+
+Implemented and installed restart-free JetBrains plugin upgrades.
+
+The JetBrains package is now a dynamic plugin: `require-restart="true"` is gone, programmatic listeners are owned by a plugin-scoped project `Disposable`, and application/project unload services release every static per-project registry while projects remain open. This follows JetBrains' supported [Dynamic Plugins](https://plugins.jetbrains.com/docs/intellij/dynamic-plugins.html) and [Disposer](https://plugins.jetbrains.com/docs/intellij/disposers.html) lifecycle rather than retaining the old classloader.
+
+The local installer now compares the complete ZIP payload with the installed tree before replacing it. A byte-identical package is a true no-op, preserving the exact JAR inode mapped by the running IDE. Regression coverage proves inode preservation for identical packages and full replacement/version verification for changed packages. A second live install of 0.2.397 exercised that path and reported `0 updated, 1 already current` with no restart required.
+
+The full gate also exposed the api.md terminal-closeout regression behind the previously red CI run. A repeated free-text prompt now fails closed instead of being mistaken for harmless post-commit drift, and the controller retry test now asserts the atomic terminal drain (`queue: stop` plus an empty queue). This directly fixes CI run 36058911325's failure.
+
+Verification completed:
+
+- JetBrains `test`, `verifyPluginProjectConfiguration`, `verifyPluginStructure`, and `buildPlugin` passed.
+- Full `make check` passed: 9,692 Rust tests, 179 VS Code tests, cross-editor simulation, documentation audit, and all formal model checks.
+- `make install` passed and installed JetBrains plugin 0.2.397 plus the rebuilt CLI/native/editor packages.
+- The packaged descriptor has no restart requirement and includes both unload cleanup services.
+- Private-name denylist passed.
+- Source commit `e41246632` and parent gitlink/runbook commit `e1c0c6581` are pushed. CI run 36062883835 is in progress for the source commit.
+
+One migration caveat remains: the currently running IntelliJ process loaded 0.2.396, whose descriptor explicitly prohibited dynamic unload, so that already-loaded generation needs one final IDE restart/reopen. Once 0.2.397 is active, future compatible JetBrains-managed upgrades no longer carry a mandatory restart; any explicit JetBrains unload-failure prompt is now treated as a lifecycle defect rather than normal procedure.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -155,10 +180,10 @@ Restart/reopen IntelliJ when convenient to load the newly installed plugin bytes
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-- Please make plugin upgrades not require a restart.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority start -->
+- 🚧 Please make plugin upgrades not require a restart.
 - ~~do [#runsubmitfirstmatch]~~
-- ~~When the api.md queue was complete, the struck `- ~~#advance-review~~` item was not cleared.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~When the api.md queue was complete, the struck `- ~~#advance-review~~` item was not cleared.~~
 <!-- /agent:queue -->
 
 

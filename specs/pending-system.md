@@ -279,7 +279,7 @@ The backlog is a **priority-ordered pool with id-based consumption** (`--done` /
 | `--done <id>` | none | Mark `[x]` in tracked work (`agent:backlog` / legacy `agent:pending`, `agent:review`, or `agent:icebox`) — commit-required closeouts reap it in the same persisted cycle, while preflight / repair also clean up stale completed items. Valid from any state (`[ ]` or `[/]`). If the id is already present in canonical `agent:done` or the current cycle's resolved-id ledger, treat it as an idempotent resolution warning rather than a fatal missing-id error. |
 | `--backlog-gate <id>` | `--pending-gate` | Move a backlog item to `agent:review` as `[/]` — code-complete, awaiting review/gate. Valid from `[ ]`. No-op if already in `agent:review`. Error if source is `[x]`. |
 | `--backlog-set-gate-type <id>=<type>` | `--pending-set-gate-type` | Set a typed gate on a gated item in `agent:review` or a legacy in-place gated backlog. A closeout may combine this with `--backlog-gate <id>`; the type assignment follows the same transaction's move into review. |
-| `--backlog-ungate <id>` | `--pending-ungate` | Move an `agent:review` item back to backlog as `[ ]` — review failed, back to active. Legacy gated backlog items still ungate in place until migrated. Error if source is `[ ]` or `[x]`. |
+| `--backlog-ungate <id>` | `--pending-ungate` | Move an `agent:review` item back to backlog as `[ ]` — review failed or its blocker cleared while executable work remains, so the same id is active again. Legacy gated backlog items still ungate in place until migrated. Error if source is `[ ]` or `[x]`. |
 | `--backlog-edit <id> "new text"` | `--pending-edit` | Rewrite text, **preserve hash and state**. Multiline edits replace the item's entire continuation block; lines after the first must be indented continuation content, not new flush-left parent items. |
 | `--backlog-clear` | `--pending-clear` | Remove all backlog items. |
 | `--backlog-reorder <id1,id2,...>` | `--pending-reorder` | Reorder backlog items by ID. Missing IDs keep their relative order after the listed prefix. |
@@ -287,6 +287,14 @@ The backlog is a **priority-ordered pool with id-based consumption** (`--done` /
 | `--review-edit <id> "new text"` | none | Rewrite text in `agent:review`, preserving hash and state. |
 | `--review-resolve <id>` | none | Resolve an `agent:review` item: remove it and archive to `agent:done`. The completion path for finished gated work. Errors if no review component or no matching id. |
 | `--review-remove <id>` | none | Delete an `agent:review` item by id, removing **every** entry sharing the id. For stale/duplicate review entries (e.g. the identical `[/]` pair an interleaved finalize leaves behind, flagged `preset_item_id_collision`) that cannot be deduped via an ambiguous edit-by-id. Errors if no review component or no matching id. |
+
+`agent:review` is reserved for a true external gate: no agent-executable step can
+run until the named review, approval, or live proof arrives. `[operator-verify]`
+is metadata and does not itself establish that state. If an item still contains
+agent-executable steps, it belongs in `agent:backlog` and may retain
+`[operator-verify]`; if a review blocker clears while work remains, closeout must
+use `--backlog-ungate <id>` (and `--backlog-edit` as needed) rather than leaving
+the new next steps behind `--review-edit`.
 
 Closeout pending-maintenance (commit-required `finalize` / `write --commit`) also auto-dedupes **identical** same-id review entries (same id, state, gate type, text, continuation) to a single representative; distinct items sharing an id are left intact so the `preset_item_id_collision` ambiguity warning still surfaces.
 

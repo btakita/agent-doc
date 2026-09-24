@@ -3339,6 +3339,22 @@ mod tests {
 
         super::install_runbooks_all(Some(dir.path())).unwrap();
 
+        const ACTIONABLE_OPERATOR_VERIFY_RULE: &str =
+            "An `[operator-verify]` tag alone never justifies `agent:review`";
+        for (env, _) in agent_kit::detect::Environment::all_skill_rel_paths("agent-doc") {
+            let path = dir
+                .path()
+                .join(super::runbooks_rel_path(&env))
+                .join("pending-ops.md");
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read installed {}: {error}", path.display()));
+            assert!(
+                content.contains(ACTIONABLE_OPERATOR_VERIFY_RULE),
+                "{} installed pending-ops runbook is missing the actionable operator-verify lifecycle rule",
+                env
+            );
+        }
+
         assert!(
             dir.path()
                 .join(".claude/skills/agent-doc/runbooks/compact-exchange.md")
@@ -3410,6 +3426,9 @@ mod tests {
         assert!(SKILL_TEMPLATE.contains("`do #id` closeout rule"));
         assert!(SKILL_TEMPLATE.contains("--done <id>"));
         assert!(SKILL_TEMPLATE.contains("pending_done_guard"));
+        assert!(SKILL_TEMPLATE.contains("An `[operator-verify]` tag alone is not a gate"));
+        assert!(SKILL_TEMPLATE.contains("use `--backlog-ungate <id>`"));
+        assert!(SKILL_TEMPLATE.contains("not `--review-edit`"));
     }
 
     #[test]

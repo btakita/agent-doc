@@ -75,10 +75,14 @@ record a hypothesis, or to avoid effort; that is what produces an unreadable
 50-item review backlog. Real-but-unblocked follow-up goes to `agent:backlog` as
 an **actionable** item, never to `agent:review`. When a gated review item's
 blocking condition is stale or already satisfied, resolve it: `--done <id>` if
-the work is in fact complete, otherwise `--backlog-ungate <id>` (or capture a
-fresh actionable backlog item) and `--done` the stale review entry so it leaves
-`agent:review`. Prefer automated completion detection (a log/state check the
-binary can evaluate) over a human-gated review item wherever the signal exists.
+the work is in fact complete, otherwise `--backlog-ungate <id>` (plus
+`--backlog-edit` when its text changed) so the same id returns to actionable
+work. An `[operator-verify]` tag alone never justifies `agent:review`: retain the
+tag on a backlog item when operator proof is part of its eventual acceptance but
+agent-executable steps remain. Do not use `--review-edit` to describe new
+executable next steps after a blocker clears; ungate the item instead. Prefer
+automated completion detection (a log/state check the binary can evaluate) over
+a human-gated review item wherever the signal exists.
 
 `--done <id>` is the tracked-work completion flag. New guidance, plans, and
 recovery hints must not emit removed completion-alias spellings.

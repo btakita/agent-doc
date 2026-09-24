@@ -129,20 +129,48 @@ fn late_answered_free_text_strike_capture(
     committed_content: &str,
     current_content: &str,
 ) -> Result<Option<LateAnsweredFreeTextStrike>> {
-    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
-        return Ok(None);
-    };
-    if state.phase != agent_doc_turn::CyclePhase::Committed {
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+    if state
+        .as_ref()
+        .is_some_and(|state| state.phase != agent_doc_turn::CyclePhase::Committed)
+    {
         return Ok(None);
     }
-    let Some(capture) = agent_doc_cycle_state_io::load_closeout_projection(file)?
-        .and_then(|projection| projection.captured_response)
-        .filter(|capture| capture.cycle_id == state.cycle_id)
-    else {
-        return Ok(None);
+    let captured = if let Some(state) = state.as_ref() {
+        agent_doc_cycle_state_io::load_closeout_projection(file)?
+            .and_then(|projection| projection.captured_response)
+            .filter(|capture| capture.cycle_id == state.cycle_id)
+            .map(|capture| (capture.capture_id, capture.response_body))
+    } else {
+        None
+    };
+    let (capture_id, response_body) = if let Some(captured) = captured {
+        captured
+    } else {
+        let components = agent_doc_element::element::parse(committed_content)?;
+        let Some(exchange) = components
+            .iter()
+            .find(|component| component.name == "exchange")
+        else {
+            return Ok(None);
+        };
+        let Some(response_body) =
+            agent_doc_document::write_normalization::latest_response_block_from_exchange_body(
+                exchange.content(committed_content),
+            )
+        else {
+            return Ok(None);
+        };
+        (
+            format!(
+                "committed-head:{}",
+                agent_doc_hash::content_hash(&response_body)
+            ),
+            response_body,
+        )
     };
     if !agent_doc_turn::response_replay::response_materialized_in_content(
-        &capture.response_body,
+        &response_body,
         committed_content,
     ) {
         return Ok(None);
@@ -152,7 +180,7 @@ fn late_answered_free_text_strike_capture(
     }
     let Some(projection) = agent_doc_queue::queue_consume::project_answered_free_text_strike(
         committed_content,
-        &capture.response_body,
+        &response_body,
         // Committed HEAD is the historical fence. Reusing the pre-response
         // baseline can change queue node keys after the Exchange insertion and
         // hide the exact late strike this recovery is proving.
@@ -171,16 +199,16 @@ fn late_answered_free_text_strike_capture(
         )? == current_content
     };
     if exact_struck_target || exact_reaped_target {
-        return Ok(Some(LateAnsweredFreeTextStrike::Exact(capture.capture_id)));
+        return Ok(Some(LateAnsweredFreeTextStrike::Exact(capture_id)));
     }
     let recurring = current_content != committed_content
         && !agent_doc_queue::queue_consume::answered_free_text_head_node_keys(
             current_content,
-            &capture.response_body,
+            &response_body,
             Some(committed_content),
         )?
         .is_empty();
-    Ok(recurring.then_some(LateAnsweredFreeTextStrike::Recurring(capture.capture_id)))
+    Ok(recurring.then_some(LateAnsweredFreeTextStrike::Recurring(capture_id)))
 }
 
 #[derive(Debug, PartialEq, Eq)]

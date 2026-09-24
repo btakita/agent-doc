@@ -105,6 +105,35 @@ The product invariant is owned by `agent-doc-controller::dispatch::route_trigger
 The implementation and verbatim deterministic regression already landed in pushed source commit `275ab868e` and are present in installed agent-doc 0.35.418; local `main` matches `origin/main` for the source repository. The focused regression passed, the full `make check` suite passed with zero failures, `make install` completed, the private-name denylist found no matches, and CI run `36031416342` is green at current source HEAD `d01d15a8b`.
 
 The separate request to make plugin upgrades restart-free remains in the queue for its own implementation cycle; it was not conflated with this routing fix.
+api.md turn did not strike the completed queue item:
+```
+- ~~do [#implementhttpshaiven]~~
+- do [#havn1361contracts]
+```
+
+### Re: api.md terminal queue closeout — gpt-5.6-sol · 2026-09-24T17:03-04:00
+
+> **Queue prompt:**
+>
+> When the api.md queue was complete, the struck `- ~~🚧 #advance-review~~` item was not cleared.
+
+Fixed both queue-closeout defects and pushed agent-doc commit `965db70d3` (`fix(queue): atomically drain terminal resolutions`).
+
+The tracked-work mutation envelope now owns the complete terminal resolution set: `--done`, `--backlog-gate`, and `--review-resolve` all project matching queue transitions atomically with their backlog/review mutation. The invariant is now fail-closed: after an Open → Done/Gated/Resolved transition, no matching live queue head may remain, including when the editor retains the response write and later closeout stages are deferred. This fixes the `#implementhttpshaiven` / `#havn1361contracts` case.
+
+Answered free-text closeout now performs the terminal queue transition in the same projection. While later work exists, completed rows remain visible; when the last live prompt is resolved and only discardable residue remains, the queue body is cleared, marker-side `start`/`go`/`auto` is stripped, and frontmatter becomes `queue: stop`. No future preflight is required to remove the final struck row, fixing the `#advance-review` residue.
+
+Verification passed:
+
+- focused unit coverage for terminal free-text drain and idempotency;
+- integration coverage reproducing `--done implementhttpshaiven` plus `--backlog-edit` / `--backlog-gate havn1361contracts`, proving an empty stopped queue and the gated item in Review;
+- full `make check`;
+- `make install`;
+- latest upstream CI run green.
+
+The live `src/haiven-dev/tasks/api.md` session is not currently crashed: its owner process is alive, and the document now has `queue: stop` with an empty queue. The installed repair command correctly reports that `#havn1361contracts` is already drained.
+
+Installation updated the binary and editor packages. The running JetBrains process still has superseded plugin bytes mapped, so restart/reopen IntelliJ when convenient to activate the installed plugin generation; I did not restart it during this session.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -116,6 +145,7 @@ The separate request to make plugin upgrades restart-free remains in the queue f
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 - Please make plugin upgrades not require a restart.
 - ~~do [#runsubmitfirstmatch]~~
+- When the api.md queue was complete, the struck `- ~~🚧 #advance-review~~` item was not cleared.
 <!-- /agent:queue -->
 
 

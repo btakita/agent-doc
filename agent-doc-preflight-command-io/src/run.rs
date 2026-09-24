@@ -3984,6 +3984,118 @@ mod tests {
             "document-only drift should be committed, clearing the wedge"
         );
     }
+
+    #[test]
+    fn preflight_auto_commits_abandoned_prompt_queue_snapshot_and_continues() {
+        // #abandonedpromptcommit: a stale preflight can be abandoned after the
+        // prompt has already been mirrored into queue/backlog and checkpointed as
+        // the snapshot. The next Run Agent Doc invocation must perform the
+        // binary-owned commit recovery itself instead of asking for manual
+        // `commit` + `session-check` commands.
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+
+        let original = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "queue: go\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, original).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        commit_all(root, "add doc", None);
+
+        let live = original
+            .replace(
+                "<!-- agent:queue -->\n<!-- /agent:queue -->",
+                "<!-- agent:queue -->\n- do [#recover]\n<!-- /agent:queue -->",
+            )
+            .replace(
+                "<!-- agent:backlog -->\n<!-- /agent:backlog -->",
+                "<!-- agent:backlog -->\n- [ ] [#recover] answer stranded prompt\n<!-- /agent:backlog -->",
+            );
+        std::fs::write(&doc, &live).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &live,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&live), Some(&live)).unwrap();
+        agent_doc_cycle_state_io::record_turn_checkpoint(
+            &doc,
+            &["answer stranded prompt".to_string()],
+            Some("recover"),
+            None,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "repair_preflight_stale_prompt_cycle_abandoned",
+            Some(&live),
+            Some(&live),
+        )
+        .unwrap();
+
+        let unsafe_response = live.replace(
+            "<!-- agent:boundary:abc123 -->",
+            "### Re: answer stranded prompt — gpt-5\n\nUncommitted answer.\n<!-- agent:boundary:abc123 -->",
+        );
+        std::fs::write(&doc, &unsafe_response).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &unsafe_response,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        assert!(
+            !agent_doc_closeout_runtime_io::document_only_drift_is_commit_recoverable(&doc),
+            "an abandoned cycle with an uncommitted response must still fail closed"
+        );
+
+        std::fs::write(&doc, &live).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &live,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        assert!(
+            agent_doc_closeout_runtime_io::document_only_drift_is_commit_recoverable(&doc),
+            "the exact abandoned/no-response queue snapshot must be safe to commit"
+        );
+        run(&doc).expect("preflight must recover and continue the queue invocation");
+
+        let committed = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("preflight recovery must create a committed document");
+        assert!(
+            committed.contains("- do [#recover]")
+                && committed.contains("- [ ] [#recover] answer stranded prompt"),
+            "preflight recovery must commit the stranded prompt bookkeeping:\n{committed}"
+        );
+        let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("preflight_document_only_drift_auto_commit_succeeded file="),
+            "the automatic recovery boundary must be auditable:\n{log}"
+        );
+    }
+
     #[test]
     fn preflight_recovers_jb_cache_conflict_cancel_orphaned_capture_once() {
         let dir = setup_project();

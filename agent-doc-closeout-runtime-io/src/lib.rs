@@ -1852,10 +1852,16 @@ mod tests {
 ///
 /// `BoundaryOnly` (boundary / `(HEAD)` marker / answered-prompt-prefix artifacts)
 /// and `MetadataOnly` (queue / `queue_active` / status metadata, with
-/// user/response and tracked-item content byte-identical) are exactly the shapes
+/// user/response and tracked-item content byte-identical) are normally the shapes
 /// whose recovery command is `agent-doc commit` because no response body is at
-/// risk. `Content` drift — which includes every unreviewed user or response
-/// edit — is rejected and still fails closed.
+/// risk. One narrowly proven `Content` shape is also safe: stale preflight repair
+/// abandoned a prompt cycle after its queue/backlog mirror had already become the
+/// exact snapshot, the cycle has no response capture, and that snapshot adds a
+/// queue id without adding a response heading (`#abandonedpromptcommit`). In that
+/// state the next invocation must commit the stranded prompt bookkeeping and
+/// continue to the still-drainable queue head instead of asking the operator to
+/// run `commit` and `session-check` by hand. Every other `Content` drift still
+/// fails closed.
 pub fn document_only_drift_is_commit_recoverable(file: &Path) -> bool {
     use agent_doc_turn::closeout_recovery::CloseoutRecoveryDrift;
     let (Ok(Some(snapshot)), Ok(Some(head))) = (
@@ -1868,7 +1874,46 @@ pub fn document_only_drift_is_commit_recoverable(file: &Path) -> bool {
     matches!(
         agent_doc_turn::closeout_recovery::classify_snapshot_head_drift(&snapshot, &head),
         CloseoutRecoveryDrift::BoundaryOnly | CloseoutRecoveryDrift::MetadataOnly
-    )
+    ) || abandoned_prompt_queue_drift_is_commit_recoverable(file, &snapshot, &head)
+}
+
+fn abandoned_prompt_queue_drift_is_commit_recoverable(
+    file: &Path,
+    snapshot: &str,
+    head: &str,
+) -> bool {
+    let Ok(Some(state)) = agent_doc_cycle_state_io::load_with_closeout_projection(file) else {
+        return false;
+    };
+    if state.phase != agent_doc_turn::CyclePhase::Abandoned
+        || state.last_event != "repair_preflight_stale_prompt_cycle_abandoned"
+        || state.capture_id.is_some()
+        || state.response_sha256.is_some()
+        || state.had_pending_mutations
+        || state.prompt_targets.is_empty()
+    {
+        return false;
+    }
+
+    let Ok(current) = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "abandoned_prompt_queue_drift_recovery",
+    ) else {
+        return false;
+    };
+    if current != snapshot
+        || snapshot == head
+        || agent_doc_turn::document_drift::detect_bypassed_response_write_between(head, snapshot)
+            .is_some()
+    {
+        return false;
+    }
+
+    let head_queue_ids = agent_doc_queue::document_queue::queue_ids_including_struck(head);
+    let snapshot_queue_ids = agent_doc_queue::document_queue::queue_ids_including_struck(snapshot);
+    snapshot_queue_ids
+        .iter()
+        .any(|id| !head_queue_ids.contains(id))
 }
 
 pub fn closeout_recovery_hint(file: &Path) -> String {

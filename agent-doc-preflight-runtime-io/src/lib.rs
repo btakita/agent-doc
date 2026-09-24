@@ -294,8 +294,12 @@ pub fn enforce_no_uncommitted_closeout_drift(
         // clears the drift, so every following turn hits the same bail.
         //
         // When the drift is document-only there is no response body at risk, so
-        // run that remedy in place instead of printing it. Mirrors the
-        // jb_cache_conflict_cancel auto-commit above.
+        // run that remedy in place instead of printing it. This also includes the
+        // narrowly proven abandoned-prompt queue mirror: repair already made the
+        // prompt-bearing queue/backlog projection the exact snapshot, no response
+        // capture or heading exists, and the queue head remains executable
+        // (`#abandonedpromptcommit`). Mirrors the jb_cache_conflict_cancel
+        // auto-commit above.
         if session_check_effects.document_only_drift_is_commit_recoverable(file) {
             agent_doc_ops_log_io::log_op(
                 file,

@@ -1720,17 +1720,15 @@ mod tests {
     fn preflight_output_includes_semantic_diff_when_set() {
         let output = PreflightOutput {
             semantic_diff: Some(agent_doc_diff::semantic::SemanticDiffSummary {
-                schema_version: 1,
+                schema_version: 2,
                 changed_components: vec!["queue".to_string()],
                 node_events: vec![agent_doc_diff::semantic::SemanticNodeEvent {
                     component: "queue".to_string(),
                     node_key: "queue:0:task:0".to_string(),
                     op: "insert".to_string(),
-                    item_id: "task".to_string(),
+                    tracked_item_id: Some("task".to_string()),
                     before_index: None,
                     after_index: Some(0),
-                    previous_node_key: None,
-                    next_node_key: None,
                     before_preview: None,
                     after_preview: Some("- do [#task]".to_string()),
                 }],
@@ -1740,7 +1738,7 @@ mod tests {
         };
         let json = serde_json::to_string(&output).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed["semantic_diff"]["schema_version"], 1);
+        assert_eq!(parsed["semantic_diff"]["schema_version"], 2);
         assert_eq!(parsed["semantic_diff"]["changed_components"][0], "queue");
         assert_eq!(parsed["semantic_diff"]["node_events"][0]["op"], "insert");
     }

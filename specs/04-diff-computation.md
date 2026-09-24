@@ -33,7 +33,7 @@ Prompt-prefix normalization targets are narrower than prompt-target blocks: bare
 
 - `changed_components` in stable sorted order, including agent components and the `frontmatter` pseudo-component
 - `component_changes` with before/after bounded navigation handles (`component:<before|after>:<name>:<occurrence>`) and line/byte spans
-- markdown-AST node events for component items (`insert`, `remove`, `replace`, `move`, `strike`, `unstrike`) keyed by stable `node_key` / `item_id`
+- markdown-AST node events for component items (`insert`, `remove`, `replace`, `move`, `strike`, `unstrike`) keyed by stable, opaque `node_key`; schema v2 emits `tracked_item_id` only when the source node carries an explicit `[#id]`. A `node_key` is a CRDT/navigation address, never a valid `--done` target. Anonymous queue prompts keep their synthetic identity internal to `node_key`, and insertion-neighbor node keys are not exposed in preflight JSON.
 - prompt-bearing change previews in encounter order
 
 The semantic view is omitted when it would be empty. It must be bounded: preflight may include short previews, line/byte spans, handles, and node keys, but must not embed full component bodies or the full session document outside the existing raw diff fields.

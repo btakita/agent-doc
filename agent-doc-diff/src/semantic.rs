@@ -60,18 +60,18 @@ pub struct SemanticNavTarget {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SemanticNodeEvent {
     pub component: String,
+    /// Opaque CRDT/navigation address. This is never a valid `--done` target.
     pub node_key: String,
     pub op: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub item_id: String,
+    /// Explicit tracked-work id, when the document node actually carries one.
+    /// Synthetic free-text identities are deliberately omitted from preflight
+    /// JSON so agents cannot mistake them for backlog ids.
+    #[serde(default, alias = "item_id", skip_serializing_if = "Option::is_none")]
+    pub tracked_item_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub before_index: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after_index: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub previous_node_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub next_node_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub before_preview: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -109,11 +109,9 @@ pub fn semantic_diff_summary(
                 component: event.component,
                 node_key: event.node_key,
                 op: semantic_node_event_kind(event.kind).to_string(),
-                item_id: event.item_id,
+                tracked_item_id: event.explicit_item_id.then_some(event.item_id),
                 before_index: event.before_index,
                 after_index: event.after_index,
-                previous_node_key: event.previous_node_key,
-                next_node_key: event.next_node_key,
                 before_preview: event.before.as_deref().and_then(semantic_preview),
                 after_preview: event.after.as_deref().and_then(semantic_preview),
             }
@@ -152,7 +150,7 @@ pub fn semantic_diff_summary(
     });
 
     Some(SemanticDiffSummary {
-        schema_version: 1,
+        schema_version: 2,
         changed_components: changed_components.into_iter().collect(),
         component_changes,
         node_events,
@@ -392,7 +390,7 @@ mod tests {
 
         let summary = semantic_diff_summary(before, current, &prompt_changes).unwrap();
 
-        assert_eq!(summary.schema_version, 1);
+        assert_eq!(summary.schema_version, 2);
         assert!(
             summary
                 .changed_components
@@ -426,6 +424,56 @@ mod tests {
             PromptBearingChangeKind::PromptTarget
         );
         assert_eq!(summary.prompt_changes[0].text_preview, "do [#beta]");
+    }
+
+    #[test]
+    fn anonymous_queue_node_identity_is_not_advertised_as_a_tracked_item_id() {
+        let before = concat!(
+            "<!-- agent:queue -->\n",
+            "- Locate the source of the 500 error\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:queue -->\n",
+            "- Locate the source of the 500 error\n",
+            "- Write the plan into a md file.\n",
+            "- do [#ft-explicit] Close the real tracked item\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let summary = semantic_diff_summary(before, current, &[]).unwrap();
+        assert_eq!(summary.schema_version, 2);
+        let anonymous = summary
+            .node_events
+            .iter()
+            .find(|event| {
+                event.after_preview.as_deref() == Some("- Write the plan into a md file.")
+            })
+            .unwrap();
+        assert_eq!(anonymous.tracked_item_id, None);
+        let explicit = summary
+            .node_events
+            .iter()
+            .find(|event| {
+                event
+                    .after_preview
+                    .as_deref()
+                    .is_some_and(|text| text.contains("ft-explicit"))
+            })
+            .unwrap();
+        assert_eq!(explicit.tracked_item_id.as_deref(), Some("ft-explicit"));
+
+        let json = serde_json::to_value(&summary).unwrap();
+        let anonymous_json = json["node_events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|event| event["after_preview"] == "- Write the plan into a md file.")
+            .unwrap();
+        assert!(anonymous_json.get("tracked_item_id").is_none());
+        assert!(anonymous_json.get("item_id").is_none());
+        assert!(anonymous_json.get("previous_node_key").is_none());
+        assert!(anonymous_json.get("next_node_key").is_none());
     }
 
     #[test]

@@ -106,6 +106,12 @@ pub enum ItemSurface {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Item {
     pub id: String,
+    /// Whether `id` came from an explicit `[#id]` token in the document.
+    ///
+    /// Free-text nodes still receive a stable synthetic id for CRDT addressing,
+    /// but that identity is not a tracked-work id and must never be presented as
+    /// a valid `--done` target.
+    pub explicit_id: bool,
     pub text: String,
     pub raw: String,
     pub start_byte: usize,
@@ -282,9 +288,11 @@ fn parse_item(raw_line_content: &str, start_byte: usize, end_byte: usize) -> Ite
 
     let kind = classify(body);
     let text = body.trim().to_string();
+    let explicit_id = extract_bracket_id(&text).is_some();
     let id = item_id(&kind, &text);
     Item {
         id,
+        explicit_id,
         text,
         raw,
         start_byte,
@@ -307,9 +315,11 @@ fn parse_multiline_item(
 ) -> Item {
     let raw = source[start_byte..raw_end_byte].to_string();
     let kind = classify(&text);
+    let explicit_id = extract_bracket_id(&text).is_some();
     let id = item_id(&kind, &text);
     Item {
         id,
+        explicit_id,
         text,
         raw,
         start_byte,

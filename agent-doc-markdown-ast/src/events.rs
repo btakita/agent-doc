@@ -35,6 +35,9 @@ pub struct DocumentNodeEvent {
     pub node_key: String,
     pub kind: DocumentNodeEventKind,
     pub item_id: String,
+    /// True only when `item_id` is an explicit document `[#id]`, rather than the
+    /// synthetic identity used to address an anonymous/free-text node.
+    pub explicit_item_id: bool,
     pub before_index: Option<usize>,
     pub after_index: Option<usize>,
     pub before: Option<String>,
@@ -66,6 +69,7 @@ pub fn diff_node_events(before: &str, after: &str) -> Vec<DocumentNodeEvent> {
                 node_key: node.node_key.clone(),
                 kind: DocumentNodeEventKind::Remove,
                 item_id: node.item.id.clone(),
+                explicit_item_id: node.item.explicit_id,
                 before_index: Some(node.index),
                 after_index: None,
                 before: Some(node_source(before, node)),
@@ -87,6 +91,7 @@ pub fn diff_node_events(before: &str, after: &str) -> Vec<DocumentNodeEvent> {
             node_key: node.node_key.clone(),
             kind: DocumentNodeEventKind::Insert,
             item_id: node.item.id.clone(),
+            explicit_item_id: node.item.explicit_id,
             before_index: None,
             after_index: Some(node.index),
             before: None,
@@ -117,6 +122,7 @@ pub fn diff_node_events(before: &str, after: &str) -> Vec<DocumentNodeEvent> {
             node_key: node.node_key.clone(),
             kind,
             item_id: node.item.id.clone(),
+            explicit_item_id: node.item.explicit_id,
             before_index: Some(node.index),
             after_index: Some(after_node.index),
             before: Some(before_source),
@@ -159,6 +165,7 @@ pub fn diff_node_events(before: &str, after: &str) -> Vec<DocumentNodeEvent> {
                 node_key: (*node_key).to_string(),
                 kind: DocumentNodeEventKind::Move,
                 item_id: node.item.id.clone(),
+                explicit_item_id: node.item.explicit_id,
                 before_index: before_by_key
                     .get(*node_key)
                     .map(|before_node| before_node.index),

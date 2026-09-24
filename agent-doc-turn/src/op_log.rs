@@ -276,7 +276,7 @@ pub fn build_ops_from_semantic_diff(
             // before-index for removes. This feeds the exchange-tail
             // affectedness classifier.
             node_index: event.after_index.or(event.before_index),
-            item_id: event.item_id.clone(),
+            item_id: event.tracked_item_id.clone().unwrap_or_default(),
             op_kind: event.op.clone(),
             actor,
             clock: CausalClock {

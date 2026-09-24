@@ -44,6 +44,10 @@ const COMMAND_SUPERVISOR_FRESHNESS_TIMEOUT: Duration = Duration::from_millis(250
 const CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT: Duration = Duration::from_secs(5);
 const CONTROLLER_CRDT_REVISION_READ_TIMEOUT: Duration = Duration::from_millis(750);
 const CONTROLLER_CRDT_CURRENT_TEXT_TIMEOUT: Duration = Duration::from_secs(120);
+/// A whole-document CP replacement can rebuild an accreted CRDT lineage and
+/// synchronously queue editor rebootstrap. It is a document mutation, not a
+/// control-plane probe, so the generic five-second RPC deadline is too short.
+const CONTROLLER_CRDT_CP_WRITE_TIMEOUT: Duration = Duration::from_secs(120);
 /// `#lazily-hot-path` W1 — ceiling for a single server-side visible-write receipt
 /// await. Matches the CRDT current-text budget above: the convergence wait is
 /// legitimately long, so the client's real deadline (not a global hang budget)
@@ -6774,7 +6778,7 @@ pub fn apply_cp_write_via_controller_model_for_doc(
         component_scope: agent_doc_element::component_scope::current_component_write_scope()
             .map(|scope| scope.to_pairs()),
     };
-    let result: ControllerCrdtCpWriteResult = request_controller(
+    let result: ControllerCrdtCpWriteResult = request_controller_with_timeout(
         &project_root,
         ControllerRequest {
             command: "crdt_cp_write".to_string(),
@@ -6791,6 +6795,7 @@ pub fn apply_cp_write_via_controller_model_for_doc(
             command_kind: None,
             diagnostic_payload: Some(serde_json::to_string(&payload)?),
         },
+        CONTROLLER_CRDT_CP_WRITE_TIMEOUT,
     )?;
     Ok(result.write)
 }
@@ -28160,6 +28165,14 @@ mod tests {
             CONTROLLER_CRDT_CURRENT_TEXT_TIMEOUT >= Duration::from_secs(120),
             "current-text recovery can queue behind large controller store work; \
              the client timeout must stay above the observed 30s response tail"
+        );
+    }
+
+    #[test]
+    fn crdt_cp_write_timeout_allows_large_lineage_replacement() {
+        assert!(
+            CONTROLLER_CRDT_CP_WRITE_TIMEOUT >= Duration::from_secs(120),
+            "whole-document recovery can rebuild an accreted CRDT lineage; the client must not report failure while the controller is still applying it"
         );
     }
 

@@ -133,17 +133,33 @@ pub fn run(
         }
         rebuild_recovery_projections_from_current(file, &content)?;
         rebase_active_capture_after_preserve_session_reset(file, &content)?;
-        if force_disk
-            && let Some(outcome) =
-                agent_doc_crdt_relay_io::apply_disk_change_for_file(file, &content)?
-        {
-            agent_doc_ops_log_io::log_op(
+        if force_disk {
+            // The live hub normally belongs to the project controller, not this
+            // short-lived CLI process. Calling `apply_disk_change_for_file`
+            // here only repaired an embedded test hub; in production it saw no
+            // local hub and left the controller/editor on the stale canonical.
+            // Route the operator-approved disk cut through the ordinary CP
+            // compare-and-swap seam so the controller canonical and every live
+            // editor are re-bootstrapped from the same exact target.
+            let authority = agent_doc_document_realtime_io::try_resolve_current_document_content(
                 file,
-                &format!(
-                    "reset_preserve_session_force_disk_reconciled_canonical file={} outcome={outcome:?}",
-                    file.display(),
-                ),
-            );
+                "reset_preserve_session_force_disk_authority",
+            )?;
+            if authority != content {
+                let write = agent_doc_document_realtime_io::apply_cp_write_through_relay_authority(
+                    file,
+                    &authority,
+                    &content,
+                    "reset_preserve_session_force_disk_reconcile",
+                )?;
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "reset_preserve_session_force_disk_reconciled_canonical file={} outcome={write:?}",
+                        file.display(),
+                    ),
+                );
+            }
         }
         eprintln!(
             "Reset recovery projections for {} from current file while preserving session state",

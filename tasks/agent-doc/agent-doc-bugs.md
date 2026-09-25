@@ -297,6 +297,10 @@ Fixed and deployed.
 Also part of the same old stack trace. `CoroutineExceptionHandlerImpl` forwards the exception to IntelliJ’s error reporter; it is not the root cause.
 
 The relevant root cause remains the cross-classloader `TurnStateBannerRefresher` cast, already fixed in plugin 0.2.417.
+
+### Re: recovered response
+
+Same propagation chain. It adds no new diagnostic information; the root cause remains the already-fixed cross-classloader cast.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

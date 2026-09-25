@@ -567,12 +567,12 @@ fn route_owned_live_pane_busy_reason(
     shared: &SupervisorShared,
     harness: &agent_doc_harness::HarnessConfig,
 ) -> Option<String> {
-    if !shared.running.load(Ordering::Relaxed) {
-        return None;
-    }
-    let output = child_output_for_detection(shared);
-    if let Some(reason) = harness.dispatch_blocker_reason(&output) {
-        return Some(format!("live_pane_busy_blocked_prompt reason={reason}"));
+    let observed = route_owned_observed_live_pane_busy_reason(shared, harness);
+    if observed
+        .as_deref()
+        .is_some_and(|reason| reason.starts_with("live_pane_busy_blocked_prompt"))
+    {
+        return observed;
     }
     if shared
         .actor_state
@@ -580,6 +580,20 @@ fn route_owned_live_pane_busy_reason(
         .is_some_and(|state| state == agent_doc_controller::actor::ActorState::Ready)
     {
         return None;
+    }
+    observed
+}
+
+fn route_owned_observed_live_pane_busy_reason(
+    shared: &SupervisorShared,
+    harness: &agent_doc_harness::HarnessConfig,
+) -> Option<String> {
+    if !shared.running.load(Ordering::Relaxed) {
+        return None;
+    }
+    let output = child_output_for_detection(shared);
+    if let Some(reason) = harness.dispatch_blocker_reason(&output) {
+        return Some(format!("live_pane_busy_blocked_prompt reason={reason}"));
     }
     if current_child_prompt_visible(shared, harness) {
         return None;
@@ -617,6 +631,13 @@ impl agent_doc_supervisor_process::route_owned_completion::RouteOwnedCompletionS
 
     fn live_pane_busy_reason(&self, harness: &agent_doc_harness::HarnessConfig) -> Option<String> {
         route_owned_live_pane_busy_reason(self, harness)
+    }
+
+    fn observed_live_pane_busy_reason(
+        &self,
+        harness: &agent_doc_harness::HarnessConfig,
+    ) -> Option<String> {
+        route_owned_observed_live_pane_busy_reason(self, harness)
     }
 
     fn owned_pane_label(&self) -> String {
@@ -2857,6 +2878,28 @@ mod tests {
         );
 
         assert_eq!(route_owned_live_pane_busy_reason(&shared, &harness), None);
+    }
+
+    #[test]
+    fn route_owned_orphan_probe_does_not_trust_ready_actor_over_active_turn() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        let harness = agent_doc_harness::HarnessConfig::codex();
+        shared.running.store(true, Ordering::Relaxed);
+        *shared.actor_state.lock() = Some(agent_doc_controller::actor::ActorState::Ready);
+        record_recent_output(
+            &shared,
+            "• Working (1m 34s • esc to interrupt)\n\n› Write tests\n".as_bytes(),
+        );
+        record_recent_output(
+            &shared,
+            "gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used\n".as_bytes(),
+        );
+
+        let reason = route_owned_observed_live_pane_busy_reason(&shared, &harness)
+            .expect("destructive orphan probe must observe the active child turn");
+
+        assert!(reason.contains("live_pane_busy_blocked_prompt"));
+        assert!(reason.contains("active codex turn"));
     }
 
     #[test]

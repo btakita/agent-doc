@@ -84,6 +84,12 @@ pub trait RouteOwnedCompletionState: Send + Sync + 'static {
     fn actor_ready(&self) -> bool;
     fn ready_busy_blocker_reason(&self, harness: &HarnessConfig) -> Option<String>;
     fn live_pane_busy_reason(&self, harness: &HarnessConfig) -> Option<String>;
+    /// Observe the child renderer without trusting a possibly stale controller `Ready` state.
+    /// Destructive orphan cleanup must use this stronger proof: a live turn can coexist with
+    /// stale actor readiness while a resumed session is still producing output.
+    fn observed_live_pane_busy_reason(&self, harness: &HarnessConfig) -> Option<String> {
+        self.live_pane_busy_reason(harness)
+    }
     fn owned_pane_label(&self) -> String;
     /// Whether THIS supervisor's own pane currently sits in a `stash` window.
     ///
@@ -211,7 +217,7 @@ where
                         next_orphan_check =
                             Instant::now() + layout_provision_orphan_check_interval;
                         if state.owned_pane_is_stashed()
-                            && state.live_pane_busy_reason(&harness).is_none()
+                            && state.observed_live_pane_busy_reason(&harness).is_none()
                         {
                             let liveness_reason =
                                 route_owned_liveness_reason_for_file(&file, &facts);
@@ -407,6 +413,8 @@ mod tests {
     struct StashedCompletionState {
         started_at: Instant,
         stop_elapsed_millis: AtomicU64,
+        busy: bool,
+        busy_probe_count: AtomicU64,
     }
 
     impl RouteOwnedCompletionState for StashedCompletionState {
@@ -420,6 +428,11 @@ mod tests {
 
         fn live_pane_busy_reason(&self, _harness: &HarnessConfig) -> Option<String> {
             None
+        }
+
+        fn observed_live_pane_busy_reason(&self, _harness: &HarnessConfig) -> Option<String> {
+            self.busy_probe_count.fetch_add(1, Ordering::Relaxed);
+            self.busy.then(|| "observed active child turn".to_string())
         }
 
         fn owned_pane_label(&self) -> String {
@@ -512,14 +525,15 @@ mod tests {
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "body").unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body")).unwrap();
-        agent_doc_cycle_state_io::mark_committed(&doc, "test", Some("body"), Some("body"))
-            .unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "test", Some("body"), Some("body")).unwrap();
         let baseline = load_route_owned_cycle_state(&doc).unwrap().unwrap();
 
         let orphan_interval = Duration::from_millis(50);
         let state = Arc::new(StashedCompletionState {
             started_at: Instant::now(),
             stop_elapsed_millis: AtomicU64::new(u64::MAX),
+            busy: false,
+            busy_probe_count: AtomicU64::new(0),
         });
         let completed = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
@@ -548,5 +562,57 @@ mod tests {
             stopped_after >= orphan_interval.as_millis() as u64,
             "fresh layout provision was reaped after {stopped_after}ms before its {orphan_interval:?} admission grace elapsed"
         );
+    }
+
+    #[test]
+    fn active_child_output_blocks_stashed_layout_provision_reap() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "body").unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body")).unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "test", Some("body"), Some("body")).unwrap();
+        let baseline = load_route_owned_cycle_state(&doc).unwrap().unwrap();
+
+        let state = Arc::new(StashedCompletionState {
+            started_at: Instant::now(),
+            stop_elapsed_millis: AtomicU64::new(u64::MAX),
+            busy: true,
+            busy_probe_count: AtomicU64::new(0),
+        });
+        let completed = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut config = RouteOwnedCompletionConfig::with_start_purpose(
+            doc,
+            Some(baseline),
+            RouteOwnedReapPolicy::KeepAlive,
+            RouteOwnedStartPurpose::LayoutProvision,
+            HarnessConfig::codex(),
+        );
+        config.poll_interval = Duration::from_millis(1);
+        config.layout_provision_orphan_check_interval = Duration::from_millis(5);
+
+        let handle = spawn_route_owned_completion_thread(
+            Arc::clone(&state),
+            config,
+            Arc::clone(&completed),
+            Arc::clone(&stop),
+            None::<()>,
+            |_, _| {},
+        );
+        let probe_deadline = Instant::now() + Duration::from_secs(1);
+        while state.busy_probe_count.load(Ordering::Relaxed) == 0 && Instant::now() < probe_deadline
+        {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        assert!(
+            state.busy_probe_count.load(Ordering::Relaxed) > 0,
+            "completion thread never evaluated the orphan liveness guard"
+        );
+        assert!(!completed.load(Ordering::Relaxed));
+        assert_eq!(state.stop_elapsed_millis.load(Ordering::Relaxed), u64::MAX);
+        stop.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
     }
 }

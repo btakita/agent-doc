@@ -1,0 +1,126 @@
+{
+  "candidate_count": 2781,
+  "candidate_size_bytes": 45557799985,
+  "deletion_performed": false,
+  "distinct_workflow_runs": 722,
+  "generated_at": "2026-09-25T17:02:35.723915+00:00",
+  "github_release_count": 626,
+  "groups": {
+    "Book :: github-pages :: unresolved": {
+      "count": 14,
+      "size_bytes": 45724238
+    },
+    "Deploy mdBook site to Pages :: github-pages :: unresolved": {
+      "count": 16,
+      "size_bytes": 71980867
+    },
+    "PyPI :: wheel-aarch64-apple-darwin :: candidate": {
+      "count": 156,
+      "size_bytes": 2488455545
+    },
+    "PyPI :: wheel-aarch64-apple-darwin :: unresolved": {
+      "count": 101,
+      "size_bytes": 1572855924
+    },
+    "PyPI :: wheel-bootstrap :: candidate": {
+      "count": 13,
+      "size_bytes": 454389
+    },
+    "PyPI :: wheel-x86_64-apple-darwin :: candidate": {
+      "count": 156,
+      "size_bytes": 2727295053
+    },
+    "PyPI :: wheel-x86_64-apple-darwin :: unresolved": {
+      "count": 101,
+      "size_bytes": 1711798132
+    },
+    "PyPI :: wheel-x86_64-pc-windows-msvc :: candidate": {
+      "count": 154,
+      "size_bytes": 2647272693
+    },
+    "PyPI :: wheel-x86_64-pc-windows-msvc :: unresolved": {
+      "count": 100,
+      "size_bytes": 1675272966
+    },
+    "PyPI :: wheel-x86_64-unknown-linux-gnu :: candidate": {
+      "count": 156,
+      "size_bytes": 2777551715
+    },
+    "PyPI :: wheel-x86_64-unknown-linux-gnu :: unresolved": {
+      "count": 101,
+      "size_bytes": 1759810412
+    },
+    "Release :: agent-doc-aarch64-apple-darwin :: candidate": {
+      "count": 413,
+      "size_bytes": 6174599175
+    },
+    "Release :: agent-doc-aarch64-apple-darwin :: unresolved": {
+      "count": 5,
+      "size_bytes": 68002858
+    },
+    "Release :: agent-doc-aarch64-unknown-linux-gnu :: candidate": {
+      "count": 412,
+      "size_bytes": 6302050673
+    },
+    "Release :: agent-doc-aarch64-unknown-linux-gnu :: unresolved": {
+      "count": 8,
+      "size_bytes": 116536131
+    },
+    "Release :: agent-doc-x86_64-apple-darwin :: candidate": {
+      "count": 412,
+      "size_bytes": 6744090041
+    },
+    "Release :: agent-doc-x86_64-apple-darwin :: unresolved": {
+      "count": 8,
+      "size_bytes": 124801747
+    },
+    "Release :: agent-doc-x86_64-pc-windows-msvc :: candidate": {
+      "count": 411,
+      "size_bytes": 6917662119
+    },
+    "Release :: agent-doc-x86_64-pc-windows-msvc :: unresolved": {
+      "count": 3,
+      "size_bytes": 51200740
+    },
+    "Release :: agent-doc-x86_64-unknown-linux-gnu :: candidate": {
+      "count": 412,
+      "size_bytes": 7013377911
+    },
+    "Release :: agent-doc-x86_64-unknown-linux-gnu :: unresolved": {
+      "count": 8,
+      "size_bytes": 129848812
+    },
+    "Release :: agent-doc-x86_64-unknown-linux-musl :: candidate": {
+      "count": 86,
+      "size_bytes": 1764990671
+    },
+    "Release :: agent-doc-x86_64-unknown-linux-musl :: unresolved": {
+      "count": 1,
+      "size_bytes": 18175324
+    }
+  },
+  "pypi_release_count": 185,
+  "repository": "btakita/agent-doc",
+  "source_artifact_count": 3247,
+  "source_size_bytes": 52903808136,
+  "unresolved_categories": {
+    "GitHub Pages artifact has no Release/PyPI counterpart": {
+      "count": 30,
+      "size_bytes": 117705105
+    },
+    "matching GitHub Release asset is missing": {
+      "count": 33,
+      "size_bytes": 508565612
+    },
+    "matching PyPI platform file is missing": {
+      "count": 395,
+      "size_bytes": 6622546457
+    },
+    "workflow run is not associated with a version tag": {
+      "count": 8,
+      "size_bytes": 97190977
+    }
+  },
+  "unresolved_count": 466,
+  "unresolved_size_bytes": 7346008151
+}

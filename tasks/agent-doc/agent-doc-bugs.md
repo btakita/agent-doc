@@ -174,6 +174,35 @@ Proof completed:
 - Pushed to `main`; Pages CI is currently running.
 
 `api.md` and `fpe.md` were not overwritten or repaired from disk—their editor/session authority remains preserved. The implementation fixes the shared crash cause that interrupted them.
+### Re: provable Lazily topology — gpt-5 · 2026-09-25T10:00-04:00
+
+> **Queue prompt:**
+>
+> Make the lazily logic + graph topology provably correct.
+
+Implemented and shipped the compositional proof boundary in agent-doc commit `b5ea90530` (`proof: verify reactive graph topology`), pushed to `origin/main`.
+
+The proved invariant is: every admitted side effect descends from a current observation through the same lifetime-scoped Lazily graph, executes at most once for that observation generation, and publishes only an exact-generation receipt. Stale effects and effects whose scope has closed cannot mutate.
+
+The policy ownership and topology are now explicit:
+
+- Lifetime and connectivity are owned by `agent-doc-state-scope`; domain state machines remain the sole owners of their exhaustive transition policy.
+- The shared graph is `observation Source -> policy Computed -> idempotent Effect -> receipt Source`.
+- The existing workspace architecture guard rejects unreviewed private context islands and deprecated pull-style signal APIs; shared-scope Rust tests prove invalidation crosses cells created in one scope.
+- New `ReactiveTopology.tla` and its TLC configuration prove derived/receipt generation ordering, exact mutation and receipt lineage, stale- and closed-scope safety, at-most-once mutation per generation, and eventual exact receipt after observations quiesce under weak fairness.
+- Domain-specific pane-authority, supervisor, closeout, and CRDT-lineage models remain separate, so their assumptions stay visible instead of being hidden inside one over-broad model.
+
+The reference in `specs/process-topology.md` and its target `tasks/agent-doc/plan-reactive-topology-proof.md` are both committed in `b5ea90530`. The plan records the invariant, policy owner, exhaustive transition table, evidence inputs, reactive topology, imperative extraction audit, edit surfaces, verification, and explicit non-claims.
+
+Verification and delivery:
+
+- Focused TLA suite passed; the new model explored 109 distinct states with no invariant or temporal-property violation.
+- Full `make check` passed with exit 0 and native zero-failure results; all nine TLA models reported no errors.
+- Private-name denylist and whitespace checks passed.
+- `make install` completed successfully, including agent-doc 0.35.418, native library, JetBrains 0.2.398, and VS Code 0.2.71.
+- Source commit `b5ea90530` is pushed; CI run `36144581064` was in progress at the required one-shot observation.
+
+This is a real compositional proof of the stated finite graph contract, not a claim that arbitrary Rust, editor, tmux, filesystem, or network implementations are universally correct. Those implementation boundaries require their domain models plus the stepwise/differential/history simulation oracles already queued in `tasks/software/lazily.md`. The next agent-doc simulation-harness prompt remains queued as a separate cycle.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -183,7 +212,7 @@ Proof completed:
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- Make the lazily logic + graph topology provably correct.
+- 🚧 Make the lazily logic + graph topology provably correct.
 - Can we implement the simulation harness for agent-doc using lazily? Note the new backlog items in lazily.md. If anything is missing from the backlog & lazily featureset, please add backlog items into lazily.md.
 <!-- /agent:queue -->
 

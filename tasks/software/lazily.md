@@ -436,13 +436,33 @@ The proof is fail-closed at each layer:
 Committed and pushed `lazily-kt` commit `f8845b5` (`test: bind reactive graph assertion blocks`). CI run 36177824548 is queued; the preceding run 36176230067 is green.
 
 `#lzktbindpending` remains open for its final area: collections, 132 sites. Overall progress is 408/540; the remaining ledger is 132 collections `bind-pending` plus 25 derived reactive `unreachable` sites. I did not touch the misplaced `api.md` work or agent-doc infrastructure.
+
+### Re: #lzktbindpending — gpt-5 · 2026-09-25T15:35-04:00
+
+Completed the final collections pass and the full Kotlin assertion-block migration.
+
+All 132 reachable collections sites across 20 fixtures now bind through `AssertionKeys`. Primary ownership is pinned at Collections 8, Merge 15, CRDT 31, QueueCell 31, TopicCell 29, and WorkQueue 18; overlapping CollectionsFamily, QueueFamily, and WorkQueue runners also route through trackers with non-owning rung-zero mode so sibling parity cannot regress silently.
+
+The proof covers the failure modes the content ledger cannot see:
+
+- Exact positional site sets, numeric pins, and duplicate rejection cover five repeated-content twin pairs.
+- Nested objects enforce both fixture-side and actual-side key closure; arrays of records use whole-record equality.
+- CRDT step dispatch rejects unknown or multiple action discriminators.
+- The migration exposed and fixed real false-green paths: omitted semtree nodes, extra version-vector peers, unknown invalidation readers, quoted numeric similarity thresholds, absent handles satisfying `false`, and non-exact downstream rerun counts.
+- A production-path matrix mutates all 53 distinct expectation evaluator families (8 + 2 + 26 + 7 + 10). Each mutation must hit exactly once, fail, and name its family. Structural negatives cover unknown top/nested keys, skipped and duplicate sites, repeated-content twins, unknown CRDT actions, and sibling unknown-handle behavior.
+
+Fresh focused verification passed 50 tests with zero failures/errors/skips. Fresh `make check` passed Kotlin, 724/749 assertion-block coverage, interop, both Lean builds, assertion ordering, and CI-reach checks. The ledger moved exactly 157 → 25 and now contains 25 independently derived reactive-graph `unreachable` sites with zero `bind-pending`; negative pins 24 and 26 failed with the required `GREW` and `SHRANK` diagnostics.
+
+Committed and pushed `lazily-kt` commit `f055ad9` (`test: bind collections assertion blocks`). CI run 36180605509 is queued; the preceding reactive run 36177824548 is green.
+
+`#lzktbindpending` is complete: 540/540 reachable sites migrated. I did not touch the misplaced `api.md` work or agent-doc infrastructure.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ⏭️ do [#lzktbindpending]
+- ~~⏭️ do [#lzktbindpending]~~
 - 🚧 do [#lzmiseusepatch]
 - do [#lzsimlicense]: use Apache2 across all Lazily packages.
 - do [#lzdurableipgate]
@@ -466,7 +486,6 @@ Committed and pushed `lazily-kt` commit `f8845b5` (`test: bind reactive graph as
 - [ ] [#lzdurablejetstream] [lazily-rs] Implement the JetStream transport phase from tasks/software/plan-lazily-postgres-nats-valkey.md: typed durable pull ingress, explicit ACK only after the Postgres commit, stable publication identity and receipt recording, redelivery through inbox deduplication, progress ACKs that extend transport ownership only, bounded backpressure, drain, and durable poison-message disposition. Test every commit, ACK, publish, and receipt crash window against a real NATS test service; the broker must never authorize domain state.
 - [ ] [#lzdurablereconcile] [lazily-spec, lazily-rs] Add the complete-history projection and reconciliation layer from tasks/software/plan-lazily-postgres-nats-valkey.md: transaction-consistent snapshots with monotonic projection versions, ordered create/amend/retract event replay, checkpointed rebuild, dry-run drift reports, lag and health signals, and scheduled idempotent reconciliation through the transactional outbox. Prove replay equivalence, partial and final retractions, restart/resume, and that stale or cache-only reads never authorize a transition.
 - [ ] [#lzdurablefamily] [lazily family] Roll the durable capability model across the family after the Rust reference is proven: publish explicit Core, Client, Durable Host, Distributed Host, and Accelerated Host tiers; give non-Rust bindings typed ingress and projection clients first; require mature database and broker clients plus the shared crash/replay corpus before any binding claims native-host support; and add cross-language envelope-version, ordering, deduplication, receipt, and projection-fingerprint conformance without claiming false parity.
-- [ ] [#lzktbindpending] [lazily-kt] PHASE 2 of #lzktblockwalk, STAYS OPEN and UNBLOCKED -- 266 of 540 bind-pending sites migrated; bind-pending moved 540 -> 274 and the whole-ledger equality is 299 (25 unreachable + 274 bind-pending), verified on 2026-09-25 against scripts/conformance-unbound-blocks.txt and EXPECTED_LEDGERED_BLOCKS=299. PASSES: 93420ff bound ipc/root, familysync, protobuf, membership, and message-passing; f87afda bound lossless-tree; ac063bc bound temporal and presence; 2ea945a bound service and resilience; 37ffde1 bound egress; 933f6b8 bound windowing and rateshape; 663c89f + a0ad8a1 + 92bd1d2 bound coordination 29 and ingress 42 and retired exactly those 71 ledger rows. Cumulative measured sample: 250 of 266 bound blocks exposed a higher-rung assertion gap (94.0%), 16 of 266 required a production fix (6.0%); keep re-measuring per area rather than forecasting. REMAINING AREAS: collections 132, reactive-graph 88, stdlib 54. REACTIVE-GRAPH IS UNBLOCKED: run one tracker over each whole block gated on the first model pass, route every per-model comparison through check and the accumulator, and use AssertionKeys.assertKeyOutcome for fixture values; all thirteen key families in a reactive-graph block must migrate together. Take one or two areas per pass; delete exactly those ledger entries and lower the exact pin by exactly that count in the same commit; prove off-by-one failure in both directions. Every higher-rung failure surfaced by migration must be fixed, never excused. Use fresh JUnit XML timestamps and --rerun-tasks when evidence may be stale. Repo: src/lazily-kt
 - [ ] 🚧 [#lzmiseusepatch] [recommended] [agent-loop superproject] Prepare, do NOT apply, the point-of-use substitution patch for #lzambienttokenresolve. Produce a plan file holding (a) a ready-to-apply diff that stops .mise.toml from resolving CARGO_REGISTRY_TOKEN, NPM_TOKEN and PYPI_PUBLISH_TOKEN into every shell started from this tree, moving each to `VAR=$(passage ...) <publish command>` at its call site, and (b) the call-site inventory that proves nothing automated depends on the ambient values: every CI publish path is OIDC or a repo secret, and only ad-hoc twine upload uses them. Keep the $(passage ...) references in .env as documentation. Application and the CARGO_REGISTRY_TOKEN / NPM_TOKEN / PYPI_PUBLISH_TOKEN rotation both stay with the operator, since the .mise.toml change alters the environment of every session started from this tree.
 <!-- /agent:backlog -->
 

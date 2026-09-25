@@ -431,6 +431,45 @@ pub fn latest_ipc_proof_diagnostic_hint(file: &Path) -> Result<Option<String>> {
         .map(|event| format!("latest IPC proof diagnostic: {event}")))
 }
 
+/// Return the newest IPC proof diagnostic that belongs to `cycle_id`.
+///
+/// A session document keeps one append-only ops log across many turns. Using the
+/// newest file-scoped diagnostic for an open-cycle receipt can therefore attach
+/// an older turn's failure to the current closeout. IPC proof events have used
+/// both `cycle_id=` and the older `turn=` field, so accept either identity while
+/// refusing an unscoped event.
+pub fn latest_ipc_proof_diagnostic_for_cycle(
+    file: &Path,
+    cycle_id: &str,
+) -> Result<Option<String>> {
+    let Some((canonical, requested_display, content)) = ops_log_context_for_file(file)? else {
+        return Ok(None);
+    };
+    let canonical_display = canonical.display().to_string();
+    let cycle_id_field = format!("cycle_id={cycle_id}");
+    let turn_field = format!("turn={cycle_id}");
+    Ok(content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .rev()
+        .map(strip_timestamp_prefix)
+        .find(|event| {
+            OpsLogEvent::IpcProofInsufficient.is_line(event)
+                && (event.contains(&format!("file={canonical_display}"))
+                    || event.contains(&format!("file={requested_display}")))
+                && (event.contains(&cycle_id_field) || event.contains(&turn_field))
+        })
+        .map(str::to_string))
+}
+
+pub fn latest_ipc_proof_diagnostic_hint_for_cycle(
+    file: &Path,
+    cycle_id: &str,
+) -> Result<Option<String>> {
+    Ok(latest_ipc_proof_diagnostic_for_cycle(file, cycle_id)?
+        .map(|event| format!("latest IPC proof diagnostic: {event}")))
+}
+
 pub fn detect_write_completed_commit_missing(file: &Path) -> Result<Option<String>> {
     Ok(last_ops_event(file)?.filter(|event| is_write_completed_commit_missing_event(event)))
 }
@@ -550,12 +589,9 @@ mod tests {
     fn primed_turn_attribution_survives_source_removal_inside_scope() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = make_project(tmp.path());
-        let started = agent_doc_cycle_state_io::start_preflight(
-            &doc,
-            Some("---\n---\n"),
-            Some("---\n---\n"),
-        )
-        .unwrap();
+        let started =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some("---\n---\n"), Some("---\n---\n"))
+                .unwrap();
 
         let _scope = begin_turn_attribution_scope();
         prime_turn_attribution(&doc);
@@ -863,6 +899,32 @@ mod tests {
         let diagnostic = latest_ipc_proof_diagnostic(&doc).unwrap().unwrap();
         assert!(diagnostic.contains("invariant=missing_response_probe"));
         assert!(diagnostic.contains("recovery=retry_without_disk_write"));
+    }
+
+    #[test]
+    fn latest_ipc_proof_diagnostic_for_cycle_ignores_older_turn() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        std::fs::write(
+            tmp.path().join(".agent-doc/logs/ops.log"),
+            format!(
+                "[100] ipc_proof_insufficient file={} turn=cycle-current invariant=current recovery=retry_without_disk_write\n[101] ipc_proof_insufficient file={} turn=cycle-old invariant=stale recovery=retry_without_disk_write\n",
+                doc.display(),
+                doc.display(),
+            ),
+        )
+        .unwrap();
+
+        let diagnostic = latest_ipc_proof_diagnostic_for_cycle(&doc, "cycle-current")
+            .unwrap()
+            .unwrap();
+        assert!(diagnostic.contains("invariant=current"));
+        assert!(!diagnostic.contains("invariant=stale"));
+        assert!(
+            latest_ipc_proof_diagnostic_for_cycle(&doc, "cycle-missing")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

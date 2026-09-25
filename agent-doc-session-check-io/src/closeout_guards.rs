@@ -319,9 +319,10 @@ pub fn open_cycle_message(
     file: &Path,
     state: &agent_doc_cycle_state_io::CycleState,
 ) -> Result<String> {
-    let ipc_hint = agent_doc_ops_log_io::latest_ipc_proof_diagnostic_hint(file)?
-        .map(|hint| format!(" {hint}"))
-        .unwrap_or_default();
+    let ipc_hint =
+        agent_doc_ops_log_io::latest_ipc_proof_diagnostic_hint_for_cycle(file, &state.cycle_id)?
+            .map(|hint| format!(" {hint}"))
+            .unwrap_or_default();
     Ok(agent_doc_workflow::session_check::open_cycle_message(
         agent_doc_workflow::session_check::OpenCycleMessage {
             file: &state.file,

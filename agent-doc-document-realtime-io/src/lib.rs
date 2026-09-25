@@ -1074,6 +1074,79 @@ fn await_serialized_atomic_write_projection(
     }
 }
 
+/// Await the strict visible-editor receipt for an exact canonical target.
+///
+/// `delivery_converged` is only the availability barrier: it can become true
+/// when a silent replica is released. The delivery-version Source still moves
+/// when a real visible ACK arrives, so follow that edge rather than returning a
+/// retained command failure or polling the document.
+fn await_visible_editor_projection_receipt(path: &Path, target_hash: &str) -> Result<bool> {
+    let started = std::time::Instant::now();
+    let mut controller_cursor = None;
+    let mut fallback_backoff_ms = CRDT_PROJECTION_FALLBACK_BACKOFF_INITIAL_MS;
+    loop {
+        let current = observe_live_editor_authority_after_model_ensure(
+            path,
+            "serialized_atomic_write_visible_receipt_wait",
+        )?;
+        let agent_doc_crdt_relay_io::CurrentText::Current {
+            ref text,
+            delivery_version,
+            ..
+        } = current
+        else {
+            return Ok(false);
+        };
+        if agent_doc_hash::content_hash(text) != target_hash {
+            return Ok(false);
+        }
+        if agent_doc_crdt_relay_io::visible_delivery_projected_for_file(path)?.unwrap_or(false) {
+            return Ok(true);
+        }
+        let remaining = std::time::Duration::from_millis(
+            CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS
+                .saturating_sub(started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64),
+        );
+        if remaining.is_zero() {
+            return Ok(false);
+        }
+        if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(path) {
+            let observed = agent_doc_crdt_relay_io::await_delivery_revision_change_for_file(
+                path,
+                delivery_version,
+                remaining,
+            )?;
+            if observed.is_none_or(|observed| observed.version == delivery_version) {
+                return Ok(false);
+            }
+            continue;
+        }
+        match agent_doc_controller_io::project_controller::
+            subscribe_document_delivery_wakes_for_file(path, controller_cursor, remaining)
+        {
+            Ok(subscription) => {
+                controller_cursor = Some(
+                    agent_doc_controller_io::project_controller::ControllerStatePlaneCursor {
+                        controller_generation: subscription.controller_generation,
+                        plane_version: subscription.latest_version,
+                    },
+                );
+                if subscription.timed_out && !subscription.changed {
+                    return Ok(false);
+                }
+            }
+            Err(_) => {
+                let sleep_ms = fallback_backoff_ms.min(
+                    remaining.as_millis().min(u128::from(u64::MAX)) as u64,
+                );
+                std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
+                fallback_backoff_ms = CRDT_PROJECTION_FALLBACK_BACKOFF_POLICY
+                    .next_ms(fallback_backoff_ms, false);
+            }
+        }
+    }
+}
+
 fn atomic_write_rebased_through_authority_body(
     path: &Path,
     projection_base: &str,
@@ -1163,7 +1236,7 @@ fn atomic_write_rebased_through_authority_body(
             // This is a strict tightening: `visible_delivery_projected` implies
             // `delivery_converged`, so every case that already refused still
             // refuses, with the same message.
-            let editor_receipt =
+            let mut editor_receipt =
                 agent_doc_crdt_relay_io::visible_delivery_projected_for_file(path)?
                     .unwrap_or(false);
             if !relay_write.delivery_converged
@@ -1185,11 +1258,15 @@ fn atomic_write_rebased_through_authority_body(
                     ),
                 ));
             }
-            match current {
+            if matches!(
+                &current,
                 agent_doc_crdt_relay_io::CurrentText::Current { text, .. }
-                    if agent_doc_hash::content_hash(&text) == relay_write.content_hash
-                        && !editor_receipt =>
-                {
+                    if agent_doc_hash::content_hash(text) == relay_write.content_hash
+            ) && !editor_receipt
+            {
+                editor_receipt =
+                    await_visible_editor_projection_receipt(path, &relay_write.content_hash)?;
+                if !editor_receipt {
                     return Err(retained_refusal(
                         path,
                         format!(
@@ -1199,6 +1276,8 @@ fn atomic_write_rebased_through_authority_body(
                         ),
                     ));
                 }
+            }
+            match current {
                 agent_doc_crdt_relay_io::CurrentText::Current { text, .. }
                     if agent_doc_hash::content_hash(&text) == relay_write.content_hash =>
                 {
@@ -1351,7 +1430,10 @@ fn canonical_editor_projection_is_persisted(
     canonical: &str,
     source: &str,
 ) -> Result<bool> {
-    if canonical_disk_projection_is_exact(path, canonical)
+    let visible_editor_receipt =
+        agent_doc_crdt_relay_io::visible_delivery_projected_for_file(path)?.unwrap_or(false);
+    if visible_editor_receipt
+        && canonical_disk_projection_is_exact(path, canonical)
         && let agent_doc_crdt_relay_io::CurrentText::Current {
             text,
             live_editors,
@@ -1365,7 +1447,8 @@ fn canonical_editor_projection_is_persisted(
     {
         return Ok(true);
     }
-    let ready_for_native_save = matches!(
+    let ready_for_native_save = visible_editor_receipt
+        && matches!(
         observe_live_editor_authority_after_model_ensure(
             path,
             "editor_projection_native_save_gate",
@@ -1381,7 +1464,7 @@ fn canonical_editor_projection_is_persisted(
             live_editors,
             delivery_converged,
         )
-    );
+        );
     let mut save_diagnosis = "native_save_gate_not_ready".to_string();
     if ready_for_native_save {
         let outcome = agent_doc_crdt_relay_io::request_native_save_for_current_projection(
@@ -1470,12 +1553,17 @@ fn await_canonical_editor_projection_persisted(
     if canonical_editor_projection_is_persisted(path, canonical, source)? {
         return Ok(true);
     }
+    if !await_visible_editor_projection_receipt(path, &agent_doc_hash::content_hash(canonical))? {
+        return Ok(false);
+    }
+    if canonical_editor_projection_is_persisted(path, canonical, source)? {
+        return Ok(true);
+    }
     let started = std::time::Instant::now();
     let mut backoff_ms = CRDT_PROJECTION_FALLBACK_BACKOFF_INITIAL_MS;
     while started.elapsed()
         < std::time::Duration::from_millis(CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS)
     {
-        std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
         let agent_doc_crdt_relay_io::CurrentText::Current {
             text,
             live_editors,
@@ -1492,6 +1580,10 @@ fn await_canonical_editor_projection_persisted(
         {
             return Ok(false);
         }
+        // The strict delivery receipt is reactive. The editor's filesystem save
+        // has no corresponding CRDT revision edge, so retain the bounded fallback
+        // only for that final native-save projection.
+        std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
         if canonical_disk_projection_is_exact(path, canonical) {
             agent_doc_ops_log_io::log_op(
                 path,
@@ -2402,7 +2494,7 @@ pub fn settle_projected_captured_response_through_authority(
         return Ok(None);
     }
 
-    if !canonical_editor_projection_is_persisted(
+    if !await_canonical_editor_projection_persisted(
         path,
         &text,
         "projected_captured_response_settlement",
@@ -8941,8 +9033,7 @@ mod tests {
     #[test]
     fn post_projection_race_replaces_a_baseline_queue_prefix_with_the_completed_edit() {
         let partial_prompt = "- Review the proposed change.\n";
-        let complete_prompt =
-            "- Review the proposed change. How is the final revision handled?\n";
+        let complete_prompt = "- Review the proposed change. How is the final revision handled?\n";
         let base = concat!(
             "---\nqueue: go\n---\n\n",
             "<!-- agent:queue go -->\n",
@@ -8966,7 +9057,11 @@ mod tests {
         let collapsed = collapse_progressive_queue_projection(base, &raced_projection)
             .expect("the completed live edit must supersede its stale baseline prefix");
         assert_eq!(collapsed.matches(complete_prompt.trim_end()).count(), 1);
-        assert!(!collapsed.lines().any(|line| line == partial_prompt.trim_end()));
+        assert!(
+            !collapsed
+                .lines()
+                .any(|line| line == partial_prompt.trim_end())
+        );
 
         let merged = rebase_agent_candidate_over_editor_cut(base, &agent_target, &collapsed)
             .expect("the agent response should rebase over the completed queue edit");

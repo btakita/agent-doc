@@ -2335,12 +2335,14 @@ Body\n\
     fn session_check_open_cycle_surfaces_ipc_proof_diagnostic() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = make_project(tmp.path());
-        agent_doc_cycle_state_io::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        let state =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
         agent_doc_ops_log_io::log_op(
             &doc,
             &format!(
-                "ipc_proof_insufficient file={} source=file_ipc patch_id=p1 invariant=no_ack recovery=retry_without_disk_write",
-                doc.display()
+                "ipc_proof_insufficient file={} source=file_ipc patch_id=p1 turn={} invariant=no_ack recovery=retry_without_disk_write",
+                doc.display(),
+                state.cycle_id,
             ),
         );
 

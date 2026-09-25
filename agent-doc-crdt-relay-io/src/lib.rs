@@ -4333,6 +4333,43 @@ pub fn await_delivery_convergence_for_file(
     }
 }
 
+/// Await the next delivery-cell revision even when the availability barrier is
+/// already converged.
+///
+/// Strict persistence callers cannot use convergence as a terminal condition:
+/// a silent-replica release makes that barrier true without manufacturing the
+/// later visible-editor ACK. This subscription observes only the revision edge
+/// and never charges or releases the availability barrier.
+pub fn await_delivery_revision_change_for_file(
+    file: &Path,
+    after_version: u64,
+    wait: std::time::Duration,
+) -> Result<Option<agent_doc_document_realtime::crdt_relay::DeliveryConvergenceWitness>> {
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
+    let Some(handle) = hub_handle(&document_hash) else {
+        return Ok(None);
+    };
+    let deadline = std::time::Instant::now().checked_add(wait);
+    loop {
+        let (witness, subscription) = {
+            let hub = handle.lock();
+            (
+                hub.delivery_convergence_witness(),
+                hub.delivery_convergence_subscription(),
+            )
+        };
+        if witness.version != after_version || wait.is_zero() {
+            return Ok(Some(witness));
+        }
+        let remaining = deadline
+            .map(|deadline| deadline.saturating_duration_since(std::time::Instant::now()))
+            .unwrap_or(wait);
+        if remaining.is_zero() || !subscription.wait_for_change(after_version, remaining) {
+            return delivery_convergence_witness_for_file(file);
+        }
+    }
+}
+
 /// How long one charged sub-wait parks for (`#silentbarrierneverreleases`).
 ///
 /// Sized so a caller spending its whole budget can exhaust
@@ -4880,6 +4917,64 @@ mod tests {
             visible_delivery_projected_for_file(&file).unwrap(),
             Some(false),
             "the process-local persistence witness must preserve the distinction"
+        );
+    }
+
+    #[test]
+    fn converged_revision_cursor_waits_for_later_visible_receipt() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("converged-revision-cursor.md");
+        std::fs::write(&file, "# baseline\n").unwrap();
+        let pending = with_hub_seeded_from_file(&file, |hub| {
+            hub.register(52).unwrap();
+            hub.apply_canonical_replace("# baseline\n", "# retained\n")
+                .unwrap();
+            for _ in 0..=agent_doc_document_realtime::crdt_relay::MAX_REDELIVERIES_WITHOUT_ACK {
+                assert_eq!(hub.pending_updates(52).unwrap().len(), 1);
+            }
+            hub.pending_updates(52).unwrap().remove(0)
+        })
+        .unwrap();
+        let before = delivery_convergence_witness_for_file(&file)
+            .unwrap()
+            .expect("seeded hub");
+        assert!(before.converged);
+        assert_eq!(
+            visible_delivery_projected_for_file(&file).unwrap(),
+            Some(false)
+        );
+
+        let waiter_file = file.clone();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            let observed = await_delivery_revision_change_for_file(
+                &waiter_file,
+                before.version,
+                std::time::Duration::from_secs(2),
+            )
+            .unwrap()
+            .expect("hub remains observed");
+            done_tx.send(observed).unwrap();
+        });
+        assert!(
+            done_rx
+                .recv_timeout(std::time::Duration::from_millis(25))
+                .is_err()
+        );
+
+        with_existing_hub(&file, |hub| {
+            hub.ack_delivery(52, &pending.patch_id, pending.generation)
+                .unwrap()
+        })
+        .unwrap();
+        let after = done_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap();
+        waiter.join().unwrap();
+        assert_ne!(after.version, before.version);
+        assert_eq!(
+            visible_delivery_projected_for_file(&file).unwrap(),
+            Some(true)
         );
     }
 

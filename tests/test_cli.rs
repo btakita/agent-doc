@@ -6943,8 +6943,9 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
         );
     }
     assert!(
-        closeout_guards.contains("agent_doc_ops_log_io::latest_ipc_proof_diagnostic_hint("),
-        "closeout_guards should call focused ops-log IO directly"
+        closeout_guards
+            .contains("agent_doc_ops_log_io::latest_ipc_proof_diagnostic_hint_for_cycle("),
+        "closeout_guards should call cycle-scoped focused ops-log IO directly"
     );
 }
 

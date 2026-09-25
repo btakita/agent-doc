@@ -254,6 +254,32 @@ Verification passed:
 - GitHub Actions CI run `36100288768`
 
 Pushed `lazily-go` commit `9fd8bb5` (`feat: add deterministic scenario generation`).
+
+### Re: #lzsimfaults — gpt-5 · 2026-09-25T02:03:06-04:00
+
+> **Queue prompt:**
+>
+> do [#lzsimfaults]
+
+
+Implemented and pushed deterministic materialized fault plans and generic simulated-port boundaries in `lazily-go`.
+
+- Added versioned `SimFaultPlan` / `SimFaultRule` data with stable IDs, backward causal references, canonical Go-local bytes/digests, deterministic seed/index materialization, isolated selection/payload streams, and dependency-preserving plan shrinking.
+- Added delay, drop, duplicate, reorder, partition/heal, crash/restart, timeout/cancel, stale response, optimistic conflict, commit/rollback, and logical-clock-advance fault kinds.
+- Added a generic `SimFaultPort[Request, Response]` whose adapter is explicitly deterministic and simulated-only. Real database, broker, operating-system, clock, and network clients are forbidden inside `SimWorld` and remain the responsibility of separate conformance tests.
+- Fault rules are one-shot materialized events; partitions persist until a declared heal. Response deliveries use ordinary `SimWorld` scheduling, so delay/reorder/clock effects obey the existing `(time, ordinal)` queue, duplicate copies receive stable FIFO ordinals, and crash/restart uses the actor lifecycle scheduler.
+- Every call/result, injection, ongoing partition effect, and recovery is trace-visible. Duplicate fan-out prevalidates queue, ordinal, trace, IDs, payloads, and the complete response batch before scheduling.
+- Added deterministic stale-response caching and frozen/cloned response/fault payloads at the port boundary.
+- Added tests covering byte-identical/order-independent plan materialization and replay, all fault kinds, real delivery order, drop/duplicate behavior, persistent partition/heal recovery, actor crash/restart, timeout/cancel/stale/conflict/commit/rollback outcomes, logical clock advancement, trace visibility, and causal one-removal-minimal shrinking.
+
+Verification passed:
+
+- `go test -race ./...`
+- `go test ./... -count=10`
+- `make check`
+- GitHub Actions CI run `36101059446`
+
+Pushed `lazily-go` commit `d9557cf` (`feat: add deterministic simulation faults`).
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -265,7 +291,7 @@ Pushed `lazily-go` commit `9fd8bb5` (`feat: add deterministic scenario generatio
 - ~~do [#lzsimspec]~~
 - ~~do [#lzsimworldgo]~~
 - ~~do [#lzsimgen]~~
-- do [#lzsimfaults]
+- ~~do [#lzsimfaults]~~
 - do [#lzsimoracle]
 - do [#lzsimconformance]
 - ⏭️ do [#lzktbindpending]
@@ -284,7 +310,6 @@ Pushed `lazily-go` commit `9fd8bb5` (`feat: add deterministic scenario generatio
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzsimlicense] [operator-decision, lazily-spec] Resolve the implementation-admission blocker in tasks/software/plan-lazily-simulation.md before #lzsimspec: an authorized owner selects and records the repository license and fixture reuse terms; then add matching project metadata, a generated third-party inventory from uv.lock, and provenance/license records for all 156 canonical fixtures and nine vendored Go copies. Until resolved, do not publish or copy simulation specifications or fixtures through lazily-spec.
-- [ ] [#lzsimfaults] [lazily-go] Add deterministic fault plans at generic port boundaries for delay, drop, duplicate, reorder, partition/heal, crash/restart, timeout/cancel, stale response, optimistic conflict, commit/rollback outcome, and clock advance. Record every injection and recovery in the trace, keep the schedule replayable and shrinkable, and state explicitly that these modeled faults do not replace real database, broker, operating-system, or network conformance tests.
 - [ ] [#lzsimoracle] [lazily-spec, lazily-go] Add stepwise invariant, reference-model, differential, and history checkers: compare observations after every action, bind ReplayHarness fingerprints to the exact trace, support safety and bounded-liveness assertions, and apply linearizability checks only to surfaces that claim it. Add mutation tests that prove each oracle catches a seeded defect, and prevent a simulator-only implementation from becoming the sole oracle for the same behavior.
 - [ ] [#lzsimconformance] [lazily-go, consumer adapters] Publish a generic consumer simulation testkit and example with interchangeable simulated and real adapters. Require consumer integration to reuse production reducers and narrow ports, run generated histories against the in-memory world plus selected real Postgres and NATS services, and retain small stubs only at nondeterministic external boundaries. Keep all consumer-specific names and artifacts outside Lazily, and document simulation as a complement to unit, contract, and real-infrastructure tests rather than a blanket mock replacement.
 - [ ] [#lzdurableipgate] [lazily family] Before durable-runtime implementation, record the public-pattern and provenance gate for tasks/software/plan-lazily-postgres-nats-valkey.md: cite Event Sourcing and CQRS, transactional inbox/outbox, idempotent consumers, at-least-once delivery, Postgres queue claiming, and JetStream ACK/redelivery semantics from public primary or official sources; inventory dependency licenses; require independently authored Lazily APIs and conformance fixtures; exclude Haiven names, schemas, events, policies, incidents, and code; and obtain the written prior-work and employer boundary described by the plan before employer-related implementation.

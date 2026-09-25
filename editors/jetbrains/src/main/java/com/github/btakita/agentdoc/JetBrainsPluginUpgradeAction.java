@@ -16,15 +16,18 @@ import java.util.concurrent.atomic.AtomicReference;
 /** Freshly loaded implementation of one JetBrains plugin package replacement. */
 public final class JetBrainsPluginUpgradeAction {
     private static final String PLUGIN_ID = "com.github.btakita.agent-doc";
+    private static final String LIFECYCLE_CLASS =
+        "com.github.btakita.agentdoc.PluginLifecycleListener";
 
     private JetBrainsPluginUpgradeAction() {}
 
     public static String run(String archiveValue, String pluginsDirValue, String expectedVersion) {
         AtomicReference<String> result = new AtomicReference<>();
         AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicReference<IdeaPluginDescriptorImpl> replacement = new AtomicReference<>();
         ApplicationManager.getApplication().invokeAndWait(() -> {
             try {
-                result.set(runOnEdt(archiveValue, pluginsDirValue, expectedVersion));
+                result.set(runOnEdt(archiveValue, pluginsDirValue, expectedVersion, replacement));
             } catch (Throwable caught) {
                 failure.set(caught);
             }
@@ -32,10 +35,20 @@ public final class JetBrainsPluginUpgradeAction {
         if (failure.get() != null) {
             throw new IllegalStateException(failure.get().getMessage(), failure.get());
         }
-        return result.get();
+        IdeaPluginDescriptorImpl loaded = replacement.get();
+        if (loaded == null) {
+            return result.get();
+        }
+        int attachedDocuments = initializeOpenProjectsAfterDynamicLoad(loaded);
+        return result.get() + ":documents=" + attachedDocuments;
     }
 
-    private static String runOnEdt(String archiveValue, String pluginsDirValue, String expectedVersion) {
+    private static String runOnEdt(
+        String archiveValue,
+        String pluginsDirValue,
+        String expectedVersion,
+        AtomicReference<IdeaPluginDescriptorImpl> replacement
+    ) {
         Path archive = Path.of(archiveValue).toAbsolutePath().normalize();
         Path pluginsDir = Path.of(pluginsDirValue).toAbsolutePath().normalize();
 
@@ -60,13 +73,38 @@ public final class JetBrainsPluginUpgradeAction {
 
         boolean loaded = PluginInstaller.installAndLoadDynamicPlugin(archive, current);
         IdeaPluginDescriptor actualDescriptor = PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID));
-        if (!loaded || actualDescriptor == null || !expectedVersion.equals(actualDescriptor.getVersion())) {
-            String actual = actualDescriptor == null ? "missing" : actualDescriptor.getVersion();
+        if (!(actualDescriptor instanceof IdeaPluginDescriptorImpl actual)
+            || !loaded
+            || !expectedVersion.equals(actual.getVersion())) {
+            String actualVersion = actualDescriptor == null ? "missing" : actualDescriptor.getVersion();
             throw new IllegalStateException(
-                "dynamic install returned " + loaded + "; expected " + expectedVersion + ", loaded " + actual
+                "dynamic install returned " + loaded + "; expected " + expectedVersion + ", loaded " + actualVersion
             );
         }
+        replacement.set(actual);
         return "ok:" + expectedVersion;
+    }
+
+    private static int initializeOpenProjectsAfterDynamicLoad(IdeaPluginDescriptorImpl descriptor) {
+        try {
+            Class<?> lifecycle = Class.forName(
+                LIFECYCLE_CLASS,
+                true,
+                descriptor.getPluginClassLoader()
+            );
+            return (Integer) lifecycle
+                .getMethod("initializeOpenProjectsAfterDynamicLoad")
+                .invoke(null);
+        } catch (ReflectiveOperationException failure) {
+            Throwable cause = failure instanceof java.lang.reflect.InvocationTargetException invocation
+                && invocation.getCause() != null
+                ? invocation.getCause()
+                : failure;
+            throw new IllegalStateException(
+                "replacement plugin did not reclaim open documents: " + cause.getMessage(),
+                cause
+            );
+        }
     }
 
     static boolean sameInstallRoot(Path actual, Path expected) {

@@ -59,7 +59,10 @@ system-classloader upgrade bridge. The bridge first verifies that the live
 plugin root belongs to the installation being updated, then calls JetBrains'
 dynamic install-and-load API with the complete ZIP. This makes unload, on-disk
 replacement, and new-classloader activation one IDE-owned transaction; the
-installer must verify both the loaded version and the final package bytes. It
+replacement must initialize every already-open project and synchronously
+reattach each eligible open document before the installer reports success. The
+installer must verify the loaded version, those live replica receipts, and the
+final package bytes. It
 may replace the directory directly only when every discovered IDE reports that
 it does not own that plugin root. Attach or dynamic-unload failure is fail-closed
 and must not be papered over by unlinking the JAR behind the live process.

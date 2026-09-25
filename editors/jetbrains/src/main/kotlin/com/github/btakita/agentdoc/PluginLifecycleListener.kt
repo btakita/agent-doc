@@ -13,6 +13,7 @@ import com.intellij.openapi.project.ProjectManagerListener
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.wm.IdeFrame
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Owns per-project startup and cleanup for both project close and dynamic plugin unload.
@@ -26,6 +27,7 @@ class PluginLifecycleListener : ProjectManagerListener {
         // Force creation of the application service whose Disposable boundary is plugin unload.
         ApplicationManager.getApplication().getService(PluginUnloadCleanupService::class.java)
         val lifecycle = project.getService(ProjectPluginLifecycleService::class.java)
+        if (!lifecycle.beginInitialization()) return
         // Track document changes for typing debounce in SubmitAction
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(TypingTracker, lifecycle)
         // Attach markdown buffers as CRDT replicas when the CP endpoint is available.
@@ -135,6 +137,33 @@ class PluginLifecycleListener : ProjectManagerListener {
         private val LOG =
             com.intellij.openapi.diagnostic.Logger.getInstance(PluginLifecycleListener::class.java)
 
+        /**
+         * Rebuild plugin-owned project services after a dynamic package replacement.
+         *
+         * JetBrains keeps projects and editor tabs open across dynamic unload/load, so
+         * [ProjectManagerListener.projectOpened] is not replayed for the replacement
+         * classloader. The attach bridge calls this entry point after the new descriptor
+         * is live, then waits for every eligible open document to own a new CRDT replica.
+         */
+        @JvmStatic
+        fun initializeOpenProjectsAfterDynamicLoad(): Int {
+            check(!javax.swing.SwingUtilities.isEventDispatchThread()) {
+                "dynamic plugin initialization must wait off the EDT"
+            }
+            val projects = java.util.concurrent.atomic.AtomicReference<List<Project>>(emptyList())
+            ApplicationManager.getApplication().invokeAndWait {
+                val openProjects = ProjectManager.getInstance().openProjects.filterNot { it.isDisposed }
+                openProjects.forEach { project -> PluginLifecycleListener().projectOpened(project) }
+                projects.set(openProjects)
+            }
+            return projects.get().sumOf { project ->
+                CrdtReplicaManager.ensureOpenDocumentReplicasAndWait(
+                    project,
+                    "dynamic-plugin-load",
+                )
+            }
+        }
+
         internal fun disposeProjectResources(project: Project) {
             ReliableSyncLivenessListener.disposeProject(project)
             CrdtReplicaManager.disposeProject(project)
@@ -158,6 +187,10 @@ class PluginLifecycleListener : ProjectManagerListener {
 class ProjectPluginLifecycleService(
     private val project: Project,
 ) : Disposable {
+    private val initialized = AtomicBoolean(false)
+
+    fun beginInitialization(): Boolean = initialized.compareAndSet(false, true)
+
     override fun dispose() {
         PluginLifecycleListener.disposeProjectResources(project)
     }

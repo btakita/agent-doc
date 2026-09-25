@@ -68,7 +68,26 @@ class PluginLifecycleListenerTest {
         assertTrue(source.contains("connect(lifecycle)"))
         assertTrue(source.contains("addDocumentListener(TypingTracker, lifecycle)"))
         assertTrue(source.contains("ProjectManager.getInstance().openProjects"))
+        assertTrue(source.contains("initializeOpenProjectsAfterDynamicLoad"))
+        assertTrue(source.contains("ensureOpenDocumentReplicasAndWait"))
+        assertTrue(source.contains("beginInitialization()"))
         assertTrue(source.contains("disposeProjectResources"))
+
+        val upgradeAction = Files.readString(
+            Paths.get("src/main/java/com/github/btakita/agentdoc/JetBrainsPluginUpgradeAction.java")
+                .takeIf { Files.exists(it) }
+                ?: Paths.get("editors/jetbrains/src/main/java/com/github/btakita/agentdoc/JetBrainsPluginUpgradeAction.java"),
+        )
+        assertTrue(upgradeAction.contains("initializeOpenProjectsAfterDynamicLoad"))
+        assertTrue(upgradeAction.contains("documents="))
+
+        val replicaManager = Files.readString(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt")
+                .takeIf { Files.exists(it) }
+                ?: Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        )
+        assertTrue(replicaManager.contains("DYNAMIC_PLUGIN_ATTACH_RECEIPT_TIMEOUT_MS"))
+        assertTrue(replicaManager.contains("manager.forwarders[filePath]?.attached == true"))
     }
 
     @Test

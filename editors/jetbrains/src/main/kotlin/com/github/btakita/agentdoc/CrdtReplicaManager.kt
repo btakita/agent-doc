@@ -74,6 +74,7 @@ internal fun nativeReloadReplicaRestartReport(
 }
 private const val CRDT_EDT_WARN_MS = 50L
 private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L
+private const val DYNAMIC_PLUGIN_ATTACH_RECEIPT_TIMEOUT_MS = 15_000L
 private const val CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS = 2_000L
 private const val CRDT_AWAIT_PERSIST_CURRENT_TIMEOUT_MS = 5_000L
 private const val CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS = 1_000L
@@ -3547,6 +3548,72 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         )
                     }
             }
+        }
+
+        /**
+         * Reattach every open agent-doc document and return only after the controller
+         * accepted each replacement replica. Dynamic plugin load keeps editor tabs open,
+         * so the package installer uses this receipt before claiming a restart-free
+         * upgrade completed.
+         */
+        fun ensureOpenDocumentReplicasAndWait(project: Project, reason: String): Int {
+            check(!SwingUtilities.isEventDispatchThread()) {
+                "open-document replica receipts must be awaited off the EDT"
+            }
+            val manager = instances[project]
+                ?: throw IllegalStateException("CRDT replica manager was not initialized")
+            val targets = mutableListOf<Triple<String, Document, String>>()
+            ApplicationManager.getApplication().invokeAndWait {
+                if (project.isDisposed) return@invokeAndWait
+                val fileDocumentManager = FileDocumentManager.getInstance()
+                FileEditorManager.getInstance(project).openFiles
+                    .asSequence()
+                    .filter { it.name.endsWith(".md") }
+                    .forEach { file ->
+                        val document = fileDocumentManager.getDocument(file) ?: return@forEach
+                        val text = document.text
+                        if (isAgentDocDocumentTextUtil(text)) {
+                            targets.add(Triple(file.path, document, text))
+                        }
+                    }
+            }
+            val failed = targets.mapNotNull { (filePath, document, text) ->
+                manager.log.info(
+                    "[crdt-replica] awaiting dynamic-plugin-load registration for ${File(filePath).name}; reason=$reason",
+                )
+                val accepted = manager.ensureOpenDocumentReplica(
+                        filePath,
+                        document,
+                        editorText = text,
+                        await = true,
+                        forceRefresh = false,
+                    )
+                if (!accepted) {
+                    // The ordinary 750ms request timeout protects interactive recovery,
+                    // but a large controller bootstrap can legitimately outlive it. The
+                    // original task remains queued and publishes the authoritative
+                    // `attached` receipt; wait for that task instead of submitting a
+                    // duplicate registration or falsely failing the package upgrade.
+                    val deadline = System.nanoTime() +
+                        TimeUnit.MILLISECONDS.toNanos(DYNAMIC_PLUGIN_ATTACH_RECEIPT_TIMEOUT_MS)
+                    while (
+                        manager.forwarders[filePath]?.attached != true &&
+                        System.nanoTime() < deadline
+                    ) {
+                        try {
+                            Thread.sleep(25L)
+                        } catch (_: InterruptedException) {
+                            Thread.currentThread().interrupt()
+                            break
+                        }
+                    }
+                }
+                filePath.takeUnless { manager.forwarders[filePath]?.attached == true }
+            }
+            check(failed.isEmpty()) {
+                "dynamic plugin load did not reattach ${failed.joinToString()}"
+            }
+            return targets.size
         }
 
         fun ensureOpenDocumentReplica(project: Project, filePath: String, reason: String) {

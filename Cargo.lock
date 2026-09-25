@@ -154,6 +154,7 @@ dependencies = [
  "indexmap",
  "instruction-files",
  "lazily 0.57.1",
+ "lazily 0.58.0",
  "libc",
  "libloading",
  "module-harness",
@@ -4263,7 +4264,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd1ec4901c6afceaa555b001e53b6f70662c4893136bb21a7659d8b96866e83"
 dependencies = [
  "arc-swap",
- "lazily-macros",
+ "lazily-macros 0.23.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parking_lot",
  "prost-build",
  "protoc-bin-vendored",
@@ -4275,10 +4276,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "lazily"
+version = "0.58.0"
+source = "git+https://github.com/lazily-hub/lazily-rs.git?rev=92656d6840e9171b3e55a9e6b11205f820ec984c#92656d6840e9171b3e55a9e6b11205f820ec984c"
+dependencies = [
+ "arc-swap",
+ "lazily-macros 0.23.0 (git+https://github.com/lazily-hub/lazily-rs.git?rev=92656d6840e9171b3e55a9e6b11205f820ec984c)",
+ "prost-build",
+ "protoc-bin-vendored",
+ "smallvec",
+]
+
+[[package]]
 name = "lazily-macros"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cde497d1471dd81ea14cd762e82f1b7bbe35e43858cc8b4066775fb387e42fa"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
+name = "lazily-macros"
+version = "0.23.0"
+source = "git+https://github.com/lazily-hub/lazily-rs.git?rev=92656d6840e9171b3e55a9e6b11205f820ec984c#92656d6840e9171b3e55a9e6b11205f820ec984c"
 dependencies = [
  "proc-macro2",
  "quote",

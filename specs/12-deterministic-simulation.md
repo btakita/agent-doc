@@ -361,6 +361,30 @@ The simulator tests print schedule count, command count, elapsed time, and the
 active budget for each corpus so CI logs show when generated coverage starts to
 approach the budget.
 
+## Lazily-backed durable closeout harness
+
+`tests/lazily_simworld.rs` is the first consumer slice built on the newer Lazily
+simulation foundations. It pins Lazily commit
+`92656d6840e9171b3e55a9e6b11205f820ec984c` as a test-only dependency and runs
+agent-doc's production `DocumentWritePipeline::transition` reducer through
+Lazily's `ReplayHarness`. Every step is fingerprinted, replayed from a fresh
+graph, and compared at stride one; schedule reordering fails before value
+comparison because the exact materialized log digest changed.
+
+The same harness records accepted write phases in Lazily's backend-neutral
+`DurableOwnerCore`, reconstructs the owner from its durable image after each
+step, proves duplicate delivery is exactly-once, and proves a stale owner fence
+cannot mutate the recovered prefix. This is deliberately a pure deterministic
+slice: the existing filesystem, git, controller-socket, editor, and live-tmux
+tests continue to own their real adapter boundaries.
+
+The current Go `SimConsumerTestkit` accepts only Postgres and NATS real-service
+adapters. Agent-doc therefore cannot yet express its CLI process, filesystem,
+controller socket, or editor replica as a selected real adapter without lying
+about the adapter kind. That missing generic process/port adapter is tracked in
+the Lazily backlog rather than copied into this repository as a consumer-specific
+fork.
+
 FlowCore also has a pure cross-flow regression that does not need the simulator
 state machine: it proves routed dispatch-proof failure, editor-visible
 typing/IPC write deferral, closeout `session-check` interruption, and queue

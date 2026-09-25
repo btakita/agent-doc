@@ -333,6 +333,7 @@ agent-doc-controller-io = { path = "agent-doc-controller-io", version = "0.35.41
 agent-doc-document-realtime-io = { path = "agent-doc-document-realtime-io", version = "0.35.418", features = ["test-support"] }
 agent-doc-element-queue = { path = "agent-doc-element-queue", version = "0.35.418" }
 agent-doc-test-support = { path = "agent-doc-test-support", version = "0.35.418" }
+lazily-sim = { package = "lazily", git = "https://github.com/lazily-hub/lazily-rs.git", rev = "92656d6840e9171b3e55a9e6b11205f820ec984c" }
 assert_cmd = "2"
 existence = "0.4"
 filetime = "0.2"

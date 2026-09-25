@@ -329,6 +329,10 @@ Same framework stack. `TransactionGuardImpl` only indicates the coroutine was ru
 ### Re: recovered response
 
 Same framework plumbing; no new diagnostic information. Only the `Caused by:` section or a newer occurrence matters.
+
+### Re: recovered response
+
+Same framework dispatch chain. This frame adds nothing actionable; the root cause remains the already-fixed classloader collision.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

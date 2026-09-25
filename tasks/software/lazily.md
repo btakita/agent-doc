@@ -280,21 +280,49 @@ Verification passed:
 - GitHub Actions CI run `36101059446`
 
 Pushed `lazily-go` commit `d9557cf` (`feat: add deterministic simulation faults`).
+
+### Re: #lzsimoracle — gpt-5 · 2026-09-25T10:28:14-04:00
+
+> **Queue prompt:**
+>
+> do [#lzsimlicense]: use Apache2 across all Lazily packages.
+
+
+> **Queue prompt:**
+>
+> do [#lzsimoracle]
+
+
+Implemented and pushed the deterministic simulation oracle layer and its portable contract.
+
+- Added a checked `SimOracle` execution boundary in `lazily-go`: after every executed action it advances an independent reference model, captures canonical observations, performs reference and differential comparisons, evaluates safety and bounded-liveness assertions, and evaluates immutable operation-history assertions. The first counterexample is sticky.
+- Added explicit comparative-source provenance (`independent_model`, `production_reducer`, `real_adapter`, or `simulation_only`). Construction now rejects a simulation-only implementation as the sole comparative authority, while allowing it as a supplemental witness beside an independent oracle.
+- Added exact-trace fingerprints binding the `SimTrace` digest, projected replay-log digest, complete `ReplayHarness` fingerprint, and canonical observations at every checked step. Verification rejects execution that bypassed the oracle boundary and validates identities before comparing values.
+- Added explicit history recording for overlapping modeled operations and capability-gated linearizability checks: a surface must claim a named, versioned sequential specification before a checker can run.
+- Added seeded mutation coverage proving safety, reference-model, differential, bounded-liveness (bound and idle), trace/replay/observation identity, history, linearizability, and anti-circularity failures are all observed.
+- Added `lazily-spec/docs/deterministic-simulation-oracles.md` and indexed it in the spec book. The contract defines stepwise checking, independent authority, exact-trace binding, bounded liveness, history/linearizability scope, and the required mutation gate.
+
+Verification passed:
+
+- `lazily-go`: `make check`
+- `lazily-go`: `go test ./... -count=10`
+- `lazily-spec`: `make check`
+- `lazily-spec`: `uv run --group dev pytest tests/ -q` — 302 passed
+- Pre-push CI heads were green. New runs `36147643312` (`lazily-go`) and `36147643323` (`lazily-spec`) started after push and were in progress/queued at closeout.
+
+Pushed `lazily-go` commit `2ee74de` (`feat: add deterministic simulation oracles`) and `lazily-spec` commit `df7fd6e` (`docs: define deterministic simulation oracles`).
+
+The exchange is large (255 lines at preflight); the active queue remains in drain mode, so it was not compacted.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- ~~do [#lzappsimulation]~~
-- ~~do [#lzsimipgate]~~
-- ~~do [#lzsimspec]~~
-- ~~do [#lzsimworldgo]~~
-- ~~do [#lzsimgen]~~
-- ~~do [#lzsimfaults]~~
-- do [#lzsimoracle]
+- ~~do [#lzsimoracle]~~
+- ~~do [#lzsimlicense]: use Apache2 across all Lazily packages.~~
 - do [#lzsimconformance]
-- ⏭️ do [#lzktbindpending]
+- do [#lzktbindpending]
 - do [#lzartifactverify]
 - do [#lzmiseusepatch]
 - do [#lzdurableipgate]
@@ -310,7 +338,6 @@ Pushed `lazily-go` commit `d9557cf` (`feat: add deterministic simulation faults`
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzsimlicense] [operator-decision, lazily-spec] Resolve the implementation-admission blocker in tasks/software/plan-lazily-simulation.md before #lzsimspec: an authorized owner selects and records the repository license and fixture reuse terms; then add matching project metadata, a generated third-party inventory from uv.lock, and provenance/license records for all 156 canonical fixtures and nine vendored Go copies. Until resolved, do not publish or copy simulation specifications or fixtures through lazily-spec.
-- [ ] [#lzsimoracle] [lazily-spec, lazily-go] Add stepwise invariant, reference-model, differential, and history checkers: compare observations after every action, bind ReplayHarness fingerprints to the exact trace, support safety and bounded-liveness assertions, and apply linearizability checks only to surfaces that claim it. Add mutation tests that prove each oracle catches a seeded defect, and prevent a simulator-only implementation from becoming the sole oracle for the same behavior.
 - [ ] [#lzsimconformance] [lazily-go, consumer adapters] Publish a generic consumer simulation testkit and example with interchangeable simulated and real adapters. Require consumer integration to reuse production reducers and narrow ports, run generated histories against the in-memory world plus selected real Postgres and NATS services, and retain small stubs only at nondeterministic external boundaries. Keep all consumer-specific names and artifacts outside Lazily, and document simulation as a complement to unit, contract, and real-infrastructure tests rather than a blanket mock replacement.
 - [ ] [#lzdurableipgate] [lazily family] Before durable-runtime implementation, record the public-pattern and provenance gate for tasks/software/plan-lazily-postgres-nats-valkey.md: cite Event Sourcing and CQRS, transactional inbox/outbox, idempotent consumers, at-least-once delivery, Postgres queue claiming, and JetStream ACK/redelivery semantics from public primary or official sources; inventory dependency licenses; require independently authored Lazily APIs and conformance fixtures; exclude Haiven names, schemas, events, policies, incidents, and code; and obtain the written prior-work and employer boundary described by the plan before employer-related implementation.
 - [ ] [#lzdurablespec] [lazily-spec, lazily-rs] Implement Phase 0 of tasks/software/plan-lazily-postgres-nats-valkey.md: backend-neutral durable-owner contracts for ordered event history or snapshot state, monotonic positions, optimistic fencing, schema and codec versions, inbox identities, outbox effect identities, and durable receipts. Add canonical crash, replay, deduplication, and projection-fingerprint fixtures, and explicitly distinguish complete-history projections from LatestDurableProjection conflation.

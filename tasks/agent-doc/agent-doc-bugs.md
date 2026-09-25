@@ -321,6 +321,10 @@ Same coroutine unwinding path—no new cause. Please skip ahead to any `Caused b
 ### Re: recovered response
 
 Same IntelliJ coroutine-dispatch wrapper. It is not a new cause; no additional fix is indicated.
+
+### Re: recovered response
+
+Same framework stack. `TransactionGuardImpl` only indicates the coroutine was running with IntelliJ write access; it is not the cause. Skip to `Caused by:`.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

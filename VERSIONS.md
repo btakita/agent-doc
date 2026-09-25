@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.418
 
+- **A saved queue edit now fast-forwards from its proven merge baseline instead
+  of being deleted by replica re-registration.** When live editor authority is
+  still exactly the recorded baseline and disk alone advanced, preflight
+  validates the complete document and compare-and-swaps that durable revision
+  into the CRDT authority before queue maintenance. If disk and authority both
+  advanced, admission remains fail-closed rather than choosing a winner.
+
 - **JetBrains compact lint failures now fit the notification surface.** The
   plugin keeps the complete subprocess failure in the IDE log while presenting
   the attempted action, document basename and line, malformed directive,

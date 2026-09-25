@@ -2782,7 +2782,8 @@ impl std::fmt::Display for QueueAuthorityUnavailable {
 impl std::error::Error for QueueAuthorityUnavailable {}
 
 /// Return the disk text only when it proves the registered live replica is an
-/// older baseline cut. Disk is evidence here, never a replacement authority.
+/// older baseline cut. The baseline is the common ancestor: equality on the
+/// authority branch proves that only the durable disk branch advanced.
 fn disk_edit_newer_than_registered_authority(
     file: &Path,
     authority: &str,
@@ -2791,29 +2792,86 @@ fn disk_edit_newer_than_registered_authority(
         return Ok(None);
     };
     let disk = std::fs::read_to_string(file)?;
-    Ok((authority == baseline && disk != baseline).then_some(disk))
+    if disk == authority || disk == baseline {
+        return Ok(None);
+    }
+    if authority == baseline {
+        return Ok(Some(disk));
+    }
+    Err(QueueAuthorityUnavailable::new(format!(
+        "disk and registered editor authority both advanced from the recorded baseline; refusing to choose a winner (baseline_hash={}, authority_hash={}, disk_hash={})",
+        agent_doc_hash::short_content_hash(&baseline),
+        agent_doc_hash::short_content_hash(authority),
+        agent_doc_hash::short_content_hash(&disk),
+    ))
+    .into())
 }
 
-fn request_queue_editor_replica_reregister(file: &Path) -> String {
-    match agent_doc_crdt_relay_io::signal_crdt_replica_event(
-        file,
-        agent_doc_crdt_relay_io::CrdtReplicaEventReason::EditorReplicaReregister,
-        0,
-    ) {
-        Ok(()) => "requested".to_string(),
-        Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
-    }
+/// Fast-forward a proven newer durable save into the live CRDT authority.
+///
+/// This is a three-way merge with an unchanged authority branch, not a generic
+/// disk-wins rule. The caller proved `authority == baseline && disk != baseline`;
+/// the compare-and-swap below rechecks the first half at the mutation edge.
+fn adopt_proven_newer_disk_save(
+    file: &Path,
+    authority: &str,
+    disk: &str,
+    source: &str,
+) -> Result<()> {
+    agent_doc_element::element::parse(disk).map_err(|err| {
+        QueueAuthorityUnavailable::new(format!(
+            "newer durable queue save is not a structurally valid agent document: {err:#}"
+        ))
+    })?;
+    let write = if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
+        agent_doc_crdt_relay_io::apply_cp_write_for_file(file, authority, disk, source)?
+            .ok_or_else(|| {
+                QueueAuthorityUnavailable::new(
+                    "embedded editor authority refused the proven durable-save fast-forward",
+                )
+            })?
+    } else {
+        agent_doc_controller_io::project_controller::apply_cp_write_via_controller_model_for_doc(
+            file, authority, disk, source,
+        )?
+        .ok_or_else(|| {
+            QueueAuthorityUnavailable::new(
+                "attached editor authority refused the proven durable-save fast-forward",
+            )
+        })?
+    };
+    anyhow::ensure!(
+        write.content_hash == agent_doc_hash::content_hash(disk),
+        "durable-save fast-forward returned the wrong canonical revision"
+    );
+    Ok(())
 }
 
 /// A native editor save can reach disk one observation before the editor's
-/// registered CRDT cut catches up. Keep editor authority fail-closed, but give
-/// the typed re-registration request the same bounded chance to converge that
-/// missing/sync-pending replicas already receive.
+/// registered CRDT cut catches up. Fast-forward the validated durable branch
+/// only from its exact unchanged baseline, then give CRDT/editor projection the
+/// same bounded chance to converge that other attached writes receive.
 fn observe_queue_authority_after_native_save_with_bounded_retry(
     file: &Path,
     source: &str,
     attempts: u32,
+    observe: impl FnMut(&Path) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>>,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
+        file,
+        source,
+        attempts,
+        observe,
+        |file, authority, disk, source| adopt_proven_newer_disk_save(file, authority, disk, source),
+    )
+}
+
+fn observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
+    file: &Path,
+    source: &str,
+    attempts: u32,
     mut observe: impl FnMut(&Path) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>>,
+    mut adopt: impl FnMut(&Path, &str, &str, &str) -> Result<()>,
 ) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
     let attempts = attempts.max(1);
     let mut observed = observe(file);
@@ -2836,7 +2894,11 @@ fn observe_queue_authority_after_native_save_with_bounded_retry(
             Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => text,
             _ => unreachable!("newer_disk is only populated for a live current authority"),
         };
-        let reregister = request_queue_editor_replica_reregister(file);
+        adopt(file, authority, &disk, source).map_err(|err| {
+            QueueAuthorityUnavailable::new(format!(
+                "could not fast-forward the proven newer durable queue save: {err:#}"
+            ))
+        })?;
         let admission = if attempt < attempts {
             "retrying"
         } else {
@@ -2845,20 +2907,19 @@ fn observe_queue_authority_after_native_save_with_bounded_retry(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "queue_authority_stale_behind_disk file={} source={} authority_hash={} disk_hash={} attempt={}/{} editor_replica_reregister={} admission={}",
+                "queue_authority_stale_behind_disk file={} source={} authority_hash={} disk_hash={} attempt={}/{} durable_save_fast_forward=applied admission={}",
                 file.display(),
                 source,
                 agent_doc_hash::short_content_hash(authority),
                 agent_doc_hash::short_content_hash(&disk),
                 attempt,
                 attempts,
-                reregister,
                 admission,
             ),
         );
         if attempt == attempts {
             return Err(QueueAuthorityUnavailable::new(format!(
-                "registered editor authority remained an older baseline cut while disk contained a newer native save after {attempts} bounded observations; editor replica re-registration {reregister}"
+                "registered editor authority remained an older baseline cut after the proven newer durable save was fast-forwarded and observed {attempts} times"
             ))
             .into());
         }
@@ -6049,8 +6110,11 @@ mod tests {
         std::fs::write(&doc, &saved).unwrap();
 
         let mut calls = 0usize;
-        let observed =
-            observe_queue_authority_after_native_save_with_bounded_retry(&doc, "test", 3, |_| {
+        let observed = observe_queue_authority_after_native_save_with_bounded_retry_and_adopt(
+            &doc,
+            "test",
+            3,
+            |_| {
                 calls += 1;
                 let text = if calls < 3 { baseline } else { &saved };
                 Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
@@ -6060,8 +6124,14 @@ mod tests {
                     delivery_version: calls as u64,
                     semantics: None,
                 }))
-            })
-            .unwrap();
+            },
+            |_, authority, disk, _| {
+                assert_eq!(authority, baseline);
+                assert_eq!(disk, saved);
+                Ok(())
+            },
+        )
+        .unwrap();
 
         assert_eq!(calls, 3, "the stale editor cut must be re-observed");
         match observed {
@@ -6988,7 +7058,7 @@ mod tests {
     }
 
     #[test]
-    fn run_queue_maintenance_refuses_stale_relay_cut_behind_native_queue_save() {
+    fn queue_authority_fast_forwards_proven_native_queue_save() {
         // A native editor save can reach disk after the relay lost that editor's
         // registration. The retained relay cut then still equals the baseline,
         // while disk contains the newly entered queue head. Treating the relay
@@ -7025,16 +7095,77 @@ mod tests {
         );
         std::fs::write(&doc, &saved).unwrap();
 
-        let err = run_queue_maintenance(&doc, None).unwrap_err();
+        let observed = observe_queue_authority_after_native_save_with_bounded_retry(
+            &doc,
+            "test_native_save_fast_forward",
+            3,
+            |file| agent_doc_crdt_relay_io::current_text_for_file(file).map(Some),
+        )
+        .unwrap()
+        .expect("live queue authority should remain available");
+        let current = observed;
         assert!(
-            err.downcast_ref::<QueueAuthorityUnavailable>().is_some(),
-            "stale retained authority must return the typed admission error: {err:#}"
+            matches!(
+                current,
+                agent_doc_crdt_relay_io::CurrentText::Current { ref text, .. }
+                    if text.contains("run the queued follow-up")
+            ),
+            "the live CRDT authority must fast-forward to the durable queue save"
         );
         assert_eq!(
             std::fs::read_to_string(&doc).unwrap(),
             saved,
             "the newer native-save queue item must remain byte-identical"
         );
+    }
+
+    #[test]
+    fn queue_authority_refuses_two_advanced_branches() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n",
+            "agent_doc_write: crdt\nqueue: go\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let (identity, replica) = publish_test_live_buffer(&doc, "jetbrains-diverged", baseline);
+        let authority = baseline.replace(
+            "<!-- agent:queue -->\n",
+            "<!-- agent:queue -->\n- authority branch\n",
+        );
+        replica.apply_local_edit(0, baseline.len() as u32, &authority);
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(
+            &doc,
+            &identity,
+            &replica.encode_state(),
+        )
+        .unwrap();
+        let disk = baseline.replace(
+            "<!-- agent:queue -->\n",
+            "<!-- agent:queue -->\n- disk branch\n",
+        );
+        std::fs::write(&doc, &disk).unwrap();
+
+        let err = observe_queue_authority_after_native_save_with_bounded_retry(
+            &doc,
+            "test_ambiguous_native_save",
+            3,
+            |file| agent_doc_crdt_relay_io::current_text_for_file(file).map(Some),
+        )
+        .unwrap_err();
+        assert!(
+            err.downcast_ref::<QueueAuthorityUnavailable>().is_some(),
+            "ambiguous branches must retain typed fail-closed admission: {err:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), disk);
     }
 
     #[test]

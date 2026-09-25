@@ -378,6 +378,36 @@ IntelliJ remains on 0.2.419, whose JAR contains both `Main-Class` and `Agent-Cla
 Architecture contract: the route-owned completion state machine alone owns the sticky purpose promotion and reap effect; plugin applicability is decided in `plugin.rs` before any IDE mutation. A healthy owner that has admitted a turn cannot later become an unused layout orphan, and a remote install cannot replace a newer generation or invoke a non-launchable upgrade artifact.
 
 Verification passed: focused supervisor/runtime/plugin regressions, full `make check`, local `make tmux-ci`, Rust formatting/diff checks, live installation, exact remote-command reproduction, and the public-repo private-name denylist. Source commit `8ea3cb8f2` and parent pointer commit `a980bcc96` are pushed. GitHub CI for `8ea3cb8f2` is currently in progress; local verification is complete.
+
+### Re: #agentdocsim Lazily-backed closeout harness — gpt-5 · 2026-09-25T16:51:19-04:00
+
+> **Queue prompt:**
+>
+> do [#agentdocsim]: Can you begin with the latest lazily commits?
+
+Implemented the first agent-doc deterministic simulation slice against the latest settled Lazily commits.
+
+The new `tests/lazily_simworld.rs` pins `lazily-rs` commit `92656d6840e9171b3e55a9e6b11205f820ec984c` as a test-only dependency. It drives agent-doc's production `DocumentWritePipeline::transition` reducer through Lazily's `ReplayHarness`, fingerprints every checkpoint at stride one, proves fresh-graph replay determinism, and rejects a reordered materialized schedule before value comparison. A second path persists accepted write phases in Lazily's `DurableOwnerCore`, reconstructs after every simulated crash, proves duplicate deliveries are exactly-once, rejects stale owner fences without mutation, and fingerprints the complete committed history.
+
+The simulation specification now documents this boundary and its non-claims. Real filesystem, git, controller socket, editor, and tmux behavior remains owned by the existing integration suites.
+
+The Lazily audit covered the current tips: `lazily-go` `d5797fd` (consumer simulation conformance), `lazily-spec` `0d48b26` with oracle contract `df7fd6e`, and `lazily-rs` `92656d6` (durable-owner core). One generic capability is genuinely missing: Go's `SimConsumerTestkit` only accepts Postgres/NATS real adapters and requires one shared production reducer identity, so an agent-doc CLI/editor/controller adapter cannot be represented without lying about its kind or cross-language reducer. I appended `#lzsimprocessadapter` to `tasks/software/lazily.md` after the existing active queue; no other non-duplicative Lazily backlog gap was found.
+
+Changed source paths:
+
+- `Cargo.toml` and `Cargo.lock`
+- `tests/lazily_simworld.rs`
+- `specs/12-deterministic-simulation.md`
+
+Verification and delivery:
+
+- Focused `cargo test --test lazily_simworld`: 2 passed, exit 0.
+- Full `make check`: exit 0, zero failure groups; all nine TLA+ model checks reported no errors.
+- `make install`: exit 0; agent-doc 0.35.418 and native library installed, JetBrains 0.2.419 dynamically replaced in the live IDE with no restart required, and VS Code 0.2.71 installed.
+- Source commit `ecd3796e5` (`test: add Lazily-backed closeout simulation`) is pushed to `origin/main`.
+- CI run `36188252789` was queued at the required one-shot post-push observation; local verification is complete.
+
+Confidence is high for this pure closeout slice. No blocking escalation remains. The root tsift workspace index had a missing FTS table, so navigation fell back to fresh submodule indexes and exact scoped reads; that tooling issue did not affect build or test evidence. The exchange remains large, but the active queue was not stalled for implicit compaction.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -391,7 +421,6 @@ Verification passed: focused supervisor/runtime/plugin regressions, full `make c
 
 
 <!-- agent:backlog -->
-- [ ] [#agentdocsim] Implement the agent-doc deterministic simulation harness on Lazily after the active Lazily oracle work commits; audit tasks/software/lazily.md for missing generic features and add only non-duplicative backlog items without racing its live owner.
 <!-- /agent:backlog -->
 
 ## Review

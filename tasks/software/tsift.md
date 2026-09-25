@@ -18,7 +18,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -100,13 +100,34 @@ Verification completed against the exact 50-path release candidate:
 - latest pre-release CI on `main` (`35766280628`): green.
 
 Separate operator warning: IntelliJ still has superseded agent-doc plugin bytes mapped. Restart IntelliJ or reopen the document tab to load the installed jar.
+
+### Re: tsift thrash guard — gpt-5 · 2026-09-25 10:05 EDT
+> **Queue prompt:**
+>
+> tsift has been thrashing for hours. Make a guard so this does not happen again.
+
+Implemented and verified a fail-fast guard for unbounded federated graph refreshes.
+
+The runaway process was `tsift graph-db --path /home/brian/work/btakita/agent-loop refresh --rebuild --json` (PID 1883513). It had held one core near 100% for roughly nine hours, peaked around 8.2 GB resident memory, and accumulated about 8.1 GB of swap. The workspace exposed 336 scoped index databases and about 1,018,901 total symbols; root graph materialization retains the federated graph in memory, which explains the swap thrash. I terminated that process after diagnosis and confirmed no replacement refresh remained.
+
+The guard is committed in tsift as `7b18e0a fix(graph): bound federated refresh work`. Unscoped federated refreshes now fail before watermark calculation or graph materialization when projected work exceeds either 64 scopes or 250,000 symbols. Scoped refreshes remain available, and the diagnostic directs users to `tsift graph-db --scope <scope> refresh --rebuild --json` or to disable federation. A second guard at the graph builder boundary protects other materialization entrypoints.
+
+Verification completed:
+
+- Replayed the exact command against this workspace with the installed v0.1.101 binary: it rejected the 337 projected scopes in effectively under 1 ms with exit 1.
+- Added boundary tests for 64 allowed scopes, 65 rejected scopes, 250,000 allowed symbols, 250,001 rejected symbols, and the filesystem preflight path.
+- `cargo build --release`, `cargo install --path . --locked`, the focused regression test, and the full `make check` all passed.
+- `git diff --check` and the public-source private-name scan passed.
+- Moved the still-local, unpublished `v0.1.101` tag from the release-only commit to `7b18e0a`, so the release includes the guard. Main and tag publication follows this document closeout; the latest pre-push GitHub CI on origin/main is green.
+
+One environment warning remains: the live IntelliJ process has older agent-doc plugin bytes loaded (0.2.397 versus installed 0.2.398). Restart IntelliJ, or close and reopen the affected editor tab, to clear the stale plugin state.
 <!-- agent:boundary:d4c17bb5:tsift -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 release + publish
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+- tsift has been thrashing for hours. Make a guard so this does not happen again.
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

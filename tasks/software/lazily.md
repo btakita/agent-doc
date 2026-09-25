@@ -228,6 +228,32 @@ Verification passed:
 Pushed `lazily-go` commit `6916018` (`feat: add deterministic simulation world`).
 
 The trace encoding in this milestone is intentionally binding-local; it does not claim to be the portable `lazily-sim-json-v1` codec planned for the codec/conformance follow-up.
+
+### Re: #lzsimgen — gpt-5 · 2026-09-25T01:52:17-04:00
+
+> **Queue prompt:**
+>
+> do [#lzsimgen]
+
+
+Implemented and pushed deterministic model-based scenario generation and causal shrinking in `lazily-go`.
+
+- Added generic `SimGenerator` / `SimModelCommand` APIs with state-dependent preconditions, integer weights, zero-weight disabling, strict `MaxActions` and `MaxHistory` bounds, stable action/cause validation, and immutable materialized `SimGeneratedScenario` output.
+- Generation derives fresh seed/index/ordinal streams without consuming `SimWorld` runtime RNG state. Command selection and payload generation use separate named streams, payload streams include the command identity, and eligible commands are name-sorted so callback draw counts and declaration order cannot perturb the selected history.
+- Repeating the same seed, generator version, and scenario index returns byte-identical materialized actions while leaving the runtime world digest unchanged. Mutable model types can provide `CloneModel` to isolate attempts.
+- Added `SimCoverageAudit` with action/scenario declarations, checked counters, sorted reports, and a failing audit whenever a declared command or scenario label has zero hits.
+- Added `SimCausalShrinker` with deterministic chunk/singleton deletion, transitive `CauseID` and command-provided dependency closure, state/precondition replay, stable IDs, bounded history, attempt bounds, and caller-defined target-failure predicates.
+- Added content-addressed counterexample persistence for ordinary regression fixtures and Go fuzz seed corpora. Persistence requires caller-supplied reversible encoding, uses the exact same case bytes for both artifacts, publishes atomically, accepts identical repeats, and refuses conflicting content at an existing digest path.
+- Added focused tests for deterministic repetition, world/RNG isolation, weighted selection, bounded history, zero-weight and missing coverage, weight overflow, dependency-valid minimal shrinking, reversible regression fixtures, exact Go fuzz corpus syntax, and conflicting-write refusal.
+
+Verification passed:
+
+- `go test -race ./...`
+- `go test ./... -count=10`
+- `make check`
+- GitHub Actions CI run `36100288768`
+
+Pushed `lazily-go` commit `9fd8bb5` (`feat: add deterministic scenario generation`).
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -238,7 +264,7 @@ The trace encoding in this milestone is intentionally binding-local; it does not
 - ~~do [#lzsimipgate]~~
 - ~~do [#lzsimspec]~~
 - ~~do [#lzsimworldgo]~~
-- do [#lzsimgen]
+- ~~do [#lzsimgen]~~
 - do [#lzsimfaults]
 - do [#lzsimoracle]
 - do [#lzsimconformance]
@@ -258,7 +284,6 @@ The trace encoding in this milestone is intentionally binding-local; it does not
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzsimlicense] [operator-decision, lazily-spec] Resolve the implementation-admission blocker in tasks/software/plan-lazily-simulation.md before #lzsimspec: an authorized owner selects and records the repository license and fixture reuse terms; then add matching project metadata, a generated third-party inventory from uv.lock, and provenance/license records for all 156 canonical fixtures and nine vendored Go copies. Until resolved, do not publish or copy simulation specifications or fixtures through lazily-spec.
-- [ ] [#lzsimgen] [lazily-go] Add model-based action generation and causal shrinking: state-dependent preconditions, weighted actions, bounded history length, deterministic seeds, coverage labels, and shrinkers that preserve identifiers, dependencies, and command validity while minimizing a failing trace. Persist minimized counterexamples as ordinary regression fixtures and Go fuzz seed corpus entries, and fail coverage audits when declared actions or scenarios are never exercised.
 - [ ] [#lzsimfaults] [lazily-go] Add deterministic fault plans at generic port boundaries for delay, drop, duplicate, reorder, partition/heal, crash/restart, timeout/cancel, stale response, optimistic conflict, commit/rollback outcome, and clock advance. Record every injection and recovery in the trace, keep the schedule replayable and shrinkable, and state explicitly that these modeled faults do not replace real database, broker, operating-system, or network conformance tests.
 - [ ] [#lzsimoracle] [lazily-spec, lazily-go] Add stepwise invariant, reference-model, differential, and history checkers: compare observations after every action, bind ReplayHarness fingerprints to the exact trace, support safety and bounded-liveness assertions, and apply linearizability checks only to surfaces that claim it. Add mutation tests that prove each oracle catches a seeded defect, and prevent a simulator-only implementation from becoming the sole oracle for the same behavior.
 - [ ] [#lzsimconformance] [lazily-go, consumer adapters] Publish a generic consumer simulation testkit and example with interchangeable simulated and real adapters. Require consumer integration to reuse production reducers and narrow ports, run generated histories against the in-memory world plus selected real Postgres and NATS services, and retain small stubs only at nondeterministic external boundaries. Keep all consumer-specific names and artifacts outside Lazily, and document simulation as a complement to unit, contract, and real-infrastructure tests rather than a blanket mock replacement.

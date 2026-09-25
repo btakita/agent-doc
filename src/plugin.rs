@@ -18,9 +18,9 @@
 //! - Unrecognized `editor` strings return `Err` with a list of supported values.
 //! - Byte-identical local JetBrains packages are true no-ops: the installed tree is not
 //!   rewritten, so a live IDE never maps an unlinked duplicate of the same generation.
-//! - Changed JetBrains packages replace the old `agent-doc-jetbrains/` directory before
-//!   extraction; the package descriptor is dynamic so JetBrains can reload it without a
-//!   mandatory IDE restart.
+//! - Changed JetBrains packages attach a system-classloader upgrade bridge to every live IDE,
+//!   letting JetBrains unload, replace, and load the package through its dynamic-plugin API.
+//!   Direct filesystem replacement is used only when no live IDE owns that installation.
 //!
 //! ## Evals
 //! - install_unknown_editor: `install("emacs")` → Err containing "Unknown editor"
@@ -40,6 +40,8 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::io::{self, IsTerminal as _, Read as _, Write as _};
 use std::path::{Path, PathBuf};
+#[cfg(not(test))]
+use std::process::Command;
 
 const GITHUB_REPO: &str = "btakita/agent-doc";
 
@@ -394,33 +396,11 @@ fn install_jetbrains_into(release: &Value, target_dir: &Path) -> Result<()> {
 
     let tmp = download_to_temp(url)?;
 
-    // Remove old installation if present
-    let dest = target_dir.join("agent-doc-jetbrains");
-    if dest.exists() {
-        fs::remove_dir_all(&dest).context("Failed to remove old plugin")?;
-    }
-
-    // Extract zip
-    let file = fs::File::open(tmp.path()).context("Failed to open downloaded zip")?;
-    let mut archive = zip::ZipArchive::new(file).context("Failed to read zip archive")?;
-
-    for i in 0..archive.len() {
-        let mut entry = archive.by_index(i)?;
-        let name = entry.name().to_string();
-        let out_path = target_dir.join(&name);
-        if entry.is_dir() {
-            fs::create_dir_all(&out_path)?;
-        } else {
-            if let Some(parent) = out_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let mut outfile = fs::File::create(&out_path)?;
-            io::copy(&mut entry, &mut outfile)?;
-        }
-    }
+    let expected_version = jetbrains_zip_plugin_version(tmp.path())?;
+    let outcome = install_jetbrains_zip_into(tmp.path(), target_dir, &expected_version)?;
 
     eprintln!("{}", jetbrains_install_success_message(target_dir)?);
-    eprintln!("Restart your IDE to activate.");
+    print_jetbrains_activation_outcome(outcome);
     Ok(())
 }
 
@@ -548,9 +528,11 @@ fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<()> {
     match install_jetbrains_local_zip_into(&zip_path, &target_dir)? {
         JetbrainsLocalInstallOutcome::Installed => {
             eprintln!("Plugin installed to {}", target_dir.display());
-            eprintln!(
-                "The package supports JetBrains dynamic reload; an IDE already running the older restart-required generation needs one final restart."
-            );
+            eprintln!("No live IDE owned this installation; the next IDE start loads it.");
+        }
+        JetbrainsLocalInstallOutcome::HotUpgraded { processes } => {
+            eprintln!("Plugin dynamically upgraded in {processes} live JetBrains process(es).");
+            eprintln!("No JetBrains restart is required.");
         }
         JetbrainsLocalInstallOutcome::Unchanged => {
             eprintln!(
@@ -592,6 +574,13 @@ fn install_jetbrains_local_all_existing() -> Result<()> {
                 installed += 1;
                 eprintln!("Plugin installed to {}", target_dir.display());
             }
+            JetbrainsLocalInstallOutcome::HotUpgraded { processes } => {
+                installed += 1;
+                eprintln!(
+                    "Plugin dynamically upgraded in {processes} live JetBrains process(es) for {}",
+                    target_dir.display()
+                );
+            }
             JetbrainsLocalInstallOutcome::Unchanged => {
                 unchanged += 1;
                 eprintln!(
@@ -607,7 +596,7 @@ fn install_jetbrains_local_all_existing() -> Result<()> {
     );
     if installed > 0 {
         eprintln!(
-            "The package supports JetBrains dynamic reload; an IDE already running the older restart-required generation needs one final restart."
+            "Changed live JetBrains packages were dynamically replaced; no IDE restart is required."
         );
     } else {
         eprintln!("No JetBrains restart is required; no installed plugin bytes changed.");
@@ -676,7 +665,227 @@ fn local_jetbrains_zip_version(zip_path: &Path) -> Result<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum JetbrainsLocalInstallOutcome {
     Installed,
+    HotUpgraded { processes: usize },
     Unchanged,
+}
+
+fn print_jetbrains_activation_outcome(outcome: JetbrainsLocalInstallOutcome) {
+    match outcome {
+        JetbrainsLocalInstallOutcome::Installed => {
+            eprintln!("No live IDE owned this installation; the next IDE start loads it.");
+        }
+        JetbrainsLocalInstallOutcome::HotUpgraded { processes } => {
+            eprintln!("Plugin dynamically upgraded in {processes} live JetBrains process(es).");
+            eprintln!("No JetBrains restart is required.");
+        }
+        JetbrainsLocalInstallOutcome::Unchanged => {
+            eprintln!("No JetBrains restart is required; no installed plugin bytes changed.");
+        }
+    }
+}
+
+fn jetbrains_ide_pids_from_jcmd(output: &str) -> Vec<u32> {
+    let mut pids = output
+        .lines()
+        .filter_map(|line| {
+            let (pid, command) = line.trim().split_once(' ')?;
+            crate::plugin_activation::jetbrains_ide_label(command)?;
+            pid.parse().ok()
+        })
+        .collect::<Vec<_>>();
+    pids.sort_unstable();
+    pids.dedup();
+    pids
+}
+
+#[cfg(not(test))]
+fn live_jetbrains_ide_pids() -> Result<Vec<u32>> {
+    let mut pids = crate::plugin_activation::live_ide_processes()
+        .into_iter()
+        .map(|process| process.pid)
+        .collect::<Vec<_>>();
+    match Command::new("jcmd").arg("-l").output() {
+        Ok(output) if output.status.success() => {
+            pids.extend(jetbrains_ide_pids_from_jcmd(&String::from_utf8_lossy(
+                &output.stdout,
+            )));
+        }
+        Ok(output) if pids.is_empty() => bail!(
+            "Cannot discover live JetBrains processes: `jcmd -l` exited with {}; refusing an uncoordinated package replacement",
+            output.status
+        ),
+        Err(error) if pids.is_empty() => bail!(
+            "Cannot discover live JetBrains processes: failed to run `jcmd -l`: {error}; refusing an uncoordinated package replacement"
+        ),
+        _ => {}
+    }
+    pids.sort_unstable();
+    pids.dedup();
+    Ok(pids)
+}
+
+#[cfg(not(test))]
+fn extract_jetbrains_upgrade_launcher(zip_path: &Path) -> Result<tempfile::NamedTempFile> {
+    let file = fs::File::open(zip_path).context("Failed to open JetBrains package")?;
+    let mut archive = zip::ZipArchive::new(file).context("Failed to read JetBrains package")?;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index)?;
+        let Some(name) = entry.enclosed_name() else {
+            continue;
+        };
+        let file_name = name
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if file_name.starts_with("agent-doc-jetbrains-") && file_name.ends_with(".jar") {
+            let mut launcher = tempfile::Builder::new()
+                .prefix("agent-doc-jb-upgrader-")
+                .suffix(".jar")
+                .tempfile()
+                .context("Failed to create temporary JetBrains upgrade launcher")?;
+            io::copy(&mut entry, &mut launcher)?;
+            launcher.flush()?;
+            return Ok(launcher);
+        }
+    }
+    bail!("JetBrains package has no agent-doc plugin jar to use as the upgrade launcher")
+}
+
+#[cfg(not(test))]
+fn java_executable() -> PathBuf {
+    std::env::var_os("JAVA_HOME")
+        .map(PathBuf::from)
+        .map(|root| root.join("bin/java"))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from("java"))
+}
+
+#[cfg(not(test))]
+fn try_hot_upgrade_jetbrains(
+    zip_path: &Path,
+    target_dir: &Path,
+    expected_version: &str,
+) -> Result<Option<usize>> {
+    let pids = live_jetbrains_ide_pids()?;
+    if pids.is_empty() {
+        return Ok(None);
+    }
+    let launcher = extract_jetbrains_upgrade_launcher(zip_path)?;
+    let archive = tempfile::Builder::new()
+        .prefix("agent-doc-jb-package-")
+        .suffix(".zip")
+        .tempfile()
+        .context("Failed to stage JetBrains package for dynamic install")?;
+    fs::copy(zip_path, archive.path()).context("Failed to stage JetBrains package")?;
+    let mut upgraded = 0usize;
+    for pid in pids {
+        let output = Command::new(java_executable())
+            .args(["--add-modules", "jdk.attach", "-jar"])
+            .arg(launcher.path())
+            .arg(pid.to_string())
+            .arg(archive.path())
+            .arg(target_dir)
+            .arg(expected_version)
+            .output()
+            .with_context(|| {
+                format!("Failed to launch JetBrains dynamic upgrader for pid {pid}")
+            })?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if !output.status.success() {
+            bail!(
+                "JetBrains dynamic upgrade failed for pid {pid}: {}{}",
+                stdout.trim(),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        if stdout.lines().any(|line| line.starts_with("ok:")) {
+            upgraded += 1;
+        }
+    }
+    Ok((upgraded > 0).then_some(upgraded))
+}
+
+#[cfg(test)]
+fn try_hot_upgrade_jetbrains(
+    _zip_path: &Path,
+    _target_dir: &Path,
+    _expected_version: &str,
+) -> Result<Option<usize>> {
+    Ok(None)
+}
+
+fn jetbrains_zip_plugin_version(zip_path: &Path) -> Result<String> {
+    let file = fs::File::open(zip_path).context("Failed to open JetBrains package")?;
+    let mut archive = zip::ZipArchive::new(file).context("Failed to read JetBrains package")?;
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index)?;
+        let Some(name) = entry.enclosed_name() else {
+            continue;
+        };
+        let file_name = name
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if let Some(version) = file_name
+            .strip_prefix("agent-doc-jetbrains-")
+            .and_then(|name| name.strip_suffix(".jar"))
+        {
+            return Ok(version.to_string());
+        }
+    }
+    bail!("JetBrains package has no versioned agent-doc plugin jar")
+}
+
+fn replace_jetbrains_plugin_tree(zip_path: &Path, target_dir: &Path) -> Result<()> {
+    let dest = target_dir.join("agent-doc-jetbrains");
+    if dest.exists() {
+        fs::remove_dir_all(&dest).context("Failed to remove old plugin")?;
+    }
+    let file = fs::File::open(zip_path).context("Failed to open zip")?;
+    let mut archive = zip::ZipArchive::new(file).context("Failed to read zip archive")?;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index)?;
+        let enclosed = entry
+            .enclosed_name()
+            .with_context(|| format!("Unsafe path in JetBrains package: {}", entry.name()))?;
+        let out_path = target_dir.join(enclosed);
+        if entry.is_dir() {
+            fs::create_dir_all(&out_path)?;
+        } else {
+            if let Some(parent) = out_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let mut outfile = fs::File::create(&out_path)?;
+            io::copy(&mut entry, &mut outfile)?;
+        }
+    }
+    Ok(())
+}
+
+fn install_jetbrains_zip_into(
+    zip_path: &Path,
+    target_dir: &Path,
+    expected_version: &str,
+) -> Result<JetbrainsLocalInstallOutcome> {
+    fs::create_dir_all(target_dir).context("Failed to create JetBrains plugins directory")?;
+    if jetbrains_local_zip_matches_installation(zip_path, target_dir)? {
+        return Ok(JetbrainsLocalInstallOutcome::Unchanged);
+    }
+    let outcome = if let Some(processes) =
+        try_hot_upgrade_jetbrains(zip_path, target_dir, expected_version)?
+    {
+        JetbrainsLocalInstallOutcome::HotUpgraded { processes }
+    } else {
+        replace_jetbrains_plugin_tree(zip_path, target_dir)?;
+        JetbrainsLocalInstallOutcome::Installed
+    };
+    if !jetbrains_local_zip_matches_installation(zip_path, target_dir)? {
+        bail!(
+            "JetBrains package verification failed in {}: installed bytes differ from the package",
+            target_dir.display()
+        );
+    }
+    Ok(outcome)
 }
 
 fn collect_installed_plugin_files(
@@ -739,37 +948,16 @@ fn install_jetbrains_local_zip_into(
     target_dir: &Path,
 ) -> Result<JetbrainsLocalInstallOutcome> {
     let expected_version = local_jetbrains_zip_version(zip_path)?;
+    let packaged_version = jetbrains_zip_plugin_version(zip_path)?;
+    if packaged_version != expected_version {
+        bail!(
+            "JetBrains package version mismatch: filename says {}, plugin jar says {}",
+            expected_version,
+            packaged_version
+        );
+    }
     eprintln!("Installing from local build: {}", zip_path.display());
-    fs::create_dir_all(target_dir).context("Failed to create JetBrains plugins directory")?;
-
-    if jetbrains_local_zip_matches_installation(zip_path, target_dir)? {
-        return Ok(JetbrainsLocalInstallOutcome::Unchanged);
-    }
-
-    // Remove old installation if present
-    let dest = target_dir.join("agent-doc-jetbrains");
-    if dest.exists() {
-        fs::remove_dir_all(&dest).context("Failed to remove old plugin")?;
-    }
-
-    // Extract zip
-    let file = fs::File::open(zip_path).context("Failed to open zip")?;
-    let mut archive = zip::ZipArchive::new(file).context("Failed to read zip archive")?;
-
-    for i in 0..archive.len() {
-        let mut entry = archive.by_index(i)?;
-        let name = entry.name().to_string();
-        let out_path = target_dir.join(&name);
-        if entry.is_dir() {
-            fs::create_dir_all(&out_path)?;
-        } else {
-            if let Some(parent) = out_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let mut outfile = fs::File::create(&out_path)?;
-            io::copy(&mut entry, &mut outfile)?;
-        }
-    }
+    let outcome = install_jetbrains_zip_into(zip_path, target_dir, &expected_version)?;
 
     let installed_version = installed_jetbrains_plugin_version(target_dir).with_context(|| {
         format!(
@@ -785,7 +973,7 @@ fn install_jetbrains_local_zip_into(
             installed_version
         );
     }
-    Ok(JetbrainsLocalInstallOutcome::Installed)
+    Ok(outcome)
 }
 
 fn install_vscode_local() -> Result<()> {
@@ -953,7 +1141,7 @@ mod tests {
         existing_jetbrains_agent_doc_dirs, find_asset, find_best_local_zip, find_local_vscode_vsix,
         find_local_zip, find_release_with_asset, github_get_request, github_token_from, has_asset,
         install_jetbrains_local_zip_into, installed_jetbrains_plugin_version,
-        is_jetbrains_ide_data_dir, jetbrains_install_success_message,
+        is_jetbrains_ide_data_dir, jetbrains_ide_pids_from_jcmd, jetbrains_install_success_message,
         jetbrains_local_zip_matches_installation, jetbrains_plugin_dirs_in_roots,
         local_jetbrains_zip_in, local_jetbrains_zip_version, release_version, releases_page_url,
     };
@@ -1358,6 +1546,13 @@ mod tests {
         assert!(dirs[0].ends_with("IntelliJIdea2026.1"));
         assert!(is_jetbrains_ide_data_dir("PyCharm2025.3"));
         assert!(!is_jetbrains_ide_data_dir("PrivacyPolicy"));
+    }
+
+    #[test]
+    fn jcmd_discovery_selects_only_jetbrains_hosts_and_deduplicates_pids() {
+        let output = "28053 com.intellij.idea.Main\n45130 com.intellij.ml.llm.matterhorn.MainKt\n\
+                      28053 com.intellij.idea.MainImpl\n991 jdk.jcmd/sun.tools.jcmd.JCmd -l\n";
+        assert_eq!(jetbrains_ide_pids_from_jcmd(output), vec![28053]);
     }
 
     #[test]

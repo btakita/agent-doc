@@ -503,6 +503,16 @@ pub fn classify_mapped_plugin_jar(
     }
 }
 
+fn prefer_mapped_plugin_jar(best: MappedPluginJar, candidate: MappedPluginJar) -> MappedPluginJar {
+    if matches!(candidate, MappedPluginJar::Current { .. })
+        || matches!(best, MappedPluginJar::Unknown) && candidate.is_superseded()
+    {
+        candidate
+    } else {
+        best
+    }
+}
+
 /// Pure core: one deduplicated warning per (kind, pid) running superseded bytes.
 ///
 /// The message has to name the version trap explicitly. An operator who reads
@@ -554,6 +564,7 @@ pub fn probe_mapped_plugin_jar(pid: u32, jar_stem: &str) -> MappedPluginJar {
     let Ok(entries) = std::fs::read_dir(&map_files) else {
         return MappedPluginJar::Unknown;
     };
+    let mut best = MappedPluginJar::Unknown;
     for entry in entries.flatten() {
         let Ok(target) = std::fs::read_link(entry.path()) else {
             continue;
@@ -570,11 +581,16 @@ pub fn probe_mapped_plugin_jar(pid: u32, jar_stem: &str) -> MappedPluginJar {
         let mapped_inode = inode_of(&entry.path());
         let disk_inode = inode_of(std::path::Path::new(stem));
         let classified = classify_mapped_plugin_jar(&link, mapped_inode, disk_inode);
-        if classified.is_superseded() {
-            return classified;
+        best = prefer_mapped_plugin_jar(best, classified);
+        if matches!(best, MappedPluginJar::Current { .. }) {
+            // Dynamic unload can leave the old classloader's mmap alive until
+            // GC while the replacement generation is already active. A mapped
+            // current jar proves this process loaded the installed generation;
+            // a historical `(deleted)` mapping no longer proves stale execution.
+            return best;
         }
     }
-    MappedPluginJar::Unknown
+    best
 }
 
 #[cfg(unix)]
@@ -626,7 +642,7 @@ pub fn plugin_jar_stem(editor_kind: &str) -> Option<&'static str> {
 mod tests {
     use super::{
         MappedPluginJar, classify_mapped_plugin_jar, plugin_byte_identity_warnings_from,
-        plugin_jar_stem,
+        plugin_jar_stem, prefer_mapped_plugin_jar,
     };
 
     /// `#pluginbyteidentity`: the kernel's `" (deleted)"` suffix is the only
@@ -669,6 +685,19 @@ mod tests {
             "an identical inode is the only thing that proves the bytes match"
         );
         assert!(!current.is_superseded());
+    }
+
+    #[test]
+    fn current_generation_wins_over_lingering_deleted_dynamic_unload_mapping() {
+        let old = MappedPluginJar::Deleted {
+            path: "/plugins/agent-doc-jetbrains-0.2.397.jar".to_string(),
+        };
+        let current = MappedPluginJar::Current {
+            path: "/plugins/agent-doc-jetbrains-0.2.408.jar".to_string(),
+            inode: 42,
+        };
+
+        assert_eq!(prefer_mapped_plugin_jar(old, current.clone()), current);
     }
 
     /// Fail open. A jar we cannot stat on either side proves nothing, and an

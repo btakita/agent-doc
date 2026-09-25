@@ -53,8 +53,16 @@ govern later upgrades.
 Local package convergence compares every ZIP payload byte and relative path
 with the installed plugin tree before replacing it. A byte-identical package is
 a true no-op: the installer leaves the existing files and inodes in place so a
-live IDE does not retain deleted mappings of the same generation. Changed
-packages retain the ordinary package replacement path and dynamic descriptor.
+live IDE does not retain deleted mappings of the same generation. For a changed
+package, the installer discovers live JetBrains JVMs and attaches the packaged
+system-classloader upgrade bridge. The bridge first verifies that the live
+plugin root belongs to the installation being updated, then calls JetBrains'
+dynamic install-and-load API with the complete ZIP. This makes unload, on-disk
+replacement, and new-classloader activation one IDE-owned transaction; the
+installer must verify both the loaded version and the final package bytes. It
+may replace the directory directly only when every discovered IDE reports that
+it does not own that plugin root. Attach or dynamic-unload failure is fail-closed
+and must not be papered over by unlinking the JAR behind the live process.
 This package lifecycle is independent of the native-library handoff.
 
 ### Claim — Split Position Detection

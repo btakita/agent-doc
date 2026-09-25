@@ -35,8 +35,8 @@ class Target:
 TARGETS = (
     Target(
         "JetBrains",
-        ("editors/jetbrains/src/",),
-        (".kt",),
+        ("editors/jetbrains/src/", "editors/jetbrains/build.gradle.kts"),
+        (".kt", ".java", ".xml", ".kts"),
         "editors/jetbrains/gradle.properties",
         ("editors/jetbrains/gradle.properties",),
     ),
@@ -84,8 +84,8 @@ def source_digest(target: Target) -> str:
     for zero distinct builds, measured while writing this. A digest bumps once
     per distinct artifact, which is the actual invariant.
 
-    Tracked and untracked sources both count, because gradlew compiles whatever
-    is on disk.
+    Tracked and untracked sources plus artifact-shaping build metadata count,
+    because gradlew packages whatever is on disk.
     """
     paths = set(git("ls-files", "--", *target.source_prefixes))
     paths |= set(git("ls-files", "--others", "--exclude-standard", "--", *target.source_prefixes))
@@ -192,10 +192,16 @@ def self_test() -> int:
             src = f"{tmp}/editors/jetbrains/src"
             os.makedirs(src)
             kt = f"{src}/A.kt"
+            java = f"{src}/UpgradeAgent.java"
+            build = f"{tmp}/editors/jetbrains/build.gradle.kts"
             with open(kt, "w", encoding="utf-8") as handle:
                 handle.write("class A")
-            rel = os.path.relpath(kt, tmp)
-            git = lambda *a: [rel] if "ls-files" in a and "--others" not in a else []  # noqa: E731
+            with open(java, "w", encoding="utf-8") as handle:
+                handle.write("class UpgradeAgent {}")
+            with open(build, "w", encoding="utf-8") as handle:
+                handle.write("plugins { java }")
+            rels = [os.path.relpath(path, tmp) for path in (kt, java, build)]
+            git = lambda *a: rels if "ls-files" in a and "--others" not in a else []  # noqa: E731
             cwd = os.getcwd()
             os.chdir(tmp)
             try:
@@ -206,6 +212,14 @@ def self_test() -> int:
                 with open(kt, "w", encoding="utf-8") as handle:
                     handle.write("class A { }")
                 assert source_digest(jb) != first, "changed source bytes must change the digest"
+                second = source_digest(jb)
+                with open(java, "w", encoding="utf-8") as handle:
+                    handle.write("class UpgradeAgent { static void agentmain() {} }")
+                assert source_digest(jb) != second, "Java agent bytes must change the digest"
+                third = source_digest(jb)
+                with open(build, "w", encoding="utf-8") as handle:
+                    handle.write("tasks.jar { manifest { } }")
+                assert source_digest(jb) != third, "artifact build metadata must change the digest"
             finally:
                 os.chdir(cwd)
     finally:

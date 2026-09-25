@@ -70,6 +70,31 @@ intellijPlatform {
 }
 
 tasks {
+    withType<JavaCompile>().configureEach {
+        options.compilerArgs.addAll(listOf("--add-modules", "jdk.attach"))
+    }
+
+    jar {
+        manifest {
+            attributes(
+                "Main-Class" to "com.github.btakita.agentdoc.JetBrainsPluginUpgradeBootstrap",
+                "Agent-Class" to "com.github.btakita.agentdoc.JetBrainsPluginUpgradeBootstrap",
+            )
+        }
+    }
+
+    // The IntelliJ Platform plugin replaces the base Jar with `composedJar`
+    // after bytecode instrumentation. Carry the attach-agent entry points onto
+    // that final artifact too: this is the Jar shipped in buildPlugin's ZIP.
+    named<org.gradle.jvm.tasks.Jar>("composedJar") {
+        manifest {
+            attributes(
+                "Main-Class" to "com.github.btakita.agentdoc.JetBrainsPluginUpgradeBootstrap",
+                "Agent-Class" to "com.github.btakita.agentdoc.JetBrainsPluginUpgradeBootstrap",
+            )
+        }
+    }
+
     register<JavaExec>("runCrossEditorHarness") {
         group = "verification"
         description = "Run the production JetBrains CRDT/native endpoint for cross-editor SimWorld"

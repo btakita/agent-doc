@@ -66,19 +66,34 @@ public final class JetBrainsPluginUpgradeAction {
             if (unloadBlocker != null) {
                 throw new IllegalStateException("plugin cannot unload dynamically: " + unloadBlocker);
             }
-            if (!DynamicPlugins.INSTANCE.unloadPlugin(current)) {
+            DynamicPlugins.UnloadPluginOptions updateOptions =
+                new DynamicPlugins.UnloadPluginOptions()
+                    .withDisable(false)
+                    .withUpdate(true);
+            if (!DynamicPlugins.INSTANCE.unloadPlugin(current, updateOptions)) {
                 throw new IllegalStateException("JetBrains refused to unload the current plugin generation");
             }
+        }
+
+        IdeaPluginDescriptor residualDescriptor = PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID));
+        if (residualDescriptor instanceof IdeaPluginDescriptorImpl residual && isLoaded(residual)) {
+            throw new IllegalStateException(
+                "JetBrains retained the current plugin generation after update unload: "
+                    + residual.getVersion()
+            );
         }
 
         boolean loaded = PluginInstaller.installAndLoadDynamicPlugin(archive, current);
         IdeaPluginDescriptor actualDescriptor = PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID));
         if (!(actualDescriptor instanceof IdeaPluginDescriptorImpl actual)
             || !loaded
+            || actual == current
+            || actual.getPluginClassLoader() == current.getPluginClassLoader()
             || !expectedVersion.equals(actual.getVersion())) {
             String actualVersion = actualDescriptor == null ? "missing" : actualDescriptor.getVersion();
             throw new IllegalStateException(
-                "dynamic install returned " + loaded + "; expected " + expectedVersion + ", loaded " + actualVersion
+                "dynamic install returned " + loaded + "; expected a fresh " + expectedVersion
+                    + " generation, loaded " + actualVersion
             );
         }
         replacement.set(actual);

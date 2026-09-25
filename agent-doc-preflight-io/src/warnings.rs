@@ -547,8 +547,10 @@ pub fn plugin_byte_identity_warnings_from(
                 "live {kind} editor pid {pid} is running superseded plugin bytes: {detail}. \
                  The version string cannot show this — an install rewrites the jar under the \
                  same version, so a version check reports the plugin as current while the \
-                 process keeps executing the replaced build. Restart the editor (or reopen the \
-                 document tab) to pick up the installed jar."
+                 process keeps executing the replaced build. Re-run the plugin installation \
+                 once so its dynamic update transaction can converge. Do not repeat status \
+                 checks or reopen document tabs; neither changes the loaded bytes. Restart the \
+                 editor only if that install explicitly reports a dynamic-unload failure."
             ),
             document_agent: None,
             active_harness: None,
@@ -774,6 +776,23 @@ mod tests {
         assert!(
             warning.message.contains("unlinked"),
             "the deleted case must name its own evidence: {}",
+            warning.message
+        );
+        assert!(
+            warning.message.contains("Re-run the plugin installation once"),
+            "the first recovery must invoke the dynamic replacement path: {}",
+            warning.message
+        );
+        assert!(
+            warning.message.contains("Do not repeat status checks or reopen document tabs"),
+            "passive checks cannot repair loaded bytes: {}",
+            warning.message
+        );
+        assert!(
+            warning
+                .message
+                .contains("only if that install explicitly reports a dynamic-unload failure"),
+            "restart must be the explicit unload-failure fallback: {}",
             warning.message
         );
     }

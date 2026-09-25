@@ -6,8 +6,6 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.components.Service
-import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
@@ -69,7 +67,6 @@ internal class TransientDocumentStatus {
  * Controller turn phase changes. Each open markdown document retains one controller subscription;
  * banner/status-bar collection reads only the resulting cache on the EDT.
  */
-@Service(Service.Level.PROJECT)
 class TurnStateBannerRefresher(private val project: Project) : Disposable {
     fun interface Listener {
         fun turnStateChanged()
@@ -281,8 +278,14 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
 
     companion object {
         private val LOG = Logger.getInstance(TurnStateBannerRefresher::class.java)
+        private val instances = ConcurrentHashMap<Project, TurnStateBannerRefresher>()
 
-        fun getInstance(project: Project): TurnStateBannerRefresher = project.service()
+        fun getInstance(project: Project): TurnStateBannerRefresher =
+            instances.computeIfAbsent(project, ::TurnStateBannerRefresher)
+
+        fun disposeProject(project: Project) {
+            instances.remove(project)?.dispose()
+        }
 
         private fun isMarkdown(file: VirtualFile): Boolean = file.name.endsWith(".md")
     }

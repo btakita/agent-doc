@@ -74,6 +74,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
      */
     private val generation = AtomicLong(0)
     private val focusProjectionGeneration = AtomicLong(0)
+    private val selectionFocusProbeGeneration = AtomicLong(0)
     private val surfaceDeliveryRetryAttempt = AtomicLong(0)
     private val activeFocusProjection = AtomicReference<ScheduledFuture<*>?>(null)
     private val lifecycleLock = Any()
@@ -128,6 +129,17 @@ class EditorTabSyncListener : FileEditorManagerListener {
             projectWindowActive: Boolean,
         ): Boolean =
             requestedGeneration == currentGeneration && projectWindowActive
+
+        internal fun shouldClaimSettledSelectionFocus(
+            selectionPath: String,
+            activeWindowPath: String?,
+            requestedGeneration: Long,
+            currentGeneration: Long,
+            projectWindowActive: Boolean,
+        ): Boolean =
+            requestedGeneration == currentGeneration &&
+                projectWindowActive &&
+                selectionPath == activeWindowPath
 
         internal fun decideFocusProjectionReceipt(
             response: FocusProjectionEffectResponse,
@@ -1167,6 +1179,7 @@ private data class CapturedSurface(
     }
 
 override fun selectionChanged(event: FileEditorManagerEvent) {
+val selectionProbeGeneration = selectionFocusProbeGeneration.incrementAndGet()
 val file = event.newFile ?: return
 val project = event.manager.project
         if (!AgentDocSessionFiles.isSessionDocument(file)) {
@@ -1206,6 +1219,7 @@ log("selectionChanged: active-split newFile=${file.name}; projection queued")
 // keyboard focus. That event is a valid spanning-layout edge, but treating
 // its file as focused redirects tmux from the operator's active split.
 log("selectionChanged: background-split newFile=${file.name}; layout-only projection queued")
+scheduleSettledSelectionFocusProbe(project, file, selectionProbeGeneration)
 }
 
 // Focus owns targeted session recovery. Re-forcing a full surface
@@ -1227,6 +1241,39 @@ ObservationAuthority.Layout
 requiredFocusGeneration = requestedFocusGeneration,
 )
 }
+
+    /**
+     * A tab-chrome click can emit [selectionChanged] before IDEA moves [FileEditorManagerEx.currentWindow]
+     * to the clicked split, and it need not emit an editor-component focus event afterward. Re-check
+     * once on the next EDT turn and claim focus only if that exact selection is now authoritative.
+     * The selection generation prevents an older callback from stealing focus after a newer tab edge.
+     */
+    private fun scheduleSettledSelectionFocusProbe(
+        project: Project,
+        file: VirtualFile,
+        requestedGeneration: Long,
+    ) {
+        ApplicationManager.getApplication().invokeLater {
+            if (closed || project.isDisposed) return@invokeLater
+            val activeWindowPath =
+                FileEditorManagerEx.getInstanceEx(project).currentWindow?.selectedFile?.path
+            val projectWindowActive =
+                WindowManager.getInstance().getFrame(project)?.isActive == true
+            if (
+                !shouldClaimSettledSelectionFocus(
+                    selectionPath = file.path,
+                    activeWindowPath = activeWindowPath,
+                    requestedGeneration = requestedGeneration,
+                    currentGeneration = selectionFocusProbeGeneration.get(),
+                    projectWindowActive = projectWindowActive,
+                )
+            ) {
+                return@invokeLater
+            }
+            log("selectionChanged: settled active-split newFile=${file.name}; focus projection queued")
+            onEditorFocusGained(project, file)
+        }
+    }
 
     /**
      * Re-publish the settled visible surface when IDEA becomes active. i3 workspace changes do not
@@ -1261,6 +1308,7 @@ requiredFocusGeneration = requestedFocusGeneration,
     * operator moves between existing splits, so both edges are required.
      */
     fun onEditorFocusGained(project: Project, file: VirtualFile) {
+        selectionFocusProbeGeneration.incrementAndGet()
         if (!AgentDocSessionFiles.isSessionDocument(file)) {
             requestObservation(
                 PendingSurfaceObservation(

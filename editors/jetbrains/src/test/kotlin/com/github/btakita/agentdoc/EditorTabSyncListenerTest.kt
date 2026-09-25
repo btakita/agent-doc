@@ -61,6 +61,46 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `settled selection claims focus only for the current active split`() {
+        assertTrue(
+            EditorTabSyncListener.shouldClaimSettledSelectionFocus(
+                selectionPath = "/repo/tasks/right.md",
+                activeWindowPath = "/repo/tasks/right.md",
+                requestedGeneration = 8,
+                currentGeneration = 8,
+                projectWindowActive = true,
+            ),
+        )
+        assertFalse(
+            EditorTabSyncListener.shouldClaimSettledSelectionFocus(
+                selectionPath = "/repo/tasks/right.md",
+                activeWindowPath = "/repo/tasks/left.md",
+                requestedGeneration = 8,
+                currentGeneration = 8,
+                projectWindowActive = true,
+            ),
+        )
+        assertFalse(
+            EditorTabSyncListener.shouldClaimSettledSelectionFocus(
+                selectionPath = "/repo/tasks/right.md",
+                activeWindowPath = "/repo/tasks/right.md",
+                requestedGeneration = 7,
+                currentGeneration = 8,
+                projectWindowActive = true,
+            ),
+        )
+        assertFalse(
+            EditorTabSyncListener.shouldClaimSettledSelectionFocus(
+                selectionPath = "/repo/tasks/right.md",
+                activeWindowPath = "/repo/tasks/right.md",
+                requestedGeneration = 8,
+                currentGeneration = 8,
+                projectWindowActive = false,
+            ),
+        )
+    }
+
+    @Test
     fun `late stashed focus receipt cannot replace a newer document projection`() {
         val request =
             FocusProjectionEffectRequest(

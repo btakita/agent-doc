@@ -126,7 +126,7 @@ class PluginLifecycleListener : ProjectManagerListener {
         TypingTracker.reportOpenMarkdownDocuments(project)
         // Detect file renames/moves and update sessions.json path
         project.messageBus
-            .connect(project)
+            .connect(lifecycle)
             .subscribe(
                 VirtualFileManager.VFS_CHANGES,
                 FileRenameListener(project),
@@ -166,6 +166,7 @@ class PluginLifecycleListener : ProjectManagerListener {
 
         internal fun disposeProjectResources(project: Project) {
             ReliableSyncLivenessListener.disposeProject(project)
+            TurnStateBannerRefresher.disposeProject(project)
             CrdtReplicaManager.disposeProject(project)
             PatchWatcher.disposeProject(project)
             LayoutChangeDetector.disposeProject(project)

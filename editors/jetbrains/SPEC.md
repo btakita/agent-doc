@@ -41,9 +41,17 @@ controller RPCs and retains no SQLite connection.
 
 The package omits `require-restart`, so JetBrains may unload the plugin and
 replace its classloader during an update. A plugin-owned project service is the
-parent disposable for every programmatic startup listener and releases the
-project's static manager registries. An application service additionally
-cleans every still-open project during plugin unload.
+parent disposable for every programmatic startup listener, including VFS
+subscriptions, and releases the project's static manager registries. No
+listener may use the longer-lived project itself as its disposable parent. An
+application service additionally cleans every still-open project during plugin
+unload.
+Generation-owned projections that must be looked up from extension callbacks
+use plugin-static per-project registries, not IntelliJ light-service lookup:
+project containers can retain a light-service adapter by implementation class
+name while a replacement classloader is activating, which would return an old
+generation instance to new bytecode. Unload cleanup removes and disposes every
+registry entry before the replacement initializes open projects.
 An unload leak is a defect and JetBrains' explicit unload-failure prompt is the
 only package-update restart fallback. The one migration exception is an IDE
 that already loaded a package generation declaring `require-restart="true"`;
@@ -56,10 +64,13 @@ a true no-op: the installer leaves the existing files and inodes in place so a
 live IDE does not retain deleted mappings of the same generation. For a changed
 package, the installer discovers live JetBrains JVMs and attaches the packaged
 system-classloader upgrade bridge. The bridge first verifies that the live
-plugin root belongs to the installation being updated, then calls JetBrains'
-dynamic install-and-load API with the complete ZIP. This makes unload, on-disk
-replacement, and new-classloader activation one IDE-owned transaction; the
-replacement must initialize every already-open project and synchronously
+plugin root belongs to the installation being updated, then unloads the current
+descriptor with JetBrains' explicit update semantics (`disable=false`,
+`isUpdate=true`). It must prove that descriptor is no longer loaded before
+calling JetBrains' dynamic install-and-load API with the complete ZIP, and it
+must reject an identity- or classloader-equal result. This keeps the plugin set
+on one live generation across the unload, on-disk replacement, and activation
+sequence; the replacement must initialize every already-open project and synchronously
 reattach each eligible open document before the installer reports success. The
 installer must verify the loaded version, those live replica receipts, and the
 final package bytes. It
@@ -109,7 +120,7 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   editor window still has no selected file; the completed file lifecycle edge
   republishes the settled surface without invoking tmux directly.
 - Every agent-document selection and visible-layout change reports one editor-surface observation containing the focused document, visible documents, open documents, and detected columns. Session-document classification reads the live editor buffer and requires agent-doc frontmatter; a plain Markdown plan is never a desired tmux target. When a non-session tab is selected, that split retains its last classified agent document and the event republishes spanning layout only, so activity in another split still updates automatic focus and pane synchronization. An agent-document `selectionChanged` event carries pane-focus authority only when its file is selected in JetBrains' active editor window; background-split selection remains a layout-only observation and omits the event file as preferred focus. The selection callback captures only this typed authority plus its event file and schedules projection; a later EDT pass snapshots immutable editor state, while project-root discovery, filesystem access, patch-watch registration, JSON construction, native transport, and controller delivery run on a serialized background executor. Native transport adds an ordered reload generation/cursor and publishes it to an existing controller. The controller's process-scoped reactive graph derives idle or layout reconciliation and owns the tmux effect. One spanning editor surface has exactly one active controller-root subscription. Candidate roots are recovered from all open session documents on every publication; before admitting the replacement observation, the listener requests same-family retirement for incompatible roots. The controller stops every retained `jetbrains-pid` generation no newer than the requester, so a prior JVM cannot contract the tmux surface while the replacement controller is still reconciling, while a delayed old-JVM retirement cannot stop the replacement. A failed pre-publication forget stays tracked and is retried after publication and on the next observation. Active selection and component-focus also publish one generation-fenced `focus_only` surface Source to the focused agent document's own controller root under a distinct `jetbrains-focus-pid` family. The controller graph derives `Focus` and must never infer structural `Sync` from that deliberately narrow payload. When its exact receipt reports a stashed, dead, reaped, missing, or non-focusable owner, the adapter generation-fences the receipt and republishes the complete spanning surface as a forced structural edge; only that layout graph may restore the owner and reconcile pane cardinality. Component-focus also republishes the spanning surface directly. This separate retained handoff is required when one visible editor surface spans a superproject document and a submodule document. The plugin never chooses a pane or tmux window, and a missing-owner outcome installs no reverse-focus suppression lease.
-- A fresh editor selection is authoritative for the next projection even if the split component tree is briefly interstitial and still exposes the opposite editor as selected. Component-focus republishes the spanning surface when no selection is pending, but cannot replace a pending document-selection observation; the shared generation guard still collapses repeated focus callbacks.
+- A fresh editor selection is authoritative for the next projection even if the split component tree is briefly interstitial and still exposes the opposite editor as selected. When a tab-chrome click initially looks like a background-split selection, the listener performs one generation-fenced next-EDT authority check; it emits focus only if that exact file has become the active editor window while the project frame is active. This closes the opposite-tab event gap without promoting programmatic or genuinely background selections. Component-focus republishes the spanning surface when no selection is pending, but cannot replace a pending document-selection observation; the shared generation guard still collapses repeated focus callbacks.
 - The listener first re-reads an interstitial selection projection on bounded later EDT turns. If it still contains the old selected file when that budget is exhausted, the listener applies the selection event's old-to-new file edge to the stale visible/layout projection before publishing; it never synthesizes a replacement unless the old event file is actually present.
 - Reverse tmux-to-editor focus sync is installed at project startup and reads the Project Controller-owned `tmux_focus_state` projection through the Project Controller socket. That projection yields a document only when the configured tmux session's current window is `agent-doc`, so switching to another tmux window must not recall the editor selection from the stale active pane in the hidden agent-doc window. If the active pane still has an exact route-owned process-tree binding but its actor projection was pruned, the controller reports that bound document instead of `active_pane_unbound`; foreign-root and ambiguous owners remain unbound. An actually focused editor component remains authoritative over background controller focus changes. The IDE frame alone is not focus authority: selecting a pane in an embedded terminal leaves the frame active but permits the corresponding visible editor document to be selected, including a document from another project root in the same split surface. A hidden foreign-root target remains suppressed. A reverse mirror may select a different editor tab but must pass `focusEditor=false`, so it cannot reactivate the JetBrains desktop window after the operator moves to another i3 window. Before `Claim for Tmux Pane` starts a CLI claim, JetBrains records the current tmux-focused document as already seen; if the claim fails and tmux focus remains on the previous pane, the reverse focus mirror must not reopen that previous document over the editor-selected claim target.
 - The plugin applies only a short event-storm debounce and generation guard before reporting the final surface. Its separate focus lane keeps only an in-memory generation and a micro-coalescing delay, then publishes retained focus state to the Project Controller; it does not submit an editor command. The controller-owned Lazily graph supplies transition deduplication and the exact selection effect receipt. The plugin stores no previous layout signature, last-focused file, pending retry, or durable controller copy.

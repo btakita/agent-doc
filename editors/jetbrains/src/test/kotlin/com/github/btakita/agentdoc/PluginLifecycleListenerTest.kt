@@ -66,12 +66,30 @@ class PluginLifecycleListenerTest {
         assertTrue(source.contains("class PluginUnloadCleanupService : Disposable"))
         assertTrue(source.contains("class ProjectPluginLifecycleService"))
         assertTrue(source.contains("connect(lifecycle)"))
+        assertFalse(
+            "programmatic listeners must not outlive their plugin generation",
+            source.contains(".connect(project)"),
+        )
         assertTrue(source.contains("addDocumentListener(TypingTracker, lifecycle)"))
         assertTrue(source.contains("ProjectManager.getInstance().openProjects"))
         assertTrue(source.contains("initializeOpenProjectsAfterDynamicLoad"))
         assertTrue(source.contains("ensureOpenDocumentReplicasAndWait"))
         assertTrue(source.contains("beginInitialization()"))
         assertTrue(source.contains("disposeProjectResources"))
+
+        val turnStateRefresher = Files.readString(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TurnStateBannerRefresher.kt")
+                .takeIf { Files.exists(it) }
+                ?: Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TurnStateBannerRefresher.kt"),
+        )
+        assertFalse(
+            "light services remain cached by class name across a dynamic plugin replacement",
+            turnStateRefresher.contains("@Service(Service.Level.PROJECT)"),
+        )
+        assertFalse(turnStateRefresher.contains("project.service()"))
+        assertTrue(turnStateRefresher.contains("instances.computeIfAbsent(project"))
+        assertTrue(turnStateRefresher.contains("fun disposeProject(project: Project)"))
+        assertTrue(source.contains("TurnStateBannerRefresher.disposeProject(project)"))
 
         val upgradeAction = Files.readString(
             Paths.get("src/main/java/com/github/btakita/agentdoc/JetBrainsPluginUpgradeAction.java")
@@ -80,6 +98,11 @@ class PluginLifecycleListenerTest {
         )
         assertTrue(upgradeAction.contains("initializeOpenProjectsAfterDynamicLoad"))
         assertTrue(upgradeAction.contains("documents="))
+        assertTrue(upgradeAction.contains(".withDisable(false)"))
+        assertTrue(upgradeAction.contains(".withUpdate(true)"))
+        assertFalse(upgradeAction.contains("unloadPlugin(current)"))
+        assertTrue(upgradeAction.contains("actual == current"))
+        assertTrue(upgradeAction.contains("actual.getPluginClassLoader() == current.getPluginClassLoader()"))
 
         val replicaManager = Files.readString(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt")

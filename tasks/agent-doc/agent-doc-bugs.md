@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0d8d1-d5de-77d3-8a6c-bdd25a7b63ce
+  codex: 01a0d8f0-5da4-7ce1-81e9-63aa5a7c3596
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -235,7 +235,49 @@ Live proof succeeded in the existing IntelliJ PID 28053: the normal CLI upgraded
 Verification is green: `make check` (9,721 Rust tests, 179 VS Code tests, cross-editor/bootstrap suites, and all TLA+ models), Gradle `test buildPlugin`, plugin-version self-checks, scoped Rust tests, `git diff --check`, and the latest upstream CI run. Implementation commits: `840a02f42` and `fef319dc7`; parent pointer commits: `f43ca2a4b` and `7751508c6`.
 
 Session note: this document has accumulated substantial history; compacting it after this cycle would keep future routing and review focused.
-<!-- agent:boundary:00048a2e:agent-doc-bugs -->
+
+> **Queue prompt:** In infra.md, agent-doc is duplicating my queue items. As I am typing, intra-queue item text is duplicated/reapplied. There are also 3 `agent-doc: awaiting response` alerts in this editor file ![img.png](img.png).
+
+### Re: JetBrains hot-reload, queue replay, and split focus — gpt-5 · 2026-09-25T12:32-04:00
+
+Fixed, built, installed, committed, and pushed.
+
+The three banners and queue-item replay had one root cause: the JetBrains updater used the default dynamic-unload options, which disable a plugin instead of performing an update handoff. IntelliJ could retain the old descriptor/classloader while loading the replacement, leaving multiple generations of listeners and registries alive. That also explains the suppressed `DiagnosticCoroutineContextException`: it was downstream cancellation after a new-generation caller received the old classloader's cached `TurnStateBannerRefresher`.
+
+The restart was safe and cleared the historical generations. Its trace also explains why the `backend_fpe_*` item appeared again: the already-corrupted controller canonical contained one extra 59-character item, while the restarted editor contained the corrected single item; normal canonical bootstrap restored the durable copy. After the duplicate was removed, the live editor/controller converged to the single-item hash. No second queue parser created it during restart.
+
+Changes:
+
+- Dynamic replacement now unloads with explicit update semantics (`disable=false`, `update=true`), proves that no loaded old descriptor remains, and proves the installed descriptor and plugin classloader are fresh before reporting success.
+- Plugin-owned listeners are tied to the plugin-generation disposable. The VFS listener no longer outlives unload.
+- `TurnStateBannerRefresher` is no longer an IntelliJ light service, whose name-based adapter survived classloader replacement and returned an old-generation instance. It now uses a generation-local registry with explicit project cleanup.
+- The stale-byte warning now directs one plugin reinstall, forbids passive status-check/tab-reopen loops, and reserves an IDE restart for an explicit dynamic-unload failure.
+- Opposite-editor-tab tmux focus now performs one next-EDT, generation-fenced authority check when the initial selection event still reports the old split. It publishes focus only when the exact file becomes the active editor window and the project frame is active, so programmatic/background selections remain layout-only.
+
+Architecture contract:
+
+- **Invariant:** exactly one loaded plugin generation owns every project listener, registry, banner subscription, CRDT adapter, and focus projection.
+- **Policy owners:** `JetBrainsPluginUpgradeAction` owns generation replacement; `PluginLifecycleListener` and generation-local registries own teardown; `EditorTabSyncListener` owns editor-focus authority; preflight warnings own operator recovery guidance.
+- **Transition:** byte-identical install is a no-op; changed bytes unload as an update, prove the old descriptor absent, load a fresh classloader, then reinitialize open projects. Any failed proof stops installation rather than stacking generations.
+- **Evidence:** descriptor/classloader identity, JVM mappings, IntelliJ dynamic-plugin logs, one refresher startup, document re-registration receipts, and regression tests.
+- **Topology:** plugin lifecycle → project disposables/registries → CRDT/banner/focus listeners → controller projections → tmux effects. Focus remains a narrow controller effect; layout remains structurally authoritative.
+- **Imperative audit:** removed default-disable unload behavior, the project-parent VFS listener, the classloader-cached light service, passive reopen/status recovery guidance, and the opposite-tab event-ordering gap.
+
+Verification:
+
+- Focused JetBrains tests and `buildPlugin`: passed.
+- Full `make check`: passed.
+- `make install`: passed; installed Agent Doc `0.2.414`.
+- Live IntelliJ proof: `0.2.412` successfully unloaded, `0.2.414` loaded without restart, open documents reattached, and no new retained-descriptor, cross-classloader cast, or coroutine error appeared.
+- Latest upstream CI before this push was green.
+- Private-name denylist scan: clean.
+
+The failed `infra.md` invocation no longer reports the disk/editor authority conflict. Its attempted dispatch left an abandoned `preflight_started` cycle and the old route-host binary has an automatic safe-boundary recycle already requested; I did not mutate or answer that separate document from this cycle.
+
+Source commit: `42a9250f4` (`fix(jetbrains): make hot reload generation-safe`)  
+Superproject pointer: `7cae80f683` (`chore: update agent-doc`)  
+Both commits are pushed to `origin/main`.
+<!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 <!--
@@ -243,8 +285,8 @@ Session note: this document has accumulated substantial history; compacting it a
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 We just worked on making the plugins not have to restart when upgrading. Please fix the no restart required upgrades: The live JetBrains process still uses superseded plugin bytes; restart IntelliJ or reopen the document tab before relying on editor-delivery acknowledgments.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+- In infra.md, agent-doc is duplicating my queue items. As I am typing, intra-queue item text is duplicated/reapplied. There are also 3 `agent-doc: awaiting response` alerts in this editor file ![img.png](img.png).
 <!-- /agent:queue -->
 
 

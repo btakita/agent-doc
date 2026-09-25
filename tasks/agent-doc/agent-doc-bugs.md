@@ -313,6 +313,10 @@ Same coroutine completion chain; no new root cause or action. You can omit the r
 ### Re: recovered response
 
 Same old exception’s coroutine unwinding. This frame adds no new diagnostic information.
+
+### Re: recovered response
+
+Same coroutine unwinding path—no new cause. Please skip ahead to any `Caused by:` line; otherwise the diagnosis is unchanged.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

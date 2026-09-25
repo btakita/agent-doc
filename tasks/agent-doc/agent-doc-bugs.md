@@ -309,6 +309,10 @@ Same propagation path. `JobSupport.finalizeFinishingState` is coroutine cleanup 
 ### Re: recovered response
 
 Same coroutine completion chain; no new root cause or action. You can omit the remaining `kotlinx.coroutines` frames—send only any later `Caused by:` section or a new timestamp.
+
+### Re: recovered response
+
+Same old exception’s coroutine unwinding. This frame adds no new diagnostic information.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

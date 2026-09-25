@@ -403,6 +403,23 @@ Completed the next two-area pass, migrating all 29 coordination and 42 ingress s
 Committed and pushed lazily-kt `663c89f`, `a0ad8a1`, and `92bd1d2`. GitHub Actions run 36174599868 was in progress at closeout; the preceding two migration runs were green.
 
 `#lzktbindpending` remains open at 266/540, with collections (132), reactive-graph (88), and stdlib (54) remaining; the backlog item has been updated in place.
+
+### Re: #lzktbindpending stdlib pass — gpt-5 · 2026-09-25T14:53:11-04:00
+
+Completed the stdlib area, migrating all 54 sites and fixing the higher-rung proof gaps exposed by that migration.
+
+- Bound every stdlib `expect` block through `AssertionKeys` with raw `JsonElement` equality and bidirectional key-set checks, preserving JSON type and unsigned-value fidelity.
+- Added exact scenario/step site identities, duplicate-visit rejection, and an aggregate 54-site pin. This closes the hole where repeated identical payloads could make digest-based bookkeeping look complete after a skipped step.
+- Added an independently executed mutation interpreter. Its unperturbed model matches the corpus, all 13 declared operators are consulted, and all 15 required operator/scenario pairs are killed.
+- Added direct production tests for timeout clock regression, cancellation-unavailable latching, register-recheck deadline precedence, and unavailable/exceptional future-adapter paths.
+- Removed exactly 54 ledger entries and lowered the exact pin from 299 to 245. The remaining ledger is 220 bind-pending plus 25 unreachable.
+- Fresh JUnit XML dated 2026-09-25T18:52:13Z records 8 stdlib production/conformance tests and 2 mutation tests passing with zero failures.
+- Full `make check` passed: 504/749 assertion sites bound, Kotlin and interop green, both Lean builds green, assertion ordering green, and CI reachability green.
+- Forced pins 244 and 246 failed in the intended ledger-GREW and ledger-SHRANK directions.
+
+Committed and pushed lazily-kt `f981f2e`, `d80a5e0`, and `142cf3d`. GitHub Actions run 36176230067 was queued at closeout; the preceding main run completed successfully.
+
+`#lzktbindpending` remains open at 320/540, with collections (132) and reactive-graph (88) remaining; the backlog item has been updated in place.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  

@@ -492,14 +492,38 @@ The license intake records current and candidate platform/client licenses withou
 Independent authorship and exclusions are now mandatory: synthetic names/values only; no Haiven names, schemas, events, policies, incidents, fixtures, credentials, logs, or code; no third-party source used as transformation input; and per-change provenance plus license deltas.
 
 The public-source/provenance record is complete, but employer-related implementation remains externally gated. No written boundary is recorded in this public repository. The plan now requires a private agreement plus a public-safe attestation containing date, authority, scope, private reference, and digest before such work begins. The review gate itself records that condition, so no additional backlog follow-up is needed.
+
+### Re: #lzsimprocessadapter — gpt-5 · 2026-09-25T18:28-04:00
+
+> **Queue prompt:**
+>
+> do [#lzsimlicense]: Apache License 2.0
+
+
+> **Queue prompt:**
+>
+> do [#lzsimprocessadapter]
+
+
+Completed and pushed the generalized consumer simulation adapter contract in `lazily-go`.
+
+- Added explicitly selected external-process adapters for neutral `cli`, `filesystem`, `local_socket`, and `editor_replica` ports while preserving the strict Postgres/NATS selection path.
+- Required stable service identity plus probe, reset, apply, observe, and exact `MaterializedHistory` callbacks for every real adapter. The testkit now verifies the materialized action-history prefix after every scenario step, not only final observations.
+- Made external-process port determinism explicit. Real adapters cannot expose `SimWorld` or stub any deterministic or nondeterministic port; only the in-memory adapter may stub a declared nondeterministic boundary.
+- Split identity evidence correctly: all adapters share `ProtocolID`; in-memory/Postgres/NATS retain the shared `ProductionReducerID` proof; an external process supplies its own stable `ReducerID` and must leave `ProductionReducerID` empty, so cross-language execution never claims to run the Go reducer.
+- Added run-result identity evidence and neutral coverage for all four process ports, exact-history drift, selection/port mismatch, missing identities and callbacks, protocol drift, false reducer claims, real-adapter `SimWorld` exposure, and real deterministic-port stubbing. Updated the public example and README contract.
+
+Verification passed with `make check` (exit 0, zero failure groups), and scoped whitespace checks were clean. Commit `69fa4a4` (`feat: generalize consumer simulation adapters`) is pushed to `lazily-go` `main`. GitHub CI run `36196885317` is queued; the previous CI run completed successfully.
+
+`#lzsimprocessadapter` is complete. No additional backlog follow-up is needed. The exchange remains large, but the active queue can continue without compaction.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
-- 🚧 do [#lzsimprocessadapter]
-- do [#lzsimlicense]: Apache License 2.0
+- ~~do [#lzsimprocessadapter]~~
+- ~~do [#lzsimlicense]: Apache License 2.0~~
 - do [#lzdurablespec]
 - do [#lzdurablepg]
 - do [#lzdurablejetstream]
@@ -513,7 +537,6 @@ The public-source/provenance record is complete, but employer-related implementa
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzsimprocessadapter] [lazily-go,simulation] Generalize SimConsumerTestkit beyond hard-coded Postgres/NATS real-adapter kinds with an explicitly selected external-process/port adapter contract for CLI, filesystem, local-socket, and editor-replica consumers. Require stable service identity, probe/reset/apply/observe callbacks, declared deterministic versus nondeterministic ports, exact materialized histories, and protocol/reducer identity evidence without pretending a cross-language adapter executes the in-memory reducer. Add negative coverage preventing real adapters from exposing SimWorld or stubbed deterministic ports; preserve the existing strict Postgres/NATS defaults and use only neutral public examples.
 - [ ] [#lzprojectionbarrier] [lazily-go,postgres][blocked-by:lzdurablepg] Specify and implement a generic database-owned projection-maintenance barrier using only independently authored APIs and the official PostgreSQL explicit-locking, transaction-isolation, lock_timeout, and advisory-lock documentation as conceptual sources. Compare table locks, transaction-scoped advisory locks, and SERIALIZABLE retry; require documented lock ordering, bounded wait/cancellation, one-transaction scan-and-replace semantics, and two-connection plus multi-host conformance proving accepted source writes are never lost. In-process ThreadSafe/Async primitives must not satisfy this capability. Use only synthetic projection names and values.
 - [ ] [#lzprojectionracecorpus] [lazily-go,simulation][blocked-by:lzprojectionbarrier] Extend SimConsumerTestkit with an independently authored, generic projection-maintenance history family: materialized append/amend/retract events interleaved with full rebuild, bounded lock timeout, retry, cancellation, and crash windows. Reuse one production reducer across an in-memory reference adapter and an explicitly selected real PostgreSQL adapter; causally shrink failures and assert no accepted update is lost plus final complete-history replay equivalence. Derive techniques only from cited public primary sources such as official Go fuzzing and PostgreSQL documentation; use synthetic nouns and exclude all consumer names, schemas, events, policies, incidents, data, fixtures, and code.
 - [ ] [#lzconcurrencyscope] [lazily-go,lazily-spec] Make concurrency scope explicit and machine-checkable across Lazily surfaces: classify single-goroutine, single-process lock/channel serialized, durable cross-process, and distributed/fenced capabilities; document that ThreadSafeContext, AsyncContext, queues, and the in-memory LatestDurableProjection core do not provide database atomicity or cross-replica exclusion; and add negative conformance tests that prevent an in-process capability from being advertised as a projection-maintenance barrier. Use independently authored neutral examples and public Go/PostgreSQL terminology only.

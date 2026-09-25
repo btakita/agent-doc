@@ -161,6 +161,14 @@ The dependency and fixture audit found:
 The `#lzsimipgate` task is complete because the fail-closed gate and its evidence are now durable. The gate is not cleared for implementation: I inserted `#lzsimlicense` immediately before `#lzsimspec` to require an authorized repository-license decision, matching project metadata and third-party inventory, and an explicit provenance/license chain for the canonical and vendored fixtures. Until that prerequisite is resolved, simulation specifications and fixtures must not be published or copied through `lazily-spec`.
 
 Verification covered the manifests and lock graph (`go list -m all`, `uv tree --group dev`), exact fixture counts, generator metadata, git authorship, official repository-license endpoints, public-source link checks, and a scoped whitespace/diff review. No runtime code or dependency changed, so no runtime suite was applicable.
+
+### Re: #lzsimspec halt — gpt-5 · 2026-09-25T01:01-04:00
+
+`#lzsimspec` is not admissible yet. The completed provenance audit found that `lazily-spec` has no declared repository license or fixture reuse terms, and `tasks/software/plan-lazily-simulation.md` now makes that a fail-closed implementation boundary.
+
+I did not create simulation contracts, schemas, fixtures, or code. I kept `#lzsimspec` open and narrowed it to depend explicitly on `#lzsimlicense`, which already captures the authorized license decision, project metadata, third-party inventory, and provenance chain needed to unblock this phase. No additional backlog follow-up is needed because that prerequisite is already tracked.
+
+The gate plan and its agent-doc response are committed and pushed on `main` through `d86e309232`. The attempted safe supervisor recycle was refused because this is the document's owner pane and no live supervisor was available to perform a non-disruptive handoff; I did not force a restart, install, or disk write.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -184,13 +192,14 @@ Verification covered the manifests and lock graph (`go list -m all`, `uv tree --
 - do [#lzdurablejetstream]
 - do [#lzdurablereconcile]
 - do [#lzdurablefamily]
+- do [#lzsimlicense]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzsimlicense] [operator-decision, lazily-spec] Resolve the implementation-admission blocker in tasks/software/plan-lazily-simulation.md before #lzsimspec: an authorized owner selects and records the repository license and fixture reuse terms; then add matching project metadata, a generated third-party inventory from uv.lock, and provenance/license records for all 156 canonical fixtures and nine vendored Go copies. Until resolved, do not publish or copy simulation specifications or fixtures through lazily-spec.
-- [ ] [#lzsimspec] [lazily-spec, lazily-go] Define backend-neutral simulation contracts for World, Actor, Action, Observation, Fault, Invariant, Trace, Seed, and monotonic logical time. Specify stable same-tick ordering, trace/schema versions, deterministic serialization, explicit port boundaries, and the rule that a consumer simulator invokes the same pure reducers or decisions as production rather than reimplementing business behavior in a test-only model.
+- [ ] [#lzsimspec] [lazily-spec, lazily-go] BLOCKED on #lzsimlicense and the fail-closed gate in tasks/software/plan-lazily-simulation.md. After an authorized lazily-spec repository-license and fixture-reuse decision is recorded, define backend-neutral simulation contracts for World, Actor, Action, Observation, Fault, Invariant, Trace, Seed, and monotonic logical time. Specify stable same-tick ordering, trace/schema versions, deterministic serialization, explicit port boundaries, and the rule that a consumer simulator invokes the same pure reducers or decisions as production rather than reimplementing business behavior in a test-only model.
 - [ ] [#lzsimworldgo] [lazily-go] Implement a deterministic single-threaded discrete-event SimWorld over ManualClock, StateMachine, and ReplayHarness: seeded randomness, stable event ordering, run-until-idle and bounded-step controls, actor lifecycle, scheduled messages, checkpoint observations, and byte-stable traces. Prohibit wall-clock reads, sleeps, uncontrolled goroutines, and ambient randomness inside the simulated world; prove identical seed plus inputs yields an identical trace.
 - [ ] [#lzsimgen] [lazily-go] Add model-based action generation and causal shrinking: state-dependent preconditions, weighted actions, bounded history length, deterministic seeds, coverage labels, and shrinkers that preserve identifiers, dependencies, and command validity while minimizing a failing trace. Persist minimized counterexamples as ordinary regression fixtures and Go fuzz seed corpus entries, and fail coverage audits when declared actions or scenarios are never exercised.
 - [ ] [#lzsimfaults] [lazily-go] Add deterministic fault plans at generic port boundaries for delay, drop, duplicate, reorder, partition/heal, crash/restart, timeout/cancel, stale response, optimistic conflict, commit/rollback outcome, and clock advance. Record every injection and recovery in the trace, keep the schedule replayable and shrinkable, and state explicitly that these modeled faults do not replace real database, broker, operating-system, or network conformance tests.

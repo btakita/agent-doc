@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0d5a6-d534-7c42-91b1-56516ab58197
+  codex: 01a0d64e-3edc-7881-8a91-102858ef177f
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -86,6 +86,24 @@ Verification and delivery:
 - `make install` succeeded for agent-doc 0.35.418, the native library, JetBrains 0.2.397, and VS Code 0.2.71.
 - Commit `0b1adf33b` (`fix(backlog): allow cross-document item moves`) is pushed to `origin/main`.
 - CI run `36082096447` was in progress at the required one-shot post-push check; local verification is complete.
+❯ 🚧 In fpe.md, fix agent-doc causes of: The agent-doc response landed, but editor convergence interrupted the terminal commit. Per its recovery guard, I stopped without resending or writing directly to disk.
+
+### Re: fpe.md terminal commit convergence — gpt-5 · 2026-09-24T22:36:11-04:00
+
+Fixed the agent-doc causes in source commit `7df2faafa` (`fix(closeout): await strict editor convergence`).
+
+The failure was a closeout race: canonical CRDT text already matched the captured response, but the visible-editor receipt arrived just after the foreground writer treated the retained projection as terminal. The recovery guard then correctly refused to recapture or write directly to disk, while session-check could also surface an IPC diagnostic from an older cycle.
+
+The fix keeps the original captured closeout active until the exact visible projection is acknowledged and persisted:
+
+- Added a reactive delivery-revision wait that still observes a later visible ACK after the availability barrier has converged.
+- Made serialized writes and retained captured-response settlement await that strict receipt before native save and commit.
+- Scoped IPC proof diagnostics to the current cycle so recovery output cannot attribute an older turn to the active closeout.
+- Added regression coverage for the converged-barrier/late-visible-receipt race and stale-cycle diagnostic filtering.
+
+Verification passed: focused regressions, all four affected crate suites, the architecture ownership guard, full `make check` (exit 0, zero failures), private-name hygiene scan, and `make install`.
+
+Architecture invariant: after response capture, one closeout operation owns reconcile, visible-delivery proof, persistence, and the exactly-once terminal commit. Policy ownership remains split between the realtime delivery Source and session-check closeout diagnostics.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

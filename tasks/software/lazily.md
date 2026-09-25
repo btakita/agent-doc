@@ -2,7 +2,7 @@
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
   claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a0aca3-5653-7a13-b2f1-b0ffed3e840f
+  codex: 01a0d6e4-c04f-7881-a3d0-bdf78f33ed5e
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -133,6 +133,34 @@ Completed the simulation-planning parent task. The backlog now carries seven ord
 The IP boundary is enforced before implementation by `#lzsimipgate`: it requires primary/public-source citations and license inventory, independently authored Lazily APIs and fixtures, exclusion of consumer-specific names and artifacts, and any required prior-work or employer clearance. The technical phases use generic public patterns while keeping consumer behavior behind production reducers and narrow ports.
 
 I marked `#lzappsimulation` done. Implementation remains explicitly tracked by the seven child items, beginning with `#lzsimipgate`; no additional backlog item is needed from this parent closeout. No code changed in this cycle, so tests were not applicable.
+
+### Re: #lzsimipgate — gpt-5 · 2026-09-25T00:58-04:00
+
+> **Queue prompt:**
+>
+> do [#lzsimipgate]
+
+
+Recorded the simulation public-pattern and provenance gate in `tasks/software/plan-lazily-simulation.md` and committed it as `7f8963294` (`docs: record Lazily simulation provenance gate`). The gate is independently authored and treats the cited materials as conceptual references only:
+
+- FoundationDB's official deterministic, single-threaded simulation documentation;
+- the QuickCheck paper and official generation/shrinking API documentation;
+- the official Go fuzzing documentation and standard `testing.F` toolchain; and
+- the Herlihy-Wing linearizability paper.
+
+The plan explicitly prohibits copying their code, API shape, examples, fixtures, prose, diagrams, or histories. It also excludes consumer/employer names, schemas, policies, incidents, recordings, production data, internal designs, and code, and requires synthetic neutral examples plus a written prior-work/employer determination before any consumer-related work.
+
+The dependency and fixture audit found:
+
+- `lazily-go` is MIT-licensed, targets Go 1.24, and has no third-party Go modules;
+- the complete 12-package `lazily-spec` Python development lock is inventoried with versions and licenses;
+- the canonical corpus has 156 JSON fixtures, only three with explicit generator metadata;
+- the Go binding has nine byte-identical vendored fixture copies; and
+- `lazily-spec` has no repository `LICENSE`/`NOTICE` or project-license metadata, so public readability does not establish reuse rights.
+
+The `#lzsimipgate` task is complete because the fail-closed gate and its evidence are now durable. The gate is not cleared for implementation: I inserted `#lzsimlicense` immediately before `#lzsimspec` to require an authorized repository-license decision, matching project metadata and third-party inventory, and an explicit provenance/license chain for the canonical and vendored fixtures. Until that prerequisite is resolved, simulation specifications and fixtures must not be published or copied through `lazily-spec`.
+
+Verification covered the manifests and lock graph (`go list -m all`, `uv tree --group dev`), exact fixture counts, generator metadata, git authorship, official repository-license endpoints, public-source link checks, and a scoped whitespace/diff review. No runtime code or dependency changed, so no runtime suite was applicable.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -140,7 +168,7 @@ I marked `#lzappsimulation` done. Implementation remains explicitly tracked by t
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzappsimulation]~~
-- do [#lzsimipgate]
+- ~~do [#lzsimipgate]~~
 - do [#lzsimspec]
 - do [#lzsimworldgo]
 - do [#lzsimgen]
@@ -161,7 +189,7 @@ I marked `#lzappsimulation` done. Implementation remains explicitly tracked by t
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzsimipgate] [lazily family] Before simulation implementation, record a public-pattern and provenance gate: cite FoundationDB deterministic single-threaded simulation, QuickCheck property generation and shrinking, official Go fuzzing, and Herlihy-Wing linearizability from primary or official sources; inventory every dependency and fixture license; author Lazily APIs, traces, and examples independently; exclude consumer names, schemas, policies, incidents, recordings, and code; and obtain any required prior-work or employer boundary before consumer-related implementation.
+- [ ] [#lzsimlicense] [operator-decision, lazily-spec] Resolve the implementation-admission blocker in tasks/software/plan-lazily-simulation.md before #lzsimspec: an authorized owner selects and records the repository license and fixture reuse terms; then add matching project metadata, a generated third-party inventory from uv.lock, and provenance/license records for all 156 canonical fixtures and nine vendored Go copies. Until resolved, do not publish or copy simulation specifications or fixtures through lazily-spec.
 - [ ] [#lzsimspec] [lazily-spec, lazily-go] Define backend-neutral simulation contracts for World, Actor, Action, Observation, Fault, Invariant, Trace, Seed, and monotonic logical time. Specify stable same-tick ordering, trace/schema versions, deterministic serialization, explicit port boundaries, and the rule that a consumer simulator invokes the same pure reducers or decisions as production rather than reimplementing business behavior in a test-only model.
 - [ ] [#lzsimworldgo] [lazily-go] Implement a deterministic single-threaded discrete-event SimWorld over ManualClock, StateMachine, and ReplayHarness: seeded randomness, stable event ordering, run-until-idle and bounded-step controls, actor lifecycle, scheduled messages, checkpoint observations, and byte-stable traces. Prohibit wall-clock reads, sleeps, uncontrolled goroutines, and ambient randomness inside the simulated world; prove identical seed plus inputs yields an identical trace.
 - [ ] [#lzsimgen] [lazily-go] Add model-based action generation and causal shrinking: state-dependent preconditions, weighted actions, bounded history length, deterministic seeds, coverage labels, and shrinkers that preserve identifiers, dependencies, and command validity while minimizing a failing trace. Persist minimized counterexamples as ordinary regression fixtures and Go fuzz seed corpus entries, and fail coverage audits when declared actions or scenarios are never exercised.

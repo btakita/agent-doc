@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
@@ -49,7 +50,6 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
     private val pathTransitionFrames = PathTransitionFrameLedger()
 
     init {
-        instances[project] = this
         // Project listeners can be created after the IDE restored its editor tabs;
         // seed that existing open set because no new fileOpened event is guaranteed.
         ApplicationManager.getApplication().invokeLater {
@@ -197,6 +197,26 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
 
     companion object {
         private val instances = ConcurrentHashMap<Project, ReliableSyncLivenessListener>()
+
+        /**
+         * Install this plugin generation's listener under its project lifecycle.
+         *
+         * IntelliJ does not replay XML-declared project-listener construction for
+         * projects that survive a dynamic plugin upgrade. Explicit installation
+         * makes the replacement generation republish every open document with its
+         * current editor version and replaces the stale PID-scoped save endpoint.
+         */
+        fun install(project: Project, lifecycle: Disposable): ReliableSyncLivenessListener =
+            instances.computeIfAbsent(project) {
+                ReliableSyncLivenessListener(project).also { listener ->
+                    project.messageBus
+                        .connect(lifecycle)
+                        .subscribe(
+                            FileEditorManagerListener.FILE_EDITOR_MANAGER,
+                            listener,
+                        )
+                }
+            }
 
         fun reportDocumentPathTransition(
             project: Project,

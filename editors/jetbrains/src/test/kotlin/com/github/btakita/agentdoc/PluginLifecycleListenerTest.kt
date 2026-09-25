@@ -71,6 +71,7 @@ class PluginLifecycleListenerTest {
             source.contains(".connect(project)"),
         )
         assertTrue(source.contains("addDocumentListener(TypingTracker, lifecycle)"))
+        assertTrue(source.contains("ReliableSyncLivenessListener.install(project, lifecycle)"))
         assertTrue(source.contains("ProjectManager.getInstance().openProjects"))
         assertTrue(source.contains("initializeOpenProjectsAfterDynamicLoad"))
         assertTrue(source.contains("ensureOpenDocumentReplicasAndWait"))
@@ -111,6 +112,19 @@ class PluginLifecycleListenerTest {
         )
         assertTrue(replicaManager.contains("DYNAMIC_PLUGIN_ATTACH_RECEIPT_TIMEOUT_MS"))
         assertTrue(replicaManager.contains("manager.forwarders[filePath]?.attached == true"))
+
+        val livenessListener = Files.readString(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/ReliableSyncLivenessListener.kt")
+                .takeIf { Files.exists(it) }
+                ?: Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/ReliableSyncLivenessListener.kt"),
+        )
+        assertTrue(livenessListener.contains("fun install(project: Project, lifecycle: Disposable)"))
+        assertTrue(livenessListener.contains("instances.computeIfAbsent(project)"))
+        assertTrue(livenessListener.contains(".connect(lifecycle)"))
+        assertFalse(
+            "the liveness publisher must be rebuilt explicitly for surviving projects",
+            pluginXml.contains("class=\"com.github.btakita.agentdoc.ReliableSyncLivenessListener\""),
+        )
     }
 
     @Test

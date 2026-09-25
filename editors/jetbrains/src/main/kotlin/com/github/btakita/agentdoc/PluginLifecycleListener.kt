@@ -30,6 +30,12 @@ class PluginLifecycleListener : ProjectManagerListener {
         if (!lifecycle.beginInitialization()) return
         // Track document changes for typing debounce in SubmitAction
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(TypingTracker, lifecycle)
+        // Publish the live editor registration from a generation-owned listener.
+        // XML project listeners are not reconstructed for projects that remain
+        // open across a dynamic plugin replacement, which left native-save
+        // routing pinned to the superseded plugin version even after the CRDT
+        // replica had reattached from the replacement classloader.
+        ReliableSyncLivenessListener.install(project, lifecycle)
         // Attach markdown buffers as CRDT replicas when the CP endpoint is available.
         CrdtReplicaManager.getInstance(project)
         // Registration is retained independently of the controller's current

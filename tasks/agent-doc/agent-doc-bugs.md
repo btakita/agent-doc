@@ -358,6 +358,26 @@ Source commit: `4946f2820` (`fix: guard resumed sessions from stale orphan reap`
 Parent pointer commit: `e06a288d0` (`fix: guard agent-doc resumed session liveness`)
 
 Both commits are pushed to `origin/main`.
+
+### Re: session crash after idle and legacy JetBrains upgrader
+
+Fixed and deployed both newly reproduced causes.
+
+The crash was a second-stage supervisor liveness bug. The previous guard correctly kept pane `%213` alive while Codex was active, but after the turn returned to its idle prompt the supervisor still remembered its original `layout-provision` purpose and reaped it as an unused orphan. A provisioned owner now makes a one-way transition to effective `Dispatch` as soon as direct child-output evidence proves a real harness interaction. That promotion remains sticky after the prompt becomes idle; a truly never-used provisioned pane still reaps normally. The installed supervisor has already emitted the live transition for this session on pane `%215`:
+
+`route_owned_start_purpose_promoted prior=layout_provision new=dispatch reason=live_child_interaction pane=%215`
+
+The `api.md` upgrader failure had a separate deterministic cause: the generic remote command selected the old 0.2.392 release asset while IntelliJ already had development generation 0.2.419. That legacy JAR has no executable `Main-Class`, so passing it to `java -jar` produced the reported error. Remote installation now compares numeric plugin versions before side effects and refuses a downgrade. Dynamic upgrade also validates the nested JAR manifest before launching Java, producing a typed actionable error for any legacy artifact instead of leaking `no main manifest attribute`.
+
+I rebuilt and installed the binary and editor plugins. The exact failing API command now exits successfully with:
+
+`Installed JetBrains plugin v0.2.419 is newer than release asset v0.2.392; refusing downgrade and keeping the installed generation.`
+
+IntelliJ remains on 0.2.419, whose JAR contains both `Main-Class` and `Agent-Class`; no restart is required. The post-upgrade IDE log contains no new classloader-cast, unhandled-exception, or manifest error.
+
+Architecture contract: the route-owned completion state machine alone owns the sticky purpose promotion and reap effect; plugin applicability is decided in `plugin.rs` before any IDE mutation. A healthy owner that has admitted a turn cannot later become an unused layout orphan, and a remote install cannot replace a newer generation or invoke a non-launchable upgrade artifact.
+
+Verification passed: focused supervisor/runtime/plugin regressions, full `make check`, local `make tmux-ci`, Rust formatting/diff checks, live installation, exact remote-command reproduction, and the public-repo private-name denylist. Source commit `8ea3cb8f2` and parent pointer commit `a980bcc96` are pushed. GitHub CI for `8ea3cb8f2` is currently in progress; local verification is complete.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

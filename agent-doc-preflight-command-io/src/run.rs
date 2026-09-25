@@ -4042,6 +4042,68 @@ mod tests {
     }
 
     #[test]
+    fn preflight_document_only_recovery_commits_current_authority_over_stale_snapshot() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("session.md");
+
+        let original = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ hello\n\n",
+            "### Re: hello — opus-4-6\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:status -->\n",
+            "idle\n",
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#base] original work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, original).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        commit_all(root, "add doc", None);
+
+        let stale_snapshot = original
+            .replace("idle\n", "stale snapshot\n")
+            .replace("[#base] original work", "[#stale] stale work");
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &stale_snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let current = original
+            .replace("idle\n", "ready\n")
+            .replace("[#base] original work", "[#current] current editor work");
+        std::fs::write(&doc, &current).unwrap();
+
+        assert!(
+            agent_doc_closeout_runtime_io::document_only_drift_is_commit_recoverable(&doc),
+            "terminal current-authority drift without a response must be recoverable"
+        );
+        run(&doc).expect("preflight must commit current authority instead of the stale snapshot");
+
+        let committed = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("preflight recovery must commit the document");
+        assert!(
+            committed.contains("[#current] current editor work")
+                && !committed.contains("[#stale] stale work"),
+            "preflight must commit current authority, not the stale recovery snapshot:\n{committed}"
+        );
+    }
+
+    #[test]
     fn preflight_auto_commits_abandoned_prompt_queue_snapshot_and_continues() {
         // #abandonedpromptcommit: a stale preflight can be abandoned after the
         // prompt has already been mirrored into queue/backlog and checkpointed as

@@ -979,6 +979,126 @@ pub fn commit(file: &Path) -> Result<bool> {
     Ok(commit_with_outcome(file)?.did_commit)
 }
 
+/// Commit document-only drift from the current document authority.
+///
+/// This is the operator/preflight recovery path named when no response body is
+/// pending. Unlike an ordinary closeout commit, it may need to advance a stale
+/// recovery snapshot to the editor-authoritative document before staging. It
+/// never adopts an open cycle or a response-shaped change relative to `HEAD`.
+pub fn commit_document_only_drift(file: &Path) -> Result<bool> {
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        let current = commit_current_document_content(file, "commit_document_only_drift")?;
+
+        let cycle = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+        let cycle_is_open = cycle.as_ref().is_some_and(|state| state.phase.is_open());
+        let head = agent_doc_git_io::revision::show_head(file)?.unwrap_or_default();
+        let current_has_uncommitted_response =
+            agent_doc_turn::document_drift::detect_bypassed_response_write_between(&head, &current)
+                .is_some();
+        let current_has_unresolved_prompt =
+            agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&current)
+                .is_some();
+        let current_exchange_is_unchanged = document_only_exchange_is_unchanged(&head, &current);
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(file)?;
+        let snapshot_has_uncommitted_response = snapshot.as_deref().is_some_and(|snapshot| {
+            agent_doc_turn::document_drift::detect_bypassed_response_write_between(&head, snapshot)
+                .is_some()
+        });
+
+        if cycle_is_open {
+            return Ok(commit_with_outcome_scoped(file)?.did_commit);
+        }
+
+        if current != head && current_has_uncommitted_response {
+            anyhow::bail!(
+                "refusing document-only commit for {}: current authority contains an uncommitted response; use `agent-doc write --commit {}`",
+                file.display(),
+                file.display()
+            );
+        }
+
+        let adopt_current = current != head
+            && !current_has_uncommitted_response
+            && !current_has_unresolved_prompt
+            && current_exchange_is_unchanged
+            && !snapshot_has_uncommitted_response;
+        if !adopt_current {
+            return Ok(commit_with_outcome_scoped(file)?.did_commit);
+        }
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &current,
+            agent_doc_ops_log_io::log_op,
+        )?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "document_only_commit_adopted_current file={} len={} hash={}",
+                file.display(),
+                current.len(),
+                agent_doc_hash::content_hash(&current),
+            ),
+        );
+
+        let outcome = commit_with_outcome_scoped(file)?;
+        let post_current = commit_current_document_content(file, "document_only_commit_post")?;
+        let post_disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+            file,
+            "document_only_commit_post_disk",
+        )?;
+        let post_head = agent_doc_git_io::revision::show_head(file)?.unwrap_or_default();
+        let normalized_head = normalize_transient_agent_doc_markers(&post_head);
+        anyhow::ensure!(
+            normalize_transient_agent_doc_markers(&post_current) == normalized_head
+                && normalize_transient_agent_doc_markers(&post_disk) == normalized_head,
+            "document-only commit for {} did not reach exact authority/disk/HEAD convergence; the commit is not terminal",
+            file.display()
+        );
+        Ok(outcome.did_commit)
+    })
+}
+
+/// Whether a stale snapshot may be replaced by current document authority for
+/// a document-only commit. This is intentionally read-only so preflight can
+/// decide whether to run the recovery without mutating the document.
+pub fn current_document_only_drift_is_safe_to_commit(file: &Path) -> bool {
+    let Ok(current) = commit_current_document_content(file, "document_only_drift_candidate") else {
+        return false;
+    };
+    let Ok(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file) else {
+        return false;
+    };
+    if cycle.as_ref().is_some_and(|state| state.phase.is_open()) {
+        return false;
+    }
+    let Ok(Some(head)) = agent_doc_git_io::revision::show_head(file) else {
+        return false;
+    };
+    let Ok(snapshot) = agent_doc_snapshot_io::load_document_baseline(file) else {
+        return false;
+    };
+    current != head
+        && agent_doc_turn::document_drift::detect_bypassed_response_write_between(&head, &current)
+            .is_none()
+        && agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&current).is_none()
+        && document_only_exchange_is_unchanged(&head, &current)
+        && snapshot.as_deref().is_none_or(|snapshot| {
+            agent_doc_turn::document_drift::detect_bypassed_response_write_between(&head, snapshot)
+                .is_none()
+        })
+}
+
+fn document_only_exchange_is_unchanged(head: &str, current: &str) -> bool {
+    let head = normalize_transient_agent_doc_markers(head);
+    let current = normalize_transient_agent_doc_markers(current);
+    let head =
+        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(&head);
+    let current =
+        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(&current);
+    agent_doc_turn::document_drift::extract_normalized_exchange_body(&head)
+        == agent_doc_turn::document_drift::extract_normalized_exchange_body(&current)
+}
+
 pub fn commit_for_authority(file: &Path, force_disk: bool) -> Result<bool> {
     Ok(commit_with_outcome_for_authority(file, force_disk)?.did_commit)
 }

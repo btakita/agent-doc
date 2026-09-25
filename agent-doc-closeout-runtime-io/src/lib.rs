@@ -1866,6 +1866,7 @@ pub fn document_only_drift_is_commit_recoverable(file: &Path) -> bool {
         agent_doc_turn::closeout_recovery::classify_snapshot_head_drift(&snapshot, &head),
         CloseoutRecoveryDrift::BoundaryOnly | CloseoutRecoveryDrift::MetadataOnly
     ) || abandoned_prompt_queue_drift_is_commit_recoverable(file, &snapshot, &head)
+        || agent_doc_commit_io::current_document_only_drift_is_safe_to_commit(file)
 }
 
 fn abandoned_prompt_queue_drift_is_commit_recoverable(

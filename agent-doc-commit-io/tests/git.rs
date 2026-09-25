@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use agent_doc_commit_io::{
-    commit, commit_proven_response_replay_canonicalization, commit_with_authoritative_compaction,
+    commit, commit_document_only_drift, commit_proven_response_replay_canonicalization,
+    commit_with_authoritative_compaction,
 };
 use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
 
@@ -142,6 +143,98 @@ pub(crate) use th::{commit_file, init_repo, start_fake_listener, wait_for_listen
 mod tests {
     #![allow(unused_imports)]
     use super::*;
+
+    #[test]
+    fn document_only_commit_stages_current_authority_not_stale_snapshot() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let file = root.join("session.md");
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:status -->\nidle\n<!-- /agent:status -->\n\n",
+            "<!-- agent:queue -->\n- do [#one]\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n- [ ] [#one] first\n<!-- /agent:backlog -->\n",
+        );
+        commit_file(root, "session.md", head, "initial");
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &head.replace("idle\n", "stale snapshot\n"),
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let current = head
+            .replace("- do [#one]", "- do [#two]")
+            .replace("- [ ] [#one] first", "- [ ] [#two] second");
+        fs::write(&file, &current).unwrap();
+
+        assert!(commit_document_only_drift(&file).unwrap());
+        let committed = agent_doc_git_io::revision::show_head(&file)
+            .unwrap()
+            .expect("document-only recovery must commit the document");
+        assert!(
+            committed.contains("- do [#two]")
+                && committed.contains("- [ ] [#two] second")
+                && !committed.contains("stale snapshot")
+                && !committed.contains("[#one]"),
+            "the explicit document-only recovery must stage current authority, allowing only normal boundary projection:\n{committed}"
+        );
+        assert!(
+            Command::new("git")
+                .current_dir(root)
+                .args(["diff", "--quiet", "--", "session.md"])
+                .status()
+                .unwrap()
+                .success(),
+            "a successful recovery must not strand the authoritative document after commit"
+        );
+    }
+
+    #[test]
+    fn document_only_commit_rejects_current_authority_with_uncommitted_response() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let file = root.join("session.md");
+        let head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ question\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        commit_file(root, "session.md", head, "initial");
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            head,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        fs::write(
+            &file,
+            head.replace(
+                "<!-- /agent:exchange -->",
+                "### Re: question — gpt-5\n\nUncaptured answer.\n<!-- /agent:exchange -->",
+            ),
+        )
+        .unwrap();
+
+        let error = commit_document_only_drift(&file).unwrap_err();
+        assert!(
+            error.to_string().contains("uncommitted response"),
+            "response-shaped drift must retain the captured closeout path: {error:#}"
+        );
+        assert_eq!(
+            agent_doc_git_io::revision::show_head(&file)
+                .unwrap()
+                .as_deref(),
+            Some(head),
+            "the refusal must leave HEAD unchanged"
+        );
+    }
 
     #[test]
     fn commit_adopts_manual_escaped_tail_cleanup_after_head_current_snapshot() {

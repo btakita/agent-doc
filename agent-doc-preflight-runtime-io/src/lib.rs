@@ -312,7 +312,7 @@ pub fn enforce_no_uncommitted_closeout_drift(
                 "[preflight] document-only closeout drift for {} -- running binary-owned auto-commit",
                 file.display()
             );
-            match agent_doc_commit_io::commit(file) {
+            match agent_doc_commit_io::commit_document_only_drift(file) {
                 Ok(_) => {
                     rc.invalidate_head_content();
                     agent_doc_ops_log_io::log_op(

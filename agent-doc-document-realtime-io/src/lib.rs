@@ -1249,14 +1249,18 @@ fn atomic_write_rebased_through_authority_body(
                     } if agent_doc_hash::content_hash(text) == relay_write.content_hash
                 )
             {
-                return Err(retained_refusal(
-                    path,
-                    format!(
-                        "serialized_atomic_write: binary-owned write for {} remains retained while its exact editor projection converges (content_hash={})",
-                        path.display(),
-                        relay_write.content_hash,
-                    ),
-                ));
+                editor_receipt =
+                    await_visible_editor_projection_receipt(path, &relay_write.content_hash)?;
+                if !editor_receipt {
+                    return Err(retained_refusal(
+                        path,
+                        format!(
+                            "serialized_atomic_write: binary-owned write for {} remains retained while its exact editor projection converges (content_hash={})",
+                            path.display(),
+                            relay_write.content_hash,
+                        ),
+                    ));
+                }
             }
             if matches!(
                 &current,
@@ -10159,6 +10163,31 @@ mod tests {
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("serialized_atomic_write_projection_wait"));
         assert!(!log.contains("action=rebase_same_intent"));
+    }
+
+    #[test]
+    fn serialized_atomic_write_observes_ack_just_after_initial_projection_deadline() {
+        let baseline = "# Session\n\nbody\n";
+        let target = "# Session\n\nbody\n\n### Re: delayed receipt\n\nCommitted.\n";
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-delayed-visible-ack";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        let ack = project_crdt_deliveries(
+            file.clone(),
+            identity,
+            1,
+            std::time::Duration::from_millis(CRDT_PROJECTION_OBSERVATION_TIMEOUT_MS + 100),
+        );
+        atomic_write_through_authority(&file, target)
+            .expect("the strict receipt wait must observe the delayed editor ACK");
+        ack.join().unwrap();
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
+        assert!(pending_document_write(&file).is_none());
     }
 
     #[test]

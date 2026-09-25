@@ -126,6 +126,25 @@ exception, and it still requires drained supervisor IPC.
 | Controller recovery inherits the host pane | Actor pane and generation feed one authority Computed; rejected admission has no mutation side effect. |
 | Install/restart interrupts an open preflight | The generation-transition policy defers every uncaptured open cycle; no timeout can synthesize replay authority. |
 
+## Reactive graph proof boundary
+
+Every live coordination graph uses the compositional topology
+`observation Source -> policy Computed -> idempotent Effect -> receipt Source`
+inside a lifetime-typed document, turn, or process scope. The workspace
+architecture guard rejects unreviewed private context islands; shared-scope
+tests prove invalidation crosses cells created in one scope.
+
+`formal/tla/ReactiveTopology.tla` model-checks the properties that compose
+across domain graphs: generation freshness, exact mutation/receipt lineage,
+at-most-once mutation, closed-scope safety, and eventual receipt after the
+observation stream quiesces under weak fairness. Authority, supervisor,
+closeout, and CRDT models prove their own transition tables separately. This
+division is deliberate: graph shape alone does not prove arbitrary adapter I/O,
+and one over-broad model would hide rather than discharge those assumptions.
+
+The full architecture contract and explicit non-claims live in
+`tasks/agent-doc/plan-reactive-topology-proof.md`.
+
 ## Plugin boundary
 
 Plugins translate editor changes into incremental Lazily operations and apply

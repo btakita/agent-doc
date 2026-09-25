@@ -46,6 +46,21 @@ ownership:
 - a pending request eventually replaces the supervisor after the cycle closes
   and IPC drains under weak fairness.
 
+`ReactiveTopology.tla` checks the shared lifetime-scoped graph contract used by
+agent-doc's Lazily state machines:
+
+- a derived generation and its receipt never lead the observation Source;
+- every mutation and receipt has an exact observation/effect lineage;
+- stale effects and effects from a closed scope never mutate;
+- a generation mutates at most once; and
+- after observations quiesce, an open graph eventually publishes the matching
+  receipt under weak fairness.
+
+This is a compositional proof boundary, not a universal proof of arbitrary I/O.
+The Rust scope guard connects production graph construction to the modeled
+lifetime rule; domain-specific models remain responsible for their transition
+tables and external-system assumptions.
+
 `CrdtLineageFence.tla` exhaustively checks the finite recovery control state:
 
 - queue tombstones and editor-authored deletions never regress;

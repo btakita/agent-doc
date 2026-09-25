@@ -325,6 +325,10 @@ Same IntelliJ coroutine-dispatch wrapper. It is not a new cause; no additional f
 ### Re: recovered response
 
 Same framework stack. `TransactionGuardImpl` only indicates the coroutine was running with IntelliJ write access; it is not the cause. Skip to `Caused by:`.
+
+### Re: recovered response
+
+Same framework plumbing; no new diagnostic information. Only the `Caused by:` section or a newer occurrence matters.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

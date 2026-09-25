@@ -1,6 +1,6 @@
 # Plan: Durable Lazily runtime with Postgres, NATS, and optional Valkey
 
-**Status:** Proposed
+**Status:** Proposed; public-pattern/provenance gate recorded 2026-09-25
 **Created:** 2026-08-05
 **Session:** `tasks/software/lazily.md`
 
@@ -124,21 +124,98 @@ graph and can prove the bypass invariant.
 
 ## IP and public-knowledge gate
 
-The generic combination is public architectural knowledge:
+This section is the implementation-admission record for `#lzdurableipgate`.
+It records public conceptual sources and dependency-license candidates; it does
+not grant a right to copy their implementation expression and does not decide
+contractual ownership. [17 U.S.C. § 102(b)](https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title17-section102&num=0&edition=prelim)
+distinguishes ideas, systems, processes, and methods of operation from protected
+expression, while signed agreements and applicable law still control a
+particular contribution. This is a project gate, not legal advice.
 
-- Lazily's published Rust package declares the MIT license.
-- [Temporal Server is MIT-licensed](https://github.com/temporalio/temporal/blob/main/LICENSE).
-- [NATS Server is Apache-2.0-licensed](https://github.com/nats-io/nats-server/blob/main/LICENSE).
-- U.S. copyright law distinguishes protected implementation expression from
-  unprotected ideas, systems, processes, and methods of operation
-  ([17 U.S.C. § 102(b)](https://uscode.house.gov/view.xhtml?edition=prelim&num=0&req=granuleid%3AUSC-prelim-title17-section102%28a%29%282%29)).
+### Public pattern register
 
-That does not decide contractual ownership of a particular implementation.
-Before employer-related implementation begins, obtain a written boundary that:
+These sources are citation-only inputs. Lazily APIs, fixtures, names, schemas,
+algorithms, prose, and tests must be independently authored. Do not copy source
+code, diagrams, examples, or prose from a cited page into Lazily merely because
+the underlying pattern is public.
 
-- identifies the existing Lazily repositories and releases as prior work;
-- reserves generic Lazily adapters, conformance fixtures, and backend-neutral
-  APIs for their existing open-source project;
+| Concept | Public primary or official source | Narrow claim admitted |
+|---|---|---|
+| Event Sourcing | [Microsoft Azure Architecture Center: Event Sourcing](https://learn.microsoft.com/en-us/azure/architecture/patterns/event-sourcing) | An append-only ordered event history can be the system of record; state and materialized projections can be rebuilt by replay. The source also treats this as a selective, complex pattern rather than a default. |
+| CQRS | [Microsoft Azure Architecture Center: CQRS](https://learn.microsoft.com/en-us/azure/architecture/patterns/cqrs) | Command/write and query/read models may be separated; asynchronously maintained read models are eventually consistent and need duplicate-safe consumers. Separation does not create two transition authorities. |
+| Transactional outbox | [AWS Prescriptive Guidance: Transactional outbox](https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html) | Business state and an outgoing record are committed in one local transaction, then relayed. Relay or broker duplication remains possible, ordering must be explicit, and consumers must be idempotent. |
+| Transactional inbox / idempotent consumer | [Microsoft Azure Architecture Center: Idempotent Consumer](https://learn.microsoft.com/en-us/azure/architecture/patterns/idempotent-consumer) | A stable message identity, unique atomic claim, and deduplication marker committed with business effects close the process-before-marker crash window. Retention must cover redelivery and operator replay; broker deduplication is not a substitute. |
+| At-least-once delivery and ACK/redelivery | [NATS: Delivery and acknowledgment](https://docs.nats.io/learn/jetstream/delivery-and-acknowledgment) and [NATS: Ack responses and redelivery](https://docs.nats.io/learn/jetstream/acknowledgment) | With explicit ACK, a missing ACK after `AckWait` causes redelivery. ACK, NAK, and TERM are terminal transport responses; in-progress only resets the timer. `AckWait`, `MaxDeliver`, and `MaxAckPending` bound transport behavior, not domain authority. |
+| PostgreSQL queue claiming | [PostgreSQL 18 `SELECT` locking clause](https://www.postgresql.org/docs/18/sql-select.html#SQL-FOR-UPDATE-SHARE) and [`UPDATE` batching example](https://www.postgresql.org/docs/18/sql-update.html) | `FOR UPDATE SKIP LOCKED` may reduce contention among queue-like consumers, but gives an inconsistent view, does not avoid the table lock, and proves neither FIFO, completeness, durable lease, nor exactly-once processing. Use a total order with a unique tiebreaker. |
+| PostgreSQL transaction and retry boundary | [Transactions](https://www.postgresql.org/docs/18/tutorial-transactions.html), [serialization-failure handling](https://www.postgresql.org/docs/18/mvcc-serialization-failure-handling.html), and [transaction isolation](https://www.postgresql.org/docs/18/transaction-iso.html) | The inbox, accepted transition, state/events, outbox, timers, and fences can commit all-or-nothing. Retry the complete decision transaction for serialization failures (`40001`) and, where classified retryable, deadlocks (`40P01`), with bounded backoff and cancellation. |
+| PostgreSQL lock and durability premises | [Explicit locking](https://www.postgresql.org/docs/18/explicit-locking.html), [`lock_timeout`](https://www.postgresql.org/docs/18/runtime-config-client.html#GUC-LOCK-TIMEOUT), and [`synchronous_commit`](https://www.postgresql.org/docs/18/runtime-config-wal.html#GUC-SYNCHRONOUS-COMMIT) | Row locks end with the transaction and are not durable leases. Use consistent lock order and bounded waits. A commit-before-ACK crash-safety claim requires logged authority tables, `fsync=on`, and authoritative transactions with `synchronous_commit` not `off`. |
+
+The resulting independent design rule is: claim a stable ingress identity;
+atomically commit its inbox marker, accepted transition, state/events, and
+outbox intents; publish only after commit; acknowledge ingress only after the
+authoritative commit; and absorb redelivery by returning or projecting the
+already committed outcome. No source above is imported as code or fixture data.
+
+### Dependency-license intake
+
+No Postgres, NATS, or Valkey client dependency is present in the current
+`lazily-rs` manifest, so no client choice is admitted by this plan. The
+pre-selection inventory is:
+
+| Surface | Current/candidate license | Admission state |
+|---|---|---|
+| `lazily-rs` | MIT, as declared in its current `Cargo.toml` | Existing metadata only; the recorded Apache-2.0 family direction has not yet converged across manifests and license files, so resolve that mismatch before publishing a durable crate. |
+| PostgreSQL server | [PostgreSQL License](https://www.postgresql.org/about/licence/) | Service/test dependency candidate; verify deployment and redistribution obligations. |
+| Rust PostgreSQL client | Candidate families such as [SQLx](https://github.com/transact-rs/sqlx) and [`tokio-postgres`](https://github.com/rust-postgres/rust-postgres) publish MIT and Apache-2.0 license files | Not selected. Record the exact crate/version/features and resolved transitive license report before adding it. |
+| NATS Server | [Apache-2.0](https://github.com/nats-io/nats-server/blob/main/LICENSE) | Service/test dependency candidate. Preserve license and notices for redistribution. |
+| Rust NATS client | [`async-nats`, Apache-2.0](https://github.com/nats-io/nats.rs/blob/main/LICENSE) | Candidate only; pinning it still requires a resolved transitive license report. |
+| Valkey server | [BSD-3-Clause](https://github.com/valkey-io/valkey/blob/unstable/COPYING) | Optional service/test dependency candidate; never an authority. |
+| Rust Valkey client | [`redis-rs` three-clause BSD license](https://github.com/redis-rs/redis-rs/blob/main/LICENSE) | Candidate only; do not infer the server license from the client or vice versa. |
+
+The reproducible current baseline is:
+
+```sh
+cargo metadata --locked --all-features --format-version 1
+```
+
+Run from `src/lazily-rs`, it resolves 354 packages with 25 distinct declared
+license expressions and zero packages missing a declaration. None is
+`async-nats`, `tokio-postgres`, `deadpool-postgres`, `sqlx`, `redis`, `bb8`, or
+`testcontainers`. This baseline describes the existing graph; it neither clears
+all combinations in compound SPDX expressions nor admits a future durable
+dependency.
+
+Before the first manifest change, generate and commit a machine-readable license
+inventory from the resolved lockfile, including build/dev dependencies and
+enabled features. Review every SPDX expression and notice; fail CI on an
+unreviewed package, unknown license, git/path dependency without provenance, or
+license outside the repository allowlist. Repeat the inventory on every lockfile
+change. A candidate row above is not approval of its future transitive graph.
+
+### Independent-authorship and exclusion record
+
+Every durable-runtime change must include a provenance note that names the
+public sources used, confirms independent authorship, lists newly selected
+dependencies and license-report changes, and confirms that its fixtures use
+synthetic nouns and values. The public repositories must exclude all employer
+or product-specific names, schemas, subjects, events, policies, incidents,
+fixtures, credentials, logs, and code. In particular, no Haiven material may be
+used as a template, golden test, transformed fixture, or naming source.
+
+Do not paste third-party source into prompts or use it as transformation input.
+If later work needs to adapt rather than merely study third-party expression,
+record the exact file/revision/license and satisfy attribution, notice,
+share-alike, and source-availability terms before the material enters a branch.
+
+### Prior-work and employer boundary
+
+Before any employer-related implementation begins, obtain a written boundary
+that:
+
+- identifies the existing Lazily repositories, release history, and published
+  artifacts as prior work;
+- reserves generic Lazily adapters, independently authored conformance fixtures,
+  and backend-neutral APIs for their existing open-source project;
 - assigns product-specific workflows, private schemas, deployment
   configuration, and confidential business logic separately;
 - states whether generic improvements may be contributed upstream;
@@ -146,10 +223,30 @@ Before employer-related implementation begins, obtain a written boundary that:
 - routes patentable or genuinely novel implementation work through the agreed
   disclosure process.
 
-Keep employer-confidential examples, subjects, schemas, incidents, and code out
-of public Lazily repositories even when the underlying architectural pattern is
-public. This section is a project gate, not legal advice; the signed agreements
-and applicable state law control.
+No such written boundary is recorded in this public repository as of
+2026-09-25. Keep the agreement itself private; record here only an operator
+attestation containing its date, parties/authority, scope, private storage
+reference, and cryptographic digest. Until that attestation exists,
+employer-related implementation is not admitted. Independently authored public
+Lazily work may proceed only when it uses no employer time, equipment,
+credentials, accounts, or confidential inputs and the contributor has confirmed
+that this is consistent with their agreements.
+
+### Admission checklist
+
+- [x] Public pattern sources and their narrow claims are recorded.
+- [x] Independent-authorship, synthetic-fixture, and confidential-material
+  exclusions are explicit.
+- [x] Current platform/client license candidates are inventoried without
+  selecting a client.
+- [ ] The family-wide Apache-2.0 direction is reconciled with the currently
+  mixed manifest and license-file metadata before a durable crate is published.
+- [ ] Exact client crates, versions, features, transitive licenses, and notices
+  are recorded from the first resolved durable-runtime lockfile.
+- [ ] A private written-boundary attestation is recorded before any
+  employer-related implementation.
+- [ ] Each implementation change carries its own provenance note and passes the
+  license/provenance CI gate.
 
 ## Authority modes
 
@@ -276,8 +373,16 @@ authority and the atomic boundary that a broker alone cannot provide.
 ### Postgres requirements
 
 - migration-owned schema with forward-compatible codec versions;
+- logged authority tables with `fsync=on` and authoritative transactions whose
+  `synchronous_commit` is not `off` before claiming commit-before-ACK crash
+  durability;
 - connection-pool backpressure;
-- transaction retry classification;
+- complete-transaction retry classification for `40001` and explicitly
+  classified `40P01`, with bounded backoff and cancellation;
+- queue claims ordered by a total key with a unique tiebreaker; `SKIP LOCKED`
+  is an ephemeral contention primitive, not a durable lease, FIFO guarantee, or
+  completeness proof, so durable claim/fence state is persisted separately;
+- consistent lock ordering plus transaction-local bounded lock waits;
 - advisory-lock avoidance unless a measured use case requires it;
 - retention and compaction policy for inbox, outbox, events, and receipts;
 - replica-read rules that never let stale reads authorize a transition;

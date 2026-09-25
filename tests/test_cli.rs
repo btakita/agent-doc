@@ -22949,6 +22949,7 @@ fn test_agent_doc_element_backlog_owns_malformed_tracked_item_policy() {
         "pub fn shadow_backlog_guard",
         "pub fn malformed_tracked_item_guard",
         "pub fn dropped_from_history_guard",
+        "pub fn dropped_from_history_report",
     ] {
         assert!(
             guard_policy.contains(required),

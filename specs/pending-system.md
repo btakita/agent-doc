@@ -68,6 +68,14 @@ Every bullet in `agent:backlog` carries a 4-char base32 hash as a visible prefix
   (no explicit prefix) are never blocked. Dispatch-time enforcement on a
   *pre-existing* collision stays a preflight warning (`preset_item_id_collision`)
   rather than a hard block, to avoid over-blocking live sessions.
+- **Cross-document moves preserve identity:** when an operator removes an open
+  tracked item from one document and keeps the same normalized id open in
+  exactly one other agent-doc document under the same project root, the dropped-
+  history guard treats that destination as transfer evidence. Prose/code mentions
+  never count, nested projects are excluded, duplicate open destinations fail
+  closed as ambiguous, and shared-mode documents still require the ordinary
+  `agent_doc_security_review` approval. If no destination contains the id, both
+  preflight and session-check continue to reject the disappearance.
 - **An inferred id is not an explicit one (`#baretagidcollide`):** only `id=<id>`
   and `[#id]` are explicit requests. A leading bare `#tag` is an *inference* the
   add path makes so `[operator-verify] #someid text` keeps `#someid` instead of

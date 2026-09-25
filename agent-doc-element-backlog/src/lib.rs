@@ -5,6 +5,8 @@ pub mod gate_verify;
 pub mod guard_policy;
 pub mod ops_proof;
 
+pub use guard_policy::dropped_from_history_report;
+
 use agent_doc_element::{
     ElementAuthority, ElementCompositionRole, ElementDescriptor, ElementRealtimeModel,
     ElementSchedulingRole, ElementShape, ElementSource, ElementTurnRole, ElementWritePolicy,

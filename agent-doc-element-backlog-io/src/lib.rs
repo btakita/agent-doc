@@ -9,6 +9,7 @@ use std::cell::RefCell;
 use std::path::Path;
 
 pub mod backlog_cmd;
+pub mod cross_document;
 pub mod done_archive;
 
 pub trait BacklogCommandEffects {

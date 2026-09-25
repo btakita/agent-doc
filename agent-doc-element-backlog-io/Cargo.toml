@@ -17,6 +17,8 @@ agent-doc-element = { path = "../agent-doc-element", version = "0.35.418" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.418" }
 agent-doc-element-done = { path = "../agent-doc-element-done", version = "0.35.418" }
 agent-doc-element-review = { path = "../agent-doc-element-review", version = "0.35.418" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.418" }
+agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.418" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.418" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.418" }
 agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.418" }

@@ -2240,20 +2240,46 @@ pub fn enforce_no_dropped_backlog(file: &Path, head_content: Option<&str>) -> Re
     })?;
     let resolved_ids = agent_doc_cycle_state_io::resolved_pending_ids(file)?;
 
-    let external_done_ids = agent_doc_element_backlog_io::done_archive::external_done_archive_ids(
-        file,
-        &current_content,
-    )?;
-    let report =
-        agent_doc_element_backlog::backlog::detect_dropped_from_history_with_extra_current_ids(
+    let mut external_current_ids =
+        agent_doc_element_backlog_io::done_archive::external_done_archive_ids(
+            file,
             &current_content,
-            head_content,
-            &resolved_ids,
-            &external_done_ids,
         )?;
+    let initial_report = agent_doc_element_backlog::dropped_from_history_report(
+        &current_content,
+        head_content,
+        &resolved_ids,
+        &external_current_ids,
+    )?;
+    if !initial_report.dropped.is_empty() {
+        let candidates = initial_report
+            .dropped
+            .iter()
+            .map(|item| item.id.clone())
+            .collect();
+        let transfer_evidence = agent_doc_element_backlog_io::cross_document::transferred_open_ids(
+            file,
+            &current_content,
+            &candidates,
+        )?;
+        for (id, destination) in &transfer_evidence.destinations {
+            eprintln!(
+                "[preflight] backlog transfer: #{} remains open in {}",
+                id,
+                destination.display()
+            );
+        }
+        external_current_ids.extend(transfer_evidence.ids());
+    }
+    let report = agent_doc_element_backlog::dropped_from_history_report(
+        &current_content,
+        head_content,
+        &resolved_ids,
+        &external_current_ids,
+    )?;
     if !report.dropped.is_empty() {
         anyhow::bail!(
-            "open backlog item(s) from recent committed history are completely absent from the document: {}. Restore them to the live backlog, move them to icebox, or mark them done before continuing",
+            "open backlog item(s) from recent committed history are completely absent from the project: {}. Restore them to the live backlog, move them to another project document's tracked work or icebox, or mark them done before continuing",
             format_dropped_refs(&report.dropped)
         );
     }
@@ -10883,6 +10909,49 @@ mod tests {
         let head_content = agent_doc_git_io::revision::show_head(&doc).unwrap();
         enforce_no_dropped_backlog(&doc, head_content.as_deref())
             .expect("same-cycle reap should count as intentional completion");
+    }
+    #[test]
+    fn preflight_allows_open_backlog_item_moved_to_another_project_document() {
+        let dir = setup_project();
+        let source = dir.path().join("tasks/source.md");
+        let destination = dir.path().join("tasks/destination.md");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        let baseline = concat!(
+            "---\nagent_doc_session: source\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#moved1] Continue this work elsewhere\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        let empty_destination = concat!(
+            "---\nagent_doc_session: destination\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&source, baseline).unwrap();
+        std::fs::write(&destination, empty_destination).unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["add", "tasks/source.md", "tasks/destination.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["commit", "-m", "baseline", "--no-verify"])
+            .output()
+            .unwrap();
+
+        let current_source = baseline.replace("- [ ] [#moved1] Continue this work elsewhere\n", "");
+        let current_destination = empty_destination.replace(
+            "<!-- agent:backlog -->\n",
+            "<!-- agent:backlog -->\n- [ ] [#moved1] Continue this work elsewhere\n",
+        );
+        std::fs::write(&source, current_source).unwrap();
+        std::fs::write(&destination, current_destination).unwrap();
+
+        let head_content = agent_doc_git_io::revision::show_head(&source).unwrap();
+        enforce_no_dropped_backlog(&source, head_content.as_deref())
+            .expect("a unique open destination should prove the transfer");
     }
     #[test]
     fn pending_maintenance_reaps_completed_icebox_items_from_file_and_snapshot() {

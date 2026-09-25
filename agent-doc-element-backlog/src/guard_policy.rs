@@ -68,13 +68,22 @@ pub fn dropped_from_history_guard(
     extra_current_ids: &HashSet<String>,
 ) -> Result<BacklogGuardOutcome> {
     Ok(dropped_from_history_report_guard(
-        &detect_dropped_from_history_with_extra_current_ids(
-            current_doc,
-            baseline_doc,
-            done_ids,
-            extra_current_ids,
-        )?,
+        &dropped_from_history_report(current_doc, baseline_doc, done_ids, extra_current_ids)?,
     ))
+}
+
+pub fn dropped_from_history_report(
+    current_doc: &str,
+    baseline_doc: &str,
+    done_ids: &HashSet<String>,
+    extra_current_ids: &HashSet<String>,
+) -> Result<DroppedBacklogReport> {
+    detect_dropped_from_history_with_extra_current_ids(
+        current_doc,
+        baseline_doc,
+        done_ids,
+        extra_current_ids,
+    )
 }
 
 pub fn dropped_from_history_report_guard(report: &DroppedBacklogReport) -> BacklogGuardOutcome {
@@ -82,7 +91,7 @@ pub fn dropped_from_history_report_guard(report: &DroppedBacklogReport) -> Backl
         return BacklogGuardOutcome::Pass;
     }
     BacklogGuardOutcome::Interrupt(format!(
-        "[session-check] INTERRUPTED: open backlog item(s) from recent history are completely absent from the document: {}. Restore them to the live backlog, move them to icebox, or mark them done",
+        "[session-check] INTERRUPTED: open backlog item(s) from recent history are completely absent from the project: {}. Restore them to the live backlog, move them to another project document's tracked work or icebox, or mark them done",
         format_dropped_refs(&report.dropped)
     ))
 }

@@ -817,6 +817,8 @@ dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-element-done",
  "agent-doc-element-review",
+ "agent-doc-frontmatter",
+ "agent-doc-frontmatter-io",
  "agent-doc-fs",
  "agent-doc-hash",
  "agent-doc-log-time",

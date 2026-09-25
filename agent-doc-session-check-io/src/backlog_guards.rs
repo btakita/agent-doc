@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use agent_doc_element_backlog::guard_policy::{
-    dropped_from_history_guard, malformed_tracked_item_guard, shadow_backlog_guard,
+    dropped_from_history_guard, dropped_from_history_report, malformed_tracked_item_guard,
+    shadow_backlog_guard,
 };
 use agent_doc_run_context_io::{AgentDocContextExt, CycleContext};
 use agent_doc_workflow::session_check::GuardResult;
@@ -34,15 +35,35 @@ pub fn check_backlog_replay_guard(file: &Path, rc: &CycleContext) -> Result<Guar
 
     let resolved_ids = agent_doc_cycle_state_io::resolved_pending_ids(file)?;
 
-    let external_done_ids = agent_doc_element_backlog_io::done_archive::external_done_archive_ids(
-        file,
+    let mut external_current_ids =
+        agent_doc_element_backlog_io::done_archive::external_done_archive_ids(
+            file,
+            &current_content,
+        )?;
+    let initial_report = dropped_from_history_report(
         &current_content,
+        &baseline,
+        &resolved_ids,
+        &external_current_ids,
     )?;
+    if !initial_report.dropped.is_empty() {
+        let candidates = initial_report
+            .dropped
+            .into_iter()
+            .map(|item| item.id)
+            .collect();
+        let transfer_evidence = agent_doc_element_backlog_io::cross_document::transferred_open_ids(
+            file,
+            &current_content,
+            &candidates,
+        )?;
+        external_current_ids.extend(transfer_evidence.ids());
+    }
     Ok(dropped_from_history_guard(
         &current_content,
         &baseline,
         &resolved_ids,
-        &external_done_ids,
+        &external_current_ids,
     )?
     .into())
 }

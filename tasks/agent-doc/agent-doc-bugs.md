@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -220,6 +220,21 @@ No new backlog item is needed because this work already remains in the active qu
 Yes. Both `specs/process-topology.md` and `tasks/agent-doc/plan-reactive-topology-proof.md` are committed in agent-doc commit `b5ea90530` (`proof: verify reactive graph topology`) and pushed to `origin/main`.
 
 The deferred simulation-harness work is preserved as actionable local backlog item `#agentdocsim`; it was not completed or silently dropped. Its implementation waits for the separately owned live Lazily oracle cycle to commit, so the harness can target the settled API and any `lazily.md` updates can be made without racing that owner.
+### Re: Restart-free JetBrains plugin upgrades — gpt-5 · 2026-09-25T11:28:19-04:00
+
+> **Queue prompt:** We just worked on making the plugins not have to restart when upgrading. Please fix the no restart required upgrades: The live JetBrains process still uses superseded plugin bytes; restart IntelliJ or reopen the document tab before relying on editor-delivery acknowledgments.
+
+Fixed and installed. Changed JetBrains packages now attach a stable bootstrap to each live IDE, freshly load the current upgrade action, and let JetBrains unload, install, and activate the replacement through its dynamic-plugin API. The installer fails closed on attach/unload errors, verifies the loaded version and every installed package byte, and preserves byte-identical installs as true no-ops.
+
+The replacement generation now explicitly initializes every already-open project and waits for each eligible open agent-doc tab to re-register its editor replica before reporting success. Large document bootstraps use their actual attached receipt rather than treating the normal 750 ms interactive timeout as an upgrade failure. This closes the remaining gap where new plugin bytes were live but a tab still needed to be reopened before editor-delivery acknowledgments were trustworthy.
+
+The stale-byte probe also prefers a mapped current JAR over historical deleted mappings left behind until old classloaders are garbage-collected, so a successful dynamic replacement no longer produces a false restart warning. Package-version digests now cover the Java bridge and artifact-shaping Gradle metadata.
+
+Live proof succeeded in the existing IntelliJ PID 28053: the normal CLI upgraded 0.2.409 to 0.2.410 without restarting IntelliJ or reopening any tab, waited for the open-document receipts, and restored this session's editor authority. An immediate second install was byte-identical and left the live generation in place. Installed state reports `agent-doc 0.35.418`, JetBrains `0.2.410`, and VS Code `0.2.71`.
+
+Verification is green: `make check` (9,721 Rust tests, 179 VS Code tests, cross-editor/bootstrap suites, and all TLA+ models), Gradle `test buildPlugin`, plugin-version self-checks, scoped Rust tests, `git diff --check`, and the latest upstream CI run. Implementation commits: `840a02f42` and `fef319dc7`; parent pointer commits: `f43ca2a4b` and `7751508c6`.
+
+Session note: this document has accumulated substantial history; compacting it after this cycle would keep future routing and review focused.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -228,7 +243,8 @@ The deferred simulation-harness work is preserved as actionable local backlog it
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 We just worked on making the plugins not have to restart when upgrading. Please fix the no restart required upgrades: The live JetBrains process still uses superseded plugin bytes; restart IntelliJ or reopen the document tab before relying on editor-delivery acknowledgments.
 <!-- /agent:queue -->
 
 

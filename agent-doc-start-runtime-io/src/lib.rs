@@ -605,6 +605,18 @@ fn route_owned_observed_live_pane_busy_reason(
     Some(format!("live_pane_busy_no_idle_prompt tail={tail:?}"))
 }
 
+fn route_owned_live_pane_interaction_observed(
+    shared: &SupervisorShared,
+    harness: &agent_doc_harness::HarnessConfig,
+) -> bool {
+    if !shared.running.load(Ordering::Relaxed) {
+        return false;
+    }
+    harness
+        .dispatch_blocker_reason(&child_output_for_detection(shared))
+        .is_some()
+}
+
 fn owned_pane_label(shared: &SupervisorShared) -> &str {
     shared.inject_pane.as_deref().unwrap_or_else(|| {
         shared
@@ -638,6 +650,10 @@ impl agent_doc_supervisor_process::route_owned_completion::RouteOwnedCompletionS
         harness: &agent_doc_harness::HarnessConfig,
     ) -> Option<String> {
         route_owned_observed_live_pane_busy_reason(self, harness)
+    }
+
+    fn live_pane_interaction_observed(&self, harness: &agent_doc_harness::HarnessConfig) -> bool {
+        route_owned_live_pane_interaction_observed(self, harness)
     }
 
     fn owned_pane_label(&self) -> String {
@@ -2900,6 +2916,10 @@ mod tests {
 
         assert!(reason.contains("live_pane_busy_blocked_prompt"));
         assert!(reason.contains("active codex turn"));
+        assert!(
+            route_owned_live_pane_interaction_observed(&shared, &harness),
+            "the same active-turn proof must permanently promote a used layout owner"
+        );
     }
 
     #[test]
@@ -2959,6 +2979,10 @@ mod tests {
         record_recent_output(&shared, "›\n".as_bytes());
 
         assert_eq!(route_owned_live_pane_busy_reason(&shared, &harness), None);
+        assert!(
+            !route_owned_live_pane_interaction_observed(&shared, &harness),
+            "an unused idle harness must remain eligible for layout-orphan cleanup"
+        );
     }
 
     #[test]

@@ -90,6 +90,14 @@ pub trait RouteOwnedCompletionState: Send + Sync + 'static {
     fn observed_live_pane_busy_reason(&self, harness: &HarnessConfig) -> Option<String> {
         self.live_pane_busy_reason(harness)
     }
+    /// Whether the owned child has admitted a real harness interaction.
+    ///
+    /// A layout-provision owner that carries a turn is no longer an unused
+    /// layout placeholder. The completion loop promotes that fact to a sticky
+    /// dispatch purpose before it can run orphan cleanup.
+    fn live_pane_interaction_observed(&self, _harness: &HarnessConfig) -> bool {
+        false
+    }
     fn owned_pane_label(&self) -> String;
     /// Whether THIS supervisor's own pane currently sits in a `stash` window.
     ///
@@ -189,8 +197,7 @@ where
             } = config;
             let mut baseline = baseline.as_ref().map(route_owned_facts_from_cycle_state);
             let reap_effects = RouteOwnedReapEffects::new();
-            let layout_provision_owner = reap_policy == RouteOwnedReapPolicy::KeepAlive
-                && start_purpose == RouteOwnedStartPurpose::LayoutProvision;
+            let mut effective_start_purpose = start_purpose;
             // A layout-provision start may resume a child beside a terminal cycle left by the
             // previous pane. Give that fresh child one complete observation interval to admit
             // its new prompt before treating the inherited terminal cycle as an orphan. An
@@ -201,6 +208,21 @@ where
             let mut ready_busy_key: Option<(String, String)> = None;
             let mut ready_busy_logged_key: Option<(String, String)> = None;
             while !stop.load(Ordering::Relaxed) && !completed.load(Ordering::Relaxed) {
+                if effective_start_purpose == RouteOwnedStartPurpose::LayoutProvision
+                    && state.live_pane_interaction_observed(&harness)
+                {
+                    effective_start_purpose = RouteOwnedStartPurpose::Dispatch;
+                    let event = format!(
+                        "route_owned_start_purpose_promoted prior={} new={} reason=live_child_interaction pane={}",
+                        start_purpose.as_str(),
+                        effective_start_purpose.as_str(),
+                        state.owned_pane_label(),
+                    );
+                    log_session_event(&mut session_log, &event);
+                    agent_doc_ops_log_io::log_op(&file, &event);
+                }
+                let layout_provision_owner = reap_policy == RouteOwnedReapPolicy::KeepAlive
+                    && effective_start_purpose == RouteOwnedStartPurpose::LayoutProvision;
                 if let Ok(Some(cycle_state)) = load_route_owned_cycle_state(&file) {
                     let facts = route_owned_facts_from_cycle_state(&cycle_state);
                     // `#stashpaneunbounded`: evaluated BEFORE the commit-edge
@@ -223,7 +245,7 @@ where
                                 route_owned_liveness_reason_for_file(&file, &facts);
                             let decision = route_owned_reap_decision_for_purpose(
                                 reap_policy,
-                                start_purpose,
+                                effective_start_purpose,
                                 liveness_reason,
                                 true,
                             );
@@ -231,7 +253,7 @@ where
                                 let event = format!(
                                     "route_owned_reap_decision policy={} purpose={} decision=reap reason={} pane={} cycle={} event={}",
                                     reap_policy.as_str(),
-                                    start_purpose.as_str(),
+                                    effective_start_purpose.as_str(),
                                     decision.reason,
                                     state.owned_pane_label(),
                                     cycle_state.cycle_id,
@@ -251,7 +273,7 @@ where
                         {
                             let decision = route_owned_reap_decision_for_purpose(
                                 reap_policy,
-                                start_purpose,
+                                effective_start_purpose,
                                 None,
                                 layout_provision_owner && state.owned_pane_is_stashed(),
                             );
@@ -348,7 +370,7 @@ where
                         );
                         route_owned_reap_decision_for_purpose(
                             reap_policy,
-                            start_purpose,
+                            effective_start_purpose,
                             liveness_reason,
                             layout_provision_owner && state.owned_pane_is_stashed(),
                         )
@@ -413,8 +435,10 @@ mod tests {
     struct StashedCompletionState {
         started_at: Instant,
         stop_elapsed_millis: AtomicU64,
-        busy: bool,
+        busy: AtomicBool,
         busy_probe_count: AtomicU64,
+        interaction_observed: AtomicBool,
+        interaction_probe_count: AtomicU64,
     }
 
     impl RouteOwnedCompletionState for StashedCompletionState {
@@ -432,7 +456,14 @@ mod tests {
 
         fn observed_live_pane_busy_reason(&self, _harness: &HarnessConfig) -> Option<String> {
             self.busy_probe_count.fetch_add(1, Ordering::Relaxed);
-            self.busy.then(|| "observed active child turn".to_string())
+            self.busy
+                .load(Ordering::Relaxed)
+                .then(|| "observed active child turn".to_string())
+        }
+
+        fn live_pane_interaction_observed(&self, _harness: &HarnessConfig) -> bool {
+            self.interaction_probe_count.fetch_add(1, Ordering::Relaxed);
+            self.interaction_observed.load(Ordering::Relaxed)
         }
 
         fn owned_pane_label(&self) -> String {
@@ -532,8 +563,10 @@ mod tests {
         let state = Arc::new(StashedCompletionState {
             started_at: Instant::now(),
             stop_elapsed_millis: AtomicU64::new(u64::MAX),
-            busy: false,
+            busy: AtomicBool::new(false),
             busy_probe_count: AtomicU64::new(0),
+            interaction_observed: AtomicBool::new(false),
+            interaction_probe_count: AtomicU64::new(0),
         });
         let completed = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
@@ -577,8 +610,10 @@ mod tests {
         let state = Arc::new(StashedCompletionState {
             started_at: Instant::now(),
             stop_elapsed_millis: AtomicU64::new(u64::MAX),
-            busy: true,
+            busy: AtomicBool::new(true),
             busy_probe_count: AtomicU64::new(0),
+            interaction_observed: AtomicBool::new(false),
+            interaction_probe_count: AtomicU64::new(0),
         });
         let completed = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
@@ -611,6 +646,65 @@ mod tests {
             "completion thread never evaluated the orphan liveness guard"
         );
         assert!(!completed.load(Ordering::Relaxed));
+        assert_eq!(state.stop_elapsed_millis.load(Ordering::Relaxed), u64::MAX);
+        stop.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn used_layout_provision_stays_alive_after_returning_to_idle_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "body").unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body")).unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "test", Some("body"), Some("body")).unwrap();
+        let baseline = load_route_owned_cycle_state(&doc).unwrap().unwrap();
+
+        let state = Arc::new(StashedCompletionState {
+            started_at: Instant::now(),
+            stop_elapsed_millis: AtomicU64::new(u64::MAX),
+            busy: AtomicBool::new(true),
+            busy_probe_count: AtomicU64::new(0),
+            interaction_observed: AtomicBool::new(true),
+            interaction_probe_count: AtomicU64::new(0),
+        });
+        let completed = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut config = RouteOwnedCompletionConfig::with_start_purpose(
+            doc,
+            Some(baseline),
+            RouteOwnedReapPolicy::KeepAlive,
+            RouteOwnedStartPurpose::LayoutProvision,
+            HarnessConfig::codex(),
+        );
+        config.poll_interval = Duration::from_millis(1);
+        config.layout_provision_orphan_check_interval = Duration::from_millis(10);
+
+        let handle = spawn_route_owned_completion_thread(
+            Arc::clone(&state),
+            config,
+            Arc::clone(&completed),
+            Arc::clone(&stop),
+            None::<()>,
+            |_, _| {},
+        );
+        let promotion_deadline = Instant::now() + Duration::from_secs(1);
+        while state.interaction_probe_count.load(Ordering::Relaxed) == 0
+            && Instant::now() < promotion_deadline
+        {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(state.interaction_probe_count.load(Ordering::Relaxed) > 0);
+
+        state.busy.store(false, Ordering::Relaxed);
+        state.interaction_observed.store(false, Ordering::Relaxed);
+        std::thread::sleep(Duration::from_millis(40));
+
+        assert!(
+            !completed.load(Ordering::Relaxed),
+            "a pane that carried a turn must not become a layout-only orphan at its next idle prompt"
+        );
         assert_eq!(state.stop_elapsed_millis.load(Ordering::Relaxed), u64::MAX);
         stop.store(true, Ordering::Relaxed);
         handle.join().unwrap();

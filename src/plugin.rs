@@ -36,6 +36,7 @@
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
+use std::cmp::Ordering as CmpOrdering;
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::{self, IsTerminal as _, Read as _, Write as _};
@@ -397,6 +398,14 @@ fn install_jetbrains_into(release: &Value, target_dir: &Path) -> Result<()> {
     let tmp = download_to_temp(url)?;
 
     let expected_version = jetbrains_zip_plugin_version(tmp.path())?;
+    if let Some(installed_version) = installed_jetbrains_plugin_version(target_dir)
+        && jetbrains_version_cmp(&installed_version, &expected_version)? == CmpOrdering::Greater
+    {
+        eprintln!(
+            "Installed JetBrains plugin v{installed_version} is newer than release asset v{expected_version}; refusing downgrade and keeping the installed generation. Use `agent-doc plugin install jetbrains --local` for the current checkout build."
+        );
+        return Ok(());
+    }
     let outcome = install_jetbrains_zip_into(tmp.path(), target_dir, &expected_version)?;
 
     eprintln!("{}", jetbrains_install_success_message(target_dir)?);
@@ -751,6 +760,26 @@ fn extract_jetbrains_upgrade_launcher(zip_path: &Path) -> Result<tempfile::Named
     bail!("JetBrains package has no agent-doc plugin jar to use as the upgrade launcher")
 }
 
+fn jetbrains_upgrade_launcher_has_main_manifest(jar_path: &Path) -> Result<bool> {
+    let file = fs::File::open(jar_path).context("Failed to open JetBrains upgrade launcher")?;
+    let mut archive =
+        zip::ZipArchive::new(file).context("Failed to read JetBrains upgrade launcher as a JAR")?;
+    let mut manifest = match archive.by_name("META-INF/MANIFEST.MF") {
+        Ok(manifest) => manifest,
+        Err(zip::result::ZipError::FileNotFound) => return Ok(false),
+        Err(error) => return Err(error).context("Failed to inspect JetBrains upgrade manifest"),
+    };
+    let mut content = String::new();
+    manifest
+        .read_to_string(&mut content)
+        .context("Failed to read JetBrains upgrade manifest")?;
+    Ok(content.lines().any(|line| {
+        line.split_once(':').is_some_and(|(name, value)| {
+            name.eq_ignore_ascii_case("Main-Class") && !value.trim().is_empty()
+        })
+    }))
+}
+
 #[cfg(not(test))]
 fn java_executable() -> PathBuf {
     std::env::var_os("JAVA_HOME")
@@ -771,6 +800,11 @@ fn try_hot_upgrade_jetbrains(
         return Ok(None);
     }
     let launcher = extract_jetbrains_upgrade_launcher(zip_path)?;
+    if !jetbrains_upgrade_launcher_has_main_manifest(launcher.path())? {
+        bail!(
+            "JetBrains package v{expected_version} predates restart-free dynamic upgrade support (its plugin JAR has no Main-Class); refusing to replace a package owned by a live IDE. Restart the IDE before installing this legacy package, or install a current local build with `agent-doc plugin install jetbrains --local`."
+        );
+    }
     let archive = tempfile::Builder::new()
         .prefix("agent-doc-jb-package-")
         .suffix(".zip")
@@ -1031,15 +1065,27 @@ fn installed_jetbrains_plugin_version(target_dir: &std::path::Path) -> Option<St
             let version = name
                 .strip_prefix("agent-doc-jetbrains-")?
                 .strip_suffix(".jar")?;
-            let key: Vec<u32> = version
-                .split('.')
-                .map(str::parse::<u32>)
-                .collect::<std::result::Result<_, _>>()
-                .ok()?;
+            let key = numeric_dot_version(version)?;
             Some((key, version.to_owned()))
         })
         .max_by(|left, right| left.0.cmp(&right.0))
         .map(|(_, version)| version)
+}
+
+fn numeric_dot_version(version: &str) -> Option<Vec<u32>> {
+    version
+        .split('.')
+        .map(str::parse::<u32>)
+        .collect::<std::result::Result<_, _>>()
+        .ok()
+}
+
+fn jetbrains_version_cmp(left: &str, right: &str) -> Result<CmpOrdering> {
+    let left_key = numeric_dot_version(left)
+        .with_context(|| format!("Invalid installed JetBrains plugin version {left:?}"))?;
+    let right_key = numeric_dot_version(right)
+        .with_context(|| format!("Invalid JetBrains package version {right:?}"))?;
+    Ok(left_key.cmp(&right_key))
 }
 
 #[cfg(test)]
@@ -1143,11 +1189,14 @@ mod tests {
         install_jetbrains_local_zip_into, installed_jetbrains_plugin_version,
         is_jetbrains_ide_data_dir, jetbrains_ide_pids_from_jcmd, jetbrains_install_success_message,
         jetbrains_local_zip_matches_installation, jetbrains_plugin_dirs_in_roots,
+        jetbrains_upgrade_launcher_has_main_manifest, jetbrains_version_cmp,
         local_jetbrains_zip_in, local_jetbrains_zip_version, release_version, releases_page_url,
     };
     use serde_json::json;
+    use std::cmp::Ordering as CmpOrdering;
     use std::fs;
     use std::io::Write as _;
+    use std::path::Path;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -1571,6 +1620,50 @@ mod tests {
             jetbrains_install_success_message(tmp.path()).unwrap(),
             format!("Plugin installed (v0.2.252) to {}", tmp.path().display())
         );
+    }
+
+    #[test]
+    fn jetbrains_versions_compare_numerically_before_install_side_effects() {
+        assert_eq!(
+            jetbrains_version_cmp("0.2.419", "0.2.392").unwrap(),
+            CmpOrdering::Greater
+        );
+        assert_eq!(
+            jetbrains_version_cmp("0.2.419", "0.2.419").unwrap(),
+            CmpOrdering::Equal
+        );
+        assert_eq!(
+            jetbrains_version_cmp("0.2.420", "0.2.419").unwrap(),
+            CmpOrdering::Greater
+        );
+    }
+
+    #[test]
+    fn jetbrains_upgrade_launcher_requires_a_main_class_manifest() {
+        fn write_launcher(path: &Path, manifest: &str) {
+            let file = fs::File::create(path).unwrap();
+            let mut archive = zip::ZipWriter::new(file);
+            archive
+                .start_file(
+                    "META-INF/MANIFEST.MF",
+                    zip::write::SimpleFileOptions::default(),
+                )
+                .unwrap();
+            archive.write_all(manifest.as_bytes()).unwrap();
+            archive.finish().unwrap();
+        }
+
+        let tmp = TempDir::new().unwrap();
+        let legacy = tmp.path().join("legacy.jar");
+        let current = tmp.path().join("current.jar");
+        write_launcher(&legacy, "Manifest-Version: 1.0\n");
+        write_launcher(
+            &current,
+            "Manifest-Version: 1.0\nMain-Class: com.example.Upgrade\n",
+        );
+
+        assert!(!jetbrains_upgrade_launcher_has_main_manifest(&legacy).unwrap());
+        assert!(jetbrains_upgrade_launcher_has_main_manifest(&current).unwrap());
     }
 
     #[test]

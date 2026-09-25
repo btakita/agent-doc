@@ -333,6 +333,31 @@ Same framework plumbing; no new diagnostic information. Only the `Caused by:` se
 ### Re: recovered response
 
 Same framework dispatch chain. This frame adds nothing actionable; the root cause remains the already-fixed classloader collision.
+
+### Re: resumed-session crash and live plugin convergence — gpt-5 · 2026-09-25T15:16-04:00
+
+Fixed, verified, installed, committed, and pushed.
+
+The repeated automatic session exits came from the layout-provision orphan cleanup path. A newly resumed child could be evaluated immediately against an inherited terminal cycle, and the destructive check trusted a stale controller `Ready` state even while the child renderer showed an active Codex turn. The supervisor now waits one full orphan-observation interval after startup and directly observes live child output before reaping a stashed layout-provision pane. Two regressions cover the startup grace period and the stale-Ready/active-turn case.
+
+The most recent interruption was operator-caused, as clarified, so I did not broaden the fix or classify that event as another product crash.
+
+The IntelliJ upgrade state is healthy without restarting IDEA. PID 2245854 has a current, non-deleted mapping for plugin 0.2.419; older 0.2.416–0.2.419 deleted mappings are historical generations, and the stale-byte probe correctly prefers the current mapping. IntelliJ logged a successful dynamic unload/reload and no new `TurnStateBannerRefresher` classloader exception. The one-time plugin reinstall requested by preflight was already performed during this cycle, so reopening the tab or restarting IntelliJ is not required now.
+
+The earlier issues in this exchange remain covered by the shipped fixes: generation-local JetBrains listeners/registries eliminate the cross-classloader cast and duplicate banner/queue replay; `api.md` was repaired to a single progress prefix; opposite-tab editor focus gained the deferred authoritative focus check; and the duplicated `infra.md` item was reconciled after restart.
+
+Verification:
+
+- Full `make check`: passed.
+- Local `make tmux-ci`: passed.
+- Focused supervisor/runtime tests and targeted Rust formatting/diff checks: passed.
+- Latest upstream CI observed before this push: successful.
+- Installed runtime: agent-doc 0.35.418, JetBrains plugin 0.2.419, VS Code 0.2.71.
+
+Source commit: `4946f2820` (`fix: guard resumed sessions from stale orphan reap`)  
+Parent pointer commit: `e06a288d0` (`fix: guard agent-doc resumed session liveness`)
+
+Both commits are pushed to `origin/main`.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

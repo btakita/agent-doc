@@ -67,10 +67,37 @@ pub fn write_wedged_from_ipc_failures(
     listener_nominally_active && consecutive_failures >= threshold
 }
 
-pub const MAX_CYCLE_OPEN_DEFER_TICKS: u32 = 40;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DurableReplayCheckpoint {
+    Absent,
+    CapturedResponse,
+}
 
-pub fn cycle_open_defer_escalates(consecutive_defers: u32, max: u32) -> bool {
-    consecutive_defers >= max
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GenerationTransitionAdmission {
+    Permit,
+    DeferUnsafeCheckpoint,
+    DeferOpenCycle,
+}
+
+/// The topology gate for replacing a supervisor generation.
+///
+/// An open cycle is stronger evidence than prompt-idle, binary-stale, or elapsed
+/// watch-tick observations. It may cross a generation boundary only when that
+/// exact cycle has a durable captured-response checkpoint from which the typed
+/// recovery path can replay. There is deliberately no timeout input.
+pub fn generation_transition_admission(
+    cycle_open: bool,
+    replay: DurableReplayCheckpoint,
+    supervisor_ipc_drained: bool,
+) -> GenerationTransitionAdmission {
+    if cycle_open && matches!(replay, DurableReplayCheckpoint::Absent) {
+        return GenerationTransitionAdmission::DeferOpenCycle;
+    }
+    if !supervisor_ipc_drained {
+        return GenerationTransitionAdmission::DeferUnsafeCheckpoint;
+    }
+    GenerationTransitionAdmission::Permit
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -334,17 +361,28 @@ pub fn supervisor_recycle_action(
     reexec_failed: bool,
     cycle_open: bool,
 ) -> SupervisorRecycleAction {
+    let replay_checkpoint = if write_wedged || editor_delivery_stale {
+        DurableReplayCheckpoint::CapturedResponse
+    } else {
+        DurableReplayCheckpoint::Absent
+    };
+    match generation_transition_admission(cycle_open, replay_checkpoint, checkpoint.is_safe()) {
+        GenerationTransitionAdmission::DeferOpenCycle => {
+            return SupervisorRecycleAction::DeferCycleOpen;
+        }
+        GenerationTransitionAdmission::DeferUnsafeCheckpoint => {
+            return if explicit_admin || write_wedged || editor_delivery_stale {
+                SupervisorRecycleAction::DeferUnsafeCheckpoint
+            } else {
+                SupervisorRecycleAction::None
+            };
+        }
+        GenerationTransitionAdmission::Permit => {}
+    }
+
     // The transition owner consumes the live IPC-drain observation directly.
     // Durable recycle intents remain pending until a safe checkpoint rather
     // than relying on each effect caller to reproduce this guard.
-    if !checkpoint.is_safe() {
-        return if explicit_admin || write_wedged || editor_delivery_stale {
-            SupervisorRecycleAction::DeferUnsafeCheckpoint
-        } else {
-            SupervisorRecycleAction::None
-        };
-    }
-
     // `#midturn-wedge-recycle`: a proven editor-IPC write wedge means the active
     // turn/cycle can never reach its own boundary — closeout is blocked on a
     // convergence receipt that will not arrive, so `turn_boundary` never becomes
@@ -392,10 +430,6 @@ pub fn supervisor_recycle_action(
             };
         }
         return SupervisorRecycleAction::None;
-    }
-
-    if cycle_open {
-        return SupervisorRecycleAction::DeferCycleOpen;
     }
 
     if stale {
@@ -455,9 +489,20 @@ pub fn supervisor_restart_action(
     reexec_intent: bool,
     turn_boundary: bool,
     stale_reexec_safe_checkpoint: bool,
+    cycle_open: bool,
 ) -> SupervisorRestartAction {
     if !restart_requested {
         return SupervisorRestartAction::None;
+    }
+    if matches!(
+        generation_transition_admission(
+            cycle_open,
+            DurableReplayCheckpoint::Absent,
+            stale_reexec_safe_checkpoint,
+        ),
+        GenerationTransitionAdmission::DeferOpenCycle
+    ) {
+        return SupervisorRestartAction::AwaitDrain;
     }
     // Re-exec replaces only the stale supervisor host; execve normally preserves
     // the harness child, pane, and durable cycle checkpoint. It must still wait
@@ -894,18 +939,26 @@ mod tests {
     }
 
     #[test]
-    fn cycle_open_defer_escalates_after_threshold_only() {
-        assert!(!cycle_open_defer_escalates(0, MAX_CYCLE_OPEN_DEFER_TICKS));
-        assert!(!cycle_open_defer_escalates(
-            MAX_CYCLE_OPEN_DEFER_TICKS - 1,
-            MAX_CYCLE_OPEN_DEFER_TICKS
-        ));
-        assert!(cycle_open_defer_escalates(
-            MAX_CYCLE_OPEN_DEFER_TICKS,
-            MAX_CYCLE_OPEN_DEFER_TICKS
-        ));
-        assert!(!cycle_open_defer_escalates(2, 3));
-        assert!(cycle_open_defer_escalates(3, 3));
+    fn generation_transition_gate_has_no_timeout_escape() {
+        use DurableReplayCheckpoint::*;
+        use GenerationTransitionAdmission::*;
+
+        for ipc_drained in [false, true] {
+            assert_eq!(
+                generation_transition_admission(true, Absent, ipc_drained),
+                DeferOpenCycle,
+                "an uncaptured open cycle dominates every IPC observation"
+            );
+        }
+        assert_eq!(
+            generation_transition_admission(true, CapturedResponse, false),
+            DeferUnsafeCheckpoint
+        );
+        assert_eq!(
+            generation_transition_admission(true, CapturedResponse, true),
+            Permit
+        );
+        assert_eq!(generation_transition_admission(false, Absent, true), Permit);
     }
 
     #[test]
@@ -967,30 +1020,43 @@ mod tests {
     fn restart_action_drain_and_supersede_policy() {
         use SupervisorRestartAction::*;
 
-        assert_eq!(supervisor_restart_action(false, true, true, true), None);
         assert_eq!(
-            supervisor_restart_action(true, true, false, false),
+            supervisor_restart_action(false, true, true, true, false),
+            None
+        );
+        assert_eq!(
+            supervisor_restart_action(true, true, false, false, false),
             AwaitDrain
         );
         assert_eq!(
-            supervisor_restart_action(true, true, false, true),
+            supervisor_restart_action(true, true, false, true, false),
             AwaitDrain
         );
         assert_eq!(
-            supervisor_restart_action(true, true, true, false),
+            supervisor_restart_action(true, true, true, false, false),
             AwaitDrain
         );
         assert_eq!(
-            supervisor_restart_action(true, true, true, true),
+            supervisor_restart_action(true, true, true, true, false),
             ReexecInPlace
         );
         assert_eq!(
-            supervisor_restart_action(true, false, false, true),
+            supervisor_restart_action(true, false, false, true, false),
             AwaitDrain
         );
         assert_eq!(
-            supervisor_restart_action(true, false, true, false),
+            supervisor_restart_action(true, false, true, false, false),
             RelaunchChild
+        );
+        assert_eq!(
+            supervisor_restart_action(true, true, true, true, true),
+            AwaitDrain,
+            "an uncaptured open cycle blocks stale in-place replacement"
+        );
+        assert_eq!(
+            supervisor_restart_action(true, false, true, true, true),
+            AwaitDrain,
+            "an uncaptured open cycle blocks fresh child relaunch"
         );
     }
 }

@@ -24085,6 +24085,9 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     let preflight_layout =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/layout.rs")).unwrap();
+    let pane_authority_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/pane_execution_authority.rs"))
+            .unwrap();
     let start_run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-start-io/src/lib.rs")).unwrap();
     assert!(
@@ -24131,7 +24134,10 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
             && watch_source.contains("agent_doc_tmux_io::capture_pane(")
             && route_pane_resolution_io.contains("agent_doc_tmux_io::join_pane_guarded(")
             && sync_source.contains("agent_doc_tmux_io::join_pane_guarded(")
-            && write_source.contains("agent_doc_tmux_io::in_tmux()")
+            && !write_source.contains("agent_doc_tmux_io::in_tmux()")
+            && pane_authority_source.contains("agent_doc_tmux_io::in_tmux()")
+            && pane_authority_source
+                .contains("agent_doc_tmux_io::current_pane_id_from_env_or_tmux(")
             && preflight_layout.contains("agent_doc_tmux_io::in_tmux()")
             && start_run_source.contains("agent_doc_tmux_io::in_tmux()")
             && !sessions_source.contains("pub fn pane_pid(")
@@ -24151,7 +24157,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
             && !sessions_source.contains("fn display_message(&self")
             && !sessions_source.contains("trait Multiplexer")
             && !sessions_source.contains("impl Multiplexer for"),
-        "route should call focused tmux IO observation helpers directly"
+        "route and pane-authority adapters should call focused tmux IO observation helpers directly"
     );
 
     for forbidden in [

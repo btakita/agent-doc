@@ -58,6 +58,60 @@ Retries are idempotent. Terminal cycles cannot expose retained response history
 as active work. An operator edit that changes the expected generation causes a
 semantic rebase; an operator same-node edit or deletion wins.
 
+## Pane execution authority
+
+Pane identity is an admission fact, not ambient process state:
+
+```mermaid
+flowchart LR
+  ACTOR["controller actor Source\npane + generation"]
+  INVOKE["invocation Source\nexplicit pane + generation"]
+  LIVE["bounded process observation Source\nexact owner / stale / unknown"]
+  AUTH["authority Computed\nexhaustive typed table"]
+  RECEIPT["typed admission receipt"]
+  EFFECT["preflight / write / recovery Effect"]
+  ACTOR --> AUTH
+  INVOKE --> AUTH
+  LIVE --> AUTH
+  AUTH --> RECEIPT --> EFFECT
+```
+
+Controller-owned effects bind the document actor's pane explicitly; they never
+inherit the controller host's `TMUX_PANE`. A live non-owner is rejected before
+repair, lease acquisition, response capture, or cycle-open. A stale binding can
+be superseded only by exact process-tree proof for the invoking document. Pane
+string equality without that proof is insufficient, including for legacy
+registry rows with no actor generation.
+
+## Supervisor generation transition authority
+
+Supervisor replacement is gated by durable document topology, not a scraped
+prompt or an idle-watch timeout:
+
+```mermaid
+flowchart LR
+  REQUEST["install / restart / stale request"]
+  CYCLE["durable cycle\nopen / terminal"]
+  REPLAY["typed replay checkpoint\nabsent / captured response"]
+  IPC["supervisor IPC\nunsafe / drained"]
+  GATE["generation-transition policy"]
+  DEFER["pending request"]
+  REPLACE["replace generation"]
+  REQUEST --> GATE
+  CYCLE --> GATE
+  REPLAY --> GATE
+  IPC --> GATE
+  GATE -->|open + no capture| DEFER
+  GATE -->|unsafe IPC| DEFER
+  GATE -->|terminal, or captured recovery| REPLACE
+  DEFER -->|cycle/IPC state edge| GATE
+```
+
+An ordinary open preflight has no replay checkpoint and therefore cannot cross
+a supervisor generation boundary. Binary staleness and elapsed polling ticks
+never weaken that edge. Captured-response recovery is the sole open-cycle
+exception, and it still requires drained supervisor IPC.
+
 ## Removed race classes
 
 | Race | Architectural resolution |
@@ -69,6 +123,8 @@ semantic rebase; an operator same-node edit or deletion wins.
 | Finalize/write recovery loops | One transaction state machine chooses the only valid next transition; committed/abandoned captures are inactive. |
 | Controller restart loses intent | Bootstrap, actor, delivery, and recovery state are transactional rows in `state.db`. |
 | Editor tab focus is stolen | Background reconciliation never invokes focus/select APIs; explicit operator commands own focus changes. |
+| Controller recovery inherits the host pane | Actor pane and generation feed one authority Computed; rejected admission has no mutation side effect. |
+| Install/restart interrupts an open preflight | The generation-transition policy defers every uncaptured open cycle; no timeout can synthesize replay authority. |
 
 ## Plugin boundary
 

@@ -536,7 +536,8 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
-    verify_pane_ownership(file)?;
+    let pane_authority_scope = agent_doc_state_backbone::DocumentScope::new();
+    agent_doc_run_io::pane_execution_authority::require_in(&pane_authority_scope, file)?;
 
     let response = read_response_input_for_closeout(flags.strict_closeout)?;
 
@@ -760,7 +761,8 @@ pub(crate) fn run_template(
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
-    verify_pane_ownership(file)?;
+    let pane_authority_scope = agent_doc_state_backbone::DocumentScope::new();
+    agent_doc_run_io::pane_execution_authority::require_in(&pane_authority_scope, file)?;
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
 
     let mut response = read_response_input_for_closeout(flags.strict_closeout)?;
@@ -1151,7 +1153,8 @@ pub(crate) fn run_stream(
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
-    verify_pane_ownership(file)?;
+    let pane_authority_scope = agent_doc_state_backbone::DocumentScope::new();
+    agent_doc_run_io::pane_execution_authority::require_in(&pane_authority_scope, file)?;
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     // #jb-tsift-pane-sync diagnostic: capture a streamed write/commit to `file`
     // executing inside a tmux pane that owns a different document.

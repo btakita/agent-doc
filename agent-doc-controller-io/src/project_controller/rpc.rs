@@ -7564,7 +7564,32 @@ fn handle_commit_document_rpc(
             strike_disk_projection_ready,
         );
     }
-    runtime_effects()?.commit_document(&canonical, payload.authoritative_compaction)
+    // The controller process lives in a host pane that is not the document
+    // actor. Bind the effect to the actor record from the controller's reactive
+    // actor graph; downstream pane authority must never observe ambient
+    // `TMUX_PANE` for a controller-owned effect. A concurrent actor rebind is
+    // still safe: the downstream authority adapter reloads the generation and
+    // rejects the stale pane before mutation.
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &bootstrap.project_root,
+        &canonical.to_string_lossy(),
+    );
+    let actor = actor_record_from_authority(bootstrap, Some(runtime), &document_id)?
+        .filter(|record| {
+            !matches!(
+                record.state,
+                agent_doc_controller::actor::ActorState::Closed
+            )
+        })
+        .with_context(|| {
+            format!(
+                "controller commit has no live actor binding for {}",
+                canonical.display()
+            )
+        })?;
+    agent_doc_tmux_io::with_current_pane_id_override(&actor.pane_id, || {
+        runtime_effects()?.commit_document(&canonical, payload.authoritative_compaction)
+    })
 }
 
 /// Single-flight admission for controller-owned compaction.

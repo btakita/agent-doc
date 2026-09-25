@@ -399,17 +399,17 @@ fn retained_write_remedy_inner(ownership: RetainedWriteOwnership, file: &str) ->
         RetainedWriteVerdict::Stranded => format!(
             "NO cycle is open and NO response capture is retained, so nothing owns this write \
              and no state edge will fire — the visible edits are STRANDED, not deferred, and \
-             waiting will not commit them. Recover from the pane that OWNS this session: \
-             `agent-doc commit {file}`, or `agent-doc write --commit {file}` if an unwritten \
-             response body remains. From any other pane both abort with `pane ownership \
-             mismatch`"
+             waiting will not commit them. Run `agent-doc commit {file}`; when a live document \
+             actor exists the controller routes that commit under the actor's explicit pane \
+             identity, so do not claim or move the live session. Use `agent-doc write --commit \
+             {file}` from the owning pane only if an unwritten response body remains"
         ),
         RetainedWriteVerdict::AwaitingTerminalCommit => format!(
             "The response write ALREADY LANDED and only the terminal commit is outstanding — \
              this is neither a lost response nor a self-completing deferral, and \
              `agent-doc session-check {file}` will report the cycle INTERRUPTED at \
-             `write_applied`. Finish it from the pane that OWNS this session: \
-             `agent-doc commit {file}`. Do NOT re-send the response (the body is already \
+             `write_applied`. Run `agent-doc commit {file}`; a live controller routes the \
+             terminal commit under the document actor's explicit pane identity. Do NOT re-send the response (the body is already \
              durable and would duplicate), force disk, `admin recycle`, or `admin reload-lib`"
         ),
         RetainedWriteVerdict::UnansweredEditPending => format!(

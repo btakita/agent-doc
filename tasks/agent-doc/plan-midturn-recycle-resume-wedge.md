@@ -1,5 +1,13 @@
 # Plan: Mid-turn recycle/restart leaves an open cycle → `live_prompt_drift_after_preflight` wedge (`#midturn-recycle-resume`)
 
+> **Superseded safety note (2026-09-25):** the bounded
+> `cycle_open_defer_escalates` design below was falsified by live uncaptured
+> preflight cycles: process adoption is recovery, not authority to interrupt a
+> cycle. The current contract is
+> [`plan-pane-execution-authority-topology.md`](plan-pane-execution-authority-topology.md):
+> an uncaptured open cycle never crosses a supervisor generation boundary, and
+> neither elapsed ticks nor prompt-idle observations may weaken that edge.
+
 ## Operator directive
 
 > "We should have been able to recycle or restart the supervisor mid turn. The restart should reliably restart the turn."

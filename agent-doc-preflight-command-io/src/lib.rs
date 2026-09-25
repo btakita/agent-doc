@@ -342,6 +342,33 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    fn pane_authority_precedes_every_preflight_mutation_boundary() {
+        let source = include_str!("run.rs");
+        let authority = source
+            .find("require_pane_authority_in(&preflight_scope")
+            .expect("preflight must have a pane-authority admission gate");
+        for mutation in [
+            "recycle_stale_supervisor_for_turn_stage",
+            "ensure_controller_running_for_file",
+            "normalize_recoverable_response_replay_duplication_for_file",
+            "retire_redundant_doubled_document_write_intents",
+            "retain_preflight_controller_projection(",
+            "wait_for_lazily_current_before_mutation",
+            "enforce_cycle_completion(file",
+            "run_pending_maintenance(",
+            "start_preflight(file",
+        ] {
+            let mutation = source
+                .find(mutation)
+                .unwrap_or_else(|| panic!("missing preflight mutation boundary {mutation}"));
+            assert!(
+                authority < mutation,
+                "pane authority must reject before {mutation} can mutate state"
+            );
+        }
+    }
+
+    #[test]
     fn preflight_output_omits_empty_claims_and_layout_issues() {
         let output = PreflightOutput::default();
         let json = serde_json::to_string(&output).unwrap();

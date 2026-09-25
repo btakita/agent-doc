@@ -14,15 +14,12 @@
 //! the current file on disk. Dedup events are logged to stderr and appended
 //! (with backtrace) to `/tmp/agent-doc-write-dedup.log` for diagnosis.
 //!
-//! ## Pane ownership verification (v0.28.2)
+//! ## Pane execution authority
 //!
-//! `verify_pane_ownership()` is called at the top of `run`, `run_template`, and
-//! `run_stream`. It checks that the current tmux pane matches the session
-//! registry entry for the document's `session` frontmatter field. If a
-//! *different* pane definitively owns the session, the write is rejected with an
-//! error suggesting `agent-doc claim`. The check is lenient: it passes silently
-//! when not in tmux, when there is no session ID, or when the pane is
-//! indeterminate.
+//! The typed pane-execution authority graph is consulted at the top of `run`,
+//! `run_template`, and `run_stream`. It joins the actor generation, exact live
+//! process ownership, registry fallback, and explicit controller pane binding;
+//! a rejected command returns before pending capture or write state can mutate.
 //!
 //! ## Spec
 //!
@@ -1949,7 +1946,7 @@ fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<()> {
 /// `run_closeout_pending_maintenance`, `enforce_review_done_guard`), so they
 /// never entered a wrapped entry point at all. Neither did this command's own
 /// readers: `observe_live_queue_heads`, `pre_write_guards`,
-/// `verify_pane_ownership`, `canonicalize_response_for_capture`,
+/// pane execution authority, `canonicalize_response_for_capture`,
 /// `captured_finalize_resume_pre_capture_editor_save`. Measured 2026-08-09 on
 /// 0.35.204: 190 of 226 resolves were `uninstalled` against 12 genuine `miss`.
 ///
@@ -3299,45 +3296,6 @@ fn log_dedup(file: &Path, context: &str) {
     }
 }
 
-/// Verify the current tmux pane owns the session for this document.
-///
-/// Returns `Ok(())` when the check passes or cannot be performed (not in tmux,
-/// no session ID, session not registered, pane indeterminate). Returns `Err`
-/// only when a *different* pane definitively owns the session.
-fn verify_pane_ownership(file: &Path) -> Result<()> {
-    if !agent_doc_tmux_io::in_tmux() {
-        return Ok(());
-    }
-    let current = match resolve_current_document(file, "verify_pane_ownership") {
-        Ok(current) => current,
-        Err(_) => return Ok(()),
-    };
-    let session_id = match frontmatter::parse(current.content()) {
-        Ok((fm, _)) => match fm.session {
-            Some(s) => s,
-            None => return Ok(()),
-        },
-        Err(_) => return Ok(()),
-    };
-    let entry = match agent_doc_session_registry_io::lookup_entry(&session_id) {
-        Ok(Some(e)) => e,
-        _ => return Ok(()),
-    };
-    let tmux = agent_doc_tmux_io::configured_tmux();
-    let current = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux)
-        .context("failed to query current tmux pane while notifying the session owner")?;
-    if entry.pane != current {
-        anyhow::bail!(
-            "pane ownership mismatch: session {} owned by pane {}, current pane is {}. \
-             Use `agent-doc claim` to reclaim.",
-            session_id,
-            entry.pane,
-            current
-        );
-    }
-    Ok(())
-}
-
 pub mod run_entry;
 pub(crate) use run_entry::*;
 
@@ -3563,6 +3521,36 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
 mod tests {
     #![allow(unused_imports)]
     use super::*;
+
+    #[test]
+    fn every_write_mode_admits_pane_authority_before_capture_or_mutation() {
+        let source = include_str!("run_entry.rs");
+        assert_eq!(
+            source
+                .matches("pane_execution_authority::require_in")
+                .count(),
+            3,
+            "append, template, and stream writes must share the typed gate",
+        );
+        for function in [
+            "pub(crate) fn run(",
+            "pub(crate) fn run_template(",
+            "pub(crate) fn run_stream(",
+        ] {
+            let start = source.find(function).expect("write mode entrypoint");
+            let tail = &source[start..];
+            let authority = tail
+                .find("pane_execution_authority::require_in")
+                .expect("write mode pane-authority gate");
+            let response_read = tail
+                .find("read_response_input_for_closeout")
+                .expect("write mode response read");
+            assert!(
+                authority < response_read,
+                "{function} must reject before reading/capturing a response"
+            );
+        }
+    }
     use std::fs;
     use std::fs::OpenOptions;
     use std::time::Duration;

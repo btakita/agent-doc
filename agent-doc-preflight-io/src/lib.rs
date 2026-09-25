@@ -2862,7 +2862,7 @@ fn observe_queue_authority_after_native_save_with_bounded_retry(
         source,
         attempts,
         observe,
-        |file, authority, disk, source| adopt_proven_newer_disk_save(file, authority, disk, source),
+        adopt_proven_newer_disk_save,
     )
 }
 

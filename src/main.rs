@@ -4668,6 +4668,11 @@ fn try_main() -> anyhow::Result<()> {
                 agent_doc_queue_io::drain_owner::clear_drain_owner_lease(&file_str);
                 println!("released drain-owner lease for {}", file.display());
             } else {
+                let pane_authority_scope = agent_doc_state_backbone::DocumentScope::new();
+                agent_doc_run_io::pane_execution_authority::require_in(
+                    &pane_authority_scope,
+                    &file,
+                )?;
                 agent_doc_queue_io::drain_owner::refresh_drain_owner_lease(&file_str, &owner)?;
                 println!(
                     "claimed drain-owner lease owner={owner} for {}",
@@ -6434,6 +6439,25 @@ fn try_main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod controller_auto_start_policy_tests {
     use super::*;
+
+    #[test]
+    fn drain_lease_claim_requires_pane_authority_before_mutation() {
+        let source = include_str!("main.rs");
+        let arm = source
+            .find("Commands::DrainClaim")
+            .expect("drain-claim command arm");
+        let arm = &source[arm..];
+        let authority = arm
+            .find("pane_execution_authority::require_in")
+            .expect("drain claim pane-authority gate");
+        let lease = arm
+            .find("refresh_drain_owner_lease")
+            .expect("drain lease mutation");
+        assert!(
+            authority < lease,
+            "wrong-pane admission must reject before the drain lease is claimed"
+        );
+    }
 
     /// `#commitsilentfirstrun`: neither commit outcome may be silent.
     ///

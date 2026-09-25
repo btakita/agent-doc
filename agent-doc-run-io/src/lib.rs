@@ -39,6 +39,8 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+pub mod pane_execution_authority;
+
 const AGENT_DOC_RUN_HEARTBEAT_SECS_ENV: &str = "AGENT_DOC_RUN_HEARTBEAT_SECS";
 const DEFAULT_RUN_HEARTBEAT_SECS: u64 = 30;
 

@@ -1485,22 +1485,13 @@ mod tests {
             hint.contains("No response body is pending"),
             "the hint must say why `write --commit` is not the path: {hint}"
         );
-        // `#driftpanehint`: both recovery commands run through
-        // `verify_pane_ownership`, so a hint that omits the constraint sends the
-        // operator into `pane ownership mismatch` on the first attempt — read as
-        // a second, unrelated failure. Observed 2026-08-03 recovering
-        // tasks/software/lazily.md from a non-owning pane.
         assert!(
-            hint.contains("pane ownership mismatch"),
-            "the hint must warn that recovery aborts from a non-owning pane: {hint}"
+            hint.contains("controller routes the commit"),
+            "the hint must explain why commit is runnable outside the owner pane: {hint}"
         );
         assert!(
-            hint.contains("agent-doc claim"),
-            "the hint must name how to reclaim, since that is the only way out from another pane: {hint}"
-        );
-        assert!(
-            hint.contains("seizes the document from the live session"),
-            "reclaiming must be qualified — it takes the document from a running session: {hint}"
+            !hint.contains("agent-doc claim") && !hint.contains("pane ownership mismatch"),
+            "runnable recovery must not prescribe a live-session claim: {hint}"
         );
     }
 
@@ -1931,16 +1922,10 @@ pub fn closeout_recovery_hint(file: &Path) -> String {
         // documented path declines and the session cannot advance. Name the
         // command that actually closes document-only drift, and mention
         // `write --commit` only for the case that genuinely needs it.
-        // `#driftpanehint`: both recovery commands run through
-        // `verify_pane_ownership`, so from any other pane they abort with
-        // `pane ownership mismatch` and the operator reads that as a second,
-        // unrelated failure. Name the constraint here rather than letting the
-        // remedy fail on its first attempt.
         None => format!(
             "No response body is pending, so this is document-only drift: run `agent-doc commit {}`, then re-run `agent-doc session-check {}`. \
              Use `agent-doc write --commit {}` instead only if you still have an unwritten response body to persist. \
-             Run the recovery from the pane that OWNS this session — from any other pane it aborts with `pane ownership mismatch`, \
-             and `agent-doc claim` seizes the document from the live session, so reclaim only when that session is finished.",
+             When a live document actor exists, the controller routes the commit under that actor's explicit pane identity; do not claim or move the live session.",
             file.display(),
             file.display(),
             file.display()

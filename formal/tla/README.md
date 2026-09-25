@@ -24,7 +24,27 @@ machines and checked in a temporary directory on every test run.
   stale visible actor while preserving a unique visible/stashed partition;
 - neither request autostarts an actor; and
 - fair execution eventually applies the controller-local request and blocks the
-external request.
+  external request.
+
+`PaneExecutionAuthority.tla` checks preflight/write/controller admission across
+live, stale, unknown, absent, headless, rebound, and generation-mismatched pane
+ownership:
+
+- a non-owner generation never mutates document state;
+- rejection has no cycle, lease, or write side effect;
+- at most one owner generation mutates;
+- stale-owner repair requires exact live process ownership and never seizes a
+  live owner; and
+- an admitted recovery reaches terminal settlement under weak fairness.
+
+`SupervisorGenerationTransition.tla` checks install/restart/recycle admission:
+
+- an uncaptured open cycle is never replaced;
+- no replacement occurs while supervisor IPC is unsafe;
+- only captured-response recovery may cross an open cycle;
+- at most one replacement occurs; and
+- a pending request eventually replaces the supervisor after the cycle closes
+  and IPC drains under weak fairness.
 
 `CrdtLineageFence.tla` exhaustively checks the finite recovery control state:
 

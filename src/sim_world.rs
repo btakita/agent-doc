@@ -4975,12 +4975,6 @@ struct RecycleClearModel {
     /// listener mid-cycle and drive the next finalize into
     /// `live_prompt_drift_after_preflight`.
     cycle_open: bool,
-    /// `#midturn-recycle-resume` Phase B: consecutive idle ticks the recycle has been
-    /// deferred for an open cycle at a turn boundary (mirrors idle_watch.rs's
-    /// `cycle_open_defer_streak`). Once it reaches `MAX_CYCLE_OPEN_DEFER_TICKS` the
-    /// watch ESCALATES and forces the recycle, so a never-closing / wedged cycle
-    /// cannot starve the stale-binary self-recycle indefinitely.
-    cycle_open_defer_streak: u32,
     /// `#midturn-recycle-resume` Phase B: the harness child has died across the
     /// recycle window (it crashed/was killed, or an escalation forced the recycle
     /// over a wedged cycle). A boot reading the still-open `#durablerecycle`
@@ -5142,10 +5136,6 @@ struct Coverage {
     /// (operator `admin recycle` or the `supervisor_recycle_action` predicate),
     /// preserving the live pane via `execve`.
     supervisor_recycles: usize,
-    /// `#midturn-recycle-resume` Phase B: a never-closing / wedged open cycle deferred
-    /// the recycle past `MAX_CYCLE_OPEN_DEFER_TICKS`, so the watch ESCALATED and forced
-    /// the recycle (the open cycle can no longer starve a stale-binary self-recycle).
-    cycle_open_defer_escalations: usize,
     /// `#midturn-recycle-resume` Phase B: a fresh supervisor boot re-dispatched a
     /// genuinely-interrupted turn from the still-open `#durablerecycle` checkpoint
     /// (the harness child died across the recycle).
@@ -7774,87 +7764,43 @@ fn operator_recycle_fires_after_cycle_commit_while_harness_turn_remains_active()
 }
 
 #[test]
-fn never_closing_cycle_escalates_recycle_then_boot_redispatches_interrupted_turn() {
-    // `#midturn-recycle-resume` Phase B: Phase A defers a stale-binary self-recycle
-    // while a cycle is open, but a cycle that NEVER closes (a wedged finalize, a
-    // stranded preflight) must not starve the recycle forever. Past
-    // `MAX_CYCLE_OPEN_DEFER_TICKS` consecutive boundary deferrals the watch ESCALATES
-    // and forces the recycle. The forced `execve` severs the wedged cycle, so the
-    // harness child dies — and the fresh supervisor boot re-dispatches the
-    // genuinely-interrupted turn from the still-open `#durablerecycle` checkpoint
-    // (idempotently: a second boot does not re-dispatch again).
-    use agent_doc_supervisor::lifecycle::MAX_CYCLE_OPEN_DEFER_TICKS;
-
+fn uncaptured_open_cycle_never_times_out_then_recycles_after_terminal_edge() {
+    // The api.md/fpe.md incident shape: install fan-out observes a stale binary
+    // while an uncaptured preflight cycle is open. Arbitrarily many idle ticks are
+    // observations, not replay authority, so they cannot force replacement.
     let mut world = SimWorld::new(9_191);
     world.apply(SimCommand::BindRouteOwner).unwrap();
     world.apply(SimCommand::SupervisorReady).unwrap();
 
-    // Stale binary + auto-recycle ON, but a cycle that never closes.
     world.apply(SimCommand::MarkSupervisorBinaryStale).unwrap();
     world
         .apply(SimCommand::EnableSupervisorAutoRecycle)
         .unwrap();
     world.apply(SimCommand::SetAgentDocCycleOpen(true)).unwrap();
 
-    // Tick just under the threshold: every tick DEFERS, no recycle, no escalation.
-    for _ in 0..(MAX_CYCLE_OPEN_DEFER_TICKS - 1) {
+    for _ in 0..1_000 {
         world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
     }
     assert_eq!(
         world.coverage.supervisor_recycles, 0,
-        "an open cycle defers the recycle below the escalation threshold"
-    );
-    assert_eq!(
-        world.coverage.cycle_open_defer_escalations, 0,
-        "no escalation before the threshold"
+        "elapsed idle ticks must not replace an uncaptured open cycle"
     );
     assert!(
         world.recycle_clear.binary_stale,
         "the stale binary stays pending while the cycle is open"
     );
 
-    // The threshold tick ESCALATES and forces the recycle even though the cycle is
-    // STILL open — proving a never-closing cycle cannot starve the recycle.
+    world
+        .apply(SimCommand::SetAgentDocCycleOpen(false))
+        .unwrap();
     world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
     assert_eq!(
-        world.coverage.cycle_open_defer_escalations, 1,
-        "the threshold tick escalates the deferred recycle"
-    );
-    assert_eq!(
         world.coverage.supervisor_recycles, 1,
-        "the escalation forces the recycle over the never-closing cycle"
+        "the pending install recycle fires on the terminal cycle edge"
     );
     assert!(
         !world.recycle_clear.binary_stale,
-        "the forced recycle promoted the fresh binary"
-    );
-    assert!(
-        world.recycle_clear.cycle_open,
-        "the cycle was still open when the recycle was forced (it never closed)"
-    );
-    assert!(
-        world.recycle_clear.recycle_child_died,
-        "the forced execve over a wedged cycle severs/kills the harness child"
-    );
-
-    // The fresh supervisor boots: the child died across the recycle, so it
-    // re-dispatches the interrupted turn from the still-open checkpoint.
-    world.apply(SimCommand::SupervisorRecycleBoot).unwrap();
-    assert_eq!(
-        world.coverage.recycle_resume_redispatches, 1,
-        "the boot re-dispatches the genuinely-interrupted turn"
-    );
-    assert_eq!(
-        world.coverage.recycle_resume_adopt_surviving, 0,
-        "no surviving child to adopt — the child died across the recycle"
-    );
-
-    // IDEMPOTENCY: a second boot over the same still-open + consumed checkpoint must
-    // NOT re-dispatch the turn again.
-    world.apply(SimCommand::SupervisorRecycleBoot).unwrap();
-    assert_eq!(
-        world.coverage.recycle_resume_redispatches, 1,
-        "a second boot must not re-dispatch the already-consumed turn"
+        "the terminal-edge recycle promoted the fresh binary"
     );
 }
 
@@ -8058,7 +8004,7 @@ fn restart_supervisor_drains_then_reexecs_in_place_no_dropped_turn() {
 }
 
 #[test]
-fn stale_restart_waits_for_live_turn_lease_then_reexecs_at_boundary() {
+fn stale_restart_waits_for_turn_boundary_and_terminal_cycle() {
     // A drained supervisor IPC handler is not proof that the harness turn ended.
     // The harness-owned turn lease remains authoritative while fresh, because a
     // failed child adoption has no generic turn checkpoint from which to continue.
@@ -8097,15 +8043,24 @@ fn stale_restart_waits_for_live_turn_lease_then_reexecs_at_boundary() {
     world.apply(SimCommand::SupervisorReady).unwrap();
     world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
 
+    assert_eq!(
+        world.coverage.supervisor_restart_drain_reexecs, 0,
+        "prompt idleness cannot replace an uncaptured open cycle"
+    );
+    assert!(world.recycle_clear.restart_requested);
+    assert!(world.recycle_clear.binary_stale);
+
+    world
+        .apply(SimCommand::SetAgentDocCycleOpen(false))
+        .unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+
     assert_eq!(world.coverage.supervisor_restart_drain_reexecs, 1);
     assert!(!world.recycle_clear.restart_requested);
     assert!(!world.recycle_clear.binary_stale);
     assert_eq!(world.route.durable.generation, generation_before + 1);
     assert_eq!(world.route.durable.pane_id, pane_before);
-    assert!(
-        world.recycle_clear.cycle_open,
-        "boundary replacement preserves the durable open-cycle checkpoint"
-    );
+    assert!(!world.recycle_clear.cycle_open);
 }
 
 #[test]
@@ -8287,12 +8242,9 @@ fn pure_codex_thread_does_not_inherit_orchard_agent_doc_work() {
 }
 
 #[test]
-fn restart_supervisor_open_cycle_never_overrides_active_ipc_then_reexecs_when_drained() {
-    // A stale open closeout cycle may hit the bounded cycle-open escalation,
-    // but that timer must never override an active supervisor IPC handler. Once
-    // IPC drains at an idle turn boundary, in-place replacement is safe even though
-    // the open cycle remains; execve preserves the child, pane, and durable checkpoint.
-    use agent_doc_supervisor::lifecycle::MAX_CYCLE_OPEN_DEFER_TICKS;
+fn restart_supervisor_waits_for_ipc_drain_and_terminal_cycle() {
+    // IPC drain alone does not make an uncaptured open cycle replayable. The
+    // pending restart crosses generations only after the cycle closes.
 
     let mut world = SimWorld::new(4_243);
     world.apply(SimCommand::BindRouteOwner).unwrap();
@@ -8305,32 +8257,34 @@ fn restart_supervisor_open_cycle_never_overrides_active_ipc_then_reexecs_when_dr
     world.apply(SimCommand::MarkIpcInflight(true)).unwrap();
     world.apply(SimCommand::RequestSupervisorRestart).unwrap();
 
-    for _ in 0..MAX_CYCLE_OPEN_DEFER_TICKS {
+    for _ in 0..1_000 {
         world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
     }
     assert_eq!(
         world.coverage.supervisor_restart_drain_reexecs, 0,
-        "active IPC must defer replacement even after the cycle-open escalation"
+        "active IPC and the open cycle both defer replacement"
     );
     assert!(
         world.recycle_clear.restart_requested,
         "the restart request stays pending until supervisor IPC drains"
     );
-    assert_eq!(
-        world.coverage.cycle_open_defer_escalations, 1,
-        "the wedged open cycle still records its bounded escalation"
-    );
-
     world.apply(SimCommand::MarkIpcInflight(false)).unwrap();
     world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
     assert_eq!(
-        world.coverage.supervisor_restart_drain_reexecs, 1,
-        "the pending replacement reexecs at the first drained turn boundary"
+        world.coverage.supervisor_restart_drain_reexecs, 0,
+        "IPC drain cannot override the open-cycle interlock"
     );
     assert!(
-        !world.recycle_clear.restart_requested,
-        "the restart request is consumed by the replacement"
+        world.recycle_clear.restart_requested,
+        "the restart remains pending while the cycle is open"
     );
+
+    world
+        .apply(SimCommand::SetAgentDocCycleOpen(false))
+        .unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(world.coverage.supervisor_restart_drain_reexecs, 1);
+    assert!(!world.recycle_clear.restart_requested);
     assert!(
         !world.recycle_clear.binary_stale,
         "the replacement promoted the fresh binary"

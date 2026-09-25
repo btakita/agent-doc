@@ -33,10 +33,9 @@ use agent_doc_supervisor::{
         paused_idle_watch_should_skip, supervisor_auto_install_pane_message,
     },
     lifecycle::{
-        MAX_CYCLE_OPEN_DEFER_TICKS, MAX_REEXEC_ESCALATIONS, SupervisorInstallAction,
-        SupervisorRecycleAction, SupervisorRecycleCheckpoint, SupervisorRestartAction,
-        cycle_open_defer_escalates, reexec_escalation_within_bound, supervisor_install_action,
-        supervisor_recycle_action, supervisor_restart_action,
+        MAX_REEXEC_ESCALATIONS, SupervisorInstallAction, SupervisorRecycleAction,
+        SupervisorRecycleCheckpoint, SupervisorRestartAction, reexec_escalation_within_bound,
+        supervisor_install_action, supervisor_recycle_action, supervisor_restart_action,
     },
 };
 use agent_doc_turn::op_log::OpsLogEvent;
@@ -1544,27 +1543,6 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // The projection is refreshed every tick while the condition holds;
             // the log line fires once so the watch loop stays quiet.
             let mut recycle_yield_requested_logged = false;
-            // `#midturn-recycle-resume` Phase B: consecutive idle-watch boundary ticks
-            // the recycle has been deferred for an open agent-doc cycle. The landed
-            // `#suprecyclespin` stalled-cycle-resolve (below) clears the gate for an
-            // abandoned-older superseded cycle, but a cycle that never closes for some
-            // OTHER reason (intermittent IPC inflight, a wedged finalize that keeps
-            // ticking `updated_at`) would still starve the recycle. Once this streak
-            // reaches `MAX_CYCLE_OPEN_DEFER_TICKS` the watch ESCALATES — it forces the
-            // recycle DECISION (`effective_cycle_open=false`) as a backstop layered on
-            // top of the stalled-resolve. The forced `execve` severs the wedged cycle,
-            // but its open `#durablerecycle` checkpoint survives so the fresh boot
-            // re-dispatches the genuinely-interrupted turn (see `boot_resume_action`).
-            let mut cycle_open_defer_streak: u32 = 0;
-            let mut cycle_open_defer_escalated_logged = false;
-            // `#suprecyclespin-falseabandon`: consecutive polls for which the
-            // transactional-cycle staleness predicate has held at a `turn_boundary`. The
-            // force-abandon only fires once this reaches
-            // `STALLED_CYCLE_RESOLVE_CONFIRM_TICKS`, so a transiently-misread
-            // boundary during a live harness generation can never abandon the
-            // turn from a merely-stale projection (a stale projection must not
-            // interfere with the live turn — Lazily stays authoritative).
-            let mut stalled_resolve_streak: u32 = 0;
             // `#idlewatchctrlbackoff`: when the controller is degraded (its RPCs
             // are timing out), the idle-watch would otherwise hammer it with a
             // CRDT-model read every poll — paying the full read timeout each
@@ -3177,147 +3155,35 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // `generation closed` / stale-supervisor `#fcc0` case without dropping
                 // the live turn. Checked before the opt-in auto-recycle decision so a
                 // deliberate operator restart always supersedes (no env opt-in needed).
-            // `#midturn-recycle-resume`: a stale operator-requested replacement may
-            // reexec at any turn stage once supervisor IPC drains. The execve
-            // preserves the harness child and durable cycle checkpoint; only an
-            // active receipt handler is unsafe. Fresh-binary child relaunches retain
-            // the real turn-boundary and open-cycle interlocks.
-                // This prevents a long model/tool turn from pinning an obsolete supervisor.
-                // `#suprecyclespin`: an open cycle whose harness turn has already
-                // ended (we are at `turn_boundary`) but that never reached
-                // `committed`/`abandoned` keeps `is_open()` true forever, so the
-                // recycle-defer arm (`DeferCycleOpen`) fires ~2/sec indefinitely and
-                // the stale supervisor never hot-reloads. This is the unbuilt
-                // `#midturnresumeb` Phase B: a stalled cycle (no IPC inflight,
-                // untouched past `STALLED_CYCLE_RESOLVE_SECS`) may be an abandoned
-                // older turn that a newer cycle has superseded. Resolve it only at a
-                // true turn boundary; mid-turn, preserve the open checkpoint so a
-                // finalize/recycle race can still be resumed by the fresh supervisor.
+                // `#midturn-recycle-resume`: a stale operator-requested replacement may
+                // reexec only after supervisor IPC drains and the durable document cycle
+                // closes. Execve usually preserves the harness child, but its fallback
+                // does not make an uncaptured preflight replayable.
+                // Cycle state is the durable topology edge. The idle watcher may
+                // observe it but must not infer abandonment from elapsed time or a
+                // scraped prompt: both api.md and fpe.md disproved that inference.
                 let inflight = agent_doc_ipc_io::inflight_connection_handlers();
-                let cycle_open = match agent_doc_cycle_state_io::load_with_closeout_projection(&path)
+                let cycle_open = agent_doc_cycle_state_io::load_with_closeout_projection(&path)
                     .ok()
                     .flatten()
-                {
-                    Some(state) if state.is_open() => {
-                        let before_response_capture_cycle_stalled = turn_boundary
-                            && state.stalled_before_response_capture_cycle(
-                                inflight,
-                                current_epoch_secs(),
-                                agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS,
-                            );
-                        // `#suprecyclespin-falseabandon`: require the stall to
-                        // persist across `STALLED_CYCLE_RESOLVE_CONFIRM_TICKS`
-                        // consecutive polls before abandoning. A live generation
-                        // does not hold `turn_boundary && stalled` back-to-back for
-                        // the confirm window, so a transient boundary misread can no
-                        // longer abandon a live turn from a stale sidecar; a truly
-                        // orphaned cycle stays stalled every poll and still resolves.
-                        if before_response_capture_cycle_stalled {
-                            stalled_resolve_streak = stalled_resolve_streak.saturating_add(1);
-                        } else {
-                            stalled_resolve_streak = 0;
-                        }
-                        let stall_confirmed = before_response_capture_cycle_stalled
-                            && stalled_resolve_streak
-                                >= agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_CONFIRM_TICKS;
-                        if stall_confirmed {
-                            stalled_resolve_streak = 0;
-                            let stalled_secs =
-                                current_epoch_secs().saturating_sub(state.updated_at);
-                            if let Err(err) = agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(&agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
-                                &path,
-                                "suprecyclespin_stalled_cycle_resolved",
-                                None,
-                                None,
-                            ) {
-                                agent_doc_ops_log_io::log_op(
-                                    &path,
-                                    &format!(
-                                        "supervisor_cycle_stale_resolve_failed file={} cycle={} err={err:#} (#suprecyclespin)",
-                                        path.display(),
-                                        state.cycle_id,
-                                    ),
-                                );
-                            }
-                            agent_doc_ops_log_io::log_op(
-                                &path,
-                                &format!(
-                                    "supervisor_cycle_stale_resolved file={} cycle={} turn={} phase={} stalled_secs={} inflight={} confirm_ticks={} reason=abandoned_older_turn_superseded (#suprecyclespin)",
-                                    path.display(),
-                                    state.cycle_id,
-                                    state.turn_id.as_deref().unwrap_or("<none>"),
-                                    state.phase.as_str(),
-                                    stalled_secs,
-                                    inflight,
-                                    agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_CONFIRM_TICKS,
-                                ),
-                            );
-                            // Gate cleared — let the recycle proceed at this boundary.
-                            inflight > 0
-                        } else {
-                            true
-                        }
-                    }
-                    _ => inflight > 0,
-                };
-                // `#midturn-recycle-resume` Phase B escalation backstop (layered on the
-                // `#suprecyclespin` stalled-resolve above): count consecutive cycle-open
-                // recycle deferrals at a `turn_boundary` (the only place a recycle would
-                // otherwise fire); once the streak reaches `MAX_CYCLE_OPEN_DEFER_TICKS`,
-                // force the recycle DECISION for this tick via `effective_cycle_open`.
-                // Off a boundary the recycle never fires, so an open cycle there is not
-                // starving anything and must not accrue the streak.
-                if cycle_open && turn_boundary {
-                    cycle_open_defer_streak = cycle_open_defer_streak.saturating_add(1);
-                } else {
-                    cycle_open_defer_streak = 0;
-                    cycle_open_defer_escalated_logged = false;
-                }
-                let escalate_cycle_open = cycle_open_defer_escalates(
-                    cycle_open_defer_streak,
-                    MAX_CYCLE_OPEN_DEFER_TICKS,
+                    .is_some_and(|state| state.is_open())
+                    || inflight > 0;
+                // A durable open cycle is the generation-transition interlock. Prompt
+                // idleness, supervisor staleness, and elapsed watch ticks cannot weaken
+                // it: an uncaptured preflight has no replay point after exec fallback.
+                let effective_cycle_open = cycle_open;
+                let stale_restart_safe_checkpoint =
+                    stale_recycle_safe_checkpoint(supervisor_stale, inflight);
+                let restart_action = supervisor_restart_action(
+                    shared.restart_requested.load(Ordering::Relaxed),
+                    shared.restart_reexec.load(Ordering::Relaxed),
+                    turn_boundary,
+                    stale_restart_safe_checkpoint,
+                    effective_cycle_open,
                 );
-                if escalate_cycle_open && !cycle_open_defer_escalated_logged {
-                    cycle_open_defer_escalated_logged = true;
-                    agent_doc_ops_log_io::log_op(
-                        &path,
-                        &format!(
-                            "supervisor_recycle_cycle_open_escalated file={} pane={} streak={} threshold={} inflight={} action=force_recycle reason=cycle_never_closed (#midturn-recycle-resume)",
-                            path.display(),
-                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
-                            cycle_open_defer_streak,
-                            MAX_CYCLE_OPEN_DEFER_TICKS,
-                            inflight,
-                        ),
-                    );
-                    log_event(
-                        &mut session_log,
-                        &format!(
-                            "supervisor_recycle_cycle_open_escalated streak={} threshold={} action=force_recycle reason=cycle_never_closed",
-                            cycle_open_defer_streak,
-                            MAX_CYCLE_OPEN_DEFER_TICKS,
-                        ),
-                    );
-                }
-            // The cycle-open escalation remains the backstop for ordinary recycle
-            // and fresh-binary child relaunch. Stale in-place replacement may cross
-            // an open agent-doc cycle once supervisor IPC is drained, but the pure
-            // restart policy still requires a real turn boundary. The harness turn
-            // lease is authoritative while fresh; reexec adoption is not a generic
-            // continuation checkpoint for an interrupted non-agent-doc turn.
-            let effective_cycle_open = cycle_open && !escalate_cycle_open;
-            let stale_restart_safe_checkpoint =
-                stale_recycle_safe_checkpoint(supervisor_stale, inflight);
-            let restart_action = supervisor_restart_action(
-                shared.restart_requested.load(Ordering::Relaxed),
-                shared.restart_reexec.load(Ordering::Relaxed),
-                turn_boundary,
-                stale_restart_safe_checkpoint,
-            );
-            if !reexec_recycle_disabled
-                && (!effective_cycle_open || stale_restart_safe_checkpoint)
-                && matches!(restart_action, SupervisorRestartAction::ReexecInPlace)
-            {
+                if !reexec_recycle_disabled
+                    && matches!(restart_action, SupervisorRestartAction::ReexecInPlace)
+                {
                     #[cfg(unix)]
                     {
                         let candidate_notes = supervisor_reexec_candidates()
@@ -3528,10 +3394,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     write_wedged,
                     editor_delivery_stale,
                     reexec_failed,
-                    // A stale supervisor's safe intra-turn checkpoint owns the durable
-                    // resume handoff, so an open cycle does not block that hot reload.
-                    // Non-stale operator replacement retains the cycle-open interlock.
-                    effective_cycle_open && !stale_safe_checkpoint,
+                    effective_cycle_open,
                 );
                 match recycle_action {
                     SupervisorRecycleAction::DeferCycleOpen => {
@@ -5424,6 +5287,25 @@ mod tests {
             "idle_watch must resolve document text/transition state through the \
              project controller, never the supervisor-local relay registry; found: {offenders:#?}"
         );
+    }
+
+    #[test]
+    fn generation_transition_never_weakens_an_uncaptured_open_cycle() {
+        let source = include_str!("idle_watch.rs");
+        assert!(source.contains("let effective_cycle_open = cycle_open;"));
+        let forbidden = [
+            ["cycle_open && !", "escalate"].concat(),
+            ["effective_cycle_open && !", "stale_safe_checkpoint"].concat(),
+            ["!effective_cycle_open || ", "stale_restart_safe_checkpoint"].concat(),
+            ["supervisor_cycle_", "stale_resolved"].concat(),
+            ["pipeline_frontmatter::", "mark_abandoned"].concat(),
+        ];
+        for forbidden in forbidden {
+            assert!(
+                !source.contains(&forbidden),
+                "idle-watch must not weaken or retire an open cycle via `{forbidden}`"
+            );
+        }
     }
 
     #[test]

@@ -362,10 +362,9 @@ pub struct AdmitOutput {
 /// (`prompt_visible && !turn_active`, both pane-scraped) that abandoned a live
 /// turn mid-generation. The deadline is now generous enough to clear normal
 /// first-response latency; the primary guard is the consecutive-tick debounce
-/// below (a genuine generation does not hold `turn_boundary && stalled` across
-/// many back-to-back polls) plus the `MAX_CYCLE_OPEN_DEFER_TICKS` recycle
-/// escalation backstop, which force-recycles a never-closing cycle WITHOUT
-/// abandoning it (the durable checkpoint survives for the fresh boot).
+/// below. Supervisor generation transition no longer consumes this timeout:
+/// elapsed watch ticks and prompt scraping are not proof that an uncaptured
+/// preflight is replayable.
 pub const STALLED_CYCLE_RESOLVE_SECS: u64 = 120;
 
 /// `#suprecyclespin-falseabandon` — consecutive idle-watch polls

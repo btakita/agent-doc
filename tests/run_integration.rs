@@ -1293,6 +1293,7 @@ fn preflight_emits_owned_pane_self_invocation_for_unresolved_prompt() {
     )
     .unwrap();
     init_git_repo(tmp.path(), &doc);
+    seed_snapshot(tmp.path(), &doc);
     write_codex_owner_session(tmp.path(), &doc);
 
     let out = agent_doc()
@@ -1304,7 +1305,7 @@ fn preflight_emits_owned_pane_self_invocation_for_unresolved_prompt() {
         .env_remove("OPENCODE_CLIENT")
         .env("CODEX_SESSION", "codex-session")
         .env("TMUX_PANE", "%77")
-        .args(["preflight", doc.to_str().unwrap()])
+        .args(["preflight", "--probe", doc.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(out.status.success(), "preflight should succeed");
@@ -1320,7 +1321,8 @@ fn preflight_emits_owned_pane_self_invocation_for_unresolved_prompt() {
         osi["work_excerpt"]
             .as_str()
             .unwrap()
-            .contains("Please reply")
+            .contains("Please reply"),
+        "unresolved prompt excerpt missing from probe output: {json}"
     );
     assert!(
         osi["persistence_command"]
@@ -1353,7 +1355,7 @@ fn preflight_owned_pane_self_invocation_absent_for_non_owner_pane() {
         .env_remove("OPENCODE_CLIENT")
         .env("CODEX_SESSION", "codex-session")
         .env("TMUX_PANE", "%99")
-        .args(["preflight", doc.to_str().unwrap()])
+        .args(["preflight", "--probe", doc.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -1391,7 +1393,7 @@ fn preflight_emits_owned_pane_self_invocation_for_active_queue_head() {
         .env_remove("OPENCODE_CLIENT")
         .env("CODEX_SESSION", "codex-session")
         .env("TMUX_PANE", "%77")
-        .args(["preflight", doc.to_str().unwrap()])
+        .args(["preflight", "--probe", doc.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(out.status.success(), "preflight should succeed");
@@ -1446,7 +1448,7 @@ fn preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit() 
         .env_remove("OPENCODE_CLIENT")
         .env("CODEX_SESSION", "codex-session")
         .env("TMUX_PANE", "%77")
-        .args(["preflight", doc.to_str().unwrap()])
+        .args(["preflight", "--probe", doc.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(

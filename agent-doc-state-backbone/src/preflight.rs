@@ -163,6 +163,7 @@ impl fmt::Display for PreflightEffect {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct PreflightEffectSignals {
+    pub execution_authority_admitted: bool,
     pub authority_current: bool,
     pub repair_settled: bool,
     pub prior_cycle_commit_settled: bool,
@@ -180,6 +181,12 @@ pub struct PreflightEffectProjection {
 }
 
 pub fn derive_effect_projection(signals: &PreflightEffectSignals) -> PreflightEffectProjection {
+    if !signals.execution_authority_admitted {
+        return PreflightEffectProjection {
+            waiting_for: Some("execution_authority_admitted".to_string()),
+            ..PreflightEffectProjection::default()
+        };
+    }
     if !signals.authority_current {
         return PreflightEffectProjection {
             waiting_for: Some("authority_current".to_string()),
@@ -276,6 +283,10 @@ impl PreflightEffectState {
         }
     }
 
+    pub fn observe_execution_authority_admitted(&self, admitted: bool) {
+        self.update(|signals| signals.execution_authority_admitted = admitted);
+    }
+
     pub fn observe_authority_current(&self, current: bool) {
         self.update(|signals| signals.authority_current = current);
     }
@@ -343,6 +354,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn execution_authority_blocks_repair_before_any_preflight_effect() {
+        let scope = DocumentScope::new();
+        let effects = PreflightEffectState::new_in(&scope);
+        effects.observe_authority_current(true);
+
+        let error = effects
+            .require(PreflightEffect::Repair)
+            .expect_err("repair must not run before pane execution admission");
+        assert!(error.to_string().contains("execution_authority_admitted"));
+        assert_eq!(
+            effects.projection().waiting_for.as_deref(),
+            Some("execution_authority_admitted")
+        );
+    }
+
+    #[test]
     fn read_projection_recomputes_when_observations_change() {
         let scope = DocumentScope::new();
         let state = PreflightReadState::new_in(&scope);
@@ -374,6 +401,7 @@ mod tests {
     fn no_effect_can_skip_its_derived_dependency() {
         let scope = DocumentScope::new();
         let effects = PreflightEffectState::new_in(&scope);
+        effects.observe_execution_authority_admitted(true);
         effects.observe_authority_current(true);
 
         let error = effects
@@ -402,6 +430,7 @@ mod tests {
     fn cycle_open_is_exactly_once_and_only_after_checkpoint() {
         let scope = DocumentScope::new();
         let effects = PreflightEffectState::new_in(&scope);
+        effects.observe_execution_authority_admitted(true);
         effects.observe_authority_current(true);
         effects.settle(PreflightEffect::Repair).unwrap();
         effects.settle(PreflightEffect::PriorCycleCommit).unwrap();
@@ -427,6 +456,7 @@ mod tests {
     fn no_cycle_needed_finishes_at_the_checkpoint_signal() {
         let scope = DocumentScope::new();
         let effects = PreflightEffectState::new_in(&scope);
+        effects.observe_execution_authority_admitted(true);
         effects.observe_authority_current(true);
         effects.settle(PreflightEffect::Repair).unwrap();
         effects.settle(PreflightEffect::PriorCycleCommit).unwrap();

@@ -34,6 +34,7 @@ agent-doc-op-capture-io = { path = "../agent-doc-op-capture-io", version = "0.35
 agent-doc-owner-pane-io = { path = "../agent-doc-owner-pane-io", version = "0.35.418" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.418" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.418" }
+agent-doc-process-owner-io = { path = "../agent-doc-process-owner-io", version = "0.35.418" }
 agent-doc-prompt-cache = { path = "../agent-doc-prompt-cache", version = "0.35.418" }
 agent-doc-prompt-context = { path = "../agent-doc-prompt-context", version = "0.35.418" }
 agent-doc-prompt-context-io = { path = "../agent-doc-prompt-context-io", version = "0.35.418" }
@@ -51,6 +52,7 @@ agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.418" }
 agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.418" }
 agent-doc-sync-io = { path = "../agent-doc-sync-io", version = "0.35.418" }
 agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.418" }
+agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.35.418" }
 agent-doc-template = { path = "../agent-doc-template", version = "0.35.418" }
 agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.35.418" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.418" }

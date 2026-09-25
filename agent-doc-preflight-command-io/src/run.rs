@@ -82,6 +82,52 @@ pub enum PreflightInvocation {
     CodexHook,
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_PANE_AUTHORITY_OBSERVATIONS: std::cell::RefCell<Option<(
+        agent_doc_state_backbone::pane_execution_authority::InvocationIdentity,
+        agent_doc_state_backbone::pane_execution_authority::OwnerObservation,
+    )>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn with_test_pane_authority_observations<T>(
+    invocation: agent_doc_state_backbone::pane_execution_authority::InvocationIdentity,
+    owner: agent_doc_state_backbone::pane_execution_authority::OwnerObservation,
+    run: impl FnOnce() -> T,
+) -> T {
+    TEST_PANE_AUTHORITY_OBSERVATIONS.with(|observations| {
+        let prior = observations.replace(Some((invocation, owner)));
+        let result = run();
+        observations.replace(prior);
+        result
+    })
+}
+
+fn require_pane_authority_in(
+    scope: &DocumentScope,
+    file: &Path,
+) -> Result<agent_doc_state_backbone::pane_execution_authority::AuthorityVerdict> {
+    #[cfg(test)]
+    if let Some((invocation, owner)) =
+        TEST_PANE_AUTHORITY_OBSERVATIONS.with(|observations| observations.borrow().clone())
+    {
+        let authority =
+            agent_doc_state_backbone::pane_execution_authority::PaneExecutionAuthority::new_in(
+                scope,
+            );
+        authority.observe_operation(
+            agent_doc_state_backbone::pane_execution_authority::AuthorityOperation::Mutation,
+        );
+        authority.observe_invocation(invocation);
+        authority.observe_owner(owner);
+        let verdict = authority.verdict();
+        anyhow::ensure!(verdict.permits(), "test pane authority must admit mutation");
+        return Ok(verdict);
+    }
+    agent_doc_run_io::pane_execution_authority::require_in(scope, file)
+}
+
 impl PreflightInvocation {
     fn explicit_harness(self) -> Option<&'static str> {
         match self {
@@ -192,6 +238,24 @@ pub fn run_with_options_to_writer(
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
+    // `#preflightreactive`: establish one document graph before any operation
+    // that can recycle a process, start a controller, repair a projection, or
+    // mutate cycle state. A rejected invocation must have no side effects.
+    let preflight_scope = DocumentScope::new();
+    let preflight_reads = PreflightReadState::new_in(&preflight_scope);
+    let preflight_effects = PreflightEffectState::new_in(&preflight_scope);
+    let pane_authority = if options.probe {
+        agent_doc_run_io::pane_execution_authority::verdict_in(
+            &preflight_scope,
+            file,
+            agent_doc_state_backbone::pane_execution_authority::AuthorityOperation::ReadOnly,
+        )?
+    } else {
+        require_pane_authority_in(&preflight_scope, file)?
+    };
+    preflight_effects.observe_execution_authority_admitted(pane_authority.permits());
+    preflight_effects.observe_authority_current(true);
+
     // Schedule a known-stale supervisor before any document resolution or
     // integrity gate can abort this stage. The request is idempotent and is
     // honored only at the supervisor's safe idle boundary.
@@ -337,14 +401,6 @@ pub fn run_with_options_to_writer(
             &agent_doc_markdown_lossless::shadow_audit_ops_log_line(&content, "preflight_initial"),
         );
     }
-    // `#preflightreactive`: this scope owns the derived read projection and the
-    // effect gate for the whole open document observation. The command remains
-    // the IO adapter; ordering is now a graph dependency, not a comment/line
-    // number contract in this function.
-    let preflight_scope = DocumentScope::new();
-    let preflight_reads = PreflightReadState::new_in(&preflight_scope);
-    let preflight_effects = PreflightEffectState::new_in(&preflight_scope);
-    preflight_effects.observe_authority_current(true);
     let (initial_frontmatter, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &content,
         file,
@@ -6498,7 +6554,20 @@ mod tests {
             ],
         );
 
-        run(&primary).unwrap();
+        with_test_pane_authority_observations(
+            agent_doc_state_backbone::pane_execution_authority::InvocationIdentity::ExplicitActor {
+                pane_id: "%70".to_string(),
+                generation: Some(1),
+                proves_document_owner: true,
+            },
+            agent_doc_state_backbone::pane_execution_authority::OwnerObservation::Present {
+                pane_id: "%70".to_string(),
+                generation: Some(1),
+                liveness: agent_doc_state_backbone::pane_execution_authority::OwnerLiveness::Live,
+            },
+            || run(&primary),
+        )
+        .unwrap();
 
         let log = Command::new("git")
             .current_dir(root)
@@ -6578,7 +6647,20 @@ mod tests {
         // fallback projection without seeding an invalid two-document actor
         // alias for pane %70.
 
-        run(&primary).unwrap();
+        with_test_pane_authority_observations(
+            agent_doc_state_backbone::pane_execution_authority::InvocationIdentity::ExplicitActor {
+                pane_id: "%70".to_string(),
+                generation: Some(1),
+                proves_document_owner: true,
+            },
+            agent_doc_state_backbone::pane_execution_authority::OwnerObservation::Present {
+                pane_id: "%70".to_string(),
+                generation: Some(1),
+                liveness: agent_doc_state_backbone::pane_execution_authority::OwnerLiveness::Live,
+            },
+            || run(&primary),
+        )
+        .unwrap();
 
         let log = Command::new("git")
             .current_dir(root)

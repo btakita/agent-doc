@@ -21,6 +21,7 @@ use agent_doc_turn::{CycleEvent, CyclePhaseMachine};
 /// Phase E (`#adstatechart`) local-process Harel state chart consolidation.
 pub mod adstatechart;
 pub mod closeout_gate;
+pub mod pane_execution_authority;
 pub mod preflight;
 pub mod retained_write;
 pub mod write_pipeline;

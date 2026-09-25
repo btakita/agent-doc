@@ -1910,10 +1910,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         last_stale_recycle_reconcile,
                         now,
                     );
-                let urgent_maintenance = stale_recycle_reconcile_due
-                    || context_reset_in_flight
+                let exclusive_supervisor_maintenance = context_reset_in_flight
                     || awaiting_clear_settle
                     || shared.restart_reexec.load(Ordering::Relaxed);
+                let urgent_maintenance =
+                    stale_recycle_reconcile_due || exclusive_supervisor_maintenance;
         let maintenance_due = document_delivery_edge_due
             || last_quiescent_maintenance.is_none_or(|last| {
                 last.elapsed() >= IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL
@@ -1963,7 +1964,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 retry_cooldown_elapsed: retry_cooldown_elapsed
                                     && !needs_operator,
                                 controller_pressure_cooldown: agent_doc_controller_io::project_controller::controller_model_pressure_cooldown_active_for_doc(&path),
-                        urgent_supervisor_maintenance: urgent_maintenance,
+                        // A stale recycle is deferred while this capture's cycle
+                        // is open. Blocking captured-finalize on that deferred
+                        // recycle creates a closed wait: closeout waits for
+                        // recycle while recycle waits for closeout. Keep the
+                        // stale fact visible to policy, but only already-admitted
+                        // exclusive maintenance suppresses the recovery effect.
+                        stale_recycle_pending: stale_recycle_reconcile_due,
+                        exclusive_supervisor_maintenance,
                     };
                     if resume_triggers.ready() && captured_finalize_resume_should_start(facts) {
                         match spawn_captured_finalize_resume_worker(
@@ -5048,6 +5056,55 @@ mod tests {
         let retry = retry.unwrap();
         assert_eq!(retry.retry_at, now);
         assert!(retry.trigger_published);
+    }
+
+    #[test]
+    fn captured_closeout_precedes_stale_recycle_at_an_open_cycle_boundary() {
+        let resume = CapturedFinalizeResumeFacts {
+            captured_operation_present: true,
+            actor_ready: false,
+            current_transition_pending: false,
+            ipc_inflight: 0,
+            worker_in_flight: false,
+            retry_cooldown_elapsed: true,
+            controller_pressure_cooldown: false,
+            stale_recycle_pending: true,
+            exclusive_supervisor_maintenance: false,
+        };
+        assert!(
+            captured_finalize_resume_should_start(resume),
+            "the captured closeout is the operation that creates the recycle-safe boundary"
+        );
+        assert_eq!(
+            supervisor_recycle_action(
+                true,
+                true,
+                SupervisorRecycleCheckpoint::TurnBoundary,
+                true,
+                false,
+                false,
+                false,
+                false,
+                true,
+            ),
+            SupervisorRecycleAction::DeferCycleOpen,
+            "stale recycle must wait while the captured closeout owns the open cycle"
+        );
+        assert_eq!(
+            supervisor_recycle_action(
+                true,
+                true,
+                SupervisorRecycleCheckpoint::TurnBoundary,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+            SupervisorRecycleAction::RecycleImmediate,
+            "once closeout retires the cycle, the deferred stale recycle becomes eligible"
+        );
     }
 
     #[test]

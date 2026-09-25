@@ -697,6 +697,32 @@ fn live_replica_signal_routes(document_hash: &str) -> Vec<ReplicaSignalRoute> {
         .collect()
 }
 
+/// Merge durable CRDT-member routes with the current liveness registration.
+///
+/// A plugin hot upgrade can leave an old CRDT identity in the membership
+/// registry after the same editor PID has registered its replacement IPC
+/// endpoint. The liveness registration is the current process-scoped endpoint;
+/// sending to both makes every signal hit the retired classloader first and can
+/// keep stale-generation repair churn alive. A CRDT route still covers a PID
+/// for which liveness has no registration, preserving rolling-upgrade recovery.
+fn authoritative_replica_signal_routes(
+    liveness_routes: impl IntoIterator<Item = ReplicaSignalRoute>,
+    replica_routes: impl IntoIterator<Item = ReplicaSignalRoute>,
+) -> HashSet<ReplicaSignalRoute> {
+    let liveness_routes = liveness_routes.into_iter().collect::<HashSet<_>>();
+    let authoritative_pids = liveness_routes
+        .iter()
+        .map(|route| route.editor_pid)
+        .collect::<HashSet<_>>();
+    let mut routes = liveness_routes;
+    routes.extend(
+        replica_routes
+            .into_iter()
+            .filter(|route| !authoritative_pids.contains(&route.editor_pid)),
+    );
+    routes
+}
+
 /// Stable logical identity shared by successive native-replica incarnations of
 /// one editor document. JetBrains appends `:refresh-N` while swapping a fresh
 /// native replica into the same visible editor; that suffix is a generation,
@@ -4637,14 +4663,16 @@ fn signal_crdt_replica_event_counting_inner(
     // identity therefore remains a valid notification route even if the
     // separately-journaled reliable-sync registration was missed or pruned.
     // Union both planes and deduplicate by the process-scoped editor endpoint.
-    let mut routes = HashSet::new();
-    for registration in registrations {
-        routes.insert(ReplicaSignalRoute {
+    let liveness_routes = registrations
+        .into_iter()
+        .map(|registration| ReplicaSignalRoute {
             editor_id: registration.editor_id,
             editor_pid: registration.pid,
         });
-    }
-    routes.extend(live_replica_signal_routes(&document_hash));
+    let routes = authoritative_replica_signal_routes(
+        liveness_routes,
+        live_replica_signal_routes(&document_hash),
+    );
 
     let found = routes.len();
     let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
@@ -5177,6 +5205,28 @@ mod tests {
         assert!(
             editor_route_from_replica_identity("anonymous-replica").is_none(),
             "untyped identities must not invent a notification endpoint"
+        );
+    }
+
+    #[test]
+    fn current_liveness_endpoint_retires_a_stale_same_pid_replica_route() {
+        let route = |editor_id: &str, editor_pid| ReplicaSignalRoute {
+            editor_id: editor_id.to_string(),
+            editor_pid,
+        };
+        let routes = authoritative_replica_signal_routes(
+            [route("jetbrains-42-current", 42)],
+            [
+                route("jetbrains-42-retired-classloader", 42),
+                route("vscode-84-replica-only", 84),
+            ],
+        );
+
+        assert!(routes.contains(&route("jetbrains-42-current", 42)));
+        assert!(!routes.contains(&route("jetbrains-42-retired-classloader", 42)));
+        assert!(
+            routes.contains(&route("vscode-84-replica-only", 84)),
+            "a CRDT member must remain routable when the liveness journal missed its registration"
         );
     }
 

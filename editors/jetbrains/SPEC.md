@@ -181,7 +181,15 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   surface so tab/focus-to-tmux synchronization resumes without another click.
 - If passive `agent-doc sync --no-autostart ...` output from an older build reports that it preserved the current layout because a visible protected pane could not detach yet, JetBrains must treat that as deferred rather than complete for both the generic `[sync] sync preserved...` marker and the safe-passive `[sync] safe passive sync preserved...` marker: leave dedup state unchanged and schedule bounded retries until the requested selection applies or a newer request supersedes it.
 - If a passive sync terminal outcome contains `[sync] safe_passive_sync_lock_contention_retry`, JetBrains must treat the command as deferred, keep the dedup state unchanged, and retry the newest pending automatic selection/layout request rather than waiting for the CLI's full sync-lock budget. Manual `Sync Tmux Layout` uses Project Controller command supersede/admission instead of a long-lived editor-side native sync guard.
-- JetBrains split-editor focus follows both editor focus-gained events and editor mouse-press activation because Swing focus is not guaranteed to change on every click between already-open split editors. Consecutive events for the same markdown path are deduped locally, but alternating paths such as A -> B -> A must each attempt the Project Controller focus handoff.
+- JetBrains split-editor focus follows editor focus-gained events, editor-content mouse activation,
+  and mouse presses anywhere in the owning project's editor-split component tree. The last source
+  includes tab chrome and preview/custom editors, which can change the active editor window without
+  emitting either of the narrower callbacks. An editor-tree press schedules a latest-wins next-EDT
+  probe and publishes only the then-current active window's selected session document; presses
+  outside the project tree, callbacks after disposal, superseded callbacks, and callbacks while the
+  project frame is inactive are inert. The process-wide AWT listener is paired with project/plugin
+  disposal. Consecutive events for the same markdown path are deduped locally, but alternating paths
+  such as A -> B -> A must each attempt the Project Controller focus handoff.
 - Local operator splices are retained immediately but published after a 250 ms trailing quiet window, coalescing human typing bursts into one ordered durable push, broadcast, and settled projection while preserving the existing per-document retry fence.
 - The structural layout-change detector only reports a new editor surface observation into `EditorTabSyncListener`; it has no second CLI planner, lock, or tmux process. The JetBrains/native boundary validates and enqueues that observation without waiting for a controller probe or tmux consequence. One delivery worker serializes publications and controller-root handoff off the EDT; each controller's process-scoped graph replaces any not-yet-started surface with the newest one. Tab selection and structural changes therefore share one latest-wins surface graph, while component focus uses only the separate selection lane, without letting a blocked controller call freeze or disable the IDE bridge.
 - A failed editor-surface publication remains generation-fenced retry work. The

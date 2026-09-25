@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
@@ -20,6 +21,68 @@ class EditorFocusSyncListenerTest {
         assertTrue(listener.contains("factory.eventMulticaster.addEditorMouseListener(mouseListener, this)"))
         assertTrue(listener.contains("if (editor.project != project) return"))
         assertTrue(!listener.contains("editorEx.addEditorMouseListener"))
+        assertTrue(listener.contains("AWTEvent.MOUSE_EVENT_MASK"))
+        assertTrue(listener.contains("SwingUtilities.isDescendingFrom(component, root)"))
+        assertTrue(listener.contains("removeAWTEventListener(editorTreeMouseListener)"))
+    }
+
+    @Test
+    fun `editor-tree click emits next-EDT selected file rather than stale pre-click file`() {
+        val callbacks = mutableListOf<() -> Unit>()
+        val emitted = mutableListOf<String>()
+        var selected = "left.md"
+        val probe = focusProbe(callbacks, { selected }, emitted)
+
+        probe.observeMousePress(belongsToEditorTree = true)
+        selected = "right.md"
+        callbacks.removeFirst().invoke()
+
+        assertEquals(listOf("right.md"), emitted)
+    }
+
+    @Test
+    fun `outside-tree and inactive editor clicks are inert`() {
+        val callbacks = mutableListOf<() -> Unit>()
+        val emitted = mutableListOf<String>()
+        var active = true
+        val probe = focusProbe(callbacks, { "right.md" }, emitted) { active }
+
+        probe.observeMousePress(belongsToEditorTree = false)
+        assertTrue(callbacks.isEmpty())
+
+        probe.observeMousePress(belongsToEditorTree = true)
+        active = false
+        callbacks.removeFirst().invoke()
+        assertTrue(emitted.isEmpty())
+    }
+
+    @Test
+    fun `newer editor-tree click supersedes an older queued probe`() {
+        val callbacks = mutableListOf<() -> Unit>()
+        val emitted = mutableListOf<String>()
+        var selected = "left.md"
+        val probe = focusProbe(callbacks, { selected }, emitted)
+
+        probe.observeMousePress(belongsToEditorTree = true)
+        selected = "right.md"
+        probe.observeMousePress(belongsToEditorTree = true)
+        callbacks.removeFirst().invoke()
+        callbacks.removeFirst().invoke()
+
+        assertEquals(listOf("right.md"), emitted)
+    }
+
+    @Test
+    fun `dispose fences a queued editor-tree probe`() {
+        val callbacks = mutableListOf<() -> Unit>()
+        val emitted = mutableListOf<String>()
+        val probe = focusProbe(callbacks, { "right.md" }, emitted)
+
+        probe.observeMousePress(belongsToEditorTree = true)
+        probe.close()
+        callbacks.removeFirst().invoke()
+
+        assertTrue(emitted.isEmpty())
     }
 
     @Test
@@ -59,4 +122,18 @@ class EditorFocusSyncListenerTest {
             focusListener.contains("onEditorFocusGained(project, file)"),
         )
     }
+
+    private fun focusProbe(
+        callbacks: MutableList<() -> Unit>,
+        selected: () -> String?,
+        emitted: MutableList<String>,
+        active: () -> Boolean = { true },
+    ): SettledEditorTreeFocusProbe<String> =
+        SettledEditorTreeFocusProbe(
+            scheduleNextEdt = callbacks::add,
+            selectedValue = selected,
+            isActive = active,
+            isEligible = { it.endsWith(".md") },
+            emit = emitted::add,
+        )
 }

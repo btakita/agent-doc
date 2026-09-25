@@ -25,7 +25,13 @@ pub struct CapturedFinalizeResumeFacts {
     pub worker_in_flight: bool,
     pub retry_cooldown_elapsed: bool,
     pub controller_pressure_cooldown: bool,
-    pub urgent_supervisor_maintenance: bool,
+    /// A stale supervisor wants to recycle, but an open captured closeout is
+    /// the boundary that makes that recycle safe. This is diagnostic input,
+    /// never a reason to suppress the closeout that retires the stale process.
+    pub stale_recycle_pending: bool,
+    /// Maintenance that is mutually exclusive with a closeout effect (context
+    /// reset/clear settlement or an already-admitted process re-exec).
+    pub exclusive_supervisor_maintenance: bool,
 }
 
 pub fn captured_finalize_resume_should_start(facts: CapturedFinalizeResumeFacts) -> bool {
@@ -35,7 +41,7 @@ pub fn captured_finalize_resume_should_start(facts: CapturedFinalizeResumeFacts)
         && !facts.worker_in_flight
         && facts.retry_cooldown_elapsed
         && !facts.controller_pressure_cooldown
-        && !facts.urgent_supervisor_maintenance
+        && !facts.exclusive_supervisor_maintenance
 }
 
 /// Longest reason prefix a `needs_operator` diagnostic may carry.
@@ -778,7 +784,8 @@ mod tests {
             worker_in_flight: false,
             retry_cooldown_elapsed: true,
             controller_pressure_cooldown: false,
-            urgent_supervisor_maintenance: false,
+            stale_recycle_pending: false,
+            exclusive_supervisor_maintenance: false,
         }
     }
 
@@ -808,9 +815,27 @@ mod tests {
                 controller_pressure_cooldown: true,
                 ..ready_resume_facts()
             },
+            CapturedFinalizeResumeFacts {
+                exclusive_supervisor_maintenance: true,
+                ..ready_resume_facts()
+            },
         ] {
             assert!(!captured_finalize_resume_should_start(blocked));
         }
+    }
+
+    #[test]
+    fn stale_recycle_cannot_block_the_captured_closeout_that_makes_recycle_safe() {
+        // Observed 2026-09-25 on haiven-dev/tasks/api.md: exact-target
+        // ResumeSettledDelivery wakes repeated for over four minutes while a
+        // stale recycle repeated DeferCycleOpen. No resume worker started until
+        // session-check bypassed this mutually deferred pair.
+        assert!(captured_finalize_resume_should_start(
+            CapturedFinalizeResumeFacts {
+                stale_recycle_pending: true,
+                ..ready_resume_facts()
+            }
+        ));
     }
 
     #[test]

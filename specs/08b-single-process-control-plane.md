@@ -241,6 +241,13 @@ race class instead of papering over each symptom.
   reconstruct the mutation command after pending response intent has cleared.
   `response_captured` may replay its captured mutation plan, while
   `write_applied` and `committed` use only the closeout continuation effect.
+  Routine stale-supervisor recycle is diagnostic input to that continuation,
+  not an exclusion gate: recycle defers while the cycle is open, so captured
+  closeout must run first and create the safe closed-cycle boundary at which
+  recycle becomes eligible. Already-admitted context reset/clear settlement or
+  process re-exec remains mutually exclusive with closeout. This partial order
+  forbids the circular state in which closeout waits for routine recycle while
+  routine recycle waits for closeout.
 - **Missing editor-replica transition.** When reliable editor liveness says the
   document is attached but relay membership is absent, the controller publishes
   the typed `editor_replica_reregister` event for that exact file. Receipt owns a
@@ -250,6 +257,11 @@ race class instead of papering over each symptom.
   that re-arms bounded recovery, after which the same captured closeout continues
   through native editor persistence. Disk forcing, response recapture, and
   supervisor recycle are not substitutes for this editor-owned transition.
+  For one editor PID, the current reliable-liveness endpoint is authoritative:
+  event signaling must omit any older CRDT-registry endpoint from a retired
+  plugin classloader with that same PID. CRDT-only endpoints belonging to other
+  PIDs remain routable so a missed liveness-journal registration cannot strand
+  their delivery.
 - **Admission release is not persistence proof.** A live replica that exhausts
   the bounded pull-without-ACK or silence budget may stop blocking new work, but
   that availability decision does not prove its editor buffer contains the

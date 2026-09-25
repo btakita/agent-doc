@@ -420,6 +420,22 @@ Completed the stdlib area, migrating all 54 sites and fixing the higher-rung pro
 Committed and pushed lazily-kt `f981f2e`, `d80a5e0`, and `142cf3d`. GitHub Actions run 36176230067 was queued at closeout; the preceding main run completed successfully.
 
 `#lzktbindpending` remains open at 320/540, with collections (132) and reactive-graph (88) remaining; the backlog item has been updated in place.
+
+### Re: #lzktbindpending — gpt-5 · 2026-09-25T15:08-04:00
+
+Completed the reactive-graph pass atomically: all 88 reachable step expectation blocks now bind through `AssertionKeys`; the 25 blocks from the six deliberately skipped fixtures remain independently derived as `unreachable`.
+
+The proof is fail-closed at each layer:
+
+- Exact site identity covers 82 ordinary step sites plus 6 scenario-step sites, rejects duplicate visits, asserts the complete 88-site set, and prevents repeated-content blocks from masking a skipped site.
+- All 11 executable expectation families use outcome-aware comparisons; nested object families enforce their child key sets in both directions. Narrative `note` is explicitly excused with a reason. Scenario-tail accumulated comparisons were upgraded to outcome-aware tracking as well.
+- A production-path mutation matrix changes one canonical value for every executable family. Every mutation must be visited exactly once, fail, and name its family; all 11 are killed.
+- Fresh focused verification passed 6 tests with zero failures/errors/skips. Fresh `make check` passed Kotlin, 592/749 assertion-block coverage, interop, both Lean builds, assertion ordering, and CI-reach checks.
+- The ledger moved exactly 245 → 157. Negative pins 156 and 158 failed respectively with the required `GREW` and `SHRANK` diagnostics.
+
+Committed and pushed `lazily-kt` commit `f8845b5` (`test: bind reactive graph assertion blocks`). CI run 36177824548 is queued; the preceding run 36176230067 is green.
+
+`#lzktbindpending` remains open for its final area: collections, 132 sites. Overall progress is 408/540; the remaining ledger is 132 collections `bind-pending` plus 25 derived reactive `unreachable` sites. I did not touch the misplaced `api.md` work or agent-doc infrastructure.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  

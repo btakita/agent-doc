@@ -8,6 +8,7 @@ use agent_doc_controller::dispatch::{
     BusyPaneAutoFixFacts, BusyPaneAutoFixOutcome, existing_pane_ready_timeout,
     fresh_route_admission_timeout, is_codex_shell_search_blocker,
 };
+use agent_doc_harness::CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER;
 use agent_doc_harness::HarnessConfig;
 use agent_doc_session_registry_io::dispatch_registry::lookup_dispatch_registration;
 use agent_doc_supervisor::route_runtime::SupervisorHealth;
@@ -34,6 +35,13 @@ pub enum BusyPaneInterruptRecoveryOutcome {
     Blocked { reason: String },
     TimedOut,
     Skipped,
+}
+
+fn existing_pane_blocker_requires_operator(blocker_reason: Option<&str>) -> bool {
+    matches!(
+        blocker_reason,
+        Some("active permission prompt" | CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER)
+    )
 }
 
 fn pending_prompt_waits_behind_queueable_blocker(
@@ -122,7 +130,18 @@ pub fn attempt_busy_existing_pane_auto_fix(
     session_id: &str,
     pane: &str,
     file_path: &str,
+    blocker_reason: Option<&str>,
 ) -> Result<BusyPaneAutoFixOutcome> {
+    if blocker_reason == Some(CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_busy_existing_pane_auto_fix_skipped file={} pane={} reason={}",
+                file_path, pane, CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER,
+            ),
+        );
+        return Ok(BusyPaneAutoFixOutcome::FailClosed);
+    }
     eprintln!(
         "[route] registered pane {} for {} is busy with pending document drift — applying scoped `agent-doc fix {}` once before failing closed",
         pane,
@@ -231,7 +250,7 @@ pub fn attempt_busy_existing_pane_interrupt_recovery(
     harness: &HarnessConfig,
     blocker_reason: Option<&str>,
 ) -> Result<BusyPaneInterruptRecoveryOutcome> {
-    if blocker_reason == Some("active permission prompt") {
+    if existing_pane_blocker_requires_operator(blocker_reason) {
         return Ok(BusyPaneInterruptRecoveryOutcome::Skipped);
     }
 
@@ -530,7 +549,22 @@ pub fn ensure_existing_pane_ready_for_dispatch(
 
 #[cfg(test)]
 mod tests {
-    use super::pending_prompt_waits_behind_queueable_blocker;
+    use super::{
+        existing_pane_blocker_requires_operator, pending_prompt_waits_behind_queueable_blocker,
+    };
+
+    #[test]
+    fn conversation_lock_is_never_interrupted_in_an_existing_pane() {
+        assert!(existing_pane_blocker_requires_operator(Some(
+            agent_doc_harness::CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER,
+        )));
+        assert!(existing_pane_blocker_requires_operator(Some(
+            "active permission prompt",
+        )));
+        assert!(!existing_pane_blocker_requires_operator(Some(
+            "active codex turn",
+        )));
+    }
 
     /// `#jbroutebusystall`: the degraded/direct-pane fallback skips the
     /// existing-pane ready-wait exactly when an ACTIVE TURN is proven, matching

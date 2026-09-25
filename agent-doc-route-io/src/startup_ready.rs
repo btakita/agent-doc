@@ -5,7 +5,10 @@ use agent_doc_controller::dispatch::{
     classify_auto_start_dispatch_ready_block, fresh_start_admission_outcome,
     pane_composer_has_pending_trigger,
 };
-use agent_doc_harness::{HarnessConfig, PaneComposerProjection, PaneComposerReadinessEvidence};
+use agent_doc_harness::{
+    CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER, HarnessConfig, PaneComposerProjection,
+    PaneComposerReadinessEvidence,
+};
 use anyhow::Result;
 use std::time::{Duration, Instant};
 use tmux_router::Tmux;
@@ -82,6 +85,56 @@ pub fn wait_for_agent_ready(
     harness: &HarnessConfig,
 ) -> bool {
     wait_for_agent_ready_outcome(tmux, pane_id, timeout, harness).is_ready()
+}
+
+/// Wait for a newly provisioned route-owned pane, recovering Codex's exact
+/// same-conversation lock once by choosing its explicit `f fork` action.
+///
+/// The recovery is intentionally unavailable to existing-pane readiness paths:
+/// only the fresh pane created for this route is safe to fork automatically.
+/// The original timeout remains one absolute budget across detection, fork,
+/// and the replacement composer's readiness proof.
+pub fn wait_for_fresh_agent_ready(
+    tmux: &Tmux,
+    pane_id: &str,
+    timeout: Duration,
+    harness: &HarnessConfig,
+    file: &std::path::Path,
+) -> Result<bool> {
+    let deadline = Instant::now() + timeout;
+    let mut fork_attempted = false;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Ok(false);
+        }
+        let outcome = wait_for_agent_ready_outcome(tmux, pane_id, remaining, harness);
+        if should_fork_codex_conversation_on_fresh_start(&outcome, fork_attempted) {
+            fork_attempted = true;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "fresh_route_codex_conversation_fork file={} pane={} reason={} recovery=send_f_once",
+                    file.display(),
+                    pane_id,
+                    CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER,
+                ),
+            );
+            eprintln!(
+                "[route] Codex conversation is open in another app; forking it once in fresh pane {pane_id}"
+            );
+            tmux.send_keys_raw(pane_id, "f")?;
+            continue;
+        }
+        return Ok(outcome.is_ready());
+    }
+}
+
+pub fn should_fork_codex_conversation_on_fresh_start(
+    outcome: &AgentReadyWaitOutcome,
+    fork_attempted: bool,
+) -> bool {
+    !fork_attempted && outcome.blocker_reason() == Some(CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER)
 }
 
 pub fn wait_for_agent_ready_outcome(

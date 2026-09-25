@@ -24,7 +24,7 @@ use crate::session_resolution::{
 };
 use crate::startup_harness::resolve_harness_for_file;
 use crate::startup_locks::{StartupLockAcquire, StartupLockMode, acquire_startup_locks};
-use crate::startup_ready::{fresh_start_missing_admission_outcome, wait_for_agent_ready};
+use crate::startup_ready::{fresh_start_missing_admission_outcome, wait_for_fresh_agent_ready};
 use agent_doc_controller::dispatch::{
     DispatchOnlyReopenDelivery, DuplicatePanePolicyErrorFacts, FreshStartAdmissionOutcome,
     RoutedDispatchStartProof, duplicate_pane_policy_error_message, fresh_route_admission_timeout,
@@ -965,7 +965,7 @@ pub fn auto_start_in_session_with_lock_mode(
         eprintln!("[route] Waiting for {} to initialize...", harness.binary);
         let ready_timeout =
             crate::invocation::wait_for_ready_override().unwrap_or(FRESH_ROUTE_AGENT_READY_TIMEOUT);
-        let ready = wait_for_agent_ready(tmux, &new_pane, ready_timeout, harness);
+        let ready = wait_for_fresh_agent_ready(tmux, &new_pane, ready_timeout, harness, file)?;
         // Fresh-start recovery can clear the early geometry-only binding while
         // the harness is still booting. Re-validate the registration before we
         // dispatch, but keep the deliberately created fresh pane authoritative

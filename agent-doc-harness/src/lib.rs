@@ -29,6 +29,12 @@ use agent_doc_turn_executor_tmux::prompt::{
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
+/// Codex's modal refusal when a resume id is still attached to another app.
+/// Fresh route-owned panes may recover this exact state by choosing the TUI's
+/// `f fork` action; ordinary existing-pane dispatch remains fail-closed.
+pub const CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER: &str =
+    "codex conversation open in another app";
+
 mod grok;
 pub mod managed_capability;
 pub mod prompt_source;
@@ -1051,6 +1057,10 @@ impl HarnessConfig {
             return Some("codex authentication screen".to_string());
         }
 
+        if self.codex_conversation_open_elsewhere(output) {
+            return Some(CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER.to_string());
+        }
+
         if agent_doc_turn_executor_tmux::prompt::parse_prompt(output).active {
             return Some("active permission prompt".to_string());
         }
@@ -1215,12 +1225,44 @@ impl HarnessConfig {
             .is_some_and(|auth_index| latest_ready_prompt.is_none_or(|prompt| prompt <= auth_index))
     }
 
+    fn codex_conversation_open_elsewhere(&self, output: &str) -> bool {
+        if self.binary != "codex" {
+            return false;
+        }
+
+        let mut latest_lock_marker = None;
+        let mut latest_fork_action = None;
+        let mut latest_ready_prompt = None;
+        for (index, raw_line) in output.lines().enumerate() {
+            let line = agent_doc_turn_executor_tmux::prompt::strip_ansi(raw_line);
+            let trimmed = line.trim();
+            let lower = trimmed.to_ascii_lowercase();
+            if lower.contains("this conversation is open in another app") {
+                latest_lock_marker = Some(index);
+            }
+            if lower.contains("r retry") && lower.contains("f fork") {
+                latest_fork_action = Some(index);
+            }
+            if self.is_dispatch_ready_prompt_line(trimmed) {
+                latest_ready_prompt = Some(index);
+            }
+        }
+
+        latest_lock_marker
+            .zip(latest_fork_action)
+            .is_some_and(|(lock_index, fork_index)| {
+                fork_index >= lock_index
+                    && latest_ready_prompt.is_none_or(|prompt| prompt <= fork_index)
+            })
+    }
+
     /// Return a reason when the latest pane output shows live user input or
     /// another interactive composer state that must block replacement.
     pub fn protected_prompt_input_reason(&self, output: &str) -> Option<String> {
         if let Some(reason) = self.dispatch_blocker_reason(output) {
             match reason.as_str() {
                 "active permission prompt" => return Some(reason),
+                CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER => return Some(reason),
                 "queued draft in composer"
                 | "interactive shell reverse-i-search"
                 | "interactive shell history search" => return Some(reason),
@@ -4310,6 +4352,32 @@ Starting codex...
         assert!(
             !h.is_idle_chrome_only_output(output),
             "hook review chrome requires operator action and must not count as idle"
+        );
+    }
+
+    #[test]
+    fn dispatch_blocker_reason_detects_codex_conversation_open_elsewhere() {
+        let h = HarnessConfig::codex();
+        let locked = "\
+🔒 This conversation is open in another app
+Close it there and press R to continue here.
+r retry   f fork   esc/ctrl+c/q exit
+";
+        assert_eq!(
+            h.dispatch_blocker_reason(locked).as_deref(),
+            Some(CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER)
+        );
+        assert_eq!(
+            h.protected_prompt_input_reason(locked).as_deref(),
+            Some(CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER),
+            "existing-pane dispatch must not interrupt or overwrite the modal"
+        );
+
+        let recovered = format!("{locked}\n› Ask Codex to do anything\n");
+        assert_eq!(
+            h.dispatch_blocker_reason(&recovered),
+            None,
+            "a later idle composer supersedes the lock screen left in scrollback"
         );
     }
 

@@ -1068,7 +1068,14 @@ pub fn retry_dispatch_only_after_busy_pane(
     }
     let fallback_detail = blocker_reason.map(|reason| format!("still shows {reason}"));
     if allow_auto_fix_retry {
-        match attempt_busy_existing_pane_auto_fix(tmux, file, session_id, busy_pane, file_path)? {
+        match attempt_busy_existing_pane_auto_fix(
+            tmux,
+            file,
+            session_id,
+            busy_pane,
+            file_path,
+            blocker_reason,
+        )? {
             BusyPaneAutoFixOutcome::RetryRoute => {
                 return dispatch_only_reopen_existing_pane(
                     tmux,

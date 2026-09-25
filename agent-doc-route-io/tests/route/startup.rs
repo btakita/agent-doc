@@ -6,7 +6,10 @@ use super::*;
 #[cfg(test)]
 use agent_doc_route_io::session_resolution::evict_previous_stash_pane_entry;
 #[cfg(test)]
-use agent_doc_route_io::startup_ready::{wait_for_agent_ready, wait_for_agent_ready_outcome};
+use agent_doc_route_io::startup_ready::{
+    AgentReadyWaitOutcome, should_fork_codex_conversation_on_fresh_start, wait_for_agent_ready,
+    wait_for_agent_ready_outcome,
+};
 
 #[cfg(test)]
 mod tests {
@@ -56,6 +59,29 @@ mod tests {
         let active_turn = "• Working (12s • esc to interrupt)\n";
         assert!(!is_codex_shell_search_blocker(
             codex.dispatch_blocker_reason(active_turn).as_deref()
+        ));
+    }
+
+    #[test]
+    fn fresh_route_forks_codex_conversation_lock_at_most_once() {
+        let locked = AgentReadyWaitOutcome::Blocked {
+            reason: agent_doc_harness::CODEX_CONVERSATION_OPEN_ELSEWHERE_BLOCKER.to_string(),
+        };
+        assert!(should_fork_codex_conversation_on_fresh_start(
+            &locked, false
+        ));
+        assert!(!should_fork_codex_conversation_on_fresh_start(
+            &locked, true
+        ));
+        assert!(!should_fork_codex_conversation_on_fresh_start(
+            &AgentReadyWaitOutcome::Blocked {
+                reason: "active codex turn".to_string(),
+            },
+            false,
+        ));
+        assert!(!should_fork_codex_conversation_on_fresh_start(
+            &AgentReadyWaitOutcome::TimedOut,
+            false,
         ));
     }
     #[test]

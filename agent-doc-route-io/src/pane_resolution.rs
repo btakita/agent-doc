@@ -1771,7 +1771,14 @@ pub fn retry_route_after_busy_pane_auto_fix(
 ) -> Result<String> {
     let fallback_detail = blocker_reason.map(|reason| format!("still shows {reason}"));
     if allow_auto_fix_retry {
-        match attempt_busy_existing_pane_auto_fix(tmux, file, session_id, busy_pane, file_path)? {
+        match attempt_busy_existing_pane_auto_fix(
+            tmux,
+            file,
+            session_id,
+            busy_pane,
+            file_path,
+            blocker_reason,
+        )? {
             BusyPaneAutoFixOutcome::RetryRoute => {
                 return retry_route(false, allow_busy_interrupt_retry, true);
             }

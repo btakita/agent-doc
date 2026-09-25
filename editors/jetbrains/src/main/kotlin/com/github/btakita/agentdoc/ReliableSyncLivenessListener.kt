@@ -65,33 +65,58 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
 
     private fun reportOpen(file: VirtualFile) {
         val fallbackRoot = project.basePath ?: return
-        val filePath = file.path
         ApplicationManager.getApplication().executeOnPooledThread {
             val lib = AgentDocLib.get() ?: return@executeOnPooledThread
-            // Scope liveness to agent-doc session documents only: a plain source file
-            // opened as a tab must not enter the plane (it would over-count the
-            // session-document scope). This disk read
-            // is appropriate at open time — it is the moment we decide whether to
-            // start tracking a possibly-random `.md` tab at all.
-            if (lib.agent_doc_is_session_document(filePath) != 1) return@executeOnPooledThread
-            val documentHash = resolveDocumentHash(lib, filePath) ?: return@executeOnPooledThread
-            // The owning controller is the nearest agent-doc root, not
-            // necessarily the IntelliJ project base. A nested submodule has its
-            // own controller; publishing `Open` to the outer project while CRDT
-            // registration goes to the nested root leaves the nested controller
-            // at detached authority and lets Compact Exchange write behind the
-            // open editor.
-            val root = NativePatching.resolveProjectPath(filePath)?.first ?: fallbackRoot
-            projectRoots[documentHash] = root
-            val opsJson = graph.open(
-                documentHash,
-                filePath,
-                EditorIdentity.id,
-                "jetbrains",
-                pluginVersion(),
-                EDITOR_CAPABILITIES,
-            ) ?: return@executeOnPooledThread
-            push(lib, root, documentHash, opsJson)
+            reportOpenNow(lib, fallbackRoot, file, republish = false)
+        }
+    }
+
+    private fun reportOpenNow(
+        lib: AgentDocLib,
+        fallbackRoot: String,
+        file: VirtualFile,
+        republish: Boolean,
+    ): Boolean {
+        val filePath = file.path
+        // Scope liveness to agent-doc session documents only: a plain source file
+        // opened as a tab must not enter the plane (it would over-count the
+        // session-document scope). This disk read is appropriate at open time —
+        // it is the moment we decide whether to track a possibly-random `.md` tab.
+        if (lib.agent_doc_is_session_document(filePath) != 1) return false
+        val documentHash = resolveDocumentHash(lib, filePath) ?: return false
+        // The owning controller is the nearest agent-doc root, not necessarily
+        // the IntelliJ project base. A nested submodule has its own controller.
+        val root = NativePatching.resolveProjectPath(filePath)?.first ?: fallbackRoot
+        projectRoots[documentHash] = root
+        val opsJson =
+            if (republish) {
+                graph.republishOpen(
+                    documentHash,
+                    filePath,
+                    EditorIdentity.id,
+                    "jetbrains",
+                    pluginVersion(),
+                    EDITOR_CAPABILITIES,
+                )
+            } else {
+                graph.open(
+                    documentHash,
+                    filePath,
+                    EditorIdentity.id,
+                    "jetbrains",
+                    pluginVersion(),
+                    EDITOR_CAPABILITIES,
+                ) ?: return true
+            }
+        return push(lib, root, documentHash, opsJson)
+    }
+
+    private fun republishOpenDocumentsAfterNativeReload(): Int {
+        if (project.isDisposed) return 0
+        val fallbackRoot = project.basePath ?: return 0
+        val lib = AgentDocLib.get() ?: return 0
+        return FileEditorManager.getInstance(project).openFiles.count { file ->
+            reportOpenNow(lib, fallbackRoot, file, republish = true)
         }
     }
 
@@ -224,6 +249,11 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
             newPath: String,
         ): PathTransitionOutcome =
             instances[project]?.reportMoveNow(oldPath, newPath) ?: PathTransitionOutcome.Retry
+
+        fun republishOpenDocumentsAfterNativeReload(projects: Iterable<Project>): Int =
+            projects.sumOf { project ->
+                instances[project]?.republishOpenDocumentsAfterNativeReload() ?: 0
+            }
 
         fun disposeProject(project: Project) {
             instances.remove(project)

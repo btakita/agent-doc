@@ -122,6 +122,11 @@ authorities once the controller record exists.
   and the spawned start process must apply the same typed decision so a pause race
   cannot dispatch work, while an idle structural owner can still converge the
   desired pane layout and quiesce its reconciliation effect.
+- A newly spawned provision-only route-owned child gets one complete orphan-check
+  observation interval before an inherited terminal cycle may classify it as
+  stale. The immediate first observation races child attachment: it can reap the
+  fresh pane before the editor's right-tab surface/focus transaction is admitted.
+  After that bounded grace, the ordinary terminal-cycle orphan rule applies.
 - The in-memory actor map is a write-through cache of SQLite state. A successful
   mutation updates memory and commits one SQLite transaction before reporting an
   accepted state-changing result.

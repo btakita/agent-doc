@@ -33,6 +33,45 @@ class ReliableSyncLivenessGraphTest {
     }
 
     @Test
+    fun `native reload republishes current endpoint without duplicating presence`() {
+        val graph = ReliableSyncLivenessGraph(42)
+        graph.open("doc", "/tmp/doc.md", "old-editor", "jetbrains", "0.2.418", "")
+
+        val republished =
+            graph.republishOpen(
+                "doc",
+                "/tmp/doc.md",
+                "current-editor",
+                "jetbrains",
+                "0.2.419",
+                "native_hot_reload_generation_v1",
+            )
+
+        assertFalse(republished.contains("\"Open\""))
+        assertTrue(republished.contains("\"Register\""))
+        assertTrue(republished.contains("\"editor_id\":\"current-editor\""))
+        assertTrue(graph.isOpen("doc"))
+    }
+
+    @Test
+    fun `native reload republish restores presence when the local graph was rebuilt`() {
+        val graph = ReliableSyncLivenessGraph(42)
+
+        val republished =
+            graph.republishOpen(
+                "doc",
+                "/tmp/doc.md",
+                "current-editor",
+                "jetbrains",
+                "0.2.419",
+                "native_hot_reload_generation_v1",
+            )
+
+        assertTrue(republished.indexOf("\"Open\"") < republished.indexOf("\"Register\""))
+        assertTrue(graph.isOpen("doc"))
+    }
+
+    @Test
     fun `path move opens and registers new identity before closing old identity`() {
         val graph = ReliableSyncLivenessGraph(42)
         graph.open("old-hash", "/tmp/old.md", "editor", "jetbrains", "1", "")

@@ -105,6 +105,18 @@ internal object NativeReloadCoordinator {
                             log.warn("[native] reload watcher restart failed", error)
                         }
                         try {
+                            val registrations =
+                                ReliableSyncLivenessListener.republishOpenDocumentsAfterNativeReload(
+                                    surfaceProjects,
+                                )
+                            log.info(
+                                "[native] republished reliable-liveness registrations " +
+                                    "before replica restart count=$registrations",
+                            )
+                        } catch (error: Throwable) {
+                            log.warn("[native] reload liveness republish failed", error)
+                        }
+                        try {
                             val report = CrdtReplicaManager.restartAfterNativeReload(replicaHandoff)
                             if (report.converged) {
                                 log.info(

@@ -25,4 +25,17 @@ class ReliableSyncLivenessListenerTest {
             source.contains("push(lib, root, documentHash, opsJson)"),
         )
     }
+
+    @Test
+    fun `native reload republishes liveness before replica registration`() {
+        val root = Paths.get("src/main/kotlin/com/github/btakita/agentdoc")
+        val listener = root.resolve("ReliableSyncLivenessListener.kt").toFile().readText()
+        val coordinator = root.resolve("NativeReloadCoordinator.kt").toFile().readText()
+
+        assertTrue(listener.contains("fun republishOpenDocumentsAfterNativeReload("))
+        val liveness = coordinator.indexOf("republishOpenDocumentsAfterNativeReload(")
+        val replicas = coordinator.indexOf("CrdtReplicaManager.restartAfterNativeReload(")
+        assertTrue("liveness endpoint authority must advance before replica admission", liveness >= 0)
+        assertTrue("replica restart must follow liveness republish", replicas > liveness)
+    }
 }

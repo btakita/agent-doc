@@ -39,6 +39,14 @@ failure may restore the old named shadow. Durable reliable-sync
 outboxes live in the project controller; the reloadable cdylib sends typed
 controller RPCs and retains no SQLite connection.
 
+Before native reload reattaches any CRDT replica, JetBrains republishes each
+open session document's reliable-liveness registration with the current plugin
+classloader endpoint identity. Existing local presence tags are retained; if
+the local liveness graph was rebuilt, presence is reopened before registration.
+The controller may therefore keep its strict superseded-endpoint admission
+fence: a delayed old classloader cannot reclaim replica membership, while the
+current classloader is admitted without depending on a duplicate-open edge.
+
 The package omits `require-restart`, so JetBrains may unload the plugin and
 replace its classloader during an update. A plugin-owned project service is the
 parent disposable for every programmatic startup listener, including VFS

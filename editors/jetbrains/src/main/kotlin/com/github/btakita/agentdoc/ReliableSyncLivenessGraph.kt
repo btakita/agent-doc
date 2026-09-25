@@ -72,6 +72,45 @@ registrationOp(documentHash, path, editorId, editorKind, editorVersion, capabili
     }
 
     /**
+     * Reassert an IDE-open document and its current editor endpoint.
+     *
+     * Native/controller replacement preserves the plugin graph, so an ordinary
+     * [open] call would suppress the duplicate presence edge and, with it, the
+     * registration carrying the current classloader identity. Republish keeps
+     * the existing presence tag when present, but always emits fresh endpoint
+     * metadata; if the graph itself was rebuilt, it also restores presence.
+     */
+    @Synchronized
+    fun republishOpen(
+        documentHash: String,
+        path: String,
+        editorId: String,
+        editorKind: String,
+        editorVersion: String,
+        capabilitiesCsv: String,
+    ): String {
+        val ops = mutableListOf<JsonObject>()
+        val state = docs.getOrPut(documentHash) { DocState() }
+        if (!state.orSet.present()) {
+            val tag = UUID.randomUUID().toString()
+            state.orSet.add(tag)
+            state.tags.add(tag)
+            ops.add(openOp(documentHash, tag))
+        }
+        ops.add(
+            registrationOp(
+                documentHash,
+                path,
+                editorId,
+                editorKind,
+                editorVersion,
+                capabilitiesCsv,
+            ),
+        )
+        return opsJson(*ops.toTypedArray())
+    }
+
+    /**
      * Atomically project an already-open document onto its new path identity.
      *
      * The new add/register precedes the observed-remove of the old identity, so

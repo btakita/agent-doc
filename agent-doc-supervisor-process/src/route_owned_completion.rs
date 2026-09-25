@@ -185,7 +185,12 @@ where
             let reap_effects = RouteOwnedReapEffects::new();
             let layout_provision_owner = reap_policy == RouteOwnedReapPolicy::KeepAlive
                 && start_purpose == RouteOwnedStartPurpose::LayoutProvision;
-            let mut next_orphan_check = Instant::now();
+            // A layout-provision start may resume a child beside a terminal cycle left by the
+            // previous pane. Give that fresh child one complete observation interval to admit
+            // its new prompt before treating the inherited terminal cycle as an orphan. An
+            // immediate first check races child attachment and reaps the new pane as stale.
+            let mut next_orphan_check =
+                Instant::now() + layout_provision_orphan_check_interval;
             let mut ready_busy_ticks: u32 = 0;
             let mut ready_busy_key: Option<(String, String)> = None;
             let mut ready_busy_logged_key: Option<(String, String)> = None;
@@ -397,6 +402,41 @@ fn sleep_with_stop(stop: &AtomicBool, total: Duration) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicU64;
+
+    struct StashedCompletionState {
+        started_at: Instant,
+        stop_elapsed_millis: AtomicU64,
+    }
+
+    impl RouteOwnedCompletionState for StashedCompletionState {
+        fn actor_ready(&self) -> bool {
+            false
+        }
+
+        fn ready_busy_blocker_reason(&self, _harness: &HarnessConfig) -> Option<String> {
+            None
+        }
+
+        fn live_pane_busy_reason(&self, _harness: &HarnessConfig) -> Option<String> {
+            None
+        }
+
+        fn owned_pane_label(&self) -> String {
+            "%test".to_string()
+        }
+
+        fn owned_pane_is_stashed(&self) -> bool {
+            true
+        }
+
+        fn request_child_stop(&self) {
+            self.stop_elapsed_millis.store(
+                self.started_at.elapsed().as_millis() as u64,
+                Ordering::Relaxed,
+            );
+        }
+    }
 
     #[test]
     fn file_liveness_adapter_reports_read_failure() {
@@ -462,6 +502,51 @@ mod tests {
         assert!(
             !dir.path().join(".agent-doc/state/cycles").exists(),
             "cycle transitions must not emit compatibility files"
+        );
+    }
+
+    #[test]
+    fn fresh_layout_provision_waits_before_reaping_stale_committed_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "body").unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body")).unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "test", Some("body"), Some("body"))
+            .unwrap();
+        let baseline = load_route_owned_cycle_state(&doc).unwrap().unwrap();
+
+        let orphan_interval = Duration::from_millis(50);
+        let state = Arc::new(StashedCompletionState {
+            started_at: Instant::now(),
+            stop_elapsed_millis: AtomicU64::new(u64::MAX),
+        });
+        let completed = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut config = RouteOwnedCompletionConfig::with_start_purpose(
+            doc,
+            Some(baseline),
+            RouteOwnedReapPolicy::KeepAlive,
+            RouteOwnedStartPurpose::LayoutProvision,
+            HarnessConfig::codex(),
+        );
+        config.poll_interval = Duration::from_millis(1);
+        config.layout_provision_orphan_check_interval = orphan_interval;
+
+        let handle = spawn_route_owned_completion_thread(
+            Arc::clone(&state),
+            config,
+            completed,
+            stop,
+            None::<()>,
+            |_, _| {},
+        );
+        handle.join().unwrap();
+
+        let stopped_after = state.stop_elapsed_millis.load(Ordering::Relaxed);
+        assert!(
+            stopped_after >= orphan_interval.as_millis() as u64,
+            "fresh layout provision was reaped after {stopped_after}ms before its {orphan_interval:?} admission grace elapsed"
         );
     }
 }

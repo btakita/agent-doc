@@ -456,6 +456,23 @@ Fresh focused verification passed 50 tests with zero failures/errors/skips. Fres
 Committed and pushed `lazily-kt` commit `f055ad9` (`test: bind collections assertion blocks`). CI run 36180605509 is queued; the preceding reactive run 36177824548 is green.
 
 `#lzktbindpending` is complete: 540/540 reachable sites migrated. I did not touch the misplaced `api.md` work or agent-doc infrastructure.
+
+### Re: #lzmiseusepatch — gpt-5 · 2026-09-25T15:47-04:00
+
+> **Queue prompt:**
+>
+> do [#lzmiseusepatch]
+
+
+Prepared and committed the operator-owned point-of-use patch plan at `tasks/software/plan-ambient-publish-token-point-of-use.md` (`c97f2fdb8`). Nothing from the plan was applied.
+
+The audit caught and removed an unsafe draft change: `.mise.toml` continues sourcing `.env`, because deleting that source would also remove dozens of unrelated settings. The plan instead comments only the six ignored-file publish aliases while retaining their `passage` references as documentation.
+
+The plan now contains seven repository-relative, zero-context diffs. All seven pass `git apply --unidiff-zero --check` against recorded SHA-256 preimages. Each call-site lookup disables xtrace, rejects a failed or empty `passage` result before launching a publisher, and scopes the credential to the publisher child. It covers root/module-harness/Corky Cargo, Corky Maturin, agent-doc and lazily-py production Twine, and ctx-core Bun; TestPyPI deliberately receives no production token.
+
+The inventory confirms every remaining automated publish path uses a repository secret or OIDC and no workflow sources the root `.env`. It also records the existing broken root `instruction-files` path as a separate application gate, Bun/npm write-plus-2FA requirements, ignored-file handling, fake-publisher success/failure proofs, fresh-shell absence checks, asymmetric rollback, and per-repository commit recording.
+
+No `passage` command was evaluated, no credential value was printed, no publish was attempted, and application plus credential rotations remain operator-only.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -463,8 +480,8 @@ Committed and pushed `lazily-kt` commit `f055ad9` (`test: bind collections asser
 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~⏭️ do [#lzktbindpending]~~
-- 🚧 do [#lzmiseusepatch]
-- do [#lzsimlicense]: use Apache2 across all Lazily packages.
+- ~~do [#lzmiseusepatch]~~
+- ~~do [#lzsimlicense]: use Apache2 across all Lazily packages.~~
 - do [#lzdurableipgate]
 - do [#lzdurablespec]
 - do [#lzdurablepg]
@@ -486,7 +503,6 @@ Committed and pushed `lazily-kt` commit `f055ad9` (`test: bind collections asser
 - [ ] [#lzdurablejetstream] [lazily-rs] Implement the JetStream transport phase from tasks/software/plan-lazily-postgres-nats-valkey.md: typed durable pull ingress, explicit ACK only after the Postgres commit, stable publication identity and receipt recording, redelivery through inbox deduplication, progress ACKs that extend transport ownership only, bounded backpressure, drain, and durable poison-message disposition. Test every commit, ACK, publish, and receipt crash window against a real NATS test service; the broker must never authorize domain state.
 - [ ] [#lzdurablereconcile] [lazily-spec, lazily-rs] Add the complete-history projection and reconciliation layer from tasks/software/plan-lazily-postgres-nats-valkey.md: transaction-consistent snapshots with monotonic projection versions, ordered create/amend/retract event replay, checkpointed rebuild, dry-run drift reports, lag and health signals, and scheduled idempotent reconciliation through the transactional outbox. Prove replay equivalence, partial and final retractions, restart/resume, and that stale or cache-only reads never authorize a transition.
 - [ ] [#lzdurablefamily] [lazily family] Roll the durable capability model across the family after the Rust reference is proven: publish explicit Core, Client, Durable Host, Distributed Host, and Accelerated Host tiers; give non-Rust bindings typed ingress and projection clients first; require mature database and broker clients plus the shared crash/replay corpus before any binding claims native-host support; and add cross-language envelope-version, ordering, deduplication, receipt, and projection-fingerprint conformance without claiming false parity.
-- [ ] 🚧 [#lzmiseusepatch] [recommended] [agent-loop superproject] Prepare, do NOT apply, the point-of-use substitution patch for #lzambienttokenresolve. Produce a plan file holding (a) a ready-to-apply diff that stops .mise.toml from resolving CARGO_REGISTRY_TOKEN, NPM_TOKEN and PYPI_PUBLISH_TOKEN into every shell started from this tree, moving each to `VAR=$(passage ...) <publish command>` at its call site, and (b) the call-site inventory that proves nothing automated depends on the ambient values: every CI publish path is OIDC or a repo secret, and only ad-hoc twine upload uses them. Keep the $(passage ...) references in .env as documentation. Application and the CARGO_REGISTRY_TOKEN / NPM_TOKEN / PYPI_PUBLISH_TOKEN rotation both stay with the operator, since the .mise.toml change alters the environment of every session started from this tree.
 <!-- /agent:backlog -->
 
 ## Review

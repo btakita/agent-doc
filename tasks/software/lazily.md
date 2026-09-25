@@ -169,6 +169,33 @@ Verification covered the manifests and lock graph (`go list -m all`, `uv tree --
 I did not create simulation contracts, schemas, fixtures, or code. I kept `#lzsimspec` open and narrowed it to depend explicitly on `#lzsimlicense`, which already captures the authorized license decision, project metadata, third-party inventory, and provenance chain needed to unblock this phase. No additional backlog follow-up is needed because that prerequisite is already tracked.
 
 The gate plan and its agent-doc response are committed and pushed on `main` through `d86e309232`. The attempted safe supervisor recycle was refused because this is the document's owner pane and no live supervisor was available to perform a non-disruptive handoff; I did not force a restart, install, or disk write.
+
+### Re: #lzsimspec — gpt-5 · 2026-09-25T01:11-04:00
+
+Completed the backend-neutral simulation contract without crossing the unresolved `lazily-spec` publication boundary. The private authority is now the `Backend-neutral simulation contract v1` section of `tasks/software/plan-lazily-simulation.md`, committed as `3675dcc4d` (`docs: define deterministic simulation contract`).
+
+The contract defines:
+
+- `LogicalTime`, `Seed`, `ActorSpec`, `Action`, `Decision`, `Observation`, `PortSpec`/`PortCall`/`PortResult`, `FaultSpec`, `InvariantSpec`, `WorldSpec`, `RunLimits`, immutable `Scenario`, append-only `Trace`, and `SimulationFingerprint`;
+- one single-threaded event queue ordered exactly by `(logical_time, enqueue_ordinal)`, including zero-delay and re-entrant same-tick behavior;
+- a step protocol that invokes the same production reducer, applies its ordered decision atomically, settles the reactive graph, then samples observations and invariants;
+- explicit ports as the only nondeterministic boundary, with no wall clock, sleeps, ambient randomness, uncontrolled concurrency, or undeclared I/O;
+- distinct contract, trace-schema, canonical-encoding, RNG, digest, subject, scheduler, and per-kind versions that all fail closed when unsupported;
+- `lazily-sim-json-v1` canonical bytes over a closed portable value algebra and `lazily-sim-rng-v1` named SHA-256 counter streams;
+- a fully materialized scenario as replay authority, so generator/PRNG evolution cannot silently change what a seed means;
+- trace and simulation-fingerprint binding for the exact scenario, subject, scheduler, fault plan, limits, and per-step settled world digests; and
++- twelve acceptance invariants covering reference integrity, time/order, same- and cold-process byte determinism, port/result completeness, production-reducer reuse, invariant purity, canonical encoding, replay localization, and mismatch refusal before state comparison.
++
++The Go integration is explicit: validate time before `ManualClock.Advance`, inject the existing `Transition` into the actor adapter, apply one decision inside `Context.Batch`, observe settled state rather than `OnTransition`/sibling-effect order, project accepted actions into `ReplayEvent`, and use `ReplayHarness` only for its narrower binding-local graph proof. A separate `SimulationFingerprint` owns the complete scenario and scheduler proof.
++
++Verification passed:
++
++- scoped whitespace and diff checks for the plan;
++- a vocabulary completeness check for every required contract concept;
++- full `make check` in `lazily-go` with exit code 0 and zero failures; and
++- latest `lazily-go` CI run `34971436130` is completed successfully.
++
++`#lzsimspec` is complete. The separate `#lzsimlicense` item still blocks publishing this private contract or new simulation fixtures through `lazily-spec`; it does not block implementing the independently authored Go `SimWorld` against this private authority. No additional follow-up is needed because that publication prerequisite is already tracked.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  

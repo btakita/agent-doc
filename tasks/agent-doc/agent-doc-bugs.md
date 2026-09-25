@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -55,6 +55,37 @@ Verification and delivery:
 - `make install` succeeded; agent-doc 0.35.418, native library, JetBrains 0.2.397 (byte-identical), and VS Code 0.2.71 are locally converged.
 - Commit `e2c1e14fd` (`fix(skill): keep actionable verification in backlog`) is pushed to `origin/main`.
 - CI run `36072812478` was in progress at the required one-shot post-push check; local verification is complete.
+agent-doc should support the operator moving backlog items into another document
+```
+› agent-doc tasks/fpe.md
+
+
+• Agent-doc could not start because #auditawsconfiguration disappeared from the live document despite being open in
+  recent committed history.
+
+  Restore it to the backlog, move it to the icebox, or mark it done before retrying. No document changes were made.
+```
+
+### Re: cross-document backlog item moves — gpt-5 · 2026-09-24T21:28:04-04:00
+
+> **Queue prompt:**
+>
+> do [#fixcausesdocument]
+
+
+Implemented and shipped. The failure came from the dropped-history guard recognizing only the source document, its done archive, and same-cycle resolutions; it had no evidence path for an item that remained open in a different project document.
+
+The shared backlog policy now preserves this invariant: a removed open item is accepted only when the same normalized ID is open in exactly one other agent-doc document under the same project root. A local item still passes normally; an explicitly completed or archived item passes; a unique cross-document destination passes as a transfer; an ID absent everywhere still interrupts; prose/code mentions do not count; nested projects are excluded; and multiple open destinations fail closed as ambiguous. Shared-mode documents retain the existing `agent_doc_security_review` gate.
+
+Preflight and session-check both consume the same typed transfer evidence through the backlog policy owner. The filesystem observation is intentionally cycle-scoped and one-shot at admission/closeout—there is no mutable cache, polling loop, retry owner, or long-lived derived state to extract into a reactive graph.
+
+Verification and delivery:
+- Focused transfer, prose-only rejection, ambiguity, preflight, architecture-ownership, and FlowCore budget tests passed.
+- Full `make check` passed: 9,698/9,698 Rust tests, 259 skipped, generated instruction audit, editor parity/native integration, and all six TLA+ model checks.
+- Private-name denylist and whitespace checks passed.
+- `make install` succeeded for agent-doc 0.35.418, the native library, JetBrains 0.2.397, and VS Code 0.2.71.
+- Commit `0b1adf33b` (`fix(backlog): allow cross-document item moves`) is pushed to `origin/main`.
+- CI run `36082096447` was in progress at the required one-shot post-push check; local verification is complete.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -63,9 +94,7 @@ Verification and delivery:
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 In fpe.md, #stgnatsrollout was not added into the backlog.
-- Ensure plugin parity
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 

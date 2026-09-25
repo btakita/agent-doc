@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0d8f0-5da4-7ce1-81e9-63aa5a7c3596
+  codex: 01a0d94a-44f9-7f43-b8fa-8bd7acf95f4b
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -277,6 +277,20 @@ The failed `infra.md` invocation no longer reports the disk/editor authority con
 Source commit: `42a9250f4` (`fix(jetbrains): make hot reload generation-safe`)  
 Superproject pointer: `7cae80f683` (`chore: update agent-doc`)  
 Both commits are pushed to `origin/main`.
+
+### Re: recovered response
+
+Fixed and deployed.
+
+- Root cause: two plugin classloader generations retained IntelliJ document listeners, causing CRDT echo loops and the `TurnStateBannerRefresher` cross-classloader cast.
+- Plugin 0.2.417 now explicitly cleans the outgoing generation before dynamic unload and fails closed if cleanup cannot complete.
+- Live upgrade succeeded without another restart; no subsequent class-cast/internal errors.
+- Repaired [api.md](/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md:73) to one `🚧` marker. It remained stable with zero `🚧go` fragments.
+- Full local `make check`, JetBrains build/tests, and queue tests passed.
+- Pushed commits `190215429` and parent pointer `1c8ee0755`.
+- GitHub CI is still running its `make check` step without failures.
+
+`api.md` remains uncommitted because its existing agent-doc cycle is interrupted at `preflight_started`; send `cont` to resume that session safely.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -286,7 +300,6 @@ Both commits are pushed to `origin/main`.
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
-- In infra.md, agent-doc is duplicating my queue items. As I am typing, intra-queue item text is duplicated/reapplied. There are also 3 `agent-doc: awaiting response` alerts in this editor file ![img.png](img.png).
 <!-- /agent:queue -->
 
 

@@ -74,6 +74,8 @@ class PluginLifecycleListenerTest {
         assertTrue(source.contains("ReliableSyncLivenessListener.install(project, lifecycle)"))
         assertTrue(source.contains("ProjectManager.getInstance().openProjects"))
         assertTrue(source.contains("initializeOpenProjectsAfterDynamicLoad"))
+        assertTrue(source.contains("fun disposeOpenProjectsForDynamicUnload(): Int"))
+        assertTrue(source.contains("projects.forEach(::disposeProjectResources)"))
         assertTrue(source.contains("ensureOpenDocumentReplicasAndWait"))
         assertTrue(source.contains("beginInitialization()"))
         assertTrue(source.contains("disposeProjectResources"))
@@ -98,6 +100,14 @@ class PluginLifecycleListenerTest {
                 ?: Paths.get("editors/jetbrains/src/main/java/com/github/btakita/agentdoc/JetBrainsPluginUpgradeAction.java"),
         )
         assertTrue(upgradeAction.contains("initializeOpenProjectsAfterDynamicLoad"))
+        assertTrue(upgradeAction.contains("cleanupOutgoingGeneration(current)"))
+        assertTrue(upgradeAction.contains("disposeOpenProjectsForDynamicUnload"))
+        assertTrue(upgradeAction.contains("disposeProjectResources$"))
+        assertTrue(
+            "outgoing document listeners must stop before IntelliJ unloads their descriptor",
+            upgradeAction.indexOf("cleanupOutgoingGeneration(current)") <
+                upgradeAction.indexOf("unloadPlugin(current, updateOptions)"),
+        )
         assertTrue(upgradeAction.contains("documents="))
         assertTrue(upgradeAction.contains(".withDisable(false)"))
         assertTrue(upgradeAction.contains(".withUpdate(true)"))

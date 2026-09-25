@@ -64,8 +64,15 @@ a true no-op: the installer leaves the existing files and inodes in place so a
 live IDE does not retain deleted mappings of the same generation. For a changed
 package, the installer discovers live JetBrains JVMs and attaches the packaged
 system-classloader upgrade bridge. The bridge first verifies that the live
-plugin root belongs to the installation being updated, then unloads the current
-descriptor with JetBrains' explicit update semantics (`disable=false`,
+plugin root belongs to the installation being updated, then explicitly invokes
+the outgoing generation's open-project cleanup hook before unload. This cleanup
+must stop every document listener, CRDT worker, and static project registry; two
+plugin-classloader generations must never observe the same IntelliJ `Document`,
+because each would classify the other's remote projection as operator input and
+rebroadcast it. For the first upgrade from a generation predating the public
+cleanup hook, the bridge calls its compatible Kotlin companion cleanup entry
+point reflectively. A missing or failed cleanup is fail-closed. The bridge then
+unloads the current descriptor with JetBrains' explicit update semantics (`disable=false`,
 `isUpdate=true`). It must prove that descriptor is no longer loaded before
 calling JetBrains' dynamic install-and-load API with the complete ZIP, and it
 must reject an identity- or classloader-equal result. This keeps the plugin set

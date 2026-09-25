@@ -170,6 +170,24 @@ class PluginLifecycleListener : ProjectManagerListener {
             }
         }
 
+        /**
+         * Stop every outgoing-generation listener before IntelliJ unloads its classloader.
+         *
+         * The system-classloader upgrade bridge calls this explicitly. Relying only on
+         * application-service disposal is insufficient: JetBrains can retain a project
+         * service/listener while replacing the plugin descriptor, leaving two CRDT managers
+         * to observe the same Document and echo one another's remote projections.
+         */
+        @JvmStatic
+        fun disposeOpenProjectsForDynamicUnload(): Int {
+            check(javax.swing.SwingUtilities.isEventDispatchThread()) {
+                "dynamic plugin cleanup must run on the EDT"
+            }
+            val projects = ProjectManager.getInstance().openProjects.filterNot { it.isDisposed }
+            projects.forEach(::disposeProjectResources)
+            return projects.size
+        }
+
         internal fun disposeProjectResources(project: Project) {
             ReliableSyncLivenessListener.disposeProject(project)
             TurnStateBannerRefresher.disposeProject(project)

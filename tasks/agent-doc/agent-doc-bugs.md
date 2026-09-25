@@ -130,6 +130,26 @@ Recovery evidence:
 - The required one-shot CI observation for the first pushed fix was `in_progress` at workflow run `36089324517`; it was not polled again.
 
 The practical answer to “is Lazily logic plus the graph provably correct?” is no, not globally. The repaired transitions are now exhaustively checked in their finite state space, while broader end-to-end correctness still needs additional formalized authority invariants and model coverage rather than trust in graph shape.
+
+### Re: recovered response
+
+Fixed and pushed.
+
+- `36cac807c`: repairs malformed CRDT queue-marker splices.
+- `4d445eb21`: prevents a fresh controller’s temporary empty canonical from replacing retained editor text.
+- `4dd0d2d50`: fixes the `api.md` reconciliation failure. When `authority == baseline` and only disk advanced, the validated disk revision is now compare-and-swapped into CRDT authority. If both branches advanced, admission fails closed.
+- `cab6110`: commits the restored `fpe.md` AWS queue prompt.
+
+The earlier “Would lazily-go help?” item was processed in `741c2a8`; no `lazily-go` implementation occurred. The later failed `api.md` prompt was preserved. Subsequent live edits have moved it into `agent:notes` and placed a PR #548 question at the queue head; I did not overwrite those edits.
+
+No, Lazily logic plus graph topology is not globally proven correct. What is now proven within the implemented finite policy space:
+
+- All eight fresh-controller reseed transition rows reject temporary-canonical adoption.
+- Durable publication failure aborts registration.
+- The baseline/authority/disk relationship handles equality, authority-only advance, disk-only advance, and ambiguous dual advance explicitly.
+- Ambiguous transitions fail closed.
+
+Validation passed: the complete earlier `make check` run passed 9,704 tests, editor tests, and TLC checks; all 158 preflight-authority tests pass after the final fix; installation completed successfully. Source is clean and pushed to `origin/main`. The failed `api.md` invocation was not rerun because the live document now has a different queue head and rerunning would start that work.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

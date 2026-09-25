@@ -538,6 +538,29 @@ pub struct ControllerWatchdogFacts {
     pub launched_elapsed: Duration,
 }
 
+/// Keep the process-local "I am a handoff replacement" marker only until the
+/// replacement has observably completed its first promotion.
+///
+/// `promote_handoff` records the public socket before the handoff client renames
+/// the bound temporary socket. The conjunction below therefore distinguishes a
+/// completed promotion from both halves of that transition. Once it returns
+/// false the caller latches the marker off; a later outgoing handoff may remove
+/// the public pathname temporarily, but that must not turn the already-promoted
+/// controller back into its own orphaned replacement.
+pub fn handoff_replacement_marker_remains(
+    marker_present: bool,
+    handoff_state: ControllerHandoffState,
+    replacement_promotion_recorded: bool,
+    handoff_replacement_socket_exists: bool,
+    public_socket_exists: bool,
+) -> bool {
+    marker_present
+        && !(handoff_state == ControllerHandoffState::Stable
+            && replacement_promotion_recorded
+            && !handoff_replacement_socket_exists
+            && public_socket_exists)
+}
+
 /// Pure self-watchdog policy for a controller process.
 ///
 /// A controller should exit when its in-memory handoff state is wedged past the
@@ -1769,6 +1792,75 @@ mod preparing_without_a_handoff_clock_tests {
             Some(500),
             Duration::from_secs(100_000),
             Duration::from_secs(45),
+        ));
+    }
+}
+
+#[cfg(test)]
+mod handoff_replacement_marker_tests {
+    use super::*;
+
+    #[test]
+    fn completed_promotion_latches_replacement_identity_off_across_the_next_handoff() {
+        let marker = handoff_replacement_marker_remains(
+            true,
+            ControllerHandoffState::Preparing,
+            false,
+            true,
+            false,
+        );
+        assert!(marker, "a private preparing replacement remains guarded");
+
+        let marker = handoff_replacement_marker_remains(
+            marker,
+            ControllerHandoffState::Stable,
+            true,
+            false,
+            true,
+        );
+        assert!(!marker, "a completed public promotion retires the marker");
+
+        assert!(
+            !handoff_replacement_marker_remains(
+                marker,
+                ControllerHandoffState::Preparing,
+                true,
+                false,
+                false,
+            ),
+            "a later outgoing handoff must not resurrect replacement identity when it removes the public socket"
+        );
+        assert!(
+            !controller_watchdog_should_suicide(ControllerWatchdogFacts {
+                handoff_state: ControllerHandoffState::Preparing,
+                handoff_started_at: Some(1_000),
+                now: 1_000,
+                stale_after: Duration::from_secs(45),
+                is_handoff_replacement: marker,
+                handoff_replacement_socket_exists: false,
+                replacement_promotion_recorded: true,
+                previous_controller_alive: Some(false),
+                launched_elapsed: Duration::from_secs(10),
+            }),
+            "the next generation handoff may not immediately self-reap merely because the original predecessor is dead"
+        );
+    }
+
+    #[test]
+    fn neither_half_of_promotion_retires_the_marker_early() {
+        assert!(handoff_replacement_marker_remains(
+            true,
+            ControllerHandoffState::Stable,
+            true,
+            true,
+            false,
+        ));
+        assert!(handoff_replacement_marker_remains(
+            true,
+            ControllerHandoffState::Stable,
+            true,
+            false,
+            false,
         ));
     }
 }

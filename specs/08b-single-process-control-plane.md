@@ -267,6 +267,12 @@ race class instead of papering over each symptom.
   only until exact canonical promotion, which performs the same retirement.
   CRDT-only endpoints belonging to other PIDs remain routable so a missed
   liveness-journal registration cannot strand their delivery.
+- **Completed controller promotion is a one-way process fact.** Once a handoff
+  replacement observes durable `Stable`/public-path state and the temporary
+  listener has been renamed onto the public socket, it retires its local
+  replacement marker permanently. A later outgoing handoff may temporarily
+  remove that public pathname, but cannot resurrect replacement identity or
+  trigger the orphaned-replacement watchdog against the established controller.
 - **Admission release is not persistence proof.** A live replica that exhausts
   the bounded pull-without-ACK or silence budget may stop blocking new work, but
   that availability decision does not prove its editor buffer contains the

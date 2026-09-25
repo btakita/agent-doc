@@ -11822,6 +11822,37 @@ pub(crate) fn serve_with_options(
                     should_stop.store(true, Ordering::SeqCst);
                     break;
                 }
+                // The temp-socket marker is process-local and predates the
+                // external handoff client's atomic rename. Retire it as soon as
+                // both durable state and the filesystem prove that first
+                // promotion completed. This is a one-way latch: a subsequent
+                // outgoing handoff temporarily removes `public_sock`, but must
+                // not make this established controller look like its own
+                // orphaned replacement to the watchdog.
+                if let Some(temp) = handoff_temp_socket.as_deref()
+                    && let Ok(bootstrap) = runtime.bootstrap_snapshot()
+                {
+                    let marker_remains = status::handoff_replacement_marker_remains(
+                        true,
+                        bootstrap.handoff_state,
+                        bootstrap.socket_path == public_sock,
+                        temp.exists(),
+                        public_sock.exists(),
+                    );
+                    if !marker_remains {
+                        agent_doc_ops_log_io::log_op(
+                            project_root,
+                            &format!(
+                                "controller_handoff_replacement_marker_retired pid={} generation={} public_sock={} reason=promotion_observed",
+                                bootstrap.pid,
+                                bootstrap.controller_generation,
+                                public_sock.display(),
+                            ),
+                        );
+                        handoff_temp_socket = None;
+                        sock = public_sock.clone();
+                    }
+                }
                 // M1 (#stuckhandoff2) — self-watchdog / suicide timer. A controller
                 // wedged in `Preparing`/`Promoted` past the staleness threshold (the
                 // client driving the two-phase handoff died between `prepare_handoff`

@@ -285,6 +285,11 @@ Pushed `lazily-go` commit `d9557cf` (`feat: add deterministic simulation faults`
 
 > **Queue prompt:**
 >
+> do [#lzsimconformance]
+
+
+> **Queue prompt:**
+>
 > do [#lzsimlicense]: use Apache2 across all Lazily packages.
 
 
@@ -313,6 +318,27 @@ Verification passed:
 Pushed `lazily-go` commit `2ee74de` (`feat: add deterministic simulation oracles`) and `lazily-spec` commit `df7fd6e` (`docs: define deterministic simulation oracles`).
 
 The exchange is large (255 lines at preflight); the active queue remains in drain mode, so it was not compacted.
+
+### Re: #lzsimconformance — gpt-5 · 2026-09-25T10:40:26-04:00
+
+Implemented and published the generic consumer simulation conformance testkit in lazily-go.
+
+- Added SimConsumerTestkit, which runs a materialized generated history through an in-memory adapter and explicitly selected real Postgres/NATS adapters, probing and resetting every service before execution.
+- Enforced reuse of one production reducer identity and one narrow-port contract across adapters. In-memory adapters must advance and trace the actual SimWorld; real adapters cannot expose a simulation world or stub ports; only declared nondeterministic boundaries may be stubbed.
+- Added per-action canonical observation comparison with adapter/action-localized divergence errors, plus validation for generated histories, service selection, service identities, probes, duplicate or unresolved causes, port drift, and invalid stubbing.
+- Added an external-package wiring example and README guidance. Consumer-specific schemas, names, and service implementations remain in consumer repositories; Lazily provides only the generic mechanics.
+- Documented simulation as complementary to unit, contract, and real-infrastructure testing, not as a blanket mock replacement.
+
+Verification passed:
+
+- focused SimConsumer tests
+- make check
+- go test ./... -count=10
+- git diff --check
+
+Published lazily-go commit d5797fd (feat: add consumer simulation conformance testkit) to origin/main. CI run 36149044460 was in progress at closeout; the preceding main CI was green.
+
+Session accretion remained at warning level while the active auto queue continued; no implicit context reset or compaction was performed.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -321,7 +347,7 @@ The exchange is large (255 lines at preflight); the active queue remains in drai
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzsimoracle]~~
 - ~~do [#lzsimlicense]: use Apache2 across all Lazily packages.~~
-- do [#lzsimconformance]
+- ~~do [#lzsimconformance]~~
 - do [#lzktbindpending]
 - do [#lzartifactverify]
 - do [#lzmiseusepatch]
@@ -338,7 +364,6 @@ The exchange is large (255 lines at preflight); the active queue remains in drai
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzsimlicense] [operator-decision, lazily-spec] Resolve the implementation-admission blocker in tasks/software/plan-lazily-simulation.md before #lzsimspec: an authorized owner selects and records the repository license and fixture reuse terms; then add matching project metadata, a generated third-party inventory from uv.lock, and provenance/license records for all 156 canonical fixtures and nine vendored Go copies. Until resolved, do not publish or copy simulation specifications or fixtures through lazily-spec.
-- [ ] [#lzsimconformance] [lazily-go, consumer adapters] Publish a generic consumer simulation testkit and example with interchangeable simulated and real adapters. Require consumer integration to reuse production reducers and narrow ports, run generated histories against the in-memory world plus selected real Postgres and NATS services, and retain small stubs only at nondeterministic external boundaries. Keep all consumer-specific names and artifacts outside Lazily, and document simulation as a complement to unit, contract, and real-infrastructure tests rather than a blanket mock replacement.
 - [ ] [#lzdurableipgate] [lazily family] Before durable-runtime implementation, record the public-pattern and provenance gate for tasks/software/plan-lazily-postgres-nats-valkey.md: cite Event Sourcing and CQRS, transactional inbox/outbox, idempotent consumers, at-least-once delivery, Postgres queue claiming, and JetStream ACK/redelivery semantics from public primary or official sources; inventory dependency licenses; require independently authored Lazily APIs and conformance fixtures; exclude Haiven names, schemas, events, policies, incidents, and code; and obtain the written prior-work and employer boundary described by the plan before employer-related implementation.
 - [ ] [#lzdurablespec] [lazily-spec, lazily-rs] Implement Phase 0 of tasks/software/plan-lazily-postgres-nats-valkey.md: backend-neutral durable-owner contracts for ordered event history or snapshot state, monotonic positions, optimistic fencing, schema and codec versions, inbox identities, outbox effect identities, and durable receipts. Add canonical crash, replay, deduplication, and projection-fingerprint fixtures, and explicitly distinguish complete-history projections from LatestDurableProjection conflation.
 - [ ] [#lzdurablepg] [lazily-rs] Implement the Rust reference Postgres durable host from tasks/software/plan-lazily-postgres-nats-valkey.md: one transaction claims the inbox identity and persists accepted events or state, projection version, outbox intents, timer changes, fences, and local receipts; relay workers claim rows with FOR UPDATE SKIP LOCKED. Prove rollback, serialization retry, crash-after-commit-before-ACK, publish-before-receipt retry, stable idempotency, and full history rebuild with deterministic integration tests.

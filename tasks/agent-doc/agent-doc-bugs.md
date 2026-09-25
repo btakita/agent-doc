@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0d94a-44f9-7f43-b8fa-8bd7acf95f4b
+  codex: 01a0da47-db7f-72d2-9c0b-4bce5d22225c
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -408,6 +408,30 @@ Verification and delivery:
 - CI run `36188252789` was queued at the required one-shot post-push observation; local verification is complete.
 
 Confidence is high for this pure closeout slice. No blocking escalation remains. The root tsift workspace index had a missing FTS table, so navigation fell back to fresh submodule indexes and exact scoped reads; that tooling issue did not affect build or test evidence. The exchange remains large, but the active queue was not stalled for implicit compaction.
+
+### Re: devops run wedge and document-authority recovery — gpt-5 · 2026-09-25 18:20
+
+> **Queue prompt:**
+>
+> do [#fixdevopsrun]
+
+
+> **Queue prompt:**
+>
+> Fix devops.md Run Agent Do wedge
+
+Implemented and pushed two agent-doc fixes:
+
+- `4fd23a3f0` fixes the `devops.md` Run Agent Doc wedge. A newly created route-owned Codex pane now recognizes the exact “conversation is open in another app” interlock and selects fork once within the original route timeout. Existing/user-owned panes remain fail-closed and are never interrupted automatically.
+- `cf31b8edb` fixes stale document-only commits and the late editor-ACK race. Bare `agent-doc commit` now stages current editor authority only for promptless, response-free document drift, preserves fresh Exchange work, and proves authority/disk/HEAD convergence before reporting terminal success. A serialized write that reaches its first projection deadline now continues through the strict visible-receipt waiter instead of returning a false retained-write failure just before the ACK.
+
+The related live cases were also resolved and verified:
+
+- The current editor/native runtime was reinstalled and reloaded without an IDE restart. `api.md` now projects Ready → Idle correctly, and right-editor focus projects to the matching tmux pane again.
+- Both reported `infra.md` retained captures converged without replay or force-write. The newer capture reached exact editor delivery, committed as `986eb380`, matched HEAD, and finalized terminally; its Stop-hook warning was a stale observation of the ACK race now covered by the new delayed-ACK regression.
+- `lazily.md` was recovered with the new bare-commit path. After a later supervisor queue projection arrived, it was committed again as `35e596bf35`; session-check is OK and the file is clean. The queue remains active, but no queue task was executed by this repair.
+
+Verification: all 9,744 Rust tests passed, plus editor parity, cross-editor simulation, package checks, and all TLA+ models. Installed versions remain agent-doc 0.35.418, JetBrains 0.2.419, and VS Code 0.2.71. Source CI run `36196141320` was queued by the push.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

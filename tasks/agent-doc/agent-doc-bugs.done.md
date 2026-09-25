@@ -162,3 +162,4 @@
 - 2026-09-24 [#fixcausesdocument] Fix agent-doc causes of this document's turn not completing.
 - 2026-09-24 [#fixrunfpe] Fix Run Agent Doc on fpe.md: unclosed component: agent:queue without matching close
 - 2026-09-25 [#agentdocsim] Implement the agent-doc deterministic simulation harness on Lazily after the active Lazily oracle work commits; audit tasks/software/lazily.md for missing generic features and add only non-duplicative backlog items without racing its live owner.
+- 2026-09-25 [#fixdevopsrun] Fix devops.md Run Agent Do wedge

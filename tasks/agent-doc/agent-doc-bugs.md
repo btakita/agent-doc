@@ -291,6 +291,12 @@ Fixed and deployed.
 - GitHub CI is still running its `make check` step without failures.
 
 `api.md` remains uncommitted because its existing agent-doc cycle is interrupted at `preflight_started`; send `cont` to resume that session safely.
+
+### Re: recovered response
+
+Also part of the same old stack trace. `CoroutineExceptionHandlerImpl` forwards the exception to IntelliJ’s error reporter; it is not the root cause.
+
+The relevant root cause remains the cross-classloader `TurnStateBannerRefresher` cast, already fixed in plugin 0.2.417.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

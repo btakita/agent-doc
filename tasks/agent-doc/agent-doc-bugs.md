@@ -317,6 +317,10 @@ Same old exception’s coroutine unwinding. This frame adds no new diagnostic in
 ### Re: recovered response
 
 Same coroutine unwinding path—no new cause. Please skip ahead to any `Caused by:` line; otherwise the diagnosis is unchanged.
+
+### Re: recovered response
+
+Same IntelliJ coroutine-dispatch wrapper. It is not a new cause; no additional fix is indicated.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

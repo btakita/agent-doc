@@ -172,6 +172,11 @@ The gate plan and its agent-doc response are committed and pushed on `main` thro
 
 ### Re: #lzsimspec — gpt-5 · 2026-09-25T01:11-04:00
 
+> **Queue prompt:**
+>
+> do [#lzsimspec]
+
+
 Completed the backend-neutral simulation contract without crossing the unresolved `lazily-spec` publication boundary. The private authority is now the `Backend-neutral simulation contract v1` section of `tasks/software/plan-lazily-simulation.md`, committed as `3675dcc4d` (`docs: define deterministic simulation contract`).
 
 The contract defines:
@@ -196,6 +201,33 @@ The contract defines:
 +- latest `lazily-go` CI run `34971436130` is completed successfully.
 +
 +`#lzsimspec` is complete. The separate `#lzsimlicense` item still blocks publishing this private contract or new simulation fixtures through `lazily-spec`; it does not block implementing the independently authored Go `SimWorld` against this private authority. No additional follow-up is needed because that publication prerequisite is already tracked.
+
+### Re: #lzsimworldgo — gpt-5 · 2026-09-25T01:39:27-04:00
+
+> **Queue prompt:**
+>
+> do [#lzsimworldgo]
+
+
+Implemented and pushed the deterministic Go simulation world in `lazily-go`.
+
+- Added a single-threaded `SimWorld` over `ManualClock` with exact `(logical_time, ordinal)` scheduling, same-tick FIFO behavior, bounded `Step` / `RunSteps` / `RunUntilIdle`, causal action validation, scheduled messages, and explicit `idle`, `bound_exhausted`, and `error` terminal states.
+- Added actor lifecycle scheduling with both explicitly status-only registration and `RegisterActorFactory` reconstruction, so crash can discard ephemeral actor state and restart can rebuild it from caller-owned durable state.
+- Added sorted observations, checkpoints, frozen terminal/world digests, byte-stable Go-local traces, and accepted-action projection into the existing `ReplayHarness` through `ReplayLog`.
+- Added seeded named SHA-256 counter streams with rejection sampling, stream isolation, and explicit counter exhaustion. The simulation core has no wall-clock reads, sleeps, goroutines, ambient randomness, or standard-library `context.Context`; the StateMachine adapter uses Lazily's reactive `Context` only.
+- Froze mutable payloads at admission and cloned outward-facing values, sealed mutation after terminal status, preserved accepted reducer evidence on downstream validation failure, and rejected unresolved causes, past scheduling, duplicate observation namespaces, and exhausted queue/trace/ordinal bounds deterministically.
+- Added focused tests proving identical seed plus inputs produces identical trace bytes/digests, stable queue ordering including reentrant same-tick work, lifecycle behavior, payload isolation, bound classification, checkpoint ordering, named-stream vectors, production `StateMachine` reuse exactly once, and replay projection.
+
+Verification passed:
+
+- `go test -race ./...`
+- `go test ./... -count=10`
+- `make check`
+- GitHub Actions CI run `36099371489`
+
+Pushed `lazily-go` commit `6916018` (`feat: add deterministic simulation world`).
+
+The trace encoding in this milestone is intentionally binding-local; it does not claim to be the portable `lazily-sim-json-v1` codec planned for the codec/conformance follow-up.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -204,8 +236,8 @@ The contract defines:
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzappsimulation]~~
 - ~~do [#lzsimipgate]~~
-- do [#lzsimspec]
-- do [#lzsimworldgo]
+- ~~do [#lzsimspec]~~
+- ~~do [#lzsimworldgo]~~
 - do [#lzsimgen]
 - do [#lzsimfaults]
 - do [#lzsimoracle]
@@ -226,8 +258,6 @@ The contract defines:
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzsimlicense] [operator-decision, lazily-spec] Resolve the implementation-admission blocker in tasks/software/plan-lazily-simulation.md before #lzsimspec: an authorized owner selects and records the repository license and fixture reuse terms; then add matching project metadata, a generated third-party inventory from uv.lock, and provenance/license records for all 156 canonical fixtures and nine vendored Go copies. Until resolved, do not publish or copy simulation specifications or fixtures through lazily-spec.
-- [ ] [#lzsimspec] [lazily-spec, lazily-go] BLOCKED on #lzsimlicense and the fail-closed gate in tasks/software/plan-lazily-simulation.md. After an authorized lazily-spec repository-license and fixture-reuse decision is recorded, define backend-neutral simulation contracts for World, Actor, Action, Observation, Fault, Invariant, Trace, Seed, and monotonic logical time. Specify stable same-tick ordering, trace/schema versions, deterministic serialization, explicit port boundaries, and the rule that a consumer simulator invokes the same pure reducers or decisions as production rather than reimplementing business behavior in a test-only model.
-- [ ] [#lzsimworldgo] [lazily-go] Implement a deterministic single-threaded discrete-event SimWorld over ManualClock, StateMachine, and ReplayHarness: seeded randomness, stable event ordering, run-until-idle and bounded-step controls, actor lifecycle, scheduled messages, checkpoint observations, and byte-stable traces. Prohibit wall-clock reads, sleeps, uncontrolled goroutines, and ambient randomness inside the simulated world; prove identical seed plus inputs yields an identical trace.
 - [ ] [#lzsimgen] [lazily-go] Add model-based action generation and causal shrinking: state-dependent preconditions, weighted actions, bounded history length, deterministic seeds, coverage labels, and shrinkers that preserve identifiers, dependencies, and command validity while minimizing a failing trace. Persist minimized counterexamples as ordinary regression fixtures and Go fuzz seed corpus entries, and fail coverage audits when declared actions or scenarios are never exercised.
 - [ ] [#lzsimfaults] [lazily-go] Add deterministic fault plans at generic port boundaries for delay, drop, duplicate, reorder, partition/heal, crash/restart, timeout/cancel, stale response, optimistic conflict, commit/rollback outcome, and clock advance. Record every injection and recovery in the trace, keep the schedule replayable and shrinkable, and state explicitly that these modeled faults do not replace real database, broker, operating-system, or network conformance tests.
 - [ ] [#lzsimoracle] [lazily-spec, lazily-go] Add stepwise invariant, reference-model, differential, and history checkers: compare observations after every action, bind ReplayHarness fingerprints to the exact trace, support safety and bounded-liveness assertions, and apply linearizability checks only to surfaces that claim it. Add mutation tests that prove each oracle catches a seeded defect, and prevent a simulator-only implementation from becoming the sole oracle for the same behavior.

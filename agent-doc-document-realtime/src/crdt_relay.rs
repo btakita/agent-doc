@@ -52,7 +52,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use agent_doc_element::element::{self, Component};
-use agent_doc_merge::crdt_sync::{ReplicaState, commit_barrier_ready, flush_to_commit_barrier};
+use agent_doc_merge::crdt_sync::{
+    ReplicaState, commit_barrier_ready, decode_update_ops, flush_to_commit_barrier,
+};
 use agent_doc_merge::document_cell::{ThreadSafeDocumentCellTree, project_document};
 
 use crate::crdt_authority::CrdtAuthority;
@@ -361,6 +363,41 @@ fn minimal_char_span_edits(current: &str, content: &str) -> Result<Vec<(u32, u32
     }
     edits.sort_unstable_by_key(|edit| std::cmp::Reverse(edit.0));
     Ok(edits)
+}
+
+/// Recover the visible insertion strings carried by one text-CRDT delta.
+///
+/// Existing characters appear in a delta only when their tombstone changed, so
+/// live operations are newly inserted characters. A local insertion mints
+/// consecutive counters for one peer; counter gaps delimit separate edits.
+fn visible_insertion_runs(delta: &[u8]) -> Result<Vec<String>> {
+    let mut by_peer: BTreeMap<u64, Vec<(u64, char)>> = BTreeMap::new();
+    for op in decode_update_ops(delta)? {
+        if op.deleted.is_none() {
+            by_peer
+                .entry(op.id.peer())
+                .or_default()
+                .push((op.id.counter(), op.ch));
+        }
+    }
+
+    let mut runs = Vec::new();
+    for entries in by_peer.values_mut() {
+        entries.sort_unstable_by_key(|(counter, _)| *counter);
+        let mut prior = None;
+        let mut run = String::new();
+        for &(counter, ch) in entries.iter() {
+            if prior.is_some_and(|value| counter != value + 1) && !run.is_empty() {
+                runs.push(std::mem::take(&mut run));
+            }
+            run.push(ch);
+            prior = Some(counter);
+        }
+        if !run.is_empty() {
+            runs.push(run);
+        }
+    }
+    Ok(runs)
 }
 
 /// Outcome of the component-scope check a CP write carried (`#cpwritecomponentscoped`).
@@ -2001,7 +2038,34 @@ impl RelayHub {
     pub fn apply_document_op_delta(&mut self, delta: &[u8]) -> Result<BroadcastPacket> {
         let before_text = self.canonical.text();
         let before = self.canonical.state_vector();
+        let candidate_text = self.canonical.preview_update_text(delta)?;
+        let target_text = if element::structural_corruption_reason(&before_text).is_none()
+            && element::structural_corruption_reason(&candidate_text).is_some()
+        {
+            let repairs: Vec<String> = visible_insertion_runs(delta)?
+                .into_iter()
+                .filter_map(|insertion| {
+                    element::repair_spliced_queue_close_marker(&candidate_text, &insertion)
+                })
+                .collect();
+            let [repaired] = repairs.as_slice() else {
+                return Err(anyhow!(
+                    "document-op delta would corrupt binary-owned component scaffolding"
+                ));
+            };
+            repaired.clone()
+        } else {
+            candidate_text.clone()
+        };
+
         self.canonical.apply_update(delta)?;
+        if target_text != candidate_text {
+            for (offset, delete_len, insert) in
+                minimal_char_span_edits(&candidate_text, &target_text)?
+            {
+                self.canonical.apply_local_edit(offset, delete_len, &insert);
+            }
+        }
         let after_text = self.canonical.text();
         self.sync_live_document_projection(&before_text, &after_text);
         let out = self.canonical.diff(&before)?;
@@ -4394,6 +4458,35 @@ mod tests {
         // Idempotent: a duplicate frame (at-least-once redelivery) is a no-op.
         hub.apply_document_op_delta(&delta).unwrap();
         assert_eq!(hub.canonical_text(), "hello world\n");
+    }
+
+    #[test]
+    fn document_op_delta_rehomes_queue_text_spliced_into_close_marker() {
+        let base = concat!("<!-- agent:queue -->\n", "<!-- /agent:queue -->\n",);
+        let mut hub = RelayHub::from_text(1, base);
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        let frontier = editor.state_vector();
+        let marker = base.find("<!-- /agent:queue -->").unwrap();
+        let stale_offset = (marker + "<!-- /ag".len()) as u32;
+        editor.apply_local_edit(stale_offset, 0, "- Continue the sample smoke tests.");
+        let delta = editor.diff(&frontier).unwrap();
+
+        hub.apply_document_op_delta(&delta).unwrap();
+
+        let expected = concat!(
+            "<!-- agent:queue -->\n",
+            "- Continue the sample smoke tests.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert_eq!(hub.canonical_text(), expected);
+        assert_eq!(
+            element::structural_corruption_reason(&hub.canonical_text()),
+            None
+        );
+
+        // At-least-once delivery remains idempotent after the canonical repair.
+        hub.apply_document_op_delta(&delta).unwrap();
+        assert_eq!(hub.canonical_text(), expected);
     }
 
     /// `#lazily-hot-path` Theme A — THE property that makes the witness usable as a

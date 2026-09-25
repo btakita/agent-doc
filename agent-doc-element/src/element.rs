@@ -1711,6 +1711,96 @@ pub fn repair_welded_queue_close_marker(doc: &str) -> Option<String> {
     (changed && structural_corruption_reason(&repaired).is_none()).then_some(repaired)
 }
 
+/// Restore a closing queue marker when a CRDT insertion landed inside its
+/// binary-owned bytes, using the complete inserted text as causal evidence.
+///
+/// A stale editor offset can project an insertion into the middle of
+/// `<!-- /agent:queue -->`. Concurrent tombstones may hide the beginning of
+/// that insertion, leaving only a suffix visible inside the comment. The
+/// document projection alone cannot recover those hidden bytes, so this repair
+/// requires the full insertion carried by the incoming CRDT delta. It accepts
+/// exactly one split of exactly one queue close marker, preserves the complete
+/// insertion on the preceding line, and refuses every ambiguous shape.
+pub fn repair_spliced_queue_close_marker(doc: &str, inserted_text: &str) -> Option<String> {
+    const CLOSE: &str = "<!-- /agent:queue -->";
+
+    let inserted_text = inserted_text
+        .strip_suffix("\r\n")
+        .or_else(|| inserted_text.strip_suffix('\n'))
+        .unwrap_or(inserted_text);
+    if inserted_text.trim().is_empty()
+        || inserted_text.contains(['\r', '\n'])
+        || inserted_text.contains("<!--")
+        || inserted_text.contains("-->")
+    {
+        return None;
+    }
+
+    let mut matches = Vec::new();
+    let mut offset = 0usize;
+    for raw_line in doc.split_inclusive('\n') {
+        let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        let indent_len = line.len() - line.trim_start().len();
+        let content = &line[indent_len..];
+        for split in 1..CLOSE.len() {
+            let (prefix, suffix) = CLOSE.split_at(split);
+            let Some(remainder) = content.strip_prefix(prefix) else {
+                continue;
+            };
+            let Some(fragment) = remainder.strip_suffix(suffix) else {
+                continue;
+            };
+            if fragment.is_empty() || !inserted_text.ends_with(fragment) {
+                continue;
+            }
+            matches.push((offset, offset + line.len(), indent_len));
+        }
+        offset += raw_line.len();
+    }
+    let [(line_start, line_end, indent_len)] = matches.as_slice() else {
+        return None;
+    };
+    if doc[..*line_start].contains(inserted_text) || doc[*line_end..].contains(inserted_text) {
+        return None;
+    }
+
+    let indent = &doc[*line_start..*line_start + *indent_len];
+    let replacement = format!("{indent}{inserted_text}\n{indent}{CLOSE}");
+    let mut repaired = doc.to_string();
+    repaired.replace_range(*line_start..*line_end, &replacement);
+    (structural_corruption_reason(&repaired).is_none()).then_some(repaired)
+}
+
+/// Prove that a sound projection is exactly the lossless queue-marker repair of
+/// a corrupt canonical document.
+///
+/// This is the restart/recovery counterpart to
+/// [`repair_spliced_queue_close_marker`]. The complete insertion may no longer
+/// be available as a delta, but an editor's sound disk projection can supply it.
+/// Every non-empty projection line is tried as evidence, and the projection is
+/// accepted only when exactly one repair reproduces it byte-for-byte.
+pub fn recover_spliced_queue_close_from_projection(
+    corrupt: &str,
+    projection: &str,
+) -> Option<String> {
+    if structural_corruption_reason(corrupt).is_none()
+        || structural_corruption_reason(projection).is_some()
+    {
+        return None;
+    }
+    let repairs: Vec<String> = projection
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| repair_spliced_queue_close_marker(corrupt, line))
+        .filter(|repaired| repaired == projection)
+        .collect();
+    let [repaired] = repairs.as_slice() else {
+        return None;
+    };
+    Some(repaired.clone())
+}
+
 /// Split operator text that got appended AFTER a component marker back onto its
 /// own line (`#markertrailingtypo`).
 ///
@@ -3585,6 +3675,59 @@ Fix applied to skip non-agent <!-- sequences.
             repair_welded_queue_close_marker(corrupted).as_deref(),
             Some(expected),
         );
+    }
+
+    #[test]
+    fn spliced_queue_close_repair_uses_complete_delta_insertion() {
+        let corrupt = concat!(
+            "<!-- agent:queue -->\n",
+            "<!-- /agged into the sample system.ent:queue -->\n",
+        );
+        let inserted = "- I logged into the sample system.";
+
+        assert_eq!(
+            repair_spliced_queue_close_marker(corrupt, inserted).as_deref(),
+            Some(concat!(
+                "<!-- agent:queue -->\n",
+                "- I logged into the sample system.\n",
+                "<!-- /agent:queue -->\n",
+            ))
+        );
+    }
+
+    #[test]
+    fn spliced_queue_close_repair_refuses_ambiguous_or_unproven_text() {
+        let ambiguous = concat!(
+            "<!-- agent:queue -->\n",
+            "<!-- /agrequest.ent:queue -->\n",
+            "<!-- /agrequest.ent:queue -->\n",
+        );
+        assert!(repair_spliced_queue_close_marker(ambiguous, "- full request.").is_none());
+
+        let corrupt = concat!("<!-- agent:queue -->\n", "<!-- /agrequest.ent:queue -->\n",);
+        assert!(repair_spliced_queue_close_marker(corrupt, "- unrelated text.").is_none());
+    }
+
+    #[test]
+    fn sound_projection_recovers_only_the_exact_spliced_queue_repair() {
+        let corrupt = concat!(
+            "# Session\n",
+            "<!-- agent:queue -->\n",
+            "<!-- /agged into the sample system.ent:queue -->\n",
+        );
+        let sound = concat!(
+            "# Session\n",
+            "<!-- agent:queue -->\n",
+            "- I logged into the sample system.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert_eq!(
+            recover_spliced_queue_close_from_projection(corrupt, sound).as_deref(),
+            Some(sound)
+        );
+
+        let unrelated = sound.replace("# Session", "# Rewritten session");
+        assert!(recover_spliced_queue_close_from_projection(corrupt, &unrelated).is_none());
     }
 
     #[test]

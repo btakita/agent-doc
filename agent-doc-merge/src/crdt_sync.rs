@@ -619,6 +619,21 @@ impl ReplicaState {
         Ok(())
     }
 
+    /// Project a remote update against an isolated fork without mutating this
+    /// replica.
+    ///
+    /// Integrity gates use this to inspect the candidate text before accepting
+    /// an untrusted durable delta. Cloning the in-memory operation graph avoids
+    /// encoding and decoding the entire retained state merely to obtain an
+    /// atomic preview.
+    pub fn preview_update_text(&self, update: &[u8]) -> Result<String> {
+        let ops = decode_update_ops(update).context("decode preview delta")?;
+        self.flush_pending_local_edits();
+        let mut preview = self.text.borrow().clone();
+        preview.apply_delta_unprojected(&ops);
+        Ok(preview.text())
+    }
+
     /// The full encoded state — a durable projection / boundary checkpoint, or the
     /// snapshot a peer needs on first contact. It is `delta_since(∅)`: every op the
     /// replica holds, as a `TextOp` list.

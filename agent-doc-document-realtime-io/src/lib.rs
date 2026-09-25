@@ -6707,14 +6707,39 @@ pub fn try_resolve_current_document_content(
     file: &std::path::Path,
     source: &str,
 ) -> Result<String> {
-    try_resolve_current_document_with_source(file, source)
+    let content = try_resolve_current_document_with_source(file, source)
         .map(CurrentDocument::into_content)
         .with_context(|| {
             format!(
                 "{source}: failed to resolve current document {}",
                 file.display()
             )
-        })
+        })?;
+    if agent_doc_element::element::structural_corruption_reason(&content).is_none() {
+        return Ok(content);
+    }
+
+    let disk = peek_disk_document_content(file, source)?;
+    let Some(recovered) =
+        agent_doc_element::element::recover_spliced_queue_close_from_projection(&content, &disk)
+    else {
+        return Ok(content);
+    };
+    let Some(_) = agent_doc_crdt_relay_io::adopt_authoritative_text_for_file(file, &recovered)?
+    else {
+        return Ok(content);
+    };
+    current_document_projection::invalidate_current_document_projection(file);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "current_document_canonical_recovered file={} source={} reason=queue_close_marker_splice content_hash={}",
+            file.display(),
+            source,
+            agent_doc_hash::content_hash(&recovered),
+        ),
+    );
+    Ok(recovered)
 }
 
 /// True when durable reliable-sync liveness says an editor currently has `file`

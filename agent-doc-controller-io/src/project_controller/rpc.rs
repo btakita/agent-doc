@@ -22048,7 +22048,7 @@ fn await_sync_tmux_layout_projection(
         // a stale Converged projection after pane focus or geometry drift.
         refresh_pane_layout_observation_before_await(bootstrap, runtime, &desired);
         let route_document = (invocation.caller_kind == "editor_route")
-            .then(|| invocation.focus.as_deref())
+            .then_some(invocation.focus.as_deref())
             .flatten();
         let projection = if let Some(document) = route_document {
             runtime.await_pane_layout_route_document(document, PANE_LAYOUT_COMMAND_AWAIT)

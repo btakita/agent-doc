@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0d673-0fc8-7843-8f38-4855c93bb164
+  codex: 01a0d6aa-78de-7031-841a-1d6ca8fd934f
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -86,7 +86,7 @@ Verification and delivery:
 - `make install` succeeded for agent-doc 0.35.418, the native library, JetBrains 0.2.397, and VS Code 0.2.71.
 - Commit `0b1adf33b` (`fix(backlog): allow cross-document item moves`) is pushed to `origin/main`.
 - CI run `36082096447` was in progress at the required one-shot post-push check; local verification is complete.
-❯ 🚧 In fpe.md, fix agent-doc causes of: The agent-doc response landed, but editor convergence interrupted the terminal commit. Per its recovery guard, I stopped without resending or writing directly to disk.
+❯ In fpe.md, fix agent-doc causes of: The agent-doc response landed, but editor convergence interrupted the terminal commit. Per its recovery guard, I stopped without resending or writing directly to disk.
 
 ### Re: fpe.md terminal commit convergence — gpt-5 · 2026-09-24T22:36:11-04:00
 
@@ -104,7 +104,7 @@ The fix keeps the original captured closeout active until the exact visible proj
 Verification passed: focused regressions, all four affected crate suites, the architecture ownership guard, full `make check` (exit 0, zero failures), private-name hygiene scan, and `make install`.
 
 Architecture invariant: after response capture, one closeout operation owns reconcile, visible-delivery proof, persistence, and the exactly-once terminal commit. Policy ownership remains split between the realtime delivery Source and session-check closeout diagnostics.
-❯ 🚧 Fix Run Agent Doc on fpe.md: unclosed component: agent:queue without matching close
+❯ Fix Run Agent Doc on fpe.md: unclosed component: agent:queue without matching close
 
 ### Re: Run Agent Doc queue-marker and authority causes — gpt-5 · 2026-09-24 23:30 EDT
 
@@ -150,6 +150,30 @@ No, Lazily logic plus graph topology is not globally proven correct. What is now
 - Ambiguous transitions fail closed.
 
 Validation passed: the complete earlier `make check` run passed 9,704 tests, editor tests, and TLC checks; all 158 preflight-authority tests pass after the final fix; installation completed successfully. Source is clean and pushed to `origin/main`. The failed `api.md` invocation was not rerun because the live document now has a different queue head and rerunning would start that work.
+### Re: recovered response
+
+Implemented, committed, installed, and pushed as `4f9a39f17`.
+
+Key fixes:
+
+- Centralized pane authority in one typed Lazily state table.
+- Headless/controller commands now observe registered ownership instead of assuming no owner.
+- Authority is checked before cycle repair, lease acquisition, capture, or writes.
+- Removed stale-binary and timeout paths that could recycle an uncaptured open cycle.
+- Install/restart/recycle now wait for a terminal cycle edge; only durable captured-response recovery may cross an open cycle.
+- Added scoped TLA+ models for pane authority and supervisor generation transitions.
+
+Proof completed:
+
+- 9,719 Rust tests passed; 259 skipped.
+- 179 VS Code tests and cross-editor native harness passed.
+- Pane model: 3,120 states, no violations.
+- Supervisor transition model: 41 states, no violations.
+- Private-name and diff checks passed.
+- Installed binary/library/plugins; supervisor fan-out was disabled to avoid re-interrupting live old-binary sessions.
+- Pushed to `main`; Pages CI is currently running.
+
+`api.md` and `fpe.md` were not overwritten or repaired from disk—their editor/session authority remains preserved. The implementation fixes the shared crash cause that interrupted them.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -158,7 +182,9 @@ Validation passed: the complete earlier `make check` run passed 9,704 tests, edi
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
+- Make the lazily logic + graph topology provably correct.
+- Can we implement the simulation harness for agent-doc using lazily? Note the new backlog items in lazily.md. If anything is missing from the backlog & lazily featureset, please add backlog items into lazily.md.
 <!-- /agent:queue -->
 
 

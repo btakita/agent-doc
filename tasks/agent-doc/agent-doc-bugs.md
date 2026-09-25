@@ -15,7 +15,7 @@ prompt_presets:
   '#self': agent-doc-bugs.md
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -215,6 +215,12 @@ Yes. Both `specs/process-topology.md` and `tasks/agent-doc/plan-reactive-topolog
 Deferred, not completed in this response: the fresh exchange question preempted queue execution according to this cycle's binary plan, and `tasks/software/lazily.md` is currently owned by a separate live pane that is implementing its active `#lzsimoracle` work with uncommitted `lazily-go` files. The harness prompt must remain queued until its own cycle can inspect the completed oracle surface and update `lazily.md` without racing that owner.
 
 No new backlog item is needed because this work already remains in the active queue.
+
+### Re: committed proof-plan reference — gpt-5 · 2026-09-25T10:02-04:00
+
+Yes. Both `specs/process-topology.md` and `tasks/agent-doc/plan-reactive-topology-proof.md` are committed in agent-doc commit `b5ea90530` (`proof: verify reactive graph topology`) and pushed to `origin/main`.
+
+The deferred simulation-harness work is preserved as actionable local backlog item `#agentdocsim`; it was not completed or silently dropped. Its implementation waits for the separately owned live Lazily oracle cycle to commit, so the harness can target the settled API and any `lazily.md` updates can be made without racing that owner.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -223,13 +229,12 @@ No new backlog item is needed because this work already remains in the active qu
 
 ## Pending / Not Built
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Make the lazily logic + graph topology provably correct.~~
-- 🚧 Can we implement the simulation harness for agent-doc using lazily? Note the new backlog items in lazily.md. If anything is missing from the backlog & lazily featureset, please add backlog items into lazily.md.
+<!-- agent:queue preset="#spec-test-build-install-commit-push" priority -->
 <!-- /agent:queue -->
 
 
 <!-- agent:backlog -->
+- [ ] [#agentdocsim] Implement the agent-doc deterministic simulation harness on Lazily after the active Lazily oracle work commits; audit tasks/software/lazily.md for missing generic features and add only non-duplicative backlog items without racing its live owner.
 <!-- /agent:backlog -->
 
 ## Review

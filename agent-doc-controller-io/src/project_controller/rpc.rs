@@ -33520,13 +33520,6 @@ body
             capture_only_wake.capture_id,
             "capture-retained-editor-arrival"
         );
-        agent_doc_crdt_relay_io::deregister_editor_replica_for_file(
-            &canonical,
-            &capture_only_identity,
-            editor_pid,
-        )
-        .unwrap();
-
         append_apply_state_event(
             &bootstrap,
             &runtime,
@@ -33604,6 +33597,15 @@ body
             editor_pid,
         )
         .unwrap();
+        assert!(
+            !agent_doc_crdt_relay_io::deregister_editor_replica_for_file(
+                &canonical,
+                &capture_only_identity,
+                editor_pid,
+            )
+            .unwrap(),
+            "the successor registration already retired the prior same-PID classloader"
+        );
         agent_doc_crdt_relay_io::deregister_editor_replica_for_file(
             &canonical,
             &seed_identity,

@@ -757,6 +757,48 @@ fn superseded_logical_replica_ids(
         .collect())
 }
 
+/// Replica generations owned by the same editor process for this document.
+///
+/// A dynamic plugin load mints a new classloader UUID while retaining the IDE
+/// PID. Logical `:refresh-N` matching cannot relate those identities, but they
+/// are not independent collaborators: the newly registered endpoint is the
+/// only classloader in that process that can still project the document. Keep
+/// other PIDs intact for genuine cross-editor collaboration.
+fn superseded_editor_process_replica_ids(
+    document_hash: &str,
+    identity: &str,
+    client_id: u64,
+) -> Result<Vec<u64>> {
+    let Some(editor_pid) = editor_process_id(identity) else {
+        return Ok(Vec::new());
+    };
+    let registry = replica_identity_registry().lock();
+    Ok(registry
+        .get(document_hash)
+        .into_iter()
+        .flat_map(|members| members.iter())
+        .filter_map(|(registered_id, registered_identity)| {
+            (*registered_id != client_id
+                && editor_process_id(registered_identity) == Some(editor_pid))
+            .then_some(*registered_id)
+        })
+        .collect())
+}
+
+/// Whether an editor identity agrees with the liveness plane's current endpoint
+/// for its `(document, pid)`. `None` means the liveness registration has not
+/// arrived yet, so the replica command remains the available process proof.
+fn identity_matches_current_liveness_endpoint(
+    identity: &str,
+    registrations: &[agent_doc_reliable_sync_io::liveness::EditorRegistration],
+) -> Option<bool> {
+    let route = editor_route_from_replica_identity(identity)?;
+    registrations
+        .iter()
+        .find(|registration| registration.pid == route.editor_pid)
+        .map(|registration| registration.editor_id == route.editor_id)
+}
+
 /// A missing raw client id may auto-heal only when no newer generation of the
 /// same logical editor is registered. Otherwise a late update from the retired
 /// forwarder would resurrect it as a second head.
@@ -2005,6 +2047,15 @@ fn register_replica_for_file_incremental_with_liveness_and_precondition(
     let registration_lock = replica_registration_lock(&document_hash)?;
     let _registration_guard = registration_lock.lock();
     let client_id = mint_client_id(identity);
+    // Re-read endpoint authority after acquiring the membership-serialization
+    // lock. A delayed request may have been queued while its classloader was
+    // current; checking before this lock would let it run after the successor
+    // registration and retire that successor with stale evidence.
+    let live_registrations = reliable_sync_editor_registrations_for_file(file);
+    anyhow::ensure!(
+        identity_matches_current_liveness_endpoint(identity, &live_registrations) != Some(false),
+        "replica_register_stale_editor_endpoint: identity does not match current reliable-liveness endpoint"
+    );
     anyhow::ensure!(
         expected_canonical_hash.is_none() || hub_handle(&document_hash).is_some(),
         "replica_register_canonical_precondition_failed: live canonical model unavailable; existing replica preserved"
@@ -2013,8 +2064,15 @@ fn register_replica_for_file_incremental_with_liveness_and_precondition(
     // lock. This lock order is deliberate: registration and deregistration can
     // never deadlock each other by holding both registries at once.
     let dead_client_ids = dead_editor_replica_ids(&document_hash, &is_pid_live)?;
-    let superseded_client_ids =
+    let mut superseded_client_ids =
         superseded_logical_replica_ids(&document_hash, identity, client_id)?;
+    superseded_client_ids.extend(superseded_editor_process_replica_ids(
+        &document_hash,
+        identity,
+        client_id,
+    )?);
+    superseded_client_ids.sort_unstable();
+    superseded_client_ids.dedup();
     let mut retired_client_ids = dead_client_ids.clone();
     if !provisional_replacement {
         retired_client_ids.extend(superseded_client_ids.iter().copied());
@@ -2240,8 +2298,15 @@ pub fn promote_replica_replacement_for_file(
     let registration_lock = replica_registration_lock(&document_hash)?;
     let _registration_guard = registration_lock.lock();
     let client_id = mint_client_id(identity);
-    let superseded_client_ids =
+    let mut superseded_client_ids =
         superseded_logical_replica_ids(&document_hash, identity, client_id)?;
+    superseded_client_ids.extend(superseded_editor_process_replica_ids(
+        &document_hash,
+        identity,
+        client_id,
+    )?);
+    superseded_client_ids.sort_unstable();
+    superseded_client_ids.dedup();
     let candidate_recorded = replica_identity_registry()
         .lock()
         .get(&document_hash)
@@ -6553,6 +6618,136 @@ mod tests {
             !attach.is_attached(&file_str),
             "the final identity for the PID closes its attachment"
         );
+    }
+
+    #[test]
+    fn new_plugin_classloader_retires_the_same_pid_document_replica() {
+        #[derive(Default)]
+        struct NoopWatcher;
+        impl agent_doc_document_realtime::editor_attach::ProcessExitWatcher for NoopWatcher {
+            fn watch(&self, _pid: u32) {}
+        }
+
+        let (_dir, doc) = temp_doc("same-pid-classloader-replacement.md");
+        let file_str = doc.display().to_string();
+        let pid = std::process::id();
+        seed_live_reliable_sync_open(&file_str);
+        agent_doc_document_realtime::editor_attach::editor_attach()
+            .install_watcher(std::sync::Arc::new(NoopWatcher));
+        let retired_identity = format!("jetbrains-{pid}-retired-classloader:{}", doc.display());
+        let current_identity = format!("jetbrains-{pid}-current-classloader:{}", doc.display());
+
+        let retired =
+            register_editor_replica_for_file_incremental(&doc, &retired_identity, None, pid)
+                .unwrap()
+                .expect("retired generation should initially attach");
+        let current =
+            register_editor_replica_for_file_incremental(&doc, &current_identity, None, pid)
+                .unwrap()
+                .expect("current generation should replace it");
+
+        with_hub(&doc, |hub| {
+            assert!(!hub.is_registered(retired.client_id));
+            assert!(hub.is_registered(current.client_id));
+            assert_eq!(hub.live_count(), 1);
+        })
+        .unwrap();
+        assert!(matches!(
+            current_text_for_file(&doc).unwrap(),
+            CurrentText::Current {
+                live_editors: 1,
+                ..
+            }
+        ));
+        assert!(
+            !deregister_editor_replica_for_file(&doc, &retired_identity, pid).unwrap(),
+            "a late unload callback from the retired classloader must be inert"
+        );
+        assert!(
+            agent_doc_document_realtime::editor_attach::editor_attach().is_attached(&file_str),
+            "the late callback must preserve the current same-PID attachment"
+        );
+    }
+
+    #[test]
+    fn stale_same_pid_classloader_cannot_reclaim_membership_after_liveness_advances() {
+        let registration =
+            |editor_id: &str, pid| agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                document_hash: "doc".into(),
+                pid,
+                path: "/tmp/session.md".into(),
+                editor_id: editor_id.into(),
+                editor_kind: "jetbrains".into(),
+                editor_version: "0.0.0-test".into(),
+                capabilities: Vec::new(),
+                timestamp_ms: 1,
+            };
+        let pid = u64::from(std::process::id());
+        let current = format!("jetbrains-{pid}-current");
+        let retired = format!("jetbrains-{pid}-retired");
+        let registrations = vec![registration(&current, pid)];
+
+        assert_eq!(
+            identity_matches_current_liveness_endpoint(
+                &format!("{current}:/tmp/session.md"),
+                &registrations,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            identity_matches_current_liveness_endpoint(
+                &format!("{retired}:/tmp/session.md"),
+                &registrations,
+            ),
+            Some(false),
+            "a delayed request from the unloaded classloader must not retire its successor"
+        );
+        assert_eq!(
+            identity_matches_current_liveness_endpoint(
+                &format!("vscode-{}-peer:/tmp/session.md", pid + 1),
+                &registrations,
+            ),
+            None,
+            "an editor process whose liveness registration has not arrived remains admissible"
+        );
+    }
+
+    #[test]
+    fn provisional_classloader_replacement_retires_same_pid_member_on_promotion() {
+        let (_dir, doc) = temp_doc("provisional-classloader-replacement.md");
+        seed_live_reliable_sync_open(&doc.display().to_string());
+        let pid = std::process::id();
+        let retired_identity = format!("jetbrains-{pid}-retired-provisional:{}", doc.display());
+        let current_identity = format!("jetbrains-{pid}-current-provisional:{}", doc.display());
+        let retired =
+            register_editor_replica_for_file_incremental(&doc, &retired_identity, None, pid)
+                .unwrap()
+                .unwrap();
+        let replacement = register_replica_for_file_with_precondition_and_replacement_mode(
+            &doc,
+            &current_identity,
+            Some(&retired.canonical_state_vector),
+            Some(pid),
+            true,
+            None,
+            true,
+        )
+        .unwrap()
+        .unwrap();
+
+        with_hub(&doc, |hub| assert_eq!(hub.live_count(), 2)).unwrap();
+        promote_replica_replacement_for_file(
+            &doc,
+            &current_identity,
+            &replacement.canonical_state_vector,
+        )
+        .unwrap();
+        with_hub(&doc, |hub| {
+            assert!(!hub.is_registered(retired.client_id));
+            assert!(hub.is_registered(replacement.client_id));
+            assert_eq!(hub.live_count(), 1);
+        })
+        .unwrap();
     }
 
     #[test]

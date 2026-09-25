@@ -259,9 +259,14 @@ race class instead of papering over each symptom.
   supervisor recycle are not substitutes for this editor-owned transition.
   For one editor PID, the current reliable-liveness endpoint is authoritative:
   event signaling must omit any older CRDT-registry endpoint from a retired
-  plugin classloader with that same PID. CRDT-only endpoints belonging to other
-  PIDs remain routable so a missed liveness-journal registration cannot strand
-  their delivery.
+  plugin classloader with that same PID. Successful registration of a new
+  classloader identity must also retire every older membership for the same
+  document and PID before delivery convergence is evaluated; otherwise the
+  unreachable predecessor remains a required ACK and strands the retained
+  projection. A provisional in-classloader replacement keeps its predecessor
+  only until exact canonical promotion, which performs the same retirement.
+  CRDT-only endpoints belonging to other PIDs remain routable so a missed
+  liveness-journal registration cannot strand their delivery.
 - **Admission release is not persistence proof.** A live replica that exhausts
   the bounded pull-without-ACK or silence budget may stop blocking new work, but
   that availability decision does not prove its editor buffer contains the

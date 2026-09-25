@@ -301,6 +301,10 @@ The relevant root cause remains the cross-classloader `TurnStateBannerRefresher`
 ### Re: recovered response
 
 Same propagation chain. It adds no new diagnostic information; the root cause remains the already-fixed cross-classloader cast.
+
+### Re: recovered response
+
+Same propagation path. `JobSupport.finalizeFinishingState` is coroutine cleanup after the exception, not its cause. The actionable root cause is still the fixed plugin classloader collision.
 <!-- agent:boundary:fe1c0161:agent-doc-bugs -->
 <!-- /agent:exchange -->
 

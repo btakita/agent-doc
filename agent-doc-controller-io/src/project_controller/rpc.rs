@@ -9922,6 +9922,7 @@ fn controller_crdt_replica_data(
                             &registration.canonical_state_vector
                         ),
                         "canonical_projection_retained": canonical_projection_retained,
+                        "retained_replica_reseed_pending": registration.retained_replica_reseed_pending,
                         "canonical_covers_retained_frontier": registration.canonical_covers_retained_frontier,
                         "canonical_content_hash": registration.canonical_content_hash,
                         "lineage": agent_doc_crdt_relay_io::current_lineage_for_file(canonical)?

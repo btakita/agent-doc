@@ -19,6 +19,65 @@ import org.junit.Test
 class RetainedCanonicalOperatorTextTest {
 
     @Test
+    fun `fresh controller reseed publishes a proven live buffer instead of temporary empty canonical`() {
+        assertEquals(
+            RetainedRegistrationProjectionAction.PublishOperatorBuffer,
+            retainedRegistrationProjectionActionForAttachUtil(
+                deferCanonicalProjectionForPendingLocal = false,
+                canonicalProjectionRetained = false,
+                retainedReplicaReseedPending = true,
+                publishedShadow = "# Session\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+                bufferText = "# Session\n\n<!-- agent:queue -->\n- operator prompt\n<!-- /agent:queue -->\n",
+                canonicalText = "",
+            ),
+        )
+    }
+
+    @Test
+    fun `fresh controller reseed without a settled ancestor holds without mutation`() {
+        assertEquals(
+            RetainedRegistrationProjectionAction.HoldOperatorBuffer,
+            retainedRegistrationProjectionActionForAttachUtil(
+                deferCanonicalProjectionForPendingLocal = false,
+                canonicalProjectionRetained = false,
+                retainedReplicaReseedPending = true,
+                publishedShadow = null,
+                bufferText = "# Session\n\noperator text\n",
+                canonicalText = "",
+            ),
+        )
+    }
+
+    @Test
+    fun `fresh controller reseed transition table never adopts temporary canonical`() {
+        val facts = listOf<String?>(null, "# settled\n")
+        for (pendingLocal in listOf(false, true)) {
+            for (publishedShadow in facts) {
+                for (bufferText in facts) {
+                    val action =
+                        retainedRegistrationProjectionActionForAttachUtil(
+                            deferCanonicalProjectionForPendingLocal = pendingLocal,
+                            canonicalProjectionRetained = false,
+                            retainedReplicaReseedPending = true,
+                            publishedShadow = publishedShadow,
+                            bufferText = bufferText,
+                            canonicalText = "",
+                        )
+                    val expected =
+                        when {
+                            pendingLocal -> RetainedRegistrationProjectionAction.DeferCanonicalProjection
+                            publishedShadow != null && bufferText != null ->
+                                RetainedRegistrationProjectionAction.PublishOperatorBuffer
+                            else -> RetainedRegistrationProjectionAction.HoldOperatorBuffer
+                        }
+                    assertEquals(expected, action)
+                    assertFalse(action == RetainedRegistrationProjectionAction.ApplyCanonical)
+                }
+            }
+        }
+    }
+
+    @Test
     fun `pending captured edits defer a fresh bootstrap even without retained delivery`() {
         assertEquals(
             RetainedRegistrationProjectionAction.DeferCanonicalProjection,

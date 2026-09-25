@@ -172,6 +172,7 @@ class CrdtReplicaForwarderTest {
         private val bootstrapKind: ReplicaBootstrapKind = ReplicaBootstrapKind.Full,
         private val canonicalStateVector: ByteArray? = null,
         private val canonicalProjectionRetained: Boolean = false,
+        private val retainedReplicaReseedPending: Boolean = false,
         private val canonicalCoversRetainedFrontier: Boolean? = null,
         private val canonicalContentHash: String? = null,
         private val durablePushSucceeds: Boolean = true,
@@ -205,6 +206,7 @@ class CrdtReplicaForwarderTest {
                 bootstrapKind = bootstrapKind,
                 canonicalStateVector = canonicalStateVector,
                 canonicalProjectionRetained = canonicalProjectionRetained,
+                retainedReplicaReseedPending = retainedReplicaReseedPending,
                 canonicalCoversRetainedFrontier = canonicalCoversRetainedFrontier,
                 canonicalContentHash = canonicalContentHash,
             )
@@ -305,6 +307,36 @@ class CrdtReplicaForwarderTest {
             1,
             transport.sentUpdates.size,
         )
+    }
+
+    @Test
+    fun `retained reseed refuses registration without durable publication`() {
+        val retained =
+            ReplicaResumeState(
+                encodedState = "VISIBLE".toByteArray(),
+                stateVector = "VISIBLE-SV".toByteArray(),
+            )
+        val node = FakeNode()
+        val transport =
+            CapturingTransport(
+                bootstrapKind = ReplicaBootstrapKind.Delta,
+                canonicalStateVector = ByteArray(0),
+                retainedReplicaReseedPending = true,
+                durablePushSucceeds = false,
+            )
+        val fwd =
+            CrdtReplicaForwarder(
+                "plan.md",
+                "intellij:retained-reseed",
+                node,
+                transport,
+                resumeState = retained,
+            )
+
+        assertFalse(fwd.register())
+        assertTrue(node.closed)
+        assertTrue(transport.deregistered)
+        assertTrue(transport.sentLineages.isNotEmpty())
     }
 
     @Test

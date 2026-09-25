@@ -2777,12 +2777,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             retainedRegistrationProjectionActionForAttachUtil(
                 deferCanonicalProjectionForPendingLocal = deferCanonicalProjectionForPendingLocal,
                 canonicalProjectionRetained = forwarder.canonicalProjectionRetained,
+                retainedReplicaReseedPending = forwarder.retainedReplicaReseedPending,
                 canonicalCoversRetainedFrontier = forwarder.canonicalCoversRetainedFrontier,
                 publishedShadow = publishedShadowAtRegistration,
                 bufferText = bufferTextAtRegistration,
                 canonicalText = forwarder.replicaText(),
             )
-        if (forwarder.canonicalProjectionRetained) {
+        if (forwarder.canonicalProjectionRetained || forwarder.retainedReplicaReseedPending) {
             // Controller state survives an IDEA/plugin restart; this local set
             // does not. Restore the fail-closed baseline before any whole-editor
             // synchronization can publish a stale restarted buffer.
@@ -2966,7 +2967,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     (settledShadows[filePath] ?: nativeReloadSettledShadows[filePath]) !=
                         publishedShadow ||
                     editorBufferText(filePath) != bufferText ||
-                    forwarder.replicaText() != publishedShadow
+                    (!forwarder.retainedReplicaReseedPending &&
+                        forwarder.replicaText() != publishedShadow)
                 ) {
                     log.warn(
                         "[crdt-replica] retained projection publication raced for ${File(filePath).name}; " +
@@ -2974,8 +2976,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     )
                     false
                 } else {
-                    forwarder.ensureEditorText(bufferText)
-                    if (forwarder.replicaText() != bufferText) {
+                    if (!forwarder.ensureEditorText(bufferText) || forwarder.replicaText() != bufferText) {
                         false
                     } else {
                         shadows[filePath] = bufferText
@@ -3954,6 +3955,7 @@ internal enum class RetainedRegistrationProjectionAction {
 internal fun retainedRegistrationProjectionActionForAttachUtil(
     deferCanonicalProjectionForPendingLocal: Boolean,
     canonicalProjectionRetained: Boolean,
+    retainedReplicaReseedPending: Boolean = false,
     canonicalCoversRetainedFrontier: Boolean? = null,
     publishedShadow: String?,
     bufferText: String?,
@@ -3961,6 +3963,15 @@ internal fun retainedRegistrationProjectionActionForAttachUtil(
 ): RetainedRegistrationProjectionAction =
     if (deferCanonicalProjectionForPendingLocal) {
         RetainedRegistrationProjectionAction.DeferCanonicalProjection
+    } else if (retainedReplicaReseedPending) {
+        // A fresh controller's empty hub is a synchronization placeholder, not
+        // a document projection. A retained editor may seed it only from a live
+        // buffer with an independently settled controller-accepted ancestor.
+        if (publishedShadow != null && bufferText != null) {
+            RetainedRegistrationProjectionAction.PublishOperatorBuffer
+        } else {
+            RetainedRegistrationProjectionAction.HoldOperatorBuffer
+        }
     } else if (canonicalProjectionRetained) {
         retainedRegistrationProjectionActionUtil(
             canonicalCoversRetainedFrontier = canonicalCoversRetainedFrontier,

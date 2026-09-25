@@ -1686,6 +1686,11 @@ pub struct ReplicaRegistration {
     /// canonical projection. A replacement editor must not publish its stale
     /// whole buffer over this bootstrap.
     pub canonical_projection_retained: bool,
+    /// The controller allocated a temporary empty canonical and is waiting for
+    /// this retained editor generation to reseed it. Consumers must reconcile
+    /// the retained CRDT projection with the live editor buffer before treating
+    /// that temporary projection as document authority.
+    pub retained_replica_reseed_pending: bool,
     /// Whether the controller's canonical CRDT frontier causally covers the
     /// retained frontier supplied by this registering editor. `None` means the
     /// editor supplied no usable frontier, so consumers must remain fail-closed.
@@ -2190,6 +2195,7 @@ fn register_replica_for_file_incremental_with_liveness_and_precondition(
         canonical_state_vector,
         incremental,
         canonical_projection_retained,
+        retained_replica_reseed_pending: restore_fresh_controller_from_retained_replica,
         canonical_covers_retained_frontier,
         canonical_content_hash,
     }))
@@ -5885,6 +5891,7 @@ mod tests {
         );
         assert!(registration.bootstrap.is_empty());
         assert!(!registration.canonical_projection_retained);
+        assert!(registration.retained_replica_reseed_pending);
         assert_eq!(registration.canonical_covers_retained_frontier, Some(false));
         assert_eq!(
             current_revision_for_file_with_authority(&doc, CrdtAuthority::MultiReplica).unwrap(),

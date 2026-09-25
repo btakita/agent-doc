@@ -109,6 +109,10 @@ class CrdtReplicaForwarder(
     var canonicalProjectionRetained: Boolean = false
         private set
 
+    /** The controller canonical is temporary-empty until this retained replica reseeds it. */
+    var retainedReplicaReseedPending: Boolean = false
+        private set
+
     /** Whether controller canonical causally covers this replica's retained frontier. */
     var canonicalCoversRetainedFrontier: Boolean? = null
         private set
@@ -166,6 +170,7 @@ class CrdtReplicaForwarder(
             clientId = ack.clientId
             lineage = ack.lineage
             canonicalProjectionRetained = ack.canonicalProjectionRetained
+            retainedReplicaReseedPending = ack.retainedReplicaReseedPending
             canonicalCoversRetainedFrontier = ack.canonicalCoversRetainedFrontier
             canonicalContentHash = ack.canonicalContentHash
             val incremental = ack.bootstrapKind == ReplicaBootstrapKind.Delta
@@ -228,7 +233,16 @@ class CrdtReplicaForwarder(
                 // example a quiesced native generation). Publish that suffix
                 // relative to the canonical frontier; duplicate CRDT ops are
                 // idempotent, while silently discarding them is not.
-                publishIncremental("resume-register")
+                val publication = publishIncremental("resume-register")
+                if (ack.retainedReplicaReseedPending && !publication.durable) {
+                    log.warn(
+                        "[crdt-replica] retained reseed lacked a durable publication receipt for " +
+                            "${File(filePath).name}; refusing temporary-empty authority",
+                    )
+                    node.close(ack.clientId)
+                    transport.deregister(filePath, identity)
+                    return false
+                }
             }
             return true
         } finally {
@@ -321,8 +335,8 @@ class CrdtReplicaForwarder(
     }
 
     /** Publish an already-fenced local editor delta against this replica. */
-    fun ensureEditorText(editorText: String) {
-        if (!attached) return
+    fun ensureEditorText(editorText: String): Boolean {
+        if (!attached) return false
         val started = System.nanoTime()
         val current = knownReplicaText ?: run {
             val textStarted = System.nanoTime()
@@ -333,22 +347,23 @@ class CrdtReplicaForwarder(
                     details = "reason=ensureEditorText chars=${currentText?.length ?: -1}",
                 )
             }
-        } ?: return
+        } ?: return false
         if (current == editorText) {
             // Canonicalize on the editor's String instance. The manager shadow
             // then compares by identity on the ordinary next-keystroke path.
             knownReplicaText = editorText
-            return
+            return true
         }
         val deleteLen = current.codePointCount(0, current.length)
         val applyStarted = System.nanoTime()
-        if (!node.applyLocal(clientId, 0, deleteLen, editorText)) return
+        if (!node.applyLocal(clientId, 0, deleteLen, editorText)) return false
         knownReplicaText = editorText
         logSlow("native.applyLocal", applyStarted, details = "reason=ensureEditorText delete_cp=$deleteLen insert_chars=${editorText.length}")
         // Incremental from the bootstrap frontier. Callers may only use this
         // after proving the editor shadow matches the controller bootstrap.
         val publish = publishIncremental("ensure-editor-text")
         logSlow("ensureEditorText", started, warnMs = 100, details = "chars=${editorText.length} update_bytes=${publish.updateBytes}")
+        return publish.durable
     }
 
     private fun publishIncremental(reason: String): IncrementalPublishResult {
@@ -527,6 +542,7 @@ data class ReplicaRegisterAck(
     val bootstrapKind: ReplicaBootstrapKind = ReplicaBootstrapKind.Full,
     val canonicalStateVector: ByteArray? = null,
     val canonicalProjectionRetained: Boolean = false,
+    val retainedReplicaReseedPending: Boolean = false,
     val canonicalCoversRetainedFrontier: Boolean? = null,
     val canonicalContentHash: String? = null,
 )
@@ -779,6 +795,8 @@ class CpSocketReplicaTransport(
             data.get("canonical_state_vector_b64")?.asString?.let { decodeBase64(it) }
         val canonicalProjectionRetained =
             data.get("canonical_projection_retained")?.asBoolean ?: false
+        val retainedReplicaReseedPending =
+            data.get("retained_replica_reseed_pending")?.asBoolean ?: false
         val canonicalCoversRetainedFrontier =
             data.get("canonical_covers_retained_frontier")
                 ?.takeUnless { it.isJsonNull }
@@ -793,6 +811,7 @@ class CpSocketReplicaTransport(
             bootstrapKind = bootstrapKind,
             canonicalStateVector = canonicalStateVector,
             canonicalProjectionRetained = canonicalProjectionRetained,
+            retainedReplicaReseedPending = retainedReplicaReseedPending,
             canonicalCoversRetainedFrontier = canonicalCoversRetainedFrontier,
             canonicalContentHash = canonicalContentHash,
         )

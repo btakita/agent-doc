@@ -324,3 +324,4 @@
 - 2026-09-15 [#removeosxbuild] If we remove the OSX build, would OSX installs still work?
 - 2026-09-15 [#fixhttpsgithub] Fix https://github.com/lazily-hub/lazily-py/pull/5 + release + publish
 - 2026-09-16 [#fixcausesfpe] Fix agent-doc causes of fpe.md session error. Also the editor performance is very laggy: • Agent-doc rejected the first write because the queue’s leading measurement instruction must also be quoted verbatim
+- 2026-09-25 [#lzappsimulation] [lazily family] Add backlog items into lazily.md to support Simulation testing for the app. Use public patterns to avoid IP issues.

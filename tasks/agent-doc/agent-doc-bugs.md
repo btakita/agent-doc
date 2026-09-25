@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0d6aa-78de-7031-841a-1d6ca8fd934f
+  codex: 01a0d8d1-d5de-77d3-8a6c-bdd25a7b63ce
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -203,6 +203,18 @@ Verification and delivery:
 - Source commit `b5ea90530` is pushed; CI run `36144581064` was in progress at the required one-shot observation.
 
 This is a real compositional proof of the stated finite graph contract, not a claim that arbitrary Rust, editor, tmux, filesystem, or network implementations are universally correct. Those implementation boundaries require their domain models plus the stepwise/differential/history simulation oracles already queued in `tasks/software/lazily.md`. The next agent-doc simulation-harness prompt remains queued as a separate cycle.
+
+### Re: committed proof-plan reference — gpt-5 · 2026-09-25T10:02-04:00
+
+Yes. Both `specs/process-topology.md` and `tasks/agent-doc/plan-reactive-topology-proof.md` are committed in agent-doc commit `b5ea90530` (`proof: verify reactive graph topology`) and pushed to `origin/main`.
+
+> **Queue prompt:**
+>
+> Can we implement the simulation harness for agent-doc using lazily? Note the new backlog items in lazily.md. If anything is missing from the backlog & lazily featureset, please add backlog items into lazily.md.
+
+Deferred, not completed in this response: the fresh exchange question preempted queue execution according to this cycle's binary plan, and `tasks/software/lazily.md` is currently owned by a separate live pane that is implementing its active `#lzsimoracle` work with uncommitted `lazily-go` files. The harness prompt must remain queued until its own cycle can inspect the completed oracle surface and update `lazily.md` without racing that owner.
+
+No new backlog item is needed because this work already remains in the active queue.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
@@ -212,8 +224,8 @@ This is a real compositional proof of the stated finite graph contract, not a cl
 ## Pending / Not Built
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 Make the lazily logic + graph topology provably correct.
-- Can we implement the simulation harness for agent-doc using lazily? Note the new backlog items in lazily.md. If anything is missing from the backlog & lazily featureset, please add backlog items into lazily.md.
+- ~~Make the lazily logic + graph topology provably correct.~~
+- 🚧 Can we implement the simulation harness for agent-doc using lazily? Note the new backlog items in lazily.md. If anything is missing from the backlog & lazily featureset, please add backlog items into lazily.md.
 <!-- /agent:queue -->
 
 

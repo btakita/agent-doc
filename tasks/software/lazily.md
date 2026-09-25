@@ -516,6 +516,33 @@ Completed and pushed the generalized consumer simulation adapter contract in `la
 Verification passed with `make check` (exit 0, zero failure groups), and scoped whitespace checks were clean. Commit `69fa4a4` (`feat: generalize consumer simulation adapters`) is pushed to `lazily-go` `main`. GitHub CI run `36196885317` is queued; the previous CI run completed successfully.
 
 `#lzsimprocessadapter` is complete. No additional backlog follow-up is needed. The exchange remains large, but the active queue can continue without compaction.
+
+### Re: #lzdurablespec — gpt-5 · 2026-09-25T18:34-04:00
+
+> **Queue prompt:**
+>
+> do [#lzdurablespec]
+
+
+Completed the Phase 0 durable-owner closeout. The requested implementation was already committed and pushed earlier today but had remained open in the session backlog, so this cycle audited the landed work and its full verification evidence rather than duplicating it.
+
+`lazily-spec` commit `0d48b26` (`feat: define durable owner conformance`) provides:
+
+- a closed backend-neutral durable-owner JSON Schema;
+- explicit owner/inbox/outbox-effect/receipt identities, positive independent schema and codec versions, monotonic positions, exact optimistic position fences, and authority fence tokens;
+- separate ordered event-history and replaceable snapshot modes;
+- four canonical fixture families for atomic crash boundaries, ordered replay and fencing, inbox/outbox/receipt deduplication, and projection/history fingerprints; and
+- an explicit `complete_history` versus `latest_state_only` boundary that prevents `LatestDurableProjection` from being relabeled as full event history.
+
+`lazily-rs` commit `92656d6` (`feat: add durable owner core`) provides the backend-neutral Rust reference: typed identities and versions, `DurableOwnerStore`, atomic commit and terminal receipt contracts, an in-memory recovery authority, exact-repeat idempotency with identity-conflict refusal, monotone position/fence enforcement, complete-history fingerprints, and canonical fixture replay.
+
+Verification completed in this cycle:
+
+- `lazily-spec`: full `make check` passed with exit 0 and zero failure groups; GitHub CI run `36185200240` completed successfully.
+- `lazily-rs`: full `make check` passed with exit 0 and zero failure groups across the full feature/conformance matrix; GitHub CI run `36185896000` completed successfully.
+- Both repository heads exactly match `origin/main`; no new repository mutation or commit was required.
+
+`#lzdurablespec` is complete. No additional backlog follow-up is needed because the later Postgres, JetStream, reconciliation, and family-rollout phases are already tracked separately. The exchange remains large, but the active queue can continue without compaction.
 <!-- agent:boundary:ce9fbb66:lazily -->
 <!-- /agent:exchange -->
  
@@ -524,7 +551,7 @@ Verification passed with `make check` (exit 0, zero failure groups), and scoped 
 <!-- agent:queue preset="#spec-test-commit-push use subagents for fan-out tasks" priority go -->
 - ~~do [#lzsimprocessadapter]~~
 - ~~do [#lzsimlicense]: Apache License 2.0~~
-- do [#lzdurablespec]
+- ~~do [#lzdurablespec]~~
 - do [#lzdurablepg]
 - do [#lzdurablejetstream]
 - do [#lzdurablereconcile]
@@ -541,7 +568,6 @@ Verification passed with `make check` (exit 0, zero failure groups), and scoped 
 - [ ] [#lzprojectionracecorpus] [lazily-go,simulation][blocked-by:lzprojectionbarrier] Extend SimConsumerTestkit with an independently authored, generic projection-maintenance history family: materialized append/amend/retract events interleaved with full rebuild, bounded lock timeout, retry, cancellation, and crash windows. Reuse one production reducer across an in-memory reference adapter and an explicitly selected real PostgreSQL adapter; causally shrink failures and assert no accepted update is lost plus final complete-history replay equivalence. Derive techniques only from cited public primary sources such as official Go fuzzing and PostgreSQL documentation; use synthetic nouns and exclude all consumer names, schemas, events, policies, incidents, data, fixtures, and code.
 - [ ] [#lzconcurrencyscope] [lazily-go,lazily-spec] Make concurrency scope explicit and machine-checkable across Lazily surfaces: classify single-goroutine, single-process lock/channel serialized, durable cross-process, and distributed/fenced capabilities; document that ThreadSafeContext, AsyncContext, queues, and the in-memory LatestDurableProjection core do not provide database atomicity or cross-replica exclusion; and add negative conformance tests that prevent an in-process capability from being advertised as a projection-maintenance barrier. Use independently authored neutral examples and public Go/PostgreSQL terminology only.
 - [ ] [#lzsimlicense] [operator-decision, lazily-spec] Resolve the implementation-admission blocker in tasks/software/plan-lazily-simulation.md before #lzsimspec: an authorized owner selects and records the repository license and fixture reuse terms; then add matching project metadata, a generated third-party inventory from uv.lock, and provenance/license records for all 156 canonical fixtures and nine vendored Go copies. Until resolved, do not publish or copy simulation specifications or fixtures through lazily-spec.
-- [ ] [#lzdurablespec] [lazily-spec, lazily-rs] Implement Phase 0 of tasks/software/plan-lazily-postgres-nats-valkey.md: backend-neutral durable-owner contracts for ordered event history or snapshot state, monotonic positions, optimistic fencing, schema and codec versions, inbox identities, outbox effect identities, and durable receipts. Add canonical crash, replay, deduplication, and projection-fingerprint fixtures, and explicitly distinguish complete-history projections from LatestDurableProjection conflation.
 - [ ] [#lzdurablepg] [lazily-rs] Implement the Rust reference Postgres durable host from tasks/software/plan-lazily-postgres-nats-valkey.md: one transaction claims the inbox identity and persists accepted events or state, projection version, outbox intents, timer changes, fences, and local receipts; relay workers claim rows with FOR UPDATE SKIP LOCKED. Prove rollback, serialization retry, crash-after-commit-before-ACK, publish-before-receipt retry, stable idempotency, and full history rebuild with deterministic integration tests.
 - [ ] [#lzdurablejetstream] [lazily-rs] Implement the JetStream transport phase from tasks/software/plan-lazily-postgres-nats-valkey.md: typed durable pull ingress, explicit ACK only after the Postgres commit, stable publication identity and receipt recording, redelivery through inbox deduplication, progress ACKs that extend transport ownership only, bounded backpressure, drain, and durable poison-message disposition. Test every commit, ACK, publish, and receipt crash window against a real NATS test service; the broker must never authorize domain state.
 - [ ] [#lzdurablereconcile] [lazily-spec, lazily-rs] Add the complete-history projection and reconciliation layer from tasks/software/plan-lazily-postgres-nats-valkey.md: transaction-consistent snapshots with monotonic projection versions, ordered create/amend/retract event replay, checkpointed rebuild, dry-run drift reports, lag and health signals, and scheduled idempotent reconciliation through the transactional outbox. Prove replay equivalence, partial and final retractions, restart/resume, and that stale or cache-only reads never authorize a transition.

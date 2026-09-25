@@ -160,3 +160,4 @@
   ```
 - 2026-09-24 [#runsubmitfirstmatch] [P1] Reproduce and fix the JetBrains Run Agent Doc startup_miss after the prior controller_editor_route_settled gate failed: run the action twice with an identical consumed trigger within 16 non-empty lines above the new draft, trace the admission/route failure, add deterministic regression coverage, rebuild and install, commit and push, then return the item to live operator verification.
 - 2026-09-24 [#fixcausesdocument] Fix agent-doc causes of this document's turn not completing.
+- 2026-09-24 [#fixrunfpe] Fix Run Agent Doc on fpe.md: unclosed component: agent:queue without matching close

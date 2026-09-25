@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: 3d56a2a6-95ce-42c4-b71c-66c102e54fb4
-  codex: 01a0d64e-3edc-7881-8a91-102858ef177f
+  codex: 01a0d673-0fc8-7843-8f38-4855c93bb164
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -104,6 +104,32 @@ The fix keeps the original captured closeout active until the exact visible proj
 Verification passed: focused regressions, all four affected crate suites, the architecture ownership guard, full `make check` (exit 0, zero failures), private-name hygiene scan, and `make install`.
 
 Architecture invariant: after response capture, one closeout operation owns reconcile, visible-delivery proof, persistence, and the exactly-once terminal commit. Policy ownership remains split between the realtime delivery Source and session-check closeout diagnostics.
+❯ 🚧 Fix Run Agent Doc on fpe.md: unclosed component: agent:queue without matching close
+
+### Re: Run Agent Doc queue-marker and authority causes — gpt-5 · 2026-09-24 23:30 EDT
+
+> **Queue prompt:**
+>
+> do [#fixrunfpe]
+
+
+Fixed and pushed both underlying authority failures.
+
+The first invariant is structural: a queue close marker may be repaired only when the observed CRDT delta proves the exact missing-marker splice, and the repaired document must parse before it can become canonical. That policy now lives at the CRDT/document-op boundary rather than in the caller. Malformed retained canonical state recovers from a sound projection, and preview-before-mutation prevents a corrupt candidate from partially entering the document. Commit `36cac807c` (`fix: recover CRDT queue marker splices`) contains this fix.
+
+The second invariant is ownership: a fresh controller's temporary empty CRDT is never document authority while a retained editor generation is reseeding it. Registration now exposes `retained_replica_reseed_pending`; the JetBrains state transition can publish the live operator buffer only when both its settled shadow and current buffer exist, otherwise it holds without mutation. Publication must receive a durable receipt before registration succeeds. It cannot select `ApplyCanonical` in any fresh-reseed row. Commit `4d445eb21` (`fix: preserve retained editor authority on reseed`) contains this fix.
+
+The transition evidence is exhaustive for the finite fresh-reseed decision table: pending-local is true or false, settled shadow is present or absent, and live buffer is present or absent. All eight rows are asserted, every row rejects temporary-canonical application, and the transport test proves failed durable publication aborts and deregisters. This is a scoped proof of that policy function, not a claim that the entire Lazily graph or all distributed executions are formally verified. The live failure is itself evidence that topology and reactive dependency wiring alone were not a proof. Preventing recurrence requires explicit authority states, fail-closed transitions, durable receipts, and executable invariants at every mutation boundary.
+
+Recovery evidence:
+
+- `tasks/fpe.md` was restored to the exact queue prompt `I logged into AWS. Continue smoke tests from the infra application.`, reseeded from current text, survived controller recycling and installation, and passes `agent-doc session-check`.
+- The `tasks/api.md` question was not reimplemented with `lazily-go`. Its event trail proves persistence, queue selection, captured response, provenance-checked removal, and commit `741c2a8`. The answer is present in the exchange and the queue is empty only because processing completed.
+- Full `make check` passed: 9,704 Rust tests passed with 259 skipped, editor parity and focused JetBrains tests passed, and all existing TLC model checks reported no errors.
+- `make install` completed successfully. Private-name hygiene found no matches. Both source commits are on `origin/main`.
+- The required one-shot CI observation for the first pushed fix was `in_progress` at workflow run `36089324517`; it was not polled again.
+
+The practical answer to “is Lazily logic plus the graph provably correct?” is no, not globally. The repaired transitions are now exhaustively checked in their finite state space, while broader end-to-end correctness still needs additional formalized authority invariants and model coverage rather than trust in graph shape.
 <!-- agent:boundary:00048a2e:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
